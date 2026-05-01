@@ -11,7 +11,7 @@ pub enum GamePhase {
     InProgress,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Player {
     pub token: String,
     pub name: String,
@@ -19,18 +19,18 @@ pub struct Player {
     pub connected: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct GameState {
     pub phase: GamePhase,
     pub players: Vec<Player>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SimSnapshot {
     pub red_alert: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
     Identify { token: String, name: String },
@@ -41,7 +41,7 @@ pub enum ClientMessage {
     ToggleRedAlert,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {
     Welcome { state: GameState },

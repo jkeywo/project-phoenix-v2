@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::messages::{ClientMessage, Console, GamePhase, GameState, ServerMessage};
+use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage};
 use crate::session::SessionManager;
 
 // ── Resources ──────────────────────────────────────────────────────────────

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Phoenix — View Screen</title>
+  <style>
+    body { margin: 0; background: #000; color: #fff; font-family: monospace; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #lobby { position: absolute; top: 0; left: 0; padding: 2rem; }
+  </style>
+</head>
+<body>
+  <div id="lobby">
+    <h1>Project Phoenix</h1>
+    <p>Scan the QR code to join.</p>
+    <div id="qr-placeholder" style="width:200px;height:200px;background:#333;display:flex;align-items:center;justify-content:center;">
+      QR code here
+    </div>
+    <ul id="player-list"></ul>
+  </div>
+  <canvas id="canvas"></canvas>
+  <!-- WASM bundle loaded by Trunk -->
+</body>
+</html>

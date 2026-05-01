@@ -1,0 +1,11 @@
+{
+  "name": "project-phoenix",
+  "private": true,
+  "scripts": {
+    "test": "cargo test",
+    "typecheck": "cargo check",
+    "build:server": "trunk build server.html",
+    "build:client": "trunk build client.html --config client-trunk.toml",
+    "build": "npm run build:server && npm run build:client"
+  }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "project-phoenix"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bevy = { version = "0.18.1", features = ["webgl2"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+uuid = { version = "1.23.1", features = ["v4"] }
+wasm-bindgen = "0.2.120"
+
+[target.wasm32-unknown-unknown.dependencies]
+web-sys = { version = "0.3.97", features = ["Window", "console"] }

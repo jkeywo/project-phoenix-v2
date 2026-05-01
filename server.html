@@ -4,22 +4,127 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Project Phoenix — View Screen</title>
+
+  <!-- CDN deps loaded before our script so they're in scope synchronously -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
   <style>
-    body { margin: 0; background: #000; color: #fff; font-family: monospace; }
-    canvas { display: block; width: 100vw; height: 100vh; }
-    #lobby { position: absolute; top: 0; left: 0; padding: 2rem; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #canvas { display: block; width: 100vw; height: 100vh; }
+    #overlay { position: absolute; top: 1rem; right: 1rem; z-index: 10; }
+    #qr { display: none; }
   </style>
 </head>
 <body>
-  <div id="lobby">
-    <h1>Project Phoenix</h1>
-    <p>Scan the QR code to join.</p>
-    <div id="qr-placeholder" style="width:200px;height:200px;background:#333;display:flex;align-items:center;justify-content:center;">
-      QR code here
-    </div>
-    <ul id="player-list"></ul>
-  </div>
+  <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
-  <!-- WASM bundle loaded by Trunk -->
+
+  <!-- QR code shown over the canvas during lobby phase -->
+  <div id="overlay">
+    <canvas id="qr"></canvas>
+  </div>
+
+  <!-- Trunk replaces this tag with the compiled WASM bundle (no-modules target).
+       After it runs, wasm_init / wasm_receive_message / set_message_callback are
+       available either directly in scope or under the wasm_bindgen.* namespace. -->
+  <link data-trunk rel="rust" data-wasm-opt="z" />
+
+  <script>
+    // ── PeerJS host peer ───────────────────────────────────────────────────
+
+    // peer connection id → session token (resolved once Identify arrives)
+    const peerTokens = new Map();
+    // session token → DataConnection (for routing server→client messages)
+    const tokenConns = new Map();
+
+    const hostPeerId = crypto.randomUUID().replace(/-/g, '');
+    const joinUrl = location.href.replace(/server\.html.*$/, 'client.html') + '#' + hostPeerId;
+
+    const peer = new Peer(hostPeerId);
+
+    peer.on('open', () => {
+      const canvas = document.getElementById('qr');
+      canvas.style.display = 'block';
+      QRCode.toCanvas(canvas, joinUrl, { width: 200 });
+    });
+
+    peer.on('connection', (conn) => {
+      conn.on('data', (raw) => {
+        const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
+        let token = peerTokens.get(conn.peer);
+
+        // First message from this peer must be Identify — extract the token
+        if (!token) {
+          try {
+            const msg = JSON.parse(json);
+            if (msg.type === 'Identify') {
+              token = msg.data.token;
+              peerTokens.set(conn.peer, token);
+              tokenConns.set(token, conn);
+            }
+          } catch (_) { return; }
+        }
+
+        if (token) wasm_receive_message(token, json);
+      });
+
+      conn.on('close', () => {
+        const token = peerTokens.get(conn.peer);
+        if (!token) return;
+        // Notify the simulation that this player disconnected
+        wasm_receive_message(token, JSON.stringify({ type: 'ClearConsole', data: null }));
+        peerTokens.delete(conn.peer);
+        tokenConns.delete(token);
+      });
+
+      conn.on('error', (err) => console.error('[PeerJS conn]', err));
+    });
+
+    peer.on('error', (err) => console.error('[PeerJS host]', err));
+
+    // ── Outbound routing ───────────────────────────────────────────────────
+
+    function routeOutbound(target, payload) {
+      if (target === 'all') {
+        for (const conn of tokenConns.values()) conn.send(payload);
+      } else if (target.startsWith('token:')) {
+        tokenConns.get(target.slice(6))?.send(payload);
+      } else if (target.startsWith('except:')) {
+        const exc = target.slice(7);
+        for (const [t, conn] of tokenConns.entries()) {
+          if (t !== exc) conn.send(payload);
+        }
+      }
+    }
+
+    // ── WASM startup ───────────────────────────────────────────────────────
+    // Trunk injects the WASM bundle before this inline script. With a
+    // no-modules wasm-bindgen target the exports land as globals directly;
+    // with the default bundler target they live under wasm_bindgen.*.
+    // We poll via rAF (zero cost — fires once after Trunk's init resolves)
+    // to handle both cases before starting Bevy.
+
+    function startPhoenix() {
+      set_message_callback(routeOutbound);
+      wasm_init();
+    }
+
+    function tryStart() {
+      if (typeof wasm_init === 'function') {
+        startPhoenix();
+      } else if (typeof wasm_bindgen !== 'undefined' && typeof wasm_bindgen.wasm_init === 'function') {
+        // Promote to globals so the rest of the script can call them directly
+        window.wasm_init             = wasm_bindgen.wasm_init;
+        window.wasm_receive_message  = wasm_bindgen.wasm_receive_message;
+        window.set_message_callback  = wasm_bindgen.set_message_callback;
+        startPhoenix();
+      } else {
+        requestAnimationFrame(tryStart);
+      }
+    }
+
+    requestAnimationFrame(tryStart);
+  </script>
 </body>
 </html>

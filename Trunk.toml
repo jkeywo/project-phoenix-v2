@@ -1,0 +1,4 @@
+[build]
+target = "server.html"
+dist = "dist"
+public_url = "./"

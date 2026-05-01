@@ -4,8 +4,8 @@
   "scripts": {
     "test": "cargo check",
     "typecheck": "cargo check",
-    "build:server": "trunk build server.html",
-    "build:client": "trunk build client.html --config client-trunk.toml",
+    "build:server": "trunk build",
+    "build:client": "trunk build --config client-trunk.toml",
     "build": "npm run build:server && npm run build:client"
   }
 }

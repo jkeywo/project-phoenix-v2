@@ -74,13 +74,6 @@ fn setup(
         Transform::from_xyz(-300.0, 150.0, 0.0),
     ));
 
-    // Lobby: QR code placeholder
-    commands.spawn((
-        LobbyItem,
-        Text2d::new("[QR Code]"),
-        Transform::from_xyz(200.0, 0.0, 0.0),
-    ));
-
     // Game: rotating cube (hidden until game starts)
     commands.spawn((
         RotatingCube,

@@ -27,23 +27,9 @@
     </a>
   </div>
 
-  <!-- Intercept the wasm_bindgen assignment so we can capture the init Promise.
-       Must run before Trunk replaces the link tag below. -->
-  <script>
-    let _resolveWasmReady;
-    window.__wasm_ready = new Promise(r => { _resolveWasmReady = r; });
-    Object.defineProperty(window, 'wasm_bindgen', {
-      configurable: true,
-      set(fn) {
-        const wrapped = async (...args) => { const r = await fn(...args); _resolveWasmReady(); return r; };
-        Object.assign(wrapped, fn);
-        Object.defineProperty(window, 'wasm_bindgen', { value: wrapped, configurable: true, writable: true });
-      },
-    });
-  </script>
-
-  <!-- Trunk replaces this with the compiled WASM bundle (no-modules target). -->
-  <link data-trunk rel="rust" data-wasm-opt="z" data-bindgen-target="no-modules" />
+  <!-- Trunk replaces this with the compiled WASM bundle. It fires
+       TrunkApplicationStarted and sets window.wasmBindings when ready. -->
+  <link data-trunk rel="rust" data-wasm-opt="z" />
 
   <script>
     // ── PeerJS host peer ───────────────────────────────────────────────────
@@ -128,13 +114,13 @@
     }
 
     // ── WASM startup ───────────────────────────────────────────────────────
-    // __wasm_ready resolves once Trunk's wasm_bindgen(path) call completes,
-    // meaning the binary is fully instantiated and exports are callable.
+    // Trunk fires TrunkApplicationStarted once the WASM binary is fully
+    // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
 
     function startPhoenix() {
-      window.wasm_init            = wasm_bindgen.wasm_init;
-      window.wasm_receive_message = wasm_bindgen.wasm_receive_message;
-      window.set_message_callback = wasm_bindgen.set_message_callback;
+      window.wasm_init            = wasmBindings.wasm_init;
+      window.wasm_receive_message = wasmBindings.wasm_receive_message;
+      window.set_message_callback = wasmBindings.set_message_callback;
       set_message_callback(routeOutbound);
       // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
       // throwing, so any code after wasm_init() never executes.
@@ -142,7 +128,7 @@
       try { wasm_init(); } catch (_) {}
     }
 
-    window.__wasm_ready.then(startPhoenix);
+    window.addEventListener('TrunkApplicationStarted', startPhoenix);
   </script>
 </body>
 </html>

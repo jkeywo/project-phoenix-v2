@@ -146,7 +146,11 @@ fn update_player_list(
     let mut content = "Players:\n".to_string();
     for p in sessions.0.players() {
         let console = p.console.as_ref().map(|c| format!("{c:?}")).unwrap_or_default();
-        content.push_str(&format!("• {} {}\n", p.name, console));
+        if console.is_empty() {
+            content.push_str(&format!("• {}\n", p.name));
+        } else {
+            content.push_str(&format!("• {} - {}\n", p.name, console));
+        }
     }
     text.0 = content;
 }

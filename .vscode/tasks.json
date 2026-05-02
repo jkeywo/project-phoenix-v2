@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build (release)",
+      "type": "shell",
+      "command": "trunk build --release && mkdir -p dist/client && cp client.html dist/client/index.html",
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": "$rustc"
+    },
+    {
+      "label": "Serve (dev)",
+      "type": "shell",
+      "command": "trunk serve",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^",
+          "endsPattern": "server listening"
+        }
+      }
+    }
+  ]
+}

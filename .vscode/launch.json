@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Build & open server page",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "trunk build --release && mkdir -p dist/client && cp client.html dist/client/index.html && echo 'Done — open dist/index.html in a browser'",
+      "presentation": { "reveal": "always" }
+    }
+  ]
+}

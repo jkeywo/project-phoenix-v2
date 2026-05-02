@@ -40,7 +40,14 @@ thread_local! {
 #[wasm_bindgen]
 pub fn wasm_init() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
+            primary_window: Some(bevy::window::Window {
+                canvas: Some("#canvas".into()),
+                fit_canvas_to_parent: true,
+                ..default()
+            }),
+            ..default()
+        }))
         .add_plugins(LobbyPlugin)
         .add_plugins(SimulationPlugin)
         .add_plugins(RendererPlugin)

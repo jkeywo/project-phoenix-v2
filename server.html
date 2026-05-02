@@ -125,8 +125,10 @@
       window.wasm_receive_message = wasm_bindgen.wasm_receive_message;
       window.set_message_callback = wasm_bindgen.set_message_callback;
       set_message_callback(routeOutbound);
-      wasm_init();
+      // Flush before wasm_init: in WASM, App::run() unwinds the JS stack by
+      // throwing, so any code after wasm_init() never executes.
       for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
+      try { wasm_init(); } catch (_) {}
     }
 
     function tryStart() {

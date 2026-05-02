@@ -38,7 +38,8 @@
     // session token → DataConnection (for routing server→client messages)
     const tokenConns = new Map();
 
-    const hostPeerId = crypto.randomUUID().replace(/-/g, '');
+    const hostPeerId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
     const joinUrl = location.href.replace(/server\.html.*$/, 'client.html') + '#' + hostPeerId;
 
     const peer = new Peer(hostPeerId);

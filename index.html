@@ -2,248 +2,48 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Project Phoenix — Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Phoenix — View Screen</title>
+
+  <!-- CDN deps loaded before our script so they're in scope synchronously -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
   <style>
-    html, body { margin: 0; padding: 0; background: #0a0a1a; color: #cce; font-family: monospace; }
-    body { padding: 1rem; box-sizing: border-box; }
-    h2 { margin: 0 0 1rem; color: #8af; }
-    label { display: block; margin-bottom: 1rem; }
-    input[type="text"] { display: block; width: 100%; box-sizing: border-box;
-      background: #111; color: #eef; border: 1px solid #446; padding: 0.5rem; margin-top: 0.25rem; }
-    button { display: block; width: 100%; background: #224; color: #eef;
-      border: 1px solid #446; padding: 0.75rem; margin: 0.4rem 0; cursor: pointer;
-      font-family: monospace; font-size: 1rem; text-align: left; }
-    button:active { background: #336; }
-    button:disabled { opacity: 0.4; cursor: default; }
-    button.mine { border-color: #8af; color: #8af; }
-    button.alert-on { background: #600; border-color: #f44; color: #faa; }
-    #player-list { margin-top: 1rem; font-size: 0.85rem; color: #99b; }
-    #player-list div { padding: 0.2rem 0; }
-    #status { margin-top: 1.5rem; color: #778; font-size: 0.8rem; }
-    section { display: none; }
-    section.active { display: block; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #canvas { display: block; width: 100vw; height: 100vh; }
+    #overlay { position: absolute; top: 1rem; right: 1rem; z-index: 10; }
+    #qr { display: none; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-bef4c47d939f3e8c.js" crossorigin="anonymous" integrity="sha384-DT2OIRE5tyn/NZPparou+otBA/+JaXVDXKGVJ0kQ+E1RJtuCiOW161TjNPU364kc"><link rel="preload" href="./project-phoenix-bef4c47d939f3e8c_bg.wasm" crossorigin="anonymous" integrity="sha384-AxOMUZ6wbpdpABcepOzUixNkg2B02/6x5Ujl6CN3WzvcAd7EHaIqS4AHw1Hmph4D" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-bef4c47d939f3e8c.js" crossorigin="anonymous" integrity="sha384-qAzSXJWrhnOqhew9jVZT4qhEjEr2zpmuotP74A1Wwd6VHKcd/5wxH0KaZ9/hfDO3"><link rel="preload" href="./project-phoenix-bef4c47d939f3e8c_bg.wasm" crossorigin="anonymous" integrity="sha384-8uROakrgdFrCHn6xGptUUrv2xb9L3NgTmuBOCXdffSW2syt/xb8KTdJvb3TDzN59" as="fetch" type="application/wasm"></head>
 <body>
-  <h2 id="phase-title">Lobby</h2>
+  <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
+  <canvas id="canvas"></canvas>
 
-  <section id="lobby-ui">
-    <label>Name
-      <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
-    </label>
-    <div id="console-list"></div>
-    <button id="engage-btn">Engage</button>
-    <div id="player-list"></div>
-  </section>
+  <!-- QR code shown over the canvas during lobby phase -->
+  <div id="overlay">
+    <a id="qr-link" target="_blank" style="cursor:pointer">
+      <canvas id="qr"></canvas>
+    </a>
+  </div>
 
-  <section id="game-ui">
-    <button id="red-alert-btn">Red Alert: OFF</button>
-    <p id="game-status"></p>
-  </section>
-
-  <div id="status">Connecting…</div>
-
+  <!-- Intercept the wasm_bindgen assignment so we can capture the init Promise.
+       Must run before Trunk replaces the link tag below. -->
   <script>
-    // ── Persistence ──────────────────────────────────────────────────────────
-
-    const RANKS = ['Ensign', 'Lieutenant', 'Commander', 'Captain', 'Admiral'];
-    const STARS = ['Vega', 'Altair', 'Rigel', 'Deneb', 'Sirius', 'Nova', 'Quasar', 'Nebula', 'Pulsar', 'Proxima'];
-
-    function randomName() {
-      return RANKS[Math.floor(Math.random() * RANKS.length)] + ' ' +
-             STARS[Math.floor(Math.random() * STARS.length)];
-    }
-
-    let myToken = localStorage.getItem('session-token');
-    if (!myToken) {
-      myToken = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem('session-token', myToken);
-    }
-
-    let myName = localStorage.getItem('player-name') || randomName();
-    localStorage.setItem('player-name', myName);
-
-    // ── State ────────────────────────────────────────────────────────────────
-
-    let players = [];   // Vec<Player> from server
-    let phase = 'Lobby';
-    let redAlert = false;
-    let conn = null;
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    const $ = id => document.getElementById(id);
-
-    function me() { return players.find(p => p.token === myToken); }
-    function isCaptain() { return players.length > 0 && players[0].token === myToken; }
-
-    function send(type, data) {
-      if (!conn || !conn.open) return;
-      const msg = data !== undefined ? { type, data } : { type };
-      conn.send(JSON.stringify(msg));
-    }
-
-    function setStatus(text) { $('status').textContent = text; }
-
-    // ── Rendering ────────────────────────────────────────────────────────────
-
-    function render() {
-      const inGame = phase === 'InProgress';
-      $('phase-title').textContent = inGame ? 'In Progress' : 'Lobby';
-      $('lobby-ui').className = inGame ? '' : 'active';
-      $('game-ui').className  = inGame ? 'active' : '';
-      if (inGame) renderGame(); else renderLobby();
-    }
-
-    function renderLobby() {
-      // Console picker — only CaptainChair exists for now
-      const CONSOLES = ['CaptainChair'];
-      const list = $('console-list');
-      list.innerHTML = '';
-      for (const c of CONSOLES) {
-        const holder = players.find(p => p.console === c);
-        const btn = document.createElement('button');
-        if (holder && holder.token === myToken) {
-          btn.textContent = c + ': Mine — clear';
-          btn.className = 'mine';
-          btn.onclick = () => send('ClearConsole');
-        } else if (holder) {
-          btn.textContent = c + ': ' + holder.name;
-          btn.disabled = true;
-        } else {
-          btn.textContent = c + ': available';
-          btn.onclick = () => send('SelectConsole', { console: c });
-        }
-        list.appendChild(btn);
-      }
-
-      // Engage button only visible to captain while in lobby
-      $('engage-btn').style.display = isCaptain() ? 'block' : 'none';
-
-      // Player list
-      const pl = $('player-list');
-      pl.innerHTML = '';
-      players.forEach((p, i) => {
-        const div = document.createElement('div');
-        const mark = p.token === myToken ? '▶ ' : '• ';
-        const cap  = i === 0 ? ' (captain)' : '';
-        const con  = p.console ? ' [' + p.console + ']' : '';
-        div.textContent = mark + p.name + cap + con;
-        pl.appendChild(div);
-      });
-    }
-
-    function renderGame() {
-      const cap = isCaptain();
-      const btn = $('red-alert-btn');
-      btn.style.display = cap ? 'block' : 'none';
-      btn.textContent = 'Red Alert: ' + (redAlert ? 'ON' : 'OFF');
-      btn.className = redAlert ? 'alert-on' : '';
-      $('game-status').textContent = cap
-        ? 'You are the captain. Issue orders.'
-        : 'Stand by for orders.';
-    }
-
-    // ── Event wiring ─────────────────────────────────────────────────────────
-
-    $('name-input').value = myName;
-
-    let nameTimer = null;
-    $('name-input').addEventListener('input', e => {
-      const val = e.target.value.trim();
-      if (!val) return;
-      myName = val;
-      clearTimeout(nameTimer);
-      nameTimer = setTimeout(() => {
-        localStorage.setItem('player-name', myName);
-        send('SetName', { name: myName });
-      }, 500);
+    let _resolveWasmReady;
+    window.__wasm_ready = new Promise(r => { _resolveWasmReady = r; });
+    Object.defineProperty(window, 'wasm_bindgen', {
+      configurable: true,
+      set(fn) {
+        const wrapped = async (...args) => { const r = await fn(...args); _resolveWasmReady(); return r; };
+        Object.assign(wrapped, fn);
+        Object.defineProperty(window, 'wasm_bindgen', { value: wrapped, configurable: true, writable: true });
+      },
     });
-
-    $('engage-btn').addEventListener('click', () => send('StartGame'));
-
-    $('red-alert-btn').addEventListener('click', () => send('ToggleRedAlert'));
-
-    // ── Incoming message handler ──────────────────────────────────────────────
-
-    function handleMessage(msg) {
-      switch (msg.type) {
-        case 'Welcome':
-          phase   = msg.data.state.phase;
-          players = msg.data.state.players;
-          setStatus('Connected');
-          break;
-        case 'PlayerJoined':
-          if (!players.find(p => p.token === msg.data.player.token))
-            players.push(msg.data.player);
-          break;
-        case 'PlayerLeft':
-          players = players.filter(p => p.token !== msg.data.token);
-          break;
-        case 'ConsoleSelected': {
-          const p = players.find(p => p.token === msg.data.token);
-          if (p) p.console = msg.data.console;
-          break;
-        }
-        case 'ConsoleCleared': {
-          const p = players.find(p => p.token === msg.data.token);
-          if (p) p.console = null;
-          break;
-        }
-        case 'NameChanged': {
-          const p = players.find(p => p.token === msg.data.token);
-          if (p) p.name = msg.data.name;
-          if (msg.data.token === myToken) myName = msg.data.name;
-          break;
-        }
-        case 'GameStarted':
-          phase = 'InProgress';
-          break;
-        case 'SimState':
-          redAlert = msg.data.snapshot.red_alert;
-          break;
-        default:
-          return; // unknown — skip re-render
-      }
-      render();
-    }
-
-    // ── PeerJS connection ─────────────────────────────────────────────────────
-
-    const hostPeerId = location.hash.slice(1);
-
-    if (!hostPeerId) {
-      setStatus('No host ID in URL. Scan the QR code on the view screen.');
-    } else {
-      const clientPeer = new Peer();
-
-      clientPeer.on('open', () => {
-        setStatus('Connecting to host…');
-        conn = clientPeer.connect(hostPeerId, { reliable: true });
-
-        conn.on('open', () => {
-          send('Identify', { token: myToken, name: myName });
-          setStatus('Waiting for server…');
-        });
-
-        conn.on('data', raw => {
-          try {
-            const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-            handleMessage(JSON.parse(str));
-          } catch (e) { console.error('[client] bad message', e, raw); }
-        });
-
-        conn.on('close', () => { setStatus('Disconnected'); conn = null; });
-        conn.on('error', e  => setStatus('Connection error: ' + e.type));
-      });
-
-      clientPeer.on('error', e => setStatus('Peer error: ' + e.type));
-    }
   </script>
 
+  <!-- Trunk replaces this with the compiled WASM bundle (no-modules target). -->
+  
 <script type="module">
 import init, * as bindings from './project-phoenix-bef4c47d939f3e8c.js';
 const wasm = await init({ module_or_path: './project-phoenix-bef4c47d939f3e8c_bg.wasm' });
@@ -254,5 +54,106 @@ window.wasmBindings = bindings;
 
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
-</script></body>
+</script>
+
+  <script>
+    // ── PeerJS host peer ───────────────────────────────────────────────────
+
+    // peer connection id → session token (resolved once Identify arrives)
+    const peerTokens = new Map();
+    // session token → DataConnection (for routing server→client messages)
+    const tokenConns = new Map();
+    // messages queued before WASM is ready
+    const msgQueue = [];
+
+    const hostPeerId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    const joinUrl = location.href.replace(/server\.html.*$/, 'client/') + '#' + hostPeerId;
+
+    const peer = new Peer(hostPeerId);
+
+    peer.on('open', () => {
+      const canvas = document.getElementById('qr');
+      canvas.style.display = 'block';
+      QRCode.toCanvas(canvas, joinUrl, { width: 200 });
+      document.getElementById('qr-link').href = joinUrl;
+    });
+
+    peer.on('connection', (conn) => {
+      conn.on('data', (raw) => {
+        const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
+        let token = peerTokens.get(conn.peer);
+
+        // First message from this peer must be Identify — extract the token
+        if (!token) {
+          try {
+            const msg = JSON.parse(json);
+            if (msg.type === 'Identify') {
+              token = msg.data.token;
+              peerTokens.set(conn.peer, token);
+              tokenConns.set(token, conn);
+            }
+          } catch (_) { return; }
+        }
+
+        if (token) dispatchToWasm(token, json);
+      });
+
+      conn.on('close', () => {
+        const token = peerTokens.get(conn.peer);
+        if (!token) return;
+        // Notify the simulation that this player disconnected
+        dispatchToWasm(token, JSON.stringify({ type: 'ClearConsole', data: null }));
+        peerTokens.delete(conn.peer);
+        tokenConns.delete(token);
+      });
+
+      conn.on('error', (err) => console.error('[PeerJS conn]', err));
+    });
+
+    peer.on('error', (err) => console.error('[PeerJS host]', err));
+
+    // ── WASM dispatch ─────────────────────────────────────────────────────
+
+    function dispatchToWasm(token, json) {
+      if (typeof wasm_receive_message === 'function') {
+        wasm_receive_message(token, json);
+      } else {
+        msgQueue.push([token, json]);
+      }
+    }
+
+    // ── Outbound routing ───────────────────────────────────────────────────
+
+    function routeOutbound(target, payload) {
+      if (target === 'all') {
+        for (const conn of tokenConns.values()) conn.send(payload);
+      } else if (target.startsWith('token:')) {
+        tokenConns.get(target.slice(6))?.send(payload);
+      } else if (target.startsWith('except:')) {
+        const exc = target.slice(7);
+        for (const [t, conn] of tokenConns.entries()) {
+          if (t !== exc) conn.send(payload);
+        }
+      }
+    }
+
+    // ── WASM startup ───────────────────────────────────────────────────────
+    // __wasm_ready resolves once Trunk's wasm_bindgen(path) call completes,
+    // meaning the binary is fully instantiated and exports are callable.
+
+    function startPhoenix() {
+      window.wasm_init            = wasm_bindgen.wasm_init;
+      window.wasm_receive_message = wasm_bindgen.wasm_receive_message;
+      window.set_message_callback = wasm_bindgen.set_message_callback;
+      set_message_callback(routeOutbound);
+      // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
+      // throwing, so any code after wasm_init() never executes.
+      for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
+      try { wasm_init(); } catch (_) {}
+    }
+
+    window.__wasm_ready.then(startPhoenix);
+  </script>
+</body>
 </html>

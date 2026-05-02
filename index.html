@@ -57,7 +57,11 @@
     }
 
     let myToken = localStorage.getItem('session-token');
-    if (!myToken) { myToken = crypto.randomUUID(); localStorage.setItem('session-token', myToken); }
+    if (!myToken) {
+      myToken = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('session-token', myToken);
+    }
 
     let myName = localStorage.getItem('player-name') || randomName();
     localStorage.setItem('player-name', myName);

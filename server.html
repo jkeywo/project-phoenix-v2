@@ -39,6 +39,8 @@
     const peerTokens = new Map();
     // session token → DataConnection (for routing server→client messages)
     const tokenConns = new Map();
+    // messages queued before WASM is ready
+    const msgQueue = [];
 
     const hostPeerId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
@@ -70,14 +72,14 @@
           } catch (_) { return; }
         }
 
-        if (token) wasm_receive_message(token, json);
+        if (token) dispatchToWasm(token, json);
       });
 
       conn.on('close', () => {
         const token = peerTokens.get(conn.peer);
         if (!token) return;
         // Notify the simulation that this player disconnected
-        wasm_receive_message(token, JSON.stringify({ type: 'ClearConsole', data: null }));
+        dispatchToWasm(token, JSON.stringify({ type: 'ClearConsole', data: null }));
         peerTokens.delete(conn.peer);
         tokenConns.delete(token);
       });
@@ -86,6 +88,16 @@
     });
 
     peer.on('error', (err) => console.error('[PeerJS host]', err));
+
+    // ── WASM dispatch ─────────────────────────────────────────────────────
+
+    function dispatchToWasm(token, json) {
+      if (typeof wasm_receive_message === 'function') {
+        wasm_receive_message(token, json);
+      } else {
+        msgQueue.push([token, json]);
+      }
+    }
 
     // ── Outbound routing ───────────────────────────────────────────────────
 
@@ -112,6 +124,7 @@
     function startPhoenix() {
       set_message_callback(routeOutbound);
       wasm_init();
+      for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
     }
 
     function tryStart() {

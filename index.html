@@ -54,7 +54,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     const hostPeerId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
-    const joinUrl = location.href.replace(/server\.html.*$/, 'client/') + '#' + hostPeerId;
+    const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/#' + hostPeerId;
 
     const peer = new Peer(hostPeerId);
 
@@ -112,6 +112,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── Outbound routing ───────────────────────────────────────────────────
 
     function routeOutbound(target, payload) {
+      try {
+        if (JSON.parse(payload).type === 'GameStarted')
+          document.getElementById('overlay').style.display = 'none';
+      } catch (_) {}
+
       if (target === 'all') {
         for (const conn of tokenConns.values()) conn.send(payload);
       } else if (target.startsWith('token:')) {

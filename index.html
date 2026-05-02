@@ -15,7 +15,7 @@
     #overlay { position: absolute; top: 1rem; right: 1rem; z-index: 10; }
     #qr { display: none; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-bef4c47d939f3e8c.js" crossorigin="anonymous" integrity="sha384-qAzSXJWrhnOqhew9jVZT4qhEjEr2zpmuotP74A1Wwd6VHKcd/5wxH0KaZ9/hfDO3"><link rel="preload" href="./project-phoenix-bef4c47d939f3e8c_bg.wasm" crossorigin="anonymous" integrity="sha384-8uROakrgdFrCHn6xGptUUrv2xb9L3NgTmuBOCXdffSW2syt/xb8KTdJvb3TDzN59" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-bef4c47d939f3e8c.js" crossorigin="anonymous" integrity="sha384-DT2OIRE5tyn/NZPparou+otBA/+JaXVDXKGVJ0kQ+E1RJtuCiOW161TjNPU364kc"><link rel="preload" href="./project-phoenix-bef4c47d939f3e8c_bg.wasm" crossorigin="anonymous" integrity="sha384-8uROakrgdFrCHn6xGptUUrv2xb9L3NgTmuBOCXdffSW2syt/xb8KTdJvb3TDzN59" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
@@ -27,22 +27,8 @@
     </a>
   </div>
 
-  <!-- Intercept the wasm_bindgen assignment so we can capture the init Promise.
-       Must run before Trunk replaces the link tag below. -->
-  <script>
-    let _resolveWasmReady;
-    window.__wasm_ready = new Promise(r => { _resolveWasmReady = r; });
-    Object.defineProperty(window, 'wasm_bindgen', {
-      configurable: true,
-      set(fn) {
-        const wrapped = async (...args) => { const r = await fn(...args); _resolveWasmReady(); return r; };
-        Object.assign(wrapped, fn);
-        Object.defineProperty(window, 'wasm_bindgen', { value: wrapped, configurable: true, writable: true });
-      },
-    });
-  </script>
-
-  <!-- Trunk replaces this with the compiled WASM bundle (no-modules target). -->
+  <!-- Trunk replaces this with the compiled WASM bundle. It fires
+       TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
 import init, * as bindings from './project-phoenix-bef4c47d939f3e8c.js';
@@ -139,13 +125,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     // ── WASM startup ───────────────────────────────────────────────────────
-    // __wasm_ready resolves once Trunk's wasm_bindgen(path) call completes,
-    // meaning the binary is fully instantiated and exports are callable.
+    // Trunk fires TrunkApplicationStarted once the WASM binary is fully
+    // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
 
     function startPhoenix() {
-      window.wasm_init            = wasm_bindgen.wasm_init;
-      window.wasm_receive_message = wasm_bindgen.wasm_receive_message;
-      window.set_message_callback = wasm_bindgen.set_message_callback;
+      window.wasm_init            = wasmBindings.wasm_init;
+      window.wasm_receive_message = wasmBindings.wasm_receive_message;
+      window.set_message_callback = wasmBindings.set_message_callback;
       set_message_callback(routeOutbound);
       // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
       // throwing, so any code after wasm_init() never executes.
@@ -153,7 +139,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       try { wasm_init(); } catch (_) {}
     }
 
-    window.__wasm_ready.then(startPhoenix);
+    window.addEventListener('TrunkApplicationStarted', startPhoenix);
   </script>
 </body>
 </html>

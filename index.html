@@ -15,7 +15,7 @@
     #overlay { position: absolute; top: 1rem; right: 1rem; z-index: 10; }
     #qr { display: none; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-bef4c47d939f3e8c.js" crossorigin="anonymous" integrity="sha384-DT2OIRE5tyn/NZPparou+otBA/+JaXVDXKGVJ0kQ+E1RJtuCiOW161TjNPU364kc"><link rel="preload" href="./project-phoenix-bef4c47d939f3e8c_bg.wasm" crossorigin="anonymous" integrity="sha384-8uROakrgdFrCHn6xGptUUrv2xb9L3NgTmuBOCXdffSW2syt/xb8KTdJvb3TDzN59" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-addb46a5ebb1ab36.js" crossorigin="anonymous" integrity="sha384-8JcM9adJEXEMe0jda/+CGckxeRIR3dir18U3yY9gV8Nm5gWKlt9FMuDa+fkujklD"><link rel="preload" href="./project-phoenix-addb46a5ebb1ab36_bg.wasm" crossorigin="anonymous" integrity="sha384-erykim9AJzYCDNo/jl6fgqXBqEPoigJGKMAnnwwy6/r/1BAtTg+u1iAyjM/kyqV7" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
@@ -31,8 +31,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-bef4c47d939f3e8c.js';
-const wasm = await init({ module_or_path: './project-phoenix-bef4c47d939f3e8c_bg.wasm' });
+import init, * as bindings from './project-phoenix-addb46a5ebb1ab36.js';
+const wasm = await init({ module_or_path: './project-phoenix-addb46a5ebb1ab36_bg.wasm' });
 
 
 window.wasmBindings = bindings;

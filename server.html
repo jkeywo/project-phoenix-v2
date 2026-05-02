@@ -22,7 +22,9 @@
 
   <!-- QR code shown over the canvas during lobby phase -->
   <div id="overlay">
-    <canvas id="qr"></canvas>
+    <a id="qr-link" target="_blank" style="cursor:pointer">
+      <canvas id="qr"></canvas>
+    </a>
   </div>
 
   <!-- Trunk replaces this tag with the compiled WASM bundle (no-modules target).
@@ -48,6 +50,7 @@
       const canvas = document.getElementById('qr');
       canvas.style.display = 'block';
       QRCode.toCanvas(canvas, joinUrl, { width: 200 });
+      document.getElementById('qr-link').href = joinUrl;
     });
 
     peer.on('connection', (conn) => {

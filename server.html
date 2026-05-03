@@ -97,10 +97,16 @@
     const peer = new Peer(hostPeerId);
 
     peer.on('open', () => {
+      setConnectionStatus('ready');
       const canvas = document.getElementById('qr');
       canvas.style.display = 'block';
       QRCode.toCanvas(canvas, joinUrl, { width: 200 });
       document.getElementById('qr-link').href = joinUrl;
+    });
+
+    peer.on('disconnected', () => {
+      setConnectionStatus('disconnected');
+      peer.reconnect();
     });
 
     peer.on('connection', (conn) => {
@@ -134,7 +140,7 @@
       conn.on('error', (err) => console.error('[PeerJS conn]', err));
     });
 
-    peer.on('error', (err) => console.error('[PeerJS host]', err));
+    peer.on('error', (err) => { console.error('[PeerJS host]', err); setConnectionStatus('error'); });
 
     // ── WASM dispatch ─────────────────────────────────────────────────────
 

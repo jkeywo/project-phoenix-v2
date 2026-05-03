@@ -12,10 +12,11 @@ struct LobbyCamera;
 #[derive(Component)]
 struct GameCamera;
 
-/// Marks entities that belong to the lobby scene (text, QR placeholder).
+/// Marks entities that belong to the lobby scene (panel root).
 #[derive(Component)]
 struct LobbyItem;
 
+/// Marks the text node whose content is the live player list.
 #[derive(Component)]
 struct PlayerListText;
 
@@ -66,13 +67,33 @@ fn setup(
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, 0.5, 0.0)),
     ));
 
-    // Lobby: player list
-    commands.spawn((
-        LobbyItem,
-        PlayerListText,
-        Text2d::new("Players:\n—"),
-        Transform::from_xyz(-300.0, 150.0, 0.0),
-    ));
+    // Lobby: panel anchored top-left via node UI
+    commands
+        .spawn((
+            LobbyItem,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::FlexStart,
+                align_items: AlignItems::FlexStart,
+                padding: UiRect::all(Val::Px(12.0)),
+                ..default()
+            },
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("Bridge Crew"),
+                TextFont { font_size: 22.0, ..default() },
+                TextColor(Color::srgb(0.53, 0.67, 1.0)),
+            ));
+            parent.spawn((
+                PlayerListText,
+                Text::new("Players:\n—"),
+                TextFont { font_size: 15.0, ..default() },
+                TextColor(Color::srgb(0.6, 0.7, 0.73)),
+            ));
+        });
 
     // Game: rotating cube (hidden until game starts)
     commands.spawn((
@@ -137,7 +158,7 @@ fn toggle_cube(
 
 fn update_player_list(
     sessions: Res<Sessions>,
-    mut query: Query<&mut Text2d, With<PlayerListText>>,
+    mut query: Query<&mut Text, With<PlayerListText>>,
 ) {
     if !sessions.is_changed() {
         return;
@@ -152,7 +173,7 @@ fn update_player_list(
             content.push_str(&format!("• {} - {}\n", p.name, console));
         }
     }
-    text.0 = content;
+    **text = content;
 }
 
 fn rotate_cube(

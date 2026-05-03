@@ -267,6 +267,7 @@
         conn = clientPeer.connect(hostPeerId, { reliable: true });
 
         conn.on('open', () => {
+          setConnectionStatus('ready');
           send('Identify', { token: myToken, name: myName });
           setStatus('Waiting for server…');
         });
@@ -278,11 +279,16 @@
           } catch (e) { console.error('[client] bad message', e, raw); }
         });
 
-        conn.on('close', () => { setStatus('Disconnected'); conn = null; });
+        conn.on('close', () => { setConnectionStatus('disconnected'); setStatus('Disconnected'); conn = null; });
         conn.on('error', e  => setStatus('Connection error: ' + e.type));
       });
 
-      clientPeer.on('error', e => setStatus('Peer error: ' + e.type));
+      clientPeer.on('disconnected', () => {
+        setConnectionStatus('disconnected');
+        clientPeer.reconnect();
+      });
+
+      clientPeer.on('error', e => { setConnectionStatus('error'); setStatus('Peer error: ' + e.type); });
     }
   </script>
 </body>

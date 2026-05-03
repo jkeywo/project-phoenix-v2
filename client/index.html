@@ -24,6 +24,16 @@
     #status { margin-top: 1.5rem; color: #778; font-size: 0.8rem; }
     section { display: none; }
     section.active { display: block; }
+    #top-bar {
+      position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
+      display: flex; align-items: center; gap: 0.5rem; font-family: monospace;
+    }
+    #conn-label { font-size: 0.75rem; color: #f44; }
+    #conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #4c4; flex-shrink: 0; }
+    #fullscreen-btn {
+      display: inline; width: auto; background: none; border: none; color: #cce;
+      font-size: 1.1rem; cursor: pointer; padding: 0; margin: 0; line-height: 1;
+    }
   </style>
 </head>
 <body>
@@ -45,7 +55,44 @@
 
   <div id="status">Connecting…</div>
 
+  <div id="top-bar">
+    <span id="conn-label"></span>
+    <span id="conn-dot"></span>
+    <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+  </div>
+
   <script>
+    // ── Connection status ──────────────────────────────────────────────────
+
+    function setConnectionStatus(state) {
+      const dot = document.getElementById('conn-dot');
+      const label = document.getElementById('conn-label');
+      if (state === 'disconnected') {
+        dot.style.background = '#f44';
+        label.textContent = 'Disconnected — reconnecting…';
+      } else if (state === 'error') {
+        dot.style.background = '#f44';
+        label.textContent = 'Error — refresh to retry';
+      } else {
+        dot.style.background = '#4c4';
+        label.textContent = '';
+      }
+    }
+
+    // ── Fullscreen controller ──────────────────────────────────────────────
+
+    (function initFullscreen() {
+      const btn = document.getElementById('fullscreen-btn');
+      function syncIcon() { btn.textContent = document.fullscreenElement ? '✕' : '⛶'; }
+      btn.addEventListener('click', () => {
+        const p = document.fullscreenElement
+          ? document.exitFullscreen()
+          : document.documentElement.requestFullscreen();
+        p && p.catch(() => {});
+      });
+      document.addEventListener('fullscreenchange', syncIcon);
+    })();
+
     // ── Persistence ──────────────────────────────────────────────────────────
 
     const RANKS = ['Ensign', 'Lieutenant', 'Commander', 'Captain', 'Admiral'];

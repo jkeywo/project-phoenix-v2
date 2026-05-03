@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::lobby::{CurrentPhase, Sessions};
 use crate::messages::GamePhase;
-use crate::simulation::RedAlertState;
+use crate::ship_state::ShipState;
 
 // ── Marker Components ──────────────────────────────────────────────────────
 
@@ -171,16 +171,16 @@ fn rotate_cube(
 }
 
 fn sync_cube_color(
-    red_alert: Res<RedAlertState>,
+    ship: Res<ShipState>,
     cube_query: Query<&MeshMaterial3d<StandardMaterial>, With<RotatingCube>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if !red_alert.is_changed() {
+    if !ship.is_changed() {
         return;
     }
     let Ok(handle) = cube_query.single() else { return };
     if let Some(mat) = materials.get_mut(handle.id()) {
-        mat.base_color = if red_alert.active {
+        mat.base_color = if ship.snapshot().red_alert {
             Color::srgb(1.0, 0.0, 0.0)
         } else {
             Color::WHITE

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage};
+use crate::messages::{ClientMessage, Console, GamePhase, GameState, ServerMessage};
 use crate::session::SessionManager;
 
 // ── Resources ──────────────────────────────────────────────────────────────
@@ -11,9 +11,6 @@ pub struct Sessions(pub SessionManager);
 #[derive(Resource)]
 pub struct CurrentPhase(pub GamePhase);
 
-#[derive(Resource, Default)]
-pub struct CaptainToken(pub Option<String>);
-
 // ── Messages (Bevy 0.18 pull-based message system) ─────────────────────────
 
 /// A decoded ClientMessage received from one peer, tagged with the sender's
@@ -22,6 +19,12 @@ pub struct CaptainToken(pub Option<String>);
 pub struct InboundMessage {
     pub token: String,
     pub msg: ClientMessage,
+}
+
+/// A lifecycle event signalled by the transport layer when a peer disconnects.
+#[derive(Message, Clone)]
+pub struct PlayerDisconnected {
+    pub token: String,
 }
 
 /// A ServerMessage to be forwarded to one or all peers by the JS bridge.
@@ -46,10 +49,10 @@ impl Plugin for LobbyPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Sessions(SessionManager::new()))
             .insert_resource(CurrentPhase(GamePhase::Lobby))
-            .init_resource::<CaptainToken>()
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()
-            .add_systems(Update, process_lobby);
+            .add_message::<PlayerDisconnected>()
+            .add_systems(Update, (process_lobby, handle_disconnect));
     }
 }
 
@@ -64,22 +67,23 @@ fn process_lobby(
     mut outbound: MessageWriter<OutboundMessage>,
     mut sessions: ResMut<Sessions>,
     mut phase: ResMut<CurrentPhase>,
-    mut captain: ResMut<CaptainToken>,
 ) {
     for ev in inbound.read() {
         match ev.msg.clone() {
             ClientMessage::Identify { token, name } => {
-                if sessions.0.reconnect(&token).is_some() {
+                if let Some(player) = sessions.0.reconnect(&token) {
+                    let player = player.clone();
                     let state = game_state(&sessions.0, &phase.0);
                     outbound.write(OutboundMessage {
-                        target: Target::Token(token),
+                        target: Target::Token(token.clone()),
                         msg: ServerMessage::Welcome { state },
+                    });
+                    outbound.write(OutboundMessage {
+                        target: Target::AllExcept(token),
+                        msg: ServerMessage::PlayerJoined { player },
                     });
                 } else if let Ok(player) = sessions.0.register(token.clone(), name) {
                     let player = player.clone();
-                    if captain.0.is_none() {
-                        captain.0 = Some(token.clone());
-                    }
                     let state = game_state(&sessions.0, &phase.0);
                     outbound.write(OutboundMessage {
                         target: Target::Token(token.clone()),
@@ -117,7 +121,7 @@ fn process_lobby(
                 });
             }
             ClientMessage::StartGame => {
-                if captain.0.as_deref() == Some(ev.token.as_str())
+                if sessions.0.captain_token() == Some(ev.token.as_str())
                     && phase.0 == GamePhase::Lobby
                 {
                     phase.0 = GamePhase::InProgress;
@@ -129,6 +133,20 @@ fn process_lobby(
             }
             ClientMessage::ToggleRedAlert => {}
         }
+    }
+}
+
+fn handle_disconnect(
+    mut events: MessageReader<PlayerDisconnected>,
+    mut outbound: MessageWriter<OutboundMessage>,
+    mut sessions: ResMut<Sessions>,
+) {
+    for ev in events.read() {
+        sessions.0.disconnect(&ev.token);
+        outbound.write(OutboundMessage {
+            target: Target::All,
+            msg: ServerMessage::PlayerLeft { token: ev.token.clone() },
+        });
     }
 }
 
@@ -235,6 +253,72 @@ mod tests {
         let out = tick(&mut app);
         assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
         assert_eq!(app.world().resource::<CurrentPhase>().0, GamePhase::InProgress);
+    }
+
+    fn disconnect(app: &mut App, token: &str) {
+        app.world_mut()
+            .resource_mut::<Messages<PlayerDisconnected>>()
+            .write(PlayerDisconnected { token: token.into() });
+    }
+
+    #[test]
+    fn disconnect_of_captain_makes_next_player_captain() {
+        let mut app = test_app();
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
+        tick(&mut app);
+        disconnect(&mut app, "t1");
+        tick(&mut app);
+        // t2 is now captain — only t2 should be able to start the game
+        push(&mut app, "t2", ClientMessage::StartGame);
+        let out = tick(&mut app);
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
+    }
+
+    #[test]
+    fn disconnect_releases_console_so_another_can_claim_it() {
+        let mut app = test_app();
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(&mut app);
+        disconnect(&mut app, "t1");
+        tick(&mut app);
+        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
+        tick(&mut app);
+        push(&mut app, "t2", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        let out = tick(&mut app);
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::ConsoleSelected { .. })));
+    }
+
+    #[test]
+    fn disconnect_broadcasts_player_left() {
+        let mut app = test_app();
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        tick(&mut app);
+        disconnect(&mut app, "t1");
+        let out = tick(&mut app);
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::PlayerLeft { token } if token == "t1")));
+    }
+
+    #[test]
+    fn reconnect_broadcasts_player_joined_to_others() {
+        let mut app = test_app();
+        // t1 joins, disconnects (simulated by registering then re-identifying)
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
+        tick(&mut app);
+        // t1 reconnects — sends Identify with same token
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        let out = tick(&mut app);
+        // The reconnecting player gets Welcome
+        assert!(out.iter().any(|m| matches!(&m.target, Target::Token(t) if t == "t1")
+            && matches!(&m.msg, ServerMessage::Welcome { .. })));
+        // Other players get PlayerJoined
+        assert!(out.iter().any(|m| matches!(&m.target, Target::AllExcept(t) if t == "t1")
+            && matches!(&m.msg, ServerMessage::PlayerJoined { .. })));
     }
 
     #[test]

@@ -1,14 +1,12 @@
 use bevy::prelude::*;
 
-use crate::lobby::{CaptainToken, CurrentPhase, InboundMessage, OutboundMessage, Target};
-use crate::messages::{ClientMessage, GamePhase, ServerMessage, SimSnapshot};
+use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target};
+use crate::messages::{ClientMessage, GamePhase, ServerMessage};
+use crate::ship_state::ShipState;
+
+impl Resource for ShipState {}
 
 // ── Resources ──────────────────────────────────────────────────────────────
-
-#[derive(Resource)]
-pub struct RedAlertState {
-    pub active: bool,
-}
 
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
@@ -19,7 +17,7 @@ pub struct SimulationPlugin;
 
 impl Plugin for SimulationPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(RedAlertState { active: false })
+        app.insert_resource(ShipState::new())
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(
                 0.1,
                 TimerMode::Repeating,
@@ -32,8 +30,8 @@ impl Plugin for SimulationPlugin {
 
 fn handle_toggle(
     mut reader: MessageReader<InboundMessage>,
-    mut red_alert: ResMut<RedAlertState>,
-    captain: Res<CaptainToken>,
+    mut ship: ResMut<ShipState>,
+    sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -41,9 +39,9 @@ fn handle_toggle(
     }
     for ev in reader.read() {
         if matches!(ev.msg, ClientMessage::ToggleRedAlert)
-            && captain.0.as_deref() == Some(ev.token.as_str())
+            && sessions.0.captain_token() == Some(ev.token.as_str())
         {
-            red_alert.active = !red_alert.active;
+            ship.toggle_red_alert();
         }
     }
 }
@@ -52,7 +50,7 @@ fn broadcast_sim_state(
     time: Res<Time>,
     mut timer: ResMut<SimBroadcastTimer>,
     mut writer: MessageWriter<OutboundMessage>,
-    red_alert: Res<RedAlertState>,
+    ship: Res<ShipState>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -61,9 +59,7 @@ fn broadcast_sim_state(
     if timer.0.tick(time.delta()).just_finished() {
         writer.write(OutboundMessage {
             target: Target::All,
-            msg: ServerMessage::SimState {
-                snapshot: SimSnapshot { red_alert: red_alert.active },
-            },
+            msg: ServerMessage::SimState { snapshot: ship.snapshot() },
         });
     }
 }
@@ -92,7 +88,7 @@ mod tests {
     }
 
     fn red_alert(app: &App) -> bool {
-        app.world().resource::<RedAlertState>().active
+        app.world().resource::<ShipState>().snapshot().red_alert
     }
 
     fn setup_in_progress(app: &mut App) {

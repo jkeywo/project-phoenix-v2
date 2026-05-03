@@ -68,17 +68,15 @@
 
     // ── State ────────────────────────────────────────────────────────────────
 
-    let players = [];   // Vec<Player> from server
-    let phase = 'Lobby';
-    let redAlert = false;
+    const state = { players: [], phase: 'Lobby', redAlert: false };
     let conn = null;
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     const $ = id => document.getElementById(id);
 
-    function me() { return players.find(p => p.token === myToken); }
-    function isCaptain() { return players.length > 0 && players[0].token === myToken; }
+    function me(s) { return s.players.find(p => p.token === myToken); }
+    function isCaptain(s) { return s.players.length > 0 && s.players[0].token === myToken; }
 
     function send(type, data) {
       if (!conn || !conn.open) return;
@@ -90,21 +88,20 @@
 
     // ── Rendering ────────────────────────────────────────────────────────────
 
-    function render() {
-      const inGame = phase === 'InProgress';
+    function render(s) {
+      const inGame = s.phase === 'InProgress';
       $('phase-title').textContent = inGame ? 'In Progress' : 'Lobby';
       $('lobby-ui').className = inGame ? '' : 'active';
       $('game-ui').className  = inGame ? 'active' : '';
-      if (inGame) renderGame(); else renderLobby();
+      if (inGame) renderGame(s); else renderLobby(s);
     }
 
-    function renderLobby() {
-      // Console picker — only CaptainChair exists for now
+    function renderLobby(s) {
       const CONSOLES = ['CaptainChair'];
       const list = $('console-list');
       list.innerHTML = '';
       for (const c of CONSOLES) {
-        const holder = players.find(p => p.console === c);
+        const holder = s.players.find(p => p.console === c);
         const btn = document.createElement('button');
         if (holder && holder.token === myToken) {
           btn.textContent = c + ': Mine — clear';
@@ -120,13 +117,11 @@
         list.appendChild(btn);
       }
 
-      // Engage button only visible to captain while in lobby
-      $('engage-btn').style.display = isCaptain() ? 'block' : 'none';
+      $('engage-btn').style.display = isCaptain(s) ? 'block' : 'none';
 
-      // Player list
       const pl = $('player-list');
       pl.innerHTML = '';
-      players.forEach((p, i) => {
+      s.players.forEach((p, i) => {
         const div = document.createElement('div');
         const mark = p.token === myToken ? '▶ ' : '• ';
         const cap  = i === 0 ? ' (captain)' : '';
@@ -136,12 +131,12 @@
       });
     }
 
-    function renderGame() {
-      const cap = isCaptain();
+    function renderGame(s) {
+      const cap = isCaptain(s);
       const btn = $('red-alert-btn');
       btn.style.display = cap ? 'block' : 'none';
-      btn.textContent = 'Red Alert: ' + (redAlert ? 'ON' : 'OFF');
-      btn.className = redAlert ? 'alert-on' : '';
+      btn.textContent = 'Red Alert: ' + (s.redAlert ? 'ON' : 'OFF');
+      btn.className = s.redAlert ? 'alert-on' : '';
       $('game-status').textContent = cap
         ? 'You are the captain. Issue orders.'
         : 'Stand by for orders.';
@@ -172,43 +167,43 @@
     function handleMessage(msg) {
       switch (msg.type) {
         case 'Welcome':
-          phase   = msg.data.state.phase;
-          players = msg.data.state.players;
+          state.phase   = msg.data.state.phase;
+          state.players = msg.data.state.players;
           setStatus('Connected');
           break;
         case 'PlayerJoined':
-          if (!players.find(p => p.token === msg.data.player.token))
-            players.push(msg.data.player);
+          if (!state.players.find(p => p.token === msg.data.player.token))
+            state.players.push(msg.data.player);
           break;
         case 'PlayerLeft':
-          players = players.filter(p => p.token !== msg.data.token);
+          state.players = state.players.filter(p => p.token !== msg.data.token);
           break;
         case 'ConsoleSelected': {
-          const p = players.find(p => p.token === msg.data.token);
+          const p = state.players.find(p => p.token === msg.data.token);
           if (p) p.console = msg.data.console;
           break;
         }
         case 'ConsoleCleared': {
-          const p = players.find(p => p.token === msg.data.token);
+          const p = state.players.find(p => p.token === msg.data.token);
           if (p) p.console = null;
           break;
         }
         case 'NameChanged': {
-          const p = players.find(p => p.token === msg.data.token);
+          const p = state.players.find(p => p.token === msg.data.token);
           if (p) p.name = msg.data.name;
           if (msg.data.token === myToken) myName = msg.data.name;
           break;
         }
         case 'GameStarted':
-          phase = 'InProgress';
+          state.phase = 'InProgress';
           break;
         case 'SimState':
-          redAlert = msg.data.snapshot.red_alert;
+          state.redAlert = msg.data.snapshot.red_alert;
           break;
         default:
           return; // unknown — skip re-render
       }
-      render();
+      render(state);
     }
 
     // ── PeerJS connection ─────────────────────────────────────────────────────

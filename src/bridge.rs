@@ -6,7 +6,7 @@
 #[cfg(target_arch = "wasm32")]
 use {
     crate::codec::{JsonCodec, MessageCodec},
-    crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target},
+    crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
     crate::renderer::RendererPlugin,
     crate::simulation::SimulationPlugin,
     bevy::{prelude::*, DefaultPlugins},
@@ -24,6 +24,9 @@ thread_local! {
     /// Messages received from JS peers, waiting to be injected into Bevy.
     /// Each entry is (sender_token, json_payload).
     static INBOUND_QUEUE: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+
+    /// Disconnect tokens queued by JS, waiting to be injected into Bevy.
+    static DISCONNECT_QUEUE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 
     /// JS callback registered by the host page to receive outbound messages.
     /// Signature: callback(target: string, payload: string)
@@ -51,7 +54,7 @@ pub fn wasm_init() {
         .add_plugins(LobbyPlugin)
         .add_plugins(SimulationPlugin)
         .add_plugins(RendererPlugin)
-        .add_systems(Update, (drain_inbound, flush_outbound))
+        .add_systems(Update, (drain_inbound, drain_disconnects, flush_outbound))
         .run();
 }
 
@@ -66,6 +69,18 @@ pub fn wasm_init() {
 pub fn wasm_receive_message(sender_token: &str, json: &str) {
     INBOUND_QUEUE.with(|q| {
         q.borrow_mut().push((sender_token.to_string(), json.to_string()));
+    });
+}
+
+/// Called by JS when a peer connection closes.
+///
+/// Queues a disconnect lifecycle event that Bevy processes next frame,
+/// replacing the old workaround of dispatching a fake `ClearConsole` message.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_player_disconnected(token: &str) {
+    DISCONNECT_QUEUE.with(|q| {
+        q.borrow_mut().push(token.to_string());
     });
 }
 
@@ -96,6 +111,16 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
         if let Ok(msg) = JsonCodec.decode_client(&json) {
             writer.write(InboundMessage { token, msg });
         }
+    }
+}
+
+/// Drains the disconnect queue each frame and injects lifecycle events into Bevy.
+#[cfg(target_arch = "wasm32")]
+fn drain_disconnects(mut writer: MessageWriter<PlayerDisconnected>) {
+    let pending: Vec<String> =
+        DISCONNECT_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
+    for token in pending {
+        writer.write(PlayerDisconnected { token });
     }
 }
 

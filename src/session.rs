@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::messages::{Console, Player};
 
 #[derive(Debug)]
@@ -12,11 +14,12 @@ pub enum ConflictError {
 
 pub struct SessionManager {
     players: Vec<Player>,
+    last_consoles: HashMap<String, Console>,
 }
 
 impl SessionManager {
     pub fn new() -> Self {
-        Self { players: Vec::new() }
+        Self { players: Vec::new(), last_consoles: HashMap::new() }
     }
 
     fn idx(&self, token: &str) -> Option<usize> {
@@ -34,13 +37,23 @@ impl SessionManager {
     pub fn reconnect(&mut self, token: &str) -> Option<&mut Player> {
         let idx = self.idx(token)?;
         self.players[idx].connected = true;
+        if let Some(last) = self.last_consoles.get(token).cloned() {
+            let taken = self.players.iter()
+                .any(|p| p.connected && p.token != token && p.console == Some(last.clone()));
+            if !taken {
+                self.players[idx].console = Some(last);
+                self.last_consoles.remove(token);
+            }
+        }
         Some(&mut self.players[idx])
     }
 
     pub fn disconnect(&mut self, token: &str) {
         if let Some(idx) = self.idx(token) {
             self.players[idx].connected = false;
-            self.players[idx].console = None;
+            if let Some(console) = self.players[idx].console.take() {
+                self.last_consoles.insert(token.to_string(), console);
+            }
         }
     }
 
@@ -81,6 +94,12 @@ impl SessionManager {
 
     pub fn players(&self) -> &[Player] {
         &self.players
+    }
+
+    pub fn captain_token(&self) -> Option<&str> {
+        self.players.iter()
+            .find(|p| p.connected)
+            .map(|p| p.token.as_str())
     }
 }
 
@@ -210,5 +229,57 @@ mod tests {
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.register("t2".into(), "Bob".into()).unwrap();
         assert_eq!(sm.players().len(), 2);
+    }
+
+    #[test]
+    fn captain_token_returns_first_connected_player() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        assert_eq!(sm.captain_token(), Some("t1"));
+    }
+
+    #[test]
+    fn captain_token_changes_when_first_player_disconnects() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.disconnect("t1");
+        assert_eq!(sm.captain_token(), Some("t2"));
+    }
+
+    #[test]
+    fn captain_token_returns_none_when_all_disconnected() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.disconnect("t1");
+        assert_eq!(sm.captain_token(), None);
+    }
+
+    #[test]
+    fn reconnect_does_not_restore_console_taken_by_another() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.select_console("t1", Console::CaptainChair).unwrap();
+        sm.disconnect("t1");
+        // Another player claims the console while t1 is gone
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.select_console("t2", Console::CaptainChair).unwrap();
+        sm.reconnect("t1");
+        assert!(sm.players().iter().find(|p| p.token == "t1").unwrap().console.is_none());
+        assert_eq!(
+            sm.players().iter().find(|p| p.token == "t2").unwrap().console,
+            Some(Console::CaptainChair)
+        );
+    }
+
+    #[test]
+    fn reconnect_restores_previous_console_when_still_free() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.select_console("t1", Console::CaptainChair).unwrap();
+        sm.disconnect("t1");
+        sm.reconnect("t1");
+        assert_eq!(sm.players()[0].console, Some(Console::CaptainChair));
     }
 }

@@ -77,8 +77,7 @@
       conn.on('close', () => {
         const token = peerTokens.get(conn.peer);
         if (!token) return;
-        // Notify the simulation that this player disconnected
-        dispatchToWasm(token, JSON.stringify({ type: 'ClearConsole', data: null }));
+        wasmBindings.wasm_player_disconnected(token);
         peerTokens.delete(conn.peer);
         tokenConns.delete(token);
       });

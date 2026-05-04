@@ -1,12 +1,27 @@
+use bevy::prelude::Resource;
 use crate::messages::SimSnapshot;
 
+#[derive(Resource)]
 pub struct ShipState {
     red_alert: bool,
+    /// Ship position (x, z)
+    pub x: f32,
+    pub z: f32,
+    /// Yaw angle in radians (0 = facing negative Z)
+    pub yaw: f32,
+    /// Current forward speed
+    pub forward_speed: f32,
 }
 
 impl ShipState {
     pub fn new() -> Self {
-        Self { red_alert: false }
+        Self {
+            red_alert: false,
+            x: 0.0,
+            z: 0.0,
+            yaw: 0.0,
+            forward_speed: 0.0,
+        }
     }
 
     pub fn toggle_red_alert(&mut self) {

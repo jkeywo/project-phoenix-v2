@@ -4,7 +4,7 @@ use crate::lobby::{CurrentPhase, Sessions};
 use crate::messages::GamePhase;
 use crate::ship_state::ShipState;
 
-// ── Marker Components ──────────────────────────────────────────────────────
+// ── Marker Components ─────────────────────────────
 
 #[derive(Component)]
 struct LobbyCamera;
@@ -20,10 +20,11 @@ struct LobbyItem;
 #[derive(Component)]
 struct PlayerListText;
 
+/// Marks the Red Alert border overlay UI element.
 #[derive(Component)]
-struct RotatingCube;
+struct RedAlertOver;
 
-// ── Plugin ─────────────────────────────────────────────────────────────────
+// ── Plugin ─────�────��─�─────────────���────���─
 
 pub struct RendererPlugin;
 
@@ -34,31 +35,27 @@ impl Plugin for RendererPlugin {
             (
                 toggle_cameras,
                 toggle_lobby_items,
-                toggle_cube,
                 update_player_list,
-                rotate_cube,
-                sync_cube_color,
+                sync_red_alert_border,
             ),
         );
     }
 }
 
-// ── Setup ──────────────────────────────────────────────────────────────────
+// ── Setup ────────�─────���────�────���────���────��─���────���──
 
 fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // 2D camera — active during lobby phase
     commands.spawn((LobbyCamera, Camera2d, Camera { order: 0, ..default() }));
 
-    // 3D camera — active during in-game phase
+    // 3D camera — active during in-game phase, positioned for ship view
     commands.spawn((
         GameCamera,
         Camera3d::default(),
         Camera { is_active: false, order: 0, ..default() },
-        Transform::from_xyz(0.0, 2.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(0.0, 2.0, -10.0),
     ));
 
     // Directional light for the 3D scene
@@ -95,20 +92,45 @@ fn setup(
             ));
         });
 
-    // Game: rotating cube (hidden until game starts)
-    commands.spawn((
-        RotatingCube,
-        Mesh3d(meshes.add(Cuboid::default())),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            ..default()
-        })),
-        Transform::default(),
-        Visibility::Hidden,
-    ));
+    // Red Alert overlay — thin red borders on all four edges.
+    // Each edge is a separate UI rect for proper coloring.
+    for pos in &[PositionType::Absolute] {
+        // Border container
+        let mut border_root = commands.spawn((
+            Node {
+                position_type: *pos,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                padding: UiRect::ZERO,
+                ..default()
+            },
+            Visibility::Hidden,
+        ));
+
+        // Four border strips
+        for (_side, size) in &[
+            ("top", (Val::Percent(100.0), Val::Px(8.0))),
+            ("bottom", (Val::Percent(100.0), Val::Px(8.0))),
+            ("left", (Val::Px(8.0), Val::Percent(100.0))),
+            ("right", (Val::Px(8.0), Val::Percent(100.0))),
+        ] {
+            border_root.with_children(|c| {
+                c.spawn((
+                    Node {
+                        width: size.0,
+                        height: size.1,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(1.0, 0.0, 0.0)),
+                ));
+            });
+        }
+
+        border_root.insert(RedAlertOver);
+    }
 }
 
-// ── Systems ────────────────────────────────────────────────────────────────
+// ── Systems ─────���──���────���────���────�──���────���────���────
 
 fn toggle_cameras(
     phase: Res<CurrentPhase>,
@@ -140,22 +162,6 @@ fn toggle_lobby_items(
     }
 }
 
-fn toggle_cube(
-    phase: Res<CurrentPhase>,
-    mut query: Query<&mut Visibility, With<RotatingCube>>,
-) {
-    if !phase.is_changed() {
-        return;
-    }
-    if let Ok(mut vis) = query.single_mut() {
-        *vis = if phase.0 == GamePhase::InProgress {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-}
-
 fn update_player_list(
     sessions: Res<Sessions>,
     mut query: Query<&mut Text, With<PlayerListText>>,
@@ -176,35 +182,24 @@ fn update_player_list(
     **text = content;
 }
 
-fn rotate_cube(
-    time: Res<Time>,
+/// Sync Red Alert overlay visibility based on ShipState::red_alert.
+fn sync_red_alert_border(
+    ship: Res<ShipState>,
+    mut query: Query<&mut Visibility, With<RedAlertOver>>,
     phase: Res<CurrentPhase>,
-    mut query: Query<&mut Transform, With<RotatingCube>>,
 ) {
+    // Only show during game phase
     if phase.0 != GamePhase::InProgress {
         return;
     }
-    let dt = time.delta_secs();
-    for mut transform in query.iter_mut() {
-        transform.rotate_y(dt * 0.8);
-        transform.rotate_x(dt * 0.5);
-    }
-}
 
-fn sync_cube_color(
-    ship: Res<ShipState>,
-    cube_query: Query<&MeshMaterial3d<StandardMaterial>, With<RotatingCube>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    if !ship.is_changed() {
-        return;
-    }
-    let Ok(handle) = cube_query.single() else { return };
-    if let Some(mat) = materials.get_mut(handle.id()) {
-        mat.base_color = if ship.snapshot().red_alert {
-            Color::srgb(1.0, 0.0, 0.0)
+    let Ok(mut visibility) = query.single_mut() else { return };
+
+    if ship.is_changed() {
+        if ship.snapshot().red_alert {
+            *visibility = Visibility::Inherited;
         } else {
-            Color::WHITE
-        };
+            *visibility = Visibility::Hidden;
+        }
     }
 }

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Console {
     CaptainChair,
+    Helm,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -39,6 +40,7 @@ pub enum ClientMessage {
     ClearConsole,
     StartGame,
     ToggleRedAlert,
+    HelmInput { thrust: f32, steering: f32 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

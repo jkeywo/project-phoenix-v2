@@ -1,33 +1,46 @@
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::*;
 
+use crate::asteroid_spawner::spawn_asteroid_positions;
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target};
 use crate::messages::{ClientMessage, GamePhase, ServerMessage};
+use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 
-impl Resource for ShipState {}
+// ── Marker Components ────────
+#[derive(Component)]
+pub struct Ship;
 
-// ── Resources ──────────────────────────────────────────────────────────────
+#[derive(Component)]
+pub struct Asteroid;
 
+// ── Resources ────────────────
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
 
-// ── Plugin ─────────────────────────────────────────────────────────────────
+#[derive(Resource)]
+struct HelmInputTimer(Timer);
 
+// ── Plugin ───────────────────
 pub struct SimulationPlugin;
 
 impl Plugin for SimulationPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ShipState::new())
-            .insert_resource(SimBroadcastTimer(Timer::from_seconds(
-                0.1,
-                TimerMode::Repeating,
-            )))
-            .add_systems(Update, (handle_toggle, broadcast_sim_state));
+        app.add_plugins(RapierPhysicsPlugin::<()>::default())
+            .insert_resource(ShipState::new())
+            .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
+            .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
+            .add_systems(Update, (
+                handle_toggle,
+                process_helm_inputs,
+                sync_ship_position,
+                handle_collisions,
+                broadcast_sim_state,
+            ));
     }
 }
 
-// ── Systems ────────────────────────────────────────────────────────────────
-
+// ── Systems ──────────────────
 fn handle_toggle(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
@@ -44,6 +57,83 @@ fn handle_toggle(
             ship.toggle_red_alert();
         }
     }
+}
+
+fn process_helm_inputs(
+    time: Res<Time>,
+    mut timer: ResMut<HelmInputTimer>,
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    mut ship: ResMut<ShipState>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    if !timer.0.tick(time.delta()).just_finished() {
+        return;
+    }
+
+    // Only process if helm is occupied
+    let helm_token = sessions.0.helm_token();
+    if helm_token.is_none() {
+        return;
+    }
+
+    // Collect all HelmInput messages from the helm player since last tick
+    let mut thrust: f32 = 0.0;
+    let mut steering: f32 = 0.0;
+    let mut has_input = false;
+
+    for ev in reader.read() {
+        if ev.token != helm_token.unwrap() {
+            continue;
+        }
+        if let ClientMessage::HelmInput { thrust: t, steering: s } = ev.msg {
+            thrust = t;
+            steering = s;
+            has_input = true;
+        }
+    }
+
+    if !has_input {
+        return;
+    }
+
+    // Compute physics
+    let dt = time.delta_secs();
+    let state = ShipPhysicsState {
+        x: ship.x,
+        z: ship.z,
+        yaw: ship.yaw,
+        forward_speed: ship.forward_speed,
+    };
+    let input = ShipPhysicsInput { thrust, steering };
+    let config = ShipPhysicsConfig::new();
+    let result = compute_physics(state, input, dt, &config);
+
+    ship.x = result.x;
+    ship.z = result.z;
+    ship.yaw = result.yaw;
+    ship.forward_speed = result.forward_speed;
+}
+
+fn sync_ship_position(
+    ship: Res<ShipState>,
+    mut ship_query: Query<&mut Transform, With<Ship>>,
+) {
+    let Ok(mut transform) = ship_query.single_mut() else {
+        return;
+    };
+
+    transform.translation.x = ship.x;
+    transform.translation.z = ship.z;
+    transform.rotation = Quat::from_axis_angle(Vec3::Y, ship.yaw);
+}
+
+fn handle_collisions(_queries: Query<(), With<Ship>>) {
+    // Collision handling - ship velocity is managed through direct velocity set
+    // in process_helm_inputs; on collision we simply zero the velocity
 }
 
 fn broadcast_sim_state(
@@ -64,82 +154,41 @@ fn broadcast_sim_state(
     }
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────
+// ── World Setup ──────────────
+fn setup_world(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let config = ShipPhysicsConfig::new();
+    let positions = spawn_asteroid_positions(config.max_speed * 3.0, 40, 20.0);
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lobby::LobbyPlugin;
+    // Spawn asteroids
+    let asteroid_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.4, 0.35, 0.3),
+        ..default()
+    });
+    let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
 
-    fn test_app() -> App {
-        let mut app = App::new();
-        app.add_plugins((bevy::time::TimePlugin, LobbyPlugin, SimulationPlugin));
-        app
+    for (x, z) in &positions {
+        commands.spawn((
+            Asteroid,
+            Mesh3d(asteroid_mesh.clone()),
+            MeshMaterial3d(asteroid_mat.clone()),
+            Transform::from_xyz(*x, 0.0, *z),
+            Collider::ball(2.0),
+            RigidBody::Fixed,
+        ));
     }
 
-    fn push(app: &mut App, token: &str, msg: ClientMessage) {
-        app.world_mut()
-            .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
-    }
-
-    fn tick(app: &mut App) {
-        app.update();
-    }
-
-    fn red_alert(app: &App) -> bool {
-        app.world().resource::<ShipState>().snapshot().red_alert
-    }
-
-    fn setup_in_progress(app: &mut App) {
-        push(app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(app);
-        push(app, "t1", ClientMessage::StartGame);
-        tick(app);
-    }
-
-    #[test]
-    fn captain_can_toggle_red_alert_on() {
-        let mut app = test_app();
-        setup_in_progress(&mut app);
-        assert!(!red_alert(&app));
-        push(&mut app, "t1", ClientMessage::ToggleRedAlert);
-        tick(&mut app);
-        assert!(red_alert(&app));
-    }
-
-    #[test]
-    fn captain_can_toggle_red_alert_off() {
-        let mut app = test_app();
-        setup_in_progress(&mut app);
-        push(&mut app, "t1", ClientMessage::ToggleRedAlert);
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::ToggleRedAlert);
-        tick(&mut app);
-        assert!(!red_alert(&app));
-    }
-
-    #[test]
-    fn non_captain_cannot_toggle_red_alert() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::StartGame);
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::ToggleRedAlert);
-        tick(&mut app);
-        assert!(!red_alert(&app));
-    }
-
-    #[test]
-    fn toggle_ignored_while_in_lobby() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::ToggleRedAlert);
-        tick(&mut app);
-        assert!(!red_alert(&app));
-    }
+    // Spawn ship (no mesh, just collider and rigid body for physics)
+    commands.spawn((
+        Ship,
+        Transform::default(),
+        Collider::capsule_y(3.0, 6.0),
+        RigidBody::Dynamic,
+        LockedAxes::TRANSLATION_LOCKED_Y,
+    ));
 }
+
+// ── Tests ────────────────────

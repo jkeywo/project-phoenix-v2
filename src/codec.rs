@@ -91,6 +91,21 @@ mod tests {
         assert_eq!(msg, rt);
     }
 
+    #[test]
+    fn client_helm_input() {
+        let msg = ClientMessage::HelmInput { thrust: 0.75, steering: -0.5 };
+        let json = codec().encode_client(&msg).unwrap();
+        let rt = codec().decode_client(&json).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn client_select_console_helm() {
+        let msg = ClientMessage::SelectConsole { console: Console::Helm };
+        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
     // ServerMessage round-trips
 
     #[test]
@@ -117,6 +132,13 @@ mod tests {
     #[test]
     fn server_console_selected() {
         let msg = ServerMessage::ConsoleSelected { token: "tok".into(), console: Console::CaptainChair };
+        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn server_console_selected_helm() {
+        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), console: Console::Helm };
         let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }

@@ -132,6 +132,7 @@ fn process_lobby(
                 }
             }
             ClientMessage::ToggleRedAlert => {}
+            ClientMessage::HelmInput { .. } => {}
         }
     }
 }
@@ -249,10 +250,33 @@ mod tests {
         let mut app = test_app();
         push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
         tick(&mut app);
+        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(&mut app);
         push(&mut app, "t1", ClientMessage::StartGame);
         let out = tick(&mut app);
         assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
         assert_eq!(app.world().resource::<CurrentPhase>().0, GamePhase::InProgress);
+    }
+
+    #[test]
+    fn helm_input_ignored_during_lobby() {
+        let mut app = test_app();
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "t1", ClientMessage::HelmInput { thrust: 0.5, steering: 0.0 });
+        let out = tick(&mut app);
+        // No GameStarted message should be produced
+        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
+    }
+
+    #[test]
+    fn select_helm_console_works() {
+        let mut app = test_app();
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::Helm });
+        let out = tick(&mut app);
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::ConsoleSelected { .. })));
     }
 
     fn disconnect(app: &mut App, token: &str) {
@@ -262,18 +286,20 @@ mod tests {
     }
 
     #[test]
-    fn disconnect_of_captain_makes_next_player_captain() {
+    fn disconnect_of_captain_makes_captain_none() {
         let mut app = test_app();
         push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
         tick(&mut app);
         push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
         tick(&mut app);
         disconnect(&mut app, "t1");
         tick(&mut app);
-        // t2 is now captain — only t2 should be able to start the game
+        // t1 was captain and disconnected, no one else is captain
         push(&mut app, "t2", ClientMessage::StartGame);
         let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
+        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
     }
 
     #[test]

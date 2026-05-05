@@ -19,8 +19,10 @@ rand = "0.9"
 bevy_rapier3d = { version = "0.33", features = ["parallel"] }
 
 # WASM: no parallel, uses single-threaded runtime
+# getrandom 0.3+ needs wasm_js feature + cfg(getrandom_backend="js")
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 bevy_rapier3d = { version = "0.33", features = ["dim3"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [target.wasm32-unknown-unknown.dependencies]
 js-sys = "0.3"

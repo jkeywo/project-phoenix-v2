@@ -30,6 +30,7 @@ impl Plugin for SimulationPlugin {
             .insert_resource(ShipState::new())
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
+            .add_systems(Startup, setup_world)
             .add_systems(Update, (
                 handle_toggle,
                 process_helm_inputs,

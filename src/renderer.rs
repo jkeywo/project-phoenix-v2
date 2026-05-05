@@ -36,6 +36,7 @@ impl Plugin for RendererPlugin {
                 toggle_cameras,
                 toggle_lobby_items,
                 update_player_list,
+                follow_camera,
                 sync_red_alert_border,
             ),
         );
@@ -180,6 +181,34 @@ fn update_player_list(
         }
     }
     **text = content;
+}
+
+/// Chase camera: positions behind + above the ship, rotates to match ship yaw.
+/// Offsets: -13 units behind (along ship forward), 2 units up.
+/// Uses ShipState (which already has x, z, yaw) so no extra coupling to the Ship component.
+fn follow_camera(
+    ship: Res<ShipState>,
+    mut cam_query: Query<&mut Transform, With<GameCamera>>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    let Ok(mut transform) = cam_query.single_mut() else { return };
+
+    // Ship's forward direction in world space:
+    // yaw=0 points along -Z, positive yaw rotates clockwise around Y.
+    let fwd_x = ship.yaw.sin();
+    let fwd_z = -ship.yaw.cos();
+
+    // Camera position: 13 units behind the ship, 2 units above.
+    transform.translation.x = ship.x - fwd_x * 13.0;
+    transform.translation.z = ship.z - fwd_z * 13.0;
+    transform.translation.y = 2.0;
+
+    // Camera faces the ship's forward direction, looking level.
+    let look_fwd = Vec3::new(-fwd_x, 0.0, fwd_z);
+    transform.look_at(look_fwd, Vec3::Y);
 }
 
 /// Sync Red Alert overlay visibility based on ShipState::red_alert.

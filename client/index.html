@@ -34,24 +34,70 @@
       display: inline; width: auto; background: none; border: none; color: #cce;
       font-size: 1.1rem; cursor: pointer; padding: 0; margin: 0; line-height: 1;
     }
+    /* Red Alert border overlay on console container */
+    #console-container {
+      position: relative;
+      border: 4px solid transparent;
+      padding: 0.5rem;
+      transition: border-color 0.15s;
+    }
+    #console-container.red-alert {
+      border-color: #f44;
+    }
+    /* Helm console UI */
+    #helm-ui { display: none; }
+    #helm-ui.active { display: block; }
+    .helm-control { margin: 0.5rem 0; }
+    .helm-control label { font-size: 0.9rem; color: #99b; }
+    input[type="range"] { width: 100%; accent-color: #8af; }
+    #thrust-value, #steering-value {
+      display: inline-block; width: 3rem; text-align: right; color: #8af;
+    }
+    #joystick-area {
+      width: 100%; aspect-ratio: 1; background: #112; border: 1px solid #336;
+      position: relative; margin: 0.5rem 0; touch-action: none;
+      border-radius: 8px;
+    }
+    #joystick-knob {
+      width: 40px; height: 40px; background: #448; border: 2px solid #8af;
+      border-radius: 50%; position: absolute; transform: translate(-50%, -50%);
+      pointer-events: none; transition: background 0.1s;
+    }
+    #joystick-knob.active { background: #66a; }
   </style>
 </head>
 <body>
   <h2 id="phase-title">Lobby</h2>
 
-  <section id="lobby-ui">
-    <label>Name
-      <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
-    </label>
-    <div id="console-list"></div>
-    <button id="engage-btn">Engage</button>
-    <div id="player-list"></div>
-  </section>
+  <div id="console-container">
+    <section id="lobby-ui">
+      <label>Name
+        <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
+      </label>
+      <div id="console-list"></div>
+      <button id="engage-btn">Engage</button>
+      <div id="player-list"></div>
+    </section>
 
-  <section id="game-ui">
-    <button id="red-alert-btn">Red Alert: OFF</button>
-    <p id="game-status"></p>
-  </section>
+    <section id="game-ui">
+      <button id="red-alert-btn">Red Alert: OFF</button>
+      <p id="game-status"></p>
+    </section>
+
+    <section id="helm-ui">
+      <div class="helm-control">
+        <label>Thrust: <span id="thrust-value">0</span>%</label>
+        <input id="thrust-slider" type="range" min="0" max="100" value="0" />
+      </div>
+      <div class="helm-control">
+        <label>Steering: <span id="steering-value">0</span>%</label>
+        <input id="steering-slider" type="range" min="-100" max="100" value="0" />
+      </div>
+      <div id="joystick-area">
+        <div id="joystick-knob"></div>
+      </div>
+    </section>
+  </div>
 
   <div id="status">Connecting…</div>
 
@@ -62,7 +108,7 @@
   </div>
 
   <script>
-    // ── Connection status ──────────────────────────────────────────────────
+    // ── Connection status ───────────────────────────────────────
 
     function setConnectionStatus(state) {
       const dot = document.getElementById('conn-dot');
@@ -79,7 +125,7 @@
       }
     }
 
-    // ── Fullscreen controller ──────────────────────────────────────────────
+    // ── Fullscreen controller ───────────────────────────────────
 
     (function initFullscreen() {
       const btn = document.getElementById('fullscreen-btn');
@@ -93,7 +139,7 @@
       document.addEventListener('fullscreenchange', syncIcon);
     })();
 
-    // ── Persistence ──────────────────────────────────────────────────────────
+    // ── Persistence ─────────────────────────────────────────────
 
     const RANKS = ['Ensign', 'Lieutenant', 'Commander', 'Captain', 'Admiral'];
     const STARS = ['Vega', 'Altair', 'Rigel', 'Deneb', 'Sirius', 'Nova', 'Quasar', 'Nebula', 'Pulsar', 'Proxima'];
@@ -113,17 +159,19 @@
     let myName = localStorage.getItem('player-name') || randomName();
     localStorage.setItem('player-name', myName);
 
-    // ── State ────────────────────────────────────────────────────────────────
+    // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false };
     let conn = null;
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── Helpers ─────────────────────────────────────────────────
 
     const $ = id => document.getElementById(id);
 
     function me(s) { return s.players.find(p => p.token === myToken); }
-    function isCaptain(s) { return s.players.length > 0 && s.players[0].token === myToken; }
+    function atConsole(s, console) { return s.players.find(p => p.token === myToken && p.console === console); }
+    function isCaptain(s) { return atConsole(s, 'CaptainChair') !== undefined; }
+    function isHelm(s) { return atConsole(s, 'Helm') !== undefined; }
 
     function send(type, data) {
       if (!conn || !conn.open) return;
@@ -133,18 +181,28 @@
 
     function setStatus(text) { $('status').textContent = text; }
 
-    // ── Rendering ────────────────────────────────────────────────────────────
+    // ── Rendering ───────────────────────────────────────────────
 
     function render(s) {
       const inGame = s.phase === 'InProgress';
       $('phase-title').textContent = inGame ? 'In Progress' : 'Lobby';
       $('lobby-ui').className = inGame ? '' : 'active';
-      $('game-ui').className  = inGame ? 'active' : '';
+      $('game-ui').className  = inGame && isCaptain(s) ? 'active' : '';
+      $('helm-ui').className  = inGame && isHelm(s) ? 'active' : '';
+
+      // Red Alert border overlay
+      const container = $('console-container');
+      if (s.redAlert) {
+        container.classList.add('red-alert');
+      } else {
+        container.classList.remove('red-alert');
+      }
+
       if (inGame) renderGame(s); else renderLobby(s);
     }
 
     function renderLobby(s) {
-      const CONSOLES = ['CaptainChair'];
+      const CONSOLES = ['CaptainChair', 'Helm'];
       const list = $('console-list');
       list.innerHTML = '';
       for (const c of CONSOLES) {
@@ -171,25 +229,30 @@
       s.players.forEach((p, i) => {
         const div = document.createElement('div');
         const mark = p.token === myToken ? '▶ ' : '• ';
-        const cap  = i === 0 ? ' (captain)' : '';
+        const cap  = p.console === 'CaptainChair' ? ' (captain)' : '';
+        const helm = p.console === 'Helm' ? ' (helm)' : '';
         const con  = p.console ? ' [' + p.console + ']' : '';
-        div.textContent = mark + p.name + cap + con;
+        div.textContent = mark + p.name + cap + helm + con;
         pl.appendChild(div);
       });
     }
 
     function renderGame(s) {
       const cap = isCaptain(s);
+      const helm = isHelm(s);
       const btn = $('red-alert-btn');
       btn.style.display = cap ? 'block' : 'none';
       btn.textContent = 'Red Alert: ' + (s.redAlert ? 'ON' : 'OFF');
       btn.className = s.redAlert ? 'alert-on' : '';
-      $('game-status').textContent = cap
-        ? 'You are the captain. Issue orders.'
-        : 'Stand by for orders.';
+
+      if (cap) {
+        $('game-status').textContent = 'You are the captain. Issue orders.';
+      } else if (!helm) {
+        $('game-status').textContent = 'Stand by. Select a console in the lobby.';
+      }
     }
 
-    // ── Event wiring ─────────────────────────────────────────────────────────
+    // ── Event wiring ────────────────────────────────────────────
 
     $('name-input').value = myName;
 
@@ -209,7 +272,105 @@
 
     $('red-alert-btn').addEventListener('click', () => send('ToggleRedAlert'));
 
-    // ── Incoming message handler ──────────────────────────────────────────────
+    // ── Helm Controls ──────────────────────────────────────────
+
+    let helmTimer = null;
+    function sendHelmInput(thrust, steering) {
+      send('HelmInput', { thrust, steering });
+    }
+
+    $('thrust-slider').addEventListener('input', e => {
+      const thrust = parseInt(e.target.value) / 100;
+      const steering = parseInt($('steering-slider').value) / 100;
+      $('thrust-value').textContent = Math.round(thrust * 100);
+      // Send at 10Hz
+      clearTimeout(helmTimer);
+      sendHelmInput(thrust, steering);
+      helmTimer = setTimeout(() => sendHelmInput(0, 0), 200);
+    });
+
+    $('steering-slider').addEventListener('input', e => {
+      const thrust = parseInt($('thrust-slider').value) / 100;
+      const steering = parseInt(e.target.value) / 100;
+      $('steering-value').textContent = Math.round(steering * 100);
+      // Send at 10Hz
+      clearTimeout(helmTimer);
+      sendHelmInput(thrust, steering);
+      helmTimer = setTimeout(() => sendHelmInput(thrust, 0), 200);
+    });
+
+    // Joystick-style steering
+    (function initJoystick() {
+      const area = $('joystick-area');
+      const knob = $('joystick-knob');
+      let active = false;
+      let center = { x: 0, y: 0 };
+
+      function updateKnob(pos) {
+        const rect = area.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const maxRadius = Math.min(cx, cy) - 20;
+        let dx = pos.x - cx;
+        let dy = pos.y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > maxRadius) {
+          dx = dx / dist * maxRadius;
+          dy = dy / dist * maxRadius;
+        }
+        knob.style.left = (cx + dx) + 'px';
+        knob.style.top = (cy + dy) + 'px';
+
+        const thrust = Math.min(1, Math.abs(dy) / maxRadius);
+        const steering = dx / maxRadius;
+        $('thrust-value').textContent = Math.round(thrust * 100);
+        $('steering-value').textContent = Math.round(steering * 100);
+        sendHelmInput(thrust, steering);
+      }
+
+      function resetKnob() {
+        const rect = area.getBoundingClientRect();
+        knob.style.left = (rect.width / 2) + 'px';
+        knob.style.top = (rect.height / 2) + 'px';
+        knob.classList.remove('active');
+        $('thrust-value').textContent = '0';
+        $('steering-value').textContent = '0';
+        sendHelmInput(0, 0);
+      }
+
+      function start(e) {
+        active = true;
+        knob.classList.add('active');
+        const rect = area.getBoundingClientRect();
+        center = { x: rect.width / 2, y: rect.height / 2 };
+        const pos = e.touches ? e.touches[0] : e;
+        updateKnob({ x: pos.clientX - rect.left, y: pos.clientY - rect.top });
+      }
+
+      function move(e) {
+        if (!active) return;
+        e.preventDefault();
+        const rect = area.getBoundingClientRect();
+        const pos = e.touches ? e.touches[0] : e;
+        updateKnob({ x: pos.clientX - rect.left, y: pos.clientY - rect.top });
+      }
+
+      function end() {
+        if (!active) return;
+        active = false;
+        resetKnob();
+      }
+
+      area.addEventListener('mousedown', start);
+      area.addEventListener('mousemove', move);
+      area.addEventListener('mouseup', end);
+      area.addEventListener('mouseleave', end);
+      area.addEventListener('touchstart', start, { passive: false });
+      area.addEventListener('touchmove', move, { passive: false });
+      area.addEventListener('touchend', end);
+    })();
+
+    // ── Incoming message handler ────────────────────────────────
 
     function handleMessage(msg) {
       switch (msg.type) {
@@ -253,7 +414,7 @@
       render(state);
     }
 
-    // ── PeerJS connection ─────────────────────────────────────────────────────
+    // ── PeerJS connection ───────────────────────────────────────
 
     const hostPeerId = location.hash.slice(1);
 

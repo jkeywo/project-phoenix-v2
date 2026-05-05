@@ -199,6 +199,26 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     window.addEventListener('TrunkApplicationStarted', startPhoenix);
+
+    // ── Audio context resume on first user gesture ───────────────────────
+    // Browsers block AudioContext from playing until a user interacts with
+    // the page. Create + resume inside the first click/tap to satisfy the
+    // autoplay policy. Bevy's audio plugin can then use this context normally.
+    (function initAudio() {
+      let resumed = false;
+      function ensureAudio() {
+        if (resumed) return;
+        resumed = true;
+        // AudioContext must be created/resumed inside a user gesture.
+        window.AudioContext = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContext();
+        // .resume() is a no-op if already running; suppresses the warning.
+        ctx.resume().catch(() => {});
+      }
+      document.addEventListener('mousedown', ensureAudio);
+      document.addEventListener('touchstart', ensureAudio);
+      document.addEventListener('keydown', ensureAudio);
+    })();
   </script>
 </body>
 </html>

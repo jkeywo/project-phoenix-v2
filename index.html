@@ -25,7 +25,7 @@
       cursor: pointer; padding: 0; line-height: 1;
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-594f4a45e391a2ba.js" crossorigin="anonymous" integrity="sha384-afxgZ9VanaV5f2EDDUQljK5cRpljgmqMdb+B3IvTbFYG8ynvCd/HzXkmON90c9Zj"><link rel="preload" href="./project-phoenix-594f4a45e391a2ba_bg.wasm" crossorigin="anonymous" integrity="sha384-jR9PcoSpiRIKIAd8vdW+CWd9NnpBAgDrVxqDYeawcWm4NUXoo40dkbEGxcFGcrMG" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-caf57c9b5ea35e2b.js" crossorigin="anonymous" integrity="sha384-afxgZ9VanaV5f2EDDUQljK5cRpljgmqMdb+B3IvTbFYG8ynvCd/HzXkmON90c9Zj"><link rel="preload" href="./project-phoenix-caf57c9b5ea35e2b_bg.wasm" crossorigin="anonymous" integrity="sha384-orczo9wwdsFXjVpssoCk8sUzM0lqGqfo/rnOzEIyR5BSOoDu15evct5omN5zd7Hc" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
@@ -47,8 +47,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-594f4a45e391a2ba.js';
-const wasm = await init({ module_or_path: './project-phoenix-594f4a45e391a2ba_bg.wasm' });
+import init, * as bindings from './project-phoenix-caf57c9b5ea35e2b.js';
+const wasm = await init({ module_or_path: './project-phoenix-caf57c9b5ea35e2b_bg.wasm' });
 
 
 window.wasmBindings = bindings;

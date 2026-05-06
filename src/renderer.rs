@@ -24,28 +24,7 @@ struct PlayerListText;
 #[derive(Component)]
 struct RedAlertOver;
 
-/// FPS display UI node (bottom-right overlay).
-#[derive(Component)]
-struct FpsDisplay;
-
-#[derive(Resource)]
-struct FpsState {
-    timer: Timer,
-    frame_count: u32,
-    last_fps: u32,
-}
-
-impl Default for FpsState {
-    fn default() -> Self {
-        Self {
-            timer: Timer::from_seconds(1.0, TimerMode::Repeating),
-            frame_count: 0,
-            last_fps: 60,
-        }
-    }
-}
-
-// ── Plugin ─────�────��─�─────────────���────���─
+// ── Plugin ────────────�────��─�─────────────���────���─
 
 pub struct RendererPlugin;
 
@@ -194,11 +173,18 @@ fn update_player_list(
     let Ok(mut text) = query.single_mut() else { return };
     let mut content = "Players:\n".to_string();
     for p in sessions.0.players() {
-        let console = p.console.as_ref().map(|c| format!("{c:?}")).unwrap_or_default();
-        if console.is_empty() {
+        let consoles: String = {
+            let names: Vec<String> = p.consoles.iter().map(|c| format!("{c:?}")).collect();
+            if names.is_empty() {
+                String::new()
+            } else {
+                format!("({})", names.join(", "))
+            }
+        };
+        if consoles.is_empty() {
             content.push_str(&format!("• {}\n", p.name));
         } else {
-            content.push_str(&format!("• {} - {}\n", p.name, console));
+            content.push_str(&format!("• {} - {}\n", p.name, consoles));
         }
     }
     **text = content;
@@ -252,11 +238,9 @@ fn sync_red_alert_border(
 
     let Ok(mut visibility) = query.single_mut() else { return };
 
-    if ship.is_changed() {
-        if ship.snapshot().red_alert {
-            *visibility = Visibility::Inherited;
-        } else {
-            *visibility = Visibility::Hidden;
-        }
+    if ship.snapshot().red_alert {
+        *visibility = Visibility::Visible;
+    } else {
+        *visibility = Visibility::Hidden;
     }
 }

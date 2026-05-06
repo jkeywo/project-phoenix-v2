@@ -103,25 +103,37 @@ fn process_lobby(
                 });
             }
             ClientMessage::SelectConsole { console } => {
-                if sessions.0.select_console(&ev.token, console.clone()).is_ok() {
-                    outbound.write(OutboundMessage {
-                        target: Target::All,
-                        msg: ServerMessage::ConsoleSelected {
-                            token: ev.token.clone(),
-                            console,
-                        },
-                    });
+                if sessions.0.toggle_console(&ev.token, console.clone()).is_ok() {
+                    let consoles = sessions.0.players()
+                        .iter()
+                        .find(|p| p.token == ev.token)
+                        .map(|p| p.consoles.clone())
+                        .unwrap_or_default();
+                    if consoles.is_empty() {
+                        outbound.write(OutboundMessage {
+                            target: Target::All,
+                            msg: ServerMessage::ConsoleCleared { token: ev.token.clone() },
+                        });
+                    } else {
+                        outbound.write(OutboundMessage {
+                            target: Target::All,
+                            msg: ServerMessage::ConsoleSelected {
+                                token: ev.token.clone(),
+                                consoles,
+                            },
+                        });
+                    }
                 }
             }
             ClientMessage::ClearConsole => {
-                sessions.0.clear_console(&ev.token);
+                sessions.0.clear_consoles(&ev.token);
                 outbound.write(OutboundMessage {
                     target: Target::All,
                     msg: ServerMessage::ConsoleCleared { token: ev.token.clone() },
                 });
             }
             ClientMessage::StartGame => {
-                if sessions.0.captain_token() == Some(ev.token.as_str())
+                if sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str())
                     && phase.0 == GamePhase::Lobby
                 {
                     phase.0 = GamePhase::InProgress;
@@ -214,10 +226,7 @@ mod tests {
         push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
         let out = tick(&mut app);
         assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::ConsoleSelected { .. })));
-        assert_eq!(
-            app.world().resource::<Sessions>().0.players()[0].console,
-            Some(Console::CaptainChair)
-        );
+        assert!(app.world().resource::<Sessions>().0.players()[0].consoles.contains(&Console::CaptainChair));
     }
 
     #[test]
@@ -230,7 +239,7 @@ mod tests {
         push(&mut app, "t1", ClientMessage::ClearConsole);
         let out = tick(&mut app);
         assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::ConsoleCleared { .. })));
-        assert!(app.world().resource::<Sessions>().0.players()[0].console.is_none());
+        assert!(app.world().resource::<Sessions>().0.players()[0].consoles.is_empty());
     }
 
     #[test]

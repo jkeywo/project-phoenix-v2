@@ -40,7 +40,7 @@ mod tests {
     }
 
     fn player() -> Player {
-        Player { token: "tok".into(), name: "Alice".into(), console: None, connected: true }
+        Player { token: "tok".into(), name: "Alice".into(), consoles: vec![], connected: true }
     }
 
     fn state() -> GameState {
@@ -131,14 +131,14 @@ mod tests {
 
     #[test]
     fn server_console_selected() {
-        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), console: Console::CaptainChair };
+        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::CaptainChair] };
         let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }
 
     #[test]
     fn server_console_selected_helm() {
-        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), console: Console::Helm };
+        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Helm] };
         let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }

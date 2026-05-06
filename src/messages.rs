@@ -16,7 +16,7 @@ pub enum GamePhase {
 pub struct Player {
     pub token: String,
     pub name: String,
-    pub console: Option<Console>,
+    pub consoles: Vec<Console>,
     pub connected: bool,
 }
 
@@ -49,7 +49,7 @@ pub enum ServerMessage {
     Welcome { state: GameState },
     PlayerJoined { player: Player },
     PlayerLeft { token: String },
-    ConsoleSelected { token: String, console: Console },
+    ConsoleSelected { token: String, consoles: Vec<Console> },
     ConsoleCleared { token: String },
     NameChanged { token: String, name: String },
     GameStarted,

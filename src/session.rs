@@ -14,7 +14,8 @@ pub enum ConflictError {
 
 pub struct SessionManager {
     players: Vec<Player>,
-    last_consoles: HashMap<String, Console>,
+    /// Last consoles assigned before disconnect — used for auto-reconnect restore.
+    last_consoles: HashMap<String, Vec<Console>>,
 }
 
 impl SessionManager {
@@ -30,7 +31,7 @@ impl SessionManager {
         if self.idx(&token).is_some() {
             return Err(RegisterError::DuplicateToken);
         }
-        self.players.push(Player { token, name, console: None, connected: true });
+        self.players.push(Player { token, name, consoles: Vec::new(), connected: true });
         Ok(self.players.last().unwrap())
     }
 
@@ -38,22 +39,25 @@ impl SessionManager {
         let idx = self.idx(token)?;
         self.players[idx].connected = true;
         if let Some(last) = self.last_consoles.get(token).cloned() {
-            let taken = self.players.iter()
-                .any(|p| p.connected && p.token != token && p.console == Some(last.clone()));
-            if !taken {
-                self.players[idx].console = Some(last);
-                self.last_consoles.remove(token);
+            for console in last {
+                let taken = self.players.iter()
+                    .any(|p| p.connected && p.token != token && p.consoles.contains(&console));
+                if !taken {
+                    self.players[idx].consoles.push(console.clone());
+                }
             }
         }
+        self.last_consoles.remove(token);
         Some(&mut self.players[idx])
     }
 
     pub fn disconnect(&mut self, token: &str) {
         if let Some(idx) = self.idx(token) {
             self.players[idx].connected = false;
-            if let Some(console) = self.players[idx].console.take() {
-                self.last_consoles.insert(token.to_string(), console);
+            if !self.players[idx].consoles.is_empty() {
+                self.last_consoles.insert(token.to_string(), self.players[idx].consoles.clone());
             }
+            self.players[idx].consoles.clear();
         }
     }
 
@@ -63,28 +67,47 @@ impl SessionManager {
         }
     }
 
-    pub fn select_console(&mut self, token: &str, console: Console) -> Result<(), ConflictError> {
-        let taken = self.players.iter()
-            .any(|p| p.connected && p.token != token && p.console == Some(console.clone()));
-        if taken {
+    /// Add console if absent, remove if owned, error if another connected player holds it.
+    pub fn toggle_console(&mut self, token: &str, console: Console) -> Result<bool, ConflictError> {
+        // Check: is it held by someone else who is connected?
+        let taken_by_other = self.players.iter()
+            .any(|p| p.connected && p.token != token && p.consoles.contains(&console));
+        if taken_by_other {
             return Err(ConflictError::ConsoleTaken);
         }
         if let Some(idx) = self.idx(token) {
-            self.players[idx].console = Some(console);
+            let player = &mut self.players[idx];
+            if let Some(pos) = player.consoles.iter().position(|c| c == &console) {
+                player.consoles.remove(pos);
+                Ok(false) // was present → removed
+            } else {
+                player.consoles.push(console);
+                Ok(true) // was absent → added
+            }
+        } else {
+            Err(ConflictError::ConsoleTaken)
         }
-        Ok(())
     }
 
-    pub fn clear_console(&mut self, token: &str) {
+    /// Remove a single console by value — only if the player owns it; no-op otherwise.
+    pub fn clear_console(&mut self, token: &str, console: Console) {
         if let Some(idx) = self.idx(token) {
-            self.players[idx].console = None;
+            self.players[idx].consoles.retain(|c| c != &console);
         }
     }
 
+    /// Remove all consoles for this player.
+    pub fn clear_consoles(&mut self, token: &str) {
+        if let Some(idx) = self.idx(token) {
+            self.players[idx].consoles.clear();
+        }
+    }
+
+    /// Consoles not held by any connected player.
     pub fn available_consoles(&self) -> Vec<Console> {
         let taken: Vec<Console> = self.players.iter()
             .filter(|p| p.connected)
-            .filter_map(|p| p.console.clone())
+            .flat_map(|p| p.consoles.clone())
             .collect();
         [Console::CaptainChair, Console::Helm]
             .into_iter()
@@ -96,16 +119,24 @@ impl SessionManager {
         &self.players
     }
 
-    pub fn captain_token(&self) -> Option<&str> {
+    /// Check if any connected player holds this console.
+    pub fn has_console(&self, console: Console) -> bool {
+        self.players.iter().any(|p| p.connected && p.consoles.contains(&console))
+    }
+
+    /// Get the connected player token(s) holding this console.  
+    /// Returns the first one if multiple players hold it (shared console).
+    pub fn console_holder(&self, console: Console) -> Option<&str> {
         self.players.iter()
-            .find(|p| p.connected && p.console == Some(Console::CaptainChair))
+            .find(|p| p.connected && p.consoles.contains(&console))
             .map(|p| p.token.as_str())
     }
 
-    pub fn helm_token(&self) -> Option<&str> {
+    /// Check if a specific token is assigned this console.
+    pub fn player_has_console(&self, token: &str, console: Console) -> bool {
         self.players.iter()
-            .find(|p| p.connected && p.console == Some(Console::Helm))
-            .map(|p| p.token.as_str())
+            .find(|p| p.token == token && p.connected)
+            .is_some_and(|p| p.consoles.contains(&console))
     }
 }
 
@@ -124,7 +155,7 @@ mod tests {
         assert_eq!(p.token, "t1");
         assert_eq!(p.name, "Alice");
         assert!(p.connected);
-        assert!(p.console.is_none());
+        assert!(p.consoles.is_empty());
     }
 
     #[test]
@@ -135,39 +166,72 @@ mod tests {
     }
 
     #[test]
-    fn select_console_assigns_it() {
+    fn toggle_console_adds() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
-        assert_eq!(sm.players()[0].console, Some(Console::CaptainChair));
+        assert!(sm.toggle_console("t1", Console::CaptainChair).unwrap());
+        assert!(sm.players()[0].consoles.contains(&Console::CaptainChair));
     }
 
     #[test]
-    fn select_console_conflict_between_connected_players() {
+    fn toggle_console_removes() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        assert!(!sm.toggle_console("t1", Console::CaptainChair).unwrap());
+        assert!(!sm.players()[0].consoles.contains(&Console::CaptainChair));
+    }
+
+    #[test]
+    fn toggle_console_conflict_between_connected_players() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
-        assert_eq!(sm.select_console("t2", Console::CaptainChair), Err(ConflictError::ConsoleTaken));
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        assert_eq!(sm.toggle_console("t2", Console::CaptainChair), Err(ConflictError::ConsoleTaken));
     }
 
     #[test]
-    fn clear_console_removes_assignment() {
+    fn toggle_console_allows_shared_unconnected_player() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
-        sm.clear_console("t1");
-        assert!(sm.players()[0].console.is_none());
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.disconnect("t1");
+        // t2 can now take CaptainChair even though Alice (disconnected) had it
+        assert!(sm.toggle_console("t2", Console::CaptainChair).unwrap());
     }
 
     #[test]
-    fn disconnect_releases_console_and_marks_disconnected() {
+    fn clear_console_removes_single() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::Helm).unwrap();
+        assert_eq!(sm.players()[0].consoles.len(), 2);
+        sm.clear_console("t1", Console::CaptainChair);
+        assert!(!sm.players()[0].consoles.contains(&Console::CaptainChair));
+        assert!(sm.players()[0].consoles.contains(&Console::Helm));
+    }
+
+    #[test]
+    fn clear_consoles_removes_all() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::Helm).unwrap();
+        sm.clear_consoles("t1");
+        assert!(sm.players()[0].consoles.is_empty());
+    }
+
+    #[test]
+    fn disconnect_releases_consoles_and_marks_disconnected() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
         sm.disconnect("t1");
         assert!(!sm.players()[0].connected);
-        assert!(sm.players()[0].console.is_none());
+        assert!(sm.players()[0].consoles.is_empty());
     }
 
     #[test]
@@ -175,33 +239,47 @@ mod tests {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
-        sm.select_console("t2", Console::Helm).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t2", Console::Helm).unwrap();
         assert!(sm.available_consoles().is_empty());
         sm.disconnect("t1");
         assert_eq!(sm.available_consoles(), vec![Console::CaptainChair]);
     }
 
     #[test]
-    fn reconnect_restores_previous_console_when_still_free() {
-        let mut sm = sm();
-        sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
-        sm.select_console("t2", Console::Helm).unwrap();
-        sm.disconnect("t1");
-        sm.disconnect("t2");
-        assert_eq!(sm.available_consoles(), vec![Console::CaptainChair, Console::Helm]);
-    }
-
-    #[test]
     fn reconnect_still_free_restores_console() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
         sm.disconnect("t1");
         sm.reconnect("t1");
-        assert_eq!(sm.players()[0].console, Some(Console::CaptainChair));
+        assert!(sm.players()[0].consoles.contains(&Console::CaptainChair));
+    }
+
+    #[test]
+    fn reconnect_multiple_consoles() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::Helm).unwrap();
+        sm.disconnect("t1");
+        sm.reconnect("t1");
+        assert!(sm.players()[0].consoles.contains(&Console::CaptainChair));
+        assert!(sm.players()[0].consoles.contains(&Console::Helm));
+    }
+
+    #[test]
+    fn reconnect_partial_restore_when_some_taken() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::Helm).unwrap();
+        sm.disconnect("t1");
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.toggle_console("t2", Console::Helm).unwrap();
+        sm.reconnect("t1");
+        assert!(sm.players()[0].consoles.contains(&Console::CaptainChair));
+        assert!(!sm.players()[0].consoles.contains(&Console::Helm));
     }
 
     #[test]
@@ -221,60 +299,66 @@ mod tests {
     }
 
     #[test]
-    fn captain_token_returns_player_at_captain_chair() {
+    fn console_holder_returns_player_at_captain_chair() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
-        assert_eq!(sm.captain_token(), Some("t1"));
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        assert_eq!(sm.console_holder(Console::CaptainChair), Some("t1"));
     }
 
     #[test]
-    fn captain_token_returns_none_when_no_captain_chair() {
+    fn console_holder_returns_none_when_no_captain_chair() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        assert_eq!(sm.captain_token(), None);
+        assert_eq!(sm.console_holder(Console::CaptainChair), None);
     }
 
     #[test]
-    fn helm_token_returns_correct_players_token() {
-        let mut sm = sm();
-        sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.select_console("t2", Console::Helm).unwrap();
-        assert_eq!(sm.helm_token(), Some("t2"));
-    }
-
-    #[test]
-    fn helm_token_returns_none_when_no_helm() {
-        let mut sm = sm();
-        sm.register("t1".into(), "Alice".into()).unwrap();
-        assert_eq!(sm.helm_token(), None);
-    }
-
-    #[test]
-    fn console_assignment_conflict_resolution_helm() {
+    fn console_holder_returns_correct_helm() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.select_console("t1", Console::Helm).unwrap();
-        assert_eq!(sm.select_console("t2", Console::Helm), Err(ConflictError::ConsoleTaken));
+        sm.toggle_console("t2", Console::Helm).unwrap();
+        assert_eq!(sm.console_holder(Console::Helm), Some("t2"));
     }
 
     #[test]
-    fn reconnect_does_not_restore_console_taken_by_another() {
+    fn has_console_returns_true_when_assigned() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.select_console("t1", Console::CaptainChair).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        assert!(sm.has_console(Console::CaptainChair));
+    }
+
+    #[test]
+    fn has_console_returns_false_when_not_assigned() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(!sm.has_console(Console::CaptainChair));
+    }
+
+    #[test]
+    fn has_console_returns_false_when_disconnected() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::Helm).unwrap();
         sm.disconnect("t1");
-        // Another player claims the console while t1 is gone
-        sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.select_console("t2", Console::CaptainChair).unwrap();
-        sm.reconnect("t1");
-        assert!(sm.players().iter().find(|p| p.token == "t1").unwrap().console.is_none());
-        assert_eq!(
-            sm.players().iter().find(|p| p.token == "t2").unwrap().console,
-            Some(Console::CaptainChair)
-        );
+        assert!(!sm.has_console(Console::Helm));
+    }
+
+    #[test]
+    fn player_has_console_returns_true_when_assigned() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        assert!(sm.player_has_console("t1", Console::CaptainChair));
+    }
+
+    #[test]
+    fn player_has_console_returns_false_when_not_assigned() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(!sm.player_has_console("t1", Console::CaptainChair));
     }
 }

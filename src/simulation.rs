@@ -3,7 +3,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::asteroid_spawner::spawn_asteroid_positions;
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target};
-use crate::messages::{ClientMessage, GamePhase, ServerMessage};
+use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 
@@ -53,7 +53,7 @@ fn handle_toggle(
     }
     for ev in reader.read() {
         if matches!(ev.msg, ClientMessage::ToggleRedAlert)
-            && sessions.0.captain_token() == Some(ev.token.as_str())
+            && sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str())
         {
             ship.toggle_red_alert();
         }
@@ -76,7 +76,7 @@ fn process_helm_inputs(
     }
 
     // Only process if helm is occupied
-    let helm_token = sessions.0.helm_token();
+    let helm_token = sessions.0.console_holder(Console::Helm);
     if helm_token.is_none() {
         return;
     }

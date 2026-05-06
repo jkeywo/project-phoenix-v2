@@ -44,23 +44,69 @@
     #console-container.red-alert {
       border-color: #f44;
     }
+    /* Console tab bar (only when player has 2+ consoles) */
+    #console-tabs {
+      display: none;
+      gap: 0.4rem;
+      margin: 0 0 0.75rem;
+      border-bottom: 1px solid #336;
+      padding-bottom: 0.5rem;
+    }
+    #console-tabs.active { display: flex; }
+    #console-tabs button {
+      flex: 1; margin: 0; padding: 0.6rem 0.4rem; font-size: 0.9rem;
+      background: #112; border: 1px solid #336; color: #99b;
+      border-radius: 4px 4px 0 0;
+    }
+    #console-tabs button.active {
+      background: #224; border-color: #8af; color: #cce;
+    }
     /* Helm console UI */
     #helm-ui { display: none; }
-    #helm-ui.active { display: block; }
-    .helm-control { margin: 0.5rem 0; }
-    .helm-control label { font-size: 0.9rem; color: #99b; }
-    input[type="range"] { width: 100%; accent-color: #8af; }
-    #thrust-value, #steering-value {
-      display: inline-block; width: 3rem; text-align: right; color: #8af;
+    #helm-ui.active { display: flex; }
+    #helm-ui {
+      position: fixed;
+      box-sizing: border-box;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      pointer-events: none; /* allow non-control area to be inert */
+      z-index: 5;
     }
+    /* Landscape: right third */
+    @media (orientation: landscape) {
+      #helm-ui { top: 0; right: 0; width: 33.333vw; height: 100vh; }
+    }
+    /* Portrait: bottom third */
+    @media (orientation: portrait) {
+      #helm-ui { left: 0; bottom: 0; width: 100vw; height: 33.333vh; }
+    }
+    #helm-readout {
+      position: absolute; top: 0.5rem; left: 0.5rem; right: 0.5rem;
+      font-size: 0.75rem; color: #99b; text-align: center; pointer-events: none;
+    }
+    #helm-readout span { color: #8af; }
     #joystick-area {
-      width: 100%; aspect-ratio: 1; background: #112; border: 1px solid #336;
-      position: relative; margin: 0.5rem 0; touch-action: none;
-      border-radius: 8px;
+      position: relative;
+      background: radial-gradient(circle at center, #112 0%, #001 75%);
+      border: 2px solid #336;
+      border-radius: 50%;
+      touch-action: none;
+      pointer-events: auto;
+      /* Square circular pad: limited by smaller of width/height of region */
+      width: min(80%, 80vmin, 18rem);
+      aspect-ratio: 1;
+      max-height: 90%;
     }
+    #joystick-area::before, #joystick-area::after {
+      content: ""; position: absolute; background: rgba(136,170,255,0.15);
+    }
+    #joystick-area::before { left: 50%; top: 8%; bottom: 8%; width: 1px; transform: translateX(-50%); }
+    #joystick-area::after  { top: 50%; left: 8%; right: 8%; height: 1px; transform: translateY(-50%); }
     #joystick-knob {
-      width: 40px; height: 40px; background: #448; border: 2px solid #8af;
-      border-radius: 50%; position: absolute; transform: translate(-50%, -50%);
+      width: 22%; height: 22%; background: #448; border: 2px solid #8af;
+      border-radius: 50%; position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
       pointer-events: none; transition: background 0.1s;
     }
     #joystick-knob.active { background: #66a; }
@@ -70,6 +116,8 @@
   <h2 id="phase-title">Lobby</h2>
 
   <div id="console-container">
+    <div id="console-tabs"></div>
+
     <section id="lobby-ui">
       <label>Name
         <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
@@ -85,15 +133,12 @@
     </section>
 
     <section id="helm-ui">
-      <div class="helm-control">
-        <label>Thrust: <span id="thrust-value">0</span>%</label>
-        <input id="thrust-slider" type="range" min="0" max="100" value="0" />
-      </div>
-      <div class="helm-control">
-        <label>Steering: <span id="steering-value">0</span>%</label>
-        <input id="steering-slider" type="range" min="-100" max="100" value="0" />
-      </div>
       <div id="joystick-area">
+        <div id="helm-readout">
+          Thrust <span id="thrust-value">0</span>%
+          &nbsp;·&nbsp;
+          Steering <span id="steering-value">0</span>%
+        </div>
         <div id="joystick-knob"></div>
       </div>
     </section>
@@ -163,15 +208,27 @@
 
     const state = { players: [], phase: 'Lobby', redAlert: false };
     let conn = null;
+    /// Currently-active console tab during InProgress. Null until set.
+    let activeConsole = null;
 
     // ── Helpers ─────────────────────────────────────────────────
 
     const $ = id => document.getElementById(id);
 
     function me(s) { return s.players.find(p => p.token === myToken); }
-    function atConsole(s, console) { return s.players.find(p => p.token === myToken && p.console === console); }
-    function isCaptain(s) { return atConsole(s, 'CaptainChair') !== undefined; }
-    function isHelm(s) { return atConsole(s, 'Helm') !== undefined; }
+    function myConsoles(s) {
+      const m = me(s);
+      return (m && Array.isArray(m.consoles)) ? m.consoles : [];
+    }
+    function hasConsole(s, c) { return myConsoles(s).includes(c); }
+    function isCaptain(s)     { return hasConsole(s, 'CaptainChair'); }
+    function isHelm(s)        { return hasConsole(s, 'Helm'); }
+
+    /// Returns the consoles list for any player, normalising old single-console field.
+    function consolesOf(p) {
+      if (Array.isArray(p.consoles)) return p.consoles;
+      return p.console ? [p.console] : [];
+    }
 
     function send(type, data) {
       if (!conn || !conn.open) return;
@@ -183,40 +240,74 @@
 
     // ── Rendering ───────────────────────────────────────────────
 
+    const CONSOLES = ['CaptainChair', 'Helm'];
+    const CONSOLE_LABEL = { CaptainChair: 'Captain', Helm: 'Helm' };
+
     function render(s) {
       const inGame = s.phase === 'InProgress';
       $('phase-title').textContent = inGame ? 'In Progress' : 'Lobby';
       $('lobby-ui').className = inGame ? '' : 'active';
-      $('game-ui').className  = inGame && isCaptain(s) ? 'active' : '';
-      $('helm-ui').className  = inGame && isHelm(s) ? 'active' : '';
+
+      // Reconcile activeConsole with current consoles list.
+      const mine = myConsoles(s);
+      if (inGame) {
+        if (!activeConsole || !mine.includes(activeConsole)) {
+          activeConsole = mine[0] || null;
+        }
+      } else {
+        activeConsole = null;
+      }
+
+      // Console sections: only the active one is visible while in-game.
+      $('game-ui').className = (inGame && activeConsole === 'CaptainChair') ? 'active' : '';
+      $('helm-ui').className = (inGame && activeConsole === 'Helm') ? 'active' : '';
+
+      // Tabs only appear when in-game with 2+ consoles.
+      renderTabs(s, inGame);
 
       // Red Alert border overlay
       const container = $('console-container');
-      if (s.redAlert) {
-        container.classList.add('red-alert');
-      } else {
-        container.classList.remove('red-alert');
-      }
+      if (s.redAlert) container.classList.add('red-alert');
+      else container.classList.remove('red-alert');
 
       if (inGame) renderGame(s); else renderLobby(s);
     }
 
+    function renderTabs(s, inGame) {
+      const bar = $('console-tabs');
+      bar.innerHTML = '';
+      const mine = myConsoles(s);
+      if (!inGame || mine.length < 2) {
+        bar.classList.remove('active');
+        return;
+      }
+      bar.classList.add('active');
+      for (const c of mine) {
+        const btn = document.createElement('button');
+        btn.textContent = CONSOLE_LABEL[c] || c;
+        if (c === activeConsole) btn.classList.add('active');
+        btn.onclick = () => { activeConsole = c; render(state); };
+        bar.appendChild(btn);
+      }
+    }
+
     function renderLobby(s) {
-      const CONSOLES = ['CaptainChair', 'Helm'];
       const list = $('console-list');
       list.innerHTML = '';
       for (const c of CONSOLES) {
-        const holder = s.players.find(p => p.console === c);
+        const holder = s.players.find(p => consolesOf(p).includes(c));
         const btn = document.createElement('button');
-        if (holder && holder.token === myToken) {
-          btn.textContent = c + ': Mine — clear';
+        const mineHere = holder && holder.token === myToken;
+        if (mineHere) {
+          btn.textContent = CONSOLE_LABEL[c] + ': Mine — release';
           btn.className = 'mine';
-          btn.onclick = () => send('ClearConsole');
+          // Server's SelectConsole toggles, so re-sending Select removes it.
+          btn.onclick = () => send('SelectConsole', { console: c });
         } else if (holder) {
-          btn.textContent = c + ': ' + holder.name;
+          btn.textContent = CONSOLE_LABEL[c] + ': ' + holder.name;
           btn.disabled = true;
         } else {
-          btn.textContent = c + ': available';
+          btn.textContent = CONSOLE_LABEL[c] + ': available';
           btn.onclick = () => send('SelectConsole', { console: c });
         }
         list.appendChild(btn);
@@ -226,28 +317,26 @@
 
       const pl = $('player-list');
       pl.innerHTML = '';
-      s.players.forEach((p, i) => {
+      s.players.forEach((p) => {
         const div = document.createElement('div');
         const mark = p.token === myToken ? '▶ ' : '• ';
-        const cap  = p.console === 'CaptainChair' ? ' (captain)' : '';
-        const helm = p.console === 'Helm' ? ' (helm)' : '';
-        const con  = p.console ? ' [' + p.console + ']' : '';
-        div.textContent = mark + p.name + cap + helm + con;
+        const cs = consolesOf(p);
+        const con = cs.length ? ' [' + cs.map(c => CONSOLE_LABEL[c] || c).join(', ') + ']' : '';
+        div.textContent = mark + p.name + con;
         pl.appendChild(div);
       });
     }
 
     function renderGame(s) {
-      const cap = isCaptain(s);
-      const helm = isHelm(s);
+      const showCap = activeConsole === 'CaptainChair';
       const btn = $('red-alert-btn');
-      btn.style.display = cap ? 'block' : 'none';
+      btn.style.display = showCap ? 'block' : 'none';
       btn.textContent = 'Red Alert: ' + (s.redAlert ? 'ON' : 'OFF');
       btn.className = s.redAlert ? 'alert-on' : '';
 
-      if (cap) {
+      if (showCap) {
         $('game-status').textContent = 'You are the captain. Issue orders.';
-      } else if (!helm) {
+      } else if (!activeConsole) {
         $('game-status').textContent = 'Stand by. Select a console in the lobby.';
       }
     }
@@ -274,100 +363,140 @@
 
     // ── Helm Controls ──────────────────────────────────────────
 
-    let helmTimer = null;
     function sendHelmInput(thrust, steering) {
       send('HelmInput', { thrust, steering });
     }
 
-    $('thrust-slider').addEventListener('input', e => {
-      const thrust = parseInt(e.target.value) / 100;
-      const steering = parseInt($('steering-slider').value) / 100;
-      $('thrust-value').textContent = Math.round(thrust * 100);
-      // Send at 10Hz
-      clearTimeout(helmTimer);
-      sendHelmInput(thrust, steering);
-      helmTimer = setTimeout(() => sendHelmInput(0, 0), 200);
-    });
-
-    $('steering-slider').addEventListener('input', e => {
-      const thrust = parseInt($('thrust-slider').value) / 100;
-      const steering = parseInt(e.target.value) / 100;
-      $('steering-value').textContent = Math.round(steering * 100);
-      // Send at 10Hz
-      clearTimeout(helmTimer);
-      sendHelmInput(thrust, steering);
-      helmTimer = setTimeout(() => sendHelmInput(thrust, 0), 200);
-    });
-
-    // Joystick-style steering
+    // Joystick: dy<0 (up)   → positive thrust (forward)
+    //          dy>0 (down) → negative thrust (reverse)
+    //          dx          → steering
     (function initJoystick() {
       const area = $('joystick-area');
       const knob = $('joystick-knob');
       let active = false;
-      let center = { x: 0, y: 0 };
+      let pointerId = null;
+      let lastThrust = 0;
+      let lastSteering = 0;
 
-      function updateKnob(pos) {
+      // Continuous resend at ~10Hz so the server keeps applying input
+      setInterval(() => {
+        if (active) sendHelmInput(lastThrust, lastSteering);
+      }, 100);
+
+      function setReadout(thrust, steering) {
+        $('thrust-value').textContent = Math.round(thrust * 100);
+        $('steering-value').textContent = Math.round(steering * 100);
+      }
+
+      function updateKnob(localX, localY) {
         const rect = area.getBoundingClientRect();
         const cx = rect.width / 2;
         const cy = rect.height / 2;
-        const maxRadius = Math.min(cx, cy) - 20;
-        let dx = pos.x - cx;
-        let dy = pos.y - cy;
+        const maxRadius = Math.min(cx, cy) - (knob.offsetWidth / 2) - 2;
+        let dx = localX - cx;
+        let dy = localY - cy;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > maxRadius) {
+        if (dist > maxRadius && dist > 0) {
           dx = dx / dist * maxRadius;
           dy = dy / dist * maxRadius;
         }
         knob.style.left = (cx + dx) + 'px';
-        knob.style.top = (cy + dy) + 'px';
+        knob.style.top  = (cy + dy) + 'px';
 
-        const thrust = Math.min(1, Math.abs(dy) / maxRadius);
-        const steering = dx / maxRadius;
-        $('thrust-value').textContent = Math.round(thrust * 100);
-        $('steering-value').textContent = Math.round(steering * 100);
-        sendHelmInput(thrust, steering);
+        // Signed thrust: up = forward (+), down = reverse (-)
+        const thrust   = -dy / maxRadius;
+        const steering =  dx / maxRadius;
+        const tClamped = Math.max(-1, Math.min(1, thrust));
+        const sClamped = Math.max(-1, Math.min(1, steering));
+        lastThrust = tClamped;
+        lastSteering = sClamped;
+        setReadout(tClamped, sClamped);
+        sendHelmInput(tClamped, sClamped);
       }
 
       function resetKnob() {
-        const rect = area.getBoundingClientRect();
-        knob.style.left = (rect.width / 2) + 'px';
-        knob.style.top = (rect.height / 2) + 'px';
+        knob.style.left = '50%';
+        knob.style.top  = '50%';
         knob.classList.remove('active');
-        $('thrust-value').textContent = '0';
-        $('steering-value').textContent = '0';
+        lastThrust = 0;
+        lastSteering = 0;
+        setReadout(0, 0);
         sendHelmInput(0, 0);
       }
 
-      function start(e) {
+      function localPos(e) {
+        const rect = area.getBoundingClientRect();
+        const p = e.touches ? e.touches[0] : e;
+        return { x: p.clientX - rect.left, y: p.clientY - rect.top };
+      }
+
+      area.addEventListener('pointerdown', e => {
         active = true;
+        pointerId = e.pointerId;
+        area.setPointerCapture(e.pointerId);
         knob.classList.add('active');
-        const rect = area.getBoundingClientRect();
-        center = { x: rect.width / 2, y: rect.height / 2 };
-        const pos = e.touches ? e.touches[0] : e;
-        updateKnob({ x: pos.clientX - rect.left, y: pos.clientY - rect.top });
-      }
+        const p = localPos(e);
+        updateKnob(p.x, p.y);
+      });
 
-      function move(e) {
-        if (!active) return;
+      area.addEventListener('pointermove', e => {
+        if (!active || e.pointerId !== pointerId) return;
         e.preventDefault();
-        const rect = area.getBoundingClientRect();
-        const pos = e.touches ? e.touches[0] : e;
-        updateKnob({ x: pos.clientX - rect.left, y: pos.clientY - rect.top });
-      }
+        const p = localPos(e);
+        updateKnob(p.x, p.y);
+      });
 
-      function end() {
-        if (!active) return;
+      function endPointer(e) {
+        if (!active || e.pointerId !== pointerId) return;
         active = false;
+        pointerId = null;
+        try { area.releasePointerCapture(e.pointerId); } catch (_) {}
         resetKnob();
       }
+      area.addEventListener('pointerup', endPointer);
+      area.addEventListener('pointercancel', endPointer);
+      area.addEventListener('pointerleave', e => { if (active) endPointer(e); });
+    })();
 
-      area.addEventListener('mousedown', start);
-      area.addEventListener('mousemove', move);
-      area.addEventListener('mouseup', end);
-      area.addEventListener('mouseleave', end);
-      area.addEventListener('touchstart', start, { passive: false });
-      area.addEventListener('touchmove', move, { passive: false });
-      area.addEventListener('touchend', end);
+    // ── Swipe to switch console tabs (when 2+ consoles assigned) ───────
+    (function initSwipe() {
+      const root = document.body;
+      let startX = 0, startY = 0, startT = 0, swiping = false;
+
+      function onStart(x, y) {
+        startX = x; startY = y; startT = performance.now(); swiping = true;
+      }
+      function onEnd(x, y) {
+        if (!swiping) return;
+        swiping = false;
+        const dx = x - startX;
+        const dy = y - startY;
+        const dt = performance.now() - startT;
+        if (dt > 600) return;
+        if (Math.abs(dx) < 60) return;
+        if (Math.abs(dy) > Math.abs(dx) * 0.6) return;
+        const mine = myConsoles(state);
+        if (mine.length < 2 || state.phase !== 'InProgress') return;
+        const idx = Math.max(0, mine.indexOf(activeConsole));
+        const next = (dx < 0)
+          ? (idx + 1) % mine.length
+          : (idx - 1 + mine.length) % mine.length;
+        activeConsole = mine[next];
+        render(state);
+      }
+
+      root.addEventListener('touchstart', e => {
+        // Don't start swipe if the touch began inside an interactive control
+        // like the joystick — let it consume the gesture.
+        if (e.target.closest('#joystick-area')) return;
+        const t = e.touches[0];
+        onStart(t.clientX, t.clientY);
+      }, { passive: true });
+
+      root.addEventListener('touchend', e => {
+        const t = e.changedTouches[0];
+        onEnd(t.clientX, t.clientY);
+      }, { passive: true });
     })();
 
     // ── Incoming message handler ────────────────────────────────
@@ -376,24 +505,29 @@
       switch (msg.type) {
         case 'Welcome':
           state.phase   = msg.data.state.phase;
-          state.players = msg.data.state.players;
+          state.players = msg.data.state.players.map(p => ({
+            ...p,
+            consoles: consolesOf(p),
+          }));
           setStatus('Connected');
           break;
         case 'PlayerJoined':
-          if (!state.players.find(p => p.token === msg.data.player.token))
-            state.players.push(msg.data.player);
+          if (!state.players.find(p => p.token === msg.data.player.token)) {
+            const p = msg.data.player;
+            state.players.push({ ...p, consoles: consolesOf(p) });
+          }
           break;
         case 'PlayerLeft':
           state.players = state.players.filter(p => p.token !== msg.data.token);
           break;
         case 'ConsoleSelected': {
           const p = state.players.find(p => p.token === msg.data.token);
-          if (p) p.console = msg.data.console;
+          if (p) p.consoles = msg.data.consoles || [];
           break;
         }
         case 'ConsoleCleared': {
           const p = state.players.find(p => p.token === msg.data.token);
-          if (p) p.console = null;
+          if (p) p.consoles = [];
           break;
         }
         case 'NameChanged': {

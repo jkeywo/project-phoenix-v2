@@ -20,10 +20,6 @@ struct LobbyItem;
 #[derive(Component)]
 struct PlayerListText;
 
-/// Marks the Red Alert border overlay UI element.
-#[derive(Component)]
-struct RedAlertOver;
-
 // ── Plugin ────────────�────��─�─────────────���────���─
 
 pub struct RendererPlugin;
@@ -37,7 +33,6 @@ impl Plugin for RendererPlugin {
                 toggle_lobby_items,
                 update_player_list,
                 follow_camera,
-                sync_red_alert_border,
             ),
         );
     }
@@ -51,11 +46,16 @@ fn setup(
     // 2D camera — active during lobby phase
     commands.spawn((LobbyCamera, Camera2d, Camera { order: 0, ..default() }));
 
-    // 3D camera — active during in-game phase, positioned for ship view
+    // 3D camera — active during in-game phase, positioned for ship view.
+    // Far plane extended so the starfield skybox at radius ~2000 is visible.
     commands.spawn((
         GameCamera,
         Camera3d::default(),
         Camera { is_active: false, order: 0, ..default() },
+        Projection::Perspective(PerspectiveProjection {
+            far: 5000.0,
+            ..default()
+        }),
         Transform::from_xyz(0.0, 2.0, -10.0),
     ));
 
@@ -64,6 +64,13 @@ fn setup(
         DirectionalLight { illuminance: 5_000.0, ..default() },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, 0.5, 0.0)),
     ));
+
+    // Low ambient so cosmetic asteroids out of the directional light still register.
+    commands.spawn(AmbientLight {
+        color: Color::srgb(0.5, 0.55, 0.7),
+        brightness: 80.0,
+        ..default()
+    });
 
     // Lobby: panel anchored top-left via node UI
     commands
@@ -93,42 +100,8 @@ fn setup(
             ));
         });
 
-    // Red Alert overlay — thin red borders on all four edges.
-    // Each edge is a separate UI rect for proper coloring.
-    for pos in &[PositionType::Absolute] {
-        // Border container
-        let mut border_root = commands.spawn((
-            Node {
-                position_type: *pos,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                padding: UiRect::ZERO,
-                ..default()
-            },
-            Visibility::Hidden,
-        ));
-
-        // Four border strips
-        for (_side, size) in &[
-            ("top", (Val::Percent(100.0), Val::Px(8.0))),
-            ("bottom", (Val::Percent(100.0), Val::Px(8.0))),
-            ("left", (Val::Px(8.0), Val::Percent(100.0))),
-            ("right", (Val::Px(8.0), Val::Percent(100.0))),
-        ] {
-            border_root.with_children(|c| {
-                c.spawn((
-                    Node {
-                        width: size.0,
-                        height: size.1,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(1.0, 0.0, 0.0)),
-                ));
-            });
-        }
-
-        border_root.insert(RedAlertOver);
-    }
+    // Red Alert overlay is now handled in server.html via a CSS vignette,
+    // toggled by SimState messages routed through JS.
 }
 
 // ── Systems ─────���──���────���────���────�──���────���────���────
@@ -223,24 +196,4 @@ fn follow_camera(
         ship.z + fwd_z * 20.0,
     );
     transform.look_at(look_at, Vec3::Y);
-}
-
-/// Sync Red Alert overlay visibility based on ShipState::red_alert.
-fn sync_red_alert_border(
-    ship: Res<ShipState>,
-    mut query: Query<&mut Visibility, With<RedAlertOver>>,
-    phase: Res<CurrentPhase>,
-) {
-    // Only show during game phase
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-
-    let Ok(mut visibility) = query.single_mut() else { return };
-
-    if ship.snapshot().red_alert {
-        *visibility = Visibility::Visible;
-    } else {
-        *visibility = Visibility::Hidden;
-    }
 }

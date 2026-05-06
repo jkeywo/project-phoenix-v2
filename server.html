@@ -16,13 +16,36 @@
     #qr { display: none; }
     #top-bar {
       position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
-      display: flex; align-items: center; gap: 0.5rem; font-family: monospace;
+      display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; font-family: monospace;
     }
+    #top-bar-row { display: flex; align-items: center; gap: 0.5rem; }
     #conn-label { font-size: 0.75rem; color: #f44; }
     #conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #4c4; flex-shrink: 0; }
     #fullscreen-btn {
       background: none; border: none; color: #cce; font-size: 1.1rem;
       cursor: pointer; padding: 0; line-height: 1;
+    }
+    #fps-counter {
+      font-size: 0.75rem; color: #cce; opacity: 0.85; font-family: monospace;
+      min-width: 4rem; text-align: right;
+    }
+    /* Soft red-alert vignette overlay */
+    #red-alert-overlay {
+      position: fixed; inset: 0; pointer-events: none; z-index: 15;
+      box-shadow: inset 0 0 180px 40px rgba(255, 20, 20, 0.0);
+      background: radial-gradient(ellipse at center,
+        rgba(255,0,0,0) 55%, rgba(255,0,0,0.0) 75%, rgba(255,0,0,0.0) 100%);
+      transition: box-shadow 0.4s ease, background 0.4s ease;
+    }
+    #red-alert-overlay.active {
+      box-shadow: inset 0 0 220px 60px rgba(255, 30, 30, 0.85);
+      background: radial-gradient(ellipse at center,
+        rgba(255,0,0,0) 50%, rgba(255,0,0,0.18) 80%, rgba(255,0,0,0.55) 100%);
+      animation: redalert-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes redalert-pulse {
+      0%, 100% { filter: brightness(1.0); }
+      50%      { filter: brightness(1.35); }
     }
   </style>
 </head>
@@ -38,10 +61,15 @@
   </div>
 
   <div id="top-bar">
-    <span id="conn-label"></span>
-    <span id="conn-dot"></span>
-    <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+    <div id="top-bar-row">
+      <span id="conn-label"></span>
+      <span id="conn-dot"></span>
+      <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
+    </div>
+    <div id="fps-counter">— fps</div>
   </div>
+
+  <div id="red-alert-overlay"></div>
 
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
@@ -156,8 +184,14 @@
 
     function routeOutbound(target, payload) {
       try {
-        if (JSON.parse(payload).type === 'GameStarted')
+        const parsed = JSON.parse(payload);
+        if (parsed.type === 'GameStarted')
           document.getElementById('overlay').style.display = 'none';
+        if (parsed.type === 'SimState') {
+          const ra = !!(parsed.data && parsed.data.snapshot && parsed.data.snapshot.red_alert);
+          const ov = document.getElementById('red-alert-overlay');
+          if (ra) ov.classList.add('active'); else ov.classList.remove('active');
+        }
       } catch (_) {}
 
       if (target === 'all') {
@@ -188,6 +222,27 @@
     }
 
     window.addEventListener('TrunkApplicationStarted', startPhoenix);
+
+    // ── FPS counter ────────────────────────────────────────────────────────
+    (function initFps() {
+      const el = document.getElementById('fps-counter');
+      let last = performance.now();
+      let frames = 0;
+      let acc = 0;
+      function tick(now) {
+        frames++;
+        acc += now - last;
+        last = now;
+        if (acc >= 500) {
+          const fps = (frames * 1000) / acc;
+          el.textContent = fps.toFixed(0) + ' fps';
+          frames = 0;
+          acc = 0;
+        }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    })();
 
     // ── Audio context resume on first user gesture ───────────────────────
     // Browsers block AudioContext from playing until a user interacts with

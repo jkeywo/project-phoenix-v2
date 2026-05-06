@@ -18,7 +18,7 @@ pub struct ShipPhysicsState {
 /// Helm input values.
 #[derive(Debug, Clone, Copy)]
 pub struct ShipPhysicsInput {
-    /// Thrust: 0.0 (no thrust) to 1.0 (max thrust)
+    /// Thrust: -1.0 (full reverse) to 1.0 (full forward). 0.0 coasts.
     pub thrust: f32,
     /// Steering: -1.0 (full left) to 1.0 (full right)
     pub steering: f32,
@@ -82,26 +82,34 @@ pub fn compute_physics(
     config: &ShipPhysicsConfig,
 ) -> ShipPhysicsResult {
     // Clamp inputs
-    let thrust = input.thrust.clamp(0.0, 1.0);
+    let thrust = input.thrust.clamp(-1.0, 1.0);
     let steering = input.steering.clamp(-1.0, 1.0);
 
-    // Compute new forward speed
-    let new_speed = if thrust > 0.0 {
-        // Apply thrust - accelerate
-        let accel = config.acceleration * thrust * dt;
-        (state.forward_speed + accel).min(config.max_speed)
+    // Compute new forward speed (signed: positive = forward, negative = reverse).
+    // - Non-zero thrust: drive speed toward (thrust * max_speed) at acceleration rate.
+    // - Zero thrust: decelerate toward 0 from whichever side.
+    let new_speed = if thrust.abs() > f32::EPSILON {
+        let target = thrust * config.max_speed;
+        let diff = target - state.forward_speed;
+        let step = config.acceleration * dt;
+        let delta = if diff.abs() <= step { diff } else { step.copysign(diff) };
+        (state.forward_speed + delta).clamp(-config.max_speed, config.max_speed)
     } else {
-        // Apply natural deceleration
         let decel = config.deceleration * dt;
-        (state.forward_speed - decel).max(0.0)
+        if state.forward_speed > 0.0 {
+            (state.forward_speed - decel).max(0.0)
+        } else if state.forward_speed < 0.0 {
+            (state.forward_speed + decel).min(0.0)
+        } else {
+            0.0
+        }
     };
 
     // Compute new yaw
     let yaw_change = steering * config.max_yaw_rate * dt;
     let new_yaw = state.yaw + yaw_change;
 
-    // Compute displacement based on new yaw and speed
-    // Ship's forward direction is along the yaw angle (negative Z when yaw=0)
+    // Compute displacement based on new yaw and signed speed
     let fwd_x = new_yaw.sin();
     let fwd_z = -new_yaw.cos();
 
@@ -239,5 +247,49 @@ mod tests {
         // Long enough time to exceed max speed if not capped
         let result = compute_physics(state, input, 10.0, &config());
         assert!(result.forward_speed <= config().max_speed);
+    }
+
+    #[test]
+    fn negative_thrust_produces_reverse_motion() {
+        let state = default_state();
+        let input = ShipPhysicsInput { thrust: -1.0, steering: 0.0 };
+        let result = compute_physics(state, input, 5.0, &config());
+        assert!(result.forward_speed <= -config().max_speed + 0.1);
+        // Facing -Z; reverse goes +Z
+        assert!(result.z > 0.0);
+    }
+
+    #[test]
+    fn reverse_speed_clamped_to_negative_max() {
+        let state = ShipPhysicsState { forward_speed: -100.0, ..default_state() };
+        let input = ShipPhysicsInput { thrust: -1.0, steering: 0.0 };
+        let result = compute_physics(state, input, 0.1, &config());
+        assert!(result.forward_speed >= -config().max_speed - f32::EPSILON);
+    }
+
+    #[test]
+    fn no_thrust_decelerates_negative_speed_toward_zero() {
+        let state = ShipPhysicsState { forward_speed: -50.0, ..default_state() };
+        let input = default_input();
+        let result = compute_physics(state, input, 1.0, &config());
+        assert!(result.forward_speed > -1.0);
+        assert!(result.forward_speed <= 0.0);
+    }
+
+    #[test]
+    fn thrust_reversal_does_not_overshoot_target() {
+        // At full forward speed; apply slight forward thrust → settles at slight target.
+        let state = ShipPhysicsState { forward_speed: 50.0, ..default_state() };
+        let input = ShipPhysicsInput { thrust: 0.2, steering: 0.0 };
+        let cfg = config();
+        let target = 0.2 * cfg.max_speed;
+        // Several seconds — should converge to target, not below.
+        let mut s = state;
+        for _ in 0..600 {
+            let r = compute_physics(s, input, 0.016, &cfg);
+            s.x = r.x; s.z = r.z; s.yaw = r.yaw; s.forward_speed = r.forward_speed;
+        }
+        assert!((s.forward_speed - target).abs() < 1.0,
+            "expected ~{target}, got {}", s.forward_speed);
     }
 }

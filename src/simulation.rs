@@ -182,6 +182,59 @@ fn setup_world(
         ));
     }
 
+    // ── Cosmetic asteroids above/below the play plane ──────────────────
+    // Pure decoration — no colliders. Distributed in two slab regions
+    // sandwiching the play plane.
+    let cosmetic_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.35, 0.3, 0.28),
+        perceptual_roughness: 0.95,
+        ..default()
+    });
+    let cosmetic_positions = spawn_asteroid_positions(config.max_speed * 4.0, 80, 10.0);
+    for (i, (x, z)) in cosmetic_positions.iter().enumerate() {
+        // Pseudo-random Y in [-60,-10] ∪ [10,60] using index hashing
+        let h = ((i as u32).wrapping_mul(2654435761)) ^ 0x9E3779B9;
+        let above = (h & 1) == 0;
+        let mag = 10.0 + ((h >> 1) % 5000) as f32 / 100.0; // 10..60
+        let y = if above { mag } else { -mag };
+        let radius = 0.5 + ((h >> 13) % 250) as f32 / 100.0; // 0.5..3.0
+        let mesh = meshes.add(Sphere { radius });
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(cosmetic_mat.clone()),
+            Transform::from_xyz(*x, y, *z),
+        ));
+    }
+
+    // ── Starfield skybox ───────────────────────────────────────────────
+    // Procedural points: many small unlit white spheres at radius ~2000
+    // around the origin. Cheap and works on WebGL2.
+    let star_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 1.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let star_mesh = meshes.add(Sphere { radius: 1.0 });
+    let star_count = 400u32;
+    let radius = 2000.0_f32;
+    for i in 0..star_count {
+        // Deterministic pseudo-random unit vector via golden-spiral on a sphere.
+        let frac = (i as f32 + 0.5) / star_count as f32;
+        let phi = (1.0 - 2.0 * frac).acos();
+        let theta = std::f32::consts::PI * (1.0 + 5_f32.sqrt()) * i as f32;
+        let x = phi.sin() * theta.cos() * radius;
+        let y = phi.sin() * theta.sin() * radius;
+        let z = phi.cos() * radius;
+        // Hash for size variation
+        let h = ((i.wrapping_mul(2654435761)) ^ 0xDEADBEEF) % 100;
+        let scale = 1.5 + (h as f32) / 25.0; // 1.5..5.5
+        commands.spawn((
+            Mesh3d(star_mesh.clone()),
+            MeshMaterial3d(star_mat.clone()),
+            Transform::from_xyz(x, y, z).with_scale(Vec3::splat(scale)),
+        ));
+    }
+
     // Spawn ship (no mesh, just collider and rigid body for physics)
     commands.spawn((
         Ship,

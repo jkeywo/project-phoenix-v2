@@ -3,7 +3,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::asteroid_spawner::spawn_asteroid_positions;
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target};
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
+use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, ViewDirection};
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 
@@ -33,6 +33,7 @@ impl Plugin for SimulationPlugin {
             .add_systems(Startup, setup_world)
             .add_systems(Update, (
                 handle_toggle,
+                handle_set_view,
                 process_helm_inputs,
                 sync_ship_position,
                 handle_collisions,
@@ -56,6 +57,24 @@ fn handle_toggle(
             && sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str())
         {
             ship.toggle_red_alert();
+        }
+    }
+}
+
+fn handle_set_view(
+    mut reader: MessageReader<InboundMessage>,
+    mut ship: ResMut<ShipState>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        if let ClientMessage::SetView { direction } = ev.msg.clone() {
+            if sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str()) {
+                ship.view_direction = direction;
+            }
         }
     }
 }
@@ -250,3 +269,92 @@ fn setup_world(
 }
 
 // ── Tests ────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lobby::{LobbyPlugin, InboundMessage, OutboundMessage};
+    use crate::messages::*;
+
+    #[derive(Resource, Default)]
+    struct Outbox(Vec<OutboundMessage>);
+
+    fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .insert_resource(ShipState::new())
+            .init_resource::<Outbox>()
+            .add_systems(Update, handle_set_view)
+            .add_systems(PostUpdate, collect);
+        app
+    }
+
+    fn push(app: &mut App, token: &str, msg: ClientMessage) {
+        app.world_mut()
+            .resource_mut::<Messages<InboundMessage>>()
+            .write(InboundMessage { token: token.into(), msg });
+    }
+
+    fn tick(app: &mut App) -> Vec<OutboundMessage> {
+        app.update();
+        let msgs = app.world().resource::<Outbox>().0.clone();
+        app.world_mut().resource_mut::<Outbox>().0.clear();
+        msgs
+    }
+
+    fn start_game(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    #[test]
+    fn set_view_during_lobby_is_ignored() {
+        let mut app = test_app();
+        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(&mut app);
+        // Still in Lobby — game not started
+        push(&mut app, "captain", ClientMessage::SetView { direction: ViewDirection::Starboard });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_direction,
+            ViewDirection::Fore
+        );
+    }
+
+    #[test]
+    fn non_captain_set_view_is_ignored() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(&mut app, "crew", ClientMessage::Identify { token: "crew".into(), name: "Bob".into() });
+        tick(&mut app);
+        push(&mut app, "crew", ClientMessage::SetView { direction: ViewDirection::Port });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_direction,
+            ViewDirection::Fore
+        );
+    }
+
+    #[test]
+    fn captain_set_view_changes_direction() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(&mut app, "captain", ClientMessage::SetView { direction: ViewDirection::Aft });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_direction,
+            ViewDirection::Aft
+        );
+    }
+}

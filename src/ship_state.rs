@@ -62,4 +62,17 @@ mod tests {
         s.toggle_red_alert();
         assert!(s.snapshot().red_alert);
     }
+
+    #[test]
+    fn view_direction_defaults_to_fore() {
+        let s = ShipState::new();
+        assert_eq!(s.view_direction, ViewDirection::Fore);
+    }
+
+    #[test]
+    fn snapshot_includes_view_direction() {
+        let mut s = ShipState::new();
+        s.view_direction = ViewDirection::Port;
+        assert_eq!(s.snapshot().view_direction, ViewDirection::Port);
+    }
 }

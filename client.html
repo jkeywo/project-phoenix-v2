@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -33,6 +33,26 @@
     #fullscreen-btn {
       display: inline; width: auto; background: none; border: none; color: #cce;
       font-size: 1.1rem; cursor: pointer; padding: 0; margin: 0; line-height: 1;
+    }
+    /* View selector cross */
+    #view-selector {
+      display: none;
+      grid-template-columns: repeat(3, 2.8rem);
+      grid-template-rows: repeat(3, 2.4rem);
+      gap: 0.2rem;
+      margin-bottom: 0.5rem;
+    }
+    .view-btn {
+      background: #224; color: #eef; border: 1px solid #446;
+      padding: 0; cursor: pointer; font-family: monospace; font-size: 1.2rem;
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 100%;
+    }
+    .view-btn.active { border-color: #8af; color: #8af; background: #336; }
+    .view-btn:active { background: #336; }
+    .view-label {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; color: #99b; font-family: monospace;
     }
     /* Red Alert border overlay on console container */
     #console-container {
@@ -128,6 +148,13 @@
     </section>
 
     <section id="game-ui">
+      <div id="view-selector">
+        <button class="view-btn" id="view-fore-btn" style="grid-column:2;grid-row:1">▲</button>
+        <button class="view-btn" id="view-port-btn" style="grid-column:1;grid-row:2">◄</button>
+        <span class="view-label"                    style="grid-column:2;grid-row:2">View</span>
+        <button class="view-btn" id="view-stbd-btn" style="grid-column:3;grid-row:2">►</button>
+        <button class="view-btn" id="view-aft-btn"  style="grid-column:2;grid-row:3">▼</button>
+      </div>
       <button id="red-alert-btn">Red Alert: OFF</button>
       <p id="game-status"></p>
     </section>
@@ -206,7 +233,7 @@
 
     // ── State ───────────────────────────────────────────────────
 
-    const state = { players: [], phase: 'Lobby', redAlert: false };
+    const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore' };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
@@ -368,8 +395,22 @@
       });
     }
 
+    const VIEW_BTN_IDS = { Fore: 'view-fore-btn', Aft: 'view-aft-btn', Port: 'view-port-btn', Starboard: 'view-stbd-btn' };
+
+    function updateViewSelectorHighlight(direction) {
+      for (const [dir, id] of Object.entries(VIEW_BTN_IDS)) {
+        const btn = $(id);
+        if (btn) btn.classList.toggle('active', dir === direction);
+      }
+    }
+
     function renderGame(s) {
       const showCap = activeConsole === 'CaptainChair';
+
+      const vs = $('view-selector');
+      vs.style.display = showCap ? 'grid' : 'none';
+      if (showCap) updateViewSelectorHighlight(s.currentView);
+
       const btn = $('red-alert-btn');
       btn.style.display = showCap ? 'block' : 'none';
       btn.textContent = 'Red Alert: ' + (s.redAlert ? 'ON' : 'OFF');
@@ -401,6 +442,11 @@
     $('engage-btn').addEventListener('click', () => send('StartGame'));
 
     $('red-alert-btn').addEventListener('click', () => send('ToggleRedAlert'));
+
+    $('view-fore-btn').addEventListener('click', () => send('SetView', { direction: 'Fore' }));
+    $('view-aft-btn').addEventListener('click',  () => send('SetView', { direction: 'Aft' }));
+    $('view-port-btn').addEventListener('click', () => send('SetView', { direction: 'Port' }));
+    $('view-stbd-btn').addEventListener('click', () => send('SetView', { direction: 'Starboard' }));
 
     // ── Helm Controls ──────────────────────────────────────────
 
@@ -588,14 +634,17 @@
           break;
         case 'SimState': {
           const ra = msg.data.snapshot.red_alert;
-          // Only update the red-alert overlay class � don't re-render the entire page.
-          // SimState is broadcast at 10Hz and would steal pointer events from tab clicks.
+          const vd = msg.data.snapshot.view_direction;
+          // Only update DOM directly — SimState at 10Hz must not race with tab clicks.
           const container = $('console-container');
           if (ra) container.classList.add('red-alert');
           else container.classList.remove('red-alert');
-          // De-duplicate: only update state when it actually changes
           if (state.redAlert !== ra) state.redAlert = ra;
-          return; // intentional: no scheduleRender() — SimState at 10Hz must not race with tab clicks
+          if (vd && state.currentView !== vd) {
+            state.currentView = vd;
+            updateViewSelectorHighlight(vd);
+          }
+          return;
         }
         default:
           return; // unknown — skip re-render

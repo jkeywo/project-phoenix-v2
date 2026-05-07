@@ -2,8 +2,10 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::asteroid_spawner::spawn_asteroid_positions;
-use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target};
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
+use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
+use crate::messages::{
+    AsteroidInfo, ClientMessage, Console, GamePhase, ServerMessage, ViewMode,
+};
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 
@@ -21,6 +23,13 @@ struct SimBroadcastTimer(Timer);
 #[derive(Resource)]
 struct HelmInputTimer(Timer);
 
+/// Tracks whether the initial WorldSetup broadcast has fired, so it only
+/// goes out once per game.
+#[derive(Resource, Default)]
+struct WorldSetupBroadcast {
+    sent: bool,
+}
+
 // ── Plugin ───────────────────
 pub struct SimulationPlugin;
 
@@ -28,6 +37,8 @@ impl Plugin for SimulationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RapierPhysicsPlugin::<()>::default())
             .insert_resource(ShipState::new())
+            .init_resource::<WorldResource>()
+            .init_resource::<WorldSetupBroadcast>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -38,6 +49,7 @@ impl Plugin for SimulationPlugin {
                 sync_ship_position,
                 handle_collisions,
                 broadcast_sim_state,
+                broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
             ));
     }
 }
@@ -72,7 +84,14 @@ fn handle_set_view(
     }
     for ev in reader.read() {
         if let ClientMessage::SetView { mode } = ev.msg.clone() {
-            if sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str()) {
+            // Authorization is per-variant: Camera views are the captain's call,
+            // Radar is the helm's call. A request from the wrong console is
+            // silently ignored.
+            let required = match &mode {
+                ViewMode::Camera(_) => Console::CaptainChair,
+                ViewMode::Radar => Console::Helm,
+            };
+            if sessions.0.console_holder(required) == Some(ev.token.as_str()) {
                 ship.view_mode = mode;
             }
         }
@@ -177,14 +196,40 @@ fn broadcast_sim_state(
     }
 }
 
+/// Emit a single `WorldSetup` broadcast the first frame the game enters
+/// `InProgress`. Stays silent in Lobby and on subsequent in-game ticks.
+fn broadcast_world_setup_on_start(
+    mut writer: MessageWriter<OutboundMessage>,
+    world: Res<WorldResource>,
+    phase: Res<CurrentPhase>,
+    mut state: ResMut<WorldSetupBroadcast>,
+) {
+    if phase.0 != GamePhase::InProgress || state.sent {
+        return;
+    }
+    writer.write(OutboundMessage {
+        target: Target::All,
+        msg: ServerMessage::WorldSetup { world: world.0.clone() },
+    });
+    state.sent = true;
+}
+
 // ── World Setup ──────────────
 fn setup_world(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut world: ResMut<WorldResource>,
 ) {
     let config = ShipPhysicsConfig::new();
     let positions = spawn_asteroid_positions(config.max_speed * 3.0, 40, 20.0);
+
+    // Record asteroid layout so it can be broadcast as WorldSetup and
+    // included in Welcome for reconnecting clients.
+    world.0.asteroids = positions
+        .iter()
+        .map(|(x, z)| AsteroidInfo { x: *x, z: *z, radius: 2.0 })
+        .collect();
 
     // Spawn asteroids
     let asteroid_mat = materials.add(StandardMaterial {
@@ -286,10 +331,18 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
+        // Use a 1-nanosecond timer so that any non-zero time delta finishes
+        // the broadcast cycle, letting tests observe the snapshot after a
+        // couple of update ticks.
         app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
             .insert_resource(ShipState::new())
+            .init_resource::<WorldResource>()
+            .init_resource::<WorldSetupBroadcast>()
+            .insert_resource(SimBroadcastTimer(Timer::new(
+                std::time::Duration::from_nanos(1), TimerMode::Repeating)))
             .init_resource::<Outbox>()
-            .add_systems(Update, handle_set_view)
+            .add_systems(Update, (handle_set_view, broadcast_sim_state, broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
             .add_systems(PostUpdate, collect);
         app
     }
@@ -356,5 +409,138 @@ mod tests {
             app.world().resource::<ShipState>().view_mode,
             ViewMode::Camera(ViewDirection::Aft)
         );
+    }
+
+    fn start_game_with_helm(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(app);
+        push(app, "helm", ClientMessage::Identify { token: "helm".into(), name: "Bob".into() });
+        tick(app);
+        push(app, "helm", ClientMessage::SelectConsole { console: Console::Helm });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    #[test]
+    fn helm_can_switch_view_to_radar() {
+        let mut app = test_app();
+        start_game_with_helm(&mut app);
+        push(&mut app, "helm", ClientMessage::SetView { mode: ViewMode::Radar });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Radar
+        );
+    }
+
+    #[test]
+    fn captain_cannot_switch_view_to_radar() {
+        let mut app = test_app();
+        start_game_with_helm(&mut app);
+        // Captain has no authority over Radar; request is silently dropped.
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Radar });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
+    }
+
+    #[test]
+    fn helm_cannot_switch_view_to_camera() {
+        let mut app = test_app();
+        start_game_with_helm(&mut app);
+        push(&mut app, "helm", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
+    }
+
+    #[test]
+    fn sim_state_broadcast_carries_ship_position_and_view_mode() {
+        let mut app = test_app();
+        start_game_with_helm(&mut app);
+        // Move the ship and switch to radar
+        {
+            let mut ship = app.world_mut().resource_mut::<ShipState>();
+            ship.x = 12.0;
+            ship.z = -3.5;
+            ship.yaw = 1.25;
+        }
+        push(&mut app, "helm", ClientMessage::SetView { mode: ViewMode::Radar });
+        tick(&mut app);
+        // Ensure Time has accumulated some real delta and the broadcast fires.
+        // Two prior ticks have already advanced TimePlugin's clock; a fresh
+        // tick now sees a non-zero delta, finishing the 1-ns broadcast timer.
+        let out = tick(&mut app);
+
+        let snap = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        }).expect("expected a SimState broadcast");
+
+        assert_eq!(snap.ship_x, 12.0);
+        assert_eq!(snap.ship_z, -3.5);
+        assert_eq!(snap.ship_yaw, 1.25);
+        assert_eq!(snap.view_mode, ViewMode::Radar);
+    }
+
+    #[test]
+    fn world_setup_is_broadcast_once_after_start_game() {
+        let mut app = test_app();
+        // Pre-populate world data so the broadcast has something to emit.
+        app.world_mut().insert_resource(WorldResource(WorldData {
+            asteroids: vec![AsteroidInfo { x: 5.0, z: -1.0, radius: 2.0 }],
+        }));
+
+        // Bring the game up to the point of pressing StartGame
+        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
+        tick(&mut app);
+        push(&mut app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(&mut app);
+        // The StartGame tick should produce the WorldSetup broadcast
+        push(&mut app, "captain", ClientMessage::StartGame);
+        let start_out = tick(&mut app);
+
+        let world_setups: Vec<_> = start_out.iter().filter(|m|
+            matches!(&m.msg, ServerMessage::WorldSetup { .. })
+        ).collect();
+        assert_eq!(world_setups.len(), 1, "expected exactly one WorldSetup on the StartGame tick");
+        match &world_setups[0].msg {
+            ServerMessage::WorldSetup { world } => {
+                assert_eq!(world.asteroids.len(), 1);
+                assert_eq!(world.asteroids[0].x, 5.0);
+            }
+            _ => unreachable!(),
+        }
+        match &world_setups[0].target {
+            crate::lobby::Target::All => {}
+            t => panic!("WorldSetup should target All, got {:?}", t),
+        }
+
+        // Subsequent ticks must not re-broadcast WorldSetup
+        let later = tick(&mut app);
+        assert!(!later.iter().any(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. })),
+            "WorldSetup should only fire once per game");
+    }
+
+    #[test]
+    fn world_setup_is_not_broadcast_during_lobby() {
+        let mut app = test_app();
+        app.world_mut().insert_resource(WorldResource(WorldData {
+            asteroids: vec![AsteroidInfo { x: 0.0, z: 0.0, radius: 2.0 }],
+        }));
+        // Identify and select a console but don't start the game.
+        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
+        tick(&mut app);
+        push(&mut app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        let out = tick(&mut app);
+        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. })),
+            "WorldSetup should not be broadcast in the Lobby phase");
     }
 }

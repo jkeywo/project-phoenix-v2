@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::messages::{ClientMessage, Console, GamePhase, GameState, ServerMessage};
+use crate::messages::{ClientMessage, Console, GamePhase, GameState, ServerMessage, WorldData};
 use crate::session::SessionManager;
 
 // ── Resources ──────────────────────────────────────────────────────────────
@@ -10,6 +10,12 @@ pub struct Sessions(pub SessionManager);
 
 #[derive(Resource)]
 pub struct CurrentPhase(pub GamePhase);
+
+/// Server's authoritative copy of the world layout — populated once during
+/// world setup and broadcast to clients via `WorldSetup` after `StartGame`,
+/// and replayed inside `Welcome` for mid-game reconnects.
+#[derive(Resource, Clone, Default)]
+pub struct WorldResource(pub WorldData);
 
 // ── Messages (Bevy 0.18 pull-based message system) ─────────────────────────
 
@@ -58,24 +64,29 @@ impl Plugin for LobbyPlugin {
 
 // ── Systems ────────────────────────────────────────────────────────────────
 
-fn game_state(sessions: &SessionManager, phase: &GamePhase) -> GameState {
-    // World is populated by the simulation layer (#44); the lobby itself
-    // does not yet know about asteroids, so always emits `world: None`.
-    GameState { phase: phase.clone(), players: sessions.players().to_vec(), world: None }
+fn game_state(sessions: &SessionManager, phase: &GamePhase, world: Option<&WorldResource>) -> GameState {
+    // World is included only after the game has started; lobby Welcomes
+    // carry `world: None` because the world isn't yet populated.
+    let world = match (phase, world) {
+        (GamePhase::InProgress, Some(w)) => Some(w.0.clone()),
+        _ => None,
+    };
+    GameState { phase: phase.clone(), players: sessions.players().to_vec(), world }
 }
 
-fn process_lobby(
+pub fn process_lobby(
     mut inbound: MessageReader<InboundMessage>,
     mut outbound: MessageWriter<OutboundMessage>,
     mut sessions: ResMut<Sessions>,
     mut phase: ResMut<CurrentPhase>,
+    world: Option<Res<WorldResource>>,
 ) {
     for ev in inbound.read() {
         match ev.msg.clone() {
             ClientMessage::Identify { token, name } => {
                 if let Some(player) = sessions.0.reconnect(&token) {
                     let player = player.clone();
-                    let state = game_state(&sessions.0, &phase.0);
+                    let state = game_state(&sessions.0, &phase.0, world.as_deref());
                     outbound.write(OutboundMessage {
                         target: Target::Token(token.clone()),
                         msg: ServerMessage::Welcome { state },
@@ -86,7 +97,7 @@ fn process_lobby(
                     });
                 } else if let Ok(player) = sessions.0.register(token.clone(), name) {
                     let player = player.clone();
-                    let state = game_state(&sessions.0, &phase.0);
+                    let state = game_state(&sessions.0, &phase.0, world.as_deref());
                     outbound.write(OutboundMessage {
                         target: Target::Token(token.clone()),
                         msg: ServerMessage::Welcome { state },
@@ -357,6 +368,47 @@ mod tests {
         // Other players get PlayerJoined
         assert!(out.iter().any(|m| matches!(&m.target, Target::AllExcept(t) if t == "t1")
             && matches!(&m.msg, ServerMessage::PlayerJoined { .. })));
+    }
+
+    #[test]
+    fn welcome_during_lobby_carries_world_none() {
+        let mut app = test_app();
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        let out = tick(&mut app);
+        let welcome = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::Welcome { state } => Some(state.clone()),
+            _ => None,
+        }).expect("expected Welcome");
+        assert!(welcome.world.is_none(), "Lobby Welcome should carry world: None");
+    }
+
+    #[test]
+    fn welcome_during_in_progress_carries_world_some() {
+        use crate::messages::{AsteroidInfo, WorldData};
+
+        let mut app = test_app();
+        // Inject a WorldResource so the lobby's Welcome builder can find it.
+        app.insert_resource(WorldResource(WorldData {
+            asteroids: vec![AsteroidInfo { x: 1.0, z: 2.0, radius: 2.0 }],
+        }));
+        // Drive the game to InProgress.
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(&mut app);
+        push(&mut app, "t1", ClientMessage::StartGame);
+        tick(&mut app);
+
+        // A reconnect after InProgress should receive a Welcome carrying world.
+        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        let out = tick(&mut app);
+        let welcome = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::Welcome { state } => Some(state.clone()),
+            _ => None,
+        }).expect("expected Welcome on reconnect");
+        let world = welcome.world.expect("InProgress Welcome should carry world: Some");
+        assert_eq!(world.asteroids.len(), 1);
+        assert_eq!(world.asteroids[0].x, 1.0);
     }
 
     #[test]

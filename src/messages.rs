@@ -96,7 +96,7 @@ pub struct AsteroidInfo {
 
 /// Static world data sent once per game (after `StartGame`) and replayed
 /// on `Welcome` to clients reconnecting mid-game.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WorldData {
     pub asteroids: Vec<AsteroidInfo>,
 }

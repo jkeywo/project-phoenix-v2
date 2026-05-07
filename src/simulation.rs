@@ -128,17 +128,14 @@ fn sync_ship_position(
 }
 
 fn handle_collisions(
-    mut events: MessageReader<CollisionEvent>,
+    context: ReadRapierContext,
     ship_query: Query<Entity, With<Ship>>,
     mut ship: ResMut<ShipState>,
 ) {
+    let Ok(ctx) = context.single() else { return };
     let Ok(ship_entity) = ship_query.single() else { return };
-    for event in events.read() {
-        if let CollisionEvent::Started(e1, e2, _) = event {
-            if *e1 == ship_entity || *e2 == ship_entity {
-                ship.forward_speed = 0.0;
-            }
-        }
+    if ctx.contact_pairs_with(ship_entity).next().is_some() {
+        ship.forward_speed = 0.0;
     }
 }
 
@@ -247,7 +244,6 @@ fn setup_world(
         Transform::default(),
         RigidBody::KinematicPositionBased,
         Collider::capsule_y(3.0, 6.0),
-        ActiveEvents::COLLISION_EVENTS,
         ActiveCollisionTypes::KINEMATIC_STATIC,
     ));
 }

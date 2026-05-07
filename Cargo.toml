@@ -6,6 +6,17 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["server"]
+# Server feature: builds the host crate (Trunk → server.html) which runs
+# the lobby, simulation, and 3D renderer. Includes the JS↔WASM bridge in
+# `bridge.rs`.
+server = []
+# Client feature: builds the player crate (Trunk → client.html) which runs
+# a thin Bevy app with DefaultPlugins and a JS↔WASM bridge in
+# `client_bridge.rs`. No server-side simulation is included.
+client = []
+
 [dependencies]
 bevy = { version = "0.18.1", features = ["webgl2"] }
 serde = { version = "1.0.228", features = ["derive"] }

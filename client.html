@@ -130,10 +130,21 @@
       pointer-events: none; transition: background 0.1s;
     }
     #joystick-knob.active { background: #66a; }
+    /* Hidden host for the Bevy WASM canvas — placeholder until #47+ migrate
+       UI into Bevy. Kept off-screen so the existing JS UI is undisturbed. */
+    #wasm-host { position: fixed; left: -9999px; top: -9999px; width: 1px; height: 1px;
+                 overflow: hidden; pointer-events: none; }
   </style>
 </head>
 <body>
   <h2 id="phase-title">Lobby</h2>
+
+  <!-- Trunk replaces this with the compiled WASM bundle (client feature).
+       It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
+  <link data-trunk rel="rust" data-wasm-opt="z" data-cargo-no-default-features data-cargo-features="client" />
+
+  <!-- Off-screen host for the Bevy canvas; the renderer is a placeholder -->
+  <div id="wasm-host"><canvas id="canvas"></canvas></div>
 
   <div id="console-container">
     <div id="console-tabs"></div>
@@ -434,6 +445,8 @@
       const val = e.target.value.trim();
       if (!val) return;
       myName = val;
+      // Forward immediately to the WASM bridge (queued until ready).
+      callWasmSetName(myName);
       clearTimeout(nameTimer);
       nameTimer = setTimeout(() => {
         localStorage.setItem('player-name', myName);
@@ -654,6 +667,58 @@
       scheduleRender();
     }
 
+    // ── WASM client bridge (Trunk) ──────────────────────────────
+    //
+    // The page hosts a Bevy WASM bundle compiled with --features client.
+    // The renderer is currently an empty placeholder; we wire the JS
+    // surface now so later issues can migrate UI into Bevy without
+    // touching the PeerJS plumbing.
+
+    // Inbound ServerMessage JSON payloads queued until WASM is ready.
+    const wasmInboundQueue = [];
+    // Pending name updates queued until WASM is ready.
+    let pendingName = null;
+    // Resolved once Trunk fires TrunkApplicationStarted.
+    let wasmReady = false;
+
+    function callWasmReceive(json) {
+      if (wasmReady && typeof wasm_client_receive === 'function') {
+        wasm_client_receive(json);
+      } else {
+        wasmInboundQueue.push(json);
+      }
+    }
+
+    function callWasmSetName(name) {
+      if (wasmReady && typeof wasm_client_set_name === 'function') {
+        wasm_client_set_name(name);
+      } else {
+        pendingName = name;
+      }
+    }
+
+    // Outbound callback the WASM uses to send ClientMessage JSON to the host.
+    function clientSendCallback(payload) {
+      if (conn && conn.open) conn.send(payload);
+    }
+
+    function startClientWasm() {
+      window.wasm_client_init           = wasmBindings.wasm_client_init;
+      window.wasm_client_receive        = wasmBindings.wasm_client_receive;
+      window.wasm_client_set_name       = wasmBindings.wasm_client_set_name;
+      window.set_client_send_callback   = wasmBindings.set_client_send_callback;
+      set_client_send_callback(clientSendCallback);
+      if (pendingName !== null) wasm_client_set_name(pendingName);
+      // Flush queued inbound messages before wasm_client_init: in WASM
+      // App::run() unwinds the JS stack via throw, so anything after it
+      // never executes.
+      for (const json of wasmInboundQueue.splice(0)) wasm_client_receive(json);
+      wasmReady = true;
+      try { wasm_client_init(); } catch (_) {}
+    }
+
+    window.addEventListener('TrunkApplicationStarted', startClientWasm);
+
     // ── PeerJS connection ───────────────────────────────────────
 
     const hostPeerId = location.hash.slice(1);
@@ -676,6 +741,9 @@
         conn.on('data', raw => {
           try {
             const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+            // Forward to the WASM client bridge (queued until ready) so
+            // future Bevy systems can react alongside the existing JS UI.
+            callWasmReceive(str);
             handleMessage(JSON.parse(str));
           } catch (e) { console.error('[client] bad message', e, raw); }
         });

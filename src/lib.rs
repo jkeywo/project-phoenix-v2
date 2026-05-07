@@ -8,4 +8,9 @@ pub mod lobby;
 pub mod simulation;
 pub mod radar;
 pub mod renderer;
+
+#[cfg(feature = "server")]
 pub mod bridge;
+
+#[cfg(feature = "client")]
+pub mod client_bridge;

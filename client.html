@@ -19,8 +19,6 @@
     button:disabled { opacity: 0.4; cursor: default; }
     button.mine { border-color: #8af; color: #8af; }
     button.alert-on { background: #600; border-color: #f44; color: #faa; }
-    #player-list { margin-top: 1rem; font-size: 0.85rem; color: #99b; }
-    #player-list div { padding: 0.2rem 0; }
     #status { margin-top: 1.5rem; color: #778; font-size: 0.8rem; }
     section { display: none; }
     section.active { display: block; }
@@ -130,10 +128,15 @@
       pointer-events: none; transition: background 0.1s;
     }
     #joystick-knob.active { background: #66a; }
-    /* Hidden host for the Bevy WASM canvas — placeholder until #47+ migrate
-       UI into Bevy. Kept off-screen so the existing JS UI is undisturbed. */
-    #wasm-host { position: fixed; left: -9999px; top: -9999px; width: 1px; height: 1px;
-                 overflow: hidden; pointer-events: none; }
+    /* Bevy WASM canvas — full-viewport, behind the JS overlays so the
+       lobby UI rendered by Bevy is visible while the name input,
+       connection status, and fullscreen button stay clickable on top. */
+    #wasm-host { position: fixed; inset: 0; z-index: 0; }
+    #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
+    /* Lift JS UI above the Bevy canvas. */
+    #console-container, #top-bar, #helm-ui, #view-selector, #helm-readout,
+    #joystick-area, #red-alert-overlay { position: relative; z-index: 1; }
+    #top-bar { z-index: 20; }
   </style>
 </head>
 <body>
@@ -143,7 +146,9 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   <link data-trunk rel="rust" data-wasm-opt="z" data-cargo-no-default-features data-cargo-features="client" />
 
-  <!-- Off-screen host for the Bevy canvas; the renderer is a placeholder -->
+  <!-- Full-viewport host for the Bevy canvas; the WASM lobby UI renders
+       here, with JS overlays (name input, connection dot, fullscreen
+       button) positioned above via z-index. -->
   <div id="wasm-host"><canvas id="canvas"></canvas></div>
 
   <div id="console-container">
@@ -153,9 +158,8 @@
       <label>Name
         <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
       </label>
-      <div id="console-list"></div>
-      <button id="engage-btn">Engage</button>
-      <div id="player-list"></div>
+      <!-- Player list, console buttons, and Engage button are rendered by
+           the Bevy WASM lobby UI; see src/client_app.rs (#47). -->
     </section>
 
     <section id="game-ui">
@@ -330,7 +334,8 @@
       if (s.redAlert) container.classList.add('red-alert');
       else container.classList.remove('red-alert');
 
-      if (inGame) renderGame(s); else renderLobby(s);
+      if (inGame) renderGame(s);
+      // Lobby UI is rendered by the Bevy WASM bridge (#47).
     }
 
     function renderTabs(s, inGame) {
@@ -372,40 +377,10 @@
       }
     }
 
-    function renderLobby(s) {
-      const list = $('console-list');
-      list.innerHTML = '';
-      for (const c of CONSOLES) {
-        const holder = s.players.find(p => consolesOf(p).includes(c));
-        const btn = document.createElement('button');
-        const mineHere = holder && holder.token === myToken;
-        if (mineHere) {
-          btn.textContent = CONSOLE_LABEL[c] + ': Mine — release';
-          btn.className = 'mine';
-          // Server's SelectConsole toggles, so re-sending Select removes it.
-          btn.onclick = () => send('SelectConsole', { console: c });
-        } else if (holder) {
-          btn.textContent = CONSOLE_LABEL[c] + ': ' + holder.name;
-          btn.disabled = true;
-        } else {
-          btn.textContent = CONSOLE_LABEL[c] + ': available';
-          btn.onclick = () => send('SelectConsole', { console: c });
-        }
-        list.appendChild(btn);
-      }
-
-      $('engage-btn').style.display = isCaptain(s) ? 'block' : 'none';
-
-      const pl = $('player-list');
-      pl.innerHTML = '';
-      s.players.forEach((p) => {
-        const div = document.createElement('div');
-        const mark = p.token === myToken ? '▶ ' : '• ';
-        const cs = consolesOf(p);
-        const con = cs.length ? ' [' + cs.map(c => CONSOLE_LABEL[c] || c).join(', ') + ']' : '';
-        div.textContent = mark + p.name + con;
-        pl.appendChild(div);
-      });
+    function renderLobby(_s) {
+      // Lobby UI moved to Bevy WASM (#47); this stub remains only so any
+      // accidental caller is a no-op rather than a ReferenceError. Remove
+      // once the in-game UI also migrates and no JS callers exist.
     }
 
     const VIEW_BTN_IDS = { Fore: 'view-fore-btn', Aft: 'view-aft-btn', Port: 'view-port-btn', Starboard: 'view-stbd-btn' };
@@ -454,7 +429,7 @@
       }, 500);
     });
 
-    $('engage-btn').addEventListener('click', () => send('StartGame'));
+    // Engage button moved to Bevy WASM lobby UI (#47).
 
     $('red-alert-btn').addEventListener('click', () => send('ToggleRedAlert'));
 
@@ -706,8 +681,12 @@
       window.wasm_client_init           = wasmBindings.wasm_client_init;
       window.wasm_client_receive        = wasmBindings.wasm_client_receive;
       window.wasm_client_set_name       = wasmBindings.wasm_client_set_name;
+      window.wasm_client_set_token      = wasmBindings.wasm_client_set_token;
       window.set_client_send_callback   = wasmBindings.set_client_send_callback;
       set_client_send_callback(clientSendCallback);
+      // The local player's session token is needed by the lobby UI to
+      // highlight "my" console selection.
+      wasm_client_set_token(myToken);
       if (pendingName !== null) wasm_client_set_name(pendingName);
       // Flush queued inbound messages before wasm_client_init: in WASM
       // App::run() unwinds the JS stack via throw, so anything after it

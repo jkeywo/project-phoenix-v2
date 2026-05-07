@@ -10,9 +10,9 @@
 //!   - Outbound traffic to JS is `ClientMessage` JSON (the player pushes
 //!     intent to the host), pushed via the callback registered with
 //!     `set_client_send_callback`.
-//!   - The player's display name arrives via `wasm_client_set_name` from
-//!     the page's `<input>` and is held in a thread-local resource for any
-//!     future Bevy systems that need it.
+//!   - The player's display name arrives via `wasm_client_set_name`.
+//!   - The player's session token arrives via `wasm_client_set_token`
+//!     (used by the lobby UI to highlight the local player's selection).
 //!
 //! On native targets this module exists but the wasm-bindgen exports are
 //! gated behind `cfg(target_arch = "wasm32")` so `cargo check --features
@@ -20,6 +20,9 @@
 
 #[cfg(target_arch = "wasm32")]
 use {
+    crate::client_app::{ClientAppPlugin, InboundServerMessage, OutboundClientMessage},
+    crate::client_lobby::LocalPlayerToken,
+    crate::codec::{JsonCodec, MessageCodec},
     bevy::{prelude::*, DefaultPlugins},
     js_sys::Function,
     std::cell::RefCell,
@@ -33,12 +36,17 @@ use {
 #[cfg(target_arch = "wasm32")]
 thread_local! {
     /// Inbound `ServerMessage` JSON payloads queued by JS, waiting to be
-    /// drained into Bevy by `drain_inbound`.
+    /// decoded and forwarded into Bevy as `InboundServerMessage` events.
     static INBOUND_QUEUE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 
     /// The player's chosen display name, updated each time JS calls
     /// `wasm_client_set_name`. Defaults to an empty string until set.
     static PLAYER_NAME: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// The player's session token, set once by JS via `wasm_client_set_token`.
+    /// Empty until JS supplies it; the lobby UI treats an empty token as
+    /// "I am not yet known to the server".
+    static PLAYER_TOKEN: RefCell<String> = const { RefCell::new(String::new()) };
 
     /// JS callback registered by the host page to forward outbound
     /// `ClientMessage` JSON back to the server peer over PeerJS.
@@ -47,20 +55,17 @@ thread_local! {
 }
 
 // ── Placeholder plugin ─────────────────────────────────────────────────────
-//
-// The full client renderer (radar, helm, console UI, etc.) lands in later
-// issues. For now this is an empty plugin so the page boots cleanly and
-// later issues have a stable insertion point.
 
-/// Placeholder plugin that the client-side Bevy app can extend in later
-/// issues. Currently empty — it merely exists so `wasm_client_init` has a
-/// stable, single seam to add per-screen renderers under.
+/// Marker plugin retained for backwards compatibility with the #46 wiring;
+/// new behaviour belongs in `client_app::ClientAppPlugin`. Kept as a
+/// public name so other modules (or future tests) can refer to a stable
+/// extension point.
 pub struct ClientRendererPlugin;
 
 #[cfg(target_arch = "wasm32")]
 impl Plugin for ClientRendererPlugin {
     fn build(&self, _app: &mut App) {
-        // Intentionally empty — see #46.
+        // Intentionally empty — see #46 / #47.
     }
 }
 
@@ -71,10 +76,15 @@ impl ClientRendererPlugin {
     pub fn new() -> Self { Self }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for ClientRendererPlugin {
+    fn default() -> Self { Self }
+}
+
 // ── Public WASM API ────────────────────────────────────────────────────────
 
 /// Called by JS on page load. Builds and runs the client Bevy app with
-/// `DefaultPlugins` (3D, windowing, input, etc.) plus `ClientRendererPlugin`.
+/// `DefaultPlugins` plus `ClientAppPlugin` (lobby UI) and `ClientRendererPlugin`.
 ///
 /// In WASM `App::run()` hands control to requestAnimationFrame and returns
 /// immediately, so this function does not block.
@@ -90,13 +100,18 @@ pub fn wasm_client_init() {
             }),
             ..default()
         }))
+        .add_plugins(ClientAppPlugin)
         .add_plugins(ClientRendererPlugin)
-        .add_systems(Update, drain_inbound)
+        .add_systems(Update, (
+            forward_local_token,
+            forward_inbound_messages,
+            flush_outbound_messages,
+        ))
         .run();
 }
 
 /// Called by JS to deliver a `ServerMessage` JSON payload from the host
-/// peer. The payload is queued and drained into Bevy on the next frame.
+/// peer. The payload is queued and decoded next frame.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_client_receive(json: &str) {
@@ -105,9 +120,7 @@ pub fn wasm_client_receive(json: &str) {
     });
 }
 
-/// Called by JS when the player edits the name `<input>`. The new name is
-/// stored in the thread-local `PLAYER_NAME` slot so later issues (Identify
-/// dispatch, on-screen labels) can read it without re-querying the DOM.
+/// Called by JS when the player edits the name `<input>`.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_client_set_name(name: &str) {
@@ -116,9 +129,18 @@ pub fn wasm_client_set_name(name: &str) {
     });
 }
 
-/// Called by JS to register the outbound message callback. Bevy systems
-/// that want to send a `ClientMessage` to the host peer build the JSON
-/// themselves and invoke this callback via the helper in this module.
+/// Called by JS once the local player's session token is known. The token
+/// is forwarded into Bevy as the `LocalPlayerToken` resource so the lobby
+/// UI can highlight the player's own selection.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_client_set_token(token: &str) {
+    PLAYER_TOKEN.with(|t| {
+        *t.borrow_mut() = token.to_string();
+    });
+}
+
+/// Called by JS to register the outbound message callback.
 ///
 /// Signature expected from JS: `callback(payload: string)`.
 #[cfg(target_arch = "wasm32")]
@@ -131,23 +153,51 @@ pub fn set_client_send_callback(callback: Function) {
 
 // ── Bevy bridge systems ────────────────────────────────────────────────────
 
-/// Drains the inbound queue each frame. Decoding into a typed
-/// `ServerMessage` and routing into Bevy events lands in later issues; for
-/// now we only clear the queue so it cannot grow unbounded.
+/// Pulls the latest token from the thread-local slot into Bevy's
+/// `LocalPlayerToken` resource each frame. Cheap (single string compare)
+/// and avoids needing a wakeup signal from JS.
 #[cfg(target_arch = "wasm32")]
-fn drain_inbound() {
-    INBOUND_QUEUE.with(|q| {
-        q.borrow_mut().clear();
+fn forward_local_token(mut token: ResMut<LocalPlayerToken>) {
+    PLAYER_TOKEN.with(|t| {
+        let latest = t.borrow();
+        if latest.as_str() != token.0 {
+            token.0 = latest.clone();
+        }
     });
 }
 
-// ── Native-side helpers (test surface) ─────────────────────────────────────
-//
-// These exist so that on native targets we can still write basic unit tests
-// against the (very small) state-shape of the client bridge without dragging
-// in wasm-bindgen.
+/// Drains the inbound queue, decodes each JSON payload as a
+/// `ServerMessage`, and writes one `InboundServerMessage` event per
+/// successful decode. Malformed payloads are silently dropped — the JS
+/// side already logs decode errors at its own layer.
+#[cfg(target_arch = "wasm32")]
+fn forward_inbound_messages(mut writer: MessageWriter<InboundServerMessage>) {
+    let pending: Vec<String> =
+        INBOUND_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
+    for json in pending {
+        if let Ok(msg) = JsonCodec.decode_server(&json) {
+            writer.write(InboundServerMessage(msg));
+        }
+    }
+}
 
-#[cfg(not(target_arch = "wasm32"))]
-impl Default for ClientRendererPlugin {
-    fn default() -> Self { Self }
+/// Reads outbound `ClientMessage` events emitted by the lobby UI (and
+/// later by other client systems), encodes each as JSON, and forwards
+/// them through the JS callback registered by `set_client_send_callback`.
+#[cfg(target_arch = "wasm32")]
+fn flush_outbound_messages(mut reader: MessageReader<OutboundClientMessage>) {
+    let payloads: Vec<String> = reader
+        .read()
+        .filter_map(|out| JsonCodec.encode_client(&out.0).ok())
+        .collect();
+    if payloads.is_empty() {
+        return;
+    }
+    OUTBOUND_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            for payload in &payloads {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(payload));
+            }
+        }
+    });
 }

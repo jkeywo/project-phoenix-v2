@@ -1,10 +1,10 @@
 use bevy::prelude::Resource;
-use crate::messages::{SimSnapshot, ViewDirection};
+use crate::messages::{SimSnapshot, ViewDirection, ViewMode};
 
 #[derive(Resource)]
 pub struct ShipState {
     red_alert: bool,
-    pub view_direction: ViewDirection,
+    pub view_mode: ViewMode,
     /// Ship position (x, z)
     pub x: f32,
     pub z: f32,
@@ -18,7 +18,7 @@ impl ShipState {
     pub fn new() -> Self {
         Self {
             red_alert: false,
-            view_direction: ViewDirection::Fore,
+            view_mode: ViewMode::Camera(ViewDirection::Fore),
             x: 0.0,
             z: 0.0,
             yaw: 0.0,
@@ -31,7 +31,13 @@ impl ShipState {
     }
 
     pub fn snapshot(&self) -> SimSnapshot {
-        SimSnapshot { red_alert: self.red_alert, view_direction: self.view_direction.clone() }
+        SimSnapshot {
+            red_alert: self.red_alert,
+            view_mode: self.view_mode.clone(),
+            ship_x: self.x,
+            ship_z: self.z,
+            ship_yaw: self.yaw,
+        }
     }
 }
 
@@ -64,15 +70,34 @@ mod tests {
     }
 
     #[test]
-    fn view_direction_defaults_to_fore() {
+    fn view_mode_defaults_to_camera_fore() {
         let s = ShipState::new();
-        assert_eq!(s.view_direction, ViewDirection::Fore);
+        assert_eq!(s.view_mode, ViewMode::Camera(ViewDirection::Fore));
     }
 
     #[test]
-    fn snapshot_includes_view_direction() {
+    fn snapshot_includes_view_mode() {
         let mut s = ShipState::new();
-        s.view_direction = ViewDirection::Port;
-        assert_eq!(s.snapshot().view_direction, ViewDirection::Port);
+        s.view_mode = ViewMode::Camera(ViewDirection::Port);
+        assert_eq!(s.snapshot().view_mode, ViewMode::Camera(ViewDirection::Port));
+    }
+
+    #[test]
+    fn snapshot_includes_ship_position_and_yaw() {
+        let mut s = ShipState::new();
+        s.x = 3.0;
+        s.z = -7.5;
+        s.yaw = 1.25;
+        let snap = s.snapshot();
+        assert_eq!(snap.ship_x, 3.0);
+        assert_eq!(snap.ship_z, -7.5);
+        assert_eq!(snap.ship_yaw, 1.25);
+    }
+
+    #[test]
+    fn snapshot_view_mode_radar_round_trips_through_state() {
+        let mut s = ShipState::new();
+        s.view_mode = ViewMode::Radar;
+        assert_eq!(s.snapshot().view_mode, ViewMode::Radar);
     }
 }

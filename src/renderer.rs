@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::lobby::{CurrentPhase, Sessions};
-use crate::messages::{Console, GamePhase, ViewDirection};
+use crate::messages::{Console, GamePhase, ViewDirection, ViewMode};
 use crate::ship_state::ShipState;
 
 // ── Marker Components ─────────────────────────────────────────────
@@ -287,7 +287,13 @@ fn hull_camera(
 
     // Direction vectors relative to ship heading (yaw=0 → ship faces -Z).
     // fwd = (sin(yaw), 0, -cos(yaw)), port = left of heading, starboard = right.
-    let offset_dir = match ship.view_direction {
+    // For ViewMode::Radar we still keep the camera at Fore so the 3D scene
+    // remains coherent; the radar overlay is drawn separately (#45).
+    let direction = match &ship.view_mode {
+        ViewMode::Camera(d) => d.clone(),
+        ViewMode::Radar => ViewDirection::Fore,
+    };
+    let offset_dir = match direction {
         ViewDirection::Fore      => Vec3::new( ship.yaw.sin(), 0.0, -ship.yaw.cos()),
         ViewDirection::Aft       => Vec3::new(-ship.yaw.sin(), 0.0,  ship.yaw.cos()),
         ViewDirection::Port      => Vec3::new(-ship.yaw.cos(), 0.0, -ship.yaw.sin()),
@@ -326,11 +332,12 @@ fn update_view_direction_label(
         return;
     }
     *vis = Visibility::Visible;
-    let label = match ship.view_direction {
-        ViewDirection::Fore      => "FORE",
-        ViewDirection::Aft       => "AFT",
-        ViewDirection::Port      => "PORT",
-        ViewDirection::Starboard => "STARBOARD",
+    let label = match &ship.view_mode {
+        ViewMode::Camera(ViewDirection::Fore)      => "FORE",
+        ViewMode::Camera(ViewDirection::Aft)       => "AFT",
+        ViewMode::Camera(ViewDirection::Port)      => "PORT",
+        ViewMode::Camera(ViewDirection::Starboard) => "STARBOARD",
+        ViewMode::Radar                            => "RADAR",
     };
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {

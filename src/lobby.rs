@@ -59,7 +59,9 @@ impl Plugin for LobbyPlugin {
 // ── Systems ────────────────────────────────────────────────────────────────
 
 fn game_state(sessions: &SessionManager, phase: &GamePhase) -> GameState {
-    GameState { phase: phase.clone(), players: sessions.players().to_vec() }
+    // World is populated by the simulation layer (#44); the lobby itself
+    // does not yet know about asteroids, so always emits `world: None`.
+    GameState { phase: phase.clone(), players: sessions.players().to_vec(), world: None }
 }
 
 fn process_lobby(

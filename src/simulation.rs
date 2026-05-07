@@ -71,9 +71,9 @@ fn handle_set_view(
         return;
     }
     for ev in reader.read() {
-        if let ClientMessage::SetView { direction } = ev.msg.clone() {
+        if let ClientMessage::SetView { mode } = ev.msg.clone() {
             if sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str()) {
-                ship.view_direction = direction;
+                ship.view_mode = mode;
             }
         }
     }
@@ -324,11 +324,11 @@ mod tests {
         push(&mut app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
         tick(&mut app);
         // Still in Lobby — game not started
-        push(&mut app, "captain", ClientMessage::SetView { direction: ViewDirection::Starboard });
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) });
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_direction,
-            ViewDirection::Fore
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
         );
     }
 
@@ -338,11 +338,11 @@ mod tests {
         start_game(&mut app);
         push(&mut app, "crew", ClientMessage::Identify { token: "crew".into(), name: "Bob".into() });
         tick(&mut app);
-        push(&mut app, "crew", ClientMessage::SetView { direction: ViewDirection::Port });
+        push(&mut app, "crew", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Port) });
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_direction,
-            ViewDirection::Fore
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
         );
     }
 
@@ -350,11 +350,11 @@ mod tests {
     fn captain_set_view_changes_direction() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { direction: ViewDirection::Aft });
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) });
         tick(&mut app);
         assert_eq!(
-            app.world().resource::<ShipState>().view_direction,
-            ViewDirection::Aft
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Aft)
         );
     }
 }

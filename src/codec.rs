@@ -44,7 +44,7 @@ mod tests {
     }
 
     fn state() -> GameState {
-        GameState { phase: GamePhase::Lobby, players: vec![player()] }
+        GameState { phase: GamePhase::Lobby, players: vec![player()], world: None }
     }
 
     // ClientMessage round-trips
@@ -93,28 +93,35 @@ mod tests {
 
     #[test]
     fn client_set_view_fore() {
-        let msg = ClientMessage::SetView { direction: ViewDirection::Fore };
+        let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Fore) };
         let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }
 
     #[test]
     fn client_set_view_aft() {
-        let msg = ClientMessage::SetView { direction: ViewDirection::Aft };
+        let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) };
         let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }
 
     #[test]
     fn client_set_view_port() {
-        let msg = ClientMessage::SetView { direction: ViewDirection::Port };
+        let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Port) };
         let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }
 
     #[test]
     fn client_set_view_starboard() {
-        let msg = ClientMessage::SetView { direction: ViewDirection::Starboard };
+        let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) };
+        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn client_set_view_radar() {
+        let msg = ClientMessage::SetView { mode: ViewMode::Radar };
         let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }
@@ -195,18 +202,101 @@ mod tests {
     #[test]
     fn server_sim_state() {
         let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot { red_alert: true, view_direction: ViewDirection::Fore },
+            snapshot: SimSnapshot {
+                red_alert: true,
+                view_mode: ViewMode::Camera(ViewDirection::Fore),
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
+            },
         };
         let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }
 
     #[test]
-    fn sim_snapshot_view_direction_starboard() {
+    fn sim_snapshot_view_mode_starboard() {
         let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot { red_alert: false, view_direction: ViewDirection::Starboard },
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::Camera(ViewDirection::Starboard),
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
+            },
         };
         let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn sim_snapshot_view_mode_radar() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::Radar,
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
+            },
+        };
+        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn sim_snapshot_carries_ship_position_and_yaw() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 12.5,
+                ship_z: -8.25,
+                ship_yaw: 1.5707,
+            },
+        };
+        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn world_data_with_asteroids_round_trips_inside_world_setup() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                asteroids: vec![
+                    AsteroidInfo { x: 1.0, z: 2.0, radius: 2.0 },
+                    AsteroidInfo { x: -3.5, z: 4.25, radius: 1.5 },
+                ],
+            },
+        };
+        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn welcome_with_world_some_round_trips() {
+        let msg = ServerMessage::Welcome {
+            state: GameState {
+                phase: GamePhase::InProgress,
+                players: vec![player()],
+                world: Some(WorldData {
+                    asteroids: vec![AsteroidInfo { x: 0.0, z: 0.0, radius: 2.0 }],
+                }),
+            },
+        };
+        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn welcome_with_world_none_round_trips() {
+        // Lobby phase has no world yet
+        let msg = ServerMessage::Welcome { state: state() };
+        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+        match rt {
+            ServerMessage::Welcome { state } => assert!(state.world.is_none()),
+            _ => panic!("expected Welcome"),
+        }
     }
 }

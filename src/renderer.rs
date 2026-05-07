@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use std::time::Instant;
 
 use crate::lobby::{CurrentPhase, Sessions};
 use crate::messages::GamePhase;
@@ -25,33 +24,13 @@ struct PlayerListText;
 #[derive(Component)]
 struct FpsText;
 
-// ── FPS Tracking Resource ────────────────────────────────────────
-
-#[derive(Resource)]
-struct FpsTracker {
-    frame_count: u32,
-    last_update: Instant,
-    fps: u32,
-}
-
-impl FpsTracker {
-    fn new() -> Self {
-        Self {
-            frame_count: 0,
-            last_update: Instant::now(),
-            fps: 0,
-        }
-    }
-}
-
 // ── Plugin ────────────────────────────────────────────────────────
 
 pub struct RendererPlugin;
 
 impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(FpsTracker::new())
-            .add_systems(Startup, setup)
+        app.add_systems(Startup, setup)
             .add_systems(Update, (
                 update_fps_counter,
                 toggle_cameras,
@@ -144,22 +123,22 @@ fn setup(
 
 // ── Systems ───────────────────────────────────────────────────────
 
+/// Compute and display FPS using Bevy's Time + Local — works on native and WASM.
 fn update_fps_counter(
-    mut tracker: ResMut<FpsTracker>,
+    time: Res<Time>,
     mut fps_query: Query<&mut Text, With<FpsText>>,
+    mut tracker: Local<(u32, f32)>, // (frame_count, accumulated_time)
 ) {
-    tracker.frame_count += 1;
-    let now = Instant::now();
-    let elapsed = (now - tracker.last_update).as_secs_f64();
+    tracker.0 += 1;
+    tracker.1 += time.delta().as_secs_f32();
 
-    if elapsed >= 0.5 {
-        tracker.fps = (tracker.frame_count as f64 / elapsed).round() as u32;
-        tracker.frame_count = 0;
-        tracker.last_update = now;
-
+    if tracker.1 >= 0.5 {
+        let fps = (tracker.0 as f32 / tracker.1).round() as u32;
         if let Ok(mut text) = fps_query.single_mut() {
-            **text = format!("{} fps", tracker.fps);
+            **text = format!("{} fps", fps);
         }
+        tracker.0 = 0;
+        tracker.1 = 0.0;
     }
 }
 

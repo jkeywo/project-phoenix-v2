@@ -6,5 +6,6 @@ pub mod ship_state;
 pub mod ship_physics;
 pub mod lobby;
 pub mod simulation;
+pub mod radar;
 pub mod renderer;
 pub mod bridge;

@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 
-use crate::lobby::{CurrentPhase, Sessions};
+use crate::lobby::{CurrentPhase, Sessions, WorldResource};
 use crate::messages::{Console, GamePhase, ViewDirection, ViewMode};
+use crate::radar;
 use crate::ship_state::ShipState;
 
 // ── Marker Components ─────────────────────────────────────────────
@@ -11,6 +12,10 @@ struct LobbyCamera;
 
 #[derive(Component)]
 struct GameCamera;
+
+/// 2D camera used to render the radar overlay during InProgress + ViewMode::Radar.
+#[derive(Component)]
+struct RadarCamera;
 
 /// Marks entities that belong to the lobby scene (panel root).
 #[derive(Component)]
@@ -47,6 +52,7 @@ impl Plugin for RendererPlugin {
                 update_view_screen_text,
                 update_view_direction_label,
                 hull_camera,
+                draw_radar_overlay,
             ));
     }
 }
@@ -70,6 +76,13 @@ fn setup(
             ..default()
         }),
         Transform::from_xyz(0.0, 2.0, -10.0),
+    ));
+
+    // 2D camera — active during InProgress + ViewMode::Radar; renders gizmos overlay.
+    commands.spawn((
+        RadarCamera,
+        Camera2d,
+        Camera { is_active: false, order: 1, ..default() },
     ));
 
     // Directional light for the 3D scene
@@ -190,19 +203,22 @@ fn update_fps_counter(
 
 fn toggle_cameras(
     phase: Res<CurrentPhase>,
-    mut lobby: Query<&mut Camera, (With<LobbyCamera>, Without<GameCamera>)>,
-    mut game: Query<&mut Camera, (With<GameCamera>, Without<LobbyCamera>)>,
+    ship: Res<ShipState>,
+    mut lobby: Query<&mut Camera, (With<LobbyCamera>, Without<GameCamera>, Without<RadarCamera>)>,
+    mut game: Query<&mut Camera, (With<GameCamera>, Without<LobbyCamera>, Without<RadarCamera>)>,
+    mut radar_cam: Query<&mut Camera, (With<RadarCamera>, Without<LobbyCamera>, Without<GameCamera>)>,
 ) {
-    if !phase.is_changed() {
+    if !phase.is_changed() && !ship.is_changed() {
         return;
     }
     let in_game = phase.0 == GamePhase::InProgress;
-    if let Ok(mut cam) = lobby.single_mut() {
-        cam.is_active = !in_game;
-    }
-    if let Ok(mut cam) = game.single_mut() {
-        cam.is_active = in_game;
-    }
+    let radar_active = in_game && matches!(ship.view_mode, ViewMode::Radar);
+    let game_active  = in_game && !radar_active;
+    let lobby_active = !in_game;
+
+    if let Ok(mut cam) = lobby.single_mut()    { cam.is_active = lobby_active; }
+    if let Ok(mut cam) = game.single_mut()     { cam.is_active = game_active; }
+    if let Ok(mut cam) = radar_cam.single_mut(){ cam.is_active = radar_active; }
 }
 
 fn toggle_lobby_items(
@@ -342,6 +358,59 @@ fn update_view_direction_label(
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {
             **text = label.to_string();
+        }
+    }
+}
+
+/// Pixel radius of the radar disc on screen.
+const RADAR_PIXEL_RADIUS: f32 = 220.0;
+
+/// Draws the radar overlay (outer ring, mid ring, ship triangle, asteroid pips)
+/// using gizmos in the RadarCamera's 2D space. Only emits when InProgress and
+/// the ship's view mode is Radar; otherwise it does nothing (so the gizmo
+/// buffer is empty and nothing is rendered).
+fn draw_radar_overlay(
+    phase: Res<CurrentPhase>,
+    ship: Res<ShipState>,
+    world: Option<Res<WorldResource>>,
+    mut gizmos: Gizmos,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    if !matches!(ship.view_mode, ViewMode::Radar) {
+        return;
+    }
+
+    let centre = Vec2::ZERO;
+    let outer  = Color::srgba(0.4, 0.9, 0.5, 0.9);
+    let mid    = Color::srgba(0.4, 0.9, 0.5, 0.45);
+    let ship_c = Color::srgba(0.6, 1.0, 0.7, 1.0);
+    let aster  = Color::srgba(0.85, 0.7, 0.55, 0.95);
+
+    // Outer ring (full radar range) and mid ring (half range).
+    gizmos.circle_2d(centre, RADAR_PIXEL_RADIUS, outer);
+    let mid_ratio = radar::RADAR_MID_RING / radar::RADAR_RANGE;
+    gizmos.circle_2d(centre, RADAR_PIXEL_RADIUS * mid_ratio, mid);
+
+    // Ship triangle at centre, pointing up (forward = +y on the radar).
+    let tip   = Vec2::new(0.0,  10.0);
+    let left  = Vec2::new(-7.0, -8.0);
+    let right = Vec2::new( 7.0, -8.0);
+    gizmos.line_2d(tip,  left,  ship_c);
+    gizmos.line_2d(left, right, ship_c);
+    gizmos.line_2d(right, tip,  ship_c);
+
+    // Asteroid pips, projected through pure radar math.
+    if let Some(world) = world {
+        for asteroid in &world.0.asteroids {
+            if let Some((rx, ry, rr)) =
+                radar::project_asteroid(asteroid, ship.x, ship.z, ship.yaw)
+            {
+                let pos = Vec2::new(rx * RADAR_PIXEL_RADIUS, ry * RADAR_PIXEL_RADIUS);
+                let pix_radius = (rr * RADAR_PIXEL_RADIUS).max(2.0);
+                gizmos.circle_2d(pos, pix_radius, aster);
+            }
         }
     }
 }

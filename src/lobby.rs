@@ -145,6 +145,7 @@ fn process_lobby(
             }
             ClientMessage::ToggleRedAlert => {}
             ClientMessage::HelmInput { .. } => {}
+            ClientMessage::SetView { .. } => {}
         }
     }
 }

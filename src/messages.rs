@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum ViewDirection {
+    #[default]
+    Fore,
+    Aft,
+    Port,
+    Starboard,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Console {
     CaptainChair,
@@ -39,6 +48,7 @@ pub struct GameState {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SimSnapshot {
     pub red_alert: bool,
+    pub view_direction: ViewDirection,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -51,6 +61,7 @@ pub enum ClientMessage {
     StartGame,
     ToggleRedAlert,
     HelmInput { thrust: f32, steering: f32 },
+    SetView { direction: ViewDirection },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

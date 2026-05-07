@@ -92,6 +92,34 @@ mod tests {
     }
 
     #[test]
+    fn client_set_view_fore() {
+        let msg = ClientMessage::SetView { direction: ViewDirection::Fore };
+        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn client_set_view_aft() {
+        let msg = ClientMessage::SetView { direction: ViewDirection::Aft };
+        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn client_set_view_port() {
+        let msg = ClientMessage::SetView { direction: ViewDirection::Port };
+        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn client_set_view_starboard() {
+        let msg = ClientMessage::SetView { direction: ViewDirection::Starboard };
+        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
     fn client_helm_input() {
         let msg = ClientMessage::HelmInput { thrust: 0.75, steering: -0.5 };
         let json = codec().encode_client(&msg).unwrap();
@@ -166,7 +194,18 @@ mod tests {
 
     #[test]
     fn server_sim_state() {
-        let msg = ServerMessage::SimState { snapshot: SimSnapshot { red_alert: true } };
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot { red_alert: true, view_direction: ViewDirection::Fore },
+        };
+        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
+        assert_eq!(msg, rt);
+    }
+
+    #[test]
+    fn sim_snapshot_view_direction_starboard() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot { red_alert: false, view_direction: ViewDirection::Starboard },
+        };
         let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
         assert_eq!(msg, rt);
     }

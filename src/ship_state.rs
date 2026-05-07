@@ -1,9 +1,10 @@
 use bevy::prelude::Resource;
-use crate::messages::SimSnapshot;
+use crate::messages::{SimSnapshot, ViewDirection};
 
 #[derive(Resource)]
 pub struct ShipState {
     red_alert: bool,
+    pub view_direction: ViewDirection,
     /// Ship position (x, z)
     pub x: f32,
     pub z: f32,
@@ -17,6 +18,7 @@ impl ShipState {
     pub fn new() -> Self {
         Self {
             red_alert: false,
+            view_direction: ViewDirection::Fore,
             x: 0.0,
             z: 0.0,
             yaw: 0.0,
@@ -29,7 +31,7 @@ impl ShipState {
     }
 
     pub fn snapshot(&self) -> SimSnapshot {
-        SimSnapshot { red_alert: self.red_alert }
+        SimSnapshot { red_alert: self.red_alert, view_direction: self.view_direction.clone() }
     }
 }
 

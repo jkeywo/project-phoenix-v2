@@ -3,7 +3,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::asteroid_spawner::spawn_asteroid_positions;
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target};
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, ViewDirection};
+use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 

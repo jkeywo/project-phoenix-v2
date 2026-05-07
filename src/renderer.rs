@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::lobby::{CurrentPhase, Sessions};
-use crate::messages::{Console, GamePhase};
+use crate::messages::{Console, GamePhase, ViewDirection};
 use crate::ship_state::ShipState;
 
 // ── Marker Components ─────────────────────────────────────────────
@@ -28,6 +28,10 @@ struct FpsText;
 #[derive(Component)]
 struct ViewScreenText;
 
+/// Top-centre label showing the current camera facing direction during InProgress phase.
+#[derive(Component)]
+struct ViewDirectionLabel;
+
 // ── Plugin ────────────────────────────────────────────────────────
 
 pub struct RendererPlugin;
@@ -41,7 +45,8 @@ impl Plugin for RendererPlugin {
                 toggle_lobby_items,
                 update_player_list,
                 update_view_screen_text,
-                follow_camera,
+                update_view_direction_label,
+                hull_camera,
             ));
     }
 }
@@ -122,6 +127,27 @@ fn setup(
         TextColor(Color::srgba(0.7, 0.85, 1.0, 0.75)),
         Visibility::Hidden,
     ));
+
+    // Direction label — top-centre, visible only during InProgress.
+    commands
+        .spawn((
+            ViewDirectionLabel,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(8.0),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new("FORE"),
+                TextFont { font_size: 20.0, ..default() },
+                TextColor(Color::srgba(0.9, 0.95, 1.0, 0.9)),
+            ));
+        });
 
     // Red Alert overlay is now handled in server.html via a CSS vignette,
     // toggled by SimState messages routed through JS.
@@ -246,12 +272,10 @@ fn update_view_screen_text(
     **text = content;
 }
 
-/// Forward camera: 1 unit in front of the ship, 0 units above, looking ahead to the horizon.
-///
-/// Bevy is left-handed: camera local +Z = forward view direction.
-/// Ship forward: (sin yaw, 0, -cos yaw).  yaw=0 → ship faces -Z.
-/// Camera must sit behind the ship (+Z at yaw=0) and look further ahead (-Z).
-fn follow_camera(
+/// First-person hull camera: positioned at the ship's hull edge in the view direction,
+/// looking straight out. Ship is always behind the camera.
+/// Hull offset = 6.0 units (matches the ship's collision capsule radius).
+fn hull_camera(
     ship: Res<ShipState>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
     phase: Res<CurrentPhase>,
@@ -261,22 +285,56 @@ fn follow_camera(
     }
     let Ok(mut transform) = cam_query.single_mut() else { return };
 
-    // Ship forward direction
-    let fwd_x = ship.yaw.sin();
-    let fwd_z = -ship.yaw.cos();
+    // Direction vectors relative to ship heading (yaw=0 → ship faces -Z).
+    // fwd = (sin(yaw), 0, -cos(yaw)), port = left of heading, starboard = right.
+    let offset_dir = match ship.view_direction {
+        ViewDirection::Fore      => Vec3::new( ship.yaw.sin(), 0.0, -ship.yaw.cos()),
+        ViewDirection::Aft       => Vec3::new(-ship.yaw.sin(), 0.0,  ship.yaw.cos()),
+        ViewDirection::Port      => Vec3::new(-ship.yaw.cos(), 0.0, -ship.yaw.sin()),
+        ViewDirection::Starboard => Vec3::new( ship.yaw.cos(), 0.0,  ship.yaw.sin()),
+    };
 
-    // Camera: 1 units in front of the ship, 0 units above
+    const HULL_RADIUS: f32 = 6.0;
+    const LOOK_DIST: f32 = 100.0;
+
     transform.translation = Vec3::new(
-        ship.x + fwd_x * 1.0,
+        ship.x + offset_dir.x * HULL_RADIUS,
         0.0,
-        ship.z + fwd_z * 1.0,
+        ship.z + offset_dir.z * HULL_RADIUS,
     );
 
-    // Look point: 20 units ahead of the ship along its forward axis, at ship altitude
-    let look_at = Vec3::new(
-        ship.x + fwd_x * 20.0,
+    let look_target = Vec3::new(
+        ship.x + offset_dir.x * LOOK_DIST,
         0.0,
-        ship.z + fwd_z * 20.0,
+        ship.z + offset_dir.z * LOOK_DIST,
     );
-    transform.look_at(look_at, Vec3::Y);
+    transform.look_at(look_target, Vec3::Y);
+}
+
+fn update_view_direction_label(
+    ship: Res<ShipState>,
+    phase: Res<CurrentPhase>,
+    mut label_query: Query<(&Children, &mut Visibility), With<ViewDirectionLabel>>,
+    mut text_query: Query<&mut Text>,
+) {
+    if !ship.is_changed() && !phase.is_changed() {
+        return;
+    }
+    let Ok((children, mut vis)) = label_query.single_mut() else { return };
+    if phase.0 != GamePhase::InProgress {
+        *vis = Visibility::Hidden;
+        return;
+    }
+    *vis = Visibility::Visible;
+    let label = match ship.view_direction {
+        ViewDirection::Fore      => "FORE",
+        ViewDirection::Aft       => "AFT",
+        ViewDirection::Port      => "PORT",
+        ViewDirection::Starboard => "STARBOARD",
+    };
+    for child in children.iter() {
+        if let Ok(mut text) = text_query.get_mut(child) {
+            **text = label.to_string();
+        }
+    }
 }

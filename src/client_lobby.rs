@@ -126,6 +126,11 @@ impl<'a> LobbyView<'a> {
         self.my_consoles().contains(&Console::CaptainChair)
     }
 
+    /// True if the local player currently holds the helm console.
+    pub fn is_helm(&self) -> bool {
+        self.my_consoles().contains(&Console::Helm)
+    }
+
     /// Consoles held by the local player (empty if no matching token).
     pub fn my_consoles(&self) -> &[Console] {
         self.state
@@ -325,6 +330,18 @@ mod tests {
         ];
         assert!( LobbyView::new(&s, "a").is_captain());
         assert!(!LobbyView::new(&s, "b").is_captain());
+    }
+
+    #[test]
+    fn is_helm_is_true_only_when_i_hold_the_helm_console() {
+        let mut s = LobbyState::default();
+        s.players = vec![
+            p("a", "Alice", vec![Console::CaptainChair]),
+            p("b", "Bob",   vec![Console::Helm]),
+        ];
+        assert!(!LobbyView::new(&s, "a").is_helm());
+        assert!( LobbyView::new(&s, "b").is_helm());
+        assert!(!LobbyView::new(&s, "ghost").is_helm());
     }
 
     #[test]

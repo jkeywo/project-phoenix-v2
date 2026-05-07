@@ -59,63 +59,15 @@
     #console-tabs button.active {
       background: #224; border-color: #8af; color: #cce;
     }
-    /* Helm console UI */
-    #helm-ui { display: none; }
-    #helm-ui.active { display: flex; }
-    #helm-ui {
-      position: fixed;
-      box-sizing: border-box;
-      align-items: center;
-      justify-content: center;
-      padding: 1rem;
-      pointer-events: none; /* allow non-control area to be inert */
-      z-index: 5;
-    }
-    /* Landscape: right third */
-    @media (orientation: landscape) {
-      #helm-ui { top: 0; right: 0; width: 33.333vw; height: 100vh; }
-    }
-    /* Portrait: bottom third */
-    @media (orientation: portrait) {
-      #helm-ui { left: 0; bottom: 0; width: 100vw; height: 33.333vh; }
-    }
-    #helm-readout {
-      position: absolute; top: 0.5rem; left: 0.5rem; right: 0.5rem;
-      font-size: 0.75rem; color: #99b; text-align: center; pointer-events: none;
-    }
-    #helm-readout span { color: #8af; }
-    #joystick-area {
-      position: relative;
-      background: radial-gradient(circle at center, #112 0%, #001 75%);
-      border: 2px solid #336;
-      border-radius: 50%;
-      touch-action: none;
-      pointer-events: auto;
-      /* Square circular pad: limited by smaller of width/height of region */
-      width: min(80%, 80vmin, 18rem);
-      aspect-ratio: 1;
-      max-height: 90%;
-    }
-    #joystick-area::before, #joystick-area::after {
-      content: ""; position: absolute; background: rgba(136,170,255,0.15);
-    }
-    #joystick-area::before { left: 50%; top: 8%; bottom: 8%; width: 1px; transform: translateX(-50%); }
-    #joystick-area::after  { top: 50%; left: 8%; right: 8%; height: 1px; transform: translateY(-50%); }
-    #joystick-knob {
-      width: 22%; height: 22%; background: #448; border: 2px solid #8af;
-      border-radius: 50%; position: absolute; left: 50%; top: 50%;
-      transform: translate(-50%, -50%);
-      pointer-events: none; transition: background 0.1s;
-    }
-    #joystick-knob.active { background: #66a; }
+    /* Helm console UI moved to Bevy WASM (#49). */
     /* Bevy WASM canvas — full-viewport, behind the JS overlays so the
        lobby UI rendered by Bevy is visible while the name input,
        connection status, and fullscreen button stay clickable on top. */
     #wasm-host { position: fixed; inset: 0; z-index: 0; }
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     /* Lift JS UI above the Bevy canvas. */
-    #console-container, #top-bar, #helm-ui, #helm-readout,
-    #joystick-area, #red-alert-overlay { position: relative; z-index: 1; }
+    #console-container, #top-bar,
+    #red-alert-overlay { position: relative; z-index: 1; }
     #top-bar { z-index: 20; }
   </style>
 </head>
@@ -148,16 +100,8 @@
       <p id="game-status"></p>
     </section>
 
-    <section id="helm-ui">
-      <div id="joystick-area">
-        <div id="helm-readout">
-          Thrust <span id="thrust-value">0</span>%
-          &nbsp;·&nbsp;
-          Steering <span id="steering-value">0</span>%
-        </div>
-        <div id="joystick-knob"></div>
-      </div>
-    </section>
+    <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
+         src/client_app.rs (#49). -->
   </div>
 
   <div id="status">Connecting…</div>
@@ -298,7 +242,7 @@
 
       // Console sections: only the active one is visible while in-game.
       $('game-ui').className = (inGame && activeConsole === 'CaptainChair') ? 'active' : '';
-      $('helm-ui').className = (inGame && activeConsole === 'Helm') ? 'active' : '';
+      // Helm console UI is rendered by Bevy WASM (#49).
 
       // Tabs only appear when in-game with 2+ consoles.
       renderTabs(s, inGame);
@@ -388,103 +332,7 @@
 
     // Engage button moved to Bevy WASM lobby UI (#47).
     // View selector and Red Alert button moved to Bevy WASM captain UI (#48).
-
-    // ── Helm Controls ──────────────────────────────────────────
-
-    function sendHelmInput(thrust, steering) {
-      send('HelmInput', { thrust, steering });
-    }
-
-    // Joystick: dy<0 (up)   → positive thrust (forward)
-    //          dy>0 (down) → negative thrust (reverse)
-    //          dx          → steering
-    (function initJoystick() {
-      const area = $('joystick-area');
-      const knob = $('joystick-knob');
-      let active = false;
-      let pointerId = null;
-      let lastThrust = 0;
-      let lastSteering = 0;
-
-      // Continuous resend at ~10Hz so the server keeps applying input
-      setInterval(() => {
-        if (active) sendHelmInput(lastThrust, lastSteering);
-      }, 100);
-
-      function setReadout(thrust, steering) {
-        $('thrust-value').textContent = Math.round(thrust * 100);
-        $('steering-value').textContent = Math.round(steering * 100);
-      }
-
-      function updateKnob(localX, localY) {
-        const rect = area.getBoundingClientRect();
-        const cx = rect.width / 2;
-        const cy = rect.height / 2;
-        const maxRadius = Math.min(cx, cy) - (knob.offsetWidth / 2) - 2;
-        let dx = localX - cx;
-        let dy = localY - cy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > maxRadius && dist > 0) {
-          dx = dx / dist * maxRadius;
-          dy = dy / dist * maxRadius;
-        }
-        knob.style.left = (cx + dx) + 'px';
-        knob.style.top  = (cy + dy) + 'px';
-
-        // Signed thrust: up = forward (+), down = reverse (-)
-        const thrust   = -dy / maxRadius;
-        const steering =  dx / maxRadius;
-        const tClamped = Math.max(-1, Math.min(1, thrust));
-        const sClamped = Math.max(-1, Math.min(1, steering));
-        lastThrust = tClamped;
-        lastSteering = sClamped;
-        setReadout(tClamped, sClamped);
-        sendHelmInput(tClamped, sClamped);
-      }
-
-      function resetKnob() {
-        knob.style.left = '50%';
-        knob.style.top  = '50%';
-        knob.classList.remove('active');
-        lastThrust = 0;
-        lastSteering = 0;
-        setReadout(0, 0);
-        sendHelmInput(0, 0);
-      }
-
-      function localPos(e) {
-        const rect = area.getBoundingClientRect();
-        const p = e.touches ? e.touches[0] : e;
-        return { x: p.clientX - rect.left, y: p.clientY - rect.top };
-      }
-
-      area.addEventListener('pointerdown', e => {
-        active = true;
-        pointerId = e.pointerId;
-        area.setPointerCapture(e.pointerId);
-        knob.classList.add('active');
-        const p = localPos(e);
-        updateKnob(p.x, p.y);
-      });
-
-      area.addEventListener('pointermove', e => {
-        if (!active || e.pointerId !== pointerId) return;
-        e.preventDefault();
-        const p = localPos(e);
-        updateKnob(p.x, p.y);
-      });
-
-      function endPointer(e) {
-        if (!active || e.pointerId !== pointerId) return;
-        active = false;
-        pointerId = null;
-        try { area.releasePointerCapture(e.pointerId); } catch (_) {}
-        resetKnob();
-      }
-      area.addEventListener('pointerup', endPointer);
-      area.addEventListener('pointercancel', endPointer);
-      area.addEventListener('pointerleave', e => { if (active) endPointer(e); });
-    })();
+    // Helm joystick moved to Bevy WASM helm UI (#49).
 
     // ── Swipe to switch console tabs (when 2+ consoles assigned) ───────
     (function initSwipe() {
@@ -492,7 +340,9 @@
       let startX = 0, startY = 0, startT = 0, swiping = false, swipeCommitted = false;
 
       root.addEventListener('touchstart', e => {
-        if (e.target.closest('#joystick-area')) return;
+        // The Bevy WASM canvas owns helm joystick gestures (#49); don't
+        // hijack swipes that begin on the canvas.
+        if (e.target.closest('#wasm-host')) return;
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
         startT = performance.now();

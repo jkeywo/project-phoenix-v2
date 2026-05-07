@@ -131,8 +131,8 @@ fn setup(
         FpsText,
         Node {
             position_type: PositionType::Absolute,
+            top: Val::Px(48.0),
             right: Val::Px(12.0),
-            bottom: Val::Px(12.0),
             ..default()
         },
         Text::new("-- fps"),

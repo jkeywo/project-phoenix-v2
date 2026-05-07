@@ -96,8 +96,9 @@ fn process_helm_inputs(
         }
     }
 
-    // Compute physics
-    let dt = time.delta_secs();
+    // Compute physics — use the timer's nominal period, not the frame delta.
+    // The timer fires every 100 ms; time.delta_secs() is only one frame (~16 ms).
+    let dt = timer.0.duration().as_secs_f32();
     let state = ShipPhysicsState {
         x: ship.x,
         z: ship.z,

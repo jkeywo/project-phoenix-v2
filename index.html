@@ -34,9 +34,9 @@
       transition: box-shadow 0.4s ease, background 0.4s ease;
     }
     #red-alert-overlay.active {
-      box-shadow: inset 0 0 220px 60px rgba(255, 30, 30, 0.85);
+      box-shadow: inset 0 0 60px 10px rgba(255, 30, 30, 0.7);
       background: radial-gradient(ellipse at center,
-        rgba(255,0,0,0) 50%, rgba(255,0,0,0.18) 80%, rgba(255,0,0,0.55) 100%);
+        rgba(255,0,0,0) 65%, rgba(255,0,0,0.08) 85%, rgba(255,0,0,0.3) 100%);
       animation: redalert-pulse 1.4s ease-in-out infinite;
     }
     @keyframes redalert-pulse {
@@ -44,7 +44,7 @@
       50%      { filter: brightness(1.35); }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-84b56447328bb77f.js" crossorigin="anonymous" integrity="sha384-ccTdDFobc2osHPJMkMxuwpeWeBbESOtbis/y9Vkx7mQWzAiqdFQmpc0cziI9ygFh"><link rel="preload" href="./project-phoenix-84b56447328bb77f_bg.wasm" crossorigin="anonymous" integrity="sha384-NMv3WfGO9LSoOZNt5mriHOk5Jw9VOwfv6R0lhaW8R9xg0duoZHYpxoTi9T8Ghh4d" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-a678991f1ed24407.js" crossorigin="anonymous" integrity="sha384-ccTdDFobc2osHPJMkMxuwpeWeBbESOtbis/y9Vkx7mQWzAiqdFQmpc0cziI9ygFh"><link rel="preload" href="./project-phoenix-a678991f1ed24407_bg.wasm" crossorigin="anonymous" integrity="sha384-XHMgSrbPa3Ak0dOyiSR12CVu/Q2g4nYGklHu3pJcAdSYW2JDYroibm7TnC74lexX" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
@@ -70,8 +70,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-84b56447328bb77f.js';
-const wasm = await init({ module_or_path: './project-phoenix-84b56447328bb77f_bg.wasm' });
+import init, * as bindings from './project-phoenix-a678991f1ed24407.js';
+const wasm = await init({ module_or_path: './project-phoenix-a678991f1ed24407_bg.wasm' });
 
 
 window.wasmBindings = bindings;

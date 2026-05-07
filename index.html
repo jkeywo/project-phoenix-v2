@@ -44,7 +44,7 @@
       50%      { filter: brightness(1.35); }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-794c7e28efd87bc4.js" crossorigin="anonymous" integrity="sha384-5BaLqe+uEbYLMvHWSXvB/fnzPG1RiiS4Dp/4skW6RfnSNKWcZuz4fm6/80zCxEBU"><link rel="preload" href="./project-phoenix-794c7e28efd87bc4_bg.wasm" crossorigin="anonymous" integrity="sha384-M95te9jEVALZOJ88cx2aEnYIPRCzC/W2GUj1uc2OsRONY+r7QAHuxyWZFrFpdCD8" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-f4e5d12fdcb11767.js" crossorigin="anonymous" integrity="sha384-A+Tvqh+pwwmBpnt7p4j99COy1U9fMq//fdChTqZ/P0GsvNZbVsJxk2hV5A/BJkQN"><link rel="preload" href="./project-phoenix-f4e5d12fdcb11767_bg.wasm" crossorigin="anonymous" integrity="sha384-OAfTd/IdBxlDSgbX45cx0C/8gQ7xPTLfQS6IbZ89ganriKXYEQFcBkyBOLaQ8BzC" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
@@ -62,7 +62,6 @@
       <span id="conn-dot"></span>
       <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
     </div>
-    <div id="fps-counter">— fps</div>
   </div>
 
   <div id="red-alert-overlay"></div>
@@ -71,8 +70,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-794c7e28efd87bc4.js';
-const wasm = await init({ module_or_path: './project-phoenix-794c7e28efd87bc4_bg.wasm' });
+import init, * as bindings from './project-phoenix-f4e5d12fdcb11767.js';
+const wasm = await init({ module_or_path: './project-phoenix-f4e5d12fdcb11767_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -229,27 +228,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     window.addEventListener('TrunkApplicationStarted', startPhoenix);
-
-    // ── FPS counter ────────────────────────────────────────────────────────
-    (function initFps() {
-      const el = document.getElementById('fps-counter');
-      let last = performance.now();
-      let frames = 0;
-      let acc = 0;
-      function tick(now) {
-        frames++;
-        acc += now - last;
-        last = now;
-        if (acc >= 500) {
-          const fps = (frames * 1000) / acc;
-          el.textContent = fps.toFixed(0) + ' fps';
-          frames = 0;
-          acc = 0;
-        }
-        requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    })();
 
     // ── Audio context resume on first user gesture ───────────────────────
     // Browsers block AudioContext from playing until a user interacts with

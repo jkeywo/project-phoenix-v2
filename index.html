@@ -25,11 +25,7 @@
       background: none; border: none; color: #cce; font-size: 1.1rem;
       cursor: pointer; padding: 0; line-height: 1;
     }
-    #fps-counter {
-      font-size: 0.75rem; color: #cce; opacity: 0.85; font-family: monospace;
-      min-width: 4rem; text-align: right;
-    }
-    /* Soft red-alert vignette overlay */
+/* Soft red-alert vignette overlay */
     #red-alert-overlay {
       position: fixed; inset: 0; pointer-events: none; z-index: 15;
       box-shadow: inset 0 0 180px 40px rgba(255, 20, 20, 0.0);
@@ -48,7 +44,7 @@
       50%      { filter: brightness(1.35); }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-18d980e17b5dda47.js" crossorigin="anonymous" integrity="sha384-C6qnLCtj6UZsKIIYoIE2P1LiSveljfpzZLAh12ZDYH++YULpIFyDzLrqFw90rkqM"><link rel="preload" href="./project-phoenix-18d980e17b5dda47_bg.wasm" crossorigin="anonymous" integrity="sha384-bwCQOd1icEJmbvHjWJpgYwxhT0HROBRgCp5r4Lrtj1//7MXzdgqL10W2DJFGI7DW" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-414187a15944976c.js" crossorigin="anonymous" integrity="sha384-srvYO09R9Ie494GilF69SXJLAHxeA/6YwSK7HYspexF5XtwEW3jZaAd1hGslwRcY"><link rel="preload" href="./project-phoenix-414187a15944976c_bg.wasm" crossorigin="anonymous" integrity="sha384-11v8XpAZOF4nFJDzFOB2wTipGvYCeTgXtqKjVC/kHGIKSvNrIj3cABxrDtP7NB3j" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
@@ -75,8 +71,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-18d980e17b5dda47.js';
-const wasm = await init({ module_or_path: './project-phoenix-18d980e17b5dda47_bg.wasm' });
+import init, * as bindings from './project-phoenix-414187a15944976c.js';
+const wasm = await init({ module_or_path: './project-phoenix-414187a15944976c_bg.wasm' });
 
 
 window.wasmBindings = bindings;

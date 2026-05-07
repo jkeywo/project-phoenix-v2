@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::lobby::{CurrentPhase, Sessions};
-use crate::messages::GamePhase;
+use crate::messages::{Console, GamePhase};
 use crate::ship_state::ShipState;
 
 // ── Marker Components ─────────────────────────────────────────────
@@ -24,6 +24,10 @@ struct PlayerListText;
 #[derive(Component)]
 struct FpsText;
 
+/// In-game crew roster shown on the view screen during InProgress phase.
+#[derive(Component)]
+struct ViewScreenText;
+
 // ── Plugin ────────────────────────────────────────────────────────
 
 pub struct RendererPlugin;
@@ -36,6 +40,7 @@ impl Plugin for RendererPlugin {
                 toggle_cameras,
                 toggle_lobby_items,
                 update_player_list,
+                update_view_screen_text,
                 follow_camera,
             ));
     }
@@ -102,6 +107,21 @@ fn setup(
                 TextColor(Color::srgb(0.6, 0.7, 0.73)),
             ));
         });
+
+    // View-screen crew roster — visible only during InProgress phase.
+    commands.spawn((
+        ViewScreenText,
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(12.0),
+            left: Val::Px(12.0),
+            ..default()
+        },
+        Text::new(""),
+        TextFont { font_size: 14.0, ..default() },
+        TextColor(Color::srgba(0.7, 0.85, 1.0, 0.75)),
+        Visibility::Hidden,
+    ));
 
     // Red Alert overlay is now handled in server.html via a CSS vignette,
     // toggled by SimState messages routed through JS.
@@ -195,6 +215,33 @@ fn update_player_list(
         } else {
             content.push_str(&format!("• {} — {}\n", p.name, consoles));
         }
+    }
+    **text = content;
+}
+
+fn update_view_screen_text(
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    mut query: Query<(&mut Text, &mut Visibility), With<ViewScreenText>>,
+) {
+    if !sessions.is_changed() && !phase.is_changed() {
+        return;
+    }
+    let Ok((mut text, mut vis)) = query.single_mut() else { return };
+    if phase.0 != GamePhase::InProgress {
+        *vis = Visibility::Hidden;
+        return;
+    }
+    *vis = Visibility::Visible;
+    let players = sessions.0.players();
+    let mut content = "VIEW SCREEN\n".to_string();
+    for console in [Console::CaptainChair, Console::Helm] {
+        let label = console.display_name();
+        let holder_name = sessions.0.console_holder(console)
+            .and_then(|token| players.iter().find(|p| p.token == token))
+            .map(|p| p.name.as_str())
+            .unwrap_or("—");
+        content.push_str(&format!("{}: {}\n", label, holder_name));
     }
     **text = content;
 }

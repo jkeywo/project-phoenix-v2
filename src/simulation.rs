@@ -81,10 +81,10 @@ fn process_helm_inputs(
         return;
     }
 
-    // Collect all HelmInput messages from the helm player since last tick
+    // Collect helm inputs; default to zero so the ship decelerates when no
+    // messages arrive (joystick released or between network packets).
     let mut thrust: f32 = 0.0;
     let mut steering: f32 = 0.0;
-    let mut has_input = false;
 
     for ev in reader.read() {
         if ev.token != helm_token.unwrap() {
@@ -93,12 +93,7 @@ fn process_helm_inputs(
         if let ClientMessage::HelmInput { thrust: t, steering: s } = ev.msg {
             thrust = t;
             steering = s;
-            has_input = true;
         }
-    }
-
-    if !has_input {
-        return;
     }
 
     // Compute physics
@@ -132,9 +127,19 @@ fn sync_ship_position(
     transform.rotation = Quat::from_axis_angle(Vec3::Y, ship.yaw);
 }
 
-fn handle_collisions(_queries: Query<(), With<Ship>>) {
-    // Collision handling - ship velocity is managed through direct velocity set
-    // in process_helm_inputs; on collision we simply zero the velocity
+fn handle_collisions(
+    mut events: MessageReader<CollisionEvent>,
+    ship_query: Query<Entity, With<Ship>>,
+    mut ship: ResMut<ShipState>,
+) {
+    let Ok(ship_entity) = ship_query.single() else { return };
+    for event in events.read() {
+        if let CollisionEvent::Started(e1, e2, _) = event {
+            if *e1 == ship_entity || *e2 == ship_entity {
+                ship.forward_speed = 0.0;
+            }
+        }
+    }
 }
 
 fn broadcast_sim_state(
@@ -235,13 +240,15 @@ fn setup_world(
         ));
     }
 
-    // Spawn ship (no mesh, just collider and rigid body for physics)
+    // Spawn ship — kinematic so we drive position directly from ShipState;
+    // collision events fire so handle_collisions can zero velocity on impact.
     commands.spawn((
         Ship,
         Transform::default(),
+        RigidBody::KinematicPositionBased,
         Collider::capsule_y(3.0, 6.0),
-        RigidBody::Dynamic,
-        LockedAxes::TRANSLATION_LOCKED_Y,
+        ActiveEvents::COLLISION_EVENTS,
+        ActiveCollisionTypes::KINEMATIC_STATIC,
     ));
 }
 

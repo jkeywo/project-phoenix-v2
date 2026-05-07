@@ -62,7 +62,6 @@
       <span id="conn-dot"></span>
       <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
     </div>
-    <div id="fps-counter">— fps</div>
   </div>
 
   <div id="red-alert-overlay"></div>
@@ -218,27 +217,6 @@
     }
 
     window.addEventListener('TrunkApplicationStarted', startPhoenix);
-
-    // ── FPS counter ────────────────────────────────────────────────────────
-    (function initFps() {
-      const el = document.getElementById('fps-counter');
-      let last = performance.now();
-      let frames = 0;
-      let acc = 0;
-      function tick(now) {
-        frames++;
-        acc += now - last;
-        last = now;
-        if (acc >= 500) {
-          const fps = (frames * 1000) / acc;
-          el.textContent = fps.toFixed(0) + ' fps';
-          frames = 0;
-          acc = 0;
-        }
-        requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    })();
 
     // ── Audio context resume on first user gesture ───────────────────────
     // Browsers block AudioContext from playing until a user interacts with

@@ -502,16 +502,35 @@
     // ── Swipe to switch console tabs (when 2+ consoles assigned) ───────
     (function initSwipe() {
       const root = document.body;
-      let startX = 0, startY = 0, startT = 0, swiping = false;
+      let startX = 0, startY = 0, startT = 0, swiping = false, swipeCommitted = false;
 
-      function onStart(x, y) {
-        startX = x; startY = y; startT = performance.now(); swiping = true;
-      }
-      function onEnd(x, y) {
+      root.addEventListener('touchstart', e => {
+        if (e.target.closest('#joystick-area')) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        startT = performance.now();
+        swiping = true;
+        swipeCommitted = false;
+      }, { passive: true });
+
+      // Non-passive so we can preventDefault() once the gesture is clearly
+      // horizontal, preventing the browser from treating it as a scroll.
+      root.addEventListener('touchmove', e => {
+        if (!swiping) return;
+        const dx = e.touches[0].clientX - startX;
+        const dy = e.touches[0].clientY - startY;
+        if (Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy)) {
+          swipeCommitted = true;
+          e.preventDefault();
+        }
+      }, { passive: false });
+
+      root.addEventListener('touchend', e => {
         if (!swiping) return;
         swiping = false;
-        const dx = x - startX;
-        const dy = y - startY;
+        if (!swipeCommitted) return;
+        const dx = e.changedTouches[0].clientX - startX;
+        const dy = e.changedTouches[0].clientY - startY;
         const dt = performance.now() - startT;
         if (dt > 600) return;
         if (Math.abs(dx) < 60) return;
@@ -524,19 +543,6 @@
           : (idx - 1 + mine.length) % mine.length;
         activeConsole = mine[next];
         render(state);
-      }
-
-      root.addEventListener('touchstart', e => {
-        // Don't start swipe if the touch began inside an interactive control
-        // like the joystick — let it consume the gesture.
-        if (e.target.closest('#joystick-area')) return;
-        const t = e.touches[0];
-        onStart(t.clientX, t.clientY);
-      }, { passive: true });
-
-      root.addEventListener('touchend', e => {
-        const t = e.changedTouches[0];
-        onEnd(t.clientX, t.clientY);
       }, { passive: true });
     })();
 
@@ -582,14 +588,14 @@
           break;
         case 'SimState': {
           const ra = msg.data.snapshot.red_alert;
-          // Only update the red-alert overlay class � don't re-render the entire page.
+          // Only update the red-alert overlay class � don't re-render the entire page.
           // SimState is broadcast at 10Hz and would steal pointer events from tab clicks.
           const container = $('console-container');
           if (ra) container.classList.add('red-alert');
           else container.classList.remove('red-alert');
           // De-duplicate: only update state when it actually changes
           if (state.redAlert !== ra) state.redAlert = ra;
-          break;
+          return; // intentional: no scheduleRender() — SimState at 10Hz must not race with tab clicks
         }
         default:
           return; // unknown — skip re-render

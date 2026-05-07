@@ -180,7 +180,7 @@
   </div>
 
   <script>
-    // ── Connection status ───────────────────────────────────────
+    // ── Connection status ──────────────────────────────────────────────────
 
     function setConnectionStatus(state) {
       const dot = document.getElementById('conn-dot');
@@ -197,7 +197,7 @@
       }
     }
 
-    // ── Fullscreen controller ───────────────────────────────────
+    // ── Fullscreen controller ──────────────────────────────────────────────
 
     (function initFullscreen() {
       const btn = document.getElementById('fullscreen-btn');
@@ -210,6 +210,8 @@
       });
       document.addEventListener('fullscreenchange', syncIcon);
     })();
+
+    setConnectionStatus('connecting');
 
     // ── Persistence ─────────────────────────────────────────────
 

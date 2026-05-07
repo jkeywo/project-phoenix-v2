@@ -156,8 +156,11 @@ struct HelmTickTimer(Timer);
 // ── Setup ──────────────────────────────────────────────────────────
 
 fn setup_lobby_ui(mut commands: Commands) {
-    // 2D camera for UI rendering.
-    commands.spawn(Camera2d);
+    // 2D camera for UI rendering. `IsDefaultUiCamera` marks this as the
+    // target for UI roots that don't carry an explicit `UiTargetCamera`,
+    // which Bevy 0.18 requires for text glyph extraction to resolve a
+    // camera deterministically.
+    commands.spawn((Camera2d, IsDefaultUiCamera));
 
     commands
         .spawn((

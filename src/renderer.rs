@@ -62,8 +62,11 @@ impl Plugin for RendererPlugin {
 fn setup(
     mut commands: Commands,
 ) {
-    // 2D camera — active during lobby phase
-    commands.spawn((LobbyCamera, Camera2d, Camera { order: 0, ..default() }));
+    // 2D camera — active during lobby phase. `IsDefaultUiCamera` marks
+    // this as the canonical UI target; Bevy 0.18 requires exactly one such
+    // camera for text glyph extraction to resolve when multiple Camera2d
+    // entities exist (we also have `RadarCamera`).
+    commands.spawn((LobbyCamera, Camera2d, Camera { order: 0, ..default() }, IsDefaultUiCamera));
 
     // 3D camera — active during in-game phase, positioned for ship view.
     // Far plane extended so the starfield skybox at radius ~2000 is visible.

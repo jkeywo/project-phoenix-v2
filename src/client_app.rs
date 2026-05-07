@@ -926,14 +926,10 @@ fn draw_helm_radar(
     gizmos.circle_2d(centre, radius * mid_ratio, RADAR_MID_RING_COLOR);
 
     // Asteroids.
-    for asteroid in &sim.world.asteroids {
-        if let Some((rx, ry, rr)) =
-            crate::radar::project_asteroid(asteroid, sim.ship_x, sim.ship_z, sim.ship_yaw)
-        {
-            let pos = centre + Vec2::new(rx * radius, ry * radius);
-            let pix_radius = (rr * radius).max(2.0);
-            gizmos.circle_2d(pos, pix_radius, RADAR_ASTEROID_COLOR);
-        }
+    for (rx, ry, rr) in crate::radar::radar_dots(&sim.world.asteroids, sim.ship_x, sim.ship_z, sim.ship_yaw) {
+        let pos = centre + Vec2::new(rx * radius, ry * radius);
+        let pix_radius = (rr * radius).max(2.0);
+        gizmos.circle_2d(pos, pix_radius, RADAR_ASTEROID_COLOR);
     }
 
     // Ship triangle, always pointing "up" (radar is ship-aligned).

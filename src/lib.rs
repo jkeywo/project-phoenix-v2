@@ -4,6 +4,7 @@ pub mod codec;
 pub mod session;
 pub mod ship_state;
 pub mod ship_physics;
+pub mod lobby_handler;
 pub mod lobby;
 pub mod simulation;
 pub mod radar;

@@ -35,8 +35,28 @@ mod tests {
     use super::*;
     use crate::messages::*;
 
-    fn codec() -> JsonCodec {
-        JsonCodec
+    struct PrettyJsonCodec;
+
+    impl MessageCodec for PrettyJsonCodec {
+        type Error = serde_json::Error;
+        fn encode_client(&self, msg: &ClientMessage) -> Result<String, Self::Error> { serde_json::to_string_pretty(msg) }
+        fn decode_client(&self, s: &str) -> Result<ClientMessage, Self::Error> { serde_json::from_str(s) }
+        fn encode_server(&self, msg: &ServerMessage) -> Result<String, Self::Error> { serde_json::to_string_pretty(msg) }
+        fn decode_server(&self, s: &str) -> Result<ServerMessage, Self::Error> { serde_json::from_str(s) }
+    }
+
+    fn assert_client_roundtrip<C: MessageCodec>(codec: &C, msg: ClientMessage)
+    where C::Error: std::fmt::Debug {
+        let encoded = codec.encode_client(&msg).unwrap();
+        let decoded = codec.decode_client(&encoded).unwrap();
+        assert_eq!(msg, decoded);
+    }
+
+    fn assert_server_roundtrip<C: MessageCodec>(codec: &C, msg: ServerMessage)
+    where C::Error: std::fmt::Debug {
+        let encoded = codec.encode_server(&msg).unwrap();
+        let decoded = codec.decode_server(&encoded).unwrap();
+        assert_eq!(msg, decoded);
     }
 
     fn player() -> Player {
@@ -52,93 +72,92 @@ mod tests {
     #[test]
     fn client_identify() {
         let msg = ClientMessage::Identify { token: "t".into(), name: "Bob".into() };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_name() {
         let msg = ClientMessage::SetName { name: "Carol".into() };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_select_console() {
         let msg = ClientMessage::SelectConsole { console: Console::CaptainChair };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_clear_console() {
         let msg = ClientMessage::ClearConsole;
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_start_game() {
         let msg = ClientMessage::StartGame;
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_toggle_red_alert() {
         let msg = ClientMessage::ToggleRedAlert;
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_fore() {
         let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Fore) };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_aft() {
         let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_port() {
         let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Port) };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_starboard() {
         let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_radar() {
         let msg = ClientMessage::SetView { mode: ViewMode::Radar };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_helm_input() {
         let msg = ClientMessage::HelmInput { thrust: 0.75, steering: -0.5 };
-        let json = codec().encode_client(&msg).unwrap();
-        let rt = codec().decode_client(&json).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_select_console_helm() {
         let msg = ClientMessage::SelectConsole { console: Console::Helm };
-        let rt = codec().decode_client(&codec().encode_client(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     // ServerMessage round-trips
@@ -146,57 +165,57 @@ mod tests {
     #[test]
     fn server_welcome() {
         let msg = ServerMessage::Welcome { state: state() };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_player_joined() {
         let msg = ServerMessage::PlayerJoined { player: player() };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_player_left() {
         let msg = ServerMessage::PlayerLeft { token: "tok".into() };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_console_selected() {
         let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::CaptainChair] };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_console_selected_helm() {
         let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Helm] };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_console_cleared() {
         let msg = ServerMessage::ConsoleCleared { token: "tok".into() };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_name_changed() {
         let msg = ServerMessage::NameChanged { token: "tok".into(), name: "Dave".into() };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_game_started() {
         let msg = ServerMessage::GameStarted;
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
@@ -210,8 +229,8 @@ mod tests {
                 ship_yaw: 0.0,
             },
         };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
@@ -225,8 +244,8 @@ mod tests {
                 ship_yaw: 0.0,
             },
         };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
@@ -240,8 +259,8 @@ mod tests {
                 ship_yaw: 0.0,
             },
         };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
@@ -255,8 +274,8 @@ mod tests {
                 ship_yaw: 1.5707,
             },
         };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
@@ -269,8 +288,8 @@ mod tests {
                 ],
             },
         };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
@@ -284,17 +303,16 @@ mod tests {
                 }),
             },
         };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn welcome_with_world_none_round_trips() {
-        // Lobby phase has no world yet
         let msg = ServerMessage::Welcome { state: state() };
-        let rt = codec().decode_server(&codec().encode_server(&msg).unwrap()).unwrap();
-        assert_eq!(msg, rt);
-        match rt {
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+        match msg {
             ServerMessage::Welcome { state } => assert!(state.world.is_none()),
             _ => panic!("expected Welcome"),
         }

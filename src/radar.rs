@@ -52,6 +52,17 @@ pub fn project_to_radar(world_x: f32, world_z: f32, ship_x: f32, ship_z: f32, sh
     Some((radar_x, radar_y))
 }
 
+/// Iterator of `(radar_x, radar_y, scaled_radius)` tuples for all asteroids
+/// within `RADAR_RANGE` of the ship. Out-of-range asteroids are silently skipped.
+pub fn radar_dots<'a>(
+    asteroids: &'a [AsteroidInfo],
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+) -> impl Iterator<Item = (f32, f32, f32)> + 'a {
+    asteroids.iter().filter_map(move |a| project_asteroid(a, ship_x, ship_z, ship_yaw))
+}
+
 /// Project an asteroid to radar coordinates plus its scaled radius.
 ///
 /// Returns `None` if the asteroid centre is outside `RADAR_RANGE`. The
@@ -149,5 +160,29 @@ mod tests {
         // PRD pinned values; locking these in protects the ring renderer.
         assert_eq!(RADAR_RANGE, 50.0);
         assert_eq!(RADAR_MID_RING, 25.0);
+    }
+
+    #[test]
+    fn radar_dots_single_in_range_matches_project_asteroid() {
+        let asteroid = AsteroidInfo { x: 0.0, z: -10.0, radius: 2.0 };
+        let dots: Vec<_> = radar_dots(&[asteroid.clone()], 0.0, 0.0, 0.0).collect();
+        assert_eq!(dots.len(), 1);
+        let expected = project_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap();
+        assert_eq!(dots[0], expected);
+    }
+
+    #[test]
+    fn radar_dots_skips_out_of_range_asteroids() {
+        let far = AsteroidInfo { x: 100.0, z: 100.0, radius: 2.0 };
+        let near = AsteroidInfo { x: 0.0, z: -10.0, radius: 2.0 };
+        let dots: Vec<_> = radar_dots(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
+        assert_eq!(dots.len(), 1);
+        assert_eq!(dots[0], project_asteroid(&near, 0.0, 0.0, 0.0).unwrap());
+    }
+
+    #[test]
+    fn radar_dots_empty_slice_returns_empty_iterator() {
+        let dots: Vec<_> = radar_dots(&[], 0.0, 0.0, 0.0).collect();
+        assert!(dots.is_empty());
     }
 }

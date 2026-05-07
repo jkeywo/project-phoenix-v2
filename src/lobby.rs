@@ -1,7 +1,15 @@
 use bevy::prelude::*;
 
-use crate::messages::{ClientMessage, Console, GamePhase, GameState, ServerMessage, WorldData};
+use crate::lobby_handler::{self, LobbyHandlerResult};
+use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage, WorldData};
 use crate::session::SessionManager;
+
+/// Cached `GameState` snapshot derived from `Sessions` + `CurrentPhase` each frame.
+/// Renderer systems read this instead of accessing `Sessions` directly.
+#[derive(Resource, Clone)]
+pub struct GameStateCache(pub GameState);
+
+pub use crate::lobby_handler::Target;
 
 // ── Resources ──────────────────────────────────────────────────────────────
 
@@ -40,39 +48,41 @@ pub struct OutboundMessage {
     pub msg: ServerMessage,
 }
 
-#[derive(Clone, Debug)]
-pub enum Target {
-    All,
-    Token(String),
-    AllExcept(String),
-}
-
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 pub struct LobbyPlugin;
 
 impl Plugin for LobbyPlugin {
     fn build(&self, app: &mut App) {
+        let initial_cache = GameStateCache(GameState {
+            phase: GamePhase::Lobby,
+            players: vec![],
+            world: None,
+        });
         app.insert_resource(Sessions(SessionManager::new()))
             .insert_resource(CurrentPhase(GamePhase::Lobby))
+            .insert_resource(initial_cache)
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()
             .add_message::<PlayerDisconnected>()
-            .add_systems(Update, (process_lobby, handle_disconnect));
+            .add_systems(Update, (process_lobby, handle_disconnect, update_game_state_cache));
     }
 }
 
-// ── Systems ────────────────────────────────────────────────────────────────
-
-fn game_state(sessions: &SessionManager, phase: &GamePhase, world: Option<&WorldResource>) -> GameState {
-    // World is included only after the game has started; lobby Welcomes
-    // carry `world: None` because the world isn't yet populated.
-    let world = match (phase, world) {
-        (GamePhase::InProgress, Some(w)) => Some(w.0.clone()),
-        _ => None,
-    };
-    GameState { phase: phase.clone(), players: sessions.players().to_vec(), world }
+pub fn update_game_state_cache(
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    world: Option<Res<WorldResource>>,
+    mut cache: ResMut<GameStateCache>,
+) {
+    if !sessions.is_changed() && !phase.is_changed() {
+        return;
+    }
+    let world_data = world.as_ref().map(|w| &w.0);
+    cache.0 = lobby_handler::derive_game_state(&sessions.0, &phase.0, world_data);
 }
+
+// ── Systems ────────────────────────────────────────────────────────────────
 
 pub fn process_lobby(
     mut inbound: MessageReader<InboundMessage>,
@@ -81,85 +91,16 @@ pub fn process_lobby(
     mut phase: ResMut<CurrentPhase>,
     world: Option<Res<WorldResource>>,
 ) {
+    let world_data = world.as_ref().map(|w| &w.0);
     for ev in inbound.read() {
-        match ev.msg.clone() {
-            ClientMessage::Identify { token, name } => {
-                if let Some(player) = sessions.0.reconnect(&token) {
-                    let player = player.clone();
-                    let state = game_state(&sessions.0, &phase.0, world.as_deref());
-                    outbound.write(OutboundMessage {
-                        target: Target::Token(token.clone()),
-                        msg: ServerMessage::Welcome { state },
-                    });
-                    outbound.write(OutboundMessage {
-                        target: Target::AllExcept(token),
-                        msg: ServerMessage::PlayerJoined { player },
-                    });
-                } else if let Ok(player) = sessions.0.register(token.clone(), name) {
-                    let player = player.clone();
-                    let state = game_state(&sessions.0, &phase.0, world.as_deref());
-                    outbound.write(OutboundMessage {
-                        target: Target::Token(token.clone()),
-                        msg: ServerMessage::Welcome { state },
-                    });
-                    outbound.write(OutboundMessage {
-                        target: Target::AllExcept(token),
-                        msg: ServerMessage::PlayerJoined { player },
-                    });
-                }
-            }
-            ClientMessage::SetName { name } => {
-                sessions.0.set_name(&ev.token, name.clone());
-                outbound.write(OutboundMessage {
-                    target: Target::All,
-                    msg: ServerMessage::NameChanged { token: ev.token.clone(), name },
-                });
-            }
-            ClientMessage::SelectConsole { console } => {
-                if sessions.0.toggle_console(&ev.token, console.clone()).is_ok() {
-                    let consoles = sessions.0.players()
-                        .iter()
-                        .find(|p| p.token == ev.token)
-                        .map(|p| p.consoles.clone())
-                        .unwrap_or_default();
-                    if consoles.is_empty() {
-                        outbound.write(OutboundMessage {
-                            target: Target::All,
-                            msg: ServerMessage::ConsoleCleared { token: ev.token.clone() },
-                        });
-                    } else {
-                        outbound.write(OutboundMessage {
-                            target: Target::All,
-                            msg: ServerMessage::ConsoleSelected {
-                                token: ev.token.clone(),
-                                consoles,
-                            },
-                        });
-                    }
-                }
-            }
-            ClientMessage::ClearConsole => {
-                sessions.0.clear_consoles(&ev.token);
-                outbound.write(OutboundMessage {
-                    target: Target::All,
-                    msg: ServerMessage::ConsoleCleared { token: ev.token.clone() },
-                });
-            }
-            ClientMessage::StartGame => {
-                if sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str())
-                    && phase.0 == GamePhase::Lobby
-                {
-                    phase.0 = GamePhase::InProgress;
-                    outbound.write(OutboundMessage {
-                        target: Target::All,
-                        msg: ServerMessage::GameStarted,
-                    });
-                }
-            }
-            ClientMessage::ToggleRedAlert => {}
-            ClientMessage::HelmInput { .. } => {}
-            ClientMessage::SetView { .. } => {}
-        }
+        let result = lobby_handler::process_message(
+            &ev.token,
+            &ev.msg,
+            &mut sessions.0,
+            phase.0.clone(),
+            world_data,
+        );
+        apply_result(result, &mut outbound, &mut phase);
     }
 }
 
@@ -167,13 +108,24 @@ fn handle_disconnect(
     mut events: MessageReader<PlayerDisconnected>,
     mut outbound: MessageWriter<OutboundMessage>,
     mut sessions: ResMut<Sessions>,
+    mut phase: ResMut<CurrentPhase>,
 ) {
     for ev in events.read() {
-        sessions.0.disconnect(&ev.token);
-        outbound.write(OutboundMessage {
-            target: Target::All,
-            msg: ServerMessage::PlayerLeft { token: ev.token.clone() },
-        });
+        let result = lobby_handler::process_disconnect(&ev.token, &mut sessions.0);
+        apply_result(result, &mut outbound, &mut phase);
+    }
+}
+
+fn apply_result(
+    result: LobbyHandlerResult,
+    outbound: &mut MessageWriter<OutboundMessage>,
+    phase: &mut ResMut<CurrentPhase>,
+) {
+    if let Some(new_phase) = result.new_phase {
+        phase.0 = new_phase;
+    }
+    for (target, msg) in result.outbound {
+        outbound.write(OutboundMessage { target, msg });
     }
 }
 
@@ -214,213 +166,10 @@ mod tests {
     }
 
     #[test]
-    fn identify_sends_welcome_to_new_player() {
+    fn identify_arrives_via_inbound_message_and_welcome_is_sent_via_outbound() {
         let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        push(&mut app, "peer-id", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
         let out = tick(&mut app);
         assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::Welcome { .. })));
-    }
-
-    #[test]
-    fn second_player_gets_welcome_others_get_player_joined() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
-        let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::Welcome { .. })));
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::PlayerJoined { .. })));
-    }
-
-    #[test]
-    fn select_console_updates_session_and_broadcasts() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
-        let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::ConsoleSelected { .. })));
-        assert!(app.world().resource::<Sessions>().0.players()[0].consoles.contains(&Console::CaptainChair));
-    }
-
-    #[test]
-    fn clear_console_removes_assignment_and_broadcasts() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::ClearConsole);
-        let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::ConsoleCleared { .. })));
-        assert!(app.world().resource::<Sessions>().0.players()[0].consoles.is_empty());
-    }
-
-    #[test]
-    fn set_name_broadcasts_name_changed() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::SetName { name: "Alicia".into() });
-        let out = tick(&mut app);
-        assert!(out.iter().any(|m| {
-            matches!(&m.msg, ServerMessage::NameChanged { name, .. } if name == "Alicia")
-        }));
-    }
-
-    #[test]
-    fn captain_starts_game_and_transitions_to_in_progress() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::StartGame);
-        let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
-        assert_eq!(app.world().resource::<CurrentPhase>().0, GamePhase::InProgress);
-    }
-
-    #[test]
-    fn helm_input_ignored_during_lobby() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::HelmInput { thrust: 0.5, steering: 0.0 });
-        let out = tick(&mut app);
-        // No GameStarted message should be produced
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
-    }
-
-    #[test]
-    fn select_helm_console_works() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::Helm });
-        let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::ConsoleSelected { .. })));
-    }
-
-    fn disconnect(app: &mut App, token: &str) {
-        app.world_mut()
-            .resource_mut::<Messages<PlayerDisconnected>>()
-            .write(PlayerDisconnected { token: token.into() });
-    }
-
-    #[test]
-    fn disconnect_of_captain_makes_captain_none() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
-        tick(&mut app);
-        disconnect(&mut app, "t1");
-        tick(&mut app);
-        // t1 was captain and disconnected, no one else is captain
-        push(&mut app, "t2", ClientMessage::StartGame);
-        let out = tick(&mut app);
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
-    }
-
-    #[test]
-    fn disconnect_releases_console_so_another_can_claim_it() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
-        tick(&mut app);
-        disconnect(&mut app, "t1");
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::SelectConsole { console: Console::CaptainChair });
-        let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::ConsoleSelected { .. })));
-    }
-
-    #[test]
-    fn disconnect_broadcasts_player_left() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        disconnect(&mut app, "t1");
-        let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::PlayerLeft { token } if token == "t1")));
-    }
-
-    #[test]
-    fn reconnect_broadcasts_player_joined_to_others() {
-        let mut app = test_app();
-        // t1 joins, disconnects (simulated by registering then re-identifying)
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
-        tick(&mut app);
-        // t1 reconnects — sends Identify with same token
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        let out = tick(&mut app);
-        // The reconnecting player gets Welcome
-        assert!(out.iter().any(|m| matches!(&m.target, Target::Token(t) if t == "t1")
-            && matches!(&m.msg, ServerMessage::Welcome { .. })));
-        // Other players get PlayerJoined
-        assert!(out.iter().any(|m| matches!(&m.target, Target::AllExcept(t) if t == "t1")
-            && matches!(&m.msg, ServerMessage::PlayerJoined { .. })));
-    }
-
-    #[test]
-    fn welcome_during_lobby_carries_world_none() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        let out = tick(&mut app);
-        let welcome = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::Welcome { state } => Some(state.clone()),
-            _ => None,
-        }).expect("expected Welcome");
-        assert!(welcome.world.is_none(), "Lobby Welcome should carry world: None");
-    }
-
-    #[test]
-    fn welcome_during_in_progress_carries_world_some() {
-        use crate::messages::{AsteroidInfo, WorldData};
-
-        let mut app = test_app();
-        // Inject a WorldResource so the lobby's Welcome builder can find it.
-        app.insert_resource(WorldResource(WorldData {
-            asteroids: vec![AsteroidInfo { x: 1.0, z: 2.0, radius: 2.0 }],
-        }));
-        // Drive the game to InProgress.
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::SelectConsole { console: Console::CaptainChair });
-        tick(&mut app);
-        push(&mut app, "t1", ClientMessage::StartGame);
-        tick(&mut app);
-
-        // A reconnect after InProgress should receive a Welcome carrying world.
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        let out = tick(&mut app);
-        let welcome = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::Welcome { state } => Some(state.clone()),
-            _ => None,
-        }).expect("expected Welcome on reconnect");
-        let world = welcome.world.expect("InProgress Welcome should carry world: Some");
-        assert_eq!(world.asteroids.len(), 1);
-        assert_eq!(world.asteroids[0].x, 1.0);
-    }
-
-    #[test]
-    fn non_captain_cannot_start_game() {
-        let mut app = test_app();
-        push(&mut app, "t1", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::Identify { token: "t2".into(), name: "Bob".into() });
-        tick(&mut app);
-        push(&mut app, "t2", ClientMessage::StartGame);
-        let out = tick(&mut app);
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::GameStarted)));
-        assert_eq!(app.world().resource::<CurrentPhase>().0, GamePhase::Lobby);
     }
 }

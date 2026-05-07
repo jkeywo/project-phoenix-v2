@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::lobby::{CurrentPhase, Sessions, WorldResource};
+use crate::lobby::{CurrentPhase, GameStateCache, WorldResource};
 use crate::messages::{Console, GamePhase, ViewDirection, ViewMode};
 use crate::radar;
 use crate::ship_state::ShipState;
@@ -238,15 +238,15 @@ fn toggle_lobby_items(
 }
 
 fn update_player_list(
-    sessions: Res<Sessions>,
+    cache: Res<GameStateCache>,
     mut query: Query<&mut Text, With<PlayerListText>>,
 ) {
-    if !sessions.is_changed() {
+    if !cache.is_changed() {
         return;
     }
     let Ok(mut text) = query.single_mut() else { return };
     let mut content = "Players:\n".to_string();
-    for p in sessions.0.players() {
+    for p in &cache.0.players {
         let consoles: String = {
             let names: Vec<String> = p.consoles.iter().map(|c| c.display_name().to_string()).collect();
             if names.is_empty() {
@@ -265,25 +265,23 @@ fn update_player_list(
 }
 
 fn update_view_screen_text(
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
+    cache: Res<GameStateCache>,
     mut query: Query<(&mut Text, &mut Visibility), With<ViewScreenText>>,
 ) {
-    if !sessions.is_changed() && !phase.is_changed() {
+    if !cache.is_changed() {
         return;
     }
     let Ok((mut text, mut vis)) = query.single_mut() else { return };
-    if phase.0 != GamePhase::InProgress {
+    if cache.0.phase != GamePhase::InProgress {
         *vis = Visibility::Hidden;
         return;
     }
     *vis = Visibility::Visible;
-    let players = sessions.0.players();
     let mut content = "VIEW SCREEN\n".to_string();
     for console in [Console::CaptainChair, Console::Helm] {
         let label = console.display_name();
-        let holder_name = sessions.0.console_holder(console)
-            .and_then(|token| players.iter().find(|p| p.token == token))
+        let holder_name = cache.0.players.iter()
+            .find(|p| p.consoles.contains(&console))
             .map(|p| p.name.as_str())
             .unwrap_or("—");
         content.push_str(&format!("{}: {}\n", label, holder_name));
@@ -406,14 +404,10 @@ fn draw_radar_overlay(
 
     // Asteroid pips, projected through pure radar math.
     if let Some(world) = world {
-        for asteroid in &world.0.asteroids {
-            if let Some((rx, ry, rr)) =
-                radar::project_asteroid(asteroid, ship.x, ship.z, ship.yaw)
-            {
-                let pos = Vec2::new(rx * RADAR_PIXEL_RADIUS, ry * RADAR_PIXEL_RADIUS);
-                let pix_radius = (rr * RADAR_PIXEL_RADIUS).max(2.0);
-                gizmos.circle_2d(pos, pix_radius, aster);
-            }
+        for (rx, ry, rr) in radar::radar_dots(&world.0.asteroids, ship.x, ship.z, ship.yaw) {
+            let pos = Vec2::new(rx * RADAR_PIXEL_RADIUS, ry * RADAR_PIXEL_RADIUS);
+            let pix_radius = (rr * RADAR_PIXEL_RADIUS).max(2.0);
+            gizmos.circle_2d(pos, pix_radius, aster);
         }
     }
 }

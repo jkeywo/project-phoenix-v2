@@ -81,10 +81,43 @@ Then open `http://localhost:8080` as the view screen and `http://localhost:8081`
 ### Tests
 
 ```bash
+# Rust unit tests (session, codec, lobby, physics, asteroids)
 cargo test
 ```
 
-Tests cover session management, serialization round-trips, lobby message routing, ship physics, and asteroid spawning. The renderer, WASM bridge, and HTML pages are tested manually.
+Tests cover session management, serialization round-trips, lobby message routing, ship physics, and asteroid spawning.
+
+#### Smoke tests (end-to-end, Playwright + Chromium)
+
+The smoke tests boot the real WASM build in a headless browser and exercise the full message flow — connect → lobby → game start → helm physics — using a `BroadcastChannel` shim instead of real WebRTC.
+
+```bash
+# 1. Build dist/ (required before running smoke tests)
+trunk build --release
+mkdir -p dist/client && cp client.html dist/client/index.html
+
+# 2. Install Playwright deps (one-time)
+cd tests/smoke
+npm install
+npx playwright install chromium
+
+# 3. Run
+npx playwright test
+
+# Optional: headed mode for debugging
+npx playwright test --headed
+```
+
+The smoke suite covers:
+| Spec | What it tests |
+|---|---|
+| `shim.spec.ts` | BroadcastChannel PeerJS shim (unit) |
+| `server-load.spec.ts` | WASM initialises without JS errors |
+| `client-connect.spec.ts` | Client page connects and receives Welcome |
+| `lobby.spec.ts` | Console selection broadcasts; only captain can start game |
+| `sim-state.spec.ts` | SimState broadcast; HelmInput changes ship position |
+
+CI runs the smoke suite automatically on every push and pull request via `.github/workflows/smoke-test.yml`.
 
 ### Production build
 

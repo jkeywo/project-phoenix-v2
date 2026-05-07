@@ -42,6 +42,8 @@ pub struct ShipPhysicsResult {
 pub struct ShipPhysicsConfig {
     /// Maximum forward speed: 50 units/s
     pub max_speed: f32,
+    /// Maximum reverse speed: half of forward (25 units/s)
+    pub max_reverse_speed: f32,
     /// Acceleration rate: 16.7 units/s² (3s to max speed)
     pub acceleration: f32,
     /// Deceleration rate: 50 units/s² (1s to stop)
@@ -53,12 +55,14 @@ pub struct ShipPhysicsConfig {
 impl ShipPhysicsConfig {
     /// Default config matching the spec:
     /// - Max speed: 50 units/s
+    /// - Max reverse speed: half of forward (25 units/s)
     /// - Acceleration: 16.7 units/s² (3s to max)
     /// - Deceleration: 50 units/s² (1s stop)
     /// - Max yaw rate: pi/2 rad/s (90 deg/s)
     pub fn new() -> Self {
         Self {
             max_speed: 50.0,
+            max_reverse_speed: 25.0, // half of max forward speed
             acceleration: 50.0 / 3.0, // ~16.7
             deceleration: 50.0,
             max_yaw_rate: std::f32::consts::PI / 2.0,
@@ -86,14 +90,20 @@ pub fn compute_physics(
     let steering = input.steering.clamp(-1.0, 1.0);
 
     // Compute new forward speed (signed: positive = forward, negative = reverse).
-    // - Non-zero thrust: drive speed toward (thrust * max_speed) at acceleration rate.
+    // - Non-zero thrust: drive speed toward (thrust * max_speed forward or max_reverse_speed reverse)
     // - Zero thrust: decelerate toward 0 from whichever side.
     let new_speed = if thrust.abs() > f32::EPSILON {
-        let target = thrust * config.max_speed;
+        let max_fwd = config.max_speed;
+        let max_rev = config.max_reverse_speed;
+        let target = if thrust > 0.0 {
+            thrust * max_fwd
+        } else {
+            thrust * max_rev
+        };
         let diff = target - state.forward_speed;
         let step = config.acceleration * dt;
         let delta = if diff.abs() <= step { diff } else { step.copysign(diff) };
-        (state.forward_speed + delta).clamp(-config.max_speed, config.max_speed)
+        (state.forward_speed + delta).clamp(-max_rev, max_fwd)
     } else {
         let decel = config.deceleration * dt;
         if state.forward_speed > 0.0 {
@@ -254,7 +264,7 @@ mod tests {
         let state = default_state();
         let input = ShipPhysicsInput { thrust: -1.0, steering: 0.0 };
         let result = compute_physics(state, input, 5.0, &config());
-        assert!(result.forward_speed <= -config().max_speed + 0.1);
+        assert!(result.forward_speed <= -config().max_reverse_speed + 0.1);
         // Facing -Z; reverse goes +Z
         assert!(result.z > 0.0);
     }
@@ -264,7 +274,7 @@ mod tests {
         let state = ShipPhysicsState { forward_speed: -100.0, ..default_state() };
         let input = ShipPhysicsInput { thrust: -1.0, steering: 0.0 };
         let result = compute_physics(state, input, 0.1, &config());
-        assert!(result.forward_speed >= -config().max_speed - f32::EPSILON);
+        assert!(result.forward_speed >= -config().max_reverse_speed - f32::EPSILON);
     }
 
     #[test]

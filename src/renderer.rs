@@ -1,10 +1,11 @@
 use bevy::prelude::*;
+use std::time::Instant;
 
 use crate::lobby::{CurrentPhase, Sessions};
 use crate::messages::GamePhase;
 use crate::ship_state::ShipState;
 
-// ── Marker Components ─────────────────────────────
+// ── Marker Components ─────────────────────────────────────────────
 
 #[derive(Component)]
 struct LobbyCamera;
@@ -20,25 +21,48 @@ struct LobbyItem;
 #[derive(Component)]
 struct PlayerListText;
 
-// ── Plugin ────────────�────��─�─────────────���────���─
+/// FPS counter text — rendered in the Bevy UI overlay.
+#[derive(Component)]
+struct FpsText;
+
+// ── FPS Tracking Resource ────────────────────────────────────────
+
+#[derive(Resource)]
+struct FpsTracker {
+    frame_count: u32,
+    last_update: Instant,
+    fps: u32,
+}
+
+impl FpsTracker {
+    fn new() -> Self {
+        Self {
+            frame_count: 0,
+            last_update: Instant::now(),
+            fps: 0,
+        }
+    }
+}
+
+// ── Plugin ────────────────────────────────────────────────────────
 
 pub struct RendererPlugin;
 
 impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup).add_systems(
-            Update,
-            (
+        app.insert_resource(FpsTracker::new())
+            .add_systems(Startup, setup)
+            .add_systems(Update, (
+                update_fps_counter,
                 toggle_cameras,
                 toggle_lobby_items,
                 update_player_list,
                 follow_camera,
-            ),
-        );
+            ));
     }
 }
 
-// ── Setup ────────�─────���────�────���────���────��─���────���──
+// ── Setup ─────────────────────────────────────────────────────────
 
 fn setup(
     mut commands: Commands,
@@ -102,9 +126,42 @@ fn setup(
 
     // Red Alert overlay is now handled in server.html via a CSS vignette,
     // toggled by SimState messages routed through JS.
+
+    // ── FPS counter (top-right, Bevy UI) ─────────────────────────────
+    commands.spawn((
+        FpsText,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(12.0),
+            bottom: Val::Px(12.0),
+            ..default()
+        },
+        Text::new("-- fps"),
+        TextFont { font_size: 13.0, ..default() },
+        TextColor(Color::srgb(0.8, 0.8, 0.95)),
+    ));
 }
 
-// ── Systems ─────���──���────���────���────�──���────���────���────
+// ── Systems ───────────────────────────────────────────────────────
+
+fn update_fps_counter(
+    mut tracker: ResMut<FpsTracker>,
+    mut fps_query: Query<&mut Text, With<FpsText>>,
+) {
+    tracker.frame_count += 1;
+    let now = Instant::now();
+    let elapsed = (now - tracker.last_update).as_secs_f64();
+
+    if elapsed >= 0.5 {
+        tracker.fps = (tracker.frame_count as f64 / elapsed).round() as u32;
+        tracker.frame_count = 0;
+        tracker.last_update = now;
+
+        if let Ok(mut text) = fps_query.single_mut() {
+            **text = format!("{} fps", tracker.fps);
+        }
+    }
+}
 
 fn toggle_cameras(
     phase: Res<CurrentPhase>,
@@ -147,7 +204,7 @@ fn update_player_list(
     let mut content = "Players:\n".to_string();
     for p in sessions.0.players() {
         let consoles: String = {
-            let names: Vec<String> = p.consoles.iter().map(|c| format!("{c:?}")).collect();
+            let names: Vec<String> = p.consoles.iter().map(|c| c.display_name().to_string()).collect();
             if names.is_empty() {
                 String::new()
             } else {
@@ -157,7 +214,7 @@ fn update_player_list(
         if consoles.is_empty() {
             content.push_str(&format!("• {}\n", p.name));
         } else {
-            content.push_str(&format!("• {} - {}\n", p.name, consoles));
+            content.push_str(&format!("• {} — {}\n", p.name, consoles));
         }
     }
     **text = content;

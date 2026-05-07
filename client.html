@@ -241,11 +241,31 @@
     // ── Rendering ───────────────────────────────────────────────
 
     const CONSOLES = ['CaptainChair', 'Helm'];
-    const CONSOLE_LABEL = { CaptainChair: 'Captain', Helm: 'Helm' };
+    const CONSOLE_LABEL = {
+      CaptainChair: 'Captain's Chair',
+      Helm: 'Helm',
+    };
+
+    // Defer re-render so rapid server messages don't steal pointer events.
+    let _renderFrame = null;
+    function scheduleRender() {
+      if (_renderFrame !== null) return;
+      _renderFrame = requestAnimationFrame(() => {
+        _renderFrame = null;
+        render(state);
+      });
+    }
 
     function render(s) {
       const inGame = s.phase === 'InProgress';
-      $('phase-title').textContent = inGame ? 'In Progress' : 'Lobby';
+      // Show the active console name in the header, or 'Lobby' / 'Bridge'
+      if (!inGame) {
+        $('phase-title').textContent = 'Lobby';
+      } else if (activeConsole) {
+        $('phase-title').textContent = CONSOLE_LABEL[activeConsole] || activeConsole;
+      } else {
+        $('phase-title').textContent = 'Bridge';
+      }
       $('lobby-ui').className = inGame ? '' : 'active';
 
       // Reconcile activeConsole with current consoles list.
@@ -275,18 +295,39 @@
 
     function renderTabs(s, inGame) {
       const bar = $('console-tabs');
-      bar.innerHTML = '';
       const mine = myConsoles(s);
       if (!inGame || mine.length < 2) {
         bar.classList.remove('active');
+        bar.innerHTML = '';
         return;
       }
       bar.classList.add('active');
+
+      // Reuse existing buttons instead of recreating every frame.
+      // Only rebuild when the console set actually changes.
+      const existing = Array.from(bar.querySelectorAll('button'));
+      if (existing.length === mine.length) {
+        let allMatch = true;
+        for (let i = 0; i < mine.length; i++) {
+          if (existing[i].dataset.console !== mine[i]) { allMatch = false; break; }
+        }
+        if (allMatch) {
+          // Just update active class
+          for (let i = 0; i < mine.length; i++) {
+            if (mine[i] === activeConsole) existing[i].classList.add('active');
+            else existing[i].classList.remove('active');
+          }
+          return;
+        }
+      }
+
+      bar.innerHTML = '';
       for (const c of mine) {
         const btn = document.createElement('button');
+        btn.dataset.console = c;
         btn.textContent = CONSOLE_LABEL[c] || c;
         if (c === activeConsole) btn.classList.add('active');
-        btn.onclick = () => { activeConsole = c; render(state); };
+        btn.addEventListener('click', () => { activeConsole = c; scheduleRender(); });
         bar.appendChild(btn);
       }
     }
@@ -539,13 +580,21 @@
         case 'GameStarted':
           state.phase = 'InProgress';
           break;
-        case 'SimState':
-          state.redAlert = msg.data.snapshot.red_alert;
+        case 'SimState': {
+          const ra = msg.data.snapshot.red_alert;
+          // Only update the red-alert overlay class � don't re-render the entire page.
+          // SimState is broadcast at 10Hz and would steal pointer events from tab clicks.
+          const container = $('console-container');
+          if (ra) container.classList.add('red-alert');
+          else container.classList.remove('red-alert');
+          // De-duplicate: only update state when it actually changes
+          if (state.redAlert !== ra) state.redAlert = ra;
           break;
+        }
         default:
           return; // unknown — skip re-render
       }
-      render(state);
+      scheduleRender();
     }
 
     // ── PeerJS connection ───────────────────────────────────────

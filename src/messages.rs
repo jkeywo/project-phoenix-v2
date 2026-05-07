@@ -6,6 +6,16 @@ pub enum Console {
     Helm,
 }
 
+impl Console {
+    /// Human-readable name suitable for display in UI.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Console::CaptainChair => "Captain's Chair",
+            Console::Helm => "Helm",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum GamePhase {
     Lobby,

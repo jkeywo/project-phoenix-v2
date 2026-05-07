@@ -66,8 +66,8 @@
     #wasm-host { position: fixed; inset: 0; z-index: 0; }
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     /* Lift JS UI above the Bevy canvas. */
-    #console-container, #top-bar,
-    #red-alert-overlay { position: relative; z-index: 1; }
+    #console-container { position: relative; z-index: 1; }
+    #red-alert-overlay { position: fixed; z-index: 15; }
     #top-bar { z-index: 20; }
   </style>
 </head>

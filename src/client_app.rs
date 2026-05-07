@@ -17,7 +17,7 @@ use crate::client_lobby::{
     engage_message, message_for_slot_click, ConsoleSlot, LobbyState, LobbyView, LocalPlayerToken,
 };
 use crate::client_sim::{
-    message_for_direction_press, red_alert_toggle_message, ClientSimState,
+    message_for_direction_press, on_screen_message, red_alert_toggle_message, ClientSimState,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, ViewDirection};
 
@@ -95,6 +95,16 @@ struct HelmKnob;
 #[derive(Component)]
 struct HelmReadout;
 
+/// Marks the radar panel container. Its `ComputedNode` size and on-screen
+/// position drive the gizmos that draw the radar visuals.
+#[derive(Component)]
+struct RadarPanel;
+
+/// Marks the "On Screen" button on the helm console; pressing it sends
+/// `SetView { mode: Radar }` so the server viewscreen mirrors the radar.
+#[derive(Component)]
+struct OnScreenButton;
+
 // ── Plugin ─────────────────────────────────────────────────────────
 
 pub struct ClientAppPlugin;
@@ -131,6 +141,8 @@ impl Plugin for ClientAppPlugin {
                         helm_resend_tick,
                         refresh_helm_knob_position,
                         refresh_helm_readout,
+                        handle_on_screen_button_press,
+                        draw_helm_radar,
                     ),
                 ),
             );
@@ -595,67 +607,135 @@ fn helm_max_radius() -> f32 {
 }
 
 fn setup_helm_ui(mut commands: Commands) {
-    let pad_entity = commands
+    let mut pad_entity: Option<Entity> = None;
+
+    commands
         .spawn((
             HelmPanel,
             Node {
                 position_type: PositionType::Absolute,
                 left:   Val::Px(16.0),
                 bottom: Val::Px(16.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::FlexStart,
-                row_gap: Val::Px(8.0),
+                right:  Val::Px(16.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::FlexEnd,
+                justify_content: JustifyContent::SpaceBetween,
+                column_gap: Val::Px(16.0),
                 ..default()
             },
             Visibility::Hidden,
         ))
         .with_children(|panel| {
-            panel.spawn((
-                HelmReadout,
-                Text::new("Thrust 0% / Steering 0%"),
-                TextFont { font_size: 14.0, ..default() },
-                TextColor(Color::srgb(0.6, 0.7, 0.73)),
-            ));
-
-            // Pad container — observes pointer drag events.
+            // ── Left column: joystick + readout ─────────────────────
             panel
                 .spawn((
-                    HelmPad,
-                    // `Button` opts the node into the picking backend so
-                    // observers fire reliably on drag start/move/end.
-                    Button,
                     Node {
-                        width:  Val::Px(HELM_PAD_SIZE),
-                        height: Val::Px(HELM_PAD_SIZE),
-                        position_type: PositionType::Relative,
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::FlexStart,
+                        row_gap: Val::Px(8.0),
                         ..default()
                     },
-                    BackgroundColor(HELM_PAD_BG),
                 ))
-                .with_children(|pad| {
-                    pad.spawn((
-                        HelmKnob,
+                .with_children(|col| {
+                    col.spawn((
+                        HelmReadout,
+                        Text::new("Thrust 0% / Steering 0%"),
+                        TextFont { font_size: 14.0, ..default() },
+                        TextColor(Color::srgb(0.6, 0.7, 0.73)),
+                    ));
+
+                    let pad = col
+                        .spawn((
+                            HelmPad,
+                            // `Button` opts the node into the picking
+                            // backend so observers fire reliably on drag
+                            // start/move/end.
+                            Button,
+                            Node {
+                                width:  Val::Px(HELM_PAD_SIZE),
+                                height: Val::Px(HELM_PAD_SIZE),
+                                position_type: PositionType::Relative,
+                                ..default()
+                            },
+                            BackgroundColor(HELM_PAD_BG),
+                        ))
+                        .with_children(|pad| {
+                            pad.spawn((
+                                HelmKnob,
+                                Node {
+                                    width:  Val::Px(HELM_KNOB_RADIUS * 2.0),
+                                    height: Val::Px(HELM_KNOB_RADIUS * 2.0),
+                                    position_type: PositionType::Absolute,
+                                    // Centre the knob: anchor by top-left
+                                    // then offset by -radius so
+                                    // (left,top) == centre.
+                                    left: Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
+                                    top:  Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
+                                    ..default()
+                                },
+                                BackgroundColor(HELM_KNOB_BG_IDLE),
+                            ));
+                        })
+                        .id();
+                    pad_entity = Some(pad);
+                });
+
+            // ── Right column: radar + On Screen button ──────────────
+            panel
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(8.0),
+                        ..default()
+                    },
+                ))
+                .with_children(|col| {
+                    col.spawn((
+                        RadarPanel,
                         Node {
-                            width:  Val::Px(HELM_KNOB_RADIUS * 2.0),
-                            height: Val::Px(HELM_KNOB_RADIUS * 2.0),
-                            position_type: PositionType::Absolute,
-                            // Centre the knob: anchor by top-left then
-                            // offset by -radius so (left,top) == centre.
-                            left: Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
-                            top:  Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
+                            // 90% of the narrowest viewport dimension,
+                            // matching the JS contract from the PRD.
+                            width:  Val::VMin(90.0),
+                            height: Val::VMin(90.0),
+                            // Cap radar at twice the joystick pad so it
+                            // doesn't dominate large landscape windows.
+                            max_width:  Val::Px(HELM_PAD_SIZE * 2.0),
+                            max_height: Val::Px(HELM_PAD_SIZE * 2.0),
                             ..default()
                         },
-                        BackgroundColor(HELM_KNOB_BG_IDLE),
+                        // Transparent — the gizmos overlay does the
+                        // drawing. A faint border helps with debug
+                        // alignment but otherwise is invisible.
+                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.20)),
                     ));
+
+                    col.spawn((
+                        OnScreenButton,
+                        Button,
+                        Node {
+                            padding: UiRect::all(Val::Px(10.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.13, 0.13, 0.27)),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("On Screen"),
+                            TextFont { font_size: 16.0, ..default() },
+                            TextColor(Color::srgb(0.93, 0.93, 1.0)),
+                        ));
+                    });
                 });
-        })
-        .id();
+        });
 
     // Pointer-event observers on the pad. Each handler updates the shared
     // `HelmJoystickState` resource and emits an `OutboundClientMessage`.
-    commands.entity(pad_entity).observe(on_helm_drag_start);
-    commands.entity(pad_entity).observe(on_helm_drag);
-    commands.entity(pad_entity).observe(on_helm_drag_end);
+    if let Some(pad) = pad_entity {
+        commands.entity(pad).observe(on_helm_drag_start);
+        commands.entity(pad).observe(on_helm_drag);
+        commands.entity(pad).observe(on_helm_drag_end);
+    }
 }
 
 fn toggle_helm_panel_visibility(
@@ -769,4 +849,97 @@ fn refresh_helm_readout(
     for mut text in readout.iter_mut() {
         **text = format!("Thrust {thrust_pct}% / Steering {steering_pct}%");
     }
+}
+
+fn handle_on_screen_button_press(
+    mut interactions: Query<
+        &Interaction,
+        (Changed<Interaction>, With<Button>, With<OnScreenButton>),
+    >,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(on_screen_message()));
+        }
+    }
+}
+
+// ── Helm radar drawing ─────────────────────────────────────────────
+
+/// Outer ring colour for the helm radar.
+const RADAR_OUTER_RING_COLOR: Color = Color::srgb(0.55, 0.70, 1.0);
+/// Mid ring colour (drawn at `RADAR_MID_RING / RADAR_RANGE` of the outer
+/// radius).
+const RADAR_MID_RING_COLOR:   Color = Color::srgb(0.30, 0.40, 0.65);
+/// Asteroid blip colour.
+const RADAR_ASTEROID_COLOR:   Color = Color::srgb(0.85, 0.75, 0.45);
+/// Ship triangle colour (always points "up" since the radar is
+/// ship-aligned).
+const RADAR_SHIP_COLOR:       Color = Color::srgb(0.95, 0.95, 1.0);
+
+/// Reads the radar panel's on-screen rect and draws rings, asteroids and
+/// ship via `Gizmos` in the Camera2d's world space. Skipped when the
+/// helm panel is hidden so we don't paint stale visuals.
+fn draw_helm_radar(
+    mut gizmos: Gizmos,
+    panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<RadarPanel>>,
+    helm_panel: Query<&Visibility, With<HelmPanel>>,
+    sim: Res<ClientSimState>,
+    windows: Query<&Window>,
+) {
+    // Only draw while the helm panel is shown.
+    if !helm_panel
+        .iter()
+        .any(|v| matches!(v, Visibility::Visible | Visibility::Inherited))
+    {
+        return;
+    }
+    let Ok((node, gt, view_vis)) = panel.single() else { return };
+    if !view_vis.get() {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let viewport_w = window.width();
+    let viewport_h = window.height();
+
+    // UI node positions are in logical screen pixels with origin at the
+    // top-left and +y down; the Camera2d default is centred on origin
+    // with +y up. Convert centre + size accordingly.
+    let node_centre_screen = gt.translation().truncate();
+    let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
+    let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
+    let centre = Vec2::new(centre_world_x, centre_world_y);
+
+    let size = node.size();
+    let radius = size.x.min(size.y) * 0.5;
+    if radius <= 0.0 {
+        return;
+    }
+
+    // Outer + mid rings.
+    gizmos.circle_2d(centre, radius, RADAR_OUTER_RING_COLOR);
+    let mid_ratio = crate::radar::RADAR_MID_RING / crate::radar::RADAR_RANGE;
+    gizmos.circle_2d(centre, radius * mid_ratio, RADAR_MID_RING_COLOR);
+
+    // Asteroids.
+    for asteroid in &sim.world.asteroids {
+        if let Some((rx, ry, rr)) =
+            crate::radar::project_asteroid(asteroid, sim.ship_x, sim.ship_z, sim.ship_yaw)
+        {
+            let pos = centre + Vec2::new(rx * radius, ry * radius);
+            let pix_radius = (rr * radius).max(2.0);
+            gizmos.circle_2d(pos, pix_radius, RADAR_ASTEROID_COLOR);
+        }
+    }
+
+    // Ship triangle, always pointing "up" (radar is ship-aligned).
+    let nose_len  = radius * 0.10;
+    let half_base = radius * 0.06;
+    let nose  = centre + Vec2::new(0.0,  nose_len);
+    let left  = centre + Vec2::new(-half_base, -nose_len * 0.6);
+    let right = centre + Vec2::new( half_base, -nose_len * 0.6);
+    gizmos.line_2d(nose, left,  RADAR_SHIP_COLOR);
+    gizmos.line_2d(left, right, RADAR_SHIP_COLOR);
+    gizmos.line_2d(right, nose, RADAR_SHIP_COLOR);
 }

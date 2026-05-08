@@ -1,0 +1,86 @@
+# Wiki Index
+
+Catalog of every page in the Project Phoenix wiki. Each entry: link · one-line summary.
+
+See [SCHEMA.md](./SCHEMA.md) for conventions and [log.md](./log.md) for the change history.
+
+## Start here
+
+- **[Project Overview](./concepts/project-overview.md)** — What Project Phoenix is in one page.
+- **[Architecture](./concepts/architecture.md)** — Star topology, two HTML pages, one WASM binary.
+- **[Game Loop](./concepts/game-loop.md)** — Lobby → In-Progress, message flow, tick rates.
+
+## Entities
+
+People, things, and game objects.
+
+- **[Player](./entities/player.md)** — A connected human, identified by session token.
+- **[Session](./entities/session.md)** — Server-side player record, survives reconnects.
+- **[Console](./entities/console.md)** — A role on the bridge (one seat each).
+- **[Captain Console](./entities/captain-console.md)** — Red Alert + View selector. Game-start authority.
+- **[Helm Console](./entities/helm-console.md)** — Thrust + steering. The only console that moves the ship.
+- **[Ship](./entities/ship.md)** — The player-controlled vessel. Capsule collider, XZ plane, Y-up.
+- **[Asteroid](./entities/asteroid.md)** — Static obstacle in the field. Sphere collider.
+- **[World Data](./entities/world-data.md)** — Fixed asteroid layout for a session. Deterministic.
+- **[Bridge Crew Stations (planned)](./entities/bridge-crew-stations-planned.md)** — Weapons, Engineering, Science, Comms.
+
+## Concepts
+
+Architecture, patterns, processes.
+
+- **[Project Overview](./concepts/project-overview.md)** — One-page elevator pitch.
+- **[Architecture](./concepts/architecture.md)** — Layers, processes, where state lives.
+- **[Networking](./concepts/networking.md)** — PeerJS, WebRTC, star topology, session tokens.
+- **[Message Flow](./concepts/message-flow.md)** — Phone → JS → WASM → Bevy → JS → broadcast.
+- **[Codec Seam](./concepts/codec-seam.md)** — Why `serde_json` lives in exactly one module.
+- **[Game Phases](./concepts/game-phases.md)** — Lobby vs In-Progress; transition rules.
+- **[Game Loop](./concepts/game-loop.md)** — Tick rates, helm input @10 Hz, sim broadcast @10 Hz.
+- **[Ship Physics](./concepts/ship-physics.md)** — Pure controller, accel/decel curves, yaw model.
+- **[Asteroid Field](./concepts/asteroid-field.md)** — Seeded generator, clear zone, deterministic layout.
+- **[Radar Projection](./concepts/radar-projection.md)** — Shared pure iterator, server + helm reuse.
+- **[View Modes](./concepts/view-modes.md)** — Camera (Fore/Aft/Port/Starboard) vs Radar.
+- **[View-Model Pattern](./concepts/view-model-pattern.md)** — Pure derived snapshots for renderers.
+- **[Console Plugin Pattern](./concepts/console-plugin-pattern.md)** — One Bevy plugin per console.
+- **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.
+- **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
+
+## Sources
+
+Faithful summaries of external artifacts. One page per source.
+
+### Product Requirements (GitHub issues)
+
+- **[PRD #1 — Browser-Based Bridge Simulator](./sources/prd-001-bridge-simulator.md)** — Closed. The PoC: lobby, captain, red alert, rotating cube.
+- **[PRD #17 — Mobile UX, Canvas Resize, Connection Status](./sources/prd-017-mobile-ux-and-status.md)** — Closed. Fullscreen, top-right status bar, Bevy node UI.
+- **[PRD #22 — Helm and Game World](./sources/prd-022-helm-and-game-world.md)** — Closed. Helm console, ship physics, asteroid field, collisions.
+- **[PRD #36 — Captain View Selector](./sources/prd-036-captain-view-selector.md)** — Closed. Fore/aft/port/starboard hull cameras.
+- **[PRD #51 — Smoke Test Harness](./sources/prd-051-smoke-test-harness.md)** — Closed. Playwright + BroadcastChannel PeerJS shim.
+- **[PRD #66 — Weapons & Engineering Consoles](./sources/prd-066-weapons-and-engineering.md)** — Open. Phasers, hull integrity, repair loop.
+
+### Design drafts (`docs/`)
+
+- **[Draft 1 — Entity Config Files](./sources/design-01-entity-config-files.md)** — Asteroid + Ship as data-driven entities.
+- **[Draft 2 — Game Map](./sources/design-02-game-map.md)** — Solar systems, planets, asteroid fields by file.
+- **[Draft 3 — Science Console](./sources/design-03-science-console.md)** — Long-range radar, impulse, system chart.
+- **[Draft 4 — Combat Update](./sources/design-04-combat-update.md)** — Phaser banks, torpedoes, four-quadrant shields.
+- **[Draft 5 — Ship's Power](./sources/design-05-ships-power.md)** — Engineering 6-point distribution, aux battery.
+- **[Draft 6 — Space Stations](./sources/design-06-space-stations.md)** — *TODO in source.*
+- **[Draft 7 — Scenario File](./sources/design-07-scenario-file.md)** — *TODO in source.*
+- **[Draft 8 — Comms Console](./sources/design-08-comms-console.md)** — *TODO in source.*
+- **[Architecture Improvement Notes](./sources/notes-architecture-improvements.md)** — Per-console message subscriptions.
+
+### Project documents
+
+- **[README.md](./sources/repo-readme.md)** — User-facing overview.
+- **[AGENTS.md](./sources/repo-agents.md)** — Agent operating manual.
+- **[CONTEXT.md](./sources/repo-context.md)** — Domain vocabulary.
+
+## Roadmap
+
+Synthesis of where the project is going.
+
+- **[Roadmap Overview](./roadmap/overview.md)** — Shipped vs in-flight vs drafted.
+- **[Console Expansion](./roadmap/console-expansion.md)** — Path from 2 consoles to 6.
+- **[Combat & Damage](./roadmap/combat-and-damage.md)** — Hull, shields, phasers, torpedoes.
+- **[Data-Driven Content](./roadmap/data-driven-content.md)** — Entity files, scenarios, system maps.
+- **[Open Architectural Questions](./roadmap/open-architectural-questions.md)** — Per-console messaging, scenarios.

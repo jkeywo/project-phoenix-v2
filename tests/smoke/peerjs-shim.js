@@ -103,9 +103,13 @@
 
   // ── Peer shim ─────────────────────────────────────────────────────────────
 
-  function Peer(id) {
+  function Peer(id, _opts) {
     Emitter.call(this);
-    this.id = id || genId();
+    // PeerJS supports both new Peer(id, opts) and new Peer(opts).
+    // When the first argument is an object it is the options bag, not an ID.
+    // Using an object as a Map key breaks BroadcastChannel registry lookups
+    // because structured-clone produces a new reference on the receiving side.
+    this.id = (typeof id === 'string' && id) ? id : genId();
     this._conns = new Map(); // remoteId -> Connection
     registry.set(this.id, this);
     getChannel(); // ensure BroadcastChannel is listening

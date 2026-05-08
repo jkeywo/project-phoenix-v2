@@ -160,6 +160,34 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    #[test]
+    fn client_select_console_weapons() {
+        let msg = ClientMessage::SelectConsole { console: Console::Weapons };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_select_console_engineering() {
+        let msg = ClientMessage::SelectConsole { console: Console::Engineering };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_console_selected_weapons() {
+        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Weapons] };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_console_selected_engineering() {
+        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Engineering] };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
     // ServerMessage round-trips
 
     #[test]

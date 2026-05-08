@@ -109,7 +109,7 @@ impl SessionManager {
             .filter(|p| p.connected)
             .flat_map(|p| p.consoles.clone())
             .collect();
-        [Console::CaptainChair, Console::Helm]
+        [Console::CaptainChair, Console::Helm, Console::Weapons, Console::Engineering]
             .into_iter()
             .filter(|c| !taken.contains(c))
             .collect()
@@ -241,9 +241,11 @@ mod tests {
         sm.register("t2".into(), "Bob".into()).unwrap();
         sm.toggle_console("t1", Console::CaptainChair).unwrap();
         sm.toggle_console("t2", Console::Helm).unwrap();
-        assert!(sm.available_consoles().is_empty());
+        // CaptainChair and Helm are taken; Weapons and Engineering remain free
+        assert!(!sm.available_consoles().contains(&Console::CaptainChair));
+        assert!(!sm.available_consoles().contains(&Console::Helm));
         sm.disconnect("t1");
-        assert_eq!(sm.available_consoles(), vec![Console::CaptainChair]);
+        assert!(sm.available_consoles().contains(&Console::CaptainChair));
     }
 
     #[test]
@@ -360,5 +362,42 @@ mod tests {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         assert!(!sm.player_has_console("t1", Console::CaptainChair));
+    }
+
+    #[test]
+    fn weapons_console_can_be_selected_and_is_available_when_free() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(sm.available_consoles().contains(&Console::Weapons));
+        sm.toggle_console("t1", Console::Weapons).unwrap();
+        assert!(!sm.available_consoles().contains(&Console::Weapons));
+    }
+
+    #[test]
+    fn engineering_console_can_be_selected_and_is_available_when_free() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(sm.available_consoles().contains(&Console::Engineering));
+        sm.toggle_console("t1", Console::Engineering).unwrap();
+        assert!(!sm.available_consoles().contains(&Console::Engineering));
+    }
+
+    #[test]
+    fn weapons_console_becomes_available_on_disconnect() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::Weapons).unwrap();
+        sm.disconnect("t1");
+        assert!(sm.available_consoles().contains(&Console::Weapons));
+    }
+
+    #[test]
+    fn engineering_console_restored_on_reconnect_if_free() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::Engineering).unwrap();
+        sm.disconnect("t1");
+        sm.reconnect("t1");
+        assert!(sm.players()[0].consoles.contains(&Console::Engineering));
     }
 }

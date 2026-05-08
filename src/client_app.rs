@@ -646,30 +646,40 @@ fn setup_helm_ui(mut commands: Commands) {
         .spawn((
             HelmPanel,
             Node {
+                // Cover the full viewport so the radar panel fills the screen.
                 position_type: PositionType::Absolute,
-                left:   Val::Px(16.0),
-                bottom: Val::Px(16.0),
-                right:  Val::Px(16.0),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::FlexEnd,
-                justify_content: JustifyContent::SpaceBetween,
-                column_gap: Val::Px(16.0),
+                left:   Val::Px(0.0),
+                top:    Val::Px(0.0),
+                right:  Val::Px(0.0),
+                bottom: Val::Px(0.0),
                 ..default()
             },
             Visibility::Hidden,
         ))
         .with_children(|panel| {
-            // ── Left column: joystick + readout ─────────────────────
+            // ── Radar fills the entire screen ────────────────────────
+            // Gizmos draw in Camera2d world-space anchored to this node's
+            // centre; no BackgroundColor so the gizmos are not occluded.
+            panel.spawn((
+                RadarPanel,
+                Node {
+                    width:  Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+            ));
+
+            // ── Joystick: absolute bottom-left ───────────────────────
             panel
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::FlexStart,
-                        row_gap: Val::Px(8.0),
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                ))
+                .spawn(Node {
+                    position_type: PositionType::Absolute,
+                    left:   Val::Px(16.0),
+                    bottom: Val::Px(16.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::FlexStart,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                })
                 .with_children(|col| {
                     col.spawn((
                         HelmReadout,
@@ -681,9 +691,6 @@ fn setup_helm_ui(mut commands: Commands) {
                     let pad = col
                         .spawn((
                             HelmPad,
-                            // `Button` opts the node into the picking
-                            // backend so observers fire reliably on drag
-                            // start/move/end.
                             Button,
                             Node {
                                 width:  Val::Px(HELM_PAD_SIZE),
@@ -700,9 +707,6 @@ fn setup_helm_ui(mut commands: Commands) {
                                     width:  Val::Px(HELM_KNOB_RADIUS * 2.0),
                                     height: Val::Px(HELM_KNOB_RADIUS * 2.0),
                                     position_type: PositionType::Absolute,
-                                    // Centre the knob: anchor by top-left
-                                    // then offset by -radius so
-                                    // (left,top) == centre.
                                     left: Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
                                     top:  Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
                                     ..default()
@@ -714,38 +718,18 @@ fn setup_helm_ui(mut commands: Commands) {
                     pad_entity = Some(pad);
                 });
 
-            // ── Right column: radar + On Screen button ──────────────
+            // ── On Screen + Repair: absolute bottom-right ────────────
             panel
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        row_gap: Val::Px(8.0),
-                        flex_grow: 1.0,
-                        flex_shrink: 1.0,
-                        min_width: Val::Px(0.0),
-                        ..default()
-                    },
-                ))
+                .spawn(Node {
+                    position_type: PositionType::Absolute,
+                    right:  Val::Px(16.0),
+                    bottom: Val::Px(16.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::FlexEnd,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                })
                 .with_children(|col| {
-                    col.spawn((
-                        RadarPanel,
-                        Node {
-                            // Fill the right column's allocated width and
-                            // maintain a 1:1 square. Capped at the joystick
-                            // pad diameter so it doesn't dominate wide screens.
-                            width:  Val::Percent(100.0),
-                            aspect_ratio: Some(1.0),
-                            max_width:  Val::Px(HELM_PAD_SIZE * 2.0),
-                            max_height: Val::Px(HELM_PAD_SIZE * 2.0),
-                            ..default()
-                        },
-                        // No BackgroundColor — the gizmos overlay does the
-                        // drawing in Camera2d world space. A solid background
-                        // here would occlude the gizmos (UI renders after the
-                        // world/gizmo pass).
-                    ));
-
                     col.spawn((
                         OnScreenButton,
                         Button,
@@ -783,8 +767,7 @@ fn setup_helm_ui(mut commands: Commands) {
                 });
         });
 
-    // Pointer-event observers on the pad. Each handler updates the shared
-    // `HelmJoystickState` resource and emits an `OutboundClientMessage`.
+    // Pointer-event observers on the pad.
     if let Some(pad) = pad_entity {
         commands.entity(pad).observe(on_helm_drag_start);
         commands.entity(pad).observe(on_helm_drag);
@@ -1008,8 +991,8 @@ fn handle_repair_button_press(
 ) {
     for (interaction, _bg) in interactions.iter_mut() {
         if *interaction == Interaction::Pressed {
-            // Ignore press if repair is in progress or penalty is active.
-            if sim.repair_in_progress || sim.repair_penalty || sim.repair_cooldown_secs > 0.0 {
+            // Suppress if already repairing or under penalty cooldown.
+            if sim.repair_in_progress || sim.repair_penalty {
                 continue;
             }
             outbound.write(OutboundClientMessage(crate::client_sim::repair_message()));
@@ -1018,16 +1001,25 @@ fn handle_repair_button_press(
 }
 
 fn refresh_repair_button(
+    time: Res<Time>,
     sim: Res<ClientSimState>,
     mut button: Query<&mut BackgroundColor, (With<RepairButton>, Without<RepairButtonLabel>)>,
     mut label: Query<(&mut Text, &mut TextColor), With<RepairButtonLabel>>,
 ) {
-    if !sim.is_changed() {
+    // Always update while penalized (drives flash animation); otherwise
+    // skip when nothing has changed to avoid unnecessary UI work.
+    if !sim.is_changed() && !sim.repair_penalty {
         return;
     }
     for mut bg in button.iter_mut() {
         *bg = if sim.repair_penalty {
-            BackgroundColor(Color::srgb(0.40, 0.05, 0.05))
+            // Flash between bright red and dark red at ~3 Hz.
+            let flash = (time.elapsed_secs() * 3.0).floor() as i32 % 2 == 0;
+            if flash {
+                BackgroundColor(Color::srgb(0.70, 0.05, 0.05))
+            } else {
+                BackgroundColor(Color::srgb(0.20, 0.02, 0.02))
+            }
         } else if sim.repair_in_progress {
             BackgroundColor(Color::srgb(0.05, 0.30, 0.05))
         } else {

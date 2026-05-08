@@ -444,7 +444,7 @@ fn draw_beam_vfx(
         return;
     };
 
-    let origin = Vec3::new(ship.x, 0.0, ship.z);
+    let origin = Vec3::new(ship.x, -1.5, ship.z);
     let target = Vec3::new(asteroid.x, 0.0, asteroid.z);
 
     // Core bright beam line

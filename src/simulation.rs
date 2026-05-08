@@ -161,6 +161,22 @@ impl Default for BreakdownQueueResource {
     }
 }
 
+/// Remembers the most recent helm input so the 10 Hz physics tick can
+/// keep applying it even when no new client message has arrived that tick.
+#[derive(Resource, Default)]
+struct LastHelmInput {
+    thrust: f32,
+    steering: f32,
+}
+
+/// Prevents `handle_collisions` from applying damage every frame while the
+/// ship is in contact. After damage is applied once, a 1-second cooldown
+/// suppresses further hits until the ship clears the obstacle.
+#[derive(Resource, Default)]
+struct CollisionCooldown {
+    remaining_secs: f32,
+}
+
 impl PhaserCooldown {
     pub fn is_active(&self) -> bool {
         self.remaining_secs > 0.0
@@ -192,6 +208,8 @@ impl Plugin for SimulationPlugin {
             .init_resource::<ActiveRepair>()
             .init_resource::<RepairPenalties>()
             .init_resource::<BreakdownQueueResource>()
+            .init_resource::<LastHelmInput>()
+            .init_resource::<CollisionCooldown>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -310,6 +328,7 @@ fn process_helm_inputs(
     sessions: Res<Sessions>,
     mut ship: ResMut<ShipState>,
     phase: Res<CurrentPhase>,
+    mut last_input: ResMut<LastHelmInput>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -324,18 +343,16 @@ fn process_helm_inputs(
         return;
     }
 
-    // Collect helm inputs; default to zero so the ship decelerates when no
-    // messages arrive (joystick released or between network packets).
-    let mut thrust: f32 = 0.0;
-    let mut steering: f32 = 0.0;
-
+    // Update the stored input from any messages that arrived this tick.
+    // If none arrived, last_input retains its previous values so a steady
+    // joystick position keeps applying thrust rather than decelerating.
     for ev in reader.read() {
         if ev.token != helm_token.unwrap() {
             continue;
         }
         if let ClientMessage::HelmInput { thrust: t, steering: s } = ev.msg {
-            thrust = t;
-            steering = s;
+            last_input.thrust = t;
+            last_input.steering = s;
         }
     }
 
@@ -348,7 +365,7 @@ fn process_helm_inputs(
         yaw: ship.yaw,
         forward_speed: ship.forward_speed,
     };
-    let input = ShipPhysicsInput { thrust, steering };
+    let input = ShipPhysicsInput { thrust: last_input.thrust, steering: last_input.steering };
     let config = ShipPhysicsConfig::new();
     let result = compute_physics(state, input, dt, &config);
 
@@ -372,15 +389,24 @@ fn sync_ship_position(
 }
 
 fn handle_collisions(
+    time: Res<Time>,
     context: ReadRapierContext,
     ship_query: Query<Entity, With<Ship>>,
     mut ship: ResMut<ShipState>,
     mut hull: ResMut<ShipHullIntegrity>,
     mut breakdowns: ResMut<BreakdownQueueResource>,
+    mut cooldown: ResMut<CollisionCooldown>,
 ) {
+    let dt = time.delta_secs();
+    cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
+
     let Ok(ctx) = context.single() else { return };
     let Ok(ship_entity) = ship_query.single() else { return };
     if ctx.contact_pairs_with(ship_entity).next().is_some() {
+        // Only apply damage once per contact event; skip while immune.
+        if cooldown.remaining_secs > 0.0 {
+            return;
+        }
         let max_speed = ShipPhysicsConfig::new().max_speed;
         let damage = collision_damage(ship.forward_speed, max_speed);
         let before = breakdowns.cumulative_damage;
@@ -393,6 +419,7 @@ fn handle_collisions(
             queue.push_random(rng);
         }
         ship.forward_speed = 0.0;
+        cooldown.remaining_secs = 1.0;
     }
 }
 
@@ -505,10 +532,11 @@ fn handle_repair(
 
         if is_authorized && !repair.is_active() {
             repair.start();
-        } else if !is_authorized {
+        } else if !is_authorized && authorized.is_some() {
+            // A breakdown is pending but this isn't the authorized console.
             penalties.penalise(token);
         }
-        // If repair is already active and they are authorized, press is a no-op.
+        // No breakdowns pending, or repair already active → silent no-op.
     }
 }
 

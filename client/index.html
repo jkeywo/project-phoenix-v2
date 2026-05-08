@@ -76,14 +76,14 @@
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     #red-alert-overlay { position: fixed; z-index: 15; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-d11e83249663f256.js" crossorigin="anonymous" integrity="sha384-hEkApb0d70zypAOYJ6Ky3jqZ4rXSLpMn8Te5ox+p9X7CGL7J06HAT436shEGwYEM"><link rel="preload" href="./project-phoenix-d11e83249663f256_bg.wasm" crossorigin="anonymous" integrity="sha384-5Ax0g/DJxwFw/DKzVaJ6zO9nPasZiKgi5J14z3pqG03CBK7/lUQt8nq8E8HMltOt" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-48c26d1dd56afba5.js" crossorigin="anonymous" integrity="sha384-hEkApb0d70zypAOYJ6Ky3jqZ4rXSLpMn8Te5ox+p9X7CGL7J06HAT436shEGwYEM"><link rel="preload" href="./project-phoenix-48c26d1dd56afba5_bg.wasm" crossorigin="anonymous" integrity="sha384-vkmGzalwLE3bVXLl9jA00pugfLzNgARhx44lypuUZ1a1nw8dpPRBztJLkew5kvY7" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-d11e83249663f256.js';
-const wasm = await init({ module_or_path: './project-phoenix-d11e83249663f256_bg.wasm' });
+import init, * as bindings from './project-phoenix-48c26d1dd56afba5.js';
+const wasm = await init({ module_or_path: './project-phoenix-48c26d1dd56afba5_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -907,27 +907,45 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const clientPeer = new Peer();
 
       clientPeer.on('open', () => {
-        setStatus('Connecting to host…');
-        conn = clientPeer.connect(hostPeerId, { reliable: true });
+        let connectTimeout;
 
-        conn.on('open', () => {
-          setConnectionStatus('ready');
-          send('Identify', { token: myToken, name: myName });
-          setStatus('Waiting for server…');
-        });
+        function startConnect() {
+          setStatus('Connecting to host…');
+          conn = clientPeer.connect(hostPeerId, { reliable: true });
 
-        conn.on('data', raw => {
-          try {
-            const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-            // Forward to the WASM client bridge (queued until ready) so
-            // future Bevy systems can react alongside the existing JS UI.
-            callWasmReceive(str);
-            handleMessage(JSON.parse(str));
-          } catch (e) { console.error('[client] bad message', e, raw); }
-        });
+          // If the DataConnection doesn't open within 8 s, retry — PeerJS
+          // can silently stall when NAT traversal fails or the host is
+          // temporarily unreachable.
+          connectTimeout = setTimeout(() => {
+            if (conn && !conn.open) {
+              conn.close();
+              conn = null;
+              startConnect();
+            }
+          }, 8000);
 
-        conn.on('close', () => { setConnectionStatus('disconnected'); setStatus('Disconnected'); conn = null; });
-        conn.on('error', e  => setStatus('Connection error: ' + e.type));
+          conn.on('open', () => {
+            clearTimeout(connectTimeout);
+            setConnectionStatus('ready');
+            send('Identify', { token: myToken, name: myName });
+            setStatus('Waiting for server…');
+          });
+
+          conn.on('data', raw => {
+            try {
+              const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+              // Forward to the WASM client bridge (queued until ready) so
+              // future Bevy systems can react alongside the existing JS UI.
+              callWasmReceive(str);
+              handleMessage(JSON.parse(str));
+            } catch (e) { console.error('[client] bad message', e, raw); }
+          });
+
+          conn.on('close', () => { clearTimeout(connectTimeout); setConnectionStatus('disconnected'); setStatus('Disconnected'); conn = null; });
+          conn.on('error', e  => { clearTimeout(connectTimeout); setStatus('Connection error: ' + e.type); });
+        }
+
+        startConnect();
       });
 
       clientPeer.on('disconnected', () => {

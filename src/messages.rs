@@ -88,6 +88,10 @@ pub struct SimSnapshot {
     pub ship_z: f32,
     pub ship_yaw: f32,
     pub hull_integrity: i32,
+    /// The console currently authorized to perform a repair action.
+    /// `None` means there are no pending breakdowns.
+    #[serde(default)]
+    pub authorized_repair_console: Option<Console>,
 }
 
 /// One asteroid in a `WorldData` snapshot — position on the play plane,

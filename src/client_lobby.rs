@@ -318,6 +318,7 @@ mod tests {
                 view_mode: ViewMode::default(),
                 ship_x: 1.0, ship_z: 2.0, ship_yaw: 0.5,
                 hull_integrity: 100,
+                authorized_repair_console: None,
             },
         });
         assert_eq!(s, before);

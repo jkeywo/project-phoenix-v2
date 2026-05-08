@@ -124,6 +124,10 @@
       <p style="margin:0 0 0.5rem;font-size:0.85rem;color:#aaa">HULL INTEGRITY</p>
       <p id="eng-hp-text" style="font-size:2.5rem;font-weight:bold;margin:0 0 1rem;color:#4cf">100 / 100</p>
       <div id="eng-hp-bar" style="display:flex;gap:4px" aria-label="Hull integrity bar"></div>
+      <div id="eng-repair-target" style="margin-top:1.5rem;padding:0.75rem 1rem;border-radius:6px;background:#111;display:none">
+        <p style="margin:0 0 0.25rem;font-size:0.8rem;color:#aaa;letter-spacing:.05em">ACTIVE REPAIR TARGET</p>
+        <p id="eng-repair-console" style="margin:0;font-size:1.4rem;font-weight:bold;color:#fa0;letter-spacing:.08em"></p>
+      </div>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -351,7 +355,7 @@
       // once the in-game UI also migrates and no JS callers exist.
     }
 
-    function renderEngineering(hp) {
+    function renderEngineering(hp, repairTarget) {
       const clamped = Math.max(0, Math.min(100, hp));
       const text = $('eng-hp-text');
       const bar = $('eng-hp-bar');
@@ -373,6 +377,23 @@
       bar.querySelectorAll('div').forEach((seg, i) => {
         seg.style.background = i < filled ? color : '#333';
       });
+      // Repair target display
+      const targetBox = $('eng-repair-target');
+      const targetLabel = $('eng-repair-console');
+      if (targetBox && targetLabel) {
+        if (repairTarget) {
+          const names = {
+            CaptainChair: "CAPTAIN'S CHAIR",
+            Helm: 'HELM',
+            Weapons: 'WEAPONS',
+            Engineering: 'ENGINEERING',
+          };
+          targetLabel.textContent = names[repairTarget] || repairTarget;
+          targetBox.style.display = '';
+        } else {
+          targetBox.style.display = 'none';
+        }
+      }
     }
 
     function renderWeaponsRadar() {
@@ -667,6 +688,7 @@
           const ra = snap.red_alert;
           const vd = snap.view_direction;
           const hp = snap.hull_integrity;
+          const repairTarget = snap.authorized_repair_console || null;
           state.shipX = snap.ship_x || 0;
           state.shipZ = snap.ship_z || 0;
           state.shipYaw = snap.ship_yaw || 0;
@@ -676,9 +698,10 @@
           else container.classList.remove('red-alert');
           if (state.redAlert !== ra) state.redAlert = ra;
           if (vd) state.currentView = vd;
-          if (typeof hp === 'number' && state.hullIntegrity !== hp) {
+          if (typeof hp === 'number' && (state.hullIntegrity !== hp || state.repairTarget !== repairTarget)) {
             state.hullIntegrity = hp;
-            renderEngineering(hp);
+            state.repairTarget = repairTarget;
+            renderEngineering(hp, repairTarget);
           }
           renderWeaponsRadar();
           // View-direction highlighting is handled by the Bevy WASM UI (#48).

@@ -40,6 +40,8 @@ mod view_mode_tests {
 pub enum Console {
     CaptainChair,
     Helm,
+    Weapons,
+    Engineering,
 }
 
 impl Console {
@@ -48,6 +50,8 @@ impl Console {
         match self {
             Console::CaptainChair => "Captain's Chair",
             Console::Helm => "Helm",
+            Console::Weapons => "Weapons",
+            Console::Engineering => "Engineering",
         }
     }
 }
@@ -83,6 +87,10 @@ pub struct SimSnapshot {
     pub ship_x: f32,
     pub ship_z: f32,
     pub ship_yaw: f32,
+    /// The console currently authorized to perform a repair action.
+    /// `None` means there are no pending breakdowns.
+    #[serde(default)]
+    pub authorized_repair_console: Option<Console>,
 }
 
 /// One asteroid in a `WorldData` snapshot — position on the play plane

@@ -1,5 +1,5 @@
 use bevy::prelude::Resource;
-use crate::shared::messages::{SimSnapshot, ViewDirection, ViewMode};
+use crate::shared::messages::{Console, SimSnapshot, ViewDirection, ViewMode};
 
 #[derive(Resource)]
 pub struct ShipState {
@@ -30,13 +30,14 @@ impl ShipState {
         self.red_alert = !self.red_alert;
     }
 
-    pub fn snapshot(&self) -> SimSnapshot {
+    pub fn snapshot(&self, authorized_repair_console: Option<Console>) -> SimSnapshot {
         SimSnapshot {
             red_alert: self.red_alert,
             view_mode: self.view_mode.clone(),
             ship_x: self.x,
             ship_z: self.z,
             ship_yaw: self.yaw,
+            authorized_repair_console,
         }
     }
 }
@@ -64,9 +65,9 @@ mod tests {
     #[test]
     fn snapshot_reflects_current_state() {
         let mut s = ShipState::new();
-        assert!(!s.snapshot().red_alert);
+        assert!(!s.snapshot(None).red_alert);
         s.toggle_red_alert();
-        assert!(s.snapshot().red_alert);
+        assert!(s.snapshot(None).red_alert);
     }
 
     #[test]
@@ -79,7 +80,7 @@ mod tests {
     fn snapshot_includes_view_mode() {
         let mut s = ShipState::new();
         s.view_mode = ViewMode::Camera(ViewDirection::Port);
-        assert_eq!(s.snapshot().view_mode, ViewMode::Camera(ViewDirection::Port));
+        assert_eq!(s.snapshot(None).view_mode, ViewMode::Camera(ViewDirection::Port));
     }
 
     #[test]
@@ -88,7 +89,7 @@ mod tests {
         s.x = 3.0;
         s.z = -7.5;
         s.yaw = 1.25;
-        let snap = s.snapshot();
+        let snap = s.snapshot(None);
         assert_eq!(snap.ship_x, 3.0);
         assert_eq!(snap.ship_z, -7.5);
         assert_eq!(snap.ship_yaw, 1.25);
@@ -98,6 +99,6 @@ mod tests {
     fn snapshot_view_mode_radar_round_trips_through_state() {
         let mut s = ShipState::new();
         s.view_mode = ViewMode::Radar;
-        assert_eq!(s.snapshot().view_mode, ViewMode::Radar);
+        assert_eq!(s.snapshot(None).view_mode, ViewMode::Radar);
     }
 }

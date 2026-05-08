@@ -92,7 +92,7 @@ mod tests {
     use crate::messages::{AsteroidInfo, Console, GamePhase, GameState, Player, SimSnapshot};
 
     fn snap(red_alert: bool, view_mode: ViewMode) -> SimSnapshot {
-        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100 }
+        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100, authorized_repair_console: None }
     }
 
     fn snap_pose(x: f32, z: f32, yaw: f32) -> SimSnapshot {
@@ -103,6 +103,7 @@ mod tests {
             ship_z: z,
             ship_yaw: yaw,
             hull_integrity: 100,
+            authorized_repair_console: None,
         }
     }
 

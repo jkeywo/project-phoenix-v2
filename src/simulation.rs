@@ -4,6 +4,7 @@ use bevy_rapier3d::prelude::*;
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::radar::is_fire_ready;
 use crate::asteroid_spawner::{spawn_asteroid_positions, spawn_asteroid_uuids};
+use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
 use crate::damage::{collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
@@ -76,6 +77,26 @@ pub struct PhaserCooldown {
     pub remaining_secs: f32,
 }
 
+/// Bevy resource wrapping the breakdown queue.
+#[derive(Resource)]
+pub struct BreakdownQueueResource {
+    pub queue: BreakdownQueue,
+    /// Cumulative damage taken since game start (tracks 10-HP bucket crossings).
+    pub cumulative_damage: i32,
+    rng: rand::rngs::SmallRng,
+}
+
+impl Default for BreakdownQueueResource {
+    fn default() -> Self {
+        use rand::SeedableRng as _;
+        Self {
+            queue: BreakdownQueue::new(),
+            cumulative_damage: 0,
+            rng: rand::rngs::SmallRng::from_os_rng(),
+        }
+    }
+}
+
 impl PhaserCooldown {
     pub fn is_active(&self) -> bool {
         self.remaining_secs > 0.0
@@ -103,6 +124,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<WeaponsTarget>()
             .init_resource::<ActiveBeam>()
             .init_resource::<PhaserCooldown>()
+            .init_resource::<BreakdownQueueResource>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -284,13 +306,22 @@ fn handle_collisions(
     ship_query: Query<Entity, With<Ship>>,
     mut ship: ResMut<ShipState>,
     mut hull: ResMut<ShipHullIntegrity>,
+    mut breakdowns: ResMut<BreakdownQueueResource>,
 ) {
     let Ok(ctx) = context.single() else { return };
     let Ok(ship_entity) = ship_query.single() else { return };
     if ctx.contact_pairs_with(ship_entity).next().is_some() {
         let max_speed = ShipPhysicsConfig::new().max_speed;
         let damage = collision_damage(ship.forward_speed, max_speed);
+        let before = breakdowns.cumulative_damage;
         hull.0.apply_damage(damage);
+        breakdowns.cumulative_damage += damage;
+        let new_count = breakdowns_from_damage(before, breakdowns.cumulative_damage);
+        // Avoid double-borrow: split mutable access to queue and rng.
+        let BreakdownQueueResource { queue, rng, .. } = &mut *breakdowns;
+        for _ in 0..new_count {
+            queue.push_random(rng);
+        }
         ship.forward_speed = 0.0;
     }
 }
@@ -479,15 +510,17 @@ fn broadcast_sim_state(
     mut writer: MessageWriter<OutboundMessage>,
     ship: Res<ShipState>,
     hull: Res<ShipHullIntegrity>,
+    breakdowns: Res<BreakdownQueueResource>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
     }
     if timer.0.tick(time.delta()).just_finished() {
+        let authorized = breakdowns.queue.front().cloned();
         writer.write(OutboundMessage {
             target: Target::All,
-            msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current()) },
+            msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current(), authorized) },
         });
     }
 }
@@ -688,6 +721,7 @@ mod tests {
             .init_resource::<WeaponsTarget>()
             .init_resource::<ActiveBeam>()
             .init_resource::<PhaserCooldown>()
+            .init_resource::<BreakdownQueueResource>()
             .insert_resource(SimBroadcastTimer(Timer::new(
                 std::time::Duration::from_nanos(1), TimerMode::Repeating)))
             .init_resource::<Outbox>()
@@ -921,6 +955,73 @@ mod tests {
             _ => None,
         }).expect("expected a SimState broadcast");
         assert_eq!(snap.hull_integrity, 90);
+    }
+
+    #[test]
+    fn taking_25hp_damage_enqueues_2_breakdowns_and_snapshot_shows_first() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Apply 25 HP of damage directly in 10-HP bucket tracking terms,
+        // mimicking how handle_collisions would do it via breakdowns_from_damage.
+        {
+            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
+            let before = bd.cumulative_damage; // 0
+            bd.cumulative_damage += 25;
+            let new_count = breakdowns_from_damage(before, bd.cumulative_damage);
+            assert_eq!(new_count, 2, "25 HP should create exactly 2 breakdowns");
+            let BreakdownQueueResource { queue, rng, .. } = &mut *bd;
+            for _ in 0..new_count {
+                queue.push_random(rng);
+            }
+        }
+
+        let out = tick(&mut app);
+        let snap = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        }).expect("expected a SimState broadcast");
+
+        // Queue has 2 entries; snapshot shows the front (not None).
+        assert!(
+            snap.authorized_repair_console.is_some(),
+            "snapshot should show the authorized repair console"
+        );
+        // Verify queue length via resource.
+        let bd = app.world().resource::<BreakdownQueueResource>();
+        assert_eq!(bd.queue.len(), 2, "2 breakdowns should be queued");
+        assert_eq!(
+            snap.authorized_repair_console.as_ref(),
+            bd.queue.front(),
+            "snapshot authorized_repair_console matches queue front"
+        );
+    }
+
+    #[test]
+    fn advancing_queue_exposes_next_breakdown() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Seed 2 breakdowns.
+        {
+            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
+            bd.cumulative_damage = 25;
+            let BreakdownQueueResource { queue, rng, .. } = &mut *bd;
+            queue.push_random(rng);
+            queue.push_random(rng);
+        }
+
+        // Capture the first (front) entry.
+        let first = app.world().resource::<BreakdownQueueResource>().queue.front().cloned();
+
+        // Pop the front (simulating a successful repair).
+        app.world_mut().resource_mut::<BreakdownQueueResource>().queue.pop_front();
+
+        // Second entry is now the front.
+        let second = app.world().resource::<BreakdownQueueResource>().queue.front().cloned();
+
+        assert!(second.is_some(), "second breakdown should now be front");
+        assert_ne!(first, second, "consecutive entries are different consoles");
     }
 
     // ── SetTarget / TargetLock tests ──────────────────────────────────

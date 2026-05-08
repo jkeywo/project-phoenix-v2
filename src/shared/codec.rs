@@ -227,6 +227,7 @@ mod tests {
                 ship_x: 0.0,
                 ship_z: 0.0,
                 ship_yaw: 0.0,
+                authorized_repair_console: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -242,6 +243,7 @@ mod tests {
                 ship_x: 0.0,
                 ship_z: 0.0,
                 ship_yaw: 0.0,
+                authorized_repair_console: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -257,6 +259,7 @@ mod tests {
                 ship_x: 0.0,
                 ship_z: 0.0,
                 ship_yaw: 0.0,
+                authorized_repair_console: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -272,6 +275,23 @@ mod tests {
                 ship_x: 12.5,
                 ship_z: -8.25,
                 ship_yaw: 1.5707,
+                authorized_repair_console: None,
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn sim_snapshot_carries_authorized_repair_console() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
+                authorized_repair_console: Some(Console::Engineering),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

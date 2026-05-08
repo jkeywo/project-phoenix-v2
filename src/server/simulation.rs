@@ -191,7 +191,7 @@ fn broadcast_sim_state(
     if timer.0.tick(time.delta()).just_finished() {
         writer.write(OutboundMessage {
             target: Target::All,
-            msg: ServerMessage::SimState { snapshot: ship.snapshot() },
+            msg: ServerMessage::SimState { snapshot: ship.snapshot(None) },
         });
     }
 }

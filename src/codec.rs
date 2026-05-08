@@ -255,6 +255,7 @@ mod tests {
                 ship_x: 0.0,
                 ship_z: 0.0,
                 ship_yaw: 0.0,
+                hull_integrity: 100,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -270,6 +271,7 @@ mod tests {
                 ship_x: 0.0,
                 ship_z: 0.0,
                 ship_yaw: 0.0,
+                hull_integrity: 100,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -285,6 +287,7 @@ mod tests {
                 ship_x: 0.0,
                 ship_z: 0.0,
                 ship_yaw: 0.0,
+                hull_integrity: 100,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -300,6 +303,23 @@ mod tests {
                 ship_x: 12.5,
                 ship_z: -8.25,
                 ship_yaw: 1.5707,
+                hull_integrity: 100,
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn sim_snapshot_carries_hull_integrity() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
+                hull_integrity: 75,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

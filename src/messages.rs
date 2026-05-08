@@ -87,6 +87,7 @@ pub struct SimSnapshot {
     pub ship_x: f32,
     pub ship_z: f32,
     pub ship_yaw: f32,
+    pub hull_integrity: i32,
 }
 
 /// One asteroid in a `WorldData` snapshot — position on the play plane,

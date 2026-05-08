@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::asteroid_spawner::{spawn_asteroid_positions, spawn_asteroid_uuids};
+use crate::damage::{collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     AsteroidInfo, ClientMessage, Console, GamePhase, ServerMessage, ViewMode,
@@ -34,6 +35,11 @@ struct SimBroadcastTimer(Timer);
 #[derive(Resource)]
 struct HelmInputTimer(Timer);
 
+/// Ship-wide Hull Integrity (0–100). Tracked as a Bevy resource so systems
+/// can read/write it independently of `ShipState`.
+#[derive(Resource)]
+pub struct ShipHullIntegrity(pub HullIntegrity);
+
 /// Tracks whether the initial WorldSetup broadcast has fired, so it only
 /// goes out once per game.
 #[derive(Resource, Default)]
@@ -48,6 +54,7 @@ impl Plugin for SimulationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RapierPhysicsPlugin::<()>::default())
             .insert_resource(ShipState::new())
+            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
@@ -181,10 +188,14 @@ fn handle_collisions(
     context: ReadRapierContext,
     ship_query: Query<Entity, With<Ship>>,
     mut ship: ResMut<ShipState>,
+    mut hull: ResMut<ShipHullIntegrity>,
 ) {
     let Ok(ctx) = context.single() else { return };
     let Ok(ship_entity) = ship_query.single() else { return };
     if ctx.contact_pairs_with(ship_entity).next().is_some() {
+        let max_speed = ShipPhysicsConfig::new().max_speed;
+        let damage = collision_damage(ship.forward_speed, max_speed);
+        hull.0.apply_damage(damage);
         ship.forward_speed = 0.0;
     }
 }
@@ -194,6 +205,7 @@ fn broadcast_sim_state(
     mut timer: ResMut<SimBroadcastTimer>,
     mut writer: MessageWriter<OutboundMessage>,
     ship: Res<ShipState>,
+    hull: Res<ShipHullIntegrity>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -202,7 +214,7 @@ fn broadcast_sim_state(
     if timer.0.tick(time.delta()).just_finished() {
         writer.write(OutboundMessage {
             target: Target::All,
-            msg: ServerMessage::SimState { snapshot: ship.snapshot() },
+            msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current()) },
         });
     }
 }
@@ -352,6 +364,7 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .insert_resource(ShipState::new())
+            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
             .insert_resource(SimBroadcastTimer(Timer::new(
@@ -557,5 +570,35 @@ mod tests {
         let out = tick(&mut app);
         assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. })),
             "WorldSetup should not be broadcast in the Lobby phase");
+    }
+
+    #[test]
+    fn hull_integrity_starts_at_100_and_appears_in_sim_snapshot() {
+        let mut app = test_app();
+        start_game(&mut app);
+        let out = tick(&mut app);
+        let snap = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        }).expect("expected a SimState broadcast");
+        assert_eq!(snap.hull_integrity, 100);
+    }
+
+    #[test]
+    fn direct_damage_reduces_hull_integrity_in_broadcast() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Directly apply damage to the resource (simulates collision at ~half speed).
+        app.world_mut()
+            .resource_mut::<ShipHullIntegrity>()
+            .0.apply_damage(10);
+
+        let out = tick(&mut app);
+        let snap = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        }).expect("expected a SimState broadcast");
+        assert_eq!(snap.hull_integrity, 90);
     }
 }

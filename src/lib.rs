@@ -1,4 +1,5 @@
 pub mod asteroid_spawner;
+pub mod damage;
 pub mod messages;
 pub mod codec;
 pub mod session;

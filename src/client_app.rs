@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use crate::client_helm::{drag, press, release, tick, HelmJoystickState};
 use crate::client_lobby::{
     engage_message, message_for_slot_click, ConsoleSlot, LobbyState, LobbyView, LocalPlayerToken,
+    ActiveConsole,
 };
 use crate::client_sim::{
     message_for_direction_press, on_screen_message, red_alert_toggle_message, ClientSimState,
@@ -119,6 +120,7 @@ impl Plugin for ClientAppPlugin {
             .init_resource::<LobbyState>()
             .init_resource::<ClientSimState>()
             .init_resource::<LocalPlayerToken>()
+            .init_resource::<ActiveConsole>()
             .insert_resource(HelmJoystickState::default())
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
@@ -307,9 +309,9 @@ fn rebuild_lobby_ui_on_change(
         });
     }
 
-    // Engage visibility.
+    // Engage visibility — only show when captain AND still in lobby.
     if let Ok(mut vis) = engage.single_mut() {
-        *vis = if view.is_captain() {
+        *vis = if view.is_captain() && state.phase == GamePhase::Lobby {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -515,13 +517,21 @@ fn spawn_view_label(grid: &mut ChildSpawnerCommands, column: i16, row: i16) {
 fn toggle_captain_panel_visibility(
     lobby: Res<LobbyState>,
     token: Res<LocalPlayerToken>,
+    active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<CaptainPanel>>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() {
+    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
         return;
     }
     let view = LobbyView::new(&lobby, &token.0);
-    let visible = lobby.phase == GamePhase::InProgress && view.is_captain();
+    let holds_captain = lobby.phase == GamePhase::InProgress && view.is_captain();
+    // When the player holds multiple consoles, only show this panel when
+    // the tab is explicitly set to CaptainChair (or unset with only 1 console).
+    let tab_active = match &active.0 {
+        Some(c) => *c == Console::CaptainChair,
+        None => true,
+    };
+    let visible = holds_captain && tab_active;
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
     }
@@ -749,15 +759,23 @@ fn setup_helm_ui(mut commands: Commands) {
 fn toggle_helm_panel_visibility(
     lobby: Res<LobbyState>,
     token: Res<LocalPlayerToken>,
+    active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<HelmPanel>>,
     mut state: ResMut<HelmJoystickState>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() {
+    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
         return;
     }
     let view = LobbyView::new(&lobby, &token.0);
-    let visible = lobby.phase == GamePhase::InProgress && view.is_helm();
+    let holds_helm = lobby.phase == GamePhase::InProgress && view.is_helm();
+    // When the player holds multiple consoles, only show this panel when
+    // the tab is explicitly set to Helm (or unset with only 1 console).
+    let tab_active = match &active.0 {
+        Some(c) => *c == Console::Helm,
+        None => true,
+    };
+    let visible = holds_helm && tab_active;
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
     }
@@ -911,16 +929,18 @@ fn draw_helm_radar(
     let viewport_w = window.width();
     let viewport_h = window.height();
 
-    // UI node positions are in logical screen pixels with origin at the
-    // top-left and +y down; the Camera2d default is centred on origin
-    // with +y up. Convert centre + size accordingly.
-    let node_centre_screen = gt.translation().truncate();
+    // UI node GlobalTransform translation is at the node's top-left corner
+    // in logical screen pixels (origin top-left, +y down). Add half the node
+    // size to get the centre, then convert to Camera2d world space (origin
+    // screen-centre, +y up).
+    let node_size = node.size();
+    let tl = gt.translation().truncate();
+    let node_centre_screen = tl + node_size * 0.5;
     let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
     let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
     let centre = Vec2::new(centre_world_x, centre_world_y);
 
-    let size = node.size();
-    let radius = size.x.min(size.y) * 0.5;
+    let radius = node_size.x.min(node_size.y) * 0.5;
     if radius <= 0.0 {
         return;
     }

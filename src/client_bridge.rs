@@ -21,7 +21,8 @@
 #[cfg(target_arch = "wasm32")]
 use {
     crate::client_app::{ClientAppPlugin, InboundServerMessage, OutboundClientMessage},
-    crate::client_lobby::LocalPlayerToken,
+    crate::client_lobby::{ActiveConsole, LocalPlayerToken},
+    crate::messages::Console,
     crate::codec::{JsonCodec, MessageCodec},
     bevy::{prelude::*, DefaultPlugins},
     js_sys::Function,
@@ -47,6 +48,10 @@ thread_local! {
     /// Empty until JS supplies it; the lobby UI treats an empty token as
     /// "I am not yet known to the server".
     static PLAYER_TOKEN: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// The console the player is currently viewing, set by the JS tab bar via
+    /// `wasm_client_set_active_console`. Empty string means "auto" (no tab override).
+    static ACTIVE_CONSOLE: RefCell<String> = const { RefCell::new(String::new()) };
 
     /// JS callback registered by the host page to forward outbound
     /// `ClientMessage` JSON back to the server peer over PeerJS.
@@ -104,6 +109,7 @@ pub fn wasm_client_init() {
         .add_plugins(ClientRendererPlugin)
         .add_systems(Update, (
             forward_local_token,
+            forward_active_console,
             forward_inbound_messages,
             flush_outbound_messages,
         ))
@@ -140,6 +146,17 @@ pub fn wasm_client_set_token(token: &str) {
     });
 }
 
+/// Called by the JS tab bar when the player switches active console.
+/// `console` is the console name string (e.g. `"CaptainChair"`, `"Helm"`)
+/// or `""` to clear the override (auto mode).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_client_set_active_console(console: &str) {
+    ACTIVE_CONSOLE.with(|c| {
+        *c.borrow_mut() = console.to_string();
+    });
+}
+
 /// Called by JS to register the outbound message callback.
 ///
 /// Signature expected from JS: `callback(payload: string)`.
@@ -162,6 +179,23 @@ fn forward_local_token(mut token: ResMut<LocalPlayerToken>) {
         let latest = t.borrow();
         if latest.as_str() != token.0 {
             token.0 = latest.clone();
+        }
+    });
+}
+
+/// Pulls the active-console override from the thread-local slot (set by the
+/// JS tab bar) into Bevy's `ActiveConsole` resource each frame.
+#[cfg(target_arch = "wasm32")]
+fn forward_active_console(mut active: ResMut<ActiveConsole>) {
+    ACTIVE_CONSOLE.with(|c| {
+        let latest = c.borrow();
+        let parsed: Option<Console> = match latest.as_str() {
+            "CaptainChair" => Some(Console::CaptainChair),
+            "Helm"         => Some(Console::Helm),
+            _              => None,
+        };
+        if active.0 != parsed {
+            active.0 = parsed;
         }
     });
 }

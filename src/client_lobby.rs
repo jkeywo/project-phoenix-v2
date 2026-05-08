@@ -185,6 +185,12 @@ pub fn engage_message() -> ClientMessage {
 #[derive(Clone, Debug, Default, Resource)]
 pub struct LocalPlayerToken(pub String);
 
+/// The console the local player is currently viewing, set by the JS tab bar.
+/// `None` means "auto" — the panel for the sole held console (or none).
+/// When a player holds 2+ consoles this is set by JS when a tab is clicked.
+#[derive(Clone, Debug, Default, Resource)]
+pub struct ActiveConsole(pub Option<Console>);
+
 #[cfg(test)]
 mod tests {
     use super::*;

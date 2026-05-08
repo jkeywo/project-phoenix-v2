@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::lobby::{CurrentPhase, GameStateCache, WorldResource};
-use crate::messages::{Console, GamePhase, ViewDirection, ViewMode};
+use crate::messages::{GamePhase, ViewDirection, ViewMode};
 use crate::radar;
 use crate::ship_state::ShipState;
 
@@ -272,22 +272,10 @@ fn update_view_screen_text(
     if !cache.is_changed() {
         return;
     }
-    let Ok((mut text, mut vis)) = query.single_mut() else { return };
-    if cache.0.phase != GamePhase::InProgress {
-        *vis = Visibility::Hidden;
-        return;
-    }
-    *vis = Visibility::Visible;
-    let mut content = "VIEW SCREEN\n".to_string();
-    for console in [Console::CaptainChair, Console::Helm] {
-        let label = console.display_name();
-        let holder_name = cache.0.players.iter()
-            .find(|p| p.consoles.contains(&console))
-            .map(|p| p.name.as_str())
-            .unwrap_or("—");
-        content.push_str(&format!("{}: {}\n", label, holder_name));
-    }
-    **text = content;
+    let Ok((_text, mut vis)) = query.single_mut() else { return };
+    // Console roster is now hidden on the view screen — crew can see the
+    // in-game HUD. Keep the entity but always hide it.
+    *vis = Visibility::Hidden;
 }
 
 /// First-person hull camera: positioned at the ship's hull edge in the view direction,

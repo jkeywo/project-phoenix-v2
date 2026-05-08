@@ -245,9 +245,17 @@
       if (inGame) {
         if (!activeConsole || !mine.includes(activeConsole)) {
           activeConsole = mine[0] || null;
+          if (typeof wasm_client_set_active_console === 'function') {
+            wasm_client_set_active_console(activeConsole || '');
+          }
         }
       } else {
-        activeConsole = null;
+        if (activeConsole !== null) {
+          activeConsole = null;
+          if (typeof wasm_client_set_active_console === 'function') {
+            wasm_client_set_active_console('');
+          }
+        }
       }
 
       // Console sections: only the active one is visible while in-game.
@@ -300,7 +308,13 @@
         btn.dataset.console = c;
         btn.textContent = CONSOLE_LABEL[c] || c;
         if (c === activeConsole) btn.classList.add('active');
-        btn.addEventListener('click', () => { activeConsole = c; scheduleRender(); });
+        btn.addEventListener('click', () => {
+          activeConsole = c;
+          if (typeof wasm_client_set_active_console === 'function') {
+            wasm_client_set_active_console(c);
+          }
+          scheduleRender();
+        });
         bar.appendChild(btn);
       }
     }
@@ -487,11 +501,12 @@
     }
 
     function startClientWasm() {
-      window.wasm_client_init           = wasmBindings.wasm_client_init;
-      window.wasm_client_receive        = wasmBindings.wasm_client_receive;
-      window.wasm_client_set_name       = wasmBindings.wasm_client_set_name;
-      window.wasm_client_set_token      = wasmBindings.wasm_client_set_token;
-      window.set_client_send_callback   = wasmBindings.set_client_send_callback;
+      window.wasm_client_init                 = wasmBindings.wasm_client_init;
+      window.wasm_client_receive              = wasmBindings.wasm_client_receive;
+      window.wasm_client_set_name             = wasmBindings.wasm_client_set_name;
+      window.wasm_client_set_token            = wasmBindings.wasm_client_set_token;
+      window.wasm_client_set_active_console   = wasmBindings.wasm_client_set_active_console;
+      window.set_client_send_callback         = wasmBindings.set_client_send_callback;
       set_client_send_callback(clientSendCallback);
       // The local player's session token is needed by the lobby UI to
       // highlight "my" console selection.

@@ -44,7 +44,7 @@
       50%      { filter: brightness(1.35); }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-6f5b996e9ad3894c.js" crossorigin="anonymous" integrity="sha384-L4TDn4c4MZCr9Wk+xmFNhXAoBNhlA5+oP0UkZyUhGSSJjrXQcBwxNJxctKlL/0Ef"><link rel="preload" href="./project-phoenix-6f5b996e9ad3894c_bg.wasm" crossorigin="anonymous" integrity="sha384-FdVD9RYg0ujkrZgP4nXXJmU4CQUgWgOhGKmr/x5OFUejnVkldiLinF7q3VDhDumQ" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-889b9314207d6539.js" crossorigin="anonymous" integrity="sha384-KBycHFdbq6H+zEjnTsOv33z93lszZyhwOxeRZ+CLiME/CUnAxYPjDxLHV3vtbced"><link rel="preload" href="./project-phoenix-889b9314207d6539_bg.wasm" crossorigin="anonymous" integrity="sha384-pLy2tuT3R32+pvDyrgF71TggUZX1UbaR1ZRczrZeIixJYZPQ7wtquLbMzsImSXJi" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
@@ -70,8 +70,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-6f5b996e9ad3894c.js';
-const wasm = await init({ module_or_path: './project-phoenix-6f5b996e9ad3894c_bg.wasm' });
+import init, * as bindings from './project-phoenix-889b9314207d6539.js';
+const wasm = await init({ module_or_path: './project-phoenix-889b9314207d6539_bg.wasm' });
 
 
 window.wasmBindings = bindings;

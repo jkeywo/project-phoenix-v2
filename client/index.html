@@ -77,14 +77,14 @@
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     #red-alert-overlay { position: fixed; z-index: 15; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-89ab86edcb3611e0.js" crossorigin="anonymous" integrity="sha384-laC3Q/5/bay3E4a3OBCJHj3zzGSbBvO0I/W1CF492N3wcJe/e4bl1kgYY0Wv422V"><link rel="preload" href="./project-phoenix-89ab86edcb3611e0_bg.wasm" crossorigin="anonymous" integrity="sha384-v1mMdkedMZcpA1rMNWTbKvQAXgkzt/ieBmJ1HoDJBaI/qWNQR9+oUSqQdpKCUfQH" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-10ed100010cb0059.js" crossorigin="anonymous" integrity="sha384-sJCGRnfH8DSDvNqntS42UDX6mhlFBaWUaMb+6c+4A94OPg9t5rG+W248AFp5yzr7"><link rel="preload" href="./project-phoenix-10ed100010cb0059_bg.wasm" crossorigin="anonymous" integrity="sha384-SsDPSlb/L3ckZUhqeEUvV9D+8c+Z+mMv3nQv9xJ0E8UCauAhgW2uwI6ONKvpV0ku" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-89ab86edcb3611e0.js';
-const wasm = await init({ module_or_path: './project-phoenix-89ab86edcb3611e0_bg.wasm' });
+import init, * as bindings from './project-phoenix-10ed100010cb0059.js';
+const wasm = await init({ module_or_path: './project-phoenix-10ed100010cb0059_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -256,9 +256,17 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (inGame) {
         if (!activeConsole || !mine.includes(activeConsole)) {
           activeConsole = mine[0] || null;
+          if (typeof wasm_client_set_active_console === 'function') {
+            wasm_client_set_active_console(activeConsole || '');
+          }
         }
       } else {
-        activeConsole = null;
+        if (activeConsole !== null) {
+          activeConsole = null;
+          if (typeof wasm_client_set_active_console === 'function') {
+            wasm_client_set_active_console('');
+          }
+        }
       }
 
       // Console sections: only the active one is visible while in-game.
@@ -311,7 +319,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         btn.dataset.console = c;
         btn.textContent = CONSOLE_LABEL[c] || c;
         if (c === activeConsole) btn.classList.add('active');
-        btn.addEventListener('click', () => { activeConsole = c; scheduleRender(); });
+        btn.addEventListener('click', () => {
+          activeConsole = c;
+          if (typeof wasm_client_set_active_console === 'function') {
+            wasm_client_set_active_console(c);
+          }
+          scheduleRender();
+        });
         bar.appendChild(btn);
       }
     }
@@ -498,11 +512,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     function startClientWasm() {
-      window.wasm_client_init           = wasmBindings.wasm_client_init;
-      window.wasm_client_receive        = wasmBindings.wasm_client_receive;
-      window.wasm_client_set_name       = wasmBindings.wasm_client_set_name;
-      window.wasm_client_set_token      = wasmBindings.wasm_client_set_token;
-      window.set_client_send_callback   = wasmBindings.set_client_send_callback;
+      window.wasm_client_init                 = wasmBindings.wasm_client_init;
+      window.wasm_client_receive              = wasmBindings.wasm_client_receive;
+      window.wasm_client_set_name             = wasmBindings.wasm_client_set_name;
+      window.wasm_client_set_token            = wasmBindings.wasm_client_set_token;
+      window.wasm_client_set_active_console   = wasmBindings.wasm_client_set_active_console;
+      window.set_client_send_callback         = wasmBindings.set_client_send_callback;
       set_client_send_callback(clientSendCallback);
       // The local player's session token is needed by the lobby UI to
       // highlight "my" console selection.

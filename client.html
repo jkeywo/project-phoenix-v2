@@ -111,7 +111,7 @@
     </section>
 
     <section id="weapons-ui">
-      <h2 style="margin:0 0 0.5rem;font-size:1.1rem;letter-spacing:.1em;color:#f84">WEAPONS</h2>
+      <h2 style="margin:0 0 0.5rem;font-size:1.1rem;letter-spacing:.1em;color:#f84">TACTICAL</h2>
       <p style="margin:0 0 0.5rem;font-size:0.8rem;color:#aaa">TAP ASTEROID TO LOCK TARGET</p>
       <canvas id="weapons-radar" width="320" height="320"
         style="display:block;margin:0 auto;border-radius:50%;background:#0a0a1a;cursor:crosshair;touch-action:none"
@@ -250,11 +250,11 @@
 
     // ── Rendering ───────────────────────────────────────────────
 
-    const CONSOLES = ['CaptainChair', 'Helm', 'Weapons', 'Engineering'];
+    const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Engineering'];
     const CONSOLE_LABEL = {
       CaptainChair: "Captain's Chair",
       Helm: 'Helm',
-      Weapons: 'Weapons',
+      Tactical: 'Tactical',
       Engineering: 'Engineering',
     };
 
@@ -304,7 +304,7 @@
 
       // Console sections: only the active one is visible while in-game.
       $('game-ui').className = (inGame && activeConsole === 'CaptainChair') ? 'active' : '';
-      $('weapons-ui').className = (inGame && activeConsole === 'Weapons') ? 'active' : '';
+      $('weapons-ui').className = (inGame && activeConsole === 'Tactical') ? 'active' : '';
       $('engineering-ui').className = (inGame && activeConsole === 'Engineering') ? 'active' : '';
       // Helm console UI is rendered by Bevy WASM (#49).
 
@@ -401,7 +401,7 @@
           const names = {
             CaptainChair: "CAPTAIN'S CHAIR",
             Helm: 'HELM',
-            Weapons: 'WEAPONS',
+            Tactical: 'TACTICAL',
             Engineering: 'ENGINEERING',
           };
           targetLabel.textContent = names[repairTarget] || repairTarget;

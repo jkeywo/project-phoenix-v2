@@ -654,7 +654,6 @@ fn setup_helm_ui(mut commands: Commands) {
                 align_items: AlignItems::FlexEnd,
                 justify_content: JustifyContent::SpaceBetween,
                 column_gap: Val::Px(16.0),
-                overflow: Overflow::clip_x(),
                 ..default()
             },
             Visibility::Hidden,
@@ -667,6 +666,7 @@ fn setup_helm_ui(mut commands: Commands) {
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::FlexStart,
                         row_gap: Val::Px(8.0),
+                        flex_shrink: 0.0,
                         ..default()
                     },
                 ))
@@ -721,6 +721,9 @@ fn setup_helm_ui(mut commands: Commands) {
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
                         row_gap: Val::Px(8.0),
+                        flex_grow: 1.0,
+                        flex_shrink: 1.0,
+                        min_width: Val::Px(0.0),
                         ..default()
                     },
                 ))
@@ -728,12 +731,11 @@ fn setup_helm_ui(mut commands: Commands) {
                     col.spawn((
                         RadarPanel,
                         Node {
-                            // 90% of the narrowest viewport dimension,
-                            // matching the JS contract from the PRD.
-                            width:  Val::VMin(90.0),
-                            height: Val::VMin(90.0),
-                            // Cap radar at twice the joystick pad so it
-                            // doesn't dominate large landscape windows.
+                            // Fill the right column's allocated width and
+                            // maintain a 1:1 square. Capped at the joystick
+                            // pad diameter so it doesn't dominate wide screens.
+                            width:  Val::Percent(100.0),
+                            aspect_ratio: Some(1.0),
                             max_width:  Val::Px(HELM_PAD_SIZE * 2.0),
                             max_height: Val::Px(HELM_PAD_SIZE * 2.0),
                             ..default()

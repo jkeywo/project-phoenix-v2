@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn client_select_console_weapons() {
-        let msg = ClientMessage::SelectConsole { console: Console::Weapons };
+        let msg = ClientMessage::SelectConsole { console: Console::Tactical };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn server_console_selected_weapons() {
-        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Weapons] };
+        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Tactical] };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }

@@ -192,6 +192,8 @@ fn forward_active_console(mut active: ResMut<ActiveConsole>) {
         let parsed: Option<Console> = match latest.as_str() {
             "CaptainChair" => Some(Console::CaptainChair),
             "Helm"         => Some(Console::Helm),
+            "Tactical"     => Some(Console::Tactical),
+            "Engineering"  => Some(Console::Engineering),
             _              => None,
         };
         if active.0 != parsed {

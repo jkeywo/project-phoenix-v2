@@ -274,7 +274,7 @@ fn handle_set_target(
         let ClientMessage::SetTarget { uuid } = &ev.msg else { continue };
 
         // Only the Weapons console holder may lock a target.
-        if sessions.0.console_holder(Console::Weapons) != Some(ev.token.as_str()) {
+        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
             continue;
         }
 
@@ -421,7 +421,7 @@ fn handle_fire_phaser(
             continue;
         }
         // Only the Weapons console holder may fire.
-        if sessions.0.console_holder(Console::Weapons) != Some(ev.token.as_str()) {
+        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
             continue;
         }
         // Reject if on cooldown.
@@ -572,7 +572,7 @@ fn broadcast_repair_state(
     }
 
     use crate::messages::Console;
-    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Weapons, Console::Engineering];
+    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Engineering];
     for console in &all_consoles {
         let Some(token) = sessions.0.console_holder(console.clone()) else { continue };
         let penalty_remaining = penalties.remaining(token);
@@ -751,7 +751,7 @@ fn broadcast_weapons_update(
     if !timer.0.just_finished() {
         return;
     }
-    let Some(weapons_token) = sessions.0.console_holder(Console::Weapons) else {
+    let Some(weapons_token) = sessions.0.console_holder(Console::Tactical) else {
         return;
     };
 
@@ -1252,7 +1252,7 @@ mod tests {
         tick(app);
         push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
         tick(app);
-        push(app, "weapons", ClientMessage::SelectConsole { console: Console::Weapons });
+        push(app, "weapons", ClientMessage::SelectConsole { console: Console::Tactical });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);

@@ -40,7 +40,7 @@ mod view_mode_tests {
 pub enum Console {
     CaptainChair,
     Helm,
-    Weapons,
+    Tactical,
     Engineering,
 }
 
@@ -50,7 +50,7 @@ impl Console {
         match self {
             Console::CaptainChair => "Captain's Chair",
             Console::Helm => "Helm",
-            Console::Weapons => "Weapons",
+            Console::Tactical => "Tactical",
             Console::Engineering => "Engineering",
         }
     }

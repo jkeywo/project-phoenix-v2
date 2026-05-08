@@ -109,7 +109,7 @@ impl SessionManager {
             .filter(|p| p.connected)
             .flat_map(|p| p.consoles.clone())
             .collect();
-        [Console::CaptainChair, Console::Helm, Console::Weapons, Console::Engineering]
+        [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Engineering]
             .into_iter()
             .filter(|c| !taken.contains(c))
             .collect()
@@ -368,9 +368,9 @@ mod tests {
     fn weapons_console_can_be_selected_and_is_available_when_free() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        assert!(sm.available_consoles().contains(&Console::Weapons));
-        sm.toggle_console("t1", Console::Weapons).unwrap();
-        assert!(!sm.available_consoles().contains(&Console::Weapons));
+        assert!(sm.available_consoles().contains(&Console::Tactical));
+        sm.toggle_console("t1", Console::Tactical).unwrap();
+        assert!(!sm.available_consoles().contains(&Console::Tactical));
     }
 
     #[test]
@@ -386,9 +386,9 @@ mod tests {
     fn weapons_console_becomes_available_on_disconnect() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.toggle_console("t1", Console::Weapons).unwrap();
+        sm.toggle_console("t1", Console::Tactical).unwrap();
         sm.disconnect("t1");
-        assert!(sm.available_consoles().contains(&Console::Weapons));
+        assert!(sm.available_consoles().contains(&Console::Tactical));
     }
 
     #[test]

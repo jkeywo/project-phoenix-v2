@@ -5,7 +5,7 @@ use rand::Rng;
 const ALL_CONSOLES: [Console; 4] = [
     Console::CaptainChair,
     Console::Helm,
-    Console::Weapons,
+    Console::Tactical,
     Console::Engineering,
 ];
 

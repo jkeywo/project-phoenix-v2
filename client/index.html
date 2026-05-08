@@ -51,23 +51,22 @@
     }
     /* In lobby phase the name input sits at the bottom; don't give it a
        background so the Bevy canvas shows through on either side. */
-    #lobby-ui { max-width: 20rem; }
-    /* Console tab bar (only when player has 2+ consoles) */
+    /* Console tab bar — fixed at the top, only when in-game with 2+ consoles */
     #console-tabs {
       display: none;
-      gap: 0.4rem;
-      margin: 0 0 0.75rem;
-      border-bottom: 1px solid #336;
-      padding-bottom: 0.5rem;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 10;
+      gap: 0;
     }
     #console-tabs.active { display: flex; }
     #console-tabs button {
-      flex: 1; margin: 0; padding: 0.6rem 0.4rem; font-size: 0.9rem;
-      background: #112; border: 1px solid #336; color: #99b;
-      border-radius: 4px 4px 0 0;
+      flex: 1; margin: 0; padding: 0.7rem 0.4rem; font-size: 1rem;
+      background: #0d0d1f; border: none; border-bottom: 2px solid #336; color: #99b;
+      font-family: monospace;
     }
     #console-tabs button.active {
-      background: #224; border-color: #8af; color: #cce;
+      background: #161630; border-bottom-color: #8af; color: #cce;
     }
     /* Helm console UI moved to Bevy WASM (#49). */
     /* Bevy WASM canvas — full-viewport, behind the JS overlays so the
@@ -77,14 +76,14 @@
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     #red-alert-overlay { position: fixed; z-index: 15; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-10ed100010cb0059.js" crossorigin="anonymous" integrity="sha384-sJCGRnfH8DSDvNqntS42UDX6mhlFBaWUaMb+6c+4A94OPg9t5rG+W248AFp5yzr7"><link rel="preload" href="./project-phoenix-10ed100010cb0059_bg.wasm" crossorigin="anonymous" integrity="sha384-SsDPSlb/L3ckZUhqeEUvV9D+8c+Z+mMv3nQv9xJ0E8UCauAhgW2uwI6ONKvpV0ku" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-e50d524e247a4d37.js" crossorigin="anonymous" integrity="sha384-qVK7/UC9H4ZmK4uDyOQg4ml7a5jBS4QRwAlIjkCjWIZAV0LLbT9ghDHGqLhAG5m+"><link rel="preload" href="./project-phoenix-e50d524e247a4d37_bg.wasm" crossorigin="anonymous" integrity="sha384-2hHxubptIq5c6RNrKfjBgZeICoMIy1isevbBXxLnjdFfh3FSnK4N0hQcp1mOZD43" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-10ed100010cb0059.js';
-const wasm = await init({ module_or_path: './project-phoenix-10ed100010cb0059_bg.wasm' });
+import init, * as bindings from './project-phoenix-e50d524e247a4d37.js';
+const wasm = await init({ module_or_path: './project-phoenix-e50d524e247a4d37_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -99,9 +98,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
        button) positioned above via z-index. -->
   <div id="wasm-host"><canvas id="canvas"></canvas></div>
 
-  <div id="console-container">
-    <div id="console-tabs"></div>
+  <!-- Console tab bar: fixed at top, shown only in-game with 2+ consoles -->
+  <div id="console-tabs"></div>
 
+  <div id="console-container">
     <section id="lobby-ui">
       <label>Name
         <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />

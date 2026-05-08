@@ -410,12 +410,16 @@ fn setup_captain_ui(mut commands: Commands) {
         .spawn((
             CaptainPanel,
             Node {
+                // Full-viewport container so we can centre the controls.
                 position_type: PositionType::Absolute,
-                right: Val::Px(16.0),
-                top:   Val::Px(16.0),
+                left: Val::Px(0.0),
+                top:  Val::Px(0.0),
+                width:  Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::FlexEnd,
-                row_gap: Val::Px(8.0),
+                align_items:     AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(0.0),
                 ..default()
             },
             Visibility::Hidden,
@@ -452,6 +456,7 @@ fn setup_captain_ui(mut commands: Commands) {
                     Button,
                     Node {
                         padding: UiRect::all(Val::Px(10.0)),
+                        margin: UiRect::top(Val::Px(24.0)),
                         ..default()
                     },
                     BackgroundColor(RED_ALERT_BG_OFF),
@@ -790,13 +795,12 @@ fn toggle_helm_panel_visibility(
 fn on_helm_drag_start(
     trigger: On<Pointer<DragStart>>,
     mut state: ResMut<HelmJoystickState>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
     mut knob_bg: Query<&mut BackgroundColor, With<HelmKnob>>,
 ) {
-    // We don't care about which entity triggered — there's only one pad.
+    // Just mark active — don't emit zero thrust. The first Drag event
+    // will supply the real position and send the actual HelmInput.
     let _ = trigger;
-    let msg = press(&mut state, 0.0, 0.0, helm_max_radius());
-    outbound.write(OutboundClientMessage(msg));
+    state.active = true;
     for mut bg in knob_bg.iter_mut() {
         bg.0 = HELM_KNOB_BG_ACTIVE;
     }
@@ -926,15 +930,16 @@ fn draw_helm_radar(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let viewport_w = window.width();
-    let viewport_h = window.height();
+    let scale = window.scale_factor();
+    let viewport_w = window.width();   // logical pixels
+    let viewport_h = window.height();  // logical pixels
 
-    // UI node GlobalTransform translation is at the node's top-left corner
-    // in logical screen pixels (origin top-left, +y down). Add half the node
-    // size to get the centre, then convert to Camera2d world space (origin
-    // screen-centre, +y up).
-    let node_size = node.size();
-    let tl = gt.translation().truncate();
+    // UI node GlobalTransform translation is in *physical* pixels (top-left
+    // corner, +y down). Divide by the window scale factor to convert to the
+    // same logical-pixel space as window.width()/height(), then shift origin
+    // from top-left to screen-centre and flip y for Camera2d world space.
+    let node_size = node.size();       // logical pixels from ComputedNode
+    let tl = gt.translation().truncate() / scale;
     let node_centre_screen = tl + node_size * 0.5;
     let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
     let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;

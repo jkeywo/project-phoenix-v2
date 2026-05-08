@@ -51,14 +51,19 @@ pub fn clamp_to_circle(dx: f32, dy: f32, max_radius: f32) -> (f32, f32) {
     (dx / dist * max_radius, dy / dist * max_radius)
 }
 
+/// Dead zone threshold: inputs with absolute value below this are zeroed.
+const DEAD_ZONE: f32 = 0.10;
+
 /// Convert a clamped knob offset into `(thrust, steering)` in `[-1, 1]`.
-/// `up` (negative dy) → positive thrust.
+/// `up` (negative dy) → positive thrust. Values within ±10% are zeroed.
 pub fn compute_thrust_steering(dx: f32, dy: f32, max_radius: f32) -> (f32, f32) {
     if max_radius <= 0.0 {
         return (0.0, 0.0);
     }
-    let thrust = (-dy / max_radius).clamp(-1.0, 1.0);
-    let steering = (dx / max_radius).clamp(-1.0, 1.0);
+    let raw_thrust   = (-dy / max_radius).clamp(-1.0, 1.0);
+    let raw_steering = (dx  / max_radius).clamp(-1.0, 1.0);
+    let thrust   = if raw_thrust.abs()   < DEAD_ZONE { 0.0 } else { raw_thrust };
+    let steering = if raw_steering.abs() < DEAD_ZONE { 0.0 } else { raw_steering };
     (thrust, steering)
 }
 
@@ -187,6 +192,22 @@ mod tests {
         let (t, s) = compute_thrust_steering(200.0, -300.0, 50.0);
         assert_eq!(t, 1.0);
         assert_eq!(s, 1.0);
+    }
+
+    #[test]
+    fn dead_zone_zeroes_small_inputs() {
+        // 9% of max_radius → both axes below dead zone → both zero.
+        let max = 100.0;
+        let (t, s) = compute_thrust_steering(9.0, -9.0, max);
+        assert_eq!(t, 0.0, "thrust below dead zone should be 0");
+        assert_eq!(s, 0.0, "steering below dead zone should be 0");
+    }
+
+    #[test]
+    fn dead_zone_passes_inputs_above_threshold() {
+        let max = 100.0;
+        let (t, _) = compute_thrust_steering(0.0, -11.0, max);
+        assert!((t - 0.11).abs() < 1e-5, "thrust above dead zone should pass through");
     }
 
     #[test]

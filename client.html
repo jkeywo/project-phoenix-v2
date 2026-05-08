@@ -51,23 +51,22 @@
     }
     /* In lobby phase the name input sits at the bottom; don't give it a
        background so the Bevy canvas shows through on either side. */
-    #lobby-ui { max-width: 20rem; }
-    /* Console tab bar (only when player has 2+ consoles) */
+    /* Console tab bar — fixed at the top, only when in-game with 2+ consoles */
     #console-tabs {
       display: none;
-      gap: 0.4rem;
-      margin: 0 0 0.75rem;
-      border-bottom: 1px solid #336;
-      padding-bottom: 0.5rem;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 10;
+      gap: 0;
     }
     #console-tabs.active { display: flex; }
     #console-tabs button {
-      flex: 1; margin: 0; padding: 0.6rem 0.4rem; font-size: 0.9rem;
-      background: #112; border: 1px solid #336; color: #99b;
-      border-radius: 4px 4px 0 0;
+      flex: 1; margin: 0; padding: 0.7rem 0.4rem; font-size: 1rem;
+      background: #0d0d1f; border: none; border-bottom: 2px solid #336; color: #99b;
+      font-family: monospace;
     }
     #console-tabs button.active {
-      background: #224; border-color: #8af; color: #cce;
+      background: #161630; border-bottom-color: #8af; color: #cce;
     }
     /* Helm console UI moved to Bevy WASM (#49). */
     /* Bevy WASM canvas — full-viewport, behind the JS overlays so the
@@ -88,9 +87,10 @@
        button) positioned above via z-index. -->
   <div id="wasm-host"><canvas id="canvas"></canvas></div>
 
-  <div id="console-container">
-    <div id="console-tabs"></div>
+  <!-- Console tab bar: fixed at top, shown only in-game with 2+ consoles -->
+  <div id="console-tabs"></div>
 
+  <div id="console-container">
     <section id="lobby-ui">
       <label>Name
         <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />

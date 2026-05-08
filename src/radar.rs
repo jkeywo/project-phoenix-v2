@@ -16,6 +16,11 @@ pub const RADAR_RANGE: f32 = 50.0;
 /// Inner reference ring drawn at this fraction of the outer ring.
 pub const RADAR_MID_RING: f32 = 25.0;
 
+/// The Weapons console radar range — asteroids within this distance of the
+/// ship can be locked as targets. Distinct from `RADAR_RANGE` (the helm's
+/// situational-awareness view) so each console can be tuned independently.
+pub const WEAPONS_RADAR_RANGE: f32 = 60.0;
+
 /// Project a world-space point onto the radar's unit square, relative to
 /// the ship's position and yaw.
 ///

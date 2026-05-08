@@ -88,7 +88,7 @@ pub fn process_message(
                 outbound.push((Target::All, ServerMessage::GameStarted));
             }
         }
-        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } => {}
+        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } => {}
     }
 
     LobbyHandlerResult { new_phase, outbound }

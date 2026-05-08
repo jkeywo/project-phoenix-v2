@@ -106,7 +106,12 @@
     </section>
 
     <section id="weapons-ui">
-      <p>Weapons console — coming soon.</p>
+      <h2 style="margin:0 0 0.5rem;font-size:1.1rem;letter-spacing:.1em;color:#f84">WEAPONS</h2>
+      <p style="margin:0 0 0.5rem;font-size:0.8rem;color:#aaa">TAP ASTEROID TO LOCK TARGET</p>
+      <canvas id="weapons-radar" width="320" height="320"
+        style="display:block;margin:0 auto;border-radius:50%;background:#0a0a1a;cursor:crosshair;touch-action:none"
+        aria-label="Weapons radar"></canvas>
+      <p id="weapons-lock-status" style="margin:0.75rem 0 0;font-size:0.9rem;text-align:center;color:#aaa">No target locked</p>
     </section>
 
     <section id="engineering-ui">
@@ -185,7 +190,8 @@
 
     // ── State ───────────────────────────────────────────────────
 
-    const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100 };
+    const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
+      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
@@ -364,6 +370,95 @@
       });
     }
 
+    function renderWeaponsRadar() {
+      const canvas = $('weapons-radar');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      const cx = W / 2, cy = H / 2, r = Math.min(cx, cy) - 4;
+      const RANGE = 60.0;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Background circle
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#0a0a1a';
+      ctx.fill();
+
+      // Grid rings
+      [0.5, 1.0].forEach(frac => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * frac, 0, Math.PI * 2);
+        ctx.strokeStyle = '#1a3a2a';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      });
+
+      // Crosshairs
+      ctx.strokeStyle = '#1a3a2a';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
+
+      // Ship at centre
+      ctx.beginPath();
+      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#8af';
+      ctx.fill();
+
+      // Ship forward direction indicator
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx, cy - 20);
+      ctx.strokeStyle = '#8af';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Project asteroids (ship-aligned, ship at origin)
+      const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
+      for (const a of state.asteroids) {
+        const dx = a.x - state.shipX;
+        const dz = a.z - state.shipZ;
+        const dist2 = dx * dx + dz * dz;
+        if (dist2 > RANGE * RANGE) continue;
+
+        // radar coords (same math as radar.rs project_to_radar)
+        const rx = (dx * cosY + dz * sinY) / RANGE;
+        const ry = (dx * sinY - dz * cosY) / RANGE;
+
+        const px = cx + rx * r;
+        const py = cy - ry * r; // y-up → y-down in canvas
+
+        const isLocked = state.weaponsLocked && state.weaponsTarget === a.uuid;
+        const dotR = Math.max(4, (a.radius / RANGE) * r);
+
+        if (isLocked) {
+          // Draw lock reticle
+          ctx.beginPath();
+          ctx.arc(px, py, dotR + 6, 0, Math.PI * 2);
+          ctx.strokeStyle = '#f84';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(px, py, dotR, 0, Math.PI * 2);
+          ctx.fillStyle = '#f84';
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.arc(px, py, dotR, 0, Math.PI * 2);
+          ctx.fillStyle = '#fc0';
+          ctx.fill();
+        }
+      }
+
+      // Range label
+      ctx.fillStyle = '#556';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('60u', cx + r - 2, cy - 4);
+    }
+
     function renderGame(s) {
       const showCap = activeConsole === 'CaptainChair';
 
@@ -376,6 +471,54 @@
         $('game-status').textContent = '';
       }
     }
+
+    // ── Weapons radar tap-to-lock ──────────────────────────────
+    (function initWeaponsRadar() {
+      const canvas = $('weapons-radar');
+      if (!canvas) return;
+      const RANGE = 60.0;
+
+      function getAsteroidAtPoint(canvasX, canvasY) {
+        const cx = canvas.width / 2, cy = canvas.height / 2;
+        const r = Math.min(cx, cy) - 4;
+        const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
+        let best = null, bestDist = Infinity;
+        for (const a of state.asteroids) {
+          const dx = a.x - state.shipX;
+          const dz = a.z - state.shipZ;
+          if (dx * dx + dz * dz > RANGE * RANGE) continue;
+          const rx = (dx * cosY + dz * sinY) / RANGE;
+          const ry = (dx * sinY - dz * cosY) / RANGE;
+          const px = cx + rx * r, py = cy - ry * r;
+          const dist = Math.hypot(canvasX - px, canvasY - py);
+          const hitR = Math.max(12, (a.radius / RANGE) * r + 6);
+          if (dist <= hitR && dist < bestDist) { best = a; bestDist = dist; }
+        }
+        return best;
+      }
+
+      function onTap(e) {
+        if (state.phase !== 'InProgress') return;
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches ? e.touches[0] : e;
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        // Scale from CSS pixels to canvas pixels
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const cx = x * scaleX, cy = y * scaleY;
+        const a = getAsteroidAtPoint(cx, cy);
+        if (a) {
+          // Optimistic pending lock indicator
+          const el = $('weapons-lock-status');
+          if (el) { el.textContent = 'Locking…'; el.style.color = '#aaa'; }
+          send('SetTarget', { uuid: a.uuid });
+        }
+      }
+
+      canvas.addEventListener('click', onTap);
+      canvas.addEventListener('touchstart', e => { e.preventDefault(); onTap(e); }, { passive: false });
+    })();
 
     // ── Event wiring ────────────────────────────────────────────
 
@@ -489,9 +632,13 @@
           state.phase = 'InProgress';
           break;
         case 'SimState': {
-          const ra = msg.data.snapshot.red_alert;
-          const vd = msg.data.snapshot.view_direction;
-          const hp = msg.data.snapshot.hull_integrity;
+          const snap = msg.data.snapshot;
+          const ra = snap.red_alert;
+          const vd = snap.view_direction;
+          const hp = snap.hull_integrity;
+          state.shipX = snap.ship_x || 0;
+          state.shipZ = snap.ship_z || 0;
+          state.shipYaw = snap.ship_yaw || 0;
           // Only update DOM directly — SimState at 10Hz must not race with tab clicks.
           const container = $('console-container');
           if (ra) container.classList.add('red-alert');
@@ -502,7 +649,32 @@
             state.hullIntegrity = hp;
             renderEngineering(hp);
           }
+          renderWeaponsRadar();
           // View-direction highlighting is handled by the Bevy WASM UI (#48).
+          return;
+        }
+        case 'WorldSetup': {
+          state.asteroids = (msg.data.world && msg.data.world.asteroids) || [];
+          renderWeaponsRadar();
+          return;
+        }
+        case 'TargetLock': {
+          const { uuid, locked } = msg.data;
+          const el = $('weapons-lock-status');
+          if (locked) {
+            state.weaponsTarget = uuid;
+            state.weaponsLocked = true;
+            if (el) { el.textContent = 'TARGET LOCKED'; el.style.color = '#f84'; }
+          } else {
+            state.weaponsTarget = null;
+            state.weaponsLocked = false;
+            if (el) { el.textContent = 'Lock rejected — out of range'; el.style.color = '#f44'; }
+            // Clear the rejected text after 2 s
+            setTimeout(() => {
+              if (el && !state.weaponsLocked) { el.textContent = 'No target locked'; el.style.color = '#aaa'; }
+            }, 2000);
+          }
+          renderWeaponsRadar();
           return;
         }
         default:

@@ -374,6 +374,27 @@ mod tests {
     }
 
     #[test]
+    fn client_set_target() {
+        let msg = ClientMessage::SetTarget { uuid: "550e8400-e29b-41d4-a716-446655440000".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_target_lock_confirmed() {
+        let msg = ServerMessage::TargetLock { uuid: "550e8400-e29b-41d4-a716-446655440000".into(), locked: true };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_target_lock_rejected() {
+        let msg = ServerMessage::TargetLock { uuid: "550e8400-e29b-41d4-a716-446655440000".into(), locked: false };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn welcome_with_world_none_round_trips() {
         let msg = ServerMessage::Welcome { state: state() };
         assert_server_roundtrip(&JsonCodec, msg.clone());

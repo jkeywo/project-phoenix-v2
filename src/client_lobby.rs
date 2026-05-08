@@ -85,7 +85,8 @@ impl LobbyState {
                 self.phase = GamePhase::InProgress;
             }
             ServerMessage::SimState { .. }
-            | ServerMessage::WorldSetup { .. } => {
+            | ServerMessage::WorldSetup { .. }
+            | ServerMessage::TargetLock { .. } => {
                 // Not relevant to the lobby model.
             }
         }

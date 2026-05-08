@@ -118,6 +118,7 @@ pub enum ClientMessage {
     ToggleRedAlert,
     HelmInput { thrust: f32, steering: f32 },
     SetView { mode: ViewMode },
+    SetTarget { uuid: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -132,4 +133,5 @@ pub enum ServerMessage {
     GameStarted,
     SimState { snapshot: SimSnapshot },
     WorldSetup { world: WorldData },
+    TargetLock { uuid: String, locked: bool },
 }

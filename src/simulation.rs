@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
+use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::asteroid_spawner::{spawn_asteroid_positions, spawn_asteroid_uuids};
 use crate::damage::{collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
@@ -47,6 +48,11 @@ struct WorldSetupBroadcast {
     sent: bool,
 }
 
+/// The currently locked target UUID on the Weapons console. `None` means no
+/// lock is active.
+#[derive(Resource, Default)]
+pub struct WeaponsTarget(pub Option<String>);
+
 // ── Plugin ───────────────────
 pub struct SimulationPlugin;
 
@@ -57,12 +63,14 @@ impl Plugin for SimulationPlugin {
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
+            .init_resource::<WeaponsTarget>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
             .add_systems(Update, (
                 handle_toggle,
                 handle_set_view,
+                handle_set_target,
                 process_helm_inputs,
                 sync_ship_position,
                 handle_collisions,
@@ -113,6 +121,51 @@ fn handle_set_view(
                 ship.view_mode = mode;
             }
         }
+    }
+}
+
+fn handle_set_target(
+    mut reader: MessageReader<InboundMessage>,
+    mut writer: MessageWriter<OutboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    ship: Res<ShipState>,
+    world: Res<WorldResource>,
+    mut weapons_target: ResMut<WeaponsTarget>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        let ClientMessage::SetTarget { uuid } = &ev.msg else { continue };
+
+        // Only the Weapons console holder may lock a target.
+        if sessions.0.console_holder(Console::Weapons) != Some(ev.token.as_str()) {
+            continue;
+        }
+
+        // Validate: asteroid must exist in world data and be within WEAPONS_RADAR_RANGE.
+        let asteroid = world.0.asteroids.iter().find(|a| &a.uuid == uuid);
+        let locked = match asteroid {
+            None => false,
+            Some(a) => {
+                let dx = a.x - ship.x;
+                let dz = a.z - ship.z;
+                dx * dx + dz * dz <= WEAPONS_RADAR_RANGE * WEAPONS_RADAR_RANGE
+            }
+        };
+
+        if locked {
+            weapons_target.0 = Some(uuid.clone());
+        } else {
+            // Rejection clears the visual lock.
+            weapons_target.0 = None;
+        }
+
+        writer.write(OutboundMessage {
+            target: Target::Token(ev.token.clone()),
+            msg: ServerMessage::TargetLock { uuid: uuid.clone(), locked },
+        });
     }
 }
 
@@ -367,10 +420,11 @@ mod tests {
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
+            .init_resource::<WeaponsTarget>()
             .insert_resource(SimBroadcastTimer(Timer::new(
                 std::time::Duration::from_nanos(1), TimerMode::Repeating)))
             .init_resource::<Outbox>()
-            .add_systems(Update, (handle_set_view, broadcast_sim_state, broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+            .add_systems(Update, (handle_set_view, handle_set_target, broadcast_sim_state, broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
             .add_systems(PostUpdate, collect);
         app
     }
@@ -600,5 +654,90 @@ mod tests {
             _ => None,
         }).expect("expected a SimState broadcast");
         assert_eq!(snap.hull_integrity, 90);
+    }
+
+    // ── SetTarget / TargetLock tests ──────────────────────────────────
+
+    fn setup_weapons_world(app: &mut App, asteroid_x: f32, asteroid_z: f32) {
+        app.world_mut().insert_resource(WorldResource(WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "target-uuid".into(),
+                x: asteroid_x,
+                z: asteroid_z,
+                radius: 2.0,
+            }],
+        }));
+    }
+
+    fn start_game_with_weapons(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(app);
+        push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        tick(app);
+        push(app, "weapons", ClientMessage::SelectConsole { console: Console::Weapons });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    #[test]
+    fn valid_target_within_range_replies_with_target_lock_confirmed() {
+        let mut app = test_app();
+        // Asteroid at (30, 0) — 30 units from ship origin, within 60-unit range.
+        setup_weapons_world(&mut app, 30.0, 0.0);
+        start_game_with_weapons(&mut app);
+
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        let out = tick(&mut app);
+
+        let lock = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+            _ => None,
+        }).expect("expected a TargetLock response");
+        assert_eq!(lock.0, "target-uuid");
+        assert!(lock.1, "expected locked=true for in-range asteroid");
+
+        // Server state should record the lock.
+        assert_eq!(
+            app.world().resource::<WeaponsTarget>().0.as_deref(),
+            Some("target-uuid")
+        );
+    }
+
+    #[test]
+    fn asteroid_outside_weapons_range_replies_with_target_lock_rejected() {
+        let mut app = test_app();
+        // Asteroid at (80, 0) — 80 units away, outside 60-unit Weapons range.
+        setup_weapons_world(&mut app, 80.0, 0.0);
+        start_game_with_weapons(&mut app);
+
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        let out = tick(&mut app);
+
+        let lock = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+            _ => None,
+        }).expect("expected a TargetLock response");
+        assert!(!lock.1, "expected locked=false for out-of-range asteroid");
+        assert!(app.world().resource::<WeaponsTarget>().0.is_none());
+    }
+
+    #[test]
+    fn unknown_uuid_replies_with_target_lock_rejected() {
+        let mut app = test_app();
+        setup_weapons_world(&mut app, 10.0, 0.0);
+        start_game_with_weapons(&mut app);
+
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "no-such-asteroid".into() });
+        let out = tick(&mut app);
+
+        let lock = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+            _ => None,
+        }).expect("expected a TargetLock response");
+        assert!(!lock.1, "expected locked=false for unknown UUID");
+        assert!(app.world().resource::<WeaponsTarget>().0.is_none());
     }
 }

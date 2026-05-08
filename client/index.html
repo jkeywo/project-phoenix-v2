@@ -76,14 +76,14 @@
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     #red-alert-overlay { position: fixed; z-index: 15; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-fa4cd24b0f95cd1c.js" crossorigin="anonymous" integrity="sha384-hEkApb0d70zypAOYJ6Ky3jqZ4rXSLpMn8Te5ox+p9X7CGL7J06HAT436shEGwYEM"><link rel="preload" href="./project-phoenix-fa4cd24b0f95cd1c_bg.wasm" crossorigin="anonymous" integrity="sha384-ZcDhIs2HLtgQOmrJvVxiNPs8uAjDCnA1LOGx1E265fVkLVgo31vp0SJGumaenzCf" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-d11e83249663f256.js" crossorigin="anonymous" integrity="sha384-hEkApb0d70zypAOYJ6Ky3jqZ4rXSLpMn8Te5ox+p9X7CGL7J06HAT436shEGwYEM"><link rel="preload" href="./project-phoenix-d11e83249663f256_bg.wasm" crossorigin="anonymous" integrity="sha384-5Ax0g/DJxwFw/DKzVaJ6zO9nPasZiKgi5J14z3pqG03CBK7/lUQt8nq8E8HMltOt" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-fa4cd24b0f95cd1c.js';
-const wasm = await init({ module_or_path: './project-phoenix-fa4cd24b0f95cd1c_bg.wasm' });
+import init, * as bindings from './project-phoenix-d11e83249663f256.js';
+const wasm = await init({ module_or_path: './project-phoenix-d11e83249663f256_bg.wasm' });
 
 
 window.wasmBindings = bindings;

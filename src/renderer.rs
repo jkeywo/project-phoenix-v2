@@ -207,9 +207,8 @@ fn update_fps_counter(
 fn toggle_cameras(
     phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
-    mut lobby: Query<&mut Camera, (With<LobbyCamera>, Without<GameCamera>, Without<RadarCamera>)>,
-    mut game: Query<&mut Camera, (With<GameCamera>, Without<LobbyCamera>, Without<RadarCamera>)>,
-    mut radar_cam: Query<&mut Camera, (With<RadarCamera>, Without<LobbyCamera>, Without<GameCamera>)>,
+    mut game: Query<&mut Camera, (With<GameCamera>, Without<RadarCamera>)>,
+    mut radar_cam: Query<&mut Camera, (With<RadarCamera>, Without<GameCamera>)>,
 ) {
     if !phase.is_changed() && !ship.is_changed() {
         return;
@@ -217,9 +216,11 @@ fn toggle_cameras(
     let in_game = phase.0 == GamePhase::InProgress;
     let radar_active = in_game && matches!(ship.view_mode, ViewMode::Radar);
     let game_active  = in_game && !radar_active;
-    let lobby_active = !in_game;
 
-    if let Ok(mut cam) = lobby.single_mut()    { cam.is_active = lobby_active; }
+    // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
+    // in all phases so that UI nodes without an explicit UiTargetCamera
+    // (e.g. the FPS counter) continue to render during InProgress. Lobby UI
+    // nodes are hidden via Visibility by toggle_lobby_items instead.
     if let Ok(mut cam) = game.single_mut()     { cam.is_active = game_active; }
     if let Ok(mut cam) = radar_cam.single_mut(){ cam.is_active = radar_active; }
 }

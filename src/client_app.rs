@@ -712,10 +712,10 @@ fn setup_helm_ui(mut commands: Commands) {
                             max_height: Val::Px(HELM_PAD_SIZE * 2.0),
                             ..default()
                         },
-                        // Transparent — the gizmos overlay does the
-                        // drawing. A faint border helps with debug
-                        // alignment but otherwise is invisible.
-                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.20)),
+                        // No BackgroundColor — the gizmos overlay does the
+                        // drawing in Camera2d world space. A solid background
+                        // here would occlude the gizmos (UI renders after the
+                        // world/gizmo pass).
                     ));
 
                     col.spawn((

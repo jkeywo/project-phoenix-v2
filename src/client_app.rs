@@ -111,7 +111,12 @@ pub struct ClientAppPlugin;
 
 impl Plugin for ClientAppPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LobbyState>()
+        app.insert_resource(ClearColor(Color::srgb(
+                    10.0 / 255.0,
+                    10.0 / 255.0,
+                    26.0 / 255.0,
+                )))
+            .init_resource::<LobbyState>()
             .init_resource::<ClientSimState>()
             .init_resource::<LocalPlayerToken>()
             .insert_resource(HelmJoystickState::default())

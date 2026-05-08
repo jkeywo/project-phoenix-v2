@@ -6,7 +6,7 @@
   <title>Project Phoenix — Console</title>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
-    html, body { margin: 0; padding: 0; background: #0a0a1a; color: #cce; font-family: monospace; }
+    html, body { margin: 0; padding: 0; background: transparent; color: #cce; font-family: monospace; }
     body { padding: 1rem; box-sizing: border-box; }
     h2 { margin: 0 0 1rem; color: #8af; }
     label { display: block; margin-bottom: 1rem; }
@@ -63,7 +63,7 @@
     /* Bevy WASM canvas — full-viewport, behind the JS overlays so the
        lobby UI rendered by Bevy is visible while the name input,
        connection status, and fullscreen button stay clickable on top. */
-    #wasm-host { position: fixed; inset: 0; z-index: 0; }
+    #wasm-host { position: fixed; inset: 0; z-index: 0; background: #0a0a1a; }
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     /* Lift JS UI above the Bevy canvas. */
     #console-container { position: relative; z-index: 1; }

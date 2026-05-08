@@ -12,6 +12,11 @@ use crate::messages::{
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 
+// ── Beam constants ────────────
+const BEAM_DURATION_SECS: f32 = 6.0;
+const BEAM_DAMAGE_PER_SEC: f32 = 5.0;
+const BEAM_COOLDOWN_SECS: f32 = 6.0;
+
 // ── Marker Components ────────
 #[derive(Component)]
 pub struct Ship;
@@ -54,6 +59,37 @@ struct WorldSetupBroadcast {
 #[derive(Resource, Default)]
 pub struct WeaponsTarget(pub Option<String>);
 
+/// Active phaser beam state. `target_uuid` is `Some` while a beam is firing.
+/// `remaining_secs` counts down to 0. `damage_accumulator` tracks fractional
+/// damage between ticks so 5 HP/s is applied accurately at any frame rate.
+#[derive(Resource, Default)]
+pub struct ActiveBeam {
+    pub target_uuid: Option<String>,
+    pub remaining_secs: f32,
+    pub damage_accumulator: f32,
+}
+
+/// Post-beam cooldown. The weapons console is locked out for `BEAM_COOLDOWN_SECS`
+/// after every beam end (natural, sever, or cancel).
+#[derive(Resource, Default)]
+pub struct PhaserCooldown {
+    pub remaining_secs: f32,
+}
+
+impl PhaserCooldown {
+    pub fn is_active(&self) -> bool {
+        self.remaining_secs > 0.0
+    }
+
+    pub fn start(&mut self) {
+        self.remaining_secs = BEAM_COOLDOWN_SECS;
+    }
+
+    pub fn tick(&mut self, dt: f32) {
+        self.remaining_secs = (self.remaining_secs - dt).max(0.0);
+    }
+}
+
 // ── Plugin ───────────────────
 pub struct SimulationPlugin;
 
@@ -65,6 +101,8 @@ impl Plugin for SimulationPlugin {
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
             .init_resource::<WeaponsTarget>()
+            .init_resource::<ActiveBeam>()
+            .init_resource::<PhaserCooldown>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -72,6 +110,8 @@ impl Plugin for SimulationPlugin {
                 handle_toggle,
                 handle_set_view,
                 handle_set_target,
+                handle_fire_phaser,
+                tick_active_beam,
                 process_helm_inputs,
                 sync_ship_position,
                 handle_collisions,
@@ -255,6 +295,184 @@ fn handle_collisions(
     }
 }
 
+/// Handle `FirePhaser` messages from the Weapons console.
+///
+/// Validates: sender is Weapons holder, game is in-progress, no active cooldown,
+/// a locked target exists, and that target is currently fire-ready.
+/// On success, starts a new beam (cancelling any active beam first) and broadcasts
+/// `BeamStarted` to all players.
+fn handle_fire_phaser(
+    mut reader: MessageReader<InboundMessage>,
+    mut writer: MessageWriter<OutboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    ship: Res<ShipState>,
+    world: Res<WorldResource>,
+    weapons_target: Res<WeaponsTarget>,
+    mut beam: ResMut<ActiveBeam>,
+    mut cooldown: ResMut<PhaserCooldown>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        if !matches!(ev.msg, ClientMessage::FirePhaser) {
+            continue;
+        }
+        // Only the Weapons console holder may fire.
+        if sessions.0.console_holder(Console::Weapons) != Some(ev.token.as_str()) {
+            continue;
+        }
+        // Reject if on cooldown.
+        if cooldown.is_active() {
+            continue;
+        }
+        // Need a locked target.
+        let Some(target_uuid) = &weapons_target.0 else { continue };
+        // Target must still exist in world data and be fire-ready.
+        let Some(asteroid) = world.0.asteroids.iter().find(|a| &a.uuid == target_uuid) else {
+            continue;
+        };
+        if !is_fire_ready(asteroid.x, asteroid.z, ship.x, ship.z, ship.yaw) {
+            continue;
+        }
+
+        // If another beam was active (shouldn't happen with cooldown enforcement,
+        // but guard defensively), end it first.
+        if let Some(old_uuid) = beam.target_uuid.take() {
+            beam.remaining_secs = 0.0;
+            beam.damage_accumulator = 0.0;
+            writer.write(OutboundMessage {
+                target: Target::All,
+                msg: ServerMessage::BeamEnded { target_uuid: old_uuid },
+            });
+        }
+
+        // Start new beam.
+        beam.target_uuid = Some(target_uuid.clone());
+        beam.remaining_secs = BEAM_DURATION_SECS;
+        beam.damage_accumulator = 0.0;
+
+        writer.write(OutboundMessage {
+            target: Target::All,
+            msg: ServerMessage::BeamStarted { target_uuid: target_uuid.clone() },
+        });
+    }
+}
+
+/// Tick the active beam each frame: apply damage, check sever conditions
+/// (arc, range, target destroyed), and handle natural expiry.
+///
+/// When the beam ends (any cause), starts the post-beam cooldown and broadcasts
+/// `BeamEnded`. If the target asteroid reaches 0 HP, also broadcasts
+/// `AsteroidDestroyed` and removes it from `WorldData`.
+fn tick_active_beam(
+    time: Res<Time>,
+    mut beam: ResMut<ActiveBeam>,
+    mut cooldown: ResMut<PhaserCooldown>,
+    mut writer: MessageWriter<OutboundMessage>,
+    ship: Res<ShipState>,
+    mut world: ResMut<WorldResource>,
+    mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut AsteroidDamage)>,
+    mut commands: Commands,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+
+    let dt = time.delta_secs();
+
+    // Tick cooldown regardless of beam state.
+    cooldown.tick(dt);
+
+    let Some(target_uuid) = beam.target_uuid.clone() else {
+        return;
+    };
+
+    // Check sever: target no longer exists in world data.
+    let asteroid_info = world.0.asteroids.iter().find(|a| a.uuid == target_uuid).cloned();
+    let Some(info) = asteroid_info else {
+        // Target was already destroyed (e.g., double-tick race). End beam silently.
+        beam.target_uuid = None;
+        beam.remaining_secs = 0.0;
+        beam.damage_accumulator = 0.0;
+        cooldown.start();
+        writer.write(OutboundMessage {
+            target: Target::All,
+            msg: ServerMessage::BeamEnded { target_uuid },
+        });
+        return;
+    };
+
+    // Check sever: out of range or out of arc.
+    if !is_fire_ready(info.x, info.z, ship.x, ship.z, ship.yaw) {
+        beam.target_uuid = None;
+        beam.remaining_secs = 0.0;
+        beam.damage_accumulator = 0.0;
+        cooldown.start();
+        writer.write(OutboundMessage {
+            target: Target::All,
+            msg: ServerMessage::BeamEnded { target_uuid },
+        });
+        return;
+    }
+
+    // Apply damage proportionally to elapsed time.
+    beam.damage_accumulator += BEAM_DAMAGE_PER_SEC * dt;
+    let damage_to_apply = beam.damage_accumulator.floor() as i32;
+    if damage_to_apply > 0 {
+        beam.damage_accumulator -= damage_to_apply as f32;
+
+        // Find the asteroid entity and apply damage.
+        let mut destroyed = false;
+        for (entity, uuid_comp, mut dmg) in asteroid_query.iter_mut() {
+            if uuid_comp.0 == target_uuid {
+                dmg.current_hp = (dmg.current_hp - damage_to_apply).max(0);
+                if dmg.current_hp == 0 {
+                    destroyed = true;
+                    commands.entity(entity).despawn();
+                }
+                break;
+            }
+        }
+
+        if destroyed {
+            // Remove from world data.
+            world.0.asteroids.retain(|a| a.uuid != target_uuid);
+
+            beam.target_uuid = None;
+            beam.remaining_secs = 0.0;
+            beam.damage_accumulator = 0.0;
+            cooldown.start();
+
+            writer.write(OutboundMessage {
+                target: Target::All,
+                msg: ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() },
+            });
+            writer.write(OutboundMessage {
+                target: Target::All,
+                msg: ServerMessage::BeamEnded { target_uuid },
+            });
+            return;
+        }
+    }
+
+    // Tick beam duration.
+    beam.remaining_secs -= dt;
+    if beam.remaining_secs <= 0.0 {
+        // Natural expiry.
+        beam.target_uuid = None;
+        beam.remaining_secs = 0.0;
+        beam.damage_accumulator = 0.0;
+        cooldown.start();
+        writer.write(OutboundMessage {
+            target: Target::All,
+            msg: ServerMessage::BeamEnded { target_uuid },
+        });
+    }
+}
+
 fn broadcast_sim_state(
     time: Res<Time>,
     mut timer: ResMut<SimBroadcastTimer>,
@@ -286,6 +504,7 @@ fn broadcast_weapons_update(
     ship: Res<ShipState>,
     world: Res<WorldResource>,
     weapons_target: Res<WeaponsTarget>,
+    cooldown: Res<PhaserCooldown>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -313,6 +532,7 @@ fn broadcast_weapons_update(
         msg: ServerMessage::WeaponsUpdate {
             target_uuid: weapons_target.0.clone(),
             fire_ready,
+            on_cooldown: cooldown.is_active(),
         },
     });
 }
@@ -466,10 +686,12 @@ mod tests {
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
             .init_resource::<WeaponsTarget>()
+            .init_resource::<ActiveBeam>()
+            .init_resource::<PhaserCooldown>()
             .insert_resource(SimBroadcastTimer(Timer::new(
                 std::time::Duration::from_nanos(1), TimerMode::Repeating)))
             .init_resource::<Outbox>()
-            .add_systems(Update, (handle_set_view, handle_set_target, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+            .add_systems(Update, (handle_set_view, handle_set_target, handle_fire_phaser, tick_active_beam, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
             .add_systems(PostUpdate, collect);
         app
     }
@@ -803,7 +1025,7 @@ mod tests {
         let out = tick(&mut app);
 
         let update = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::WeaponsUpdate { target_uuid, fire_ready } =>
+            ServerMessage::WeaponsUpdate { target_uuid, fire_ready, .. } =>
                 Some((target_uuid.clone(), *fire_ready)),
             _ => None,
         }).expect("expected a WeaponsUpdate message");
@@ -825,11 +1047,274 @@ mod tests {
         let out = tick(&mut app);
 
         let update = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::WeaponsUpdate { target_uuid, fire_ready } =>
+            ServerMessage::WeaponsUpdate { target_uuid, fire_ready, .. } =>
                 Some((target_uuid.clone(), *fire_ready)),
             _ => None,
         }).expect("expected a WeaponsUpdate message");
         assert_eq!(update.0.as_deref(), Some("target-uuid"));
         assert!(!update.1, "expected fire_ready=false for beyond-phaser-range target");
+    }
+
+    // ── FirePhaser / beam lifecycle tests ──────────────────────────────────────
+
+    /// Helper: lock target then fire phaser; returns messages from the fire tick.
+    fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<OutboundMessage> {
+        setup_weapons_world(app, asteroid_x, asteroid_z);
+        start_game_with_weapons(app);
+        // Lock
+        push(app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        let _ = tick(app);
+        // Fire
+        push(app, "weapons", ClientMessage::FirePhaser);
+        tick(app)
+    }
+
+    /// Firing at a fire-ready target broadcasts BeamStarted to all.
+    #[test]
+    fn fire_phaser_on_valid_target_broadcasts_beam_started() {
+        let mut app = test_app();
+        // Asteroid directly ahead at 20 units (yaw=0 → facing -Z → asteroid at (0,-20)).
+        let out = lock_and_fire(&mut app, 0.0, -20.0);
+
+        let beam_started = out.iter().find(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. }));
+        assert!(beam_started.is_some(), "expected BeamStarted after firing at fire-ready target");
+        match &beam_started.unwrap().msg {
+            ServerMessage::BeamStarted { target_uuid } => assert_eq!(target_uuid, "target-uuid"),
+            _ => unreachable!(),
+        }
+        match &beam_started.unwrap().target {
+            Target::All => {}
+            t => panic!("BeamStarted should target All, got {:?}", t),
+        }
+
+        // ActiveBeam resource should be populated.
+        assert_eq!(
+            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            Some("target-uuid")
+        );
+    }
+
+    /// FirePhaser is silently ignored when the phaser is on cooldown.
+    #[test]
+    fn fire_phaser_rejected_during_cooldown() {
+        let mut app = test_app();
+        let _ = lock_and_fire(&mut app, 0.0, -20.0);
+
+        // Manually put the cooldown into active state (simulating a beam just ended).
+        app.world_mut().resource_mut::<ActiveBeam>().target_uuid = None;
+        app.world_mut().resource_mut::<PhaserCooldown>().remaining_secs = 3.0;
+
+        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        let out = tick(&mut app);
+
+        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "BeamStarted should not fire during cooldown");
+    }
+
+    /// Non-weapons player cannot fire.
+    #[test]
+    fn fire_phaser_ignored_from_non_weapons_player() {
+        let mut app = test_app();
+        setup_weapons_world(&mut app, 0.0, -20.0);
+        start_game(&mut app);
+
+        push(&mut app, "captain", ClientMessage::FirePhaser);
+        let out = tick(&mut app);
+
+        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "captain should not be able to fire phaser");
+    }
+
+    /// When the beam fires at a target outside the 180° arc, it is rejected.
+    #[test]
+    fn fire_phaser_rejected_when_target_behind_ship() {
+        let mut app = test_app();
+        // Yaw=0 means ship faces -Z. Asteroid at (0, +20) is directly behind — in rear arc.
+        setup_weapons_world(&mut app, 0.0, 20.0);
+        start_game_with_weapons(&mut app);
+        // Lock (within 60u range) — lock doesn't require arc.
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        let _ = tick(&mut app);
+        // Fire — rejected because target is behind.
+        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        let out = tick(&mut app);
+
+        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "FirePhaser should be rejected when target is in rear arc");
+    }
+
+    /// A 6-second natural beam kills the asteroid (5 HP/s × 6s = 30 HP total).
+    ///
+    /// The test accelerates time by manipulating the beam state directly
+    /// after confirming the beam started, then runs ticks with large deltas.
+    #[test]
+    fn full_beam_duration_kills_asteroid() {
+        let mut app = test_app();
+
+        // Spawn an asteroid entity with full HP so tick_active_beam can find it.
+        let asteroid_entity = app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("target-uuid".into()),
+            AsteroidDamage { max_hp: 30, current_hp: 30 },
+        )).id();
+
+        let _ = lock_and_fire(&mut app, 0.0, -20.0);
+
+        // Verify beam started.
+        assert_eq!(
+            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            Some("target-uuid")
+        );
+
+        // Fast-forward: accumulate 30 damage via the damage_accumulator.
+        // Set accumulator to 30.0 so all damage applies in one tick.
+        {
+            let mut b = app.world_mut().resource_mut::<ActiveBeam>();
+            b.damage_accumulator = 30.0;
+            b.remaining_secs = 5.0; // still "ongoing"
+        }
+
+        let out = tick(&mut app);
+
+        // Asteroid destroyed message should be present.
+        let destroyed = out.iter().find(|m| matches!(&m.msg, ServerMessage::AsteroidDestroyed { .. }));
+        assert!(destroyed.is_some(), "expected AsteroidDestroyed when asteroid HP reaches 0");
+        match &destroyed.unwrap().msg {
+            ServerMessage::AsteroidDestroyed { uuid } => assert_eq!(uuid, "target-uuid"),
+            _ => unreachable!(),
+        }
+
+        // BeamEnded also broadcast.
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded after asteroid destruction");
+
+        // Asteroid no longer in world data.
+        assert!(
+            !app.world().resource::<WorldResource>().0.asteroids.iter().any(|a| a.uuid == "target-uuid"),
+            "destroyed asteroid should be removed from WorldData"
+        );
+
+        // Beam resource cleared.
+        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none());
+
+        // Cooldown started.
+        assert!(app.world().resource::<PhaserCooldown>().is_active(),
+            "cooldown should start after beam end");
+
+        // The entity should be despawned.
+        assert!(app.world().get::<AsteroidDamage>(asteroid_entity).is_none(),
+            "asteroid entity should be despawned");
+    }
+
+    /// Beam severs when ship rotates target out of the 180° forward arc.
+    #[test]
+    fn beam_severs_when_target_leaves_forward_arc() {
+        let mut app = test_app();
+        let _ = lock_and_fire(&mut app, 0.0, -20.0);
+
+        // Now rotate ship so the asteroid is behind it (yaw = π → facing +Z, asteroid at (0,-20) is behind).
+        app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
+
+        let out = tick(&mut app);
+
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded when target leaves forward arc");
+        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none(),
+            "beam should be cleared after sever-by-arc");
+        assert!(app.world().resource::<PhaserCooldown>().is_active(),
+            "cooldown should start after arc sever");
+    }
+
+    /// Beam severs when the target moves beyond 40-unit phaser range.
+    #[test]
+    fn beam_severs_when_target_leaves_phaser_range() {
+        let mut app = test_app();
+        let _ = lock_and_fire(&mut app, 0.0, -20.0);
+
+        // Move asteroid position in WorldData to 50 units away (out of 40u range).
+        app.world_mut().resource_mut::<WorldResource>().0.asteroids[0].z = -50.0;
+
+        let out = tick(&mut app);
+
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded when target leaves phaser range");
+        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none(),
+            "beam should be cleared after sever-by-range");
+        assert!(app.world().resource::<PhaserCooldown>().is_active(),
+            "cooldown should start after range sever");
+    }
+
+    /// No damage refund on sever — whatever HP was dealt is permanent.
+    #[test]
+    fn no_damage_refund_on_sever() {
+        let mut app = test_app();
+        let asteroid_entity = app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("target-uuid".into()),
+            AsteroidDamage { max_hp: 30, current_hp: 30 },
+        )).id();
+
+        let _ = lock_and_fire(&mut app, 0.0, -20.0);
+
+        // Apply partial damage via accumulator.
+        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 10.0;
+        let _ = tick(&mut app);
+
+        // Now sever by rotating ship.
+        app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
+        let _ = tick(&mut app);
+
+        let hp = app.world().get::<AsteroidDamage>(asteroid_entity)
+            .map(|d| d.current_hp);
+        assert!(
+            hp.is_some() && hp.unwrap() < 30,
+            "asteroid should retain damage after sever (no refund), hp={:?}",
+            hp
+        );
+    }
+
+    /// A fresh FirePhaser after cooldown on a new locked target cancels any
+    /// active beam and starts a new one.
+    #[test]
+    fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
+        let mut app = test_app();
+
+        // Set up two asteroids.
+        app.world_mut().insert_resource(WorldResource(WorldData {
+            asteroids: vec![
+                AsteroidInfo { uuid: "t1".into(), x: 0.0, z: -20.0, radius: 2.0 },
+                AsteroidInfo { uuid: "t2".into(), x: 0.0, z: -15.0, radius: 2.0 },
+            ],
+        }));
+        start_game_with_weapons(&mut app);
+
+        // Lock and fire at t1.
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t1".into() });
+        let _ = tick(&mut app);
+        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        let _ = tick(&mut app);
+        assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t1"));
+
+        // Natural beam expiry: set remaining to 0.
+        app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 0.0;
+        // Zero damage accumulator so no destruction fires.
+        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 0.0;
+        let _ = tick(&mut app); // beam ends, cooldown starts
+
+        // Cooldown should be active.
+        assert!(app.world().resource::<PhaserCooldown>().is_active());
+
+        // Force cooldown to expire.
+        app.world_mut().resource_mut::<PhaserCooldown>().remaining_secs = 0.0;
+
+        // Lock and fire at t2.
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t2".into() });
+        let _ = tick(&mut app);
+        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        let out = tick(&mut app);
+
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "expected BeamStarted for new target after cooldown");
+        assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t2"));
     }
 }

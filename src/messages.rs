@@ -119,6 +119,7 @@ pub enum ClientMessage {
     HelmInput { thrust: f32, steering: f32 },
     SetView { mode: ViewMode },
     SetTarget { uuid: String },
+    FirePhaser,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -135,7 +136,16 @@ pub enum ServerMessage {
     WorldSetup { world: WorldData },
     TargetLock { uuid: String, locked: bool },
     /// Sent at 10 Hz to the Weapons console player only.  `target_uuid` is the
-    /// currently locked target (`None` if no lock), and `fire_ready` indicates
-    /// whether that target is within phaser range and in the forward 180° arc.
-    WeaponsUpdate { target_uuid: Option<String>, fire_ready: bool },
+    /// currently locked target (`None` if no lock), `fire_ready` indicates
+    /// whether that target is within phaser range and in the forward 180° arc,
+    /// and `on_cooldown` indicates whether the phaser is in its post-beam
+    /// cooldown period (Fire is blocked).
+    WeaponsUpdate { target_uuid: Option<String>, fire_ready: bool, on_cooldown: bool },
+    /// Broadcast when a phaser beam starts. Sent to all players so the renderer
+    /// can draw the beam on the viewscreen.
+    BeamStarted { target_uuid: String },
+    /// Broadcast when a phaser beam ends (natural expiry, sever, or cancel).
+    BeamEnded { target_uuid: String },
+    /// Broadcast when an asteroid's HP reaches 0 and it is despawned.
+    AsteroidDestroyed { uuid: String },
 }

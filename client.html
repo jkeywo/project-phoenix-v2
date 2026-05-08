@@ -196,7 +196,7 @@
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false };
+      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
@@ -469,12 +469,14 @@
       ctx.textAlign = 'right';
       ctx.fillText('60u', cx + r - 2, cy - 4);
 
-      // Fire button — visible and enabled only when fire-ready.
+      // Fire button — visible and enabled only when fire-ready and not on cooldown.
       const fireBtn = $('weapons-fire-btn');
       if (fireBtn) {
         fireBtn.style.display = state.weaponsLocked ? 'block' : 'none';
-        fireBtn.disabled = !state.weaponsFireReady;
-        fireBtn.style.opacity = state.weaponsFireReady ? '1' : '0.4';
+        const canFire = state.weaponsFireReady && !state.weaponsOnCooldown;
+        fireBtn.disabled = !canFire;
+        fireBtn.style.opacity = canFire ? '1' : '0.4';
+        fireBtn.textContent = state.weaponsOnCooldown ? 'COOLDOWN' : 'FIRE';
       }
     }
 
@@ -537,6 +539,16 @@
 
       canvas.addEventListener('click', onTap);
       canvas.addEventListener('touchstart', e => { e.preventDefault(); onTap(e); }, { passive: false });
+
+      // Fire button sends FirePhaser.
+      const fireBtn = $('weapons-fire-btn');
+      if (fireBtn) {
+        fireBtn.addEventListener('click', () => {
+          if (state.weaponsFireReady && !state.weaponsOnCooldown) {
+            send('FirePhaser');
+          }
+        });
+      }
     })();
 
     // ── Event wiring ────────────────────────────────────────────
@@ -698,18 +710,42 @@
           return;
         }
         case 'WeaponsUpdate': {
-          const { target_uuid, fire_ready } = msg.data;
+          const { target_uuid, fire_ready, on_cooldown } = msg.data;
           state.weaponsFireReady = fire_ready;
+          state.weaponsOnCooldown = !!on_cooldown;
           const el = $('weapons-lock-status');
           if (target_uuid) {
             state.weaponsTarget = target_uuid;
             state.weaponsLocked = true;
             if (el) {
-              el.textContent = fire_ready ? 'FIRE READY' : 'TARGET LOCKED';
-              el.style.color = fire_ready ? '#f44' : '#f84';
+              const label = on_cooldown ? 'COOLDOWN' : (fire_ready ? 'FIRE READY' : 'TARGET LOCKED');
+              const color = on_cooldown ? '#a4a' : (fire_ready ? '#f44' : '#f84');
+              el.textContent = label;
+              el.style.color = color;
             }
           } else {
             state.weaponsFireReady = false;
+          }
+          renderWeaponsRadar();
+          return;
+        }
+        case 'BeamStarted': {
+          // Optional: could animate beam on phone UI. For now just log.
+          return;
+        }
+        case 'BeamEnded': {
+          return;
+        }
+        case 'AsteroidDestroyed': {
+          const { uuid } = msg.data;
+          // Remove the destroyed asteroid from local state so it disappears from radar.
+          state.asteroids = state.asteroids.filter(a => a.uuid !== uuid);
+          if (state.weaponsTarget === uuid) {
+            state.weaponsTarget = null;
+            state.weaponsLocked = false;
+            state.weaponsFireReady = false;
+            const el = $('weapons-lock-status');
+            if (el) { el.textContent = 'Target destroyed'; el.style.color = '#aaa'; }
           }
           renderWeaponsRadar();
           return;

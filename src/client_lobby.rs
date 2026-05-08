@@ -87,7 +87,10 @@ impl LobbyState {
             ServerMessage::SimState { .. }
             | ServerMessage::WorldSetup { .. }
             | ServerMessage::TargetLock { .. }
-            | ServerMessage::WeaponsUpdate { .. } => {
+            | ServerMessage::WeaponsUpdate { .. }
+            | ServerMessage::BeamStarted { .. }
+            | ServerMessage::BeamEnded { .. }
+            | ServerMessage::AsteroidDestroyed { .. } => {
                 // Not relevant to the lobby model.
             }
         }

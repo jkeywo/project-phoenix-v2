@@ -399,6 +399,7 @@ mod tests {
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
             fire_ready: true,
+            on_cooldown: false,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -409,7 +410,47 @@ mod tests {
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: None,
             fire_ready: false,
+            on_cooldown: false,
         };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_weapons_update_on_cooldown() {
+        let msg = ServerMessage::WeaponsUpdate {
+            target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+            fire_ready: false,
+            on_cooldown: true,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_fire_phaser_round_trips() {
+        let msg = ClientMessage::FirePhaser;
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_beam_started_round_trips() {
+        let msg = ServerMessage::BeamStarted { target_uuid: "550e8400-e29b-41d4-a716-446655440000".into() };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_beam_ended_round_trips() {
+        let msg = ServerMessage::BeamEnded { target_uuid: "550e8400-e29b-41d4-a716-446655440000".into() };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_asteroid_destroyed_round_trips() {
+        let msg = ServerMessage::AsteroidDestroyed { uuid: "550e8400-e29b-41d4-a716-446655440000".into() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }

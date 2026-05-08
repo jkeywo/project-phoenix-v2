@@ -307,12 +307,30 @@ mod tests {
     }
 
     #[test]
+    fn asteroid_info_with_uuid_round_trips_in_world_setup() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                asteroids: vec![
+                    AsteroidInfo {
+                        uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+                        x: 12.5,
+                        z: -8.0,
+                        radius: 2.0,
+                    },
+                ],
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn world_data_with_asteroids_round_trips_inside_world_setup() {
         let msg = ServerMessage::WorldSetup {
             world: WorldData {
                 asteroids: vec![
-                    AsteroidInfo { x: 1.0, z: 2.0, radius: 2.0 },
-                    AsteroidInfo { x: -3.5, z: 4.25, radius: 1.5 },
+                    AsteroidInfo { uuid: "a1b2c3d4-e5f6-4789-8abc-def012345678".into(), x: 1.0, z: 2.0, radius: 2.0 },
+                    AsteroidInfo { uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(), x: -3.5, z: 4.25, radius: 1.5 },
                 ],
             },
         };
@@ -327,7 +345,7 @@ mod tests {
                 phase: GamePhase::InProgress,
                 players: vec![player()],
                 world: Some(WorldData {
-                    asteroids: vec![AsteroidInfo { x: 0.0, z: 0.0, radius: 2.0 }],
+                    asteroids: vec![AsteroidInfo { uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(), x: 0.0, z: 0.0, radius: 2.0 }],
                 }),
             },
         };

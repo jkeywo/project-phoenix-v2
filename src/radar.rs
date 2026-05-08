@@ -141,14 +141,14 @@ mod tests {
 
     #[test]
     fn project_asteroid_scales_radius_by_range() {
-        let a = AsteroidInfo { x: 0.0, z: -10.0, radius: 2.0 };
+        let a = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0 };
         let (_rx, _ry, r) = project_asteroid(&a, 0.0, 0.0, 0.0).unwrap();
         close(r, 2.0 / RADAR_RANGE);
     }
 
     #[test]
     fn project_asteroid_outside_range_returns_none() {
-        let a = AsteroidInfo { x: 100.0, z: 100.0, radius: 2.0 };
+        let a = AsteroidInfo { uuid: "".into(), x: 100.0, z: 100.0, radius: 2.0 };
         assert!(project_asteroid(&a, 0.0, 0.0, 0.0).is_none());
     }
 
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn radar_dots_single_in_range_matches_project_asteroid() {
-        let asteroid = AsteroidInfo { x: 0.0, z: -10.0, radius: 2.0 };
+        let asteroid = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0 };
         let dots: Vec<_> = radar_dots(&[asteroid.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(dots.len(), 1);
         let expected = project_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap();
@@ -170,8 +170,8 @@ mod tests {
 
     #[test]
     fn radar_dots_skips_out_of_range_asteroids() {
-        let far = AsteroidInfo { x: 100.0, z: 100.0, radius: 2.0 };
-        let near = AsteroidInfo { x: 0.0, z: -10.0, radius: 2.0 };
+        let far = AsteroidInfo { uuid: "".into(), x: 100.0, z: 100.0, radius: 2.0 };
+        let near = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0 };
         let dots: Vec<_> = radar_dots(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(dots.len(), 1);
         assert_eq!(dots[0], project_asteroid(&near, 0.0, 0.0, 0.0).unwrap());

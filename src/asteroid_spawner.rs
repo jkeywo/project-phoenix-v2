@@ -47,6 +47,42 @@ pub fn spawn_asteroid_positions(
     positions
 }
 
+/// Generate deterministic UUID strings for `count` asteroids, derived from
+/// the same seed used by `spawn_asteroid_positions`. The UUIDs are stable
+/// across runs given identical parameters.
+pub fn spawn_asteroid_uuids(spawn_radius: f32, count: usize, clear_zone_radius: f32) -> Vec<String> {
+    let seed = spawn_radius as u64 + (count as u64) << 16 + (clear_zone_radius as u64) << 32;
+    // Use a secondary seed offset so UUID RNG doesn't interfere with position RNG.
+    let uuid_seed = seed.wrapping_add(0xDEAD_BEEF_CAFE_1234);
+    let mut rng = StdRng::seed_from_u64(uuid_seed);
+    (0..count)
+        .map(|_| {
+            let a: u64 = rng.random();
+            let b: u64 = rng.random();
+            // Format as UUID v4-like string (8-4-4-4-12 hex groups)
+            let bytes: [u8; 16] = [
+                (a >> 56) as u8, (a >> 48) as u8, (a >> 40) as u8, (a >> 32) as u8,
+                (a >> 24) as u8, (a >> 16) as u8,
+                // Set version bits (4) in byte 6
+                0x40 | ((a >> 8) as u8 & 0x0f),
+                a as u8,
+                // Set variant bits in byte 8
+                0x80 | ((b >> 56) as u8 & 0x3f),
+                (b >> 48) as u8, (b >> 40) as u8, (b >> 32) as u8,
+                (b >> 24) as u8, (b >> 16) as u8, (b >> 8) as u8, b as u8,
+            ];
+            format!(
+                "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                bytes[0], bytes[1], bytes[2], bytes[3],
+                bytes[4], bytes[5],
+                bytes[6], bytes[7],
+                bytes[8], bytes[9],
+                bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +146,55 @@ mod tests {
     fn zero_count_returns_empty() {
         let positions = spawner(0);
         assert!(positions.is_empty());
+    }
+
+    fn uuids(count: usize) -> Vec<String> {
+        spawn_asteroid_uuids(150.0, count, 20.0)
+    }
+
+    #[test]
+    fn uuids_returns_exact_count() {
+        let ids = uuids(25);
+        assert_eq!(ids.len(), 25);
+    }
+
+    #[test]
+    fn uuids_are_unique() {
+        let ids = uuids(40);
+        let mut seen = std::collections::HashSet::new();
+        for id in &ids {
+            assert!(seen.insert(id.as_str()), "Duplicate UUID: {}", id);
+        }
+    }
+
+    #[test]
+    fn uuids_are_deterministic() {
+        let ids_a = uuids(10);
+        let ids_b = uuids(10);
+        assert_eq!(ids_a, ids_b);
+    }
+
+    #[test]
+    fn uuids_have_expected_format() {
+        let ids = uuids(5);
+        for id in &ids {
+            let parts: Vec<&str> = id.split('-').collect();
+            assert_eq!(parts.len(), 5, "UUID should have 5 parts: {}", id);
+            assert_eq!(parts[0].len(), 8);
+            assert_eq!(parts[1].len(), 4);
+            assert_eq!(parts[2].len(), 4);
+            assert_eq!(parts[3].len(), 4);
+            assert_eq!(parts[4].len(), 12);
+        }
+    }
+
+    #[test]
+    fn positions_unchanged_after_adding_uuid_generation() {
+        // Ensure that adding UUID generation doesn't change the seeding logic
+        // for positions — the two are independent.
+        let positions_before = spawner(25);
+        let _uuids = uuids(25); // run UUID generation
+        let positions_after = spawner(25);
+        assert_eq!(positions_before, positions_after);
     }
 }

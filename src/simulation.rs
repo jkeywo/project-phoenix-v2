@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::asteroid_spawner::spawn_asteroid_positions;
+use crate::asteroid_spawner::{spawn_asteroid_positions, spawn_asteroid_uuids};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     AsteroidInfo, ClientMessage, Console, GamePhase, ServerMessage, ViewMode,
@@ -15,6 +15,17 @@ pub struct Ship;
 
 #[derive(Component)]
 pub struct Asteroid;
+
+/// Stable UUID string identifying this asteroid entity (for targeting).
+#[derive(Component, Clone)]
+pub struct AsteroidUuid(pub String);
+
+/// Tracks remaining HP for an asteroid entity (max and current = 30).
+#[derive(Component)]
+pub struct AsteroidDamage {
+    pub max_hp: i32,
+    pub current_hp: i32,
+}
 
 // ── Resources ────────────────
 #[derive(Resource)]
@@ -223,12 +234,14 @@ fn setup_world(
 ) {
     let config = ShipPhysicsConfig::new();
     let positions = spawn_asteroid_positions(config.max_speed * 3.0, 40, 20.0);
+    let uuids = spawn_asteroid_uuids(config.max_speed * 3.0, 40, 20.0);
 
     // Record asteroid layout so it can be broadcast as WorldSetup and
     // included in Welcome for reconnecting clients.
     world.0.asteroids = positions
         .iter()
-        .map(|(x, z)| AsteroidInfo { x: *x, z: *z, radius: 2.0 })
+        .zip(uuids.iter())
+        .map(|((x, z), uuid)| AsteroidInfo { uuid: uuid.clone(), x: *x, z: *z, radius: 2.0 })
         .collect();
 
     // Spawn asteroids
@@ -238,9 +251,11 @@ fn setup_world(
     });
     let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
 
-    for (x, z) in &positions {
+    for ((x, z), uuid) in positions.iter().zip(uuids.iter()) {
         commands.spawn((
             Asteroid,
+            AsteroidUuid(uuid.clone()),
+            AsteroidDamage { max_hp: 30, current_hp: 30 },
             Mesh3d(asteroid_mesh.clone()),
             MeshMaterial3d(asteroid_mat.clone()),
             Transform::from_xyz(*x, 0.0, *z),
@@ -495,7 +510,7 @@ mod tests {
         let mut app = test_app();
         // Pre-populate world data so the broadcast has something to emit.
         app.world_mut().insert_resource(WorldResource(WorldData {
-            asteroids: vec![AsteroidInfo { x: 5.0, z: -1.0, radius: 2.0 }],
+            asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 5.0, z: -1.0, radius: 2.0 }],
         }));
 
         // Bring the game up to the point of pressing StartGame
@@ -533,7 +548,7 @@ mod tests {
     fn world_setup_is_not_broadcast_during_lobby() {
         let mut app = test_app();
         app.world_mut().insert_resource(WorldResource(WorldData {
-            asteroids: vec![AsteroidInfo { x: 0.0, z: 0.0, radius: 2.0 }],
+            asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 0.0, z: 0.0, radius: 2.0 }],
         }));
         // Identify and select a console but don't start the game.
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });

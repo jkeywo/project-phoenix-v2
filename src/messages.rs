@@ -89,10 +89,11 @@ pub struct SimSnapshot {
     pub ship_yaw: f32,
 }
 
-/// One asteroid in a `WorldData` snapshot — position on the play plane
-/// and collider radius.
+/// One asteroid in a `WorldData` snapshot — position on the play plane,
+/// collider radius, and stable UUID for client-side targeting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AsteroidInfo {
+    pub uuid: String,
     pub x: f32,
     pub z: f32,
     pub radius: f32,

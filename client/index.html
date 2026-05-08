@@ -76,14 +76,14 @@
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     #red-alert-overlay { position: fixed; z-index: 15; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-e50d524e247a4d37.js" crossorigin="anonymous" integrity="sha384-qVK7/UC9H4ZmK4uDyOQg4ml7a5jBS4QRwAlIjkCjWIZAV0LLbT9ghDHGqLhAG5m+"><link rel="preload" href="./project-phoenix-e50d524e247a4d37_bg.wasm" crossorigin="anonymous" integrity="sha384-2hHxubptIq5c6RNrKfjBgZeICoMIy1isevbBXxLnjdFfh3FSnK4N0hQcp1mOZD43" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-1f80f28b9fb8f6aa.js" crossorigin="anonymous" integrity="sha384-sJCGRnfH8DSDvNqntS42UDX6mhlFBaWUaMb+6c+4A94OPg9t5rG+W248AFp5yzr7"><link rel="preload" href="./project-phoenix-1f80f28b9fb8f6aa_bg.wasm" crossorigin="anonymous" integrity="sha384-jQ/qlndbnjMBNm0UqTix0n/Ilqt1P6sWySNf0JR8gkplHoLy947oetOQ+UfrdTZa" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-e50d524e247a4d37.js';
-const wasm = await init({ module_or_path: './project-phoenix-e50d524e247a4d37_bg.wasm' });
+import init, * as bindings from './project-phoenix-1f80f28b9fb8f6aa.js';
+const wasm = await init({ module_or_path: './project-phoenix-1f80f28b9fb8f6aa_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -114,6 +114,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       <!-- View selector cross and Red Alert button are rendered by the
            Bevy WASM captain UI; see src/client_app.rs (#48). -->
       <p id="game-status"></p>
+    </section>
+
+    <section id="weapons-ui">
+      <p>Weapons console — coming soon.</p>
+    </section>
+
+    <section id="engineering-ui">
+      <p>Engineering console — coming soon.</p>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -219,10 +227,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     // ── Rendering ───────────────────────────────────────────────
 
-    const CONSOLES = ['CaptainChair', 'Helm'];
+    const CONSOLES = ['CaptainChair', 'Helm', 'Weapons', 'Engineering'];
     const CONSOLE_LABEL = {
       CaptainChair: "Captain's Chair",
       Helm: 'Helm',
+      Weapons: 'Weapons',
+      Engineering: 'Engineering',
     };
 
     // Defer re-render so rapid server messages don't steal pointer events.
@@ -271,6 +281,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
       // Console sections: only the active one is visible while in-game.
       $('game-ui').className = (inGame && activeConsole === 'CaptainChair') ? 'active' : '';
+      $('weapons-ui').className = (inGame && activeConsole === 'Weapons') ? 'active' : '';
+      $('engineering-ui').className = (inGame && activeConsole === 'Engineering') ? 'active' : '';
       // Helm console UI is rendered by Bevy WASM (#49).
 
       // Tabs only appear when in-game with 2+ consoles.
@@ -344,6 +356,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         $('game-status').textContent = 'You are the captain. Issue orders.';
       } else if (!activeConsole) {
         $('game-status').textContent = 'Stand by. Select a console in the lobby.';
+      } else {
+        $('game-status').textContent = '';
       }
     }
 

@@ -319,9 +319,9 @@ fn rebuild_lobby_ui_on_change(
         });
     }
 
-    // Engage visibility — only show when captain AND still in lobby.
+    // Engage visibility — only show when captain, in lobby, and all consoles filled.
     if let Ok(mut vis) = engage.single_mut() {
-        *vis = if view.is_captain() && state.phase == GamePhase::Lobby {
+        *vis = if view.is_captain() && state.phase == GamePhase::Lobby && view.all_consoles_filled() {
             Visibility::Visible
         } else {
             Visibility::Hidden

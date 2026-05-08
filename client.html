@@ -896,27 +896,45 @@
       const clientPeer = new Peer();
 
       clientPeer.on('open', () => {
-        setStatus('Connecting to host…');
-        conn = clientPeer.connect(hostPeerId, { reliable: true });
+        let connectTimeout;
 
-        conn.on('open', () => {
-          setConnectionStatus('ready');
-          send('Identify', { token: myToken, name: myName });
-          setStatus('Waiting for server…');
-        });
+        function startConnect() {
+          setStatus('Connecting to host…');
+          conn = clientPeer.connect(hostPeerId, { reliable: true });
 
-        conn.on('data', raw => {
-          try {
-            const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-            // Forward to the WASM client bridge (queued until ready) so
-            // future Bevy systems can react alongside the existing JS UI.
-            callWasmReceive(str);
-            handleMessage(JSON.parse(str));
-          } catch (e) { console.error('[client] bad message', e, raw); }
-        });
+          // If the DataConnection doesn't open within 8 s, retry — PeerJS
+          // can silently stall when NAT traversal fails or the host is
+          // temporarily unreachable.
+          connectTimeout = setTimeout(() => {
+            if (conn && !conn.open) {
+              conn.close();
+              conn = null;
+              startConnect();
+            }
+          }, 8000);
 
-        conn.on('close', () => { setConnectionStatus('disconnected'); setStatus('Disconnected'); conn = null; });
-        conn.on('error', e  => setStatus('Connection error: ' + e.type));
+          conn.on('open', () => {
+            clearTimeout(connectTimeout);
+            setConnectionStatus('ready');
+            send('Identify', { token: myToken, name: myName });
+            setStatus('Waiting for server…');
+          });
+
+          conn.on('data', raw => {
+            try {
+              const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+              // Forward to the WASM client bridge (queued until ready) so
+              // future Bevy systems can react alongside the existing JS UI.
+              callWasmReceive(str);
+              handleMessage(JSON.parse(str));
+            } catch (e) { console.error('[client] bad message', e, raw); }
+          });
+
+          conn.on('close', () => { clearTimeout(connectTimeout); setConnectionStatus('disconnected'); setStatus('Disconnected'); conn = null; });
+          conn.on('error', e  => { clearTimeout(connectTimeout); setStatus('Connection error: ' + e.type); });
+        }
+
+        startConnect();
       });
 
       clientPeer.on('disconnected', () => {

@@ -147,6 +147,13 @@ impl<'a> LobbyView<'a> {
             .unwrap_or(&[])
     }
 
+    /// True if every console in `ALL_CONSOLES` is held by someone.
+    pub fn all_consoles_filled(&self) -> bool {
+        self.console_slots()
+            .iter()
+            .all(|slot| !matches!(slot, ConsoleSlot::Available { .. }))
+    }
+
     /// One slot per console in `ALL_CONSOLES`, classified by who holds it.
     pub fn console_slots(&self) -> Vec<ConsoleSlot> {
         ALL_CONSOLES
@@ -419,5 +426,29 @@ mod tests {
     #[test]
     fn engage_message_is_start_game() {
         assert_eq!(engage_message(), ClientMessage::StartGame);
+    }
+
+    #[test]
+    fn all_consoles_filled_is_false_when_any_console_is_available() {
+        let mut s = LobbyState::default();
+        s.players = vec![
+            p("a", "Alice", vec![Console::CaptainChair]),
+            p("b", "Bob",   vec![Console::Helm]),
+            p("c", "Carol", vec![Console::Weapons]),
+            // Engineering not taken
+        ];
+        assert!(!LobbyView::new(&s, "a").all_consoles_filled());
+    }
+
+    #[test]
+    fn all_consoles_filled_is_true_when_all_four_consoles_are_held() {
+        let mut s = LobbyState::default();
+        s.players = vec![
+            p("a", "Alice", vec![Console::CaptainChair]),
+            p("b", "Bob",   vec![Console::Helm]),
+            p("c", "Carol", vec![Console::Weapons]),
+            p("d", "Dave",  vec![Console::Engineering]),
+        ];
+        assert!(LobbyView::new(&s, "a").all_consoles_filled());
     }
 }

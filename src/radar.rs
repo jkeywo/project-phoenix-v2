@@ -35,20 +35,22 @@ pub fn project_to_radar(world_x: f32, world_z: f32, ship_x: f32, ship_z: f32, sh
         return None;
     }
 
-    // Rotate the world displacement by -yaw so the ship's forward direction
-    // becomes the +Y axis on the radar. With yaw=0 the ship faces -Z, so
-    // forward (-Z) must map to +Y; a point directly ahead (dz < 0) yields
-    // +radar_y. Hence radar_y = -dz at yaw=0.
+    // Project world displacement onto ship-local axes.
+    //
+    // The ship's axes in world XZ space are:
+    //   forward = (sin(yaw), -cos(yaw))
+    //   right   = (cos(yaw),  sin(yaw))   [forward × world_up, right-hand rule]
+    //
+    // radar_x = dot((dx,dz), right)   = dx*cos(yaw) + dz*sin(yaw)
+    // radar_y = dot((dx,dz), forward) = dx*sin(yaw) - dz*cos(yaw)
+    //
+    // At yaw=0: right=(1,0), forward=(0,-1).  A point at dz=-25 (ahead) gives
+    // radar_y = +0.5.  A point at dx=+25 (starboard) gives radar_x = +0.5.
     let cos_y = ship_yaw.cos();
     let sin_y = ship_yaw.sin();
-    // Rotation by -yaw applied to (dx, dz):
-    //   rx =  dx*cos(yaw) - dz*sin(yaw)
-    //   rz =  dx*sin(yaw) + dz*cos(yaw)
-    let rx =  dx * cos_y - dz * sin_y;
-    let rz =  dx * sin_y + dz * cos_y;
 
-    let radar_x = rx / RADAR_RANGE;
-    let radar_y = -rz / RADAR_RANGE;
+    let radar_x = (dx * cos_y + dz * sin_y) / RADAR_RANGE;
+    let radar_y = (dx * sin_y - dz * cos_y) / RADAR_RANGE;
     Some((radar_x, radar_y))
 }
 
@@ -121,25 +123,20 @@ mod tests {
 
     #[test]
     fn ship_yaw_rotates_world_to_keep_forward_pointing_up() {
-        // Yaw = π/2: ship has rotated 90° anticlockwise around +Y.
-        // From the ship's frame, what was at world +X is now behind
-        // (or in front, depending on rotation sense). The convention
-        // used in ship_physics rotates the heading by +yaw counter-
-        // clockwise when viewed from above; the transform here must be
-        // its inverse.
-        // Place a point ahead of the ship (in its local frame) at world
-        // location consistent with yaw=π/2 facing +X (since yaw=0 → -Z,
-        // yaw=π/2 → -Z rotated by +90°). Easier: assert symmetry — a
-        // point directly to the ship's right always maps to (+rx, 0)
-        // regardless of yaw.
+        // Yaw = π/2: ship faces +X (forward = (sin(π/2), -cos(π/2)) = (1, 0) in XZ).
+        // The ship's starboard (right) vector = forward × world_up = +Z direction.
+        // So 25 units to starboard is world (x=0, z=+25).
+        // That point should map to radar_x=+0.5, radar_y=0.
         let yaw = std::f32::consts::FRAC_PI_2;
-        // World position of "25 units to ship's right" when yaw=π/2:
-        // ship faces (sin(yaw), 0, -cos(yaw)) = (1, 0, 0). Right of that
-        // is (-cos(yaw), 0, -sin(yaw)) = (0, 0, -1). So 25 to the right
-        // is world (0, 0, -25).
-        let p = project_to_radar(0.0, -25.0, 0.0, 0.0, yaw).unwrap();
+        let p = project_to_radar(0.0, 25.0, 0.0, 0.0, yaw).unwrap();
         close(p.0, 0.5);
         close(p.1, 0.0);
+
+        // Also verify: a point directly ahead at yaw=π/2 is at world (+25, 0).
+        // It should map to radar_x=0, radar_y=+0.5.
+        let q = project_to_radar(25.0, 0.0, 0.0, 0.0, yaw).unwrap();
+        close(q.0, 0.0);
+        close(q.1, 0.5);
     }
 
     #[test]

@@ -76,14 +76,14 @@
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     #red-alert-overlay { position: fixed; z-index: 15; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-b776fc818833f160.js" crossorigin="anonymous" integrity="sha384-TwZuWQZP1GKu9ROgwEfFkXwM5fD5CAMqaCGRmalESB3UVvBWRhVEdH2BTROVo42p"><link rel="preload" href="./project-phoenix-b776fc818833f160_bg.wasm" crossorigin="anonymous" integrity="sha384-I7eWZsKplNEf2imeJLRMIB7OihrQHMeLaVpWKMc/bvJfuh4x6VpGSs0+TL/zjQBK" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-fa4cd24b0f95cd1c.js" crossorigin="anonymous" integrity="sha384-hEkApb0d70zypAOYJ6Ky3jqZ4rXSLpMn8Te5ox+p9X7CGL7J06HAT436shEGwYEM"><link rel="preload" href="./project-phoenix-fa4cd24b0f95cd1c_bg.wasm" crossorigin="anonymous" integrity="sha384-ZcDhIs2HLtgQOmrJvVxiNPs8uAjDCnA1LOGx1E265fVkLVgo31vp0SJGumaenzCf" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-b776fc818833f160.js';
-const wasm = await init({ module_or_path: './project-phoenix-b776fc818833f160_bg.wasm' });
+import init, * as bindings from './project-phoenix-fa4cd24b0f95cd1c.js';
+const wasm = await init({ module_or_path: './project-phoenix-fa4cd24b0f95cd1c_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -114,6 +114,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       <!-- View selector cross and Red Alert button are rendered by the
            Bevy WASM captain UI; see src/client_app.rs (#48). -->
       <p id="game-status"></p>
+      <button id="captain-repair-btn"
+        style="margin-top:1rem;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
+               letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
+               cursor:pointer;width:80%;display:block;margin-left:auto;margin-right:auto"
+        onclick="send('Repair', {})">REPAIR</button>
     </section>
 
     <section id="weapons-ui">
@@ -128,6 +133,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
                letter-spacing:.15em;background:#900;color:#fff;border:2px solid #f44;border-radius:6px;
                cursor:pointer;width:80%"
         disabled>FIRE</button>
+      <button id="weapons-repair-btn"
+        style="margin:0.75rem auto 0;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
+               letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
+               cursor:pointer;width:80%;display:block"
+        onclick="send('Repair', {})">REPAIR</button>
     </section>
 
     <section id="engineering-ui">
@@ -135,6 +145,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       <p style="margin:0 0 0.5rem;font-size:0.85rem;color:#aaa">HULL INTEGRITY</p>
       <p id="eng-hp-text" style="font-size:2.5rem;font-weight:bold;margin:0 0 1rem;color:#4cf">100 / 100</p>
       <div id="eng-hp-bar" style="display:flex;gap:4px" aria-label="Hull integrity bar"></div>
+      <div id="eng-repair-target" style="margin-top:1.5rem;padding:0.75rem 1rem;border-radius:6px;background:#111;display:none">
+        <p style="margin:0 0 0.25rem;font-size:0.8rem;color:#aaa;letter-spacing:.05em">ACTIVE REPAIR TARGET</p>
+        <p id="eng-repair-console" style="margin:0;font-size:1.4rem;font-weight:bold;color:#fa0;letter-spacing:.08em"></p>
+      </div>
+      <button id="eng-repair-btn"
+        style="margin-top:1.5rem;padding:0.75rem 2rem;font-size:1.1rem;font-weight:bold;
+               letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
+               cursor:pointer;width:100%"
+        onclick="send('Repair', {})">REPAIR</button>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -207,7 +226,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false };
+      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false,
+      repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
@@ -362,7 +382,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       // once the in-game UI also migrates and no JS callers exist.
     }
 
-    function renderEngineering(hp) {
+    function renderEngineering(hp, repairTarget) {
       const clamped = Math.max(0, Math.min(100, hp));
       const text = $('eng-hp-text');
       const bar = $('eng-hp-bar');
@@ -384,10 +404,53 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       bar.querySelectorAll('div').forEach((seg, i) => {
         seg.style.background = i < filled ? color : '#333';
       });
+      // Repair target display
+      const targetBox = $('eng-repair-target');
+      const targetLabel = $('eng-repair-console');
+      if (targetBox && targetLabel) {
+        if (repairTarget) {
+          const names = {
+            CaptainChair: "CAPTAIN'S CHAIR",
+            Helm: 'HELM',
+            Weapons: 'WEAPONS',
+            Engineering: 'ENGINEERING',
+          };
+          targetLabel.textContent = names[repairTarget] || repairTarget;
+          targetBox.style.display = '';
+        } else {
+          targetBox.style.display = 'none';
+        }
+      }
     }
 
-    function renderWeaponsRadar() {
-      const canvas = $('weapons-radar');
+    function renderRepairButtons(s) {
+      const ids = ['captain-repair-btn', 'weapons-repair-btn', 'eng-repair-btn'];
+      for (const id of ids) {
+        const btn = $(id);
+        if (!btn) continue;
+        if (s.repairPenalty) {
+          btn.textContent = 'COOLDOWN ' + Math.ceil(s.repairCooldownSecs) + 's';
+          btn.style.background = '#400';
+          btn.style.color = '#f66';
+          btn.style.borderColor = '#f44';
+          btn.disabled = true;
+        } else if (s.repairInProgress) {
+          btn.textContent = 'REPAIRING ' + Math.ceil(s.repairCooldownSecs) + 's';
+          btn.style.background = '#030';
+          btn.style.color = '#5f5';
+          btn.style.borderColor = '#4a4';
+          btn.disabled = true;
+        } else {
+          btn.textContent = 'REPAIR';
+          btn.style.background = '#063';
+          btn.style.color = '#5f5';
+          btn.style.borderColor = '#5f5';
+          btn.disabled = false;
+        }
+      }
+    }
+
+    function renderWeaponsRadar() {      const canvas = $('weapons-radar');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const W = canvas.width, H = canvas.height;
@@ -678,6 +741,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           const ra = snap.red_alert;
           const vd = snap.view_direction;
           const hp = snap.hull_integrity;
+          const repairTarget = snap.authorized_repair_console || null;
           state.shipX = snap.ship_x || 0;
           state.shipZ = snap.ship_z || 0;
           state.shipYaw = snap.ship_yaw || 0;
@@ -687,9 +751,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           else container.classList.remove('red-alert');
           if (state.redAlert !== ra) state.redAlert = ra;
           if (vd) state.currentView = vd;
-          if (typeof hp === 'number' && state.hullIntegrity !== hp) {
+          if (typeof hp === 'number' && (state.hullIntegrity !== hp || state.repairTarget !== repairTarget)) {
             state.hullIntegrity = hp;
-            renderEngineering(hp);
+            state.repairTarget = repairTarget;
+            renderEngineering(hp, repairTarget);
           }
           renderWeaponsRadar();
           // View-direction highlighting is handled by the Bevy WASM UI (#48).
@@ -745,6 +810,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           return;
         }
         case 'BeamEnded': {
+          return;
+        }
+        case 'RepairState': {
+          const { remaining_cooldown_secs, in_progress, penalty } = msg.data;
+          state.repairCooldownSecs = remaining_cooldown_secs || 0;
+          state.repairInProgress = !!in_progress;
+          state.repairPenalty = !!penalty;
+          renderRepairButtons(state);
           return;
         }
         case 'AsteroidDestroyed': {

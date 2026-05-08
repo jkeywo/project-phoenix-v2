@@ -12,7 +12,7 @@
 
 use bevy::prelude::*;
 
-use crate::client_helm::{drag, press, release, tick, HelmJoystickState};
+use crate::client_helm::{drag, release, tick, HelmJoystickState};
 use crate::client_lobby::{
     engage_message, message_for_slot_click, ConsoleSlot, LobbyState, LobbyView, LocalPlayerToken,
     ActiveConsole,

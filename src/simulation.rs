@@ -438,7 +438,7 @@ fn handle_fire_phaser(
     world: Res<WorldResource>,
     weapons_target: Res<WeaponsTarget>,
     mut beam: ResMut<ActiveBeam>,
-    mut cooldown: ResMut<PhaserCooldown>,
+    cooldown: ResMut<PhaserCooldown>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;

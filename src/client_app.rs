@@ -654,6 +654,7 @@ fn setup_helm_ui(mut commands: Commands) {
                 align_items: AlignItems::FlexEnd,
                 justify_content: JustifyContent::SpaceBetween,
                 column_gap: Val::Px(16.0),
+                overflow: Overflow::clip_x(),
                 ..default()
             },
             Visibility::Hidden,
@@ -840,12 +841,9 @@ fn on_helm_drag(
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     let drag_event = trigger.event();
-    if let Some(msg) = drag(
-        &mut state,
-        drag_event.distance.x,
-        drag_event.distance.y,
-        helm_max_radius(),
-    ) {
+    let new_dx = state.knob_dx + drag_event.delta.x;
+    let new_dy = state.knob_dy + drag_event.delta.y;
+    if let Some(msg) = drag(&mut state, new_dx, new_dy, helm_max_radius()) {
         outbound.write(OutboundClientMessage(msg));
     }
 }
@@ -958,17 +956,14 @@ fn draw_helm_radar(
         return;
     }
     let Ok(window) = windows.single() else { return };
-    let scale = window.scale_factor();
     let viewport_w = window.width();   // logical pixels
     let viewport_h = window.height();  // logical pixels
 
-    // UI node GlobalTransform translation is in *physical* pixels (top-left
-    // corner, +y down). Divide by the window scale factor to convert to the
-    // same logical-pixel space as window.width()/height(), then shift origin
-    // from top-left to screen-centre and flip y for Camera2d world space.
-    let node_size = node.size();       // logical pixels from ComputedNode
-    let tl = gt.translation().truncate() / scale;
-    let node_centre_screen = tl + node_size * 0.5;
+    // In Bevy 0.18, GlobalTransform::translation() for UI nodes returns the
+    // node centre in logical pixels (+y up). Shift origin from top-left to
+    // screen-centre and flip y for Camera2d world space.
+    let node_size = node.size();
+    let node_centre_screen = gt.translation().truncate();
     let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
     let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
     let centre = Vec2::new(centre_world_x, centre_world_y);

@@ -100,7 +100,7 @@ impl LobbyState {
 
 /// All consoles the lobby UI knows how to render. Listed in the order
 /// they appear on screen.
-pub const ALL_CONSOLES: [Console; 2] = [Console::CaptainChair, Console::Helm];
+pub const ALL_CONSOLES: [Console; 4] = [Console::CaptainChair, Console::Helm, Console::Weapons, Console::Engineering];
 
 /// One console row as the lobby UI should render it.
 #[derive(Clone, Debug, PartialEq)]

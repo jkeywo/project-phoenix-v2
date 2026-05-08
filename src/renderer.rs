@@ -4,6 +4,22 @@ use crate::lobby::{CurrentPhase, GameStateCache, WorldResource};
 use crate::messages::{GamePhase, ViewDirection, ViewMode};
 use crate::radar;
 use crate::ship_state::ShipState;
+use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx};
+
+// ── VFX Components ────────────────────────────────────────────────
+
+/// A ripple ring expanding outward at an asteroid destruction site.
+/// `elapsed` tracks how far through the animation we are; the effect
+/// lasts `RIPPLE_DURATION` seconds.
+#[derive(Component)]
+struct RippleEffect {
+    x: f32,
+    z: f32,
+    elapsed: f32,
+}
+
+const RIPPLE_DURATION: f32 = 1.2;
+const RIPPLE_MAX_RADIUS: f32 = 30.0;
 
 // ── Marker Components ─────────────────────────────────────────────
 
@@ -53,6 +69,11 @@ impl Plugin for RendererPlugin {
                 update_view_direction_label,
                 hull_camera,
                 draw_radar_overlay,
+            ))
+            .add_systems(Update, (
+                draw_beam_vfx,
+                spawn_ripples,
+                tick_ripples,
             ));
     }
 }
@@ -397,6 +418,106 @@ fn draw_radar_overlay(
             let pos = Vec2::new(rx * RADAR_PIXEL_RADIUS, ry * RADAR_PIXEL_RADIUS);
             let pix_radius = (rr * RADAR_PIXEL_RADIUS).max(2.0);
             gizmos.circle_2d(pos, pix_radius, aster);
+        }
+    }
+}
+
+// ── VFX Systems ───────────────────────────────────────────────────
+
+/// Draws a phaser beam from the ship to its target asteroid each frame while
+/// `ActiveBeam` has a live target. Uses 3D gizmo lines in world space so the
+/// beam is visible on the `GameCamera` view screen.
+fn draw_beam_vfx(
+    phase: Res<CurrentPhase>,
+    ship: Res<ShipState>,
+    beam: Res<ActiveBeam>,
+    world: Option<Res<WorldResource>>,
+    mut gizmos: Gizmos,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    let Some(target_uuid) = &beam.target_uuid else { return };
+    let Some(world) = world else { return };
+
+    let Some(asteroid) = world.0.asteroids.iter().find(|a| &a.uuid == target_uuid) else {
+        return;
+    };
+
+    let origin = Vec3::new(ship.x, 0.0, ship.z);
+    let target = Vec3::new(asteroid.x, 0.0, asteroid.z);
+
+    // Core bright beam line
+    let beam_color = Color::srgba(1.0, 0.4, 0.1, 1.0);
+    gizmos.line(origin, target, beam_color);
+
+    // Slightly wider glow by drawing two offset parallel lines
+    let glow_color = Color::srgba(1.0, 0.6, 0.2, 0.35);
+    let perp = {
+        let dx = target.x - origin.x;
+        let dz = target.z - origin.z;
+        let len = (dx * dx + dz * dz).sqrt().max(0.001);
+        Vec3::new(-dz / len * 0.5, 0.0, dx / len * 0.5)
+    };
+    gizmos.line(origin + perp, target + perp, glow_color);
+    gizmos.line(origin - perp, target - perp, glow_color);
+}
+
+/// Spawns a `RippleEffect` entity for each `AsteroidDestroyedVfx` event received.
+fn spawn_ripples(
+    mut events: MessageReader<AsteroidDestroyedVfx>,
+    mut commands: Commands,
+) {
+    for ev in events.read() {
+        commands.spawn(RippleEffect { x: ev.x, z: ev.z, elapsed: 0.0 });
+    }
+}
+
+/// Ticks all active `RippleEffect` entities: advances time, draws the expanding
+/// ring via 3D gizmos, and despawns the entity once the animation completes.
+fn tick_ripples(
+    time: Res<Time>,
+    phase: Res<CurrentPhase>,
+    mut query: Query<(Entity, &mut RippleEffect)>,
+    mut gizmos: Gizmos,
+    mut commands: Commands,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    let dt = time.delta_secs();
+    for (entity, mut ripple) in query.iter_mut() {
+        ripple.elapsed += dt;
+        if ripple.elapsed >= RIPPLE_DURATION {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        let t = ripple.elapsed / RIPPLE_DURATION;           // 0..1
+        let radius = RIPPLE_MAX_RADIUS * t;
+        let alpha = (1.0 - t) * 0.85;                       // fade out
+
+        // Draw a horizontal circle (XZ plane) as the ripple ring.
+        // `gizmos.circle` draws in a plane defined by a normal vector.
+        let center = Vec3::new(ripple.x, 0.0, ripple.z);
+        let color = Color::srgba(1.0, 0.55, 0.1, alpha);
+        gizmos.circle(
+            Isometry3d::new(center, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            radius,
+            color,
+        );
+
+        // Second outer ring, slightly delayed, for a double-ripple feel.
+        if t > 0.15 {
+            let t2 = (t - 0.15) / (1.0 - 0.15);
+            let r2 = RIPPLE_MAX_RADIUS * t2;
+            let a2 = (1.0 - t2) * 0.45;
+            let c2 = Color::srgba(1.0, 0.75, 0.3, a2);
+            gizmos.circle(
+                Isometry3d::new(center, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                r2,
+                c2,
+            );
         }
     }
 }

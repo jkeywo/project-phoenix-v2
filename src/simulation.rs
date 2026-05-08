@@ -77,6 +77,14 @@ pub struct PhaserCooldown {
     pub remaining_secs: f32,
 }
 
+/// Bevy message fired (with world-space position) when an asteroid is destroyed
+/// by phaser fire. The renderer uses this to spawn a ripple VFX at the site.
+#[derive(Message, Clone, Debug)]
+pub struct AsteroidDestroyedVfx {
+    pub x: f32,
+    pub z: f32,
+}
+
 /// Bevy resource wrapping the breakdown queue.
 #[derive(Resource)]
 pub struct BreakdownQueueResource {
@@ -117,6 +125,7 @@ pub struct SimulationPlugin;
 impl Plugin for SimulationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RapierPhysicsPlugin::<()>::default())
+            .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
             .init_resource::<WorldResource>()
@@ -402,6 +411,7 @@ fn tick_active_beam(
     mut beam: ResMut<ActiveBeam>,
     mut cooldown: ResMut<PhaserCooldown>,
     mut writer: MessageWriter<OutboundMessage>,
+    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     ship: Res<ShipState>,
     mut world: ResMut<WorldResource>,
     mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut AsteroidDamage)>,
@@ -471,6 +481,11 @@ fn tick_active_beam(
         if destroyed {
             // Remove from world data.
             world.0.asteroids.retain(|a| a.uuid != target_uuid);
+
+            // Fire VFX event with the asteroid's last known position so the
+            // renderer can play the destruction ripple. `info` holds the position
+            // captured before the retain() call above.
+            vfx_events.write(AsteroidDestroyedVfx { x: info.x, z: info.z });
 
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
@@ -720,6 +735,7 @@ mod tests {
             .init_resource::<WorldSetupBroadcast>()
             .init_resource::<WeaponsTarget>()
             .init_resource::<ActiveBeam>()
+            .add_message::<AsteroidDestroyedVfx>()
             .init_resource::<PhaserCooldown>()
             .init_resource::<BreakdownQueueResource>()
             .insert_resource(SimBroadcastTimer(Timer::new(

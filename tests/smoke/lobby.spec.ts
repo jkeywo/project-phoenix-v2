@@ -25,6 +25,9 @@ test('console selection — both clients receive ConsoleSelected broadcasts', as
   const selAonB = await clientB.waitForMessage('ConsoleSelected', 5_000) as any;
   expect(selAonB.data.token).toBe(clientA.token);
 
+  // Clear clientB's message queue so the next waitForMessage sees only new messages
+  await clientB.page.evaluate(() => { (window as any).__messages = []; });
+
   // Client B claims Helm
   await clientB.send('SetName', { name: 'Beta' });
   await clientB.send('SelectConsole', { console: 'Helm' });

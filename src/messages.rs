@@ -124,6 +124,7 @@ pub enum ClientMessage {
     SetView { mode: ViewMode },
     SetTarget { uuid: String },
     FirePhaser,
+    Repair,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -152,4 +153,8 @@ pub enum ServerMessage {
     BeamEnded { target_uuid: String },
     /// Broadcast when an asteroid's HP reaches 0 and it is despawned.
     AsteroidDestroyed { uuid: String },
+    /// Sent at 10 Hz to each console player.  Carries the remaining cooldown
+    /// (penalty or repair) in seconds, whether a repair action is currently
+    /// in progress, and whether the last cooldown was a penalty.
+    RepairState { remaining_cooldown_secs: f32, in_progress: bool, penalty: bool },
 }

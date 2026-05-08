@@ -77,6 +77,62 @@ pub struct PhaserCooldown {
     pub remaining_secs: f32,
 }
 
+// ── Repair constants ──────────
+const REPAIR_DURATION_SECS: f32 = 30.0;
+const REPAIR_HP_PER_SEC: f32 = 1.0 / 3.0; // +1 HP every 3 seconds
+const REPAIR_MAX_HP: i32 = 10;
+const REPAIR_PENALTY_SECS: f32 = 30.0;
+
+/// Active repair action. `Some` while a repair is underway; the authorised
+/// console is healing the ship. Resets to `None` when time expires or
+/// `REPAIR_MAX_HP` is restored.
+#[derive(Resource, Default)]
+pub struct ActiveRepair {
+    /// How many seconds remain in the current repair action.
+    pub remaining_secs: f32,
+    /// Fractional HP accumulator so 1 HP/3 s is applied accurately.
+    pub hp_accumulator: f32,
+    /// Total HP restored so far in this repair action (capped at REPAIR_MAX_HP).
+    pub hp_restored: i32,
+}
+
+impl ActiveRepair {
+    pub fn is_active(&self) -> bool {
+        self.remaining_secs > 0.0
+    }
+
+    pub fn start(&mut self) {
+        self.remaining_secs = REPAIR_DURATION_SECS;
+        self.hp_accumulator = 0.0;
+        self.hp_restored = 0;
+    }
+}
+
+/// Per-token penalty cooldown. When a player presses Repair on an unauthorised
+/// console, their token is entered here and locked out for `REPAIR_PENALTY_SECS`.
+#[derive(Resource, Default)]
+pub struct RepairPenalties(pub std::collections::HashMap<String, f32>);
+
+impl RepairPenalties {
+    pub fn is_penalised(&self, token: &str) -> bool {
+        self.0.get(token).map_or(false, |&secs| secs > 0.0)
+    }
+
+    pub fn penalise(&mut self, token: &str) {
+        self.0.insert(token.to_string(), REPAIR_PENALTY_SECS);
+    }
+
+    pub fn tick(&mut self, dt: f32) {
+        for secs in self.0.values_mut() {
+            *secs = (*secs - dt).max(0.0);
+        }
+    }
+
+    pub fn remaining(&self, token: &str) -> f32 {
+        self.0.get(token).copied().unwrap_or(0.0)
+    }
+}
+
 /// Bevy message fired (with world-space position) when an asteroid is destroyed
 /// by phaser fire. The renderer uses this to spawn a ripple VFX at the site.
 #[derive(Message, Clone, Debug)]
@@ -133,6 +189,8 @@ impl Plugin for SimulationPlugin {
             .init_resource::<WeaponsTarget>()
             .init_resource::<ActiveBeam>()
             .init_resource::<PhaserCooldown>()
+            .init_resource::<ActiveRepair>()
+            .init_resource::<RepairPenalties>()
             .init_resource::<BreakdownQueueResource>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
@@ -142,12 +200,15 @@ impl Plugin for SimulationPlugin {
                 handle_set_view,
                 handle_set_target,
                 handle_fire_phaser,
+                handle_repair,
                 tick_active_beam,
+                tick_repair,
                 process_helm_inputs,
                 sync_ship_position,
                 handle_collisions,
                 broadcast_sim_state,
                 broadcast_weapons_update.after(broadcast_sim_state),
+                broadcast_repair_state.after(broadcast_sim_state),
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
             ));
     }
@@ -396,6 +457,135 @@ fn handle_fire_phaser(
         writer.write(OutboundMessage {
             target: Target::All,
             msg: ServerMessage::BeamStarted { target_uuid: target_uuid.clone() },
+        });
+    }
+}
+
+/// Handle `Repair` messages from any console player.
+///
+/// Validates: game is in-progress, sender holds a console.
+/// - If the sender's console is the `authorized_repair_console` and no repair is
+///   already active and they are not penalised: start a 30-second repair action.
+/// - Otherwise: apply a 30-second penalty cooldown to that player (ignored if
+///   they are already penalised or a repair is in progress for them).
+fn handle_repair(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    breakdowns: Res<BreakdownQueueResource>,
+    mut repair: ResMut<ActiveRepair>,
+    mut penalties: ResMut<RepairPenalties>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        if !matches!(ev.msg, ClientMessage::Repair) {
+            continue;
+        }
+        // Sender must hold some console.
+        let token = ev.token.as_str();
+        let sender_consoles = sessions.0.players()
+            .iter()
+            .find(|p| p.token == token)
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        if sender_consoles.is_empty() {
+            continue;
+        }
+        // Ignore presses during an active penalty for this player.
+        if penalties.is_penalised(token) {
+            continue;
+        }
+        // Check if sender holds the authorized repair console.
+        let authorized = breakdowns.queue.front().cloned();
+        let is_authorized = authorized.as_ref().map_or(false, |auth_console| {
+            sender_consoles.contains(auth_console)
+        });
+
+        if is_authorized && !repair.is_active() {
+            repair.start();
+        } else if !is_authorized {
+            penalties.penalise(token);
+        }
+        // If repair is already active and they are authorized, press is a no-op.
+    }
+}
+
+/// Tick the active repair each frame: restore HP, advance breakdown queue on
+/// completion.
+fn tick_repair(
+    time: Res<Time>,
+    mut repair: ResMut<ActiveRepair>,
+    mut penalties: ResMut<RepairPenalties>,
+    mut hull: ResMut<ShipHullIntegrity>,
+    mut breakdowns: ResMut<BreakdownQueueResource>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    let dt = time.delta_secs();
+    // Tick per-token penalty timers.
+    penalties.tick(dt);
+
+    if !repair.is_active() {
+        return;
+    }
+
+    repair.hp_accumulator += REPAIR_HP_PER_SEC * dt;
+    let hp_to_apply = repair.hp_accumulator.floor() as i32;
+    if hp_to_apply > 0 {
+        repair.hp_accumulator -= hp_to_apply as f32;
+        let remaining_budget = REPAIR_MAX_HP - repair.hp_restored;
+        let actual = hp_to_apply.min(remaining_budget);
+        if actual > 0 {
+            hull.0.restore(actual);
+            repair.hp_restored += actual;
+        }
+    }
+
+    repair.remaining_secs -= dt;
+    if repair.remaining_secs <= 0.0 || repair.hp_restored >= REPAIR_MAX_HP {
+        // Repair complete — advance the breakdown queue.
+        breakdowns.queue.pop_front();
+        repair.remaining_secs = 0.0;
+        repair.hp_accumulator = 0.0;
+        repair.hp_restored = 0;
+    }
+}
+
+/// Broadcast `RepairState` at 10 Hz to every console holder.
+fn broadcast_repair_state(
+    timer: Res<SimBroadcastTimer>,
+    mut writer: MessageWriter<OutboundMessage>,
+    sessions: Res<Sessions>,
+    repair: Res<ActiveRepair>,
+    penalties: Res<RepairPenalties>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    if !timer.0.just_finished() {
+        return;
+    }
+
+    use crate::messages::Console;
+    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Weapons, Console::Engineering];
+    for console in &all_consoles {
+        let Some(token) = sessions.0.console_holder(console.clone()) else { continue };
+        let penalty_remaining = penalties.remaining(token);
+        let (remaining_cooldown_secs, in_progress, penalty) = if repair.is_active() {
+            (repair.remaining_secs, true, false)
+        } else if penalty_remaining > 0.0 {
+            (penalty_remaining, false, true)
+        } else {
+            (0.0, false, false)
+        };
+        writer.write(OutboundMessage {
+            target: Target::Token(token.to_string()),
+            msg: ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty },
         });
     }
 }
@@ -737,11 +927,13 @@ mod tests {
             .init_resource::<ActiveBeam>()
             .add_message::<AsteroidDestroyedVfx>()
             .init_resource::<PhaserCooldown>()
+            .init_resource::<ActiveRepair>()
+            .init_resource::<RepairPenalties>()
             .init_resource::<BreakdownQueueResource>()
             .insert_resource(SimBroadcastTimer(Timer::new(
                 std::time::Duration::from_nanos(1), TimerMode::Repeating)))
             .init_resource::<Outbox>()
-            .add_systems(Update, (handle_set_view, handle_set_target, handle_fire_phaser, tick_active_beam, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+            .add_systems(Update, (handle_set_view, handle_set_target, handle_fire_phaser, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
             .add_systems(PostUpdate, collect);
         app
     }
@@ -1433,5 +1625,171 @@ mod tests {
         assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
             "expected BeamStarted for new target after cooldown");
         assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t2"));
+    }
+
+    // ── Repair helpers ────────────────────────────────────────────────────
+
+    /// Set up a game with a captain, engineering player, enqueue one breakdown
+    /// targeting Engineering, and apply 10 HP damage so HP = 90.
+    fn start_game_with_breakdown_for_engineering(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(app);
+        push(app, "eng", ClientMessage::Identify { token: "eng".into(), name: "Bob".into() });
+        tick(app);
+        push(app, "eng", ClientMessage::SelectConsole { console: Console::Engineering });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+
+        // Apply 10 damage so HP = 90.
+        app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10);
+
+        // Force the breakdown queue to have Engineering at the front using a seeded
+        // RNG that deterministically yields Engineering first.
+        {
+            use rand::SeedableRng as _;
+            let mut bdr = app.world_mut().resource_mut::<BreakdownQueueResource>();
+            bdr.rng = rand::rngs::SmallRng::seed_from_u64(0);
+        }
+        // Push entries until Engineering is at the front.
+        loop {
+            let front = {
+                let bdr = app.world().resource::<BreakdownQueueResource>();
+                bdr.queue.front().cloned()
+            };
+            if front == Some(Console::Engineering) {
+                break;
+            }
+            // If front is None or wrong, push + pop until Engineering.
+            {
+                let bdr = app.world_mut().resource_mut::<BreakdownQueueResource>();
+                let BreakdownQueueResource { queue, rng, .. } = &mut *bdr.into_inner();
+                if front.is_some() {
+                    queue.pop_front();
+                }
+                queue.push_random(rng);
+            }
+        }
+    }
+
+    #[test]
+    fn authorized_repair_press_starts_repair_action() {
+        let mut app = test_app();
+        start_game_with_breakdown_for_engineering(&mut app);
+
+        // Engineering player presses Repair.
+        push(&mut app, "eng", ClientMessage::Repair);
+        tick(&mut app);
+
+        assert!(app.world().resource::<ActiveRepair>().is_active(),
+            "repair should be active after authorized press");
+    }
+
+    #[test]
+    fn unauthorized_repair_press_starts_penalty_not_repair() {
+        let mut app = test_app();
+        start_game_with_breakdown_for_engineering(&mut app);
+
+        // Captain presses Repair — they hold CaptainChair, not Engineering.
+        push(&mut app, "captain", ClientMessage::Repair);
+        tick(&mut app);
+
+        assert!(!app.world().resource::<ActiveRepair>().is_active(),
+            "repair should NOT be active after unauthorized press");
+        assert!(app.world().resource::<RepairPenalties>().is_penalised("captain"),
+            "captain should have penalty after unauthorized press");
+    }
+
+    #[test]
+    fn repair_during_cooldown_is_ignored() {
+        let mut app = test_app();
+        start_game_with_breakdown_for_engineering(&mut app);
+
+        // Captain presses once — gets penalty.
+        push(&mut app, "captain", ClientMessage::Repair);
+        tick(&mut app);
+        assert!(app.world().resource::<RepairPenalties>().is_penalised("captain"));
+
+        // Captain presses again — should still be penalised (no change).
+        push(&mut app, "captain", ClientMessage::Repair);
+        tick(&mut app);
+        // Penalty remaining should still be close to 30s (only a tiny dt elapsed).
+        let remaining = app.world().resource::<RepairPenalties>().remaining("captain");
+        assert!(remaining > 25.0,
+            "penalty should still be near 30s, got {remaining}");
+    }
+
+    #[test]
+    fn authorized_repair_restores_hp_over_time() {
+        let mut app = test_app();
+        start_game_with_breakdown_for_engineering(&mut app);
+
+        push(&mut app, "eng", ClientMessage::Repair);
+        tick(&mut app);
+
+        let initial_hp = app.world().resource::<ShipHullIntegrity>().0.current();
+
+        // Simulate 3 seconds of repair (should restore 1 HP).
+        app.world_mut().resource_mut::<ActiveRepair>().hp_accumulator = 0.999; // just under 1
+        // Manually advance time is hard in Bevy tests; instead inject hp_accumulator directly.
+        app.world_mut().resource_mut::<ActiveRepair>().hp_accumulator = 1.0;
+        tick(&mut app);
+
+        let hp_after = app.world().resource::<ShipHullIntegrity>().0.current();
+        assert_eq!(hp_after, initial_hp + 1, "HP should increase by 1 after accumulator reaches 1.0");
+    }
+
+    #[test]
+    fn repair_completion_advances_breakdown_queue() {
+        let mut app = test_app();
+        start_game_with_breakdown_for_engineering(&mut app);
+
+        push(&mut app, "eng", ClientMessage::Repair);
+        tick(&mut app);
+
+        // Fast-complete the repair: set hp_restored to the cap so the next tick
+        // triggers queue advancement.
+        app.world_mut().resource_mut::<ActiveRepair>().hp_restored = REPAIR_MAX_HP;
+        tick(&mut app);
+
+        // Queue should be empty after the single breakdown is resolved.
+        assert!(app.world().resource::<BreakdownQueueResource>().queue.is_empty(),
+            "breakdown queue should be empty after repair completion");
+        assert!(!app.world().resource::<ActiveRepair>().is_active(),
+            "repair should no longer be active after completion");
+    }
+
+    #[test]
+    fn repair_state_broadcast_sent_to_engineering_console() {
+        let mut app = test_app();
+        start_game_with_breakdown_for_engineering(&mut app);
+
+        push(&mut app, "eng", ClientMessage::Repair);
+        let out = tick(&mut app);
+
+        let repair_state = out.iter().find(|m| {
+            matches!(&m.msg, ServerMessage::RepairState { in_progress: true, .. })
+                && matches!(&m.target, Target::Token(t) if t == "eng")
+        });
+        assert!(repair_state.is_some(),
+            "RepairState with in_progress=true should be broadcast to engineering");
+    }
+
+    #[test]
+    fn penalty_repair_state_broadcast_to_penalised_player() {
+        let mut app = test_app();
+        start_game_with_breakdown_for_engineering(&mut app);
+
+        push(&mut app, "captain", ClientMessage::Repair);
+        let out = tick(&mut app);
+
+        let penalty_msg = out.iter().find(|m| {
+            matches!(&m.msg, ServerMessage::RepairState { penalty: true, .. })
+                && matches!(&m.target, Target::Token(t) if t == "captain")
+        });
+        assert!(penalty_msg.is_some(),
+            "RepairState with penalty=true should be broadcast to the penalised captain");
     }
 }

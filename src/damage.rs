@@ -29,6 +29,11 @@ impl HullIntegrity {
     pub fn apply_damage(&mut self, amount: i32) {
         self.hp = (self.hp - amount).max(0);
     }
+
+    /// Restore HP. Clamps HP ceiling to 100.
+    pub fn restore(&mut self, amount: i32) {
+        self.hp = (self.hp + amount).min(100);
+    }
 }
 
 impl Default for HullIntegrity {
@@ -103,5 +108,20 @@ mod tests {
         h.apply_damage(5);
         h.apply_damage(10);
         assert_eq!(h.current(), 85);
+    }
+
+    #[test]
+    fn restore_increases_hp() {
+        let mut h = HullIntegrity::new();
+        h.apply_damage(20);
+        h.restore(5);
+        assert_eq!(h.current(), 85);
+    }
+
+    #[test]
+    fn restore_clamps_at_100() {
+        let mut h = HullIntegrity::new();
+        h.restore(50);
+        assert_eq!(h.current(), 100);
     }
 }

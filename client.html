@@ -103,6 +103,11 @@
       <!-- View selector cross and Red Alert button are rendered by the
            Bevy WASM captain UI; see src/client_app.rs (#48). -->
       <p id="game-status"></p>
+      <button id="captain-repair-btn"
+        style="margin-top:1rem;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
+               letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
+               cursor:pointer;width:80%;display:block;margin-left:auto;margin-right:auto"
+        onclick="send('Repair', {})">REPAIR</button>
     </section>
 
     <section id="weapons-ui">
@@ -117,6 +122,11 @@
                letter-spacing:.15em;background:#900;color:#fff;border:2px solid #f44;border-radius:6px;
                cursor:pointer;width:80%"
         disabled>FIRE</button>
+      <button id="weapons-repair-btn"
+        style="margin:0.75rem auto 0;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
+               letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
+               cursor:pointer;width:80%;display:block"
+        onclick="send('Repair', {})">REPAIR</button>
     </section>
 
     <section id="engineering-ui">
@@ -128,6 +138,11 @@
         <p style="margin:0 0 0.25rem;font-size:0.8rem;color:#aaa;letter-spacing:.05em">ACTIVE REPAIR TARGET</p>
         <p id="eng-repair-console" style="margin:0;font-size:1.4rem;font-weight:bold;color:#fa0;letter-spacing:.08em"></p>
       </div>
+      <button id="eng-repair-btn"
+        style="margin-top:1.5rem;padding:0.75rem 2rem;font-size:1.1rem;font-weight:bold;
+               letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
+               cursor:pointer;width:100%"
+        onclick="send('Repair', {})">REPAIR</button>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -200,7 +215,8 @@
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false };
+      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false,
+      repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
@@ -396,8 +412,34 @@
       }
     }
 
-    function renderWeaponsRadar() {
-      const canvas = $('weapons-radar');
+    function renderRepairButtons(s) {
+      const ids = ['captain-repair-btn', 'weapons-repair-btn', 'eng-repair-btn'];
+      for (const id of ids) {
+        const btn = $(id);
+        if (!btn) continue;
+        if (s.repairPenalty) {
+          btn.textContent = 'COOLDOWN ' + Math.ceil(s.repairCooldownSecs) + 's';
+          btn.style.background = '#400';
+          btn.style.color = '#f66';
+          btn.style.borderColor = '#f44';
+          btn.disabled = true;
+        } else if (s.repairInProgress) {
+          btn.textContent = 'REPAIRING ' + Math.ceil(s.repairCooldownSecs) + 's';
+          btn.style.background = '#030';
+          btn.style.color = '#5f5';
+          btn.style.borderColor = '#4a4';
+          btn.disabled = true;
+        } else {
+          btn.textContent = 'REPAIR';
+          btn.style.background = '#063';
+          btn.style.color = '#5f5';
+          btn.style.borderColor = '#5f5';
+          btn.disabled = false;
+        }
+      }
+    }
+
+    function renderWeaponsRadar() {      const canvas = $('weapons-radar');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const W = canvas.width, H = canvas.height;
@@ -757,6 +799,14 @@
           return;
         }
         case 'BeamEnded': {
+          return;
+        }
+        case 'RepairState': {
+          const { remaining_cooldown_secs, in_progress, penalty } = msg.data;
+          state.repairCooldownSecs = remaining_cooldown_secs || 0;
+          state.repairInProgress = !!in_progress;
+          state.repairPenalty = !!penalty;
+          renderRepairButtons(state);
           return;
         }
         case 'AsteroidDestroyed': {

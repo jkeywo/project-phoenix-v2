@@ -90,7 +90,8 @@ impl LobbyState {
             | ServerMessage::WeaponsUpdate { .. }
             | ServerMessage::BeamStarted { .. }
             | ServerMessage::BeamEnded { .. }
-            | ServerMessage::AsteroidDestroyed { .. } => {
+            | ServerMessage::AsteroidDestroyed { .. }
+            | ServerMessage::RepairState { .. } => {
                 // Not relevant to the lobby model.
             }
         }

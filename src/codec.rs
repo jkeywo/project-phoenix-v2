@@ -478,6 +478,24 @@ mod tests {
     }
 
     #[test]
+    fn client_repair_round_trips() {
+        let msg = ClientMessage::Repair;
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_repair_state_round_trips() {
+        let msg = ServerMessage::RepairState {
+            remaining_cooldown_secs: 12.5,
+            in_progress: true,
+            penalty: false,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn welcome_with_world_none_round_trips() {
         let msg = ServerMessage::Welcome { state: state() };
         assert_server_roundtrip(&JsonCodec, msg.clone());

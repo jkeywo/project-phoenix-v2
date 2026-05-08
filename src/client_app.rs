@@ -106,6 +106,14 @@ struct RadarPanel;
 #[derive(Component)]
 struct OnScreenButton;
 
+/// Marks the Repair button on the helm console.
+#[derive(Component)]
+struct RepairButton;
+
+/// Marks the text label inside the Repair button (used to refresh cooldown text).
+#[derive(Component)]
+struct RepairButtonLabel;
+
 // ── Plugin ─────────────────────────────────────────────────────────
 
 pub struct ClientAppPlugin;
@@ -149,6 +157,8 @@ impl Plugin for ClientAppPlugin {
                         refresh_helm_knob_position,
                         refresh_helm_readout,
                         handle_on_screen_button_press,
+                        handle_repair_button_press,
+                        refresh_repair_button,
                         draw_helm_radar,
                     ),
                 ),
@@ -749,6 +759,24 @@ fn setup_helm_ui(mut commands: Commands) {
                             TextColor(Color::srgb(0.93, 0.93, 1.0)),
                         ));
                     });
+
+                    col.spawn((
+                        RepairButton,
+                        Button,
+                        Node {
+                            padding: UiRect::all(Val::Px(10.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.13, 0.27, 0.13)),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            RepairButtonLabel,
+                            Text::new("REPAIR"),
+                            TextFont { font_size: 16.0, ..default() },
+                            TextColor(Color::srgb(0.5, 1.0, 0.5)),
+                        ));
+                    });
                 });
         });
 
@@ -971,4 +999,54 @@ fn draw_helm_radar(
     gizmos.line_2d(nose, left,  RADAR_SHIP_COLOR);
     gizmos.line_2d(left, right, RADAR_SHIP_COLOR);
     gizmos.line_2d(right, nose, RADAR_SHIP_COLOR);
+}
+
+fn handle_repair_button_press(
+    mut interactions: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>, With<RepairButton>),
+    >,
+    sim: Res<ClientSimState>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for (interaction, _bg) in interactions.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            // Ignore press if repair is in progress or penalty is active.
+            if sim.repair_in_progress || sim.repair_penalty || sim.repair_cooldown_secs > 0.0 {
+                continue;
+            }
+            outbound.write(OutboundClientMessage(crate::client_sim::repair_message()));
+        }
+    }
+}
+
+fn refresh_repair_button(
+    sim: Res<ClientSimState>,
+    mut button: Query<&mut BackgroundColor, (With<RepairButton>, Without<RepairButtonLabel>)>,
+    mut label: Query<(&mut Text, &mut TextColor), With<RepairButtonLabel>>,
+) {
+    if !sim.is_changed() {
+        return;
+    }
+    for mut bg in button.iter_mut() {
+        *bg = if sim.repair_penalty {
+            BackgroundColor(Color::srgb(0.40, 0.05, 0.05))
+        } else if sim.repair_in_progress {
+            BackgroundColor(Color::srgb(0.05, 0.30, 0.05))
+        } else {
+            BackgroundColor(Color::srgb(0.13, 0.27, 0.13))
+        };
+    }
+    for (mut text, mut color) in label.iter_mut() {
+        if sim.repair_penalty {
+            **text = format!("COOLDOWN {:.0}s", sim.repair_cooldown_secs);
+            *color = TextColor(Color::srgb(1.0, 0.3, 0.3));
+        } else if sim.repair_in_progress {
+            **text = format!("REPAIRING {:.0}s", sim.repair_cooldown_secs);
+            *color = TextColor(Color::srgb(0.5, 1.0, 0.5));
+        } else {
+            **text = "REPAIR".to_string();
+            *color = TextColor(Color::srgb(0.5, 1.0, 0.5));
+        }
+    }
 }

@@ -22,6 +22,13 @@ pub struct ClientSimState {
     /// Static world snapshot replayed on `WorldSetup` and on `Welcome`
     /// (when the server includes it). Used by the helm radar.
     pub world: WorldData,
+    /// Seconds remaining on the active repair action (if `repair_in_progress`)
+    /// or penalty cooldown (if `repair_penalty`).
+    pub repair_cooldown_secs: f32,
+    /// True while this console is performing an authorized repair.
+    pub repair_in_progress: bool,
+    /// True while this player has an unauthorized-repair penalty cooldown.
+    pub repair_penalty: bool,
 }
 
 impl Default for ClientSimState {
@@ -33,6 +40,9 @@ impl Default for ClientSimState {
             ship_z:   0.0,
             ship_yaw: 0.0,
             world: WorldData::default(),
+            repair_cooldown_secs: 0.0,
+            repair_in_progress: false,
+            repair_penalty: false,
         }
     }
 }
@@ -57,6 +67,11 @@ impl ClientSimState {
                 let preserved_world = state.world.clone().unwrap_or_default();
                 *self = Self::default();
                 self.world = preserved_world;
+            }
+            ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty } => {
+                self.repair_cooldown_secs = *remaining_cooldown_secs;
+                self.repair_in_progress = *in_progress;
+                self.repair_penalty = *penalty;
             }
             _ => {}
         }
@@ -84,6 +99,11 @@ pub fn red_alert_toggle_message() -> ClientMessage {
 /// viewscreen to radar mode.
 pub fn on_screen_message() -> ClientMessage {
     ClientMessage::SetView { mode: ViewMode::Radar }
+}
+
+/// `ClientMessage` for the Repair button: sends a repair request to the server.
+pub fn repair_message() -> ClientMessage {
+    ClientMessage::Repair
 }
 
 #[cfg(test)]
@@ -157,6 +177,9 @@ mod tests {
             view_mode: ViewMode::Radar,
             ship_x: 9.0, ship_z: 9.0, ship_yaw: 1.0,
             world: WorldData::default(),
+            repair_cooldown_secs: 0.0,
+            repair_in_progress: false,
+            repair_penalty: false,
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5 }],
@@ -186,6 +209,9 @@ mod tests {
             world: WorldData {
                 asteroids: vec![AsteroidInfo { uuid: "d".into(), x: 0.0, z: 0.0, radius: 1.0 }],
             },
+            repair_cooldown_secs: 0.0,
+            repair_in_progress: false,
+            repair_penalty: false,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -206,6 +232,9 @@ mod tests {
             world: WorldData {
                 asteroids: vec![AsteroidInfo { uuid: "e".into(), x: 0.0, z: 0.0, radius: 1.0 }],
             },
+            repair_cooldown_secs: 0.0,
+            repair_in_progress: false,
+            repair_penalty: false,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {

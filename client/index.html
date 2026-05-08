@@ -70,13 +70,24 @@
     #red-alert-overlay { position: fixed; z-index: 15; }
     #top-bar { z-index: 20; }
   </style>
-</head>
+<link rel="modulepreload" href="./project-phoenix-847b56a03606ba1d.js" crossorigin="anonymous" integrity="sha384-nGpUauKx1JlL7OQep/xwSVi9pdii+cBjZx8XHnKChx7RETbCCYw+XxpORtCr62r5"><link rel="preload" href="./project-phoenix-847b56a03606ba1d_bg.wasm" crossorigin="anonymous" integrity="sha384-38n4WuBXhpX6XOi88VmZkLtNpnGubxunlqFopSId/mraccHQXjH+CahuMgXZdTJZ" as="fetch" type="application/wasm"></head>
 <body>
   <h2 id="phase-title">Lobby</h2>
 
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
-  <link data-trunk rel="rust" data-wasm-opt="z" data-cargo-no-default-features data-cargo-features="client" />
+  
+<script type="module">
+import init, * as bindings from './project-phoenix-847b56a03606ba1d.js';
+const wasm = await init({ module_or_path: './project-phoenix-847b56a03606ba1d_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
 
   <!-- Full-viewport host for the Bevy canvas; the WASM lobby UI renders
        here, with JS overlays (name input, connection dot, fullscreen

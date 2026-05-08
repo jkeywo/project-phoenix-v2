@@ -1,4 +1,4 @@
 [build]
 target = "client.html"
-dist = "dist"
+dist = "dist/client"
 public_url = "./"

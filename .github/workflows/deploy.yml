@@ -36,8 +36,8 @@ jobs:
       - name: Build server page (WASM + JS)
         run: trunk build --release
 
-      - name: Copy client page to client/index.html
-        run: mkdir -p dist/client && cp client.html dist/client/index.html
+      - name: Build client page (WASM + JS)
+        run: trunk build --release --config client-trunk.toml
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

@@ -39,8 +39,8 @@ jobs:
       - name: Build server page (WASM + JS)
         run: trunk build --release
 
-      - name: Copy client page
-        run: mkdir -p dist/client && cp client.html dist/client/index.html
+      - name: Build client page (WASM + JS)
+        run: trunk build --release --config client-trunk.toml
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4

@@ -47,7 +47,7 @@ trunk build --release --config client-trunk.toml
 
 # Smoke tests (Playwright, Chromium) — requires dist/ built first
 trunk build --release
-mkdir -p dist/client && cp client.html dist/client/index.html
+trunk build --release --config client-trunk.toml
 cd tests/smoke && npm install && npx playwright install chromium
 npx playwright test                            # from tests/smoke/
 
@@ -276,7 +276,7 @@ End-to-end tests that boot the real server WASM in a headless browser and exerci
 
 **Key shim design decisions:**
 - `window.__wasmReady` is set (and `wasm-ready` event fired) only after BOTH the Peer opens AND `TrunkApplicationStarted` fires, using `setTimeout(0)` so `startPhoenix()` runs first.
-- `dist/client/index.html` is the plain `client.html` copy (no client WASM built in CI). JS message handling works; Bevy UI overlay does not. Sufficient for smoke testing.
+- `dist/client/index.html` is the Trunk-built client page (WASM + JS). Both the JS message handling and the Bevy UI overlay are fully functional in CI and in production.
 - Lobby/sim-state specs use blank test pages with the shim API directly rather than `client.html`, giving full control over which messages are sent.
 
 ### What is NOT tested (manual only)

@@ -86,7 +86,8 @@ impl LobbyState {
             }
             ServerMessage::SimState { .. }
             | ServerMessage::WorldSetup { .. }
-            | ServerMessage::TargetLock { .. } => {
+            | ServerMessage::TargetLock { .. }
+            | ServerMessage::WeaponsUpdate { .. } => {
                 // Not relevant to the lobby model.
             }
         }

@@ -134,4 +134,8 @@ pub enum ServerMessage {
     SimState { snapshot: SimSnapshot },
     WorldSetup { world: WorldData },
     TargetLock { uuid: String, locked: bool },
+    /// Sent at 10 Hz to the Weapons console player only.  `target_uuid` is the
+    /// currently locked target (`None` if no lock), and `fire_ready` indicates
+    /// whether that target is within phaser range and in the forward 180° arc.
+    WeaponsUpdate { target_uuid: Option<String>, fire_ready: bool },
 }

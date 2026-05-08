@@ -13,6 +13,9 @@ use crate::messages::AsteroidInfo;
 /// outer ring. Anything beyond is clipped.
 pub const RADAR_RANGE: f32 = 50.0;
 
+/// Maximum firing range, in world units, for the phaser weapon.
+pub const PHASER_RANGE: f32 = 40.0;
+
 /// Inner reference ring drawn at this fraction of the outer ring.
 pub const RADAR_MID_RING: f32 = 25.0;
 
@@ -57,6 +60,36 @@ pub fn project_to_radar(world_x: f32, world_z: f32, ship_x: f32, ship_z: f32, sh
     let radar_x = (dx * cos_y + dz * sin_y) / RADAR_RANGE;
     let radar_y = (dx * sin_y - dz * cos_y) / RADAR_RANGE;
     Some((radar_x, radar_y))
+}
+
+/// Returns `true` if a world-space target is within phaser firing parameters:
+/// - distance from ship ≤ `PHASER_RANGE` (40 world units), and
+/// - inside the ship's 180° forward arc (forward hemisphere in ship-local space).
+///
+/// The forward arc is defined by `radar_y > 0` in the same ship-aligned
+/// projection used by `project_to_radar`.  A target exactly on the beam (at
+/// 90° to the side) is **not** fire-ready (`radar_y == 0`).
+pub fn is_fire_ready(
+    target_x: f32,
+    target_z: f32,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+) -> bool {
+    let dx = target_x - ship_x;
+    let dz = target_z - ship_z;
+
+    // Range gate: must be within PHASER_RANGE.
+    if dx * dx + dz * dz > PHASER_RANGE * PHASER_RANGE {
+        return false;
+    }
+
+    // Arc gate: must be in the forward 180° hemisphere (radar_y > 0).
+    // radar_y = dot((dx,dz), forward) = dx*sin(yaw) - dz*cos(yaw)
+    let sin_y = ship_yaw.sin();
+    let cos_y = ship_yaw.cos();
+    let radar_y = dx * sin_y - dz * cos_y;
+    radar_y > 0.0
 }
 
 /// Iterator of `(radar_x, radar_y, scaled_radius)` tuples for all asteroids
@@ -186,5 +219,57 @@ mod tests {
     fn radar_dots_empty_slice_returns_empty_iterator() {
         let dots: Vec<_> = radar_dots(&[], 0.0, 0.0, 0.0).collect();
         assert!(dots.is_empty());
+    }
+
+    // ── is_fire_ready ──────────────────────────────────────────────────────────
+
+    /// Directly ahead, well within range → fire-ready.
+    #[test]
+    fn fire_ready_target_ahead_in_range() {
+        // yaw=0: forward is -Z. Target at (0, -20) is 20 units ahead.
+        assert!(is_fire_ready(0.0, -20.0, 0.0, 0.0, 0.0));
+    }
+
+    /// Directly behind → not fire-ready (aft hemisphere).
+    #[test]
+    fn fire_ready_target_behind_is_not_ready() {
+        // yaw=0: target at (0, +20) is directly aft.
+        assert!(!is_fire_ready(0.0, 20.0, 0.0, 0.0, 0.0));
+    }
+
+    /// Exactly at 40-unit range, ahead → fire-ready (boundary inclusive).
+    #[test]
+    fn fire_ready_at_exact_range_boundary() {
+        assert!(is_fire_ready(0.0, -PHASER_RANGE, 0.0, 0.0, 0.0));
+    }
+
+    /// One unit beyond 40-unit range → not fire-ready.
+    #[test]
+    fn fire_ready_just_outside_range_is_not_ready() {
+        assert!(!is_fire_ready(0.0, -(PHASER_RANGE + 1.0), 0.0, 0.0, 0.0));
+    }
+
+    /// Exactly 90° to the side (beam direction) → not fire-ready (arc boundary exclusive).
+    #[test]
+    fn fire_ready_at_90_degree_arc_boundary_is_not_ready() {
+        // yaw=0: target at (+20, 0) is exactly 90° to starboard (radar_y = 0).
+        assert!(!is_fire_ready(20.0, 0.0, 0.0, 0.0, 0.0));
+    }
+
+    /// Just inside the forward arc (slightly ahead of beam) → fire-ready.
+    #[test]
+    fn fire_ready_just_inside_forward_arc() {
+        // Target at (+20, -1): mostly starboard but slightly ahead.
+        assert!(is_fire_ready(20.0, -1.0, 0.0, 0.0, 0.0));
+    }
+
+    /// With ship yaw rotated: target must still be evaluated in ship-local space.
+    #[test]
+    fn fire_ready_respects_ship_yaw() {
+        // yaw = π/2: ship faces +X. Target at (+20, 0) is directly ahead.
+        let yaw = std::f32::consts::FRAC_PI_2;
+        assert!(is_fire_ready(20.0, 0.0, 0.0, 0.0, yaw));
+        // Same target but ship now faces -X (yaw = -π/2): target is aft.
+        assert!(!is_fire_ready(20.0, 0.0, 0.0, 0.0, -yaw));
     }
 }

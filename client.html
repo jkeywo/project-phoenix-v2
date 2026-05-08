@@ -112,6 +112,11 @@
         style="display:block;margin:0 auto;border-radius:50%;background:#0a0a1a;cursor:crosshair;touch-action:none"
         aria-label="Weapons radar"></canvas>
       <p id="weapons-lock-status" style="margin:0.75rem 0 0;font-size:0.9rem;text-align:center;color:#aaa">No target locked</p>
+      <button id="weapons-fire-btn"
+        style="display:none;margin:0.75rem auto 0;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
+               letter-spacing:.15em;background:#900;color:#fff;border:2px solid #f44;border-radius:6px;
+               cursor:pointer;width:80%"
+        disabled>FIRE</button>
     </section>
 
     <section id="engineering-ui">
@@ -191,7 +196,7 @@
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false };
+      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
@@ -434,15 +439,21 @@
         const dotR = Math.max(4, (a.radius / RANGE) * r);
 
         if (isLocked) {
+          // Pulse red when fire-ready, orange otherwise.
+          const t = Date.now() / 300;
+          const pulse = state.weaponsFireReady ? (0.6 + 0.4 * Math.sin(t)) : 1.0;
+          const lockedColor = state.weaponsFireReady
+            ? `rgba(255,${Math.floor(40 * pulse)},${Math.floor(40 * pulse)},${pulse})`
+            : '#f84';
           // Draw lock reticle
           ctx.beginPath();
           ctx.arc(px, py, dotR + 6, 0, Math.PI * 2);
-          ctx.strokeStyle = '#f84';
+          ctx.strokeStyle = lockedColor;
           ctx.lineWidth = 2;
           ctx.stroke();
           ctx.beginPath();
           ctx.arc(px, py, dotR, 0, Math.PI * 2);
-          ctx.fillStyle = '#f84';
+          ctx.fillStyle = lockedColor;
           ctx.fill();
         } else {
           ctx.beginPath();
@@ -457,6 +468,14 @@
       ctx.font = '10px monospace';
       ctx.textAlign = 'right';
       ctx.fillText('60u', cx + r - 2, cy - 4);
+
+      // Fire button — visible and enabled only when fire-ready.
+      const fireBtn = $('weapons-fire-btn');
+      if (fireBtn) {
+        fireBtn.style.display = state.weaponsLocked ? 'block' : 'none';
+        fireBtn.disabled = !state.weaponsFireReady;
+        fireBtn.style.opacity = state.weaponsFireReady ? '1' : '0.4';
+      }
     }
 
     function renderGame(s) {
@@ -668,11 +687,29 @@
           } else {
             state.weaponsTarget = null;
             state.weaponsLocked = false;
+            state.weaponsFireReady = false;
             if (el) { el.textContent = 'Lock rejected — out of range'; el.style.color = '#f44'; }
             // Clear the rejected text after 2 s
             setTimeout(() => {
               if (el && !state.weaponsLocked) { el.textContent = 'No target locked'; el.style.color = '#aaa'; }
             }, 2000);
+          }
+          renderWeaponsRadar();
+          return;
+        }
+        case 'WeaponsUpdate': {
+          const { target_uuid, fire_ready } = msg.data;
+          state.weaponsFireReady = fire_ready;
+          const el = $('weapons-lock-status');
+          if (target_uuid) {
+            state.weaponsTarget = target_uuid;
+            state.weaponsLocked = true;
+            if (el) {
+              el.textContent = fire_ready ? 'FIRE READY' : 'TARGET LOCKED';
+              el.style.color = fire_ready ? '#f44' : '#f84';
+            }
+          } else {
+            state.weaponsFireReady = false;
           }
           renderWeaponsRadar();
           return;

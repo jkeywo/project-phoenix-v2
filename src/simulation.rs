@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::radar::WEAPONS_RADAR_RANGE;
+use crate::radar::is_fire_ready;
 use crate::asteroid_spawner::{spawn_asteroid_positions, spawn_asteroid_uuids};
 use crate::damage::{collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
@@ -75,6 +76,7 @@ impl Plugin for SimulationPlugin {
                 sync_ship_position,
                 handle_collisions,
                 broadcast_sim_state,
+                broadcast_weapons_update.after(broadcast_sim_state),
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
             ));
     }
@@ -272,6 +274,49 @@ fn broadcast_sim_state(
     }
 }
 
+/// Broadcast `WeaponsUpdate` to the Weapons console player at 10 Hz.
+///
+/// Reuses `SimBroadcastTimer`; after the timer ticks in `broadcast_sim_state`
+/// the `just_finished()` flag is still `true` for the remainder of the frame
+/// because `Repeating` timers latch it until the next `tick`.
+fn broadcast_weapons_update(
+    timer: Res<SimBroadcastTimer>,
+    mut writer: MessageWriter<OutboundMessage>,
+    sessions: Res<Sessions>,
+    ship: Res<ShipState>,
+    world: Res<WorldResource>,
+    weapons_target: Res<WeaponsTarget>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    if !timer.0.just_finished() {
+        return;
+    }
+    let Some(weapons_token) = sessions.0.console_holder(Console::Weapons) else {
+        return;
+    };
+
+    let fire_ready = match &weapons_target.0 {
+        None => false,
+        Some(uuid) => {
+            world.0.asteroids.iter()
+                .find(|a| &a.uuid == uuid)
+                .map(|a| is_fire_ready(a.x, a.z, ship.x, ship.z, ship.yaw))
+                .unwrap_or(false)
+        }
+    };
+
+    writer.write(OutboundMessage {
+        target: Target::Token(weapons_token.to_string()),
+        msg: ServerMessage::WeaponsUpdate {
+            target_uuid: weapons_target.0.clone(),
+            fire_ready,
+        },
+    });
+}
+
 /// Emit a single `WorldSetup` broadcast the first frame the game enters
 /// `InProgress`. Stays silent in Lobby and on subsequent in-game ticks.
 fn broadcast_world_setup_on_start(
@@ -424,7 +469,7 @@ mod tests {
             .insert_resource(SimBroadcastTimer(Timer::new(
                 std::time::Duration::from_nanos(1), TimerMode::Repeating)))
             .init_resource::<Outbox>()
-            .add_systems(Update, (handle_set_view, handle_set_target, broadcast_sim_state, broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+            .add_systems(Update, (handle_set_view, handle_set_target, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
             .add_systems(PostUpdate, collect);
         app
     }
@@ -739,5 +784,52 @@ mod tests {
         }).expect("expected a TargetLock response");
         assert!(!lock.1, "expected locked=false for unknown UUID");
         assert!(app.world().resource::<WeaponsTarget>().0.is_none());
+    }
+
+    // ── WeaponsUpdate / fire_ready tests ──────────────────────────────────────
+
+    /// Target locked, within 40-unit phaser range, in forward arc → fire_ready = true.
+    #[test]
+    fn weapons_update_fire_ready_true_when_target_in_range_and_arc() {
+        let mut app = test_app();
+        // Ship at origin, yaw=0 (facing -Z). Asteroid at (0, -20): directly ahead, 20 units away.
+        setup_weapons_world(&mut app, 0.0, -20.0);
+        start_game_with_weapons(&mut app);
+
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        // Lock the target
+        let _ = tick(&mut app);
+        // Now run another tick to get a WeaponsUpdate
+        let out = tick(&mut app);
+
+        let update = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::WeaponsUpdate { target_uuid, fire_ready } =>
+                Some((target_uuid.clone(), *fire_ready)),
+            _ => None,
+        }).expect("expected a WeaponsUpdate message");
+        assert_eq!(update.0.as_deref(), Some("target-uuid"));
+        assert!(update.1, "expected fire_ready=true for in-range, forward-arc target");
+    }
+
+    /// Target locked but beyond 40-unit phaser range (within 60u lock range) → fire_ready = false.
+    #[test]
+    fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
+        let mut app = test_app();
+        // Ship at origin, yaw=0. Asteroid at (0, -50): directly ahead, 50 units — within lock range
+        // (60u) but outside phaser range (40u).
+        setup_weapons_world(&mut app, 0.0, -50.0);
+        start_game_with_weapons(&mut app);
+
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        let _ = tick(&mut app);
+        let out = tick(&mut app);
+
+        let update = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::WeaponsUpdate { target_uuid, fire_ready } =>
+                Some((target_uuid.clone(), *fire_ready)),
+            _ => None,
+        }).expect("expected a WeaponsUpdate message");
+        assert_eq!(update.0.as_deref(), Some("target-uuid"));
+        assert!(!update.1, "expected fire_ready=false for beyond-phaser-range target");
     }
 }

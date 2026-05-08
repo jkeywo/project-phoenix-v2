@@ -4,13 +4,38 @@ import path from 'path';
 
 export const SHIM = fs.readFileSync(path.join(__dirname, 'peerjs-shim.js'), 'utf-8');
 
+// Stub CDN scripts so they don't overwrite the shim or block execution.
+// In CI environments the unpkg / jsdelivr CDN can be slow or blocked, and
+// synchronous <script src="..."> tags block all inline scripts below them.
+const STUB_PEER_JS = `'use strict';
+// No-op — window.Peer is already provided by the peerjs-shim addInitScript.
+if (typeof window.Peer === 'undefined') { window.Peer = function Peer() {}; };
+`;
+
+const STUB_QRCODE = `'use strict';
+// Minimal stub so server.html QR rendering code doesn't crash during tests.
+window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
+`;
+
 // Override the default context fixture to inject the PeerJS shim into every
 // page that the test creates.  No type parameter needed when overriding a
 // built-in fixture — TypeScript infers BrowserContext from the base signature.
 export const test = base.extend({
   context: async ({ browser }, use) => {
     const ctx = await browser.newContext();
+    await ctx.addInitScript({ content: STUB_PEER_JS });
+    await ctx.addInitScript({ content: STUB_QRCODE });
     await ctx.addInitScript({ content: SHIM });
+
+    // Intercept CDN script loads — stub PeerJS so the real library doesn't
+    // overwrite the shim, and stub QRCode so it doesn't block.
+    await ctx.route('**/peerjs*.js', (route) =>
+      route.fulfill({ contentType: 'application/javascript', body: STUB_PEER_JS }),
+    );
+    await ctx.route('**/qrcode*.js', (route) =>
+      route.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }),
+    );
+
     await use(ctx);
     await ctx.close();
   },

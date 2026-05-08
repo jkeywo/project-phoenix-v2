@@ -3,11 +3,12 @@
 // touching production WASM at all.
 
 import { test, expect } from '@playwright/test';
+import type { BrowserContext } from '@playwright/test';
 import { SHIM } from './fixtures';
 
 // Opens a blank page at localhost:3000 (required for BroadcastChannel cross-page
 // messaging — null-origin pages can't communicate).
-async function blankPage(ctx: Awaited<ReturnType<typeof import('@playwright/test').test.extend>['context']> | any, slug: string) {
+async function blankPage(ctx: BrowserContext, slug: string) {
   const page = await ctx.newPage();
   await page.route(`**/${slug}`, (r: any) =>
     r.fulfill({ contentType: 'text/html', body: '<!DOCTYPE html><html><body></body></html>' }),

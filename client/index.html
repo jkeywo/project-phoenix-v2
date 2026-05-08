@@ -7,9 +7,8 @@
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
     html, body { margin: 0; padding: 0; background: transparent; color: #cce; font-family: monospace; }
-    body { padding: 1rem; box-sizing: border-box; }
-    h2 { margin: 0 0 1rem; color: #8af; }
-    label { display: block; margin-bottom: 1rem; }
+    body { box-sizing: border-box; }
+    label { display: block; margin-bottom: 0.5rem; font-size: 0.85rem; }
     input[type="text"] { display: block; width: 100%; box-sizing: border-box;
       background: #111; color: #eef; border: 1px solid #446; padding: 0.5rem; margin-top: 0.25rem; }
     button { display: block; width: 100%; background: #224; color: #eef;
@@ -18,7 +17,8 @@
     button:active { background: #336; }
     button:disabled { opacity: 0.4; cursor: default; }
     button.mine { border-color: #8af; color: #8af; }
-    #status { margin-top: 1.5rem; color: #778; font-size: 0.8rem; }
+    /* Status line: bottom-left, above canvas */
+    #status { position: fixed; bottom: 0.5rem; left: 0.75rem; color: #778; font-size: 0.75rem; z-index: 5; }
     section { display: none; }
     section.active { display: block; }
     #top-bar {
@@ -34,14 +34,24 @@
     /* View selector cross and Red Alert button moved to Bevy WASM (#48). */
     /* Red Alert border overlay on console container */
     #console-container {
-      position: relative;
+      position: fixed;
+      bottom: 2rem;
+      left: 0; right: 0;
       border: 4px solid transparent;
-      padding: 0.5rem;
+      padding: 0.5rem 0.75rem;
       transition: border-color 0.15s;
+      z-index: 1;
+      pointer-events: none;
+    }
+    #console-container > *, #console-container section.active > * {
+      pointer-events: auto;
     }
     #console-container.red-alert {
       border-color: #f44;
     }
+    /* In lobby phase the name input sits at the bottom; don't give it a
+       background so the Bevy canvas shows through on either side. */
+    #lobby-ui { max-width: 20rem; }
     /* Console tab bar (only when player has 2+ consoles) */
     #console-tabs {
       display: none;
@@ -65,21 +75,16 @@
        connection status, and fullscreen button stay clickable on top. */
     #wasm-host { position: fixed; inset: 0; z-index: 0; background: #0a0a1a; }
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
-    /* Lift JS UI above the Bevy canvas. */
-    #console-container { position: relative; z-index: 1; }
     #red-alert-overlay { position: fixed; z-index: 15; }
-    #top-bar { z-index: 20; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-847b56a03606ba1d.js" crossorigin="anonymous" integrity="sha384-nGpUauKx1JlL7OQep/xwSVi9pdii+cBjZx8XHnKChx7RETbCCYw+XxpORtCr62r5"><link rel="preload" href="./project-phoenix-847b56a03606ba1d_bg.wasm" crossorigin="anonymous" integrity="sha384-38n4WuBXhpX6XOi88VmZkLtNpnGubxunlqFopSId/mraccHQXjH+CahuMgXZdTJZ" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-89ab86edcb3611e0.js" crossorigin="anonymous" integrity="sha384-laC3Q/5/bay3E4a3OBCJHj3zzGSbBvO0I/W1CF492N3wcJe/e4bl1kgYY0Wv422V"><link rel="preload" href="./project-phoenix-89ab86edcb3611e0_bg.wasm" crossorigin="anonymous" integrity="sha384-v1mMdkedMZcpA1rMNWTbKvQAXgkzt/ieBmJ1HoDJBaI/qWNQR9+oUSqQdpKCUfQH" as="fetch" type="application/wasm"></head>
 <body>
-  <h2 id="phase-title">Lobby</h2>
-
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-847b56a03606ba1d.js';
-const wasm = await init({ module_or_path: './project-phoenix-847b56a03606ba1d_bg.wasm' });
+import init, * as bindings from './project-phoenix-89ab86edcb3611e0.js';
+const wasm = await init({ module_or_path: './project-phoenix-89ab86edcb3611e0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -118,6 +123,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   <div id="status">Connecting…</div>
 
   <div id="top-bar">
+    <span id="phase-title" style="font-size:0.9rem;color:#8af;display:none"></span>
     <span id="conn-label"></span>
     <span id="conn-dot"></span>
     <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
@@ -231,13 +237,17 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     function render(s) {
       const inGame = s.phase === 'InProgress';
-      // Show the active console name in the header, or 'Lobby' / 'Bridge'
+      // Show the active console name in the top-bar during game phase.
+      // In lobby the Bevy canvas renders its own "Lobby" heading.
+      const titleEl = $('phase-title');
       if (!inGame) {
-        $('phase-title').textContent = 'Lobby';
+        titleEl.style.display = 'none';
       } else if (activeConsole) {
-        $('phase-title').textContent = CONSOLE_LABEL[activeConsole] || activeConsole;
+        titleEl.style.display = '';
+        titleEl.textContent = CONSOLE_LABEL[activeConsole] || activeConsole;
       } else {
-        $('phase-title').textContent = 'Bridge';
+        titleEl.style.display = '';
+        titleEl.textContent = 'Bridge';
       }
       $('lobby-ui').className = inGame ? '' : 'active';
 
@@ -442,10 +452,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           if (ra) container.classList.add('red-alert');
           else container.classList.remove('red-alert');
           if (state.redAlert !== ra) state.redAlert = ra;
-          if (vd && state.currentView !== vd) {
-            state.currentView = vd;
-            updateViewSelectorHighlight(vd);
-          }
+          if (vd) state.currentView = vd;
+          // View-direction highlighting is handled by the Bevy WASM UI (#48).
           return;
         }
         default:

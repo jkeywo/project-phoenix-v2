@@ -75,15 +75,31 @@
     #wasm-host { position: fixed; inset: 0; z-index: 0; background: #0a0a1a; }
     #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
     #red-alert-overlay { position: fixed; z-index: 15; }
+    #wasm-spinner {
+      position: fixed; inset: 0; z-index: 200;
+      background: #0a0a1a;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: #8af; font-family: monospace; font-size: 0.9rem;
+      gap: 1rem;
+    }
+    .spinner-ring {
+      width: 48px; height: 48px;
+      border: 4px solid #223;
+      border-top-color: #8af;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-c13299496a46ed7a.js" crossorigin="anonymous" integrity="sha384-7en6AwOdJ0Q7dpLHfIoviBkh+3D2Etve1fzpMNwjAE0M+wIUViDsQNPaDf08AUgF"><link rel="preload" href="./project-phoenix-c13299496a46ed7a_bg.wasm" crossorigin="anonymous" integrity="sha384-gVFIiub8hPg/6nl6l4D4i4qfTWBNtsitsfjC+xa2TN5Bz6Tk9wF+mIYeWcxhaKFG" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-9a2327513cf1534d.js" crossorigin="anonymous" integrity="sha384-7en6AwOdJ0Q7dpLHfIoviBkh+3D2Etve1fzpMNwjAE0M+wIUViDsQNPaDf08AUgF"><link rel="preload" href="./project-phoenix-9a2327513cf1534d_bg.wasm" crossorigin="anonymous" integrity="sha384-E2RFvpZcOh2faah53l5rRztWjgVm8h9OvkX90PtH5j0wUlULVbO1+i+Kadpwpt+7" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-c13299496a46ed7a.js';
-const wasm = await init({ module_or_path: './project-phoenix-c13299496a46ed7a_bg.wasm' });
+import init, * as bindings from './project-phoenix-9a2327513cf1534d.js';
+const wasm = await init({ module_or_path: './project-phoenix-9a2327513cf1534d_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -92,6 +108,12 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
+
+  <!-- Loading spinner shown until WASM is ready -->
+  <div id="wasm-spinner">
+    <div class="spinner-ring"></div>
+    <span>Loading…</span>
+  </div>
 
   <!-- Full-viewport host for the Bevy canvas; the WASM lobby UI renders
        here, with JS overlays (name input, connection dot, fullscreen
@@ -118,7 +140,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         style="margin-top:1rem;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
                letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
                cursor:pointer;width:80%;display:block;margin-left:auto;margin-right:auto"
-        onclick="send('Repair', {})">REPAIR</button>
+        onclick="send('Repair', { console: 'CaptainChair' })">REPAIR</button>
     </section>
 
     <section id="weapons-ui">
@@ -137,7 +159,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         style="margin:0.75rem auto 0;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
                letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
                cursor:pointer;width:80%;display:block"
-        onclick="send('Repair', {})">REPAIR</button>
+        onclick="send('Repair', { console: 'Tactical' })">REPAIR</button>
     </section>
 
     <section id="engineering-ui">
@@ -153,7 +175,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         style="margin-top:1.5rem;padding:0.75rem 2rem;font-size:1.1rem;font-weight:bold;
                letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
                cursor:pointer;width:100%"
-        onclick="send('Repair', {})">REPAIR</button>
+        onclick="send('Repair', { console: 'Engineering' })">REPAIR</button>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -226,7 +248,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false,
+      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
@@ -423,14 +445,30 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
     }
 
+    const REPAIR_BTN_MAP = {
+      CaptainChair: 'captain-repair-btn',
+      Tactical: 'weapons-repair-btn',
+      Engineering: 'eng-repair-btn',
+    };
+
     function renderRepairButtons(s) {
-      const ids = ['captain-repair-btn', 'weapons-repair-btn', 'eng-repair-btn'];
-      for (const id of ids) {
+      for (const [console, id] of Object.entries(REPAIR_BTN_MAP)) {
         const btn = $(id);
         if (!btn) continue;
+        if (console !== activeConsole) {
+          // Reset non-active buttons to ready state so they don't show stale state.
+          btn.textContent = 'REPAIR';
+          btn.style.background = '#063';
+          btn.style.color = '#5f5';
+          btn.style.borderColor = '#5f5';
+          btn.disabled = false;
+          continue;
+        }
+        // Active console's button reflects current repair state.
         if (s.repairPenalty) {
+          const flash = Math.floor(Date.now() / 333) % 2 === 0;
           btn.textContent = 'COOLDOWN ' + Math.ceil(s.repairCooldownSecs) + 's';
-          btn.style.background = '#400';
+          btn.style.background = flash ? '#800' : '#400';
           btn.style.color = '#f66';
           btn.style.borderColor = '#f44';
           btn.disabled = true;
@@ -543,14 +581,29 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       ctx.textAlign = 'right';
       ctx.fillText('60u', cx + r - 2, cy - 4);
 
-      // Fire button — visible and enabled only when fire-ready and not on cooldown.
+      // Fire button — visible and enabled only when fire-ready and not locked out.
       const fireBtn = $('weapons-fire-btn');
       if (fireBtn) {
         fireBtn.style.display = state.weaponsLocked ? 'block' : 'none';
-        const canFire = state.weaponsFireReady && !state.weaponsOnCooldown;
+        const canFire = state.weaponsFireReady && !state.weaponsOnCooldown && !state.weaponsFiring;
         fireBtn.disabled = !canFire;
         fireBtn.style.opacity = canFire ? '1' : '0.4';
-        fireBtn.textContent = state.weaponsOnCooldown ? 'COOLDOWN' : 'FIRE';
+        if (state.weaponsFiring) {
+          fireBtn.textContent = 'FIRING';
+          fireBtn.style.background = '#640';
+          fireBtn.style.borderColor = '#fa0';
+          fireBtn.style.color = '#fa0';
+        } else if (state.weaponsOnCooldown) {
+          fireBtn.textContent = 'COOLDOWN';
+          fireBtn.style.background = '#900';
+          fireBtn.style.borderColor = '#f44';
+          fireBtn.style.color = '#fff';
+        } else {
+          fireBtn.textContent = 'FIRE';
+          fireBtn.style.background = '#900';
+          fireBtn.style.borderColor = '#f44';
+          fireBtn.style.color = '#fff';
+        }
       }
     }
 
@@ -618,7 +671,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const fireBtn = $('weapons-fire-btn');
       if (fireBtn) {
         fireBtn.addEventListener('click', () => {
-          if (state.weaponsFireReady && !state.weaponsOnCooldown) {
+          if (state.weaponsFireReady && !state.weaponsOnCooldown && !state.weaponsFiring) {
             send('FirePhaser');
           }
         });
@@ -806,10 +859,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           return;
         }
         case 'BeamStarted': {
-          // Optional: could animate beam on phone UI. For now just log.
+          state.weaponsFiring = true;
+          renderWeaponsRadar();
           return;
         }
         case 'BeamEnded': {
+          state.weaponsFiring = false;
+          renderWeaponsRadar();
           return;
         }
         case 'RepairState': {
@@ -892,6 +948,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       // never executes.
       for (const json of wasmInboundQueue.splice(0)) wasm_client_receive(json);
       wasmReady = true;
+      const spinner = document.getElementById('wasm-spinner');
+      if (spinner) spinner.style.display = 'none';
       try { wasm_client_init(); } catch (_) {}
     }
 

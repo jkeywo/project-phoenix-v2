@@ -43,9 +43,31 @@
       0%, 100% { filter: brightness(1.0); }
       50%      { filter: brightness(1.35); }
     }
+    #wasm-spinner {
+      position: fixed; inset: 0; z-index: 100;
+      background: #000;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: #aae; font-family: monospace; font-size: 0.9rem;
+      gap: 1rem;
+    }
+    .spinner-ring {
+      width: 48px; height: 48px;
+      border: 4px solid #223;
+      border-top-color: #aae;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-e59bee937d49e457.js" crossorigin="anonymous" integrity="sha384-MfjQK+6Fm2TmI+5Hf0H1HLMONFN0mXZLi5FQlwM/QN4VC+HcicQNg4ZmHbQhjUAJ"><link rel="preload" href="./project-phoenix-e59bee937d49e457_bg.wasm" crossorigin="anonymous" integrity="sha384-mQXc920OpgdJMuW+P0YnApm/dmBEqAnXYvptaLSyP5oUNRHzB8OsOv4xJKYiQ84G" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-bd52323bd494763c.js" crossorigin="anonymous" integrity="sha384-p5SFFID2mAiGEVnh3WT0wF/j1FIsbPm8NMbanjcORzOL5dfAgksJK0WcyyrY/DzN"><link rel="preload" href="./project-phoenix-bd52323bd494763c_bg.wasm" crossorigin="anonymous" integrity="sha384-sJD2+EatelkFdtw0AwTgPNcv535UQO9CknfcHvqKIIxlniqHGkzHeLMhJWilS7uW" as="fetch" type="application/wasm"></head>
 <body>
+  <!-- Loading spinner shown until WASM is ready -->
+  <div id="wasm-spinner">
+    <div class="spinner-ring"></div>
+    <span>Loading…</span>
+  </div>
+
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
 
@@ -70,8 +92,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-e59bee937d49e457.js';
-const wasm = await init({ module_or_path: './project-phoenix-e59bee937d49e457_bg.wasm' });
+import init, * as bindings from './project-phoenix-bd52323bd494763c.js';
+const wasm = await init({ module_or_path: './project-phoenix-bd52323bd494763c_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -222,6 +244,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
 
     function startPhoenix() {
+      const spinner = document.getElementById('wasm-spinner');
+      if (spinner) spinner.style.display = 'none';
       window.wasm_init            = wasmBindings.wasm_init;
       window.wasm_receive_message = wasmBindings.wasm_receive_message;
       window.set_message_callback = wasmBindings.set_message_callback;

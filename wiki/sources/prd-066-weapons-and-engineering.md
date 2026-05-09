@@ -1,10 +1,10 @@
 ---
 title: PRD #66 — Weapons & Engineering Consoles
 type: source
-tags: [prd, weapons, engineering, combat, hull, repair, open]
+tags: [prd, weapons, engineering, combat, hull, repair, shipped]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/66
-status: open (created 2026-05-08)
-updated: 2026-05-08
+status: shipped (2026-05-09)
+updated: 2026-05-09
 ---
 
 # PRD #66 — Weapons Console & Engineering Console
@@ -35,14 +35,21 @@ Two new consoles plus a ship-wide Hull Integrity system.
 - **Per-console message routing.** Direct `Target::One(token)` payloads at 10 Hz so Weapons/Engineering only receive what they need.
 - **Beam rendered server-side only** (line/glow on viewscreen). Asteroid destruction plays a radial ripple and despawns.
 
-## Schema additions (planned)
+## Schema additions (shipped)
 
-- `Console`: `Weapons`, `Engineering`
-- `AsteroidInfo`: `id: Uuid`
-- `SimSnapshot`: `hull_integrity: i32`, `authorized_repair_console: Option<Console>`
-- New components: `AsteroidDamage`, `ShipHullIntegrity`, `BreakdownQueue`, `ActiveBeam`
-- New `ClientMessage`: `SetTarget`, `FirePhaser`, `Repair`
-- New `ServerMessage`: `TargetLock`, `RepairState`, `DamageReport`
+- `Console`: `Tactical`, `Engineering` (PRD called them `Weapons`/`Engineering`; shipped as `Tactical`/`Engineering`)
+- `AsteroidInfo`: added `uuid: String`
+- `SimSnapshot`: added `hull_integrity: i32`, `authorized_repair_console: Option<Console>`
+- New pure modules: `damage.rs` (`collision_damage()`, `HullIntegrity`), `breakdown.rs` (`BreakdownQueue`, `breakdowns_from_damage()`)
+- New `ClientMessage`: `SetTarget { uuid }`, `FirePhaser`, `Repair`
+- New `ServerMessage`: `TargetLock`, `WeaponsUpdate`, `BeamStarted`, `BeamEnded`, `AsteroidDestroyed`, `RepairState`
+- Client is now a full Bevy/WASM app (`client_app.rs`, `client_bridge.rs`, `client_lobby.rs`, `client_sim.rs`, `client_helm.rs`)
+
+## Deviations from PRD
+
+- Console named `Tactical` (not `Weapons`) in the shipped enum.
+- `DamageReport` was not shipped; hull integrity is included in the existing `SimState` broadcast.
+- Repair button appears on the Helm console (and any console that can receive `RepairState`), not on a dedicated Engineering-only UI element — instead the `authorized_repair_console` field in `SimState` gates who should press it.
 
 ## Out of scope
 

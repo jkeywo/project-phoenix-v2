@@ -1,6 +1,6 @@
 # Project Phoenix — Bridge Simulator
 
-A browser-based tabletop spaceship bridge simulator for groups. One browser tab on a shared screen shows a 3D view of space. Players join from their phones by scanning a QR code — no app install required.
+A browser-based spaceship bridge simulator for groups. One browser tab on a shared screen shows a 3D view of space. Players join from their phones by scanning a QR code — no app install required.
 
 **[Play it live →](https://jkeywo.github.io/project-phoenix-v2/)**
 
@@ -18,8 +18,10 @@ A browser-based tabletop spaceship bridge simulator for groups. One browser tab 
 
 | Console | Controls |
 |---|---|
-| **Captain's Chair** | Toggle Red Alert |
-| **Helm** | Joystick — up/down = thrust/reverse, left/right = steering |
+| **Captain's Chair** | Toggle Red Alert; switch view camera |
+| **Helm** | Joystick — up/down = thrust/reverse, left/right = steering; radar overlay |
+| **Tactical** | Lock targets, fire phasers |
+| **Engineering** | Repair hull breakdowns |
 
 ---
 
@@ -27,13 +29,13 @@ A browser-based tabletop spaceship bridge simulator for groups. One browser tab 
 
 | Layer | Tech |
 |---|---|
-| Game engine | [Bevy](https://bevyengine.org/) 0.18 (Rust) |
+| Game engine (server + client) | [Bevy](https://bevyengine.org/) 0.18 (Rust) |
 | Physics | [bevy_rapier3d](https://github.com/dimforge/bevy_rapier) 0.33 |
 | Networking | [PeerJS](https://peerjs.com/) (WebRTC, no server needed) |
-| Build | [Trunk](https://trunkrs.dev/) (Rust → WASM) |
+| Build | [Trunk](https://trunkrs.dev/) (Rust → WASM, two separate builds) |
 | Hosting | GitHub Pages |
 
-The host page (`server.html`) compiles to WebAssembly and runs the authoritative game simulation in the browser. Phone clients are plain HTML/JS — no framework, no install.
+Both pages compile to WebAssembly. The host page (`server.html`) runs the authoritative game simulation. The client page (`client.html`) runs a thin Bevy UI layer — lobby panel, console panels, and radar — that sends and receives JSON messages over PeerJS.
 
 ---
 
@@ -137,16 +139,26 @@ src/
   messages.rs         — wire types (ClientMessage, ServerMessage, Console)
   codec.rs            — JSON serialization (only place serde_json is used)
   session.rs          — player lifecycle: tokens, consoles, reconnect
+  lobby_handler.rs    — pure lobby message handler (no Bevy, fully testable)
   lobby.rs            — Bevy plugin: lobby phase message routing
-  simulation.rs       — Bevy plugin: physics, helm input, collisions
+  simulation.rs       — Bevy plugin: physics, helm input, weapons, collisions
   ship_physics.rs     — pure Rust physics function (fully unit-tested)
   ship_state.rs       — ShipState Bevy resource
   asteroid_spawner.rs — deterministic seeded asteroid placement
-  renderer.rs         — Bevy plugin: 2D lobby UI + 3D game camera
-  bridge.rs           — wasm-bindgen exports (WASM target only)
+  radar.rs            — pure radar projection math (server + client share)
+  damage.rs           — hull integrity and collision damage formula
+  breakdown.rs        — breakdown queue mechanic
+  renderer.rs         — Bevy plugin: 2D lobby UI + 3D game camera (server)
+  bridge.rs           — wasm-bindgen exports (server feature only)
+
+  client_lobby.rs     — pure lobby state model (client, Bevy-free)
+  client_sim.rs       — pure sim-state model (client, Bevy-free)
+  client_helm.rs      — pure joystick logic (client, Bevy-free)
+  client_app.rs       — Bevy plugin: lobby + captain + helm UI panels (client)
+  client_bridge.rs    — wasm-bindgen exports (client feature only)
 
 server.html           — host page: loads WASM, owns PeerJS host peer
-client.html           — client page: phone UI, plain HTML/JS
-Trunk.toml            — build config for server.html
-client-trunk.toml     — build config for client.html
+client.html           — client page: loads client WASM, connects via PeerJS
+Trunk.toml            — build config for server.html (server feature)
+client-trunk.toml     — build config for client.html (client feature)
 ```

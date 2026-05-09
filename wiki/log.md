@@ -59,3 +59,46 @@ Cross-cutting tensions surfaced:
 
 Six open architectural questions catalogued; each blocks at least one drafted
 feature.
+
+## [2026-05-09] ingest | PRD #66 shipped; client is now Bevy/WASM; 4 consoles | touched: AGENTS.md, README.md, CONTEXT.md, sources/prd-066, sources/repo-agents, sources/repo-context, entities/console, roadmap/overview, index.md
+
+Major update pass reflecting the current state of the codebase, which has diverged
+significantly from the 2026-05-08 bootstrap.
+
+Key changes discovered and documented:
+
+1. **Client is now a full Bevy/WASM app.** `client.html` is no longer plain HTML/JS.
+   New client-side Rust modules: `client_lobby.rs`, `client_sim.rs`, `client_helm.rs`,
+   `client_app.rs`, `client_bridge.rs`. All are compiled via the `client` Cargo feature.
+
+2. **4 consoles shipped.** `Tactical` (phasers, target lock) and `Engineering` (repair loop)
+   are now live. `Console` enum has 4 variants. `client_lobby.rs` defines `ALL_CONSOLES [4]`.
+
+3. **PRD #66 fully implemented.** Moved from "In flight" to "Shipped" in roadmap.
+   - `damage.rs`: `collision_damage()` formula + `HullIntegrity` struct
+   - `breakdown.rs`: `BreakdownQueue` FIFO + `breakdowns_from_damage()` bucket formula
+   - New messages: `SetTarget`, `FirePhaser`, `Repair`, `TargetLock`, `WeaponsUpdate`,
+     `BeamStarted`, `BeamEnded`, `AsteroidDestroyed`, `RepairState`
+   - `SimSnapshot` gained `hull_integrity` and `authorized_repair_console` fields
+
+4. **Cargo features** (`server` / `client`) split the two builds. Previously only a
+   single WASM target existed; now each HTML page has its own feature gate.
+
+5. **`lobby_handler.rs` extracted.** Pure handler functions (`process_message`,
+   `process_disconnect`) separated from the Bevy plugin in `lobby.rs` for testability.
+
+6. **`radar.rs` expanded.** Added `is_fire_ready()` (range + arc gate for phasers)
+   and `WEAPONS_RADAR_RANGE` constant.
+
+7. **Multi-console tab support.** `ActiveConsole` Bevy resource + `wasm_client_set_active_console`
+   bridge call allow the JS tab bar to switch which panel is shown when a player holds
+   multiple consoles.
+
+Pages updated: AGENTS.md, README.md, CONTEXT.md, `sources/prd-066`,
+`sources/repo-agents`, `sources/repo-context`, `entities/console`, `roadmap/overview`,
+`index.md`.
+
+Pages not yet updated (may have stale file paths or line numbers):
+`concepts/architecture`, `concepts/testing-strategy`, `concepts/console-plugin-pattern`,
+`concepts/view-model-pattern`, `entities/helm-console`, `entities/captain-console`,
+`roadmap/combat-and-damage`, `roadmap/console-expansion`.

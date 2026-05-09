@@ -18,7 +18,8 @@ People, things, and game objects.
 - **[Session](./entities/session.md)** — Server-side player record, survives reconnects.
 - **[Console](./entities/console.md)** — A role on the bridge (one seat each).
 - **[Captain Console](./entities/captain-console.md)** — Red Alert + View selector. Game-start authority.
-- **[Helm Console](./entities/helm-console.md)** — Thrust + steering. The only console that moves the ship.
+- **[Helm Console](./entities/helm-console.md)** — Thrust + steering. The only console that moves the ship. Radar overlay.
+- **[Console](./entities/console.md)** — All four consoles (CaptainChair, Helm, Tactical, Engineering) and how to add more.
 - **[Ship](./entities/ship.md)** — The player-controlled vessel. Capsule collider, XZ plane, Y-up.
 - **[Asteroid](./entities/asteroid.md)** — Static obstacle in the field. Sphere collider.
 - **[World Data](./entities/world-data.md)** — Fixed asteroid layout for a session. Deterministic.
@@ -55,7 +56,7 @@ Faithful summaries of external artifacts. One page per source.
 - **[PRD #22 — Helm and Game World](./sources/prd-022-helm-and-game-world.md)** — Closed. Helm console, ship physics, asteroid field, collisions.
 - **[PRD #36 — Captain View Selector](./sources/prd-036-captain-view-selector.md)** — Closed. Fore/aft/port/starboard hull cameras.
 - **[PRD #51 — Smoke Test Harness](./sources/prd-051-smoke-test-harness.md)** — Closed. Playwright + BroadcastChannel PeerJS shim.
-- **[PRD #66 — Weapons & Engineering Consoles](./sources/prd-066-weapons-and-engineering.md)** — Open. Phasers, hull integrity, repair loop.
+- **[PRD #66 — Weapons & Engineering Consoles](./sources/prd-066-weapons-and-engineering.md)** — Shipped. Tactical (phasers, lock), Engineering (repair loop), hull integrity, breakdown queue.
 
 ### Design drafts (`docs/`)
 

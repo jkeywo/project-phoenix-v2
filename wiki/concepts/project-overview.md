@@ -8,7 +8,7 @@ updated: 2026-05-08
 
 # Project Overview
 
-**Project Phoenix** is a browser-based tabletop spaceship bridge simulator for groups.
+**Project Phoenix** is a browser-based spaceship bridge simulator for groups.
 
 - One browser tab on a shared screen (TV / monitor) is the **view screen** — a 3D view of space.
 - Each player joins from their own phone by **scanning a QR code**. No app install. No network setup.

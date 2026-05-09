@@ -4,7 +4,7 @@ type: source
 tags: [agents, operating-manual, conventions, llm]
 source_path: AGENTS.md
 status: shipped
-updated: 2026-05-08
+updated: 2026-05-09
 ---
 
 # AGENTS.md
@@ -13,25 +13,26 @@ The operating manual for any LLM coding agent working on the repo.
 
 ## What it covers
 
-- TL;DR of the project (one paragraph + the two foundational PRD links: #1 and #22).
+- TL;DR of the project (one paragraph + PRD links: #1, #22, #66).
 - Prerequisites (`rustup`, `trunk`, node).
 - Common commands (`cargo test`, `trunk serve`, smoke tests, CI).
 - **"The Web Stack — For Game Devs"** section:
   - WASM ≠ Native (Bevy `App::run()` returns immediately on WASM).
   - The full message-flow diagram (phone → JS → WASM → Bevy → JS → broadcast).
   - Trunk basics (Vite-for-Rust analogy).
-  - File layout table.
+  - File layout table (now includes all client Rust modules).
 - Detailed architecture overview: star topology, session tokens, Bevy 0.18 pull-based message system.
 - The codec contract: `serde_json` lives only in `codec.rs`.
 - Game-flow phases (Lobby, In-Progress, disconnect/reconnect).
-- Module map with dependencies and Bevy involvement.
-- Game-mechanic specs (ship physics constants, asteroid field, console authority rules).
-- Testing strategy (Rust unit + Playwright smoke).
-- Key constraints & rules (numbered, load-bearing).
-- Cargo.toml notes for WASM vs native targets.
+- Module map with dependencies and Bevy involvement (server + client modules).
+- Game-mechanic specs: ship physics, asteroid field, all four console authority rules.
+- Testing strategy (Rust unit tests across all pure modules + Playwright smoke).
+- Key constraints & rules (10 numbered, load-bearing).
+- Cargo.toml notes: feature flags (`server`/`client`), WASM vs native targets.
 - Deployed URLs.
-- Quick reference for `client.html` and `server.html` JS patterns.
-- "Adding new message types" 6-step checklist.
+- Quick reference for `client.html` JS patterns (now WASM-backed).
+- Quick reference for `server.html` JS patterns.
+- "Adding new message types" 8-step checklist.
 
 ## Why this matters for the wiki
 

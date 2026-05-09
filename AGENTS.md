@@ -2,13 +2,14 @@
 
 ## TL;DR
 
-A browser-based tabletop spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and acts as the authoritative server. Phone clients are plain HTML/JS. Networking uses PeerJS (WebRTC) in a star topology.
+A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code — no installation. Both the host (view screen) and the client (phone console) run Rust/Bevy compiled to WebAssembly. The host acts as the authoritative server; clients send inputs and receive state snapshots. Networking uses PeerJS (WebRTC) in a star topology.
 
-**Two PRDs define the project:**
+**PRDs that define the project:**
 - **PRD #1:** [Project Phoenix — Browser-Based Bridge Simulator](https://github.com/jkeywo/project-phoenix-v2/issues/1) — PoC: lobby, captain's chair, red alert, rotating cube
 - **PRD #22:** [Helm and Game World](https://github.com/jkeywo/project-phoenix-v2/issues/22) — Ship physics, asteroids, helm console with thrust/steering
+- **PRD #66:** [Weapons & Engineering Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/66) — Phasers, hull integrity, breakdown queue, repair loop
 
-**Current state:** Both PRDs are fully implemented. The game has a lobby with player management, two consoles (Captain + Helm), a physics-simulated ship, randomized asteroid field, and Red Alert.
+**Current state:** All three PRDs are fully implemented. The game has a lobby with player management, four consoles (Captain + Helm + Tactical + Engineering), a physics-simulated ship, asteroid field with destroyable asteroids, phaser weapons, hull damage and the breakdown/repair system.
 
 ---
 
@@ -100,30 +101,40 @@ Trunk is like Vite/Webpack but for Rust→WASM. It:
 
 Two configs:
 - `Trunk.toml` — builds `server.html` (includes WASM via `<link data-trunk rel="rust">`)
-- `client-trunk.toml` — builds `client.html` (no WASM, just static HTML/JS)
+- `client-trunk.toml` — builds `client.html` (client WASM feature; thin Bevy UI app)
 
 ### File Layout
 
 ```
 src/
-  messages.rs       — Pure data types (no logic). Console, Player, GameState, ClientMessage, ServerMessage
-  codec.rs          — MessageCodec trait + JsonCodec impl. ONLY place serde_json is used directly.
-  session.rs        — SessionManager: tokens → players, console assignment, reconnect/vacancy logic
-  lobby.rs          — Bevy plugin: processes lobby-phase messages, phase transitions
-  simulation.rs     — Bevy plugin: helm input → physics → ship state, asteroid spawning, collision
-  ship_physics.rs   — Pure Rust physics controller (no Bevy). Input/output function, fully testable.
-  ship_state.rs     — ShipState resource: position, yaw, speed, red_alert toggle
+  messages.rs         — Pure data types. Console, Player, GameState, SimSnapshot, ClientMessage, ServerMessage
+  codec.rs            — MessageCodec trait + JsonCodec impl. ONLY place serde_json is used directly.
+  session.rs          — SessionManager: tokens → players, console assignment, reconnect/vacancy logic
+  lobby_handler.rs    — Pure lobby message handler: process_message(), process_disconnect(). No Bevy.
+  lobby.rs            — Bevy plugin: drives lobby_handler, phase transitions
+  simulation.rs       — Bevy plugin: helm input → physics → weapons → collision → breakdown → broadcast
+  ship_physics.rs     — Pure Rust physics controller (no Bevy). Input/output function, fully testable.
+  ship_state.rs       — ShipState resource: position, yaw, speed, red_alert, hull, phaser state
   asteroid_spawner.rs — Pure Rust asteroid position generator (seeded, deterministic)
-  renderer.rs       — Bevy plugin: lobby UI, 3D camera, Red Alert border overlay
-  bridge.rs         — wasm-bindgen exports. ONLY for WASM target.
-  lib.rs            — Module declarations
+  radar.rs            — Pure radar projection math. Shared by server renderer and client helm panel.
+  damage.rs           — collision_damage() formula + HullIntegrity struct. No Bevy.
+  breakdown.rs        — BreakdownQueue FIFO + breakdowns_from_damage() formula. No Bevy.
+  renderer.rs         — Bevy plugin: lobby UI, 3D camera, Red Alert border overlay (server only)
+  bridge.rs           — wasm-bindgen exports. Compiled when `server` feature is active.
 
-server.html         — Host page: loads WASM, runs Bevy, owns PeerJS host peer
-client.html         — Client page: plain HTML/JS, connects to host via PeerJS peer ID from URL hash
-Cargo.toml          — Single crate: cdylib (WASM) + rlib (tests)
-Trunk.toml          — Build config for server.html
-client-trunk.toml   — Build config for client.html
-.github/workflows/  — CI: builds both pages, deploys to gh-pages
+  client_lobby.rs     — Pure client lobby state model: LobbyState, LobbyView, ConsoleSlot. No Bevy.
+  client_sim.rs       — Pure client sim-state model: ClientSimState. No Bevy.
+  client_helm.rs      — Pure joystick logic: drag/release/tick, clamp_to_circle. No Bevy.
+  client_app.rs       — Bevy plugin: lobby panel, captain panel, helm panel, radar drawing.
+  client_bridge.rs    — wasm-bindgen exports. Compiled when `client` feature is active.
+  lib.rs              — Module declarations + feature gates
+
+server.html           — Host page: loads server WASM, runs Bevy, owns PeerJS host peer
+client.html           — Client page: loads client WASM, connects to host via PeerJS peer ID in URL hash
+Cargo.toml            — Single crate: cdylib (WASM) + rlib (tests). Features: server | client.
+Trunk.toml            — Build config for server.html (default = server feature)
+client-trunk.toml     — Build config for client.html (client feature)
+.github/workflows/    — CI: builds both pages, deploys to gh-pages
 ```
 
 ---
@@ -185,14 +196,17 @@ This project uses Bevy's new **pull-based message system** (`add_message<T>()`, 
 
 ### 2. In-Progress Phase
 
-- **Captain:** toggles Red Alert via `ToggleRedAlert`
-- **Helm:** sends `HelmInput { thrust, steering }` at 10Hz
+- **Captain:** toggles Red Alert via `ToggleRedAlert`; changes view via `SetView`
+- **Helm:** sends `HelmInput { thrust, steering }` at 10Hz; can push radar to viewscreen via `SetView { Radar }`
+- **Tactical:** sends `SetTarget { uuid }` to lock an asteroid; sends `FirePhaser` to start a beam (must be in range and forward arc)
+- **Engineering:** sends `Repair` to clear the current breakdown; wrong-console repairs incur a penalty cooldown
 - **Server simulation:**
   - Reads helm inputs tagged with `helm_token()`
   - Feeds into `compute_physics()` (pure function in `ship_physics.rs`)
   - Applies to ship's Rapier rigid body as direct velocity
-  - Every 100ms, broadcasts `SimState { red_alert }` snapshot
-- **Renderer:** 3D camera follows ship, Red Alert border shows on view screen
+  - Collision → `collision_damage()` → `HullIntegrity::apply_damage()` → `breakdowns_from_damage()` → `BreakdownQueue::push_random()`
+  - Every 100ms: broadcasts `SimState { red_alert, hull_integrity, authorized_repair_console, … }` snapshot; sends `WeaponsUpdate` to Tactical; sends `RepairState` to Engineering
+- **Renderer:** 3D camera follows ship, Red Alert border shows on view screen, phaser beam drawn when active
 
 ### 3. Disconnection / Reconnection
 
@@ -210,13 +224,22 @@ This project uses Bevy's new **pull-based message system** (`add_message<T>()`, 
 | `messages.rs` | Pure data types. No logic. | serde | No |
 | `codec.rs` | MessageCodec trait + JsonCodec | messages, serde_json | No |
 | `session.rs` | SessionManager: player lifecycle | messages | No |
-| `lobby.rs` | Bevy plugin: lobby message routing | messages, session | Yes |
-| `simulation.rs` | Bevy plugin: physics integration | messages, session, ship_physics, ship_state, asteroid_spawner | Yes |
+| `lobby_handler.rs` | Pure lobby message handler | messages, session | No |
+| `lobby.rs` | Bevy plugin: lobby message routing | lobby_handler, session | Yes |
+| `simulation.rs` | Bevy plugin: physics + weapons + damage | messages, session, ship_physics, ship_state, asteroid_spawner, radar, damage, breakdown | Yes |
 | `ship_physics.rs` | Pure physics: inputs → new state | None (pure Rust) | No |
 | `ship_state.rs` | ShipState resource | messages | Yes |
 | `asteroid_spawner.rs` | Pure asteroid position generator | rand | No |
-| `renderer.rs` | Bevy plugin: 2D lobby + 3D game view | messages, session, ship_state | Yes |
-| `bridge.rs` | wasm-bindgen exports | codec, lobby, renderer, simulation | WASM only |
+| `radar.rs` | Pure radar projection + fire-ready check | messages | No |
+| `damage.rs` | collision_damage() + HullIntegrity | None (pure Rust) | No |
+| `breakdown.rs` | BreakdownQueue + breakdowns_from_damage() | messages, rand | No |
+| `renderer.rs` | Bevy plugin: 2D lobby + 3D game view | messages, session, ship_state | Yes (server) |
+| `bridge.rs` | wasm-bindgen exports (server feature) | codec, lobby, renderer, simulation | WASM+server |
+| `client_lobby.rs` | Pure client lobby state + LobbyView | messages | No |
+| `client_sim.rs` | Pure client sim state (ClientSimState) | messages | No |
+| `client_helm.rs` | Pure joystick logic | messages | No |
+| `client_app.rs` | Bevy plugin: all client UI panels | client_lobby, client_sim, client_helm | Yes (client) |
+| `client_bridge.rs` | wasm-bindgen exports (client feature) | codec, client_app | WASM+client |
 
 ---
 
@@ -241,8 +264,10 @@ Deterministic seeded generation. Fixed layout per game session. Spheres at rando
 
 ### Consoles
 
-- **CaptainChair:** Red Alert toggle (exclusive). Only captain can `StartGame` and `ToggleRedAlert`.
-- **Helm:** Thrust slider + steering joystick/sliders. Sends `HelmInput` at 10Hz while active. Ship only moves when Helm is occupied.
+- **CaptainChair:** Red Alert toggle (exclusive). Only captain can `StartGame` and `ToggleRedAlert`. View selector (Fore/Aft/Port/Starboard or Radar).
+- **Helm:** Thrust + steering joystick. Sends `HelmInput` at 10Hz while active. Ship only moves when Helm is occupied. Displays radar overlay and "On Screen" button to push radar to the viewscreen.
+- **Tactical:** Target lock (`SetTarget`), fire phasers (`FirePhaser`). Receives `WeaponsUpdate` at 10Hz with lock status, fire readiness, and cooldown. Beam events (`BeamStarted`, `BeamEnded`) broadcast to all.
+- **Engineering:** Repair hull breakdowns (`Repair`). Receives `RepairState` at 10Hz with cooldown status. Repairing without authorization incurs a penalty cooldown.
 
 ---
 
@@ -254,10 +279,16 @@ Tests live inline with modules (`#[cfg(test)] mod tests`).
 
 - **`session.rs`** — Player registration, duplicate tokens, console assignment/clearing, disconnect vacancy, reconnect auto-assign, `helm_token()` / `captain_token()` lookups, conflict resolution
 - **`codec.rs`** — Round-trip serialization for every `ClientMessage` and `ServerMessage` variant
-- **`lobby.rs`** — Bevy App harness: Identify → Welcome, console select → broadcast, captain only can start, HelmInput ignored in lobby, disconnect handling
+- **`lobby_handler.rs`** — Pure handler: Identify → Welcome, console select → broadcast, captain only can start, HelmInput ignored in lobby, disconnect handling
 - **`ship_physics.rs`** — Zero input, thrust curve, deceleration curve, steering yaw, diagonal motion, dt scaling, speed cap
 - **`asteroid_spawner.rs`** — Exact count, within bounds, clear zone, no duplicates
 - **`ship_state.rs`** — Red alert toggle, snapshot generation
+- **`radar.rs`** — project_to_radar (yaw rotation, range cull), project_asteroid, radar_dots iterator, is_fire_ready (range + arc gates)
+- **`damage.rs`** — collision_damage formula (zero speed, max speed, mid speed, clamp), HullIntegrity (apply/restore/floor/ceiling)
+- **`breakdown.rs`** — BreakdownQueue push/pop/front, no-repeat picker, breakdowns_from_damage bucket math
+- **`client_lobby.rs`** — LobbyState message application (Welcome, PlayerJoined/Left, ConsoleSelected/Cleared, GameStarted), LobbyView derivation (slots, is_captain, is_helm, all_consoles_filled), outbound message builders
+- **`client_sim.rs`** — ClientSimState message application (SimState, WorldSetup, Welcome, RepairState), is_active_camera_direction, message builders
+- **`client_helm.rs`** — clamp_to_circle, compute_thrust_steering, press/drag/release/tick state machine
 
 ### Smoke tests (`tests/smoke/`, Playwright + Chromium)
 
@@ -294,13 +325,15 @@ End-to-end tests that boot the real server WASM in a headless browser and exerci
 ## Key Constraints & Rules
 
 1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules.
-2. **`bridge.rs` is WASM-only.** Gated behind `#[cfg(target_arch = "wasm32")]`.
+2. **Feature gates for bridges.** `bridge.rs` is compiled under the `server` feature; `client_bridge.rs` under the `client` feature. Neither is gated by `cfg(target_arch)` alone — the feature flag controls it.
 3. **Captain authority.** Only the player at `CaptainChair` can `StartGame` and `ToggleRedAlert`. The server enforces this.
 4. **Console vacancy on disconnect.** Immediately — in all game phases.
 5. **Helm sends at 10Hz.** Simulation reads helm inputs at 10Hz tick intervals.
 6. **Deterministic asteroids.** Seeded generator, fixed per session.
 7. **WebGL2 rendering.** For broad browser support.
 8. **PeerJS cloud broker.** Not self-hosted (deferred post-PoC).
+9. **Pure modules are Bevy-free.** `lobby_handler`, `radar`, `damage`, `breakdown`, `client_lobby`, `client_sim`, `client_helm` have no Bevy imports — they are fully unit-testable on native and shared between server and client.
+10. **A player may hold multiple consoles.** `Player.consoles` is `Vec<Console>`. The JS tab bar controls which panel is visible via `wasm_client_set_active_console`.
 
 ---
 
@@ -309,6 +342,11 @@ End-to-end tests that boot the real server WASM in a headless browser and exerci
 ```toml
 [lib]
 crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for testing
+
+[features]
+default = ["server"]
+server = []   # host build → server.html (bridge.rs compiled in)
+client = []   # client build → client.html (client_bridge.rs compiled in)
 
 # WASM-specific: no parallel physics, needs getrandom wasm_js backend
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -332,14 +370,17 @@ bevy_rapier3d = { version = "0.33", features = ["parallel"] }
 
 ## Client Page (client.html) Quick Reference
 
-The client is pure HTML/JS — no WASM, no framework. Key patterns:
+The client is a WASM Bevy app built with the `client` Cargo feature. Key patterns:
 
+- `client.html` minimal JS wires up PeerJS, localStorage, and the WASM bridge
 - `localStorage` for session token and player name persistence
 - Reads host peer ID from `location.hash.slice(1)`
 - PeerJS `clientPeer.connect(hostPeerId, { reliable: true })` for DataConnection
-- Sends JSON: `{ "type": "<MessageType>", "data": { ... } }`
-- `handleMessage()` dispatches on `msg.type`, mutates local `state`, calls `render(state)`
-- `render(state)` toggles sections: `lobby-ui`, `game-ui`, `helm-ui` with CSS class `active`
+- Inbound `ServerMessage` JSON → `wasm_client_receive(json)` → decoded next Bevy frame
+- Outbound `ClientMessage` JSON → JS callback registered via `set_client_send_callback`
+- `wasm_client_set_token(token)` sets `LocalPlayerToken` resource each frame
+- `wasm_client_set_active_console(name)` sets `ActiveConsole` resource (drives panel visibility)
+- Panels (`LobbyRoot`, `CaptainPanel`, `HelmPanel`) toggle `Visibility` based on phase + held consoles
 
 ---
 
@@ -362,7 +403,9 @@ When extending `ClientMessage` or `ServerMessage`:
 
 1. Add variant to enum in `messages.rs` (derive `Clone, Debug, Serialize, Deserialize, PartialEq`)
 2. Add round-trip test in `codec.rs` (`codec-tests` module)
-3. Handle in `lobby.rs` (process or pass through based on game phase)
-4. Handle in `simulation.rs` if in-game message
-5. Handle in `client.html` `handleMessage()` and update `render()` if UI changes
-6. Handle in `server.html` JS if routing needs adjustment
+3. Handle in `lobby_handler.rs` `process_message()` (pass through or produce outbound)
+4. Handle in `simulation.rs` if it is an in-game message
+5. Handle in `client_lobby.rs` `LobbyState::apply()` or `client_sim.rs` `ClientSimState::apply()` as appropriate
+6. Update `client_app.rs` if a new UI element or button is needed
+7. Handle in `server.html` JS `routeOutbound()` if routing logic needs adjustment
+8. Handle in `client.html` JS if the handshake / PeerJS wiring changes

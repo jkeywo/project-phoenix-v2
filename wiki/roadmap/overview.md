@@ -3,7 +3,7 @@ title: Roadmap Overview
 type: roadmap
 tags: [roadmap, planning, status]
 sources: [PRD-001, PRD-017, PRD-022, PRD-036, PRD-051, PRD-066, docs/]
-updated: 2026-05-08
+updated: 2026-05-09
 ---
 
 # Roadmap Overview
@@ -19,14 +19,13 @@ Closed PRDs whose features are live in `main`:
 - **[PRD #22](../sources/prd-022-helm-and-game-world.md)** — Helm Console, ship physics, asteroid field, collisions.
 - **[PRD #36](../sources/prd-036-captain-view-selector.md)** — Captain View Modes (Fore/Aft/Port/Starboard + Radar).
 - **[PRD #51](../sources/prd-051-smoke-test-harness.md)** — Playwright smoke tests with the BroadcastChannel PeerJS shim.
+- **[PRD #66 — Weapons & Engineering](../sources/prd-066-weapons-and-engineering.md)** — Tactical (phasers, target lock) and Engineering (repair loop, breakdown queue). Hull integrity, phaser beam events, `AsteroidDestroyed`. Client now a full Bevy/WASM app.
 
-Net result today: **2 consoles** (Captain, Helm), one ship, deterministic asteroid field, view selector, fully tested in CI.
+Net result today: **4 consoles** (Captain, Helm, Tactical, Engineering), one ship, destroyable asteroid field, phaser weapons, hull damage, breakdown/repair system, client WASM Bevy UI, fully tested in CI.
 
 ## In flight
 
-Open PRDs accepted but not yet shipped:
-
-- **[PRD #66 — Weapons & Engineering](../sources/prd-066-weapons-and-engineering.md)** — First combat loop. Adds two consoles, hull integrity, breakdown queue, the "wrong-console penalty" repair mechanic. See [Combat & Damage](./combat-and-damage.md).
+No open PRDs currently. Next features are in the `docs/` drafts.
 
 ## Drafted (no PRD yet)
 

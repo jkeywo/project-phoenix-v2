@@ -1,6 +1,7 @@
 pub mod asteroid_spawner;
 pub mod breakdown;
 pub mod damage;
+pub mod entity_config;
 pub mod messages;
 pub mod codec;
 pub mod session;

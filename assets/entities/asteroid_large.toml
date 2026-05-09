@@ -1,0 +1,17 @@
+name = "Large Asteroid"
+tags = ["asteroid", "gameplay", "large"]
+
+[collider]
+shape = "ball"
+radius = 10.0
+
+[hull]
+integrity = 100
+max_integrity = 100
+
+[appearance]
+colour = [0.4, 0.4, 0.4]
+mesh = "sphere"
+
+[physics]
+mass = 50.0

@@ -1,0 +1,31 @@
+name = "Player Ship"
+tags = ["player", "ship"]
+
+[collider]
+shape = "cylinder"
+radius = 5.0
+half_height = 5.0
+
+[hull]
+integrity = 100
+max_integrity = 100
+
+[physics]
+mass = 100.0
+linear_damping = 0.9
+angular_damping = 0.9
+max_speed = 50.0
+acceleration = 16.7
+decceleration = 50.0
+max_yaw_rate = 1.5708
+
+[weapons]
+phaser_range = 200.0
+phaser_damage = 10
+phaser_cooldown = 0.5
+
+[console]
+captain_console = { enabled = true }
+helm_console = { enabled = true }
+weapons_console = { enabled = true }
+engineering_console = { enabled = true }

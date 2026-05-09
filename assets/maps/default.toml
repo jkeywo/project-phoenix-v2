@@ -1,0 +1,31 @@
+[global]
+seed = 42
+
+[[star]]
+name = "Sun"
+radius = 50.0
+colour = [1.0, 0.8, 0.0]
+position = [0.0, 0.0, 0.0]
+tags = ["star", "center"]
+
+[[planet]]
+name = "Earth"
+radius = 20.0
+colour = [0.0, 0.5, 1.0]
+position = [200.0, 0.0, 200.0]
+tags = ["planet", "habitable"]
+
+[[asteroid_field]]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+spawn_distance = 150.0
+despawn_distance = 250.0
+asteroid_type_paths = [
+    "assets/entities/asteroid_small.toml",
+    "assets/entities/asteroid_large.toml",
+]
+cosmetic_type_paths = [
+    "assets/entities/asteroid_cosmetic.toml",
+]
+tags = ["field", "main"]

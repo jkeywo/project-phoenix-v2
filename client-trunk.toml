@@ -2,3 +2,11 @@
 target = "client.html"
 dist = "dist/client"
 public_url = "./"
+
+[[copy_file]]
+source = "assets/"
+destination = "../assets/"
+
+[watch]
+watch_path = ["assets/"]
+include = "*.toml"

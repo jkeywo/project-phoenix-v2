@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn client_repair_round_trips() {
-        let msg = ClientMessage::Repair;
+        let msg = ClientMessage::Repair { console: crate::messages::Console::Engineering };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }

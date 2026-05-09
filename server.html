@@ -43,9 +43,31 @@
       0%, 100% { filter: brightness(1.0); }
       50%      { filter: brightness(1.35); }
     }
+    #wasm-spinner {
+      position: fixed; inset: 0; z-index: 100;
+      background: #000;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: #aae; font-family: monospace; font-size: 0.9rem;
+      gap: 1rem;
+    }
+    .spinner-ring {
+      width: 48px; height: 48px;
+      border: 4px solid #223;
+      border-top-color: #aae;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
+  <!-- Loading spinner shown until WASM is ready -->
+  <div id="wasm-spinner">
+    <div class="spinner-ring"></div>
+    <span>Loading…</span>
+  </div>
+
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
 
@@ -211,6 +233,8 @@
     // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
 
     function startPhoenix() {
+      const spinner = document.getElementById('wasm-spinner');
+      if (spinner) spinner.style.display = 'none';
       window.wasm_init            = wasmBindings.wasm_init;
       window.wasm_receive_message = wasmBindings.wasm_receive_message;
       window.set_message_callback = wasmBindings.set_message_callback;

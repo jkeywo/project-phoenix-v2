@@ -103,7 +103,7 @@ pub fn on_screen_message() -> ClientMessage {
 
 /// `ClientMessage` for the Repair button: sends a repair request to the server.
 pub fn repair_message() -> ClientMessage {
-    ClientMessage::Repair
+    ClientMessage::Repair { console: crate::messages::Console::Helm }
 }
 
 #[cfg(test)]

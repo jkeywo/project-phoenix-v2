@@ -81,7 +81,7 @@ pub struct PhaserCooldown {
 const REPAIR_DURATION_SECS: f32 = 30.0;
 const REPAIR_HP_PER_SEC: f32 = 1.0 / 3.0; // +1 HP every 3 seconds
 const REPAIR_MAX_HP: i32 = 10;
-const REPAIR_PENALTY_SECS: f32 = 30.0;
+const REPAIR_PENALTY_SECS: f32 = 10.0;
 
 /// Active repair action. `Some` while a repair is underway; the authorised
 /// console is healing the ship. Resets to `None` when time expires or
@@ -451,8 +451,8 @@ fn handle_fire_phaser(
         if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
             continue;
         }
-        // Reject if on cooldown.
-        if cooldown.is_active() {
+        // Reject if on cooldown or a beam is already active.
+        if cooldown.is_active() || beam.target_uuid.is_some() {
             continue;
         }
         // Need a locked target.
@@ -507,33 +507,31 @@ fn handle_repair(
         return;
     }
     for ev in reader.read() {
-        if !matches!(ev.msg, ClientMessage::Repair) {
-            continue;
-        }
-        // Sender must hold some console.
+        let repair_console = match &ev.msg {
+            ClientMessage::Repair { console } => console.clone(),
+            _ => continue,
+        };
         let token = ev.token.as_str();
+        // Sender must actually hold the console they claim to be pressing.
         let sender_consoles = sessions.0.players()
             .iter()
             .find(|p| p.token == token)
             .map(|p| p.consoles.clone())
             .unwrap_or_default();
-        if sender_consoles.is_empty() {
+        if !sender_consoles.contains(&repair_console) {
             continue;
         }
         // Ignore presses during an active penalty for this player.
         if penalties.is_penalised(token) {
             continue;
         }
-        // Check if sender holds the authorized repair console.
+        // Check if the specific console pressed is the authorized one.
         let authorized = breakdowns.queue.front().cloned();
-        let is_authorized = authorized.as_ref().map_or(false, |auth_console| {
-            sender_consoles.contains(auth_console)
-        });
+        let is_authorized = authorized.as_ref().map_or(false, |auth| *auth == repair_console);
 
         if is_authorized && !repair.is_active() {
             repair.start();
         } else if !is_authorized && authorized.is_some() {
-            // A breakdown is pending but this isn't the authorized console.
             penalties.penalise(token);
         }
         // No breakdowns pending, or repair already active → silent no-op.
@@ -771,6 +769,7 @@ fn broadcast_weapons_update(
     world: Res<WorldResource>,
     weapons_target: Res<WeaponsTarget>,
     cooldown: Res<PhaserCooldown>,
+    beam: Res<ActiveBeam>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -798,7 +797,7 @@ fn broadcast_weapons_update(
         msg: ServerMessage::WeaponsUpdate {
             target_uuid: weapons_target.0.clone(),
             fire_ready,
-            on_cooldown: cooldown.is_active(),
+            on_cooldown: cooldown.is_active() || beam.target_uuid.is_some(),
         },
     });
 }
@@ -1708,7 +1707,7 @@ mod tests {
         start_game_with_breakdown_for_engineering(&mut app);
 
         // Engineering player presses Repair.
-        push(&mut app, "eng", ClientMessage::Repair);
+        push(&mut app, "eng", ClientMessage::Repair { console: Console::Engineering });
         tick(&mut app);
 
         assert!(app.world().resource::<ActiveRepair>().is_active(),
@@ -1721,7 +1720,7 @@ mod tests {
         start_game_with_breakdown_for_engineering(&mut app);
 
         // Captain presses Repair — they hold CaptainChair, not Engineering.
-        push(&mut app, "captain", ClientMessage::Repair);
+        push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
 
         assert!(!app.world().resource::<ActiveRepair>().is_active(),
@@ -1736,17 +1735,17 @@ mod tests {
         start_game_with_breakdown_for_engineering(&mut app);
 
         // Captain presses once — gets penalty.
-        push(&mut app, "captain", ClientMessage::Repair);
+        push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
         assert!(app.world().resource::<RepairPenalties>().is_penalised("captain"));
 
         // Captain presses again — should still be penalised (no change).
-        push(&mut app, "captain", ClientMessage::Repair);
+        push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
-        // Penalty remaining should still be close to 30s (only a tiny dt elapsed).
+        // Penalty remaining should still be close to 10s (only a tiny dt elapsed).
         let remaining = app.world().resource::<RepairPenalties>().remaining("captain");
-        assert!(remaining > 25.0,
-            "penalty should still be near 30s, got {remaining}");
+        assert!(remaining > 5.0,
+            "penalty should still be near 10s, got {remaining}");
     }
 
     #[test]
@@ -1754,7 +1753,7 @@ mod tests {
         let mut app = test_app();
         start_game_with_breakdown_for_engineering(&mut app);
 
-        push(&mut app, "eng", ClientMessage::Repair);
+        push(&mut app, "eng", ClientMessage::Repair { console: Console::Engineering });
         tick(&mut app);
 
         let initial_hp = app.world().resource::<ShipHullIntegrity>().0.current();
@@ -1774,7 +1773,7 @@ mod tests {
         let mut app = test_app();
         start_game_with_breakdown_for_engineering(&mut app);
 
-        push(&mut app, "eng", ClientMessage::Repair);
+        push(&mut app, "eng", ClientMessage::Repair { console: Console::Engineering });
         tick(&mut app);
 
         // Fast-complete the repair: set hp_restored to the cap so the next tick
@@ -1794,7 +1793,7 @@ mod tests {
         let mut app = test_app();
         start_game_with_breakdown_for_engineering(&mut app);
 
-        push(&mut app, "eng", ClientMessage::Repair);
+        push(&mut app, "eng", ClientMessage::Repair { console: Console::Engineering });
         let out = tick(&mut app);
 
         let repair_state = out.iter().find(|m| {
@@ -1810,7 +1809,7 @@ mod tests {
         let mut app = test_app();
         start_game_with_breakdown_for_engineering(&mut app);
 
-        push(&mut app, "captain", ClientMessage::Repair);
+        push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         let out = tick(&mut app);
 
         let penalty_msg = out.iter().find(|m| {

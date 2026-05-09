@@ -40,32 +40,21 @@ pub struct ShipPhysicsResult {
 /// Physics tuning constants.
 #[derive(Debug, Clone, Copy)]
 pub struct ShipPhysicsConfig {
-    /// Maximum forward speed: 50 units/s
     pub max_speed: f32,
-    /// Maximum reverse speed: half of forward (25 units/s)
     pub max_reverse_speed: f32,
-    /// Acceleration rate: 16.7 units/s² (3s to max speed)
     pub acceleration: f32,
-    /// Deceleration rate: 50 units/s² (1s to stop)
     pub deceleration: f32,
-    /// Maximum yaw rate in radians/s
     pub max_yaw_rate: f32,
 }
 
 impl ShipPhysicsConfig {
-    /// Default config matching the spec:
-    /// - Max speed: 50 units/s
-    /// - Max reverse speed: half of forward (25 units/s)
-    /// - Acceleration: 16.7 units/s² (3s to max)
-    /// - Deceleration: 50 units/s² (1s stop)
-    /// - Max yaw rate: pi/2 rad/s (90 deg/s)
     pub fn new() -> Self {
         Self {
-            max_speed: 50.0,
-            max_reverse_speed: 25.0, // half of max forward speed
-            acceleration: 50.0 / 3.0, // ~16.7
-            deceleration: 50.0,
-            max_yaw_rate: std::f32::consts::PI / 2.0,
+            max_speed: 25.0,
+            max_reverse_speed: 12.5,
+            acceleration: 25.0 / 3.0,
+            deceleration: 25.0,
+            max_yaw_rate: std::f32::consts::PI / 8.0,
         }
     }
 }
@@ -180,11 +169,11 @@ mod tests {
     #[test]
     fn deceleration_from_max_speed_reaches_zero() {
         let state = ShipPhysicsState {
-            forward_speed: 50.0,
+            forward_speed: 25.0,
             ..default_state()
         };
         let input = default_input(); // No thrust
-        // After 1 second of no thrust (decel is 50/s)
+        // After 1 second of no thrust (decel is 25/s)
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.forward_speed < 1.0);
     }
@@ -230,10 +219,10 @@ mod tests {
     fn thrust_with_steering_produces_diagonal_motion() {
         let state = default_state();
         let input = ShipPhysicsInput { thrust: 1.0, steering: 1.0 };
-        let result = compute_physics(state, input, 0.1, &config());
+        let result = compute_physics(state, input, 1.0, &config());
         // Should have both X and Z displacement
-        assert!((result.x).abs() > 0.01);
-        assert!((result.z).abs() > 0.01);
+        assert!((result.x).abs() > 0.1);
+        assert!((result.z).abs() > 0.1);
     }
 
     #[test]
@@ -279,7 +268,7 @@ mod tests {
 
     #[test]
     fn no_thrust_decelerates_negative_speed_toward_zero() {
-        let state = ShipPhysicsState { forward_speed: -50.0, ..default_state() };
+        let state = ShipPhysicsState { forward_speed: -25.0, ..default_state() };
         let input = default_input();
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.forward_speed > -1.0);
@@ -289,7 +278,7 @@ mod tests {
     #[test]
     fn thrust_reversal_does_not_overshoot_target() {
         // At full forward speed; apply slight forward thrust → settles at slight target.
-        let state = ShipPhysicsState { forward_speed: 50.0, ..default_state() };
+        let state = ShipPhysicsState { forward_speed: 25.0, ..default_state() };
         let input = ShipPhysicsInput { thrust: 0.2, steering: 0.0 };
         let cfg = config();
         let target = 0.2 * cfg.max_speed;

@@ -124,7 +124,7 @@ pub enum ClientMessage {
     SetView { mode: ViewMode },
     SetTarget { uuid: String },
     FirePhaser,
-    Repair,
+    Repair { console: Console },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

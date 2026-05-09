@@ -958,15 +958,16 @@ fn draw_helm_radar(
         return;
     }
 
-    // Outer + mid rings.
+    // Outer ring represents 1.5x RADAR_RANGE; everything inside is scaled down.
+    const ZOOM: f32 = 1.5;
     gizmos.circle_2d(centre, radius, RADAR_OUTER_RING_COLOR);
     let mid_ratio = crate::radar::RADAR_MID_RING / crate::radar::RADAR_RANGE;
-    gizmos.circle_2d(centre, radius * mid_ratio, RADAR_MID_RING_COLOR);
+    gizmos.circle_2d(centre, radius * mid_ratio / ZOOM, RADAR_MID_RING_COLOR);
 
     // Asteroids.
     for (rx, ry, rr) in crate::radar::radar_dots(&sim.world.asteroids, sim.ship_x, sim.ship_z, sim.ship_yaw) {
-        let pos = centre + Vec2::new(rx * radius, ry * radius);
-        let pix_radius = (rr * radius).max(2.0);
+        let pos = centre + Vec2::new(rx * radius / ZOOM, ry * radius / ZOOM);
+        let pix_radius = (rr * radius / ZOOM).max(2.0);
         gizmos.circle_2d(pos, pix_radius, RADAR_ASTEROID_COLOR);
     }
 

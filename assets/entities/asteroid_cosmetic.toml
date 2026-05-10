@@ -2,7 +2,7 @@ name = "Cosmetic Asteroid"
 tags = ["asteroid", "cosmetic"]
 
 [collider]
-shape = "ball"
+shape = "Ball"
 radius = 3.0
 
 [appearance]

@@ -1,12 +1,15 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
+use std::collections::HashMap;
 
-use crate::radar::WEAPONS_RADAR_RANGE;
-use crate::radar::is_fire_ready;
 use crate::asteroid_spawner::generate_donut_field;
 use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
 use crate::damage::{collision_damage, HullIntegrity};
+use crate::entity_config::EntityConfig;
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
+use crate::map_config::MapConfig;
+use crate::radar::WEAPONS_RADAR_RANGE;
+use crate::radar::is_fire_ready;
 use crate::messages::{
     AsteroidInfo, ClientMessage, Console, GamePhase, ServerMessage, ViewMode,
 };
@@ -822,105 +825,222 @@ fn broadcast_world_setup_on_start(
 
 // ── World Setup ──────────────
 fn setup_world(
+    commands: Commands,
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
+    world: ResMut<WorldResource>,
+) {
+    // Try to get the preloaded map config and config cache
+    if let Some(map_config) = crate::config_cache::get_map_config() {
+        let config_cache = crate::config_cache::get_config_cache();
+        setup_world_from_config(commands, meshes, materials, world, map_config, config_cache);
+    } else {
+        // Fallback: use hardcoded behavior
+        setup_world_hardcoded(commands, meshes, materials, world);
+    }
+}
+
+fn setup_world_from_config(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut world: ResMut<WorldResource>,
+    map_config: MapConfig,
+    config_cache: HashMap<String, EntityConfig>,
+) {
+    
+    // Spawn stars as unlit emissive sphere meshes
+    for star in &map_config.stars {
+        let star_mesh = meshes.add(Sphere { radius: star.radius });
+        // Convert RGB vec to Color
+        let star_color = Color::srgb(star.colour[0], star.colour[1], star.colour[2]);
+        let star_mat = materials.add(StandardMaterial {
+            base_color: star_color,
+            emissive: LinearRgba::from(star_color) * 2.0,
+            ..default()
+        });
+        commands.spawn((
+            Mesh3d(star_mesh),
+            MeshMaterial3d(star_mat),
+            Transform::from_xyz(star.position[0], star.position[1], star.position[2]),
+        ));
+    }
+    
+    // Spawn planets as standard lit sphere meshes
+    for planet in &map_config.planets {
+        let planet_mesh = meshes.add(Sphere { radius: planet.radius });
+        let planet_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(planet.colour[0], planet.colour[1], planet.colour[2]),
+            ..default()
+        });
+        commands.spawn((
+            Mesh3d(planet_mesh),
+            MeshMaterial3d(planet_mat),
+            Transform::from_xyz(planet.position[0], planet.position[1], planet.position[2]),
+        ));
+    }
+    
+    // Spawn starfield skybox
+    // Procedural points: many small unlit white spheres at radius ~2000
+    let star_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 1.0, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let star_mesh = meshes.add(Sphere { radius: 1.0 });
+    let star_count = 400u32;
+    let radius = 2000.0_f32;
+    for i in 0..star_count {
+        // Deterministic pseudo-random unit vector via golden-spiral on a sphere.
+        let frac = (i as f32 + 0.5) / star_count as f32;
+        let phi = (1.0 - 2.0 * frac).acos();
+        let theta = std::f32::consts::PI * (1.0 + 5_f32.sqrt()) * i as f32;
+        let x = phi.sin() * theta.cos() * radius;
+        let y = phi.sin() * theta.sin() * radius;
+        let z = phi.cos() * radius;
+        // Hash for size variation
+        let h = ((i.wrapping_mul(2654435761)) ^ 0xDEADBEEF) % 100;
+        let scale = 1.5 + (h as f32) / 25.0; // 1.5..5.5
+        commands.spawn((
+            Mesh3d(star_mesh.clone()),
+            MeshMaterial3d(star_mat.clone()),
+            Transform::from_xyz(x, y, z).with_scale(Vec3::splat(scale)),
+        ));
+    }
+    
+    // Spawn player ship from EntityConfig
+    if let Some(ship_config) = config_cache.get("assets/entities/player_ship.toml") {
+        // Get collider config
+        let collider_radius = ship_config.collider.as_ref().map(|c| c.radius).unwrap_or(3.0);
+        let collider_half_height = ship_config.collider.as_ref().map(|c| c.length / 2.0).unwrap_or(3.0);
+        
+            // Get hull integrity
+            let hull_integrity = ship_config.hull.as_ref().map(|h| h.hull_integrity).unwrap_or(100);
+            
+            // Spawn ship - store hull integrity in resource
+            commands.insert_resource(ShipHullIntegrity(HullIntegrity::with_hp(hull_integrity)));
+        
+        commands.spawn((
+            Ship,
+            Transform::default(),
+            RigidBody::KinematicPositionBased,
+            Collider::capsule_y(collider_half_height, collider_radius),
+            ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+    } else {
+        // Fallback if no ship config
+        // Fallback hull integrity
+        commands.insert_resource(ShipHullIntegrity(HullIntegrity::new()));
+        
+        commands.spawn((
+            
+            Ship,
+            Transform::default(),
+            RigidBody::KinematicPositionBased,
+            Collider::capsule_y(3.0, 6.0),
+            ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+    }
+    
+    // Spawn asteroids from asteroid fields
+    let mut all_asteroid_infos = Vec::new();
+    
+    for (field_idx, field) in map_config.asteroid_fields.iter().enumerate() {
+        let donut_result = generate_donut_field(
+            field.inner_radius,
+            field.outer_radius,
+            field.density,
+            field_idx as u64,
+            &field.asteroid_type_paths,
+            &field.cosmetic_type_paths,
+        );
+        
+        // Generate UUIDs for this field
+        let uuids = crate::asteroid_spawner::generate_donut_uuids(
+            field.inner_radius,
+            field.outer_radius,
+            field.density,
+            field_idx as u64,
+            donut_result.spawns.len(),
+        );
+        
+        // Spawn gameplay asteroids
+        let asteroid_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.4, 0.35, 0.3),
+            ..default()
+        });
+        let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
+        
+        let mut gameplay_count = 0;
+        for spawn in &donut_result.spawns {
+            // Check if this is a gameplay type
+            if field.asteroid_type_paths.contains(&spawn.config_path) {
+                gameplay_count += 1;
+                commands.spawn((
+                    Asteroid,
+                    AsteroidUuid(uuids[gameplay_count - 1].clone()),
+                    AsteroidDamage { max_hp: 30, current_hp: 30 },
+                    Mesh3d(asteroid_mesh.clone()),
+                    MeshMaterial3d(asteroid_mat.clone()),
+                    Transform::from_xyz(spawn.x, 0.0, spawn.z),
+                    Collider::ball(2.0),
+                    RigidBody::Fixed,
+                ));
+                
+                all_asteroid_infos.push(AsteroidInfo {
+                    uuid: uuids[gameplay_count - 1].clone(),
+                    x: spawn.x,
+                    z: spawn.z,
+                    radius: 2.0,
+                });
+            }
+        }
+        
+        // Spawn cosmetic asteroids above/below the play plane
+        let cosmetic_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.35, 0.3, 0.28),
+            perceptual_roughness: 0.95,
+            ..default()
+        });
+        
+        let mut cosmetic_start_idx = gameplay_count;
+        for (i, spawn) in donut_result.spawns.iter().enumerate() {
+            if field.cosmetic_type_paths.contains(&spawn.config_path) {
+                let idx = i;
+                let h = ((idx as u32).wrapping_mul(2654435761)) ^ 0x9E3779B9;
+                let above = (h & 1) == 0;
+                let mag = 10.0 + ((h >> 1) % 5000) as f32 / 100.0; // 10..60
+                let y = if above { mag } else { -mag };
+                let radius = 0.5 + ((h >> 13) % 250) as f32 / 100.0; // 0.5..3.0
+                let mesh = meshes.add(Sphere { radius });
+                commands.spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(cosmetic_mat.clone()),
+                    Transform::from_xyz(spawn.x, y, spawn.z),
+                ));
+                
+                all_asteroid_infos.push(AsteroidInfo {
+                    uuid: uuids[cosmetic_start_idx].clone(),
+                    x: spawn.x,
+                    z: spawn.z,
+                    radius,
+                });
+                cosmetic_start_idx += 1;
+            }
+        }
+    }
+    
+    // Record asteroid layout
+    world.0.asteroids = all_asteroid_infos;
+}
+
+/// Fallback world setup with hardcoded values for development/testing
+fn setup_world_hardcoded(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut world: ResMut<WorldResource>,
 ) {
-    // Generate gameplay asteroids using donut model
-    // Old parameters: spawn_radius=150, count=40, clear_zone=20
-    // Old parameters: spawn_radius=150, count=40, clear_zone=20
-    // New parameters: inner=20, outer=150, density to approximate 40 asteroids
-    let gameplay_field = generate_donut_field(
-        20.0,   // inner_radius
-        150.0,  // outer_radius
-        0.0006, // density (approximates ~40 asteroids)
-        0,      // seed_offset
-        &["asteroid_large".to_string()],  // gameplay_type_paths
-        &[],    // cosmetic_type_paths (none for gameplay field)
-    );
-    
-    // Generate cosmetic asteroids using donut model
-    // Old parameters: spawn_radius=200, count=80, clear_zone=10
-    // New parameters: inner=10, outer=200, density to approximate 80 asteroids
-    let cosmetic_field = generate_donut_field(
-        10.0,   // inner_radius
-        200.0,  // outer_radius
-        0.00065, // density (approximates ~80 asteroids)
-        1,      // seed_offset (different from gameplay for independent layout)
-        &[],    // gameplay_type_paths (none for cosmetic field)
-        &["asteroid_cosmetic".to_string()], // cosmetic_type_paths
-    );
-    
-    // Combine all spawns
-    let all_spawns: Vec<_> = gameplay_field.spawns.iter()
-        .chain(&cosmetic_field.spawns)
-        .collect();
-    
-    // Generate UUIDs for all asteroids
-    let total_count = all_spawns.len();
-    let uuids = crate::asteroid_spawner::generate_donut_uuids(
-        20.0, 200.0, 0.0006, 0, total_count
-    );
-
-    // Record asteroid layout so it can be broadcast as WorldSetup and
-    // included in Welcome for reconnecting clients.
-    world.0.asteroids = all_spawns
-        .iter()
-        .zip(uuids.iter())
-        .map(|(spawn, uuid)| AsteroidInfo { 
-            uuid: uuid.clone(), 
-            x: spawn.x, 
-            z: spawn.z, 
-            radius: 2.0 
-        })
-        .collect();
-
-    // Spawn gameplay asteroids
-    let asteroid_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.4, 0.35, 0.3),
-        ..default()
-    });
-    let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
-
-    for (spawn, uuid) in gameplay_field.spawns.iter().zip(
-        uuids.iter().take(gameplay_field.spawns.len())
-    ) {
-        commands.spawn((
-            Asteroid,
-            AsteroidUuid(uuid.clone()),
-            AsteroidDamage { max_hp: 30, current_hp: 30 },
-            Mesh3d(asteroid_mesh.clone()),
-            MeshMaterial3d(asteroid_mat.clone()),
-            Transform::from_xyz(spawn.x, 0.0, spawn.z),
-            Collider::ball(2.0),
-            RigidBody::Fixed,
-        ));
-    }
-
-    // ── Cosmetic asteroids above/below the play plane ──────────────────
-    // Pure decoration — no colliders. Distributed in two slab regions
-    // sandwiching the play plane.
-    let cosmetic_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.35, 0.3, 0.28),
-        perceptual_roughness: 0.95,
-        ..default()
-    });
-    
-    for (i, spawn) in cosmetic_field.spawns.iter().enumerate() {
-        // Pseudo-random Y in [-60,-10] ∪ [10,60] using index hashing
-        let h = ((i as u32).wrapping_mul(2654435761)) ^ 0x9E3779B9;
-        let above = (h & 1) == 0;
-        let mag = 10.0 + ((h >> 1) % 5000) as f32 / 100.0; // 10..60
-        let y = if above { mag } else { -mag };
-        let radius = 0.5 + ((h >> 13) % 250) as f32 / 100.0; // 0.5..3.0
-        let mesh = meshes.add(Sphere { radius });
-        commands.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(cosmetic_mat.clone()),
-            Transform::from_xyz(spawn.x, y, spawn.z),
-        ));
-    }
 
     // ── Starfield skybox ───────────────────────────────────────────────
     // Procedural points: many small unlit white spheres at radius ~2000

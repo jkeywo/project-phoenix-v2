@@ -2,9 +2,9 @@ name = "Player Ship"
 tags = ["player", "ship"]
 
 [collider]
-shape = "cylinder"
-radius = 5.0
-half_height = 5.0
+shape = "Capsule"
+radius = 3.0
+length = 6.0
 
 [hull]
 integrity = 100

@@ -2,7 +2,7 @@ name = "Small Asteroid"
 tags = ["asteroid", "gameplay", "small"]
 
 [collider]
-shape = "ball"
+shape = "Ball"
 radius = 5.0
 
 [hull]

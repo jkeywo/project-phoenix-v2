@@ -34,6 +34,11 @@ impl HullIntegrity {
     pub fn restore(&mut self, amount: i32) {
         self.hp = (self.hp + amount).min(100);
     }
+    
+    /// Create a new HullIntegrity with a specific HP value.
+    pub fn with_hp(hp: i32) -> Self {
+        Self { hp: hp.clamp(0, 100) }
+    }
 }
 
 impl Default for HullIntegrity {

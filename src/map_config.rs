@@ -93,7 +93,7 @@ fn default_despawn_distance() -> f32 {
 }
 
 /// Complete map configuration.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, bevy::prelude::Resource)]
 pub struct MapConfig {
     /// Global configuration.
     #[serde(default)]

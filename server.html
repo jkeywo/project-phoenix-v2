@@ -228,24 +228,111 @@
       }
     }
 
-    // ── WASM startup ───────────────────────────────────────────────────────
-    // Trunk fires TrunkApplicationStarted once the WASM binary is fully
-    // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
+// ── Config Preload ──────────────────────────────────────────────────────
 
-    function startPhoenix() {
-      const spinner = document.getElementById('wasm-spinner');
-      if (spinner) spinner.style.display = 'none';
-      window.wasm_init            = wasmBindings.wasm_init;
-      window.wasm_receive_message = wasmBindings.wasm_receive_message;
-      window.set_message_callback = wasmBindings.set_message_callback;
-      set_message_callback(routeOutbound);
-      // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
-      // throwing, so any code after wasm_init() never executes.
-      for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
-      try { wasm_init(); } catch (_) {}
+// Track which entity paths have been requested to prevent duplicate fetches
+const fetchedPaths = new Set();
+
+// Preload sequence: fetch map -> load map -> fetch entities -> load entities -> init
+async function preloadAndStart() {
+  const spinner = document.getElementById('wasm-spinner');
+  
+  try {
+    // Step 1: Set up the config request callback
+    window.set_config_request_callback = wasmBindings.set_config_request_callback;
+    set_config_request_callback(handleConfigRequest);
+    
+    // Step 2: Fetch and load the default map
+    const mapResponse = await fetch('assets/maps/default.toml');
+    if (!mapResponse.ok) {
+      console.error('Failed to fetch default map:', mapResponse.status);
+      throw new Error('Map fetch failed');
     }
+    const mapToml = await mapResponse.text();
+    
+    // Step 3: Load the map - this will trigger callbacks for entity paths
+    window.wasm_load_map = wasmBindings.wasm_load_map;
+    window.wasm_load_config = wasmBindings.wasm_load_config;
+    window.wasm_is_preload_complete = wasmBindings.wasm_is_preload_complete;
+    
+    wasm_load_map(mapToml);
+    
+  } catch (e) {
+    console.error('Preload failed:', e);
+    if (spinner) spinner.style.display = 'none';
+    // Show error to user
+    const overlay = document.getElementById('overlay');
+    if (overlay) {
+      overlay.innerHTML = '<div style="color: #f44; padding: 2rem; text-align: center;">Failed to load game configuration. See console for details.</div>';
+      overlay.style.display = 'block';
+    }
+    return;
+  }
+}
 
-    window.addEventListener('TrunkApplicationStarted', startPhoenix);
+// Handle config fetch requests from Rust
+function handleConfigRequest(path) {
+  // Prevent duplicate fetches
+  if (fetchedPaths.has(path)) {
+    return;
+  }
+  fetchedPaths.add(path);
+  
+  // Fetch the entity config
+  fetch(path)
+    .then(response => {
+      if (!response.ok) {
+        console.error(`Failed to fetch config at ${path}: ${response.status}`);
+        // Try to continue without this config
+        return '';
+      }
+      return response.text();
+    })
+    .then(toml => {
+      if (toml) {
+        // Load the config into Rust
+        const result = wasm_load_config(path, toml);
+        if (result instanceof Error) {
+          console.error(`Failed to parse config at ${path}:`, result);
+        } else if (result === true) {
+          // Preload complete - initialize the app
+          finishInit();
+        }
+      }
+    })
+    .catch(err => {
+      console.error(`Error fetching config at ${path}:`, err);
+    });
+}
+
+// Finish initialization after preload completes
+function finishInit() {
+  const spinner = document.getElementById('wasm-spinner');
+  if (spinner) spinner.style.display = 'none';
+  
+  window.wasm_init = wasmBindings.wasm_init;
+  window.wasm_receive_message = wasmBindings.wasm_receive_message;
+  window.set_message_callback = wasmBindings.set_message_callback;
+  set_message_callback(routeOutbound);
+  
+  // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
+  // throwing, so any code after wasm_init() never executes.
+  for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
+  try { wasm_init(); } catch (_) {}
+}
+
+// ── WASM startup ───────────────────────────────────────────────────────
+// Trunk fires TrunkApplicationStarted once the WASM binary is fully
+// instantiated and sets window.wasmBindings to the wasm-bindgen exports.
+
+function startPhoenix() {
+  // Start the preload sequence
+  preloadAndStart().catch(err => {
+    console.error('Failed to start preload:', err);
+  });
+}
+
+window.addEventListener('TrunkApplicationStarted', startPhoenix);
 
     // ── Audio context resume on first user gesture ───────────────────────
     // Browsers block AudioContext from playing until a user interacts with

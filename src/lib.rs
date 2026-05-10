@@ -1,6 +1,8 @@
 pub mod asteroid_spawner;
 pub mod breakdown;
+pub mod config_cache;
 pub mod damage;
+pub mod entity_config;
 pub mod map_config;
 pub mod messages;
 pub mod codec;

@@ -6,6 +6,7 @@
 #[cfg(target_arch = "wasm32")]
 use {
     crate::codec::{JsonCodec, MessageCodec},
+    crate::config_cache::ConfigCachePlugin,
     crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
     crate::renderer::RendererPlugin,
     crate::simulation::SimulationPlugin,
@@ -43,19 +44,20 @@ thread_local! {
 #[wasm_bindgen]
 pub fn wasm_init() {
     App::new()
-        .add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
-            primary_window: Some(bevy::window::Window {
-                canvas: Some("#canvas".into()),
-                fit_canvas_to_parent: true,
-                ..default()
-            }),
+    .add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
+        primary_window: Some(bevy::window::Window {
+            canvas: Some("#canvas".into()),
+            fit_canvas_to_parent: true,
             ..default()
-        }))
-        .add_plugins(LobbyPlugin)
-        .add_plugins(SimulationPlugin)
-        .add_plugins(RendererPlugin)
-        .add_systems(Update, (drain_inbound, drain_disconnects, flush_outbound))
-        .run();
+        }),
+        ..default()
+    }))
+    .add_plugins(ConfigCachePlugin)
+    .add_plugins(LobbyPlugin)
+    .add_plugins(SimulationPlugin)
+    .add_plugins(RendererPlugin)
+    .add_systems(Update, (drain_inbound, drain_disconnects, flush_outbound))
+    .run();
 }
 
 /// Called by JS to deliver an inbound message from a peer into Bevy.
@@ -88,15 +90,45 @@ pub fn wasm_player_disconnected(token: &str) {
 ///
 /// Bevy will invoke `callback(target: string, payload: string)` for every
 /// outbound `ServerMessage`, where `target` is one of:
-///   `"all"` — broadcast to every peer
-///   `"token:<token>"` — send to one peer
-///   `"except:<token>"` — broadcast excluding one peer
+/// `"all"` — broadcast to every peer
+/// `"token:<token>"` — send to one peer
+/// `"except:<token>"` — broadcast excluding one peer
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_message_callback(callback: Function) {
     OUTBOUND_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
     });
+}
+
+// ── Config Preload Exports ──────────────────────────────────────────────────
+
+/// Re-export config preload functions from config_cache module.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_config_request_callback(callback: js_sys::Function) {
+    crate::config_cache::set_config_request_callback(callback);
+}
+
+/// Re-export config preload functions from config_cache module.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_load_map(toml_str: String) -> Result<JsValue, JsValue> {
+    crate::config_cache::wasm_load_map(toml_str)
+}
+
+/// Re-export config preload functions from config_cache module.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    crate::config_cache::wasm_load_config(path, toml_str)
+}
+
+/// Check if preload is complete.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_is_preload_complete() -> bool {
+    crate::config_cache::wasm_is_preload_complete()
 }
 
 // ── Bevy bridge systems ────────────────────────────────────────────────────

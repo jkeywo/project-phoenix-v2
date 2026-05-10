@@ -3,7 +3,7 @@ use bevy_rapier3d::prelude::*;
 
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::radar::is_fire_ready;
-use crate::asteroid_spawner::{spawn_asteroid_positions, spawn_asteroid_uuids};
+use crate::asteroid_spawner::generate_donut_field;
 use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
 use crate::damage::{collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
@@ -827,33 +827,72 @@ fn setup_world(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut world: ResMut<WorldResource>,
 ) {
-    let config = ShipPhysicsConfig::new();
-    let positions = spawn_asteroid_positions(config.max_speed * 3.0, 40, 20.0);
-    let uuids = spawn_asteroid_uuids(config.max_speed * 3.0, 40, 20.0);
+    // Generate gameplay asteroids using donut model
+    // Old parameters: spawn_radius=150, count=40, clear_zone=20
+    // Old parameters: spawn_radius=150, count=40, clear_zone=20
+    // New parameters: inner=20, outer=150, density to approximate 40 asteroids
+    let gameplay_field = generate_donut_field(
+        20.0,   // inner_radius
+        150.0,  // outer_radius
+        0.0006, // density (approximates ~40 asteroids)
+        0,      // seed_offset
+        &["asteroid_large".to_string()],  // gameplay_type_paths
+        &[],    // cosmetic_type_paths (none for gameplay field)
+    );
+    
+    // Generate cosmetic asteroids using donut model
+    // Old parameters: spawn_radius=200, count=80, clear_zone=10
+    // New parameters: inner=10, outer=200, density to approximate 80 asteroids
+    let cosmetic_field = generate_donut_field(
+        10.0,   // inner_radius
+        200.0,  // outer_radius
+        0.00065, // density (approximates ~80 asteroids)
+        1,      // seed_offset (different from gameplay for independent layout)
+        &[],    // gameplay_type_paths (none for cosmetic field)
+        &["asteroid_cosmetic".to_string()], // cosmetic_type_paths
+    );
+    
+    // Combine all spawns
+    let all_spawns: Vec<_> = gameplay_field.spawns.iter()
+        .chain(&cosmetic_field.spawns)
+        .collect();
+    
+    // Generate UUIDs for all asteroids
+    let total_count = all_spawns.len();
+    let uuids = crate::asteroid_spawner::generate_donut_uuids(
+        20.0, 200.0, 0.0006, 0, total_count
+    );
 
     // Record asteroid layout so it can be broadcast as WorldSetup and
     // included in Welcome for reconnecting clients.
-    world.0.asteroids = positions
+    world.0.asteroids = all_spawns
         .iter()
         .zip(uuids.iter())
-        .map(|((x, z), uuid)| AsteroidInfo { uuid: uuid.clone(), x: *x, z: *z, radius: 2.0 })
+        .map(|(spawn, uuid)| AsteroidInfo { 
+            uuid: uuid.clone(), 
+            x: spawn.x, 
+            z: spawn.z, 
+            radius: 2.0 
+        })
         .collect();
 
-    // Spawn asteroids
+    // Spawn gameplay asteroids
     let asteroid_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.4, 0.35, 0.3),
         ..default()
     });
     let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
 
-    for ((x, z), uuid) in positions.iter().zip(uuids.iter()) {
+    for (spawn, uuid) in gameplay_field.spawns.iter().zip(
+        uuids.iter().take(gameplay_field.spawns.len())
+    ) {
         commands.spawn((
             Asteroid,
             AsteroidUuid(uuid.clone()),
             AsteroidDamage { max_hp: 30, current_hp: 30 },
             Mesh3d(asteroid_mesh.clone()),
             MeshMaterial3d(asteroid_mat.clone()),
-            Transform::from_xyz(*x, 0.0, *z),
+            Transform::from_xyz(spawn.x, 0.0, spawn.z),
             Collider::ball(2.0),
             RigidBody::Fixed,
         ));
@@ -867,8 +906,8 @@ fn setup_world(
         perceptual_roughness: 0.95,
         ..default()
     });
-    let cosmetic_positions = spawn_asteroid_positions(config.max_speed * 4.0, 80, 10.0);
-    for (i, (x, z)) in cosmetic_positions.iter().enumerate() {
+    
+    for (i, spawn) in cosmetic_field.spawns.iter().enumerate() {
         // Pseudo-random Y in [-60,-10] ∪ [10,60] using index hashing
         let h = ((i as u32).wrapping_mul(2654435761)) ^ 0x9E3779B9;
         let above = (h & 1) == 0;
@@ -879,7 +918,7 @@ fn setup_world(
         commands.spawn((
             Mesh3d(mesh),
             MeshMaterial3d(cosmetic_mat.clone()),
-            Transform::from_xyz(*x, y, *z),
+            Transform::from_xyz(spawn.x, y, spawn.z),
         ));
     }
 

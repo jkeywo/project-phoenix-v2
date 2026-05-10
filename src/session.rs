@@ -16,11 +16,42 @@ pub struct SessionManager {
     players: Vec<Player>,
     /// Last consoles assigned before disconnect — used for auto-reconnect restore.
     last_consoles: HashMap<String, Vec<Console>>,
+    /// Available consoles based on the ship's EntityConfig.
+    /// If None, all consoles are available (default for backward compatibility).
+    available_consoles: Option<Vec<Console>>,
 }
 
 impl SessionManager {
     pub fn new() -> Self {
-        Self { players: Vec::new(), last_consoles: HashMap::new() }
+        Self { 
+            players: Vec::new(), 
+            last_consoles: HashMap::new(),
+            available_consoles: None,
+        }
+    }
+    
+    /// Create a new SessionManager with available consoles from EntityConfig.
+    pub fn new_with_config(config: &crate::entity_config::EntityConfig) -> Self {
+        let mut available = Vec::new();
+        
+        if config.captain_console.is_some() {
+            available.push(Console::CaptainChair);
+        }
+        if config.helm_console.is_some() {
+            available.push(Console::Helm);
+        }
+        if config.weapons_console.is_some() {
+            available.push(Console::Tactical);
+        }
+        if config.engineering_console.is_some() {
+            available.push(Console::Engineering);
+        }
+        
+        Self { 
+            players: Vec::new(), 
+            last_consoles: HashMap::new(),
+            available_consoles: Some(available),
+        }
     }
 
     fn idx(&self, token: &str) -> Option<usize> {
@@ -68,7 +99,15 @@ impl SessionManager {
     }
 
     /// Add console if absent, remove if owned, error if another connected player holds it.
+    /// Also rejects selection of consoles that are not available in the configured list.
     pub fn toggle_console(&mut self, token: &str, console: Console) -> Result<bool, ConflictError> {
+        // Check: is this console available in the configured list?
+        if let Some(ref available) = self.available_consoles {
+            if !available.contains(&console) {
+                return Err(ConflictError::ConsoleTaken); // Reuse error type for "not available"
+            }
+        }
+        
         // Check: is it held by someone else who is connected?
         let taken_by_other = self.players.iter()
             .any(|p| p.connected && p.token != token && p.consoles.contains(&console));
@@ -109,9 +148,19 @@ impl SessionManager {
             .filter(|p| p.connected)
             .flat_map(|p| p.consoles.clone())
             .collect();
-        [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Engineering]
-            .into_iter()
+        
+        // Use configured available consoles, or default to all if not configured
+        let all_available = self.available_consoles.as_deref().unwrap_or(&[
+            Console::CaptainChair,
+            Console::Helm,
+            Console::Tactical,
+            Console::Engineering,
+        ]);
+        
+        all_available
+            .iter()
             .filter(|c| !taken.contains(c))
+            .cloned()
             .collect()
     }
 
@@ -397,7 +446,75 @@ mod tests {
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.toggle_console("t1", Console::Engineering).unwrap();
         sm.disconnect("t1");
-        sm.reconnect("t1");
-        assert!(sm.players()[0].consoles.contains(&Console::Engineering));
+    sm.reconnect("t1");
+    assert!(sm.players()[0].consoles.contains(&Console::Engineering));
+    }
+    
+    // ── Console Selectability Tests ────────────────────────────────────────
+    
+    fn sm_with_config(consoles: Vec<Console>) -> SessionManager {
+        let mut sm = SessionManager::new();
+        sm.available_consoles = Some(consoles);
+        sm
+    }
+    
+    #[test]
+    fn all_consoles_available_with_all_sections_present() {
+        let sm = sm_with_config(vec![
+            Console::CaptainChair,
+            Console::Helm,
+            Console::Tactical,
+            Console::Engineering,
+        ]);
+        let available = sm.available_consoles();
+        assert!(available.contains(&Console::CaptainChair));
+        assert!(available.contains(&Console::Helm));
+        assert!(available.contains(&Console::Tactical));
+        assert!(available.contains(&Console::Engineering));
+    }
+    
+    #[test]
+    fn weapons_console_hidden_when_not_in_config() {
+        let sm = sm_with_config(vec![
+            Console::CaptainChair,
+            Console::Helm,
+            Console::Engineering,
+        ]);
+        let available = sm.available_consoles();
+        assert!(!available.contains(&Console::Tactical));
+    }
+    
+    #[test]
+    fn captain_console_hidden_when_not_in_config() {
+        let sm = sm_with_config(vec![
+            Console::Helm,
+            Console::Tactical,
+            Console::Engineering,
+        ]);
+        let available = sm.available_consoles();
+        assert!(!available.contains(&Console::CaptainChair));
+    }
+    
+    #[test]
+    fn selecting_unavailable_console_is_rejected() {
+        let mut sm = sm_with_config(vec![
+            Console::CaptainChair,
+            Console::Helm,
+            Console::Engineering,
+        ]);
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        // Weapons console is not available
+        let result = sm.toggle_console("t1", Console::Tactical);
+        assert!(matches!(result, Err(ConflictError::ConsoleTaken)));
+    }
+    
+    #[test]
+    fn default_session_manager_has_all_consoles() {
+        let sm = SessionManager::new();
+        let available = sm.available_consoles();
+        assert!(available.contains(&Console::CaptainChair));
+        assert!(available.contains(&Console::Helm));
+        assert!(available.contains(&Console::Tactical));
+        assert!(available.contains(&Console::Engineering));
     }
 }

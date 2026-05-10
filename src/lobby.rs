@@ -65,7 +65,20 @@ impl Plugin for LobbyPlugin {
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()
             .add_message::<PlayerDisconnected>()
+            .add_systems(Startup, update_session_with_config)
             .add_systems(Update, (process_lobby, handle_disconnect, update_game_state_cache));
+    }
+}
+
+/// Update the Sessions resource with available consoles from the ship's EntityConfig.
+fn update_session_with_config(
+    mut sessions: ResMut<Sessions>,
+) {
+    // Get the config cache from thread-local storage
+    if let Some(ship_config) = crate::config_cache::get_config_cache()
+        .get("assets/entities/player_ship.toml")
+    {
+        sessions.0 = SessionManager::new_with_config(ship_config);
     }
 }
 

@@ -1,10 +1,11 @@
 use bevy::prelude::*;
+use std::collections::{HashMap, HashSet};
 
 use crate::lobby::{CurrentPhase, GameStateCache, WorldResource};
 use crate::messages::{GamePhase, PhaserBank, ViewDirection, ViewMode};
 use crate::radar;
 use crate::ship_state::ShipState;
-use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig};
+use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource};
 use crate::beam_render;
 
 // ── VFX Components ────────────────────────────────────────────────
@@ -21,6 +22,31 @@ struct RippleEffect {
 
 const RIPPLE_DURATION: f32 = 1.2;
 const RIPPLE_MAX_RADIUS: f32 = 30.0;
+
+// ── Torpedo rendering ─────────────────────────────────────────────
+
+/// Marks a 3D sphere entity that represents an in-flight torpedo on the viewscreen.
+#[derive(Component)]
+pub struct TorpedoSphere;
+
+/// Maps torpedo UUID → the `Entity` of its sphere mesh, so we can update
+/// positions each frame and despawn when the torpedo is removed.
+#[derive(Resource, Default)]
+pub struct TorpedoEntityMap(pub HashMap<String, Entity>);
+
+/// Given the set of UUIDs currently in-flight and the set already tracked
+/// in the entity map, returns which UUIDs need to be spawned and which
+/// entities need to be despawned.
+///
+/// This pure function is the testable core of the sync logic.
+pub fn diff_torpedo_sets(
+    in_flight_uuids: &HashSet<String>,
+    tracked: &HashSet<String>,
+) -> (Vec<String>, Vec<String>) {
+    let to_spawn: Vec<String> = in_flight_uuids.difference(tracked).cloned().collect();
+    let to_despawn: Vec<String> = tracked.difference(in_flight_uuids).cloned().collect();
+    (to_spawn, to_despawn)
+}
 
 // ── Marker Components ─────────────────────────────────────────────
 
@@ -60,7 +86,8 @@ pub struct RendererPlugin;
 
 impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
+        app.init_resource::<TorpedoEntityMap>()
+            .add_systems(Startup, setup)
             .add_systems(Update, (
                 update_fps_counter,
                 toggle_cameras,
@@ -75,6 +102,7 @@ impl Plugin for RendererPlugin {
                 draw_beam_vfx,
                 spawn_ripples,
                 tick_ripples,
+                sync_torpedo_entities,
             ));
     }
 }
@@ -542,5 +570,117 @@ fn tick_ripples(
                 c2,
             );
         }
+    }
+}
+
+// ── Torpedo entity sync ───────────────────────────────────────────
+
+/// Synchronises the set of torpedo sphere entities with the live torpedoes in
+/// `TorpedoSystemResource`.
+///
+/// - Spawns a bright-yellow sphere for each torpedo that entered `in_flight`.
+/// - Updates the `Transform` of every existing torpedo sphere each frame.
+/// - Despawns sphere entities for torpedoes that have left `in_flight`.
+///
+/// Only runs during `InProgress` phase; despawns all remaining torpedo spheres
+/// when the game is not in progress.
+fn sync_torpedo_entities(
+    phase: Res<CurrentPhase>,
+    torpedo_sys: Option<Res<TorpedoSystemResource>>,
+    mut entity_map: ResMut<TorpedoEntityMap>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut transforms: Query<&mut Transform, With<TorpedoSphere>>,
+) {
+    let Some(torpedo_sys) = torpedo_sys else { return };
+
+    if phase.0 != GamePhase::InProgress {
+        for (_, entity) in entity_map.0.drain() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    let in_flight = &torpedo_sys.0.in_flight;
+    let in_flight_uuids: HashSet<String> = in_flight.iter().map(|t| t.uuid.clone()).collect();
+    let tracked_uuids: HashSet<String> = entity_map.0.keys().cloned().collect();
+    let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight_uuids, &tracked_uuids);
+
+    for uuid in to_despawn {
+        if let Some(entity) = entity_map.0.remove(&uuid) {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    let torpedo_mesh = meshes.add(Sphere { radius: 1.0 });
+    let torpedo_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 1.0, 0.0),
+        emissive: LinearRgba::new(1.0, 1.0, 0.0, 1.0),
+        ..default()
+    });
+
+    for uuid in &to_spawn {
+        if let Some(t) = in_flight.iter().find(|t| &t.uuid == uuid) {
+            let entity = commands.spawn((
+                TorpedoSphere,
+                Mesh3d(torpedo_mesh.clone()),
+                MeshMaterial3d(torpedo_mat.clone()),
+                Transform::from_xyz(t.x, 0.0, t.z),
+            )).id();
+            entity_map.0.insert(uuid.clone(), entity);
+        }
+    }
+
+    for t in in_flight {
+        if let Some(&entity) = entity_map.0.get(&t.uuid) {
+            if let Ok(mut transform) = transforms.get_mut(entity) {
+                transform.translation.x = t.x;
+                transform.translation.z = t.z;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_torpedo_sets_spawns_new_uuids() {
+        let in_flight: HashSet<String> = ["a".into(), "b".into()].into();
+        let tracked: HashSet<String> = HashSet::new();
+        let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
+        let mut to_spawn_sorted = to_spawn.clone();
+        to_spawn_sorted.sort();
+        assert_eq!(to_spawn_sorted, vec!["a".to_string(), "b".to_string()]);
+        assert!(to_despawn.is_empty());
+    }
+
+    #[test]
+    fn diff_torpedo_sets_despawns_removed_uuids() {
+        let in_flight: HashSet<String> = HashSet::new();
+        let tracked: HashSet<String> = ["a".into()].into();
+        let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
+        assert!(to_spawn.is_empty());
+        assert_eq!(to_despawn, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn diff_torpedo_sets_no_change_when_same() {
+        let in_flight: HashSet<String> = ["a".into()].into();
+        let tracked: HashSet<String> = ["a".into()].into();
+        let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
+        assert!(to_spawn.is_empty());
+        assert!(to_despawn.is_empty());
+    }
+
+    #[test]
+    fn diff_torpedo_sets_mixed_spawn_and_despawn() {
+        let in_flight: HashSet<String> = ["b".into(), "c".into()].into();
+        let tracked: HashSet<String> = ["a".into(), "b".into()].into();
+        let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
+        assert_eq!(to_spawn, vec!["c".to_string()]);
+        assert_eq!(to_despawn, vec!["a".to_string()]);
     }
 }

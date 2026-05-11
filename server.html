@@ -318,6 +318,10 @@ function finishInit() {
   // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
   // throwing, so any code after wasm_init() never executes.
   for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
+  // Signal that WASM is fully initialised and ready to receive messages.
+  // The peerjs-shim (and tests) gate __wasmReady on this event rather than
+  // TrunkApplicationStarted so they don't race with async config preloading.
+  window.dispatchEvent(new CustomEvent('PhoenixReady'));
   try { wasm_init(); } catch (_) {}
 }
 

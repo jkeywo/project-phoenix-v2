@@ -1,3 +1,4 @@
+pub mod beam_render;
 pub mod impulse;
 pub mod shield;
 pub mod entity_tags;

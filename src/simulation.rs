@@ -80,6 +80,8 @@ pub struct ActiveBeam {
     pub target_uuid: Option<String>,
     pub remaining_secs: f32,
     pub damage_accumulator: f32,
+    /// Which bank is firing this beam. `None` when no beam is active.
+    pub bank: Option<crate::messages::PhaserBank>,
 }
 
 /// Post-beam cooldown. The weapons console is locked out for `BEAM_COOLDOWN_SECS`

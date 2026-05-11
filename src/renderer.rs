@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 
+use crate::beam_render;
 use crate::lobby::{CurrentPhase, GameStateCache, WorldResource};
-use crate::messages::{GamePhase, ViewDirection, ViewMode};
+use crate::messages::{GamePhase, PhaserBank, ViewDirection, ViewMode};
 use crate::radar;
 use crate::ship_state::ShipState;
 use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx};
@@ -425,9 +426,12 @@ fn draw_radar_overlay(
 
 // ── VFX Systems ───────────────────────────────────────────────────
 
-/// Draws a phaser beam from the ship to its target asteroid each frame while
-/// `ActiveBeam` has a live target. Uses 3D gizmo lines in world space so the
-/// beam is visible on the `GameCamera` view screen.
+/// Draws phaser beams from port and starboard banks to the target asteroid
+/// while `ActiveBeam` has a live target. Uses 3D gizmo lines in world space.
+///
+/// The origin of each beam is offset laterally from the ship centre to the
+/// appropriate hull side via `beam_render::bank_origin`.  The endpoint is
+/// the asteroid position, clamped to max range via `beam_render::beam_endpoint`.
 fn draw_beam_vfx(
     phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
@@ -445,23 +449,42 @@ fn draw_beam_vfx(
         return;
     };
 
-    let origin = Vec3::new(ship.x, -1.5, ship.z);
-    let target = Vec3::new(asteroid.x, 0.0, asteroid.z);
+    // Resolve max range: use WEAPONS_RADAR_RANGE as the reference range.
+    let max_range = crate::radar::WEAPONS_RADAR_RANGE;
 
-    // Core bright beam line
-    let beam_color = Color::srgba(1.0, 0.4, 0.1, 1.0);
-    gizmos.line(origin, target, beam_color);
+    // Endpoint clamped to max range.
+    let (end_x, end_z) = beam_render::beam_endpoint(
+        ship.x, ship.z,
+        asteroid.x, asteroid.z,
+        max_range,
+    );
 
-    // Slightly wider glow by drawing two offset parallel lines
-    let glow_color = Color::srgba(1.0, 0.6, 0.2, 0.35);
-    let perp = {
-        let dx = target.x - origin.x;
-        let dz = target.z - origin.z;
-        let len = (dx * dx + dz * dz).sqrt().max(0.001);
-        Vec3::new(-dz / len * 0.5, 0.0, dx / len * 0.5)
-    };
-    gizmos.line(origin + perp, target + perp, glow_color);
-    gizmos.line(origin - perp, target - perp, glow_color);
+    // Resolve beam colour (empty vec → default orange).
+    let [r, g, b, a] = beam_render::DEFAULT_BEAM_COLOR;
+    let beam_color = Color::srgba(r, g, b, a);
+    let glow_color = Color::srgba(r, g * 1.5, b * 2.0, a * 0.35);
+
+    // Draw a beam for each bank, originating from the correct hull side.
+    for bank in [PhaserBank::Port, PhaserBank::Starboard] {
+        let (ox, oz) = beam_render::bank_origin(
+            ship.x, ship.z, ship.yaw, bank, beam_render::BANK_HULL_OFFSET,
+        );
+        let origin = Vec3::new(ox, -1.5, oz);
+        let target = Vec3::new(end_x, 0.0, end_z);
+
+        // Core bright beam line
+        gizmos.line(origin, target, beam_color);
+
+        // Slightly wider glow by drawing two offset parallel lines
+        let perp = {
+            let dx = target.x - origin.x;
+            let dz = target.z - origin.z;
+            let len = (dx * dx + dz * dz).sqrt().max(0.001);
+            Vec3::new(-dz / len * 0.5, 0.0, dx / len * 0.5)
+        };
+        gizmos.line(origin + perp, target + perp, glow_color);
+        gizmos.line(origin - perp, target - perp, glow_color);
+    }
 }
 
 /// Spawns a `RippleEffect` entity for each `AsteroidDestroyedVfx` event received.

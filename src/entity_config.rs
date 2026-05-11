@@ -59,6 +59,10 @@ pub struct WeaponsConsoleConfig {
     pub beam_duration_secs: f32,
     #[serde(default)]
     pub cooldown_secs: f32,
+    /// RGBA beam colour as a 4-element float array `[r, g, b, a]` in 0.0–1.0.
+    /// When absent (empty vec), the renderer falls back to `beam_render::DEFAULT_BEAM_COLOR`.
+    #[serde(default)]
+    pub beam_color: Vec<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -70,7 +74,7 @@ pub struct EngineeringConsoleConfig {
     #[serde(default)]
     pub repair_cooldown_secs: f32,
     #[serde(default)]
-    pub penalty_cooldown_secs: f32,
+    pub cooldown_secs: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -311,5 +315,27 @@ radar_shows = false
         assert_eq!(h.max_speed, 30.0);
         assert!(!h.radar_shows);
         assert_eq!(h.max_reverse_speed, 0.0);
+    }
+
+    #[test]
+    fn weapons_console_beam_color_parses_rgba() {
+        let toml_str = r##"
+[weapons_console]
+beam_color = [1.0, 0.5, 0.2, 0.9]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let w = config.weapons_console.expect("weapons_console must be Some");
+        assert_eq!(w.beam_color, vec![1.0, 0.5, 0.2, 0.9]);
+    }
+
+    #[test]
+    fn weapons_console_beam_color_defaults_to_empty_when_omitted() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 40.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let w = config.weapons_console.expect("weapons_console must be Some");
+        assert!(w.beam_color.is_empty(), "beam_color should default to empty vec when omitted");
     }
 }

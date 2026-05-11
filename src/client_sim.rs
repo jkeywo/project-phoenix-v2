@@ -7,7 +7,7 @@
 
 use bevy::prelude::Resource;
 
-use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode};
+use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -71,6 +71,9 @@ pub struct ClientSimState {
     /// The most recent science target suggestion received from the server
     /// (None until a Science officer designates a target).
     pub science_target_suggestion: Option<String>,
+    /// Latest shield facing snapshots received from the server.
+    /// Empty until the first `ShieldStatus` message is received.
+    pub shield_facings: Vec<ShieldFacingStatus>,
 }
 
 impl Default for ClientSimState {
@@ -88,6 +91,7 @@ impl Default for ClientSimState {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            shield_facings: Vec::new(),
         }
     }
 }
@@ -123,6 +127,9 @@ impl ClientSimState {
             }
             ServerMessage::ScienceTargetSuggestion { uuid } => {
                 self.science_target_suggestion = Some(uuid.clone());
+            }
+            ServerMessage::ShieldStatus { facings } => {
+                self.shield_facings = facings.clone();
             }
             _ => {}
         }
@@ -161,6 +168,75 @@ pub fn repair_message() -> ClientMessage {
 /// long-range radar to suggest it as a target to the Weapons console.
 pub fn set_science_target_message(uuid: String) -> ClientMessage {
     ClientMessage::SetScienceTarget { uuid }
+}
+
+/// A single shield arc as rendered in the 2D top-down status diagram.
+///
+/// The arc is a pie slice centred on the ship sprite. `start_angle` and
+/// `end_angle` are in radians, measured clockwise from "up" (forward) in
+/// screen space (matching Bevy/CSS canvas convention where 0 = top, π/2 = right).
+///
+/// `fill_fraction` is in `[0.0, 1.0]` — the arc fills from the centre outward
+/// to `max_radius * fill_fraction`. When the facing is offline the fraction is
+/// 0.0.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShieldArcView {
+    /// Human-readable label (e.g. "Fore", "Port").
+    pub label: String,
+    pub hp: i32,
+    pub max_hp: i32,
+    pub online: bool,
+    /// Fraction of the maximum arc radius to fill, in `[0.0, 1.0]`.
+    pub fill_fraction: f32,
+    /// Start angle in radians (clockwise from up).
+    pub start_angle: f32,
+    /// End angle in radians (clockwise from up).
+    pub end_angle: f32,
+}
+
+/// Compute the list of `ShieldArcView`s for the Science Console shield diagram.
+///
+/// Each facing occupies an equal pie-slice of the full circle. Facing 0 is
+/// centred on forward (top of the diagram); indices increase clockwise so that
+/// the standard 4-facing layout is Fore(top), Port(left), Aft(bottom),
+/// Starboard(right).
+///
+/// `fill_fraction` is `hp / max_hp` when online; `0.0` when offline.
+pub fn shield_status_view(facings: &[ShieldFacingStatus]) -> Vec<ShieldArcView> {
+    let n = facings.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    use std::f32::consts::TAU;
+    let arc = TAU / n as f32;
+    let half_arc = arc / 2.0;
+
+    facings
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            // Centre of this facing's arc, clockwise from up.
+            // Facing 0 → centred on 0 (top / forward).
+            // Facing 1 → centred on arc (clockwise from facing 0).
+            let centre_angle = i as f32 * arc;
+            let start_angle = centre_angle - half_arc;
+            let end_angle = centre_angle + half_arc;
+            let fill_fraction = if f.online && f.max_hp > 0 {
+                (f.hp as f32 / f.max_hp as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            ShieldArcView {
+                label: f.label.clone(),
+                hp: f.hp,
+                max_hp: f.max_hp,
+                online: f.online,
+                fill_fraction,
+                start_angle,
+                end_angle,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -241,6 +317,7 @@ mod tests {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            shield_facings: Vec::new(),
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
@@ -278,6 +355,7 @@ mod tests {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            shield_facings: Vec::new(),
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -305,6 +383,7 @@ mod tests {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            shield_facings: Vec::new(),
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -477,5 +556,164 @@ mod tests {
         let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-3, "expected {b}, got {a}");
         close(view.rings[0].centre_x, 0.0);
         close(view.rings[0].centre_y, 100.0 / SYSTEM_CHART_RANGE);
+    }
+
+    // ── shield state in ClientSimState ───────────────────────────────────
+
+    fn make_facing(label: &str, hp: i32, max_hp: i32, online: bool) -> ShieldFacingStatus {
+        ShieldFacingStatus {
+            label: label.into(),
+            hp,
+            max_hp,
+            online,
+            offline_remaining: if online { 0.0 } else { 5.0 },
+        }
+    }
+
+    #[test]
+    fn shield_facings_default_to_empty() {
+        let s = ClientSimState::default();
+        assert!(s.shield_facings.is_empty());
+    }
+
+    #[test]
+    fn shield_status_message_updates_facings() {
+        let mut s = ClientSimState::default();
+        let facings = vec![
+            make_facing("Fore", 80, 100, true),
+            make_facing("Port", 50, 100, true),
+            make_facing("Aft", 0, 100, false),
+            make_facing("Starboard", 100, 100, true),
+        ];
+        s.apply(&ServerMessage::ShieldStatus { facings: facings.clone() });
+        assert_eq!(s.shield_facings, facings);
+    }
+
+    #[test]
+    fn second_shield_status_message_overwrites_first() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::ShieldStatus {
+            facings: vec![make_facing("Fore", 90, 100, true)],
+        });
+        s.apply(&ServerMessage::ShieldStatus {
+            facings: vec![make_facing("Fore", 70, 100, true)],
+        });
+        assert_eq!(s.shield_facings.len(), 1);
+        assert_eq!(s.shield_facings[0].hp, 70);
+    }
+
+    #[test]
+    fn welcome_resets_shield_facings() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::ShieldStatus {
+            facings: vec![make_facing("Fore", 80, 100, true)],
+        });
+        s.apply(&ServerMessage::Welcome {
+            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+        });
+        assert!(s.shield_facings.is_empty());
+    }
+
+    // ── shield_status_view ───────────────────────────────────────────────
+
+    #[test]
+    fn empty_facings_produce_empty_view() {
+        let view = shield_status_view(&[]);
+        assert!(view.is_empty());
+    }
+
+    #[test]
+    fn four_facings_produce_four_arcs() {
+        let facings = vec![
+            make_facing("Fore", 100, 100, true),
+            make_facing("Port", 100, 100, true),
+            make_facing("Aft", 100, 100, true),
+            make_facing("Starboard", 100, 100, true),
+        ];
+        let view = shield_status_view(&facings);
+        assert_eq!(view.len(), 4);
+    }
+
+    #[test]
+    fn full_hp_online_facing_has_fill_fraction_one() {
+        let facings = vec![make_facing("Fore", 100, 100, true)];
+        let view = shield_status_view(&facings);
+        assert!((view[0].fill_fraction - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn half_hp_online_facing_has_fill_fraction_half() {
+        let facings = vec![make_facing("Fore", 50, 100, true)];
+        let view = shield_status_view(&facings);
+        assert!((view[0].fill_fraction - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn offline_facing_has_fill_fraction_zero() {
+        let facings = vec![make_facing("Aft", 0, 100, false)];
+        let view = shield_status_view(&facings);
+        assert!((view[0].fill_fraction).abs() < 1e-4);
+    }
+
+    #[test]
+    fn facing_zero_is_centred_on_top_forward() {
+        use std::f32::consts::TAU;
+        let facings = vec![make_facing("Fore", 100, 100, true)];
+        let view = shield_status_view(&facings);
+        // For n=1, arc = TAU, half_arc = TAU/2.
+        // start = -TAU/2, end = +TAU/2. Centre is 0 (forward / top).
+        let centre = (view[0].start_angle + view[0].end_angle) / 2.0;
+        assert!(centre.abs() < 1e-4, "facing 0 centre should be 0 (forward), got {centre}");
+        let _ = TAU; // used above
+    }
+
+    #[test]
+    fn four_facing_arcs_cover_full_circle_without_gap() {
+        use std::f32::consts::TAU;
+        let facings = vec![
+            make_facing("Fore", 100, 100, true),
+            make_facing("Port", 100, 100, true),
+            make_facing("Aft", 100, 100, true),
+            make_facing("Starboard", 100, 100, true),
+        ];
+        let view = shield_status_view(&facings);
+        // Each arc should span TAU/4.
+        for arc in &view {
+            let span = arc.end_angle - arc.start_angle;
+            assert!((span - TAU / 4.0).abs() < 1e-4, "arc span should be TAU/4, got {span}");
+        }
+        // Arcs should tile seamlessly: end[i] == start[i+1].
+        for i in 0..3 {
+            assert!((view[i].end_angle - view[i + 1].start_angle).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn arc_view_labels_match_facing_labels() {
+        let facings = vec![
+            make_facing("Fore", 100, 100, true),
+            make_facing("Port", 80, 100, true),
+            make_facing("Aft", 0, 100, false),
+            make_facing("Starboard", 100, 100, true),
+        ];
+        let view = shield_status_view(&facings);
+        assert_eq!(view[0].label, "Fore");
+        assert_eq!(view[1].label, "Port");
+        assert_eq!(view[2].label, "Aft");
+        assert_eq!(view[3].label, "Starboard");
+    }
+
+    #[test]
+    fn arc_view_hp_and_online_match_facing_status() {
+        let facings = vec![
+            make_facing("Fore", 75, 100, true),
+            make_facing("Aft", 0, 100, false),
+        ];
+        let view = shield_status_view(&facings);
+        assert_eq!(view[0].hp, 75);
+        assert_eq!(view[0].max_hp, 100);
+        assert!(view[0].online);
+        assert_eq!(view[1].hp, 0);
+        assert!(!view[1].online);
     }
 }

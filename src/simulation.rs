@@ -3,14 +3,14 @@ use bevy_rapier3d::prelude::*;
 
 use crate::asteroid_spawner::generate_donut_field;
 use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
-use crate::damage::{collision_damage, HullIntegrity};
+use crate::damage::{apply_damage_with_shields, collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::radar::is_fire_ready;
 use crate::messages::{
-    AsteroidInfo, ClientMessage, Console, GamePhase, ServerMessage, ViewMode,
+    AsteroidInfo, ClientMessage, Console, GamePhase, ServerMessage, ShieldFacingStatus, ViewMode,
 };
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
@@ -249,6 +249,7 @@ impl Plugin for SimulationPlugin {
                 broadcast_sim_state,
                 broadcast_weapons_update.after(broadcast_sim_state),
                 broadcast_repair_state.after(broadcast_sim_state),
+                broadcast_shield_status.after(broadcast_sim_state),
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
             ));
     }
@@ -488,10 +489,9 @@ fn handle_collisions(
             .unwrap_or(0.0); // fallback: treat as fore hit
 
         // Route damage: shields absorb first, overflow goes to hull.
-        let hull_damage = shields.0.apply_damage(damage, bearing);
+        let hull_damage = apply_damage_with_shields(damage, bearing, &mut shields.0, &mut hull.0);
         if hull_damage > 0 {
             let before = breakdowns.cumulative_damage;
-            hull.0.apply_damage(hull_damage);
             breakdowns.cumulative_damage += hull_damage;
             let new_count = breakdowns_from_damage(before, breakdowns.cumulative_damage);
             let BreakdownQueueResource { queue, rng, .. } = &mut *breakdowns;
@@ -867,6 +867,32 @@ fn broadcast_sim_state(
     }
 }
 
+/// Broadcast `ShieldStatus` to all players at 10 Hz.
+fn broadcast_shield_status(
+    timer: Res<SimBroadcastTimer>,
+    mut writer: MessageWriter<OutboundMessage>,
+    shields: Res<ShipShields>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    if !timer.0.just_finished() {
+        return;
+    }
+    let facings = shields.0.snapshot().into_iter().map(|s| ShieldFacingStatus {
+        label: s.label,
+        hp: s.hp,
+        max_hp: s.max_hp,
+        online: s.online,
+        offline_remaining: s.offline_remaining,
+    }).collect();
+    writer.write(OutboundMessage {
+        target: Target::All,
+        msg: ServerMessage::ShieldStatus { facings },
+    });
+}
+
 /// Broadcast `WeaponsUpdate` to the Weapons console player at 10 Hz.
 ///
 /// Reuses `SimBroadcastTimer`; after the timer ticks in `broadcast_sim_state`
@@ -1232,7 +1258,7 @@ fn test_app() -> App {
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
 }

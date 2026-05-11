@@ -81,24 +81,32 @@
   };
 
   // ── wasm-ready signalling ─────────────────────────────────────────────────
+  //
+  // __wasmReady is set when BOTH:
+  //   1. The host peer has opened (so readHostPeerId can return a peer ID), AND
+  //   2. PhoenixReady has fired — dispatched by server.html's finishInit() after
+  //      the async config preload completes and wasm_init() has been called.
+  //
+  // Previously this used TrunkApplicationStarted, but that fires before the
+  // async map/entity config fetch sequence completes, causing Welcome timeouts.
 
   var _peerOpened = false;
-  var _trunkFired = false;
+  var _phoenixReady = false;
   var _wasmReadyFired = false;
 
   function _maybeDispatch() {
-    if (_peerOpened && _trunkFired && !_wasmReadyFired) {
+    if (_peerOpened && _phoenixReady && !_wasmReadyFired) {
       _wasmReadyFired = true;
       window.__wasmReady = true;
       window.dispatchEvent(new CustomEvent('wasm-ready'));
     }
   }
 
-  // TrunkApplicationStarted fires after the WASM binary is loaded.
-  // We use setTimeout(0) so startPhoenix() (registered after us) runs first.
-  window.addEventListener('TrunkApplicationStarted', function () {
-    _trunkFired = true;
-    setTimeout(_maybeDispatch, 0);
+  // PhoenixReady is dispatched by server.html's finishInit() after the full
+  // async preload sequence and wasm_init() call are complete.
+  window.addEventListener('PhoenixReady', function () {
+    _phoenixReady = true;
+    _maybeDispatch();
   });
 
   // ── Peer shim ─────────────────────────────────────────────────────────────
@@ -118,9 +126,8 @@
     Promise.resolve().then(function () {
       self._emit('open', self.id);
       _peerOpened = true;
-      // Handle the case where TrunkApplicationStarted already fired before
-      // the peer opened (rare, but possible if WASM was cached).
-      if (_trunkFired) setTimeout(_maybeDispatch, 0);
+      // If PhoenixReady already fired before the peer opened, dispatch now.
+      if (_phoenixReady) _maybeDispatch();
     });
   }
   Peer.prototype = Object.create(Emitter.prototype);

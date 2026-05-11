@@ -310,7 +310,7 @@ function handleConfigRequest(path) {
 }
 
 // Finish initialization after preload completes
-let _finishInitCalled = false;
+  let _finishInitCalled = false;
 function finishInit() {
   if (_finishInitCalled) return;
   _finishInitCalled = true;
@@ -326,6 +326,13 @@ function finishInit() {
   // throwing, so any code after wasm_init() never executes.
   for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
   try { wasm_init(); } catch (_) {}
+
+  // Signal smoke tests (and any other listeners) that the full init
+  // sequence is complete — WASM is running and ready to receive messages.
+  // This replaces the TrunkApplicationStarted-based signal in the shim,
+  // which fired before the async config preload completed.
+  window.__phoenixReady = true;
+  window.dispatchEvent(new CustomEvent('PhoenixReady'));
 }
 
 // ── WASM startup ───────────────────────────────────────────────────────

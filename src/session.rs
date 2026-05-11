@@ -46,6 +46,8 @@ impl SessionManager {
         if config.engineering_console.is_some() {
             available.push(Console::Engineering);
         }
+        // Science has no dedicated TOML config section; always available when a ship entity is loaded.
+        available.push(Console::Science);
         
         Self { 
             players: Vec::new(), 
@@ -155,6 +157,7 @@ impl SessionManager {
             Console::Helm,
             Console::Tactical,
             Console::Engineering,
+            Console::Science,
         ]);
         
         all_available
@@ -516,5 +519,27 @@ mod tests {
         assert!(available.contains(&Console::Helm));
         assert!(available.contains(&Console::Tactical));
         assert!(available.contains(&Console::Engineering));
+        assert!(available.contains(&Console::Science));
+    }
+
+    #[test]
+    fn new_with_config_includes_science_console() {
+        use crate::entity_config::EntityConfig;
+        let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
+        let config = EntityConfig::from_toml(toml_str).unwrap();
+        let sm = SessionManager::new_with_config(&config);
+        let available = sm.available_consoles();
+        assert!(available.contains(&Console::Science), "Science must be in available_consoles after new_with_config");
+    }
+
+    #[test]
+    fn science_console_selectable_after_new_with_config() {
+        use crate::entity_config::EntityConfig;
+        let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
+        let config = EntityConfig::from_toml(toml_str).unwrap();
+        let mut sm = SessionManager::new_with_config(&config);
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        let result = sm.toggle_console("t1", Console::Science);
+        assert!(result.is_ok(), "Science console toggle must succeed, got: {:?}", result);
     }
 }

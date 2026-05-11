@@ -1,3 +1,4 @@
+pub mod impulse;
 pub mod shield;
 pub mod entity_tags;
 pub mod asteroid_lifecycle;

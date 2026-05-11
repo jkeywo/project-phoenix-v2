@@ -260,11 +260,11 @@ async function preloadAndStart() {
   } catch (e) {
     console.error('Preload failed:', e);
     if (spinner) spinner.style.display = 'none';
-    // Show error to user
-    const overlay = document.getElementById('overlay');
-    if (overlay) {
-      overlay.innerHTML = '<div style="color: #f44; padding: 2rem; text-align: center;">Failed to load game configuration. See console for details.</div>';
-      overlay.style.display = 'block';
+    // Show error to user — use wasm-spinner element so we don't destroy #qr-link
+    const errDiv = document.getElementById('wasm-spinner');
+    if (errDiv) {
+      errDiv.innerHTML = '<div style="color: #f44; padding: 2rem; text-align: center; font-family: monospace;">Failed to load game configuration. See console for details.</div>';
+      errDiv.style.display = 'flex';
     }
     return;
   }

@@ -119,6 +119,12 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
                 in_flight.borrow_mut().remove(&path);
             });
             
+            // Also remove from pending queue in case it wasn't drained before
+            // the fetch completed.
+            PENDING_QUEUE.with(|q| {
+                q.borrow_mut().retain(|p| p != &path);
+            });
+            
             // Check if preload is complete
             let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
             let has_in_flight = IN_FLIGHT.with(|q| !q.borrow().is_empty());
@@ -137,9 +143,12 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
                 "Failed to parse entity config at {}: {:?}",
                 path, e
             )));
-            // Remove from in-flight so it doesn't block preload
+            // Remove from in-flight and pending so it doesn't block preload
             IN_FLIGHT.with(|in_flight| {
                 in_flight.borrow_mut().remove(&path);
+            });
+            PENDING_QUEUE.with(|q| {
+                q.borrow_mut().retain(|p| p != &path);
             });
             Err(JsValue::from_str(&format!("Entity config parse error at {}: {:?}", path, e)))
         }

@@ -14,6 +14,7 @@ use crate::messages::{
 };
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
+use crate::impulse::ImpulseState;
 
 // ── Beam constants ────────────
 const BEAM_DURATION_SECS: f32 = 6.0;
@@ -54,6 +55,10 @@ pub struct ShipHullIntegrity(pub HullIntegrity);
 /// first; only overflow passes through to the hull.
 #[derive(Resource)]
 pub struct ShipShields(pub ShieldSystem);
+
+/// The ship's impulse drive state. Cancelled automatically when hull damage is taken.
+#[derive(Resource)]
+pub struct ShipImpulse(pub ImpulseState);
 
 /// Tracks whether the initial WorldSetup broadcast has fired, so it only
 /// goes out once per game.
@@ -218,6 +223,7 @@ impl Plugin for SimulationPlugin {
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
             .insert_resource(ShipShields(ShieldSystem::default()))
+            .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
             .init_resource::<WeaponsTarget>()
@@ -240,6 +246,7 @@ impl Plugin for SimulationPlugin {
                 handle_fire_phaser,
                 handle_set_phaser_mode,
                 handle_repair,
+                handle_impulse_messages,
                 tick_active_beam,
                 tick_repair,
                 tick_shields,
@@ -642,6 +649,44 @@ fn handle_repair(
             penalties.penalise(token);
         }
         // No breakdowns pending, or repair already active → silent no-op.
+    }
+}
+
+/// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/science.
+/// Also cancels impulse whenever the hull takes damage this frame.
+fn handle_impulse_messages(
+    mut reader: MessageReader<InboundMessage>,
+    mut impulse: ResMut<ShipImpulse>,
+    phase: Res<CurrentPhase>,
+    hull: Res<ShipHullIntegrity>,
+    mut last_hull_hp: Local<i32>,
+) {
+    // Initialise on first call.
+    if *last_hull_hp == 0 && hull.0.current() == 100 {
+        *last_hull_hp = 100;
+    }
+
+    // Cancel impulse if hull HP decreased since last frame.
+    let current_hp = hull.0.current();
+    if current_hp < *last_hull_hp {
+        impulse.0.cancel_charge();
+    }
+    *last_hull_hp = current_hp;
+
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+
+    for msg in reader.read() {
+        match &msg.msg {
+            ClientMessage::StartImpulseCharge => {
+                impulse.0.start_charge();
+            }
+            ClientMessage::CancelImpulse => {
+                impulse.0.cancel_charge();
+            }
+            _ => {}
+        }
     }
 }
 
@@ -1244,6 +1289,7 @@ fn test_app() -> App {
         .insert_resource(ShipState::new())
         .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
         .insert_resource(ShipShields(ShieldSystem::default()))
+        .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<WorldResource>()
         .init_resource::<WorldSetupBroadcast>()
         .init_resource::<WeaponsTarget>()
@@ -1258,7 +1304,7 @@ fn test_app() -> App {
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_repair, handle_impulse_messages, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
 }
@@ -2219,6 +2265,126 @@ fn test_app() -> App {
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
+    }
+
+    // ── Impulse Drive / Damage Cancellation tests ────────────────────────
+
+    fn start_game_with_helm_and_science(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(app);
+        push(app, "helm", ClientMessage::Identify { token: "helm".into(), name: "Hikaru".into() });
+        tick(app);
+        push(app, "helm", ClientMessage::SelectConsole { console: Console::Helm });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    #[test]
+    fn hull_damage_cancels_charging_impulse() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        // Helm begins charging impulse.
+        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
+        tick(&mut app);
+
+        // Verify impulse is now charging.
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Charging,
+            "impulse should be charging after StartImpulseCharge"
+        );
+
+        // Direct hull damage (simulates a collision landing hull damage).
+        app.world_mut()
+            .resource_mut::<ShipHullIntegrity>()
+            .0.apply_damage(10);
+        tick(&mut app);
+
+        // Impulse should have been cancelled.
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Idle,
+            "impulse charge should be cancelled when hull damage is taken"
+        );
+    }
+
+    #[test]
+    fn hull_damage_cancels_active_impulse() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        // Force impulse to Active by directly mutating the resource.
+        {
+            let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
+            imp.0.start_charge();
+            imp.0.tick(crate::impulse::IMPULSE_CHARGE_DURATION);
+        }
+        assert!(app.world().resource::<ShipImpulse>().0.is_active(),
+            "impulse should be active before damage");
+
+        // Apply hull damage.
+        app.world_mut()
+            .resource_mut::<ShipHullIntegrity>()
+            .0.apply_damage(10);
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Idle,
+            "active impulse should be cancelled when hull damage is taken"
+        );
+    }
+
+    #[test]
+    fn no_hull_damage_does_not_cancel_impulse() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
+        tick(&mut app);
+
+        // No damage applied — tick without damage.
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Charging,
+            "impulse should still be charging when no damage occurred"
+        );
+    }
+
+    #[test]
+    fn start_impulse_charge_message_begins_charge() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Charging,
+        );
+    }
+
+    #[test]
+    fn cancel_impulse_message_cancels_charge() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
+        tick(&mut app);
+        push(&mut app, "helm", ClientMessage::CancelImpulse);
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Idle,
+        );
     }
 
     #[test]

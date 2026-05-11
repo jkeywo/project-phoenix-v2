@@ -1,4 +1,5 @@
 pub mod asteroid_lifecycle;
+pub mod phaser;
 pub mod asteroid_spawner;
 pub mod breakdown;
 pub mod config_cache;

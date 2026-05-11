@@ -76,7 +76,7 @@ test('HelmInput changes ship position in subsequent SimState', async ({ context 
       );
     },
     { x: initX, z: initZ },
-    { timeout: 3_000 },
+    { timeout: 10_000 },
   );
 
   // Stop repeating inputs

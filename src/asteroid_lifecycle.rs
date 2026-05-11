@@ -60,6 +60,7 @@ pub fn check_destroyed_asteroids(
 /// Runs on a timer, spawns at most one asteroid per frame.
 pub fn lazy_asteroid_spawn(
     commands: Commands,
+    time: Res<Time>,
     mut spawn_timer: ResMut<AsteroidSpawnTimer>,
     destroyed: Res<DestroyedAsteroids>,
     ship_state: Res<crate::ship_state::ShipState>,
@@ -68,12 +69,9 @@ pub fn lazy_asteroid_spawn(
 ) {
     // Only run on timer tick
     let timer = &mut spawn_timer.0;
-    if !timer.tick(timer.duration()).just_finished() {
+    if !timer.tick(time.delta()).just_finished() {
         return;
     }
-
-    // Reset timer
-    timer.reset();
     
     // Get map config
     let map_config = match map_config {

@@ -104,6 +104,12 @@ pub fn process_lobby(
     mut phase: ResMut<CurrentPhase>,
     world: Option<Res<WorldResource>>,
 ) {
+    // Only consume inbound messages during the Lobby phase.  In InProgress the
+    // simulation systems own the message queue; draining here would silently
+    // discard HelmInput and other sim messages before they can be processed.
+    if phase.0 != GamePhase::Lobby {
+        return;
+    }
     let world_data = world.as_ref().map(|w| &w.0);
     for ev in inbound.read() {
         let result = lobby_handler::process_message(

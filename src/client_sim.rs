@@ -16,6 +16,66 @@ use crate::radar::{ScienceRadarView, compute_science_radar_view};
 /// full solar system layout.
 pub const SYSTEM_CHART_RANGE: f32 = 500.0;
 
+/// Range used by the Helm console radar — tactical situational awareness.
+pub const HELM_RADAR_RANGE: f32 = 50.0;
+
+/// Range used by the Weapons console radar — target acquisition range.
+pub const WEAPONS_RADAR_RANGE: f32 = 60.0;
+
+/// Returns the `RadarConfig` for the Helm console radar.
+///
+/// Short-range situational awareness: shows asteroids within `HELM_RADAR_RANGE`.
+pub fn helm_radar_config() -> RadarConfig {
+    RadarConfig {
+        range: HELM_RADAR_RANGE,
+        shows: vec![EntityTag::Asteroid],
+    }
+}
+
+/// Returns the `RadarConfig` for the Weapons console radar.
+///
+/// Extended target-acquisition range: shows asteroids within
+/// `WEAPONS_RADAR_RANGE` so the Tactical officer can lock targets
+/// that are just beyond the helm's view.
+pub fn weapons_radar_config() -> RadarConfig {
+    RadarConfig {
+        range: WEAPONS_RADAR_RANGE,
+        shows: vec![EntityTag::Asteroid],
+    }
+}
+
+/// Compute the Helm console radar view from the current client state.
+///
+/// Filters to asteroids within `HELM_RADAR_RANGE`.  Normalises all
+/// coordinates to `[-1, 1]` using `helm_radar_config().range`.
+pub fn compute_helm_radar_view(state: &ClientSimState) -> ScienceRadarView {
+    let config = helm_radar_config();
+    compute_science_radar_view(
+        &state.world.asteroids,
+        &state.world.asteroid_fields,
+        state.ship_x,
+        state.ship_z,
+        state.ship_yaw,
+        &config,
+    )
+}
+
+/// Compute the Weapons console radar view from the current client state.
+///
+/// Filters to asteroids within `WEAPONS_RADAR_RANGE`.  Normalises all
+/// coordinates to `[-1, 1]` using `weapons_radar_config().range`.
+pub fn compute_weapons_radar_view(state: &ClientSimState) -> ScienceRadarView {
+    let config = weapons_radar_config();
+    compute_science_radar_view(
+        &state.world.asteroids,
+        &state.world.asteroid_fields,
+        state.ship_x,
+        state.ship_z,
+        state.ship_yaw,
+        &config,
+    )
+}
+
 /// Returns the `RadarConfig` for the Science console System Chart tab.
 ///
 /// Uses a large detection range and filters for navigational entities only:
@@ -775,5 +835,207 @@ mod tests {
         use crate::impulse::ImpulseState;
         let s = ImpulseState::new();
         assert_eq!(press_cancel_impulse_button(&s), None);
+    }
+
+    // ── helm_radar_config ────────────────────────────────────────────────
+
+    #[test]
+    fn helm_radar_config_range_matches_constant() {
+        let cfg = helm_radar_config();
+        assert_eq!(cfg.range, HELM_RADAR_RANGE);
+    }
+
+    #[test]
+    fn helm_radar_config_shows_asteroids() {
+        use crate::entity_tags::EntityTag;
+        let cfg = helm_radar_config();
+        assert!(cfg.shows.contains(&EntityTag::Asteroid), "helm radar must show asteroids");
+    }
+
+    // ── weapons_radar_config ─────────────────────────────────────────────
+
+    #[test]
+    fn weapons_radar_config_range_matches_constant() {
+        let cfg = weapons_radar_config();
+        assert_eq!(cfg.range, WEAPONS_RADAR_RANGE);
+    }
+
+    #[test]
+    fn weapons_radar_config_has_longer_range_than_helm() {
+        assert!(
+            WEAPONS_RADAR_RANGE > HELM_RADAR_RANGE,
+            "weapons radar ({}) must have longer range than helm ({})",
+            WEAPONS_RADAR_RANGE,
+            HELM_RADAR_RANGE,
+        );
+    }
+
+    #[test]
+    fn weapons_radar_config_shows_asteroids() {
+        use crate::entity_tags::EntityTag;
+        let cfg = weapons_radar_config();
+        assert!(cfg.shows.contains(&EntityTag::Asteroid), "weapons radar must show asteroids");
+    }
+
+    // ── compute_helm_radar_view ──────────────────────────────────────────
+
+    #[test]
+    fn helm_radar_view_empty_world_produces_empty_view() {
+        let s = ClientSimState::default();
+        let view = compute_helm_radar_view(&s);
+        assert!(view.dots.is_empty());
+        assert!(view.rings.is_empty());
+    }
+
+    #[test]
+    fn helm_radar_view_includes_asteroid_within_helm_range() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "a1".into(),
+                x: 0.0,
+                z: -(HELM_RADAR_RANGE - 5.0),
+                radius: 1.0,
+                tags: vec!["asteroid".into()],
+            }],
+            asteroid_fields: vec![],
+        };
+        let view = compute_helm_radar_view(&s);
+        assert_eq!(view.dots.len(), 1);
+        assert_eq!(view.dots[0].uuid, "a1");
+    }
+
+    #[test]
+    fn helm_radar_view_excludes_asteroid_beyond_helm_range() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        // Place asteroid between helm range and weapons range.
+        let beyond_helm = HELM_RADAR_RANGE + 5.0;
+        s.world = WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "far".into(),
+                x: 0.0,
+                z: -beyond_helm,
+                radius: 1.0,
+                tags: vec!["asteroid".into()],
+            }],
+            asteroid_fields: vec![],
+        };
+        let view = compute_helm_radar_view(&s);
+        assert!(view.dots.is_empty(), "asteroid beyond helm range must not appear");
+    }
+
+    #[test]
+    fn helm_radar_dot_position_normalised_to_helm_range() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "at-edge".into(),
+                x: 0.0,
+                z: -HELM_RADAR_RANGE,
+                radius: 1.0,
+                tags: vec!["asteroid".into()],
+            }],
+            asteroid_fields: vec![],
+        };
+        let view = compute_helm_radar_view(&s);
+        assert_eq!(view.dots.len(), 1);
+        // Asteroid directly ahead at exactly helm range → radar_y = 1.0.
+        let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
+        close(view.dots[0].radar_y, 1.0);
+    }
+
+    // ── compute_weapons_radar_view ───────────────────────────────────────
+
+    #[test]
+    fn weapons_radar_view_empty_world_produces_empty_view() {
+        let s = ClientSimState::default();
+        let view = compute_weapons_radar_view(&s);
+        assert!(view.dots.is_empty());
+        assert!(view.rings.is_empty());
+    }
+
+    #[test]
+    fn weapons_radar_view_includes_asteroid_within_weapons_range() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        // Between helm range and weapons range — weapons only.
+        let between = (HELM_RADAR_RANGE + WEAPONS_RADAR_RANGE) / 2.0;
+        s.world = WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "mid".into(),
+                x: 0.0,
+                z: -between,
+                radius: 1.0,
+                tags: vec!["asteroid".into()],
+            }],
+            asteroid_fields: vec![],
+        };
+        let view = compute_weapons_radar_view(&s);
+        assert_eq!(view.dots.len(), 1, "weapons radar should see asteroid between the two ranges");
+        assert_eq!(view.dots[0].uuid, "mid");
+    }
+
+    #[test]
+    fn weapons_radar_view_excludes_asteroid_beyond_weapons_range() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        let beyond = WEAPONS_RADAR_RANGE + 5.0;
+        s.world = WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "very-far".into(),
+                x: 0.0,
+                z: -beyond,
+                radius: 1.0,
+                tags: vec!["asteroid".into()],
+            }],
+            asteroid_fields: vec![],
+        };
+        let view = compute_weapons_radar_view(&s);
+        assert!(view.dots.is_empty(), "asteroid beyond weapons range must not appear");
+    }
+
+    #[test]
+    fn weapons_radar_dot_position_normalised_to_weapons_range() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "at-edge".into(),
+                x: 0.0,
+                z: -WEAPONS_RADAR_RANGE,
+                radius: 1.0,
+                tags: vec!["asteroid".into()],
+            }],
+            asteroid_fields: vec![],
+        };
+        let view = compute_weapons_radar_view(&s);
+        assert_eq!(view.dots.len(), 1);
+        let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
+        close(view.dots[0].radar_y, 1.0);
+    }
+
+    #[test]
+    fn helm_and_weapons_views_differ_for_asteroid_in_weapons_range_only() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        // Asteroid between helm and weapons range.
+        let between = (HELM_RADAR_RANGE + WEAPONS_RADAR_RANGE) / 2.0;
+        s.world = WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "between".into(),
+                x: 0.0,
+                z: -between,
+                radius: 1.0,
+                tags: vec!["asteroid".into()],
+            }],
+            asteroid_fields: vec![],
+        };
+        let helm_view = compute_helm_radar_view(&s);
+        let weapons_view = compute_weapons_radar_view(&s);
+        assert!(helm_view.dots.is_empty(), "helm should NOT see asteroid beyond its range");
+        assert_eq!(weapons_view.dots.len(), 1, "weapons SHOULD see asteroid within its range");
     }
 }

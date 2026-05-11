@@ -55,6 +55,17 @@ fn default_range() -> f32 {
 }
 
 impl RadarConfig {
+    /// Returns the radar dampening multiplier for this configuration.
+    ///
+    /// Currently hardcoded to `1.0` (no dampening effect).
+    ///
+    /// TODO: integrate with the region system so that region effects (e.g.
+    /// nebulae, interference zones) can reduce radar effectiveness by returning
+    /// a value in `(0.0, 1.0]`.
+    pub fn radar_dampening_multiplier(&self) -> f32 {
+        1.0
+    }
+
     /// Parse a `RadarConfig` from a TOML string.
     ///
     /// Unknown tag strings are silently dropped so that future extensions do
@@ -149,6 +160,14 @@ shows = ["asteroid", "ship", "asteroid_field", "star", "planet", "region"]
         assert!(cfg.shows.contains(&EntityTag::Star));
         assert!(cfg.shows.contains(&EntityTag::Planet));
         assert!(cfg.shows.contains(&EntityTag::Region));
+    }
+
+    // ── RadarConfig::radar_dampening_multiplier ───────────────────────────
+
+    #[test]
+    fn radar_dampening_multiplier_is_one() {
+        let cfg = RadarConfig::default();
+        assert_eq!(cfg.radar_dampening_multiplier(), 1.0);
     }
 
     // ── RadarConfig::default ───────────────────────────────────────────────

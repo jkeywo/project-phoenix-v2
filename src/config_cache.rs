@@ -53,7 +53,6 @@ thread_local! {
 ///
 /// The callback signature is: `callback(path: string)`
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
 pub fn set_config_request_callback(callback: Function) {
     CONFIG_REQUEST_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
@@ -67,7 +66,6 @@ pub fn set_config_request_callback(callback: Function) {
 ///
 /// On parse failure, logs the error and returns Err(JsValue) without crashing.
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
 pub fn wasm_load_map(toml_str: String) -> Result<JsValue, JsValue> {
     match crate::map_config::parse_map_config(&toml_str) {
         Ok(map_config) => {
@@ -110,7 +108,6 @@ pub fn wasm_load_map(toml_str: String) -> Result<JsValue, JsValue> {
 /// Returns Ok(false) while there are still pending configs.
 /// Returns Err(JsValue) on parse failure (without crashing).
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
 pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsValue> {
     match EntityConfig::from_toml(&toml_str) {
         Ok(config) => {
@@ -152,7 +149,6 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
 /// Check if the preload sequence is complete (all configs loaded).
 /// This can be called to verify before calling wasm_init.
 #[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
 pub fn wasm_is_preload_complete() -> bool {
     PRELOAD_COMPLETE.with(|flag| *flag.borrow())
 }

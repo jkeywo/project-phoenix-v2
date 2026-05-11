@@ -83,25 +83,22 @@
   // ── wasm-ready signalling ─────────────────────────────────────────────────
 
   var _peerOpened = false;
-  var _phoenixReadyFired = false;
+  var _trunkFired = false;
   var _wasmReadyFired = false;
 
   function _maybeDispatch() {
-    if (_peerOpened && _phoenixReadyFired && !_wasmReadyFired) {
+    if (_peerOpened && _trunkFired && !_wasmReadyFired) {
       _wasmReadyFired = true;
       window.__wasmReady = true;
       window.dispatchEvent(new CustomEvent('wasm-ready'));
     }
   }
 
-  // PhoenixReady fires from finishInit() in server.html, after the async config
-  // preload completes and wasm_receive_message is wired up.  This is later than
-  // TrunkApplicationStarted (which only means the binary loaded, not that the
-  // preload is done), so tests that wait for __wasmReady won't race with the
-  // preload fetch chain.
-  window.addEventListener('PhoenixReady', function () {
-    _phoenixReadyFired = true;
-    _maybeDispatch();
+  // TrunkApplicationStarted fires after the WASM binary is loaded.
+  // We use setTimeout(0) so startPhoenix() (registered after us) runs first.
+  window.addEventListener('TrunkApplicationStarted', function () {
+    _trunkFired = true;
+    setTimeout(_maybeDispatch, 0);
   });
 
   // ── Peer shim ─────────────────────────────────────────────────────────────
@@ -121,9 +118,9 @@
     Promise.resolve().then(function () {
       self._emit('open', self.id);
       _peerOpened = true;
-      // Handle the case where PhoenixReady already fired before
+      // Handle the case where TrunkApplicationStarted already fired before
       // the peer opened (rare, but possible if WASM was cached).
-      if (_phoenixReadyFired) _maybeDispatch();
+      if (_trunkFired) setTimeout(_maybeDispatch, 0);
     });
   }
   Peer.prototype = Object.create(Emitter.prototype);

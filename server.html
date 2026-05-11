@@ -325,14 +325,15 @@ function finishInit() {
   // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
   // throwing, so any code after wasm_init() never executes.
   for (const [token, json] of msgQueue.splice(0)) wasm_receive_message(token, json);
-  try { wasm_init(); } catch (_) {}
 
-  // Signal smoke tests (and any other listeners) that the full init
-  // sequence is complete — WASM is running and ready to receive messages.
-  // This replaces the TrunkApplicationStarted-based signal in the shim,
-  // which fired before the async config preload completed.
+  // Signal smoke tests (and any other listeners) that wasm_receive_message is
+  // now set and the msgQueue has been flushed.  We dispatch PhoenixReady BEFORE
+  // wasm_init() because App::run() in WASM throws (unwinding the JS stack), so
+  // code placed after wasm_init() is unreachable.
   window.__phoenixReady = true;
   window.dispatchEvent(new CustomEvent('PhoenixReady'));
+
+  try { wasm_init(); } catch (_) {}
 }
 
 // ── WASM startup ───────────────────────────────────────────────────────

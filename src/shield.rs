@@ -228,6 +228,38 @@ impl Default for ShieldSystem {
     }
 }
 
+/// Compute the bearing of an attacker position relative to the ship's yaw.
+///
+/// `attacker_x`, `attacker_z` — world-space position of the attacker (or the
+///   point from which the hit originates).
+/// `ship_x`, `ship_z` — world-space position of the ship.
+/// `ship_yaw` — ship's current yaw in radians (0 = forward along –Z axis).
+///
+/// Returns the bearing in `(-π, π]` measured anti-clockwise from the ship's
+/// forward direction, consistent with `facing_index_for_bearing`.
+pub fn attacker_bearing_relative(
+    attacker_x: f32,
+    attacker_z: f32,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+) -> f32 {
+    // World-space direction from ship to attacker.
+    let dx = attacker_x - ship_x;
+    let dz = attacker_z - ship_z;
+
+    // World-space bearing of the attacker (atan2 in XZ plane).
+    // We use atan2(dx, -dz) so that "forward" (dx=0, dz<0) gives 0.
+    let world_bearing = dx.atan2(-dz);
+
+    // Subtract ship yaw to get bearing relative to the ship's own frame.
+    // Then normalise to (-π, π].
+    let relative = world_bearing - ship_yaw;
+    let tau = std::f32::consts::TAU;
+    let wrapped = ((relative + std::f32::consts::PI).rem_euclid(tau)) - std::f32::consts::PI;
+    wrapped
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -422,5 +454,58 @@ mod tests {
         assert_eq!(s.facings.len(), 2);
         assert_eq!(s.facings[0].max_hp, 200);
         assert_eq!(s.facings[0].hp, 200);
+    }
+
+    // ── attacker_bearing_relative ────────────────────────────────────────────
+
+    #[test]
+    fn attacker_directly_ahead_gives_zero_bearing() {
+        // Ship at origin, yaw = 0, attacker in front (negative Z)
+        let b = attacker_bearing_relative(0.0, -10.0, 0.0, 0.0, 0.0);
+        assert!(b.abs() < 1e-4, "expected ~0, got {b}");
+    }
+
+    #[test]
+    fn attacker_directly_aft_gives_pi_bearing() {
+        let b = attacker_bearing_relative(0.0, 10.0, 0.0, 0.0, 0.0);
+        assert!((b.abs() - PI).abs() < 1e-4, "expected ~±π, got {b}");
+    }
+
+    #[test]
+    fn attacker_to_starboard_gives_positive_bearing() {
+        // Starboard is to the right; with yaw=0 forward=-Z, right = +X
+        let b = attacker_bearing_relative(10.0, 0.0, 0.0, 0.0, 0.0);
+        assert!((b - PI / 2.0).abs() < 1e-4, "expected ~+π/2, got {b}");
+    }
+
+    #[test]
+    fn attacker_to_port_gives_negative_bearing() {
+        let b = attacker_bearing_relative(-10.0, 0.0, 0.0, 0.0, 0.0);
+        assert!((b + PI / 2.0).abs() < 1e-4, "expected ~-π/2, got {b}");
+    }
+
+    #[test]
+    fn bearing_accounts_for_ship_yaw() {
+        // Ship rotated 90° clockwise (yaw = +π/2).
+        // Attacker is in the world's +X direction; relative to the ship that
+        // should now be directly ahead.
+        let b = attacker_bearing_relative(10.0, 0.0, 0.0, 0.0, PI / 2.0);
+        assert!(b.abs() < 1e-4, "expected ~0, got {b}");
+    }
+
+    #[test]
+    fn bearing_routes_to_fore_facing() {
+        let s = ShieldSystem::default(); // 4 facings
+        // Attacker straight ahead → Fore (index 0)
+        let b = attacker_bearing_relative(0.0, -10.0, 0.0, 0.0, 0.0);
+        assert_eq!(s.facing_index_for_bearing(b), 0);
+    }
+
+    #[test]
+    fn bearing_routes_to_aft_facing() {
+        let s = ShieldSystem::default();
+        // Attacker straight behind → Aft (index 2)
+        let b = attacker_bearing_relative(0.0, 10.0, 0.0, 0.0, 0.0);
+        assert_eq!(s.facing_index_for_bearing(b), 2);
     }
 }

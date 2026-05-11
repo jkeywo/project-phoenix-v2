@@ -5,6 +5,7 @@ use crate::asteroid_spawner::generate_donut_field;
 use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
 use crate::damage::{collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
+use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::radar::is_fire_ready;
@@ -48,6 +49,11 @@ struct HelmInputTimer(Timer);
 /// can read/write it independently of `ShipState`.
 #[derive(Resource)]
 pub struct ShipHullIntegrity(pub HullIntegrity);
+
+/// The ship's shield system. Damage from collisions is routed through shields
+/// first; only overflow passes through to the hull.
+#[derive(Resource)]
+pub struct ShipShields(pub ShieldSystem);
 
 /// Tracks whether the initial WorldSetup broadcast has fired, so it only
 /// goes out once per game.
@@ -211,6 +217,7 @@ impl Plugin for SimulationPlugin {
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+            .insert_resource(ShipShields(ShieldSystem::default()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
             .init_resource::<WeaponsTarget>()
@@ -235,6 +242,7 @@ impl Plugin for SimulationPlugin {
                 handle_repair,
                 tick_active_beam,
                 tick_repair,
+                tick_shields,
                 process_helm_inputs,
                 sync_ship_position,
                 handle_collisions,
@@ -436,8 +444,10 @@ fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
     ship_query: Query<Entity, With<Ship>>,
+    asteroid_query: Query<(&Transform, &AsteroidUuid), With<Asteroid>>,
     mut ship: ResMut<ShipState>,
     mut hull: ResMut<ShipHullIntegrity>,
+    mut shields: ResMut<ShipShields>,
     mut breakdowns: ResMut<BreakdownQueueResource>,
     mut cooldown: ResMut<CollisionCooldown>,
 ) {
@@ -446,25 +456,57 @@ fn handle_collisions(
 
     let Ok(ctx) = context.single() else { return };
     let Ok(ship_entity) = ship_query.single() else { return };
-    if ctx.contact_pairs_with(ship_entity).next().is_some() {
+
+    // Collect the first contact partner entity (if any).
+    let contact = ctx.contact_pairs_with(ship_entity).next().map(|pair| {
+        if pair.collider1() == Some(ship_entity) { pair.collider2() } else { pair.collider1() }
+    }).flatten();
+
+    if contact.is_some() {
         // Only apply damage once per contact event; skip while immune.
         if cooldown.remaining_secs > 0.0 {
             return;
         }
         let max_speed = ShipPhysicsConfig::new().max_speed;
         let damage = collision_damage(ship.forward_speed, max_speed);
-        let before = breakdowns.cumulative_damage;
-        hull.0.apply_damage(damage);
-        breakdowns.cumulative_damage += damage;
-        let new_count = breakdowns_from_damage(before, breakdowns.cumulative_damage);
-        // Avoid double-borrow: split mutable access to queue and rng.
-        let BreakdownQueueResource { queue, rng, .. } = &mut *breakdowns;
-        for _ in 0..new_count {
-            queue.push_random(rng);
+
+        // Determine which shield facing absorbs the hit by finding the
+        // attacker's world-space position and computing its bearing relative
+        // to the ship's current yaw.
+        let bearing = contact
+            .and_then(|attacker_entity| {
+                asteroid_query.get(attacker_entity).ok().map(|(t, _)| {
+                    attacker_bearing_relative(
+                        t.translation.x,
+                        t.translation.z,
+                        ship.x,
+                        ship.z,
+                        ship.yaw,
+                    )
+                })
+            })
+            .unwrap_or(0.0); // fallback: treat as fore hit
+
+        // Route damage: shields absorb first, overflow goes to hull.
+        let hull_damage = shields.0.apply_damage(damage, bearing);
+        if hull_damage > 0 {
+            let before = breakdowns.cumulative_damage;
+            hull.0.apply_damage(hull_damage);
+            breakdowns.cumulative_damage += hull_damage;
+            let new_count = breakdowns_from_damage(before, breakdowns.cumulative_damage);
+            let BreakdownQueueResource { queue, rng, .. } = &mut *breakdowns;
+            for _ in 0..new_count {
+                queue.push_random(rng);
+            }
         }
         ship.forward_speed = 0.0;
         cooldown.remaining_secs = 1.0;
     }
+}
+
+/// Tick shield regen and offline timers each frame.
+fn tick_shields(time: Res<Time>, mut shields: ResMut<ShipShields>) {
+    shields.0.tick(time.delta_secs());
 }
 
 /// Handle `FirePhaser` messages from the Weapons console.
@@ -1175,6 +1217,7 @@ fn test_app() -> App {
         .add_plugins(bevy::time::TimePlugin)
         .insert_resource(ShipState::new())
         .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+        .insert_resource(ShipShields(ShieldSystem::default()))
         .init_resource::<WorldResource>()
         .init_resource::<WorldSetupBroadcast>()
         .init_resource::<WeaponsTarget>()

@@ -60,7 +60,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-6e03cea99e3a36b9.js" crossorigin="anonymous" integrity="sha384-IYikfb3vAJP1PbK6kzvTGUg8rbH05zMJEGgOoeEOa7z4ykJXB3mEX0F3qKgnMs+n"><link rel="preload" href="./project-phoenix-6e03cea99e3a36b9_bg.wasm" crossorigin="anonymous" integrity="sha384-5wbwPTnaKAyxbp6QpLqr6LTArX2T7urCmaScKtppWrlTSSgju7u3rC8iqR2SDfwi" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-976eff37784fa2af.js" crossorigin="anonymous" integrity="sha384-wShYRk+NgUdnEzvJ8Z8TBcBQXkt/a7jdGPXHWI8wh+3vTcwgm6/nZh2uuZ9T6LwA"><link rel="preload" href="./project-phoenix-976eff37784fa2af_bg.wasm" crossorigin="anonymous" integrity="sha384-pIfhH5KmNPE8ly7VhUuTiGjeis6hFDzds8wfBKdYxXclGM5MFXUQdAc/NPBV2Tjq" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">
@@ -92,8 +92,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-6e03cea99e3a36b9.js';
-const wasm = await init({ module_or_path: './project-phoenix-6e03cea99e3a36b9_bg.wasm' });
+import init, * as bindings from './project-phoenix-976eff37784fa2af.js';
+const wasm = await init({ module_or_path: './project-phoenix-976eff37784fa2af_bg.wasm' });
 
 
 window.wasmBindings = bindings;

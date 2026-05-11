@@ -291,33 +291,39 @@ function handleConfigRequest(path) {
   
   // Fetch the entity config
   fetch(path)
-    .then(response => {
-      if (!response.ok) {
-        console.error(`Failed to fetch config at ${path}: ${response.status}`);
-        // Try to continue without this config
-        return '';
-      }
-      return response.text();
-    })
+    .then(response => response.ok ? response.text() : Promise.reject(new Error(`HTTP ${response.status}`)))
     .then(toml => {
-      if (toml) {
-        // Load the config into Rust
-        const result = wasm_load_config(path, toml);
-        if (result instanceof Error) {
-          console.error(`Failed to parse config at ${path}:`, result);
-        } else if (result === true) {
-          // Preload complete - initialize the app
-          finishInit();
-        }
+      let complete = false;
+      try {
+        // wasm_load_config returns true when the last pending config is loaded.
+        complete = wasm_load_config(path, toml) === true;
+      } catch (e) {
+        console.error(`Failed to parse config at ${path}:`, e);
+        // Rust already cleaned up in_flight/pending in the Err path.
+        // Check if all other paths finished before this one errored.
+        complete = wasm_is_preload_complete();
       }
+      if (complete) finishInit();
     })
     .catch(err => {
-      console.error(`Error fetching config at ${path}:`, err);
+      console.error(`Failed to fetch config at ${path}:`, err);
+      // Fetch failed — call wasm_load_config with empty string so Rust can
+      // remove this path from in_flight/pending and know whether preload is done.
+      let complete = false;
+      try {
+        complete = wasm_load_config(path, '') === true;
+      } catch (_) {
+        complete = wasm_is_preload_complete();
+      }
+      if (complete) finishInit();
     });
 }
 
 // Finish initialization after preload completes
+let _finishInitCalled = false;
 function finishInit() {
+  if (_finishInitCalled) return;
+  _finishInitCalled = true;
   const spinner = document.getElementById('wasm-spinner');
   if (spinner) spinner.style.display = 'none';
   

@@ -150,7 +150,20 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
             PENDING_QUEUE.with(|q| {
                 q.borrow_mut().retain(|p| p != &path);
             });
-            Err(JsValue::from_str(&format!("Entity config parse error at {}: {:?}", path, e)))
+            // Even on parse failure, check if all configs are now done.
+            // A failed parse still counts as "processed"; we must not let a
+            // bad TOML permanently block finishInit().
+            let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
+            let has_in_flight = IN_FLIGHT.with(|q| !q.borrow().is_empty());
+            if !has_pending && !has_in_flight {
+                PRELOAD_COMPLETE.with(|flag| {
+                    *flag.borrow_mut() = true;
+                });
+                // Return TRUE so handleConfigRequest calls finishInit().
+                Ok(JsValue::TRUE)
+            } else {
+                Err(JsValue::from_str(&format!("Entity config parse error at {}: {:?}", path, e)))
+            }
         }
     }
 }

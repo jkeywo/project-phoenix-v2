@@ -3,13 +3,13 @@ target = "server.html"
 dist = "dist"
 public_url = "./"
 
-[[copy_file]]
-source = "assets/"
-destination = "assets/"
+[[copy_dir]]
+source = "assets"
+destination = "assets"
 
-[[copy_file]]
-source = "client/"
-destination = "client/"
+[[copy_dir]]
+source = "client"
+destination = "client"
 
 [watch]
 watch_path = ["assets/", "client/"]

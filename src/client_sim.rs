@@ -170,6 +170,23 @@ pub fn set_science_target_message(uuid: String) -> ClientMessage {
     ClientMessage::SetScienceTarget { uuid }
 }
 
+/// Returns `true` when the Science Console's "Cancel Impulse" button should
+/// be visible — i.e. when the impulse drive is charging or active.
+pub fn cancel_impulse_button_visible(state: &crate::impulse::ImpulseState) -> bool {
+    state.is_active() || state.phase == crate::impulse::ImpulsePhase::Charging
+}
+
+/// Called when the Science officer presses the "Cancel Impulse" button.
+/// Returns `Some(CancelImpulse)` when the drive is charging or active,
+/// `None` when idle (button should not be visible in that state).
+pub fn press_cancel_impulse_button(state: &crate::impulse::ImpulseState) -> Option<ClientMessage> {
+    if cancel_impulse_button_visible(state) {
+        Some(ClientMessage::CancelImpulse)
+    } else {
+        None
+    }
+}
+
 /// A single shield arc as rendered in the 2D top-down status diagram.
 ///
 /// The arc is a pie slice centred on the ship sprite. `start_angle` and
@@ -715,5 +732,48 @@ mod tests {
         assert!(view[0].online);
         assert_eq!(view[1].hp, 0);
         assert!(!view[1].online);
+    }
+
+    // ── Science cancel-impulse button ────────────────────────────────────
+
+    #[test]
+    fn cancel_impulse_button_hidden_when_impulse_idle() {
+        use crate::impulse::ImpulseState;
+        let s = ImpulseState::new();
+        assert!(!cancel_impulse_button_visible(&s));
+    }
+
+    #[test]
+    fn cancel_impulse_button_visible_when_charging() {
+        use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION};
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        s.tick(IMPULSE_CHARGE_DURATION / 2.0);
+        assert!(cancel_impulse_button_visible(&s));
+    }
+
+    #[test]
+    fn cancel_impulse_button_visible_when_active() {
+        use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION};
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        s.tick(IMPULSE_CHARGE_DURATION);
+        assert!(cancel_impulse_button_visible(&s));
+    }
+
+    #[test]
+    fn press_cancel_impulse_sends_message_when_visible() {
+        use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION};
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        s.tick(IMPULSE_CHARGE_DURATION / 2.0);
+        assert_eq!(press_cancel_impulse_button(&s), Some(ClientMessage::CancelImpulse));
+    }
+
+    #[test]
+    fn press_cancel_impulse_noop_when_idle() {
+        use crate::impulse::ImpulseState;
+        let s = ImpulseState::new();
+        assert_eq!(press_cancel_impulse_button(&s), None);
     }
 }

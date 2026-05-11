@@ -175,6 +175,13 @@ mod tests {
     }
 
     #[test]
+    fn client_cancel_impulse() {
+        let msg = ClientMessage::CancelImpulse;
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_select_console_helm() {
         let msg = ClientMessage::SelectConsole { console: Console::Helm };
         assert_client_roundtrip(&JsonCodec, msg.clone());

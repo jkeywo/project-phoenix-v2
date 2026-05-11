@@ -176,6 +176,8 @@ pub enum ClientMessage {
     HelmInput { thrust: f32, steering: f32 },
     /// Sent by the Helm officer to begin charging the impulse drive.
     StartImpulseCharge,
+    /// Sent by the Science officer to cancel an active or charging impulse drive.
+    CancelImpulse,
     SetView { mode: ViewMode },
     SetTarget { uuid: String },
     /// Science officer taps an entity on their radar to suggest it as a target

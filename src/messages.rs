@@ -1,5 +1,20 @@
 use serde::{Deserialize, Serialize};
 
+/// Which phaser bank to address. Used in `SetPhaserMode` and `PhaserFired`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PhaserBank {
+    Port,
+    Starboard,
+}
+
+/// Firing mode for phaser banks. Matches `phaser::PhaserMode`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum PhaserMode {
+    #[default]
+    Auto,
+    Manual,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ViewDirection {
     #[default]
@@ -124,6 +139,7 @@ pub enum ClientMessage {
     SetView { mode: ViewMode },
     SetTarget { uuid: String },
     FirePhaser,
+    SetPhaserMode { mode: PhaserMode },
     Repair { console: Console },
 }
 
@@ -153,6 +169,8 @@ pub enum ServerMessage {
     BeamEnded { target_uuid: String },
     /// Broadcast when an asteroid's HP reaches 0 and it is despawned.
     AsteroidDestroyed { uuid: String },
+    /// Sent when a phaser bank fires a shot at a target.
+    PhaserFired { bank: PhaserBank, target_uuid: String },
     /// Sent at 10 Hz to each console player.  Carries the remaining cooldown
     /// (penalty or repair) in seconds, whether a repair action is currently
     /// in progress, and whether the last cooldown was a penalty.

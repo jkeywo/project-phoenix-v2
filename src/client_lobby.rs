@@ -91,6 +91,7 @@ impl LobbyState {
             | ServerMessage::BeamStarted { .. }
             | ServerMessage::BeamEnded { .. }
             | ServerMessage::AsteroidDestroyed { .. }
+            | ServerMessage::PhaserFired { .. }
             | ServerMessage::RepairState { .. } => {
                 // Not relevant to the lobby model.
             }

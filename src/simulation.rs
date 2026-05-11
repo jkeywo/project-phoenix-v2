@@ -80,6 +80,16 @@ pub struct PhaserCooldown {
     pub remaining_secs: f32,
 }
 
+/// Current phaser firing mode (Auto or Manual), set by the Weapons console.
+#[derive(Resource)]
+pub struct CurrentPhaserMode(pub crate::messages::PhaserMode);
+
+impl Default for CurrentPhaserMode {
+    fn default() -> Self {
+        Self(crate::messages::PhaserMode::Auto)
+    }
+}
+
 // ── Repair constants ──────────
 const REPAIR_DURATION_SECS: f32 = 30.0;
 const REPAIR_HP_PER_SEC: f32 = 1.0 / 3.0; // +1 HP every 3 seconds
@@ -208,6 +218,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<WeaponsTarget>()
             .init_resource::<ActiveBeam>()
             .init_resource::<PhaserCooldown>()
+            .init_resource::<CurrentPhaserMode>()
             .init_resource::<ActiveRepair>()
             .init_resource::<RepairPenalties>()
             .init_resource::<BreakdownQueueResource>()
@@ -221,6 +232,7 @@ impl Plugin for SimulationPlugin {
                 handle_set_view,
                 handle_set_target,
                 handle_fire_phaser,
+                handle_set_phaser_mode,
                 handle_repair,
                 tick_active_beam,
                 tick_repair,
@@ -488,6 +500,27 @@ fn handle_fire_phaser(
             target: Target::All,
             msg: ServerMessage::BeamStarted { target_uuid: target_uuid.clone() },
         });
+    }
+}
+
+/// Handle `SetPhaserMode` messages from the Weapons console.
+///
+/// Only the Tactical console holder may change the phaser mode.
+fn handle_set_phaser_mode(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    mut phaser_mode: ResMut<CurrentPhaserMode>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        let ClientMessage::SetPhaserMode { mode } = &ev.msg else { continue };
+        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
+            continue;
+        }
+        phaser_mode.0 = *mode;
     }
 }
 
@@ -1117,6 +1150,7 @@ fn test_app() -> App {
         .init_resource::<ActiveBeam>()
         .add_message::<AsteroidDestroyedVfx>()
         .init_resource::<PhaserCooldown>()
+        .init_resource::<CurrentPhaserMode>()
         .init_resource::<ActiveRepair>()
         .init_resource::<RepairPenalties>()
         .init_resource::<BreakdownQueueResource>()
@@ -1124,7 +1158,7 @@ fn test_app() -> App {
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_fire_phaser, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_fire_phaser, handle_set_phaser_mode, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
 }
@@ -1982,5 +2016,35 @@ fn test_app() -> App {
         });
         assert!(penalty_msg.is_some(),
             "RepairState with penalty=true should be broadcast to the penalised captain");
+    }
+
+    // ── SetPhaserMode tests ────────────────────────────────────────────────────
+
+    /// The Weapons console holder can change the phaser mode to Manual.
+    #[test]
+    fn weapons_console_can_set_phaser_mode_to_manual() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        push(&mut app, "weapons", ClientMessage::SetPhaserMode { mode: crate::messages::PhaserMode::Manual });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<CurrentPhaserMode>().0,
+            crate::messages::PhaserMode::Manual,
+            "phaser mode should be Manual after SetPhaserMode"
+        );
+    }
+
+    /// A non-Weapons player cannot change the phaser mode.
+    #[test]
+    fn non_weapons_player_cannot_set_phaser_mode() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        push(&mut app, "captain", ClientMessage::SetPhaserMode { mode: crate::messages::PhaserMode::Manual });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<CurrentPhaserMode>().0,
+            crate::messages::PhaserMode::Auto,
+            "phaser mode should stay Auto when non-Weapons player sends SetPhaserMode"
+        );
     }
 }

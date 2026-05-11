@@ -7,7 +7,7 @@
 
 use bevy::prelude::Resource;
 
-use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData};
+use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode};
 
 /// Subset of `SimSnapshot` the client UI needs. Reset to defaults on
 /// `Welcome` (which also clears `LobbyState`) and refreshed every time
@@ -29,6 +29,10 @@ pub struct ClientSimState {
     pub repair_in_progress: bool,
     /// True while this player has an unauthorized-repair penalty cooldown.
     pub repair_penalty: bool,
+    /// Current phaser firing mode.
+    pub phaser_mode: PhaserMode,
+    /// UUID of the last asteroid hit by a phaser shot (cleared on new shot).
+    pub last_phaser_target: Option<String>,
 }
 
 impl Default for ClientSimState {
@@ -43,6 +47,8 @@ impl Default for ClientSimState {
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
             repair_penalty: false,
+            phaser_mode: PhaserMode::Auto,
+            last_phaser_target: None,
         }
     }
 }
@@ -72,6 +78,9 @@ impl ClientSimState {
                 self.repair_cooldown_secs = *remaining_cooldown_secs;
                 self.repair_in_progress = *in_progress;
                 self.repair_penalty = *penalty;
+            }
+            ServerMessage::PhaserFired { target_uuid, .. } => {
+                self.last_phaser_target = Some(target_uuid.clone());
             }
             _ => {}
         }
@@ -180,6 +189,8 @@ mod tests {
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
             repair_penalty: false,
+            phaser_mode: PhaserMode::Auto,
+            last_phaser_target: None,
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5 }],
@@ -212,6 +223,8 @@ mod tests {
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
             repair_penalty: false,
+            phaser_mode: PhaserMode::Auto,
+            last_phaser_target: None,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -235,6 +248,8 @@ mod tests {
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
             repair_penalty: false,
+            phaser_mode: PhaserMode::Auto,
+            last_phaser_target: None,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {

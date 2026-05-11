@@ -496,6 +496,23 @@ mod tests {
     }
 
     #[test]
+    fn client_set_phaser_mode_round_trips() {
+        let msg = ClientMessage::SetPhaserMode { mode: crate::messages::PhaserMode::Manual };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_phaser_fired_round_trips() {
+        let msg = ServerMessage::PhaserFired {
+            bank: crate::messages::PhaserBank::Port,
+            target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn welcome_with_world_none_round_trips() {
         let msg = ServerMessage::Welcome { state: state() };
         assert_server_roundtrip(&JsonCodec, msg.clone());

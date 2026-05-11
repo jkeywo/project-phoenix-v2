@@ -1010,16 +1010,18 @@ fn draw_helm_radar(
         return;
     }
 
-    // Outer ring represents 1.5x RADAR_RANGE; everything inside is scaled down.
+    // Outer ring represents 1.5x the helm radar range; everything inside is scaled down.
     const ZOOM: f32 = 1.5;
     gizmos.circle_2d(centre, radius, RADAR_OUTER_RING_COLOR);
-    let mid_ratio = crate::radar::RADAR_MID_RING / crate::radar::RADAR_RANGE;
+    let helm_range = crate::client_sim::helm_radar_config().range;
+    let mid_ratio = crate::radar::RADAR_MID_RING / helm_range;
     gizmos.circle_2d(centre, radius * mid_ratio / ZOOM, RADAR_MID_RING_COLOR);
 
-    // Asteroids.
-    for (rx, ry, rr) in crate::radar::radar_dots(&sim.world.asteroids, sim.ship_x, sim.ship_z, sim.ship_yaw) {
-        let pos = centre + Vec2::new(rx * radius / ZOOM, ry * radius / ZOOM);
-        let pix_radius = (rr * radius / ZOOM).max(2.0);
+    // Asteroids — use the unified helm radar view (RadarConfig-filtered).
+    let helm_view = crate::client_sim::compute_helm_radar_view(&sim);
+    for dot in &helm_view.dots {
+        let pos = centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
+        let pix_radius = (dot.scaled_radius * radius / ZOOM).max(2.0);
         gizmos.circle_2d(pos, pix_radius, RADAR_ASTEROID_COLOR);
     }
 

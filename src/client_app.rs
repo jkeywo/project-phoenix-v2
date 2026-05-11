@@ -18,9 +18,10 @@ use crate::client_lobby::{
     ActiveConsole,
 };
 use crate::client_sim::{
-    message_for_direction_press, on_screen_message, red_alert_toggle_message, ClientSimState,
+    message_for_direction_press, on_screen_message, red_alert_toggle_message,
+    fire_phaser_message, set_phaser_mode_message, ClientSimState,
 };
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, ViewDirection};
+use crate::messages::{ClientMessage, Console, GamePhase, PhaserMode, ServerMessage, ViewDirection};
 
 // ── Events ─────────────────────────────────────────────────────────
 
@@ -119,6 +120,27 @@ struct RepairButtonLabel;
 #[derive(Component)]
 struct SciencePanel;
 
+/// Marks the root of the weapons console UI; shown only when the local
+/// player holds Tactical and the phase is InProgress.
+#[derive(Component)]
+struct WeaponsPanel;
+
+/// Marks the "FIRE PHASERS" button on the Weapons console.
+#[derive(Component)]
+struct FirePhaserButton;
+
+/// Marks the text label inside the Fire button (used to show cooldown status).
+#[derive(Component)]
+struct FirePhaserLabel;
+
+/// Marks the phaser mode toggle button (Auto / Manual).
+#[derive(Component)]
+struct PhaserModeButton;
+
+/// Marks the text label inside the mode button.
+#[derive(Component)]
+struct PhaserModeLabel;
+
 // ── Plugin ─────────────────────────────────────────────────────────
 
 pub struct ClientAppPlugin;
@@ -138,7 +160,7 @@ impl Plugin for ClientAppPlugin {
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
-            .add_systems(Startup, (setup_lobby_ui, setup_captain_ui, setup_helm_ui, setup_science_ui))
+            .add_systems(Startup, (setup_lobby_ui, setup_captain_ui, setup_helm_ui, setup_science_ui, setup_weapons_ui))
             .add_systems(
                 Update,
                 (
@@ -166,6 +188,10 @@ impl Plugin for ClientAppPlugin {
                         refresh_repair_button,
                         draw_helm_radar,
                         toggle_science_panel_visibility,
+                        toggle_weapons_panel_visibility,
+                        handle_fire_phaser_button_press,
+                        handle_phaser_mode_toggle_press,
+                        refresh_weapons_panel,
                     ),
                 ),
             );
@@ -1092,5 +1118,173 @@ fn refresh_repair_button(
             **text = "REPAIR".to_string();
             *color = TextColor(Color::srgb(0.5, 1.0, 0.5));
         }
+    }
+}
+
+// ── Weapons panel ──────────────────────────────────────────────────
+
+fn setup_weapons_ui(mut commands: Commands) {
+    commands
+        .spawn((
+            WeaponsPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                left:   Val::Px(0.0),
+                top:    Val::Px(0.0),
+                right:  Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(16.0),
+                padding: UiRect::all(Val::Px(24.0)),
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new("Weapons Console"),
+                TextFont { font_size: 24.0, ..default() },
+                TextColor(Color::srgb(1.0, 0.5, 0.2)),
+            ));
+
+            // Phaser mode toggle button
+            panel
+                .spawn((
+                    PhaserModeButton,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(24.0), Val::Px(12.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.15, 0.15, 0.35)),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        PhaserModeLabel,
+                        Text::new("Mode: AUTO"),
+                        TextFont { font_size: 18.0, ..default() },
+                        TextColor(Color::srgb(0.7, 0.7, 1.0)),
+                    ));
+                });
+
+            // Fire phasers button
+            panel
+                .spawn((
+                    FirePhaserButton,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(32.0), Val::Px(16.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.40, 0.10, 0.10)),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        FirePhaserLabel,
+                        Text::new("FIRE PHASERS"),
+                        TextFont { font_size: 22.0, ..default() },
+                        TextColor(Color::srgb(1.0, 0.5, 0.2)),
+                    ));
+                });
+        });
+}
+
+fn toggle_weapons_panel_visibility(
+    lobby: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    active: Res<ActiveConsole>,
+    mut panel: Query<&mut Visibility, With<WeaponsPanel>>,
+) {
+    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
+        return;
+    }
+    let view = LobbyView::new(&lobby, &token.0);
+    let holds_tactical = lobby.phase == GamePhase::InProgress
+        && view.my_consoles().contains(&Console::Tactical);
+    let tab_active = match &active.0 {
+        Some(c) => *c == Console::Tactical,
+        None => true,
+    };
+    let visible = holds_tactical && tab_active;
+    for mut vis in panel.iter_mut() {
+        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
+fn handle_fire_phaser_button_press(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<Button>, With<FirePhaserButton>)>,
+    sim: Res<ClientSimState>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // Suppress if on cooldown.
+        if sim.on_cooldown {
+            continue;
+        }
+        outbound.write(OutboundClientMessage(fire_phaser_message()));
+    }
+}
+
+fn handle_phaser_mode_toggle_press(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<Button>, With<PhaserModeButton>)>,
+    sim: Res<ClientSimState>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // Toggle between Auto and Manual.
+        let new_mode = match sim.phaser_mode {
+            PhaserMode::Auto => PhaserMode::Manual,
+            PhaserMode::Manual => PhaserMode::Auto,
+        };
+        outbound.write(OutboundClientMessage(set_phaser_mode_message(new_mode)));
+    }
+}
+
+fn refresh_weapons_panel(
+    sim: Res<ClientSimState>,
+    mut fire_bg: Query<&mut BackgroundColor, (With<FirePhaserButton>, Without<PhaserModeButton>)>,
+    mut fire_label: Query<(&mut Text, &mut TextColor), With<FirePhaserLabel>>,
+    mut mode_label: Query<(&mut Text, &mut TextColor), (With<PhaserModeLabel>, Without<FirePhaserLabel>)>,
+) {
+    if !sim.is_changed() {
+        return;
+    }
+    // Update fire button appearance.
+    for mut bg in fire_bg.iter_mut() {
+        *bg = if sim.on_cooldown {
+            BackgroundColor(Color::srgb(0.20, 0.05, 0.05))
+        } else if sim.fire_ready {
+            BackgroundColor(Color::srgb(0.60, 0.10, 0.10))
+        } else {
+            BackgroundColor(Color::srgb(0.30, 0.08, 0.08))
+        };
+    }
+    for (mut text, mut color) in fire_label.iter_mut() {
+        if sim.on_cooldown {
+            **text = "COOLING DOWN".to_string();
+            *color = TextColor(Color::srgb(0.5, 0.2, 0.2));
+        } else {
+            **text = "FIRE PHASERS".to_string();
+            *color = if sim.fire_ready {
+                TextColor(Color::srgb(1.0, 0.5, 0.2))
+            } else {
+                TextColor(Color::srgb(0.5, 0.3, 0.2))
+            };
+        }
+    }
+    // Update mode button label.
+    for (mut text, _) in mode_label.iter_mut() {
+        **text = match sim.phaser_mode {
+            PhaserMode::Auto => "Mode: AUTO".to_string(),
+            PhaserMode::Manual => "Mode: MANUAL".to_string(),
+        };
     }
 }

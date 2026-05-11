@@ -173,6 +173,12 @@ pub struct ClientSimState {
     /// Latest shield facing snapshots received from the server.
     /// Empty until the first `ShieldStatus` message is received.
     pub shield_facings: Vec<ShieldFacingStatus>,
+    /// True when the phaser can fire (target in range/arc, no cooldown).
+    /// Updated by `WeaponsUpdate` messages from the server.
+    pub fire_ready: bool,
+    /// True while the phaser bank is on post-fire cooldown.
+    /// Updated by `WeaponsUpdate` messages from the server.
+    pub on_cooldown: bool,
 }
 
 impl Default for ClientSimState {
@@ -191,6 +197,8 @@ impl Default for ClientSimState {
             last_phaser_target: None,
             science_target_suggestion: None,
             shield_facings: Vec::new(),
+            fire_ready: false,
+            on_cooldown: false,
         }
     }
 }
@@ -223,6 +231,10 @@ impl ClientSimState {
             }
             ServerMessage::PhaserFired { target_uuid, .. } => {
                 self.last_phaser_target = Some(target_uuid.clone());
+            }
+            ServerMessage::WeaponsUpdate { fire_ready, on_cooldown, .. } => {
+                self.fire_ready = *fire_ready;
+                self.on_cooldown = *on_cooldown;
             }
             ServerMessage::ScienceTargetSuggestion { uuid } => {
                 self.science_target_suggestion = Some(uuid.clone());
@@ -261,6 +273,42 @@ pub fn on_screen_message() -> ClientMessage {
 /// `ClientMessage` for the Repair button: sends a repair request to the server.
 pub fn repair_message() -> ClientMessage {
     ClientMessage::Repair { console: crate::messages::Console::Helm }
+}
+
+/// `ClientMessage` to fire the phaser.
+pub fn fire_phaser_message() -> ClientMessage {
+    ClientMessage::FirePhaser
+}
+
+/// `ClientMessage` to set the phaser mode (Auto or Manual).
+pub fn set_phaser_mode_message(mode: crate::messages::PhaserMode) -> ClientMessage {
+    ClientMessage::SetPhaserMode { mode }
+}
+
+/// `ClientMessage` to toggle the phaser mode: Auto → Manual, Manual → Auto.
+pub fn toggle_phaser_mode_message(current: PhaserMode) -> ClientMessage {
+    let next = match current {
+        PhaserMode::Auto => PhaserMode::Manual,
+        PhaserMode::Manual => PhaserMode::Auto,
+    };
+    ClientMessage::SetPhaserMode { mode: next }
+}
+
+/// Returns `true` when the Fire Phaser button should be enabled.
+///
+/// The button is active only when the server has reported that the target is
+/// in range/arc (`fire_ready`) AND the phaser bank is not on post-fire
+/// cooldown (`on_cooldown`).
+pub fn is_fire_button_enabled(state: &ClientSimState) -> bool {
+    state.fire_ready && !state.on_cooldown
+}
+
+/// Human-readable label for the current phaser mode toggle button.
+pub fn phaser_mode_label(mode: PhaserMode) -> &'static str {
+    match mode {
+        PhaserMode::Auto => "AUTO",
+        PhaserMode::Manual => "MANUAL",
+    }
 }
 
 /// `ClientMessage` to send when the Science officer taps an entity on their
@@ -434,6 +482,8 @@ mod tests {
             last_phaser_target: None,
             science_target_suggestion: None,
             shield_facings: Vec::new(),
+            fire_ready: false,
+            on_cooldown: false,
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
@@ -472,6 +522,8 @@ mod tests {
             last_phaser_target: None,
             science_target_suggestion: None,
             shield_facings: Vec::new(),
+            fire_ready: false,
+            on_cooldown: false,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -500,6 +552,8 @@ mod tests {
             last_phaser_target: None,
             science_target_suggestion: None,
             shield_facings: Vec::new(),
+            fire_ready: false,
+            on_cooldown: false,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -616,7 +670,7 @@ mod tests {
                     inner_radius: 10.0,
                     outer_radius: 30.0,
                     tags: vec!["asteroid_field".into()],
-                }
+                },
             ],
         };
         s
@@ -1130,5 +1184,92 @@ mod tests {
         };
         let view = compute_science_long_range_radar_view(&s);
         assert_eq!(view.dots.len(), 1, "science radar must show asteroid within range");
+    }
+
+    // ── weapons_update ───────────────────────────────────────────────────
+
+    #[test]
+    fn weapons_update_sets_fire_ready_and_cooldown() {
+        let mut s = ClientSimState::default();
+        assert!(!s.fire_ready, "default: fire not ready");
+        assert!(!s.on_cooldown, "default: not on cooldown");
+
+        s.apply(&ServerMessage::WeaponsUpdate {
+            target_uuid: None,
+            fire_ready: true,
+            on_cooldown: false,
+        });
+        assert!(s.fire_ready);
+        assert!(!s.on_cooldown);
+
+        s.apply(&ServerMessage::WeaponsUpdate {
+            target_uuid: None,
+            fire_ready: false,
+            on_cooldown: true,
+        });
+        assert!(!s.fire_ready);
+        assert!(s.on_cooldown);
+    }
+
+    #[test]
+    fn fire_phaser_message_builder_produces_correct_message() {
+        let msg = fire_phaser_message();
+        assert_eq!(msg, ClientMessage::FirePhaser);
+    }
+
+    #[test]
+    fn set_phaser_mode_message_builder_produces_correct_message() {
+        assert_eq!(
+            set_phaser_mode_message(PhaserMode::Manual),
+            ClientMessage::SetPhaserMode { mode: PhaserMode::Manual },
+        );
+        assert_eq!(
+            set_phaser_mode_message(PhaserMode::Auto),
+            ClientMessage::SetPhaserMode { mode: PhaserMode::Auto },
+        );
+    }
+
+    #[test]
+    fn toggle_phaser_mode_auto_produces_set_manual() {
+        let msg = toggle_phaser_mode_message(PhaserMode::Auto);
+        assert_eq!(msg, ClientMessage::SetPhaserMode { mode: PhaserMode::Manual });
+    }
+
+    #[test]
+    fn toggle_phaser_mode_manual_produces_set_auto() {
+        let msg = toggle_phaser_mode_message(PhaserMode::Manual);
+        assert_eq!(msg, ClientMessage::SetPhaserMode { mode: PhaserMode::Auto });
+    }
+
+    #[test]
+    fn fire_button_disabled_when_not_fire_ready() {
+        let s = ClientSimState::default();
+        assert!(!is_fire_button_enabled(&s), "fire button should be disabled when fire_ready is false");
+    }
+
+    #[test]
+    fn fire_button_enabled_when_fire_ready_and_not_on_cooldown() {
+        let mut s = ClientSimState::default();
+        s.fire_ready = true;
+        s.on_cooldown = false;
+        assert!(is_fire_button_enabled(&s), "fire button should be enabled when fire_ready and not on cooldown");
+    }
+
+    #[test]
+    fn fire_button_disabled_when_on_cooldown_even_if_fire_ready() {
+        let mut s = ClientSimState::default();
+        s.fire_ready = true;
+        s.on_cooldown = true;
+        assert!(!is_fire_button_enabled(&s), "fire button should be disabled when on cooldown");
+    }
+
+    #[test]
+    fn phaser_mode_label_auto() {
+        assert_eq!(phaser_mode_label(PhaserMode::Auto), "AUTO");
+    }
+
+    #[test]
+    fn phaser_mode_label_manual() {
+        assert_eq!(phaser_mode_label(PhaserMode::Manual), "MANUAL");
     }
 }

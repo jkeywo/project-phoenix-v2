@@ -282,6 +282,7 @@ fn handle_set_view(
             let required = match &mode {
                 ViewMode::Camera(_) => Console::CaptainChair,
                 ViewMode::Radar => Console::Helm,
+                ViewMode::ScienceRadar | ViewMode::SystemChart => Console::Science,
             };
             if sessions.0.console_holder(required) == Some(ev.token.as_str()) {
                 ship.view_mode = mode;
@@ -1268,6 +1269,55 @@ fn test_app() -> App {
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
+    }
+
+    fn start_game_with_science(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(app);
+        push(app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
+        tick(app);
+        push(app, "science", ClientMessage::SelectConsole { console: Console::Science });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    #[test]
+    fn science_can_switch_view_to_science_radar() {
+        let mut app = test_app();
+        start_game_with_science(&mut app);
+        push(&mut app, "science", ClientMessage::SetView { mode: ViewMode::ScienceRadar });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::ScienceRadar
+        );
+    }
+
+    #[test]
+    fn science_can_switch_view_to_system_chart() {
+        let mut app = test_app();
+        start_game_with_science(&mut app);
+        push(&mut app, "science", ClientMessage::SetView { mode: ViewMode::SystemChart });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::SystemChart
+        );
+    }
+
+    #[test]
+    fn non_science_cannot_switch_view_to_science_radar() {
+        let mut app = test_app();
+        start_game_with_science(&mut app);
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::ScienceRadar });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
     }
 
     #[test]

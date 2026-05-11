@@ -33,6 +33,8 @@ pub enum ViewDirection {
 pub enum ViewMode {
     Camera(ViewDirection),
     Radar,
+    ScienceRadar,
+    SystemChart,
 }
 
 impl Default for ViewMode {

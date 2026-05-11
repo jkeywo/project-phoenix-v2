@@ -90,6 +90,7 @@ fn handle_set_view(
             let required = match &mode {
                 ViewMode::Camera(_) => Console::CaptainChair,
                 ViewMode::Radar => Console::Helm,
+                ViewMode::ScienceRadar | ViewMode::SystemChart => Console::Science,
             };
             if sessions.0.console_holder(required) == Some(ev.token.as_str()) {
                 ship.view_mode = mode;

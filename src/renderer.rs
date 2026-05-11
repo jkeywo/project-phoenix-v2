@@ -235,7 +235,7 @@ fn toggle_cameras(
         return;
     }
     let in_game = phase.0 == GamePhase::InProgress;
-    let radar_active = in_game && matches!(ship.view_mode, ViewMode::Radar);
+    let radar_active = in_game && matches!(ship.view_mode, ViewMode::Radar | ViewMode::ScienceRadar | ViewMode::SystemChart);
     let game_active  = in_game && !radar_active;
 
     // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
@@ -318,7 +318,7 @@ fn hull_camera(
     // remains coherent; the radar overlay is drawn separately (#45).
     let direction = match &ship.view_mode {
         ViewMode::Camera(d) => d.clone(),
-        ViewMode::Radar => ViewDirection::Fore,
+        ViewMode::Radar | ViewMode::ScienceRadar | ViewMode::SystemChart => ViewDirection::Fore,
     };
     let offset_dir = match direction {
         ViewDirection::Fore      => Vec3::new( ship.yaw.sin(), 0.0, -ship.yaw.cos()),
@@ -365,6 +365,8 @@ fn update_view_direction_label(
         ViewMode::Camera(ViewDirection::Port)      => "PORT",
         ViewMode::Camera(ViewDirection::Starboard) => "STARBOARD",
         ViewMode::Radar                            => "RADAR",
+        ViewMode::ScienceRadar                     => "SCIENCE RADAR",
+        ViewMode::SystemChart                      => "SYSTEM CHART",
     };
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {
@@ -392,7 +394,6 @@ fn draw_radar_overlay(
     if !matches!(ship.view_mode, ViewMode::Radar) {
         return;
     }
-
     let centre = Vec2::ZERO;
     let outer  = Color::srgba(0.4, 0.9, 0.5, 0.9);
     let mid    = Color::srgba(0.4, 0.9, 0.5, 0.45);

@@ -147,6 +147,20 @@ mod tests {
     }
 
     #[test]
+    fn client_set_view_science_radar() {
+        let msg = ClientMessage::SetView { mode: ViewMode::ScienceRadar };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_view_system_chart() {
+        let msg = ClientMessage::SetView { mode: ViewMode::SystemChart };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_helm_input() {
         let msg = ClientMessage::HelmInput { thrust: 0.75, steering: -0.5 };
         assert_client_roundtrip(&JsonCodec, msg.clone());

@@ -1,0 +1,15 @@
+name = "Cosmetic Asteroid"
+tags = ["asteroid", "cosmetic"]
+
+[collider]
+shape = "Ball"
+radius = 3.0
+
+[appearance]
+colour = [0.6, 0.6, 0.6]
+mesh = "sphere"
+alpha = 0.7
+
+[physics]
+mass = 5.0
+collidable = false

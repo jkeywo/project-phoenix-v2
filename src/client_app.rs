@@ -19,7 +19,7 @@ use crate::client_lobby::{
 };
 use crate::client_sim::{
     message_for_direction_press, on_screen_message, red_alert_toggle_message,
-    fire_phaser_message, set_phaser_mode_message, ClientSimState,
+    fire_phaser_message, set_phaser_mode_message, fire_torpedo_message, ClientSimState,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, PhaserMode, ServerMessage, ViewDirection};
 
@@ -141,6 +141,30 @@ struct PhaserModeButton;
 #[derive(Component)]
 struct PhaserModeLabel;
 
+/// Tracks which torpedo tube is currently selected on the Weapons console.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+struct SelectedTube(Option<crate::messages::TorpedoTube>);
+
+/// Marks a torpedo tube selection button. Contains the tube it represents.
+#[derive(Component)]
+struct TorpedoTubeButton(crate::messages::TorpedoTube);
+
+/// Marks the "FIRE TORPEDO" button on the Weapons console.
+#[derive(Component)]
+struct FireTorpedoButton;
+
+/// Marks the text label inside the Fire Torpedo button.
+#[derive(Component)]
+struct FireTorpedoLabel;
+
+/// Marks the torpedo count text label.
+#[derive(Component)]
+struct TorpedoCountLabel;
+
+/// Marks the label that shows tube reload status.
+#[derive(Component)]
+struct TubeStatusLabel(crate::messages::TorpedoTube);
+
 // ── Plugin ─────────────────────────────────────────────────────────
 
 pub struct ClientAppPlugin;
@@ -156,6 +180,7 @@ impl Plugin for ClientAppPlugin {
             .init_resource::<ClientSimState>()
             .init_resource::<LocalPlayerToken>()
             .init_resource::<ActiveConsole>()
+            .init_resource::<SelectedTube>()
             .insert_resource(HelmJoystickState::default())
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
@@ -192,6 +217,9 @@ impl Plugin for ClientAppPlugin {
                         handle_fire_phaser_button_press,
                         handle_phaser_mode_toggle_press,
                         refresh_weapons_panel,
+                        handle_torpedo_tube_button_press,
+                        handle_fire_torpedo_button_press,
+                        refresh_torpedo_ui,
                     ),
                 ),
             );
@@ -1149,6 +1177,91 @@ fn setup_weapons_ui(mut commands: Commands) {
                 TextColor(Color::srgb(1.0, 0.5, 0.2)),
             ));
 
+            // Torpedo count label
+            panel.spawn((
+                TorpedoCountLabel,
+                Text::new("Torpedoes: 10"),
+                TextFont { font_size: 16.0, ..default() },
+                TextColor(Color::srgb(0.8, 0.8, 0.2)),
+            ));
+
+            // Torpedo tube selection row
+            panel.spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
+            )).with_children(|row| {
+                for (tube, label) in [
+                    (crate::messages::TorpedoTube::ForePort, "FWD PORT"),
+                    (crate::messages::TorpedoTube::ForeStarboard, "FWD STBD"),
+                    (crate::messages::TorpedoTube::Aft, "AFT"),
+                ] {
+                    row.spawn((
+                        TorpedoTubeButton(tube),
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.10, 0.20, 0.30)),
+                    )).with_children(|btn| {
+                        btn.spawn((
+                            Text::new(label),
+                            TextFont { font_size: 14.0, ..default() },
+                            TextColor(Color::srgb(0.6, 0.8, 1.0)),
+                        ));
+                    });
+                }
+            });
+
+            // Tube status labels row
+            panel.spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
+            )).with_children(|row| {
+                for tube in [
+                    crate::messages::TorpedoTube::ForePort,
+                    crate::messages::TorpedoTube::ForeStarboard,
+                    crate::messages::TorpedoTube::Aft,
+                ] {
+                    row.spawn((
+                        TubeStatusLabel(tube),
+                        Text::new("LOADED"),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(Color::srgb(0.3, 1.0, 0.3)),
+                        Node {
+                            min_width: Val::Px(70.0),
+                            ..default()
+                        },
+                    ));
+                }
+            });
+
+            // Fire torpedo button
+            panel
+                .spawn((
+                    FireTorpedoButton,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(32.0), Val::Px(16.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.10, 0.30, 0.10)),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        FireTorpedoLabel,
+                        Text::new("FIRE TORPEDO"),
+                        TextFont { font_size: 22.0, ..default() },
+                        TextColor(Color::srgb(0.3, 1.0, 0.3)),
+                    ));
+                });
+
             // Phaser mode toggle button
             panel
                 .spawn((
@@ -1286,5 +1399,131 @@ fn refresh_weapons_panel(
             PhaserMode::Auto => "Mode: AUTO".to_string(),
             PhaserMode::Manual => "Mode: MANUAL".to_string(),
         };
+    }
+}
+
+// ── Torpedo UI systems ─────────────────────────────────────────────
+
+/// Handle torpedo tube selection button presses — update `SelectedTube`.
+fn handle_torpedo_tube_button_press(
+    interactions: Query<(&Interaction, &TorpedoTubeButton), Changed<Interaction>>,
+    mut selected: ResMut<SelectedTube>,
+) {
+    for (interaction, tube_btn) in interactions.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // Toggle: press same tube again to deselect.
+        if selected.0 == Some(tube_btn.0) {
+            selected.0 = None;
+        } else {
+            selected.0 = Some(tube_btn.0);
+        }
+    }
+}
+
+/// Handle the Fire Torpedo button press. Fires from the selected tube with
+/// the current target as the homing target (if any).
+fn handle_fire_torpedo_button_press(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<Button>, With<FireTorpedoButton>)>,
+    selected: Res<SelectedTube>,
+    sim: Res<ClientSimState>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let Some(tube) = selected.0 else { continue };
+        // Check the chosen tube is loaded.
+        let loaded = match tube {
+            crate::messages::TorpedoTube::ForePort => sim.fore_port_loaded,
+            crate::messages::TorpedoTube::ForeStarboard => sim.fore_starboard_loaded,
+            crate::messages::TorpedoTube::Aft => sim.aft_loaded,
+        };
+        if !loaded || sim.torpedo_count == 0 {
+            continue;
+        }
+        outbound.write(OutboundClientMessage(fire_torpedo_message(tube, None)));
+    }
+}
+
+/// Refresh the torpedo UI (count, tube status labels, fire button, tube selection highlights).
+fn refresh_torpedo_ui(
+    sim: Res<ClientSimState>,
+    selected: Res<SelectedTube>,
+    mut count_label: Query<&mut Text, With<TorpedoCountLabel>>,
+    mut tube_status: Query<(&mut Text, &mut TextColor, &TubeStatusLabel), Without<TorpedoCountLabel>>,
+    mut fire_bg: Query<&mut BackgroundColor, With<FireTorpedoButton>>,
+    mut fire_label: Query<(&mut Text, &mut TextColor), With<FireTorpedoLabel>>,
+    mut tube_btn_bg: Query<(&mut BackgroundColor, &TorpedoTubeButton), Without<FireTorpedoButton>>,
+) {
+    if !sim.is_changed() && !selected.is_changed() {
+        return;
+    }
+
+    // Update torpedo count label.
+    for mut text in count_label.iter_mut() {
+        **text = format!("Torpedoes: {}", sim.torpedo_count);
+    }
+
+    // Update per-tube status labels.
+    for (mut text, mut color, label) in tube_status.iter_mut() {
+        let (loaded, reload_secs) = match label.0 {
+            crate::messages::TorpedoTube::ForePort =>
+                (sim.fore_port_loaded, sim.fore_port_reload_secs),
+            crate::messages::TorpedoTube::ForeStarboard =>
+                (sim.fore_starboard_loaded, sim.fore_starboard_reload_secs),
+            crate::messages::TorpedoTube::Aft =>
+                (sim.aft_loaded, sim.aft_reload_secs),
+        };
+        if loaded {
+            **text = "LOADED".to_string();
+            *color = TextColor(Color::srgb(0.3, 1.0, 0.3));
+        } else {
+            **text = format!("{:.0}s", reload_secs.ceil());
+            *color = TextColor(Color::srgb(1.0, 0.6, 0.2));
+        }
+    }
+
+    // Update tube selection button highlights.
+    for (mut bg, tube_btn) in tube_btn_bg.iter_mut() {
+        let is_selected = selected.0 == Some(tube_btn.0);
+        *bg = if is_selected {
+            BackgroundColor(Color::srgb(0.10, 0.50, 0.70))
+        } else {
+            BackgroundColor(Color::srgb(0.10, 0.20, 0.30))
+        };
+    }
+
+    // Update Fire Torpedo button appearance.
+    let tube_ready = selected.0.map(|t| match t {
+        crate::messages::TorpedoTube::ForePort => sim.fore_port_loaded,
+        crate::messages::TorpedoTube::ForeStarboard => sim.fore_starboard_loaded,
+        crate::messages::TorpedoTube::Aft => sim.aft_loaded,
+    }).unwrap_or(false);
+    let can_fire = tube_ready && sim.torpedo_count > 0 && selected.0.is_some();
+
+    for mut bg in fire_bg.iter_mut() {
+        *bg = if can_fire {
+            BackgroundColor(Color::srgb(0.10, 0.50, 0.10))
+        } else {
+            BackgroundColor(Color::srgb(0.05, 0.20, 0.05))
+        };
+    }
+    for (mut text, mut color) in fire_label.iter_mut() {
+        if selected.0.is_none() {
+            **text = "SELECT TUBE".to_string();
+            *color = TextColor(Color::srgb(0.5, 0.5, 0.5));
+        } else if sim.torpedo_count == 0 {
+            **text = "NO TORPEDOES".to_string();
+            *color = TextColor(Color::srgb(0.6, 0.3, 0.3));
+        } else if !tube_ready {
+            **text = "TUBE LOADING".to_string();
+            *color = TextColor(Color::srgb(0.8, 0.5, 0.2));
+        } else {
+            **text = "FIRE TORPEDO".to_string();
+            *color = TextColor(Color::srgb(0.3, 1.0, 0.3));
+        }
     }
 }

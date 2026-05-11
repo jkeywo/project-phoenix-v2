@@ -468,6 +468,10 @@ mod tests {
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
             fire_ready: true,
             on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true, fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true, fore_starboard_reload_secs: 0.0,
+            aft_loaded: true, aft_reload_secs: 0.0,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -479,6 +483,10 @@ mod tests {
             target_uuid: None,
             fire_ready: false,
             on_cooldown: false,
+            torpedo_count: 8,
+            fore_port_loaded: false, fore_port_reload_secs: 7.5,
+            fore_starboard_loaded: true, fore_starboard_reload_secs: 0.0,
+            aft_loaded: false, aft_reload_secs: 3.2,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -490,6 +498,10 @@ mod tests {
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
             fire_ready: false,
             on_cooldown: true,
+            torpedo_count: 0,
+            fore_port_loaded: false, fore_port_reload_secs: 10.0,
+            fore_starboard_loaded: false, fore_starboard_reload_secs: 5.0,
+            aft_loaded: false, aft_reload_secs: 2.0,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

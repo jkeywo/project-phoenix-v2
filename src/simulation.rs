@@ -1083,6 +1083,7 @@ fn broadcast_weapons_update(
     cooldown: Res<PhaserCooldown>,
     beam: Res<ActiveBeam>,
     phase: Res<CurrentPhase>,
+    torpedo_sys: Res<TorpedoSystemResource>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1104,12 +1105,20 @@ fn broadcast_weapons_update(
         }
     };
 
+    let ts = &torpedo_sys.0;
     writer.write(OutboundMessage {
         target: Target::Token(weapons_token.to_string()),
         msg: ServerMessage::WeaponsUpdate {
             target_uuid: weapons_target.0.clone(),
             fire_ready,
             on_cooldown: cooldown.is_active() || beam.target_uuid.is_some(),
+            torpedo_count: ts.torpedoes_remaining,
+            fore_port_loaded: ts.fore_port.is_loaded(),
+            fore_port_reload_secs: ts.fore_port.reload_remaining,
+            fore_starboard_loaded: ts.fore_starboard.is_loaded(),
+            fore_starboard_reload_secs: ts.fore_starboard.reload_remaining,
+            aft_loaded: ts.aft.is_loaded(),
+            aft_reload_secs: ts.aft.reload_remaining,
         },
     });
 }

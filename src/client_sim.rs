@@ -179,6 +179,20 @@ pub struct ClientSimState {
     /// True while the phaser bank is on post-fire cooldown.
     /// Updated by `WeaponsUpdate` messages from the server.
     pub on_cooldown: bool,
+    /// Remaining torpedoes in the magazine.
+    pub torpedo_count: u32,
+    /// Whether the fore-port tube is loaded and ready.
+    pub fore_port_loaded: bool,
+    /// Seconds until the fore-port tube is ready (0.0 when loaded).
+    pub fore_port_reload_secs: f32,
+    /// Whether the fore-starboard tube is loaded and ready.
+    pub fore_starboard_loaded: bool,
+    /// Seconds until the fore-starboard tube is ready (0.0 when loaded).
+    pub fore_starboard_reload_secs: f32,
+    /// Whether the aft tube is loaded and ready.
+    pub aft_loaded: bool,
+    /// Seconds until the aft tube is ready (0.0 when loaded).
+    pub aft_reload_secs: f32,
     /// In-flight torpedoes: (uuid, x, z, heading, tube).
     /// Updated by `TorpedoLaunched` and `TorpedoDestroyed` messages.
     pub torpedoes_in_flight: Vec<(String, f32, f32, f32, TorpedoTube)>,
@@ -202,6 +216,13 @@ impl Default for ClientSimState {
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true,
+            fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: true,
+            aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
         }
     }
@@ -236,9 +257,23 @@ impl ClientSimState {
             ServerMessage::PhaserFired { target_uuid, .. } => {
                 self.last_phaser_target = Some(target_uuid.clone());
             }
-            ServerMessage::WeaponsUpdate { fire_ready, on_cooldown, .. } => {
+            ServerMessage::WeaponsUpdate {
+                fire_ready, on_cooldown,
+                torpedo_count,
+                fore_port_loaded, fore_port_reload_secs,
+                fore_starboard_loaded, fore_starboard_reload_secs,
+                aft_loaded, aft_reload_secs,
+                ..
+            } => {
                 self.fire_ready = *fire_ready;
                 self.on_cooldown = *on_cooldown;
+                self.torpedo_count = *torpedo_count;
+                self.fore_port_loaded = *fore_port_loaded;
+                self.fore_port_reload_secs = *fore_port_reload_secs;
+                self.fore_starboard_loaded = *fore_starboard_loaded;
+                self.fore_starboard_reload_secs = *fore_starboard_reload_secs;
+                self.aft_loaded = *aft_loaded;
+                self.aft_reload_secs = *aft_reload_secs;
             }
             ServerMessage::ScienceTargetSuggestion { uuid } => {
                 self.science_target_suggestion = Some(uuid.clone());
@@ -283,6 +318,11 @@ pub fn on_screen_message() -> ClientMessage {
 /// `ClientMessage` for the Repair button: sends a repair request to the server.
 pub fn repair_message() -> ClientMessage {
     ClientMessage::Repair { console: crate::messages::Console::Helm }
+}
+
+/// `ClientMessage` to fire a torpedo from the given tube with an optional homing target.
+pub fn fire_torpedo_message(tube: TorpedoTube, target_uuid: Option<String>) -> ClientMessage {
+    ClientMessage::FireTorpedo { tube, target_uuid }
 }
 
 /// `ClientMessage` to fire the phaser.
@@ -494,6 +534,13 @@ mod tests {
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true,
+            fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: true,
+            aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
         };
         let world = WorldData {
@@ -535,6 +582,13 @@ mod tests {
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true,
+            fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: true,
+            aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
         };
         s.apply(&ServerMessage::Welcome {
@@ -566,6 +620,13 @@ mod tests {
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true,
+            fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: true,
+            aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
         };
         let before = s.clone();
@@ -1211,6 +1272,10 @@ mod tests {
             target_uuid: None,
             fire_ready: true,
             on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true, fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true, fore_starboard_reload_secs: 0.0,
+            aft_loaded: true, aft_reload_secs: 0.0,
         });
         assert!(s.fire_ready);
         assert!(!s.on_cooldown);
@@ -1219,6 +1284,10 @@ mod tests {
             target_uuid: None,
             fire_ready: false,
             on_cooldown: true,
+            torpedo_count: 10,
+            fore_port_loaded: true, fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true, fore_starboard_reload_secs: 0.0,
+            aft_loaded: true, aft_reload_secs: 0.0,
         });
         assert!(!s.fire_ready);
         assert!(s.on_cooldown);
@@ -1284,6 +1353,54 @@ mod tests {
     #[test]
     fn phaser_mode_label_manual() {
         assert_eq!(phaser_mode_label(PhaserMode::Manual), "MANUAL");
+    }
+
+    #[test]
+    fn weapons_update_torpedo_fields_update_tube_status() {
+        let mut s = ClientSimState::default();
+        // Default: all tubes loaded, full count.
+        assert_eq!(s.torpedo_count, 10);
+        assert!(s.fore_port_loaded, "fore port should start loaded");
+        assert!(s.fore_starboard_loaded, "fore starboard should start loaded");
+        assert!(s.aft_loaded, "aft should start loaded");
+        assert_eq!(s.fore_port_reload_secs, 0.0);
+        assert_eq!(s.fore_starboard_reload_secs, 0.0);
+        assert_eq!(s.aft_reload_secs, 0.0);
+
+        s.apply(&ServerMessage::WeaponsUpdate {
+            target_uuid: None,
+            fire_ready: false,
+            on_cooldown: false,
+            torpedo_count: 8,
+            fore_port_loaded: false,
+            fore_port_reload_secs: 7.5,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: false,
+            aft_reload_secs: 3.2,
+        });
+
+        assert_eq!(s.torpedo_count, 8);
+        assert!(!s.fore_port_loaded);
+        assert_eq!(s.fore_port_reload_secs, 7.5);
+        assert!(s.fore_starboard_loaded);
+        assert_eq!(s.fore_starboard_reload_secs, 0.0);
+        assert!(!s.aft_loaded);
+        assert_eq!(s.aft_reload_secs, 3.2);
+    }
+
+    #[test]
+    fn fire_torpedo_message_builder_produces_correct_message() {
+        let msg = fire_torpedo_message(TorpedoTube::ForePort, Some("target-uuid".into()));
+        assert_eq!(msg, ClientMessage::FireTorpedo {
+            tube: TorpedoTube::ForePort,
+            target_uuid: Some("target-uuid".into()),
+        });
+        let msg2 = fire_torpedo_message(TorpedoTube::Aft, None);
+        assert_eq!(msg2, ClientMessage::FireTorpedo {
+            tube: TorpedoTube::Aft,
+            target_uuid: None,
+        });
     }
 
     #[test]

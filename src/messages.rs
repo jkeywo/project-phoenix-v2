@@ -216,7 +216,25 @@ pub enum ServerMessage {
     /// whether that target is within phaser range and in the forward 180° arc,
     /// and `on_cooldown` indicates whether the phaser is in its post-beam
     /// cooldown period (Fire is blocked).
-    WeaponsUpdate { target_uuid: Option<String>, fire_ready: bool, on_cooldown: bool },
+    WeaponsUpdate {
+        target_uuid: Option<String>,
+        fire_ready: bool,
+        on_cooldown: bool,
+        /// Remaining torpedoes in the magazine.
+        torpedo_count: u32,
+        /// Whether the fore-port tube is loaded and ready.
+        fore_port_loaded: bool,
+        /// Reload remaining for the fore-port tube (0.0 when loaded).
+        fore_port_reload_secs: f32,
+        /// Whether the fore-starboard tube is loaded and ready.
+        fore_starboard_loaded: bool,
+        /// Reload remaining for the fore-starboard tube (0.0 when loaded).
+        fore_starboard_reload_secs: f32,
+        /// Whether the aft tube is loaded and ready.
+        aft_loaded: bool,
+        /// Reload remaining for the aft tube (0.0 when loaded).
+        aft_reload_secs: f32,
+    },
     /// Broadcast when a phaser beam starts. Sent to all players so the renderer
     /// can draw the beam on the viewscreen.
     BeamStarted { target_uuid: String },

@@ -33,6 +33,9 @@ pub struct ClientSimState {
     pub phaser_mode: PhaserMode,
     /// UUID of the last asteroid hit by a phaser shot (cleared on new shot).
     pub last_phaser_target: Option<String>,
+    /// The most recent science target suggestion received from the server
+    /// (None until a Science officer designates a target).
+    pub science_target_suggestion: Option<String>,
 }
 
 impl Default for ClientSimState {
@@ -49,6 +52,7 @@ impl Default for ClientSimState {
             repair_penalty: false,
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
+            science_target_suggestion: None,
         }
     }
 }
@@ -82,6 +86,9 @@ impl ClientSimState {
             ServerMessage::PhaserFired { target_uuid, .. } => {
                 self.last_phaser_target = Some(target_uuid.clone());
             }
+            ServerMessage::ScienceTargetSuggestion { uuid } => {
+                self.science_target_suggestion = Some(uuid.clone());
+            }
             _ => {}
         }
     }
@@ -113,6 +120,12 @@ pub fn on_screen_message() -> ClientMessage {
 /// `ClientMessage` for the Repair button: sends a repair request to the server.
 pub fn repair_message() -> ClientMessage {
     ClientMessage::Repair { console: crate::messages::Console::Helm }
+}
+
+/// `ClientMessage` to send when the Science officer taps an entity on their
+/// long-range radar to suggest it as a target to the Weapons console.
+pub fn set_science_target_message(uuid: String) -> ClientMessage {
+    ClientMessage::SetScienceTarget { uuid }
 }
 
 #[cfg(test)]
@@ -174,6 +187,7 @@ mod tests {
                 AsteroidInfo { uuid: "a".into(), x:  3.0, z:  4.0, radius: 2.0, tags: vec![] },
                 AsteroidInfo { uuid: "b".into(), x: -1.5, z:  0.0, radius: 1.0, tags: vec![] },
             ],
+            asteroid_fields: vec![],
         };
         s.apply(&ServerMessage::WorldSetup { world: world.clone() });
         assert_eq!(s.world, world);
@@ -191,9 +205,11 @@ mod tests {
             repair_penalty: false,
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
+            science_target_suggestion: None,
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
+            asteroid_fields: vec![],
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -219,12 +235,14 @@ mod tests {
             ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
             world: WorldData {
                 asteroids: vec![AsteroidInfo { uuid: "d".into(), x: 0.0, z: 0.0, radius: 1.0, tags: vec![] }],
+                asteroid_fields: vec![],
             },
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
             repair_penalty: false,
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
+            science_target_suggestion: None,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -244,12 +262,14 @@ mod tests {
             ship_x: 5.0, ship_z: 6.0, ship_yaw: 0.7,
             world: WorldData {
                 asteroids: vec![AsteroidInfo { uuid: "e".into(), x: 0.0, z: 0.0, radius: 1.0, tags: vec![] }],
+                asteroid_fields: vec![],
             },
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
             repair_penalty: false,
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
+            science_target_suggestion: None,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -294,5 +314,37 @@ mod tests {
             on_screen_message(),
             ClientMessage::SetView { mode: ViewMode::Radar },
         );
+    }
+
+    #[test]
+    fn science_target_suggestion_updates_state() {
+        let mut s = ClientSimState::default();
+        assert!(s.science_target_suggestion.is_none());
+        s.apply(&ServerMessage::ScienceTargetSuggestion { uuid: "entity-abc".into() });
+        assert_eq!(s.science_target_suggestion, Some("entity-abc".into()));
+    }
+
+    #[test]
+    fn science_target_suggestion_is_overwritten_by_newer_message() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::ScienceTargetSuggestion { uuid: "first".into() });
+        s.apply(&ServerMessage::ScienceTargetSuggestion { uuid: "second".into() });
+        assert_eq!(s.science_target_suggestion, Some("second".into()));
+    }
+
+    #[test]
+    fn welcome_clears_science_target_suggestion() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::ScienceTargetSuggestion { uuid: "some-entity".into() });
+        s.apply(&ServerMessage::Welcome {
+            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+        });
+        assert!(s.science_target_suggestion.is_none());
+    }
+
+    #[test]
+    fn set_science_target_message_builder_produces_correct_message() {
+        let msg = set_science_target_message("entity-uuid-42".into());
+        assert_eq!(msg, ClientMessage::SetScienceTarget { uuid: "entity-uuid-42".into() });
     }
 }

@@ -91,6 +91,7 @@ impl LobbyState {
             | ServerMessage::BeamStarted { .. }
             | ServerMessage::BeamEnded { .. }
             | ServerMessage::AsteroidDestroyed { .. }
+            | ServerMessage::ScienceTargetSuggestion { .. }
             | ServerMessage::PhaserFired { .. }
             | ServerMessage::RepairState { .. } => {
                 // Not relevant to the lobby model.
@@ -136,6 +137,11 @@ impl<'a> LobbyView<'a> {
     /// True if the local player currently holds the helm console.
     pub fn is_helm(&self) -> bool {
         self.my_consoles().contains(&Console::Helm)
+    }
+
+    /// True if the local player currently holds the science console.
+    pub fn is_science(&self) -> bool {
+        self.my_consoles().contains(&Console::Science)
     }
 
     /// Consoles held by the local player (empty if no matching token).
@@ -427,6 +433,18 @@ mod tests {
     #[test]
     fn engage_message_is_start_game() {
         assert_eq!(engage_message(), ClientMessage::StartGame);
+    }
+
+    #[test]
+    fn is_science_is_true_only_when_i_hold_the_science_console() {
+        let mut s = LobbyState::default();
+        s.players = vec![
+            p("a", "Alice", vec![Console::Helm]),
+            p("b", "Bob",   vec![Console::Science]),
+        ];
+        assert!(!LobbyView::new(&s, "a").is_science());
+        assert!( LobbyView::new(&s, "b").is_science());
+        assert!(!LobbyView::new(&s, "ghost").is_science());
     }
 
     #[test]

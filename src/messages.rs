@@ -146,6 +146,9 @@ pub struct AsteroidInfo {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WorldData {
     pub asteroids: Vec<AsteroidInfo>,
+    /// Asteroid field rings, for science radar and system chart rendering.
+    #[serde(default)]
+    pub asteroid_fields: Vec<AsteroidField>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -160,6 +163,9 @@ pub enum ClientMessage {
     HelmInput { thrust: f32, steering: f32 },
     SetView { mode: ViewMode },
     SetTarget { uuid: String },
+    /// Science officer taps an entity on their radar to suggest it as a target
+    /// to the Weapons console. Advisory only — does not affect lock state.
+    SetScienceTarget { uuid: String },
     FirePhaser,
     SetPhaserMode { mode: PhaserMode },
     Repair { console: Console },
@@ -191,6 +197,10 @@ pub enum ServerMessage {
     BeamEnded { target_uuid: String },
     /// Broadcast when an asteroid's HP reaches 0 and it is despawned.
     AsteroidDestroyed { uuid: String },
+    /// Broadcast to all players when the Science officer taps a radar entity
+    /// to designate it as a suggested target. Advisory only — does not lock
+    /// the Tactical console.
+    ScienceTargetSuggestion { uuid: String },
     /// Sent when a phaser bank fires a shot at a target.
     PhaserFired { bank: PhaserBank, target_uuid: String },
     /// Sent at 10 Hz to each console player.  Carries the remaining cooldown

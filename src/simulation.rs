@@ -1314,6 +1314,7 @@ fn test_app() -> App {
         // Pre-populate world data so the broadcast has something to emit.
         app.world_mut().insert_resource(WorldResource(WorldData {
             asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 5.0, z: -1.0, radius: 2.0, tags: vec![] }],
+            asteroid_fields: vec![],
         }));
 
         // Bring the game up to the point of pressing StartGame
@@ -1352,6 +1353,7 @@ fn test_app() -> App {
         let mut app = test_app();
         app.world_mut().insert_resource(WorldResource(WorldData {
             asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 0.0, z: 0.0, radius: 2.0, tags: vec![] }],
+            asteroid_fields: vec![],
         }));
         // Identify and select a console but don't start the game.
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
@@ -1470,6 +1472,7 @@ fn test_app() -> App {
                 radius: 2.0,
                 tags: vec![],
             }],
+            asteroid_fields: vec![],
         }));
     }
 
@@ -1822,6 +1825,7 @@ fn test_app() -> App {
                 AsteroidInfo { uuid: "t1".into(), x: 0.0, z: -20.0, radius: 2.0, tags: vec![] },
                 AsteroidInfo { uuid: "t2".into(), x: 0.0, z: -15.0, radius: 2.0, tags: vec![] },
             ],
+            asteroid_fields: vec![],
         }));
         start_game_with_weapons(&mut app);
 

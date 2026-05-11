@@ -375,6 +375,7 @@ mod tests {
                         tags: vec![],
                     },
                 ],
+                asteroid_fields: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -389,6 +390,7 @@ mod tests {
                     AsteroidInfo { uuid: "a1b2c3d4-e5f6-4789-8abc-def012345678".into(), x: 1.0, z: 2.0, radius: 2.0, tags: vec![] },
                     AsteroidInfo { uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(), x: -3.5, z: 4.25, radius: 1.5, tags: vec![] },
                 ],
+                asteroid_fields: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -403,6 +405,7 @@ mod tests {
                 players: vec![player()],
                 world: Some(WorldData {
                     asteroids: vec![AsteroidInfo { uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(), x: 0.0, z: 0.0, radius: 2.0, tags: vec![] }],
+                    asteroid_fields: vec![],
                 }),
             },
         };
@@ -523,6 +526,20 @@ mod tests {
             bank: crate::messages::PhaserBank::Port,
             target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
         };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_science_target_round_trips() {
+        let msg = ClientMessage::SetScienceTarget { uuid: "entity-uuid-123".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_science_target_suggestion_round_trips() {
+        let msg = ServerMessage::ScienceTargetSuggestion { uuid: "entity-uuid-456".into() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }

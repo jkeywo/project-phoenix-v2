@@ -88,7 +88,7 @@ pub fn process_message(
                 outbound.push((Target::All, ServerMessage::GameStarted));
             }
         }
-        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::Repair { .. } => {}
+        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::Repair { .. } | ClientMessage::SetScienceTarget { .. } => {}
     }
 
     LobbyHandlerResult { new_phase, outbound }
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn welcome_during_in_progress_carries_world_some() {
         let mut sessions = SessionManager::new();
-        let world = WorldData { asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 1.0, z: 2.0, radius: 2.0, tags: vec![] }] };
+        let world = WorldData { asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 1.0, z: 2.0, radius: 2.0, tags: vec![] }], asteroid_fields: vec![] };
         let msg = ClientMessage::Identify { token: "t1".into(), name: "Alice".into() };
         let result = process_message("peer", &msg, &mut sessions, GamePhase::InProgress, Some(&world));
         let state = result.outbound.iter().find_map(|(_, m)| match m {

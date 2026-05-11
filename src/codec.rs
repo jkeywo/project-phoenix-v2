@@ -175,6 +175,20 @@ mod tests {
     }
 
     #[test]
+    fn client_select_console_science() {
+        let msg = ClientMessage::SelectConsole { console: Console::Science };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_console_selected_science() {
+        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Science] };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn server_console_selected_weapons() {
         let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Tactical] };
         assert_server_roundtrip(&JsonCodec, msg.clone());

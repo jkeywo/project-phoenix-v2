@@ -114,6 +114,11 @@ struct RepairButton;
 #[derive(Component)]
 struct RepairButtonLabel;
 
+/// Marks the root of the science console UI; shown only when the local
+/// player holds Science and the phase is InProgress.
+#[derive(Component)]
+struct SciencePanel;
+
 // ── Plugin ─────────────────────────────────────────────────────────
 
 pub struct ClientAppPlugin;
@@ -133,7 +138,7 @@ impl Plugin for ClientAppPlugin {
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
-            .add_systems(Startup, (setup_lobby_ui, setup_captain_ui, setup_helm_ui))
+            .add_systems(Startup, (setup_lobby_ui, setup_captain_ui, setup_helm_ui, setup_science_ui))
             .add_systems(
                 Update,
                 (
@@ -160,6 +165,7 @@ impl Plugin for ClientAppPlugin {
                         handle_repair_button_press,
                         refresh_repair_button,
                         draw_helm_radar,
+                        toggle_science_panel_visibility,
                     ),
                 ),
             );
@@ -772,6 +778,52 @@ fn setup_helm_ui(mut commands: Commands) {
         commands.entity(pad).observe(on_helm_drag_start);
         commands.entity(pad).observe(on_helm_drag);
         commands.entity(pad).observe(on_helm_drag_end);
+    }
+}
+
+fn setup_science_ui(mut commands: Commands) {
+    commands.spawn((
+        SciencePanel,
+        Node {
+            position_type: PositionType::Absolute,
+            left:   Val::Px(0.0),
+            top:    Val::Px(0.0),
+            right:  Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        Visibility::Hidden,
+    ))
+    .with_children(|panel| {
+        panel.spawn((
+            Text::new("Science Console"),
+            TextFont { font_size: 32.0, ..default() },
+            TextColor(Color::srgb(0.8, 0.8, 1.0)),
+        ));
+    });
+}
+
+fn toggle_science_panel_visibility(
+    lobby: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    active: Res<ActiveConsole>,
+    mut panel: Query<&mut Visibility, With<SciencePanel>>,
+) {
+    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
+        return;
+    }
+    let view = LobbyView::new(&lobby, &token.0);
+    let holds_science = lobby.phase == GamePhase::InProgress
+        && view.my_consoles().contains(&Console::Science);
+    let tab_active = match &active.0 {
+        Some(c) => *c == Console::Science,
+        None => true,
+    };
+    let visible = holds_science && tab_active;
+    for mut vis in panel.iter_mut() {
+        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
     }
 }
 

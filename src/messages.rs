@@ -57,6 +57,7 @@ pub enum Console {
     Helm,
     Tactical,
     Engineering,
+    Science,
 }
 
 impl Console {
@@ -67,6 +68,7 @@ impl Console {
             Console::Helm => "Helm",
             Console::Tactical => "Tactical",
             Console::Engineering => "Engineering",
+            Console::Science => "Science",
         }
     }
 }

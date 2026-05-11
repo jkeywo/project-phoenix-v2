@@ -101,7 +101,7 @@ impl LobbyState {
 
 /// All consoles the lobby UI knows how to render. Listed in the order
 /// they appear on screen.
-pub const ALL_CONSOLES: [Console; 4] = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Engineering];
+pub const ALL_CONSOLES: [Console; 5] = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Engineering, Console::Science];
 
 /// One console row as the lobby UI should render it.
 #[derive(Clone, Debug, PartialEq)]
@@ -442,13 +442,14 @@ mod tests {
     }
 
     #[test]
-    fn all_consoles_filled_is_true_when_all_four_consoles_are_held() {
+    fn all_consoles_filled_is_true_when_all_five_consoles_are_held() {
         let mut s = LobbyState::default();
         s.players = vec![
             p("a", "Alice", vec![Console::CaptainChair]),
             p("b", "Bob",   vec![Console::Helm]),
             p("c", "Carol", vec![Console::Tactical]),
             p("d", "Dave",  vec![Console::Engineering]),
+            p("e", "Eve",   vec![Console::Science]),
         ];
         assert!(LobbyView::new(&s, "a").all_consoles_filled());
     }

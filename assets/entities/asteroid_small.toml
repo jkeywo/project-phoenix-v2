@@ -4,14 +4,7 @@ tags = ["asteroid", "gameplay", "small"]
 [collider]
 shape = "Ball"
 radius = 5.0
+length = 0.0
 
 [hull]
-integrity = 30
-max_integrity = 30
-
-[appearance]
-colour = [0.5, 0.5, 0.5]
-mesh = "sphere"
-
-[physics]
-mass = 10.0
+hull_integrity = 30

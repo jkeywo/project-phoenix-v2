@@ -7,8 +7,7 @@ radius = 3.0
 length = 6.0
 
 [hull]
-integrity = 100
-max_integrity = 100
+hull_integrity = 100
 
 [physics]
 mass = 100.0

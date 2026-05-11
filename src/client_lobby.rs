@@ -94,7 +94,9 @@ impl LobbyState {
             | ServerMessage::ScienceTargetSuggestion { .. }
             | ServerMessage::PhaserFired { .. }
             | ServerMessage::RepairState { .. }
-            | ServerMessage::ShieldStatus { .. } => {
+            | ServerMessage::ShieldStatus { .. }
+            | ServerMessage::TorpedoLaunched { .. }
+            | ServerMessage::TorpedoDestroyed { .. } => {
                 // Not relevant to the lobby model.
             }
         }

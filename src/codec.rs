@@ -587,6 +587,46 @@ mod tests {
     }
 
     #[test]
+    fn client_fire_torpedo_round_trips() {
+        let msg = ClientMessage::FireTorpedo {
+            tube: crate::messages::TorpedoTube::ForePort,
+            target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_fire_torpedo_no_target_round_trips() {
+        let msg = ClientMessage::FireTorpedo {
+            tube: crate::messages::TorpedoTube::Aft,
+            target_uuid: None,
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_torpedo_launched_round_trips() {
+        let msg = ServerMessage::TorpedoLaunched {
+            uuid: "torpedo-uuid-1".into(),
+            tube: crate::messages::TorpedoTube::ForeStarboard,
+            x: 10.5,
+            z: -20.0,
+            heading: 1.57,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_torpedo_destroyed_round_trips() {
+        let msg = ServerMessage::TorpedoDestroyed { uuid: "torpedo-uuid-1".into() };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn welcome_with_world_none_round_trips() {
         let msg = ServerMessage::Welcome { state: state() };
         assert_server_roundtrip(&JsonCodec, msg.clone());

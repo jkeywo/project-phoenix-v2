@@ -18,6 +18,14 @@ pub enum PhaserBank {
     Starboard,
 }
 
+/// Which torpedo tube to fire from.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TorpedoTube {
+    ForePort,
+    ForeStarboard,
+    Aft,
+}
+
 /// Firing mode for phaser banks. Matches `phaser::PhaserMode`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum PhaserMode {
@@ -186,6 +194,8 @@ pub enum ClientMessage {
     FirePhaser,
     SetPhaserMode { mode: PhaserMode },
     Repair { console: Console },
+    /// Fire a torpedo from the specified tube. `target_uuid` is optional homing target.
+    FireTorpedo { tube: TorpedoTube, target_uuid: Option<String> },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -227,4 +237,8 @@ pub enum ServerMessage {
     /// Sent at 10 Hz (or on change) to all players. Contains HP and online
     /// status for every shield facing.
     ShieldStatus { facings: Vec<ShieldFacingStatus> },
+    /// Broadcast to all when a torpedo is launched from a tube.
+    TorpedoLaunched { uuid: String, tube: TorpedoTube, x: f32, z: f32, heading: f32 },
+    /// Broadcast to all when a torpedo is destroyed (expired or hit something).
+    TorpedoDestroyed { uuid: String },
 }

@@ -88,7 +88,7 @@ pub fn process_message(
                 outbound.push((Target::All, ServerMessage::GameStarted));
             }
         }
-        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::Repair { .. } | ClientMessage::SetScienceTarget { .. } | ClientMessage::StartImpulseCharge | ClientMessage::CancelImpulse => {}
+        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::Repair { .. } | ClientMessage::SetScienceTarget { .. } | ClientMessage::StartImpulseCharge | ClientMessage::CancelImpulse | ClientMessage::FireTorpedo { .. } => {}
     }
 
     LobbyHandlerResult { new_phase, outbound }

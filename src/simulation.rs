@@ -12,6 +12,8 @@ use crate::radar::is_fire_ready;
 use crate::messages::{
     AsteroidInfo, ClientMessage, Console, GamePhase, ServerMessage, ShieldFacingStatus, ViewMode,
 };
+use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
+use crate::messages::TorpedoTube as MsgTorpedoTube;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 use crate::impulse::ImpulseState;
@@ -185,6 +187,10 @@ pub struct AsteroidDestroyedVfx {
     pub z: f32,
 }
 
+/// Wraps the pure-Rust torpedo system so it can be used as a Bevy resource.
+#[derive(Resource)]
+pub struct TorpedoSystemResource(pub TorpedoSystem);
+
 /// Bevy resource wrapping the breakdown queue.
 #[derive(Resource)]
 pub struct BreakdownQueueResource {
@@ -258,6 +264,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<BreakdownQueueResource>()
             .init_resource::<LastHelmInput>()
             .init_resource::<CollisionCooldown>()
+            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -268,14 +275,18 @@ impl Plugin for SimulationPlugin {
                 handle_set_science_target,
                 handle_fire_phaser,
                 handle_set_phaser_mode,
+                handle_fire_torpedo,
                 handle_repair,
                 handle_impulse_messages,
                 tick_active_beam,
                 tick_repair,
+                tick_torpedo_system,
                 tick_shields,
                 process_helm_inputs,
                 sync_ship_position,
                 handle_collisions,
+            ))
+            .add_systems(Update, (
                 broadcast_sim_state,
                 broadcast_weapons_update.after(broadcast_sim_state),
                 broadcast_repair_state.after(broadcast_sim_state),
@@ -627,6 +638,97 @@ fn handle_set_phaser_mode(
             continue;
         }
         phaser_mode.0 = *mode;
+    }
+}
+
+/// Convert a `messages::TorpedoTube` to a `torpedo::TorpedoTubeId`.
+fn to_tube_id(tube: MsgTorpedoTube) -> TorpedoTubeId {
+    match tube {
+        MsgTorpedoTube::ForePort => TorpedoTubeId::ForePort,
+        MsgTorpedoTube::ForeStarboard => TorpedoTubeId::ForeStarboard,
+        MsgTorpedoTube::Aft => TorpedoTubeId::Aft,
+    }
+}
+
+/// Convert a `torpedo::TorpedoTubeId` back to a `messages::TorpedoTube`.
+fn to_msg_tube(tube: TorpedoTubeId) -> MsgTorpedoTube {
+    match tube {
+        TorpedoTubeId::ForePort => MsgTorpedoTube::ForePort,
+        TorpedoTubeId::ForeStarboard => MsgTorpedoTube::ForeStarboard,
+        TorpedoTubeId::Aft => MsgTorpedoTube::Aft,
+    }
+}
+
+/// Handle `FireTorpedo` messages from the Tactical console.
+///
+/// Validates: sender is Tactical holder, game is in-progress, tube is loaded,
+/// and there are torpedoes remaining.
+/// On success, launches the torpedo and broadcasts `TorpedoLaunched` to all.
+fn handle_fire_torpedo(
+    mut reader: MessageReader<InboundMessage>,
+    mut writer: MessageWriter<OutboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    ship: Res<ShipState>,
+    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else { continue };
+        // Only the Tactical console holder may fire torpedoes.
+        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
+            continue;
+        }
+        let tube_id = to_tube_id(*tube);
+        let uuid = uuid::Uuid::new_v4().to_string();
+        // Heading matches ship yaw (torpedoes fire along ship forward for fore tubes).
+        let launch_heading = ship.yaw;
+        use crate::torpedo::LaunchResult;
+        match torpedo_sys.0.launch(tube_id, uuid, ship.x, ship.z, launch_heading, target_uuid.clone()) {
+            LaunchResult::Launched { uuid: launched_uuid } => {
+                writer.write(OutboundMessage {
+                    target: Target::All,
+                    msg: ServerMessage::TorpedoLaunched {
+                        uuid: launched_uuid,
+                        tube: *tube,
+                        x: ship.x,
+                        z: ship.z,
+                        heading: launch_heading,
+                    },
+                });
+            }
+            LaunchResult::TubeNotLoaded | LaunchResult::NoTorpedoes => {
+                // Silently ignore; client should check state before firing.
+            }
+        }
+    }
+}
+
+/// Advance all in-flight torpedoes and broadcast `TorpedoDestroyed` for any
+/// that expire this tick.
+fn tick_torpedo_system(
+    mut writer: MessageWriter<OutboundMessage>,
+    phase: Res<CurrentPhase>,
+    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+    world: Res<WorldResource>,
+    time: Res<Time>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    let dt = time.delta_secs();
+    let target_positions: std::collections::HashMap<String, (f32, f32)> = world.0.asteroids
+        .iter()
+        .map(|a| (a.uuid.clone(), (a.x, a.z)))
+        .collect();
+    let result = torpedo_sys.0.tick(dt, &target_positions);
+    for expired_uuid in result.expired {
+        writer.write(OutboundMessage {
+            target: Target::All,
+            msg: ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
+        });
     }
 }
 
@@ -1336,10 +1438,11 @@ fn test_app() -> App {
         .init_resource::<RepairPenalties>()
         .init_resource::<BreakdownQueueResource>()
         .init_resource::<crate::asteroid_lifecycle::DestroyedAsteroids>()
+        .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_repair, handle_impulse_messages, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_impulse_messages, tick_active_beam, tick_repair, tick_torpedo_system, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
 }
@@ -2473,6 +2576,81 @@ fn test_app() -> App {
         assert!(
             !out.iter().any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
             "SetScienceTarget should be ignored during Lobby phase"
+        );
+    }
+
+    // ── FireTorpedo tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+
+        push(&mut app, "weapons", ClientMessage::FireTorpedo {
+            tube: crate::messages::TorpedoTube::ForePort,
+            target_uuid: None,
+        });
+        let out = tick(&mut app);
+
+        assert!(
+            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube: crate::messages::TorpedoTube::ForePort, .. })),
+            "expected TorpedoLaunched broadcast after Tactical fires torpedo"
+        );
+    }
+
+    #[test]
+    fn non_tactical_player_cannot_fire_torpedo() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+
+        push(&mut app, "captain", ClientMessage::FireTorpedo {
+            tube: crate::messages::TorpedoTube::ForePort,
+            target_uuid: None,
+        });
+        let out = tick(&mut app);
+
+        assert!(
+            !out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            "captain should not be able to fire torpedo"
+        );
+    }
+
+    #[test]
+    fn fire_torpedo_ignored_in_lobby() {
+        let mut app = test_app();
+        push(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        tick(&mut app);
+        push(&mut app, "weapons", ClientMessage::SelectConsole { console: Console::Tactical });
+        tick(&mut app);
+
+        push(&mut app, "weapons", ClientMessage::FireTorpedo {
+            tube: crate::messages::TorpedoTube::Aft,
+            target_uuid: None,
+        });
+        let out = tick(&mut app);
+
+        assert!(
+            !out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            "FireTorpedo should be ignored during Lobby phase"
+        );
+    }
+
+    #[test]
+    fn torpedo_launched_is_broadcast_to_all() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+
+        push(&mut app, "weapons", ClientMessage::FireTorpedo {
+            tube: crate::messages::TorpedoTube::ForeStarboard,
+            target_uuid: None,
+        });
+        let out = tick(&mut app);
+
+        let launched = out.iter().find(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. }))
+            .expect("expected TorpedoLaunched");
+        assert!(
+            matches!(&launched.target, Target::All),
+            "TorpedoLaunched should be broadcast to All, not {:?}", launched.target
         );
     }
 }

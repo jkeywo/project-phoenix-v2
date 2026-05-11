@@ -7,7 +7,7 @@
 
 use bevy::prelude::Resource;
 
-use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus};
+use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -179,6 +179,9 @@ pub struct ClientSimState {
     /// True while the phaser bank is on post-fire cooldown.
     /// Updated by `WeaponsUpdate` messages from the server.
     pub on_cooldown: bool,
+    /// In-flight torpedoes: (uuid, x, z, heading, tube).
+    /// Updated by `TorpedoLaunched` and `TorpedoDestroyed` messages.
+    pub torpedoes_in_flight: Vec<(String, f32, f32, f32, TorpedoTube)>,
 }
 
 impl Default for ClientSimState {
@@ -199,6 +202,7 @@ impl Default for ClientSimState {
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
+            torpedoes_in_flight: Vec::new(),
         }
     }
 }
@@ -241,6 +245,12 @@ impl ClientSimState {
             }
             ServerMessage::ShieldStatus { facings } => {
                 self.shield_facings = facings.clone();
+            }
+            ServerMessage::TorpedoLaunched { uuid, tube, x, z, heading } => {
+                self.torpedoes_in_flight.push((uuid.clone(), *x, *z, *heading, *tube));
+            }
+            ServerMessage::TorpedoDestroyed { uuid } => {
+                self.torpedoes_in_flight.retain(|(id, ..)| id != uuid);
             }
             _ => {}
         }
@@ -484,6 +494,7 @@ mod tests {
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
+            torpedoes_in_flight: Vec::new(),
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
@@ -524,6 +535,7 @@ mod tests {
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
+            torpedoes_in_flight: Vec::new(),
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -554,6 +566,7 @@ mod tests {
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
+            torpedoes_in_flight: Vec::new(),
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -1271,5 +1284,46 @@ mod tests {
     #[test]
     fn phaser_mode_label_manual() {
         assert_eq!(phaser_mode_label(PhaserMode::Manual), "MANUAL");
+    }
+
+    #[test]
+    fn torpedo_launched_adds_to_in_flight() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::TorpedoLaunched {
+            uuid: "t1".into(),
+            tube: TorpedoTube::ForePort,
+            x: 10.0,
+            z: -5.0,
+            heading: 0.0,
+        });
+        assert_eq!(s.torpedoes_in_flight.len(), 1);
+        let (uuid, x, z, heading, tube) = &s.torpedoes_in_flight[0];
+        assert_eq!(uuid, "t1");
+        assert_eq!(*x, 10.0);
+        assert_eq!(*z, -5.0);
+        assert_eq!(*heading, 0.0);
+        assert_eq!(*tube, TorpedoTube::ForePort);
+    }
+
+    #[test]
+    fn torpedo_destroyed_removes_from_in_flight() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::TorpedoLaunched {
+            uuid: "t1".into(),
+            tube: TorpedoTube::Aft,
+            x: 0.0,
+            z: 0.0,
+            heading: 0.0,
+        });
+        s.apply(&ServerMessage::TorpedoLaunched {
+            uuid: "t2".into(),
+            tube: TorpedoTube::ForeStarboard,
+            x: 0.0,
+            z: 0.0,
+            heading: 0.0,
+        });
+        s.apply(&ServerMessage::TorpedoDestroyed { uuid: "t1".into() });
+        assert_eq!(s.torpedoes_in_flight.len(), 1);
+        assert_eq!(s.torpedoes_in_flight[0].0, "t2");
     }
 }

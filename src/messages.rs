@@ -109,6 +109,23 @@ pub struct SimSnapshot {
     pub authorized_repair_console: Option<Console>,
 }
 
+/// An asteroid field defined as a donut-shaped ring in world space.
+///
+/// The field has a centre (`x`, `z`), an `inner_radius` (the clear inner
+/// boundary) and an `outer_radius` (the dense outer boundary).  On radar
+/// these appear as concentric rings.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AsteroidField {
+    pub uuid: String,
+    pub x: f32,
+    pub z: f32,
+    pub inner_radius: f32,
+    pub outer_radius: f32,
+    /// Semantic tags for this entity (e.g. `["asteroid_field"]`).
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
 /// One asteroid in a `WorldData` snapshot — position on the play plane,
 /// collider radius, and stable UUID for client-side targeting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

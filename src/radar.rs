@@ -7,7 +7,7 @@
 // client). Keeping the math separate makes both renderers identical and
 // independently unit-testable.
 
-use crate::messages::AsteroidInfo;
+use crate::messages::{AsteroidInfo, AsteroidField};
 use crate::entity_tags::{EntityTag, matches_any, parse_tags};
 use crate::radar_config::RadarConfig;
 
@@ -185,6 +185,53 @@ pub fn radar_dots_with_config<'a>(
         let (rx, ry) = project_to_radar_with_config(a.x, a.z, ship_x, ship_z, ship_yaw, config)?;
         Some((rx, ry, a.radius / config.range))
     })
+}
+
+/// Project an asteroid field to radar ring coordinates.
+///
+/// Returns `Some((centre_x, centre_y, inner_r, outer_r))` where all values are
+/// normalised to `[-1, 1]` units (i.e. divided by `RADAR_RANGE`).
+///
+/// Returns `None` only if the *entire* ring is completely outside radar range
+/// — i.e., the distance from the ship to the field centre minus the outer
+/// radius is greater than `RADAR_RANGE`.  Rings that partially overlap the
+/// radar view are returned (the renderer clips them).
+pub fn project_asteroid_field(
+    field: &AsteroidField,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+) -> Option<(f32, f32, f32, f32)> {
+    let dx = field.x - ship_x;
+    let dz = field.z - ship_z;
+    let dist = (dx * dx + dz * dz).sqrt();
+
+    // Cull only when even the near edge of the ring is beyond radar range.
+    if dist - field.outer_radius > RADAR_RANGE {
+        return None;
+    }
+
+    let cos_y = ship_yaw.cos();
+    let sin_y = ship_yaw.sin();
+    let centre_x = (dx * cos_y + dz * sin_y) / RADAR_RANGE;
+    let centre_y = (dx * sin_y - dz * cos_y) / RADAR_RANGE;
+
+    let inner_r = field.inner_radius / RADAR_RANGE;
+    let outer_r = field.outer_radius / RADAR_RANGE;
+
+    Some((centre_x, centre_y, inner_r, outer_r))
+}
+
+/// Iterator of `(centre_x, centre_y, inner_r, outer_r)` tuples (all in radar
+/// unit-square coordinates) for all `AsteroidField` values that are at least
+/// partially within `RADAR_RANGE` of the ship.
+pub fn radar_rings<'a>(
+    fields: &'a [AsteroidField],
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+) -> impl Iterator<Item = (f32, f32, f32, f32)> + 'a {
+    fields.iter().filter_map(move |f| project_asteroid_field(f, ship_x, ship_z, ship_yaw))
 }
 
 #[cfg(test)]
@@ -479,6 +526,67 @@ mod tests {
         };
         let dots: Vec<_> = radar_dots_with_config(&[a, s], 0.0, 0.0, 0.0, &cfg).collect();
         assert_eq!(dots.len(), 2);
+    }
+
+    // ── project_asteroid_field / radar_rings ──────────────────────────────
+
+    fn make_field(x: f32, z: f32, inner: f32, outer: f32) -> crate::messages::AsteroidField {
+        crate::messages::AsteroidField {
+            uuid: "field-1".into(),
+            x,
+            z,
+            inner_radius: inner,
+            outer_radius: outer,
+            tags: vec!["asteroid_field".into()],
+        }
+    }
+
+    #[test]
+    fn project_asteroid_field_centred_on_ship_maps_to_origin() {
+        let field = make_field(0.0, 0.0, 5.0, 15.0);
+        let (cx, cy, ir, or_) = project_asteroid_field(&field, 0.0, 0.0, 0.0).unwrap();
+        close(cx, 0.0);
+        close(cy, 0.0);
+        close(ir, 5.0 / RADAR_RANGE);
+        close(or_, 15.0 / RADAR_RANGE);
+    }
+
+    #[test]
+    fn project_asteroid_field_ahead_maps_to_positive_y() {
+        let field = make_field(0.0, -25.0, 5.0, 10.0);
+        let (cx, cy, _ir, _or) = project_asteroid_field(&field, 0.0, 0.0, 0.0).unwrap();
+        close(cx, 0.0);
+        close(cy, 0.5);
+    }
+
+    #[test]
+    fn project_asteroid_field_fully_out_of_range_returns_none() {
+        // Field centre at 100 units, outer radius 5 → nearest edge at 95 > 50.
+        let field = make_field(100.0, 0.0, 3.0, 5.0);
+        assert!(project_asteroid_field(&field, 0.0, 0.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn project_asteroid_field_partially_in_range_returns_some() {
+        // Field centre at 55 units, outer radius 10 → near edge at 45 < 50.
+        let field = make_field(55.0, 0.0, 5.0, 10.0);
+        assert!(project_asteroid_field(&field, 0.0, 0.0, 0.0).is_some());
+    }
+
+    #[test]
+    fn radar_rings_skips_fully_out_of_range_fields() {
+        let far = make_field(200.0, 0.0, 5.0, 10.0);
+        let near = make_field(0.0, -25.0, 5.0, 10.0);
+        let rings: Vec<_> = radar_rings(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
+        assert_eq!(rings.len(), 1);
+        let expected = project_asteroid_field(&near, 0.0, 0.0, 0.0).unwrap();
+        assert_eq!(rings[0], expected);
+    }
+
+    #[test]
+    fn radar_rings_empty_slice_returns_empty() {
+        let rings: Vec<_> = radar_rings(&[], 0.0, 0.0, 0.0).collect();
+        assert!(rings.is_empty());
     }
 }
 

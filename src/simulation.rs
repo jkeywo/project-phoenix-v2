@@ -229,6 +229,7 @@ impl Plugin for SimulationPlugin {
                 handle_toggle,
                 handle_set_view,
                 handle_set_target,
+                handle_set_science_target,
                 handle_fire_phaser,
                 handle_set_phaser_mode,
                 handle_repair,
@@ -330,6 +331,35 @@ fn handle_set_target(
         writer.write(OutboundMessage {
             target: Target::Token(ev.token.clone()),
             msg: ServerMessage::TargetLock { uuid: uuid.clone(), locked },
+        });
+    }
+}
+
+fn handle_set_science_target(
+    mut reader: MessageReader<InboundMessage>,
+    mut writer: MessageWriter<OutboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        let ClientMessage::SetScienceTarget { uuid } = &ev.msg else { continue };
+
+        // Only the Science console holder may broadcast a target suggestion.
+        if sessions.0.console_holder(Console::Science) != Some(ev.token.as_str()) {
+            continue;
+        }
+
+        // Only broadcast if there is a Weapons console player to receive it.
+        let Some(weapons_token) = sessions.0.console_holder(Console::Tactical) else {
+            continue;
+        };
+
+        writer.write(OutboundMessage {
+            target: Target::Token(weapons_token.to_string()),
+            msg: ServerMessage::ScienceTargetSuggestion { uuid: uuid.clone() },
         });
     }
 }
@@ -1158,7 +1188,7 @@ fn test_app() -> App {
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_fire_phaser, handle_set_phaser_mode, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
 }
@@ -2050,6 +2080,79 @@ fn test_app() -> App {
             app.world().resource::<CurrentPhaserMode>().0,
             crate::messages::PhaserMode::Auto,
             "phaser mode should stay Auto when non-Weapons player sends SetPhaserMode"
+        );
+    }
+
+    // ── SetScienceTarget / ScienceTargetSuggestion tests ─────────────────
+
+    fn start_game_with_science_and_weapons(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        tick(app);
+        push(app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
+        tick(app);
+        push(app, "science", ClientMessage::SelectConsole { console: Console::Science });
+        tick(app);
+        push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        tick(app);
+        push(app, "weapons", ClientMessage::SelectConsole { console: Console::Tactical });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    #[test]
+    fn science_set_science_target_broadcasts_suggestion_to_weapons() {
+        let mut app = test_app();
+        start_game_with_science_and_weapons(&mut app);
+
+        push(&mut app, "science", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
+        let out = tick(&mut app);
+
+        let suggestion = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::ScienceTargetSuggestion { uuid } => Some(uuid.clone()),
+            _ => None,
+        }).expect("expected a ScienceTargetSuggestion message");
+        assert_eq!(suggestion, "asteroid-42");
+
+        // Should be targeted to Weapons console player only.
+        let suggestion_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. }))
+            .unwrap();
+        assert!(
+            matches!(&suggestion_msg.target, Target::Token(t) if t == "weapons"),
+            "ScienceTargetSuggestion should be sent only to Weapons console"
+        );
+    }
+
+    #[test]
+    fn non_science_player_cannot_send_science_target() {
+        let mut app = test_app();
+        start_game_with_science_and_weapons(&mut app);
+
+        push(&mut app, "captain", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
+        let out = tick(&mut app);
+
+        assert!(
+            !out.iter().any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
+            "non-Science player should not be able to send ScienceTargetSuggestion"
+        );
+    }
+
+    #[test]
+    fn set_science_target_ignored_in_lobby() {
+        let mut app = test_app();
+        push(&mut app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
+        tick(&mut app);
+        push(&mut app, "science", ClientMessage::SelectConsole { console: Console::Science });
+        tick(&mut app);
+
+        push(&mut app, "science", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
+        let out = tick(&mut app);
+
+        assert!(
+            !out.iter().any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
+            "SetScienceTarget should be ignored during Lobby phase"
         );
     }
 }

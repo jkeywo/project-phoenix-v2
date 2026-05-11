@@ -8,6 +8,41 @@
 use bevy::prelude::Resource;
 
 use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode};
+use crate::entity_tags::EntityTag;
+use crate::radar_config::RadarConfig;
+use crate::radar::{ScienceRadarView, compute_science_radar_view};
+
+/// Range used by the Science console system chart — large enough to show the
+/// full solar system layout.
+pub const SYSTEM_CHART_RANGE: f32 = 500.0;
+
+/// Returns the `RadarConfig` for the Science console System Chart tab.
+///
+/// Uses a large detection range and filters for navigational entities only:
+/// stars, planets, and asteroid field rings.
+pub fn system_chart_config() -> RadarConfig {
+    RadarConfig {
+        range: SYSTEM_CHART_RANGE,
+        shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField],
+    }
+}
+
+/// Compute the Science console System Chart view from the current client state.
+///
+/// Non-interactive: returns dots and rings for navigational entities (stars,
+/// planets, asteroid fields) within `SYSTEM_CHART_RANGE` of the ship.
+/// Individual asteroids are excluded (they are not navigational features).
+pub fn compute_system_chart_view(state: &ClientSimState) -> ScienceRadarView {
+    let config = system_chart_config();
+    compute_science_radar_view(
+        &state.world.asteroids,
+        &state.world.asteroid_fields,
+        state.ship_x,
+        state.ship_z,
+        state.ship_yaw,
+        &config,
+    )
+}
 
 /// Subset of `SimSnapshot` the client UI needs. Reset to defaults on
 /// `Welcome` (which also clears `LobbyState`) and refreshed every time
@@ -346,5 +381,101 @@ mod tests {
     fn set_science_target_message_builder_produces_correct_message() {
         let msg = set_science_target_message("entity-uuid-42".into());
         assert_eq!(msg, ClientMessage::SetScienceTarget { uuid: "entity-uuid-42".into() });
+    }
+
+    // ── system_chart_config ──────────────────────────────────────────────
+
+    #[test]
+    fn system_chart_config_has_large_range() {
+        let cfg = system_chart_config();
+        assert!(cfg.range >= 200.0, "system chart range {:.0} should be large (≥200)", cfg.range);
+    }
+
+    #[test]
+    fn system_chart_config_shows_star_planet_asteroid_field() {
+        use crate::entity_tags::EntityTag;
+        let cfg = system_chart_config();
+        assert!(cfg.shows.contains(&EntityTag::Star),         "must show stars");
+        assert!(cfg.shows.contains(&EntityTag::Planet),       "must show planets");
+        assert!(cfg.shows.contains(&EntityTag::AsteroidField),"must show asteroid fields");
+    }
+
+    #[test]
+    fn system_chart_config_does_not_show_individual_asteroids() {
+        use crate::entity_tags::EntityTag;
+        let cfg = system_chart_config();
+        assert!(!cfg.shows.contains(&EntityTag::Asteroid), "individual asteroids are not navigational");
+    }
+
+    // ── compute_system_chart_view ────────────────────────────────────────
+
+    fn state_with_field(x: f32, z: f32) -> ClientSimState {
+        use crate::messages::{AsteroidField, WorldData};
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            asteroids: vec![],
+            asteroid_fields: vec![
+                AsteroidField {
+                    uuid: "field-1".into(),
+                    x, z,
+                    inner_radius: 10.0,
+                    outer_radius: 30.0,
+                    tags: vec!["asteroid_field".into()],
+                }
+            ],
+        };
+        s
+    }
+
+    #[test]
+    fn system_chart_view_empty_world_produces_empty_view() {
+        let s = ClientSimState::default();
+        let view = compute_system_chart_view(&s);
+        assert!(view.dots.is_empty());
+        assert!(view.rings.is_empty());
+    }
+
+    #[test]
+    fn system_chart_view_includes_asteroid_field_ring_within_range() {
+        let s = state_with_field(0.0, -100.0);
+        let view = compute_system_chart_view(&s);
+        assert_eq!(view.rings.len(), 1, "asteroid field within range should appear as a ring");
+        assert_eq!(view.rings[0].uuid, "field-1");
+    }
+
+    #[test]
+    fn system_chart_view_excludes_asteroid_field_beyond_range() {
+        // Place field far outside SYSTEM_CHART_RANGE.
+        let far = SYSTEM_CHART_RANGE + 200.0;
+        let s = state_with_field(far, 0.0);
+        let view = compute_system_chart_view(&s);
+        assert!(view.rings.is_empty(), "field beyond system chart range must be excluded");
+    }
+
+    #[test]
+    fn system_chart_view_excludes_individual_asteroids() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            asteroids: vec![
+                AsteroidInfo { uuid: "a1".into(), x: 0.0, z: -50.0, radius: 2.0, tags: vec!["asteroid".into()] }
+            ],
+            asteroid_fields: vec![],
+        };
+        let view = compute_system_chart_view(&s);
+        assert!(view.dots.is_empty(), "individual asteroids must not appear on system chart");
+    }
+
+    #[test]
+    fn system_chart_view_ring_position_respects_ship_pose() {
+        // Field directly ahead at 100 units (ship at origin, yaw=0 → forward is -Z).
+        let s = state_with_field(0.0, -100.0);
+        let view = compute_system_chart_view(&s);
+        assert_eq!(view.rings.len(), 1);
+        // Ring centre should be at roughly (0, positive) in radar space.
+        assert!(view.rings[0].centre_y > 0.0, "field ahead should map to positive radar_y");
+        let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-3, "expected {b}, got {a}");
+        close(view.rings[0].centre_x, 0.0);
+        close(view.rings[0].centre_y, 100.0 / SYSTEM_CHART_RANGE);
     }
 }

@@ -51,12 +51,23 @@ Faithful summaries of external artifacts. One page per source.
 
 ### Product Requirements (GitHub issues)
 
+Shipped:
+
 - **[PRD #1 — Browser-Based Bridge Simulator](./sources/prd-001-bridge-simulator.md)** — Closed. The PoC: lobby, captain, red alert, rotating cube.
 - **[PRD #17 — Mobile UX, Canvas Resize, Connection Status](./sources/prd-017-mobile-ux-and-status.md)** — Closed. Fullscreen, top-right status bar, Bevy node UI.
 - **[PRD #22 — Helm and Game World](./sources/prd-022-helm-and-game-world.md)** — Closed. Helm console, ship physics, asteroid field, collisions.
 - **[PRD #36 — Captain View Selector](./sources/prd-036-captain-view-selector.md)** — Closed. Fore/aft/port/starboard hull cameras.
 - **[PRD #51 — Smoke Test Harness](./sources/prd-051-smoke-test-harness.md)** — Closed. Playwright + BroadcastChannel PeerJS shim.
 - **[PRD #66 — Weapons & Engineering Consoles](./sources/prd-066-weapons-and-engineering.md)** — Shipped. Tactical (phasers, lock), Engineering (repair loop), hull integrity, breakdown queue.
+
+Open (planned work):
+
+- **[PRD #115 — Native PC Server](./sources/prd-115-native-pc-server.md)** — Native binary host with bundled cloudflared tunnel + WebSocket transport. New `native` Cargo feature.
+- **[PRD #116 — Save/Load Game Sessions](./sources/prd-116-save-load-sessions.md)** — `localStorage` save slots; `save.rs` is the second sanctioned `serde_json` surface.
+- **[PRD #117 — Modifier System](./sources/prd-117-modifier-system.md)** — Pure `modifiers.rs` infrastructure for cross-console multipliers.
+- **[PRD #118 — Repair + Power Consoles](./sources/prd-118-repair-and-power-consoles.md)** — Splits Engineering; shape-matching repair; 6+2 power allocation. Depends on #117.
+- **[PRD #119 — Stations, Scenarios & Comms](./sources/prd-119-stations-scenarios-comms.md)** — TOML scenario engine, station entities, `Console::Comms`.
+- **[PRD #120 — Station-Based Lobby](./sources/prd-120-station-based-lobby.md)** — Per-station picking with auto-shuffle and spectator FIFO.
 
 ### Design drafts (`docs/`)
 
@@ -65,9 +76,12 @@ Faithful summaries of external artifacts. One page per source.
 - **[Draft 3 — Science Console](./sources/design-03-science-console.md)** — Long-range radar, impulse, system chart.
 - **[Draft 4 — Combat Update](./sources/design-04-combat-update.md)** — Phaser banks, torpedoes, four-quadrant shields.
 - **[Draft 5 — Ship's Power](./sources/design-05-ships-power.md)** — Engineering 6-point distribution, aux battery.
-- **[Draft 6 — Space Stations](./sources/design-06-space-stations.md)** — *TODO in source.*
-- **[Draft 7 — Scenario File](./sources/design-07-scenario-file.md)** — *TODO in source.*
-- **[Draft 8 — Comms Console](./sources/design-08-comms-console.md)** — *TODO in source.*
+- **[Draft 6 — Space Stations](./sources/design-06-space-stations.md)** — *Stub. Consolidated into PRD #119.*
+- **[Draft 7 — Scenario File](./sources/design-07-scenario-file.md)** — *Stub. Consolidated into PRD #119.*
+- **[Draft 8 — Comms Console](./sources/design-08-comms-console.md)** — *Stub. Consolidated into PRD #119.*
+- **[Draft 9 — AI and Behaviour](./sources/design-09-ai-and-behaviour.md)** — State-machine NPCs.
+- **[Draft 10 — Region Entities](./sources/design-10-region-entities.md)** — Invisible trigger volumes (radar dampening, damage zones, impulse blockers).
+- **[Draft 11 — Console Complexity](./sources/design-11-console-complexity.md)** — Per-console Low / Full complexity toggle.
 - **[Architecture Improvement Notes](./sources/notes-architecture-improvements.md)** — Per-console message subscriptions.
 
 ### Project documents

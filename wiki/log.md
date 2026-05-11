@@ -102,3 +102,65 @@ Pages not yet updated (may have stale file paths or line numbers):
 `concepts/architecture`, `concepts/testing-strategy`, `concepts/console-plugin-pattern`,
 `concepts/view-model-pattern`, `entities/helm-console`, `entities/captain-console`,
 `roadmap/combat-and-damage`, `roadmap/console-expansion`.
+
+## [2026-05-11] ingest | PRDs #115-120 + design drafts 9-11; refresh AGENTS/README/CONTEXT | touched: AGENTS.md, README.md, CONTEXT.md, sources/prd-115..120, sources/design-09..11, roadmap/overview, index.md
+
+Bulk ingest pass for the new wave of planned work and to bring the root docs in
+sync with the current codebase.
+
+New source pages (six PRDs + three drafts):
+
+- `sources/prd-115-native-pc-server.md` — native binary, cloudflared tunnel, WS transport
+- `sources/prd-116-save-load-sessions.md` — `localStorage` save slots, `save.rs` as the
+  *second* sanctioned `serde_json` surface
+- `sources/prd-117-modifier-system.md` — pure `modifiers.rs` infrastructure
+- `sources/prd-118-repair-and-power-consoles.md` — Engineering split (Repair + Power),
+  shape-matching, 6+2 power
+- `sources/prd-119-stations-scenarios-comms.md` — TOML scenario engine, station entities,
+  `Console::Comms`
+- `sources/prd-120-station-based-lobby.md` — per-station picking, cascade reassignment,
+  spectator FIFO
+- `sources/design-09-ai-and-behaviour.md` — NPC state machine
+- `sources/design-10-region-entities.md` — invisible trigger volumes
+- `sources/design-11-console-complexity.md` — Low/Full per console, shield frequency
+
+Pages updated:
+
+- `AGENTS.md` — added "Wiki — Read It and Maintain It" section pointing at SCHEMA.md
+  with workflow at a glance; refreshed PRD list (shipped + open); added `phaser.rs`,
+  `torpedo.rs`, `shield.rs`, `impulse.rs`, `entity_config.rs`, `map_config.rs`,
+  `config_cache.rs`, `radar_config.rs`, `entity_tags.rs`, `asteroid_lifecycle.rs`,
+  `beam_render.rs` to the file layout; flagged `src/server/`, `src/client/`,
+  `src/shared/` as unwired draft refactor; added `assets/` tree; added Science
+  console; added impulse + torpedo + phaser-mode messages to In-Progress flow.
+- `README.md` — added Science to the consoles table; added Tactical/Helm details;
+  pointed at `wiki/` and the open PRDs; refreshed `Project Structure` tree with the
+  new modules.
+- `CONTEXT.md` — added Science to Console; added planned-vocabulary entries (Station,
+  Modifier, Power Allocation, Save Slot, Scenario, Shield Facing, Phaser Bank,
+  Torpedo Tube, Impulse Drive); added Entity Config + Map Config terms.
+- `wiki/index.md` — split PRD list into shipped + open; added the three new design
+  drafts; reflagged drafts 1–5 as shipped/superseded as appropriate.
+- `wiki/roadmap/overview.md` — full rewrite. Documents the wave of work that landed
+  without labelled PRDs (phasers, torpedoes, shields, impulse, science, data-driven
+  entities); summarises the six open PRDs with a suggested ordering;
+  re-categorises the design drafts (1–5 mostly shipped, 6–8 absorbed by #119, 9–11
+  candidates); calls out cross-PRD tensions (wire-break cadence, viewscreen
+  authority, save fidelity vs scenario state, spectator persistence).
+
+Pages not yet updated in this pass (may need follow-up if their facts shift further):
+`concepts/architecture`, `concepts/testing-strategy`, `concepts/console-plugin-pattern`,
+`concepts/view-model-pattern`, `entities/helm-console`, `entities/captain-console`,
+`entities/console`, `entities/bridge-crew-stations-planned`, `roadmap/combat-and-damage`,
+`roadmap/console-expansion`, `roadmap/data-driven-content`,
+`roadmap/open-architectural-questions`.
+
+Open questions surfaced:
+
+- #116 save format vs #118 `Engineering` rename — a save written today would be
+  invalid after #118 lands, since `Console::Engineering` no longer exists.
+- #116 vs #119 — save fidelity does not yet cover scenario state, objectives, or
+  active comms threads.
+- #120 vs #116 — save format also doesn't restore the spectator FIFO.
+- Captain `SetView` authority vs Science / Comms viewscreen pushes — needs an
+  explicit override path. PRD #119 user story 13 calls this out for Comms.

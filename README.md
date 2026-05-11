@@ -19,9 +19,12 @@ A browser-based spaceship bridge simulator for groups. One browser tab on a shar
 | Console | Controls |
 |---|---|
 | **Captain's Chair** | Toggle Red Alert; switch view camera |
-| **Helm** | Joystick — up/down = thrust/reverse, left/right = steering; radar overlay |
-| **Tactical** | Lock targets, fire phasers |
+| **Helm** | Joystick — up/down = thrust/reverse, left/right = steering; radar overlay; trigger impulse charge |
+| **Tactical** | Lock targets, fire phaser banks (port/starboard), launch torpedoes |
 | **Engineering** | Repair hull breakdowns |
+| **Science** | Long-range radar, system chart, suggest targets, cancel impulse |
+
+See [`wiki/`](./wiki/) for a deeper architectural map and [GitHub PRDs](https://github.com/jkeywo/project-phoenix-v2/issues?q=label%3APRD) for upcoming work (native PC server, save/load, modifier system, scenarios + comms console, station-based crew assignment).
 
 ---
 
@@ -136,7 +139,7 @@ CI builds both pages on every push to `main` and deploys to GitHub Pages automat
 
 ```
 src/
-  messages.rs         — wire types (ClientMessage, ServerMessage, Console)
+  messages.rs         — wire types (ClientMessage, ServerMessage, Console, ViewMode, etc.)
   codec.rs            — JSON serialization (only place serde_json is used)
   session.rs          — player lifecycle: tokens, consoles, reconnect
   lobby_handler.rs    — pure lobby message handler (no Bevy, fully testable)
@@ -145,20 +148,37 @@ src/
   ship_physics.rs     — pure Rust physics function (fully unit-tested)
   ship_state.rs       — ShipState Bevy resource
   asteroid_spawner.rs — deterministic seeded asteroid placement
+  asteroid_lifecycle.rs — Bevy systems: range-gated asteroid spawn/despawn
   radar.rs            — pure radar projection math (server + client share)
+  radar_config.rs     — pure radar viewport configs (helm + weapons)
   damage.rs           — hull integrity and collision damage formula
   breakdown.rs        — breakdown queue mechanic
+  phaser.rs           — pure phaser bank state machine
+  torpedo.rs          — pure torpedo + tube state machine
+  shield.rs           — pure four-quadrant shield model
+  impulse.rs          — pure impulse-drive charge state machine
+  beam_render.rs      — Bevy plugin: phaser beam rendering (server)
+  entity_config.rs    — TOML entity config types
+  map_config.rs       — TOML map config (anchors, fields, default scenario)
+  config_cache.rs     — Bevy plugin: preloads TOML configs via JS fetch on WASM
+  entity_tags.rs      — string-tag helpers for entity configs
   renderer.rs         — Bevy plugin: 2D lobby UI + 3D game camera (server)
   bridge.rs           — wasm-bindgen exports (server feature only)
 
   client_lobby.rs     — pure lobby state model (client, Bevy-free)
   client_sim.rs       — pure sim-state model (client, Bevy-free)
   client_helm.rs      — pure joystick logic (client, Bevy-free)
-  client_app.rs       — Bevy plugin: lobby + captain + helm UI panels (client)
+  client_app.rs       — Bevy plugin: lobby + console UI panels (client)
   client_bridge.rs    — wasm-bindgen exports (client feature only)
+
+assets/
+  maps/default.toml             — default map config
+  entities/*.toml               — asteroid + ship entity configs
 
 server.html           — host page: loads WASM, owns PeerJS host peer
 client.html           — client page: loads client WASM, connects via PeerJS
 Trunk.toml            — build config for server.html (server feature)
 client-trunk.toml     — build config for client.html (client feature)
+wiki/                 — LLM-maintained knowledge base (see wiki/SCHEMA.md)
+docs/                 — design drafts (numbered)
 ```

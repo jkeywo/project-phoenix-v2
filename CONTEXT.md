@@ -6,7 +6,9 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 ## Game Domain
 
-**Console** — a role a player occupies on the ship. Currently: `CaptainChair`, `Helm`, `Tactical`, `Engineering`. Each console has exactly one seat; vacancy is immediate on disconnect. A player may hold more than one console simultaneously (the `Player.consoles` field is a `Vec<Console>`); the JS tab bar uses the `ActiveConsole` resource to switch which console panel is displayed.
+**Console** — a role a player occupies on the ship. Currently shipped: `CaptainChair`, `Helm`, `Tactical`, `Engineering`, `Science`. Each console has exactly one seat; vacancy is immediate on disconnect. A player may hold more than one console simultaneously (the `Player.consoles` field is a `Vec<Console>`); the JS tab bar uses the `ActiveConsole` resource to switch which console panel is displayed. Planned (PRD #118): `Engineering` → `Repair` rename + new `Power` console. Planned (PRD #119): `Comms` console. Planned (PRD #120): per-console picking is replaced by per-station picking.
+
+**Station** *(planned, PRD #120)* — a player's role bundle of one or more consoles, defined per player count in `player_ship.toml`. Joining/leaving auto-shuffles players between stations. Spectators wait in a FIFO queue.
 
 **Session** — the server-side record of a connected (or recently-disconnected) player. Keyed by session token, not peer ID. Survives reconnects.
 
@@ -24,15 +26,35 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 **Hull Integrity** — the ship's hit-point pool, starting at 100 and clamped to [0, 100]. Reduced by asteroid collisions (5–15 HP depending on impact speed, via `damage.rs`). Restored by successful repairs.
 
-**Breakdown** — a console-repair assignment triggered by hull damage. Every 10 cumulative HP of damage generates one breakdown. A `BreakdownQueue` (FIFO in `breakdown.rs`) tracks pending assignments; the front entry is the `authorized_repair_console` broadcast in `SimSnapshot`.
+**Shield Facing** — one of four quadrants (fore/aft/port/starboard) absorbing damage before hull. Tracked in `shield.rs` and broadcast via `ShieldStatus`.
+
+**Phaser Bank** — `Port` or `Starboard` directional energy weapon. Has its own arc, lock state, and cooldown. Modelled in `phaser.rs`.
+
+**Torpedo Tube** — `ForePort`, `ForeStarboard`, or `Aft`. Each tube reloads independently and launches a homing torpedo via `torpedo.rs`.
+
+**Impulse Drive** — a charged short-burst speed boost triggered by Helm via `StartImpulseCharge`, cancellable by Science via `CancelImpulse`. Modelled in `impulse.rs`.
+
+**Breakdown** — a console-repair assignment triggered by hull damage. Every 10 cumulative HP of damage generates one breakdown. A `BreakdownQueue` (FIFO in `breakdown.rs`) tracks pending assignments; the front entry is the `authorized_repair_console` broadcast in `SimSnapshot`. Planned (PRD #118): replaced by shape-matching with a `Shape` enum and three repair teams.
 
 **Repair** — the action a console player performs to clear a breakdown. Only the console named in `authorized_repair_console` may repair without penalty. Sending `Repair` from the wrong console incurs a cooldown penalty instead.
 
-**View Mode** — the server-side camera perspective on the view screen. `Camera(direction)` shows one of four hull cameras (Fore/Aft/Port/Starboard); `Radar` shows a top-down tactical view. Settable by clients via `SetView`.
+**Modifier** *(planned, PRD #117)* — a multiplier registered on a named `ModifierSlot` (`MaxSpeed`, `MaxYawRate`, `RadarRange`, `PhaserDamage`, `HullDamageTaken`, `RepairRate`) by a `ModifierSource` (a console, the impulse drive, a region effect). Resolved into a per-slot cached multiplier consumed by physics, weapons, repair, and radar systems.
 
-**Radar** — the overhead mini-map showing asteroid positions relative to the ship. Rendered on both the server view screen and the Helm console.
+**Power Allocation** *(planned, PRD #118)* — 6 base + up to 2 battery points distributed across `Helm`, `Tactical`, and `Science` by the Power console. Drives modifiers on each console's relevant slots. Battery exhaustion locks all controls to level 1 until recharged to an emergency threshold.
 
-**World Data** — the fixed asteroid layout for a game session. Generated once on `StartGame` using a seeded deterministic generator. Sent to clients as `WorldSetup`.
+**Save Slot** *(planned, PRD #116)* — a `localStorage`-keyed snapshot (`phoenix_save_<uuid>`) holding `SaveMeta` (version, timestamps, player names) plus full `SaveState` (ship pose, hull, breakdowns, weapons, surviving asteroids). Saved on `Engage`, every 30 s, and on best-effort tab close.
+
+**Scenario** *(planned, PRD #119)* — a TOML file loaded on top of the map at runtime that spawns entities, registers triggers (`on_attacked`, `on_destroyed`, `on_hailed`, `on_timer`), fires actions (`load_scenario`, `add_objective`, push comms message), and scripts comms exchanges. Owns the entities, objectives, and messages it created; cleans them up when unloaded.
+
+**View Mode** — the server-side camera perspective on the view screen. `Camera(direction)` shows one of four hull cameras (Fore/Aft/Port/Starboard); `Radar` shows a top-down tactical view; `ScienceRadar` and `SystemChart` are pushed by Science. Settable by clients via `SetView`.
+
+**Radar** — the overhead mini-map showing asteroid (and planned: station) positions relative to the ship. Rendered on the server view screen (when in `Radar` mode), and inside the Helm and Tactical (weapons radar) panels. Science shows a longer-range overlay.
+
+**World Data** — the snapshot of asteroids and asteroid fields visible to all players. Sent in `Welcome` and on `WorldSetup`. Asteroids stream in/out of the spawned ECS world via `asteroid_lifecycle.rs` based on range from the ship.
+
+**Entity Config** — a TOML file under `assets/entities/` describing one entity type's tags, geometry, physics, weapons, shields, and (planned) `on_attacked`/`on_destroyed` triggers. Loaded by `entity_config.rs` and surfaced as Bevy resources via `config_cache.rs`.
+
+**Map Config** — a TOML file under `assets/maps/` defining named spawn anchors, asteroid fields, and the default scenario reference. Loaded by `map_config.rs`.
 
 ---
 

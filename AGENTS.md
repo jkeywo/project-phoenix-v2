@@ -4,12 +4,40 @@
 
 A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code — no installation. Both the host (view screen) and the client (phone console) run Rust/Bevy compiled to WebAssembly. The host acts as the authoritative server; clients send inputs and receive state snapshots. Networking uses PeerJS (WebRTC) in a star topology.
 
-**PRDs that define the project:**
-- **PRD #1:** [Project Phoenix — Browser-Based Bridge Simulator](https://github.com/jkeywo/project-phoenix-v2/issues/1) — PoC: lobby, captain's chair, red alert, rotating cube
+**Shipped PRDs:**
+- **PRD #1:** [Browser-Based Bridge Simulator](https://github.com/jkeywo/project-phoenix-v2/issues/1) — PoC: lobby, captain's chair, red alert, rotating cube
+- **PRD #17:** [Mobile UX, Canvas Resize, Connection Status](https://github.com/jkeywo/project-phoenix-v2/issues/17)
 - **PRD #22:** [Helm and Game World](https://github.com/jkeywo/project-phoenix-v2/issues/22) — Ship physics, asteroids, helm console with thrust/steering
+- **PRD #36:** [Captain View Selector](https://github.com/jkeywo/project-phoenix-v2/issues/36)
+- **PRD #51:** [Smoke Test Harness](https://github.com/jkeywo/project-phoenix-v2/issues/51)
 - **PRD #66:** [Weapons & Engineering Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/66) — Phasers, hull integrity, breakdown queue, repair loop
 
-**Current state:** All three PRDs are fully implemented. The game has a lobby with player management, four consoles (Captain + Helm + Tactical + Engineering), a physics-simulated ship, asteroid field with destroyable asteroids, phaser weapons, hull damage and the breakdown/repair system.
+**Open PRDs (planned work):**
+- **PRD #115:** [Native PC Server](https://github.com/jkeywo/project-phoenix-v2/issues/115) — Native binary host with bundled cloudflared tunnel and embedded WebSocket transport. Adds a `native` Cargo feature alongside `server`/`client`.
+- **PRD #116:** [Save/Load Game Sessions](https://github.com/jkeywo/project-phoenix-v2/issues/116) — `localStorage`-backed save slots, periodic + lifecycle saves, version-gated load. Introduces `save.rs` (the *second* sanctioned `serde_json` surface).
+- **PRD #117:** [Modifier System for Cross-Console Multipliers](https://github.com/jkeywo/project-phoenix-v2/issues/117) — Pure `modifiers.rs`: `ModifierSlot`, `ModifierSource`, `ShipModifiers` cache. Infrastructure for #118 and beyond.
+- **PRD #118:** [Engineering Split: Repair + Power Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/118) — Renames `Engineering` → `Repair`, adds `Power` console, shape-matching repair with 3 teams, 6+2 power allocation. Depends on #117.
+- **PRD #119:** [Space Stations, Scenario Engine & Comms Console](https://github.com/jkeywo/project-phoenix-v2/issues/119) — TOML scenarios with triggers/actions, station entities, `Console::Comms`. Depends on Science + Power.
+- **PRD #120:** [Station-Based Lobby & Crew Assignment](https://github.com/jkeywo/project-phoenix-v2/issues/120) — Replaces per-console picking with per-station picking; auto-shuffle on join/leave; spectator FIFO queue.
+
+**Current state:** Five consoles in the wire types (`CaptainChair`, `Helm`, `Tactical`, `Engineering`, `Science`). Full simulation: ship physics, destroyable asteroid field, phaser banks (port/starboard), torpedoes, four-quadrant shields, impulse drive, hull damage, breakdown/repair loop. Data-driven entities and maps loaded from TOML via `assets/`. Client is a full Bevy/WASM app. See **[wiki/](./wiki/)** for the deeper map of the codebase.
+
+---
+
+## Wiki — Read It and Maintain It
+
+This repo carries an **LLM-maintained wiki** under `wiki/`. It is a persistent, compounding knowledge base that summarises and indexes the raw sources (this file, `README.md`, `CONTEXT.md`, the codebase, PRDs, design drafts). Treat it as the index you reach for first when orienting in a new session, and update it whenever you ingest a new source or learn something non-trivial.
+
+**Read [wiki/SCHEMA.md](./wiki/SCHEMA.md) at the start of any non-trivial task.** It defines the layout (`entities/`, `concepts/`, `sources/`, `roadmap/`, `index.md`, `log.md`), the page conventions (YAML frontmatter, code references, cross-links), and the workflows.
+
+**Workflow at a glance:**
+
+- *Orienting* — open `wiki/index.md`, find candidate pages, read them. If precision matters, follow their `sources:` links into the raw layer (code, PRDs, drafts).
+- *Ingesting a new source* (a new PRD lands, a `docs/*.md` is added, or you discover the codebase has shifted from what the wiki says) — create or update the matching `wiki/sources/` page, then update every `entities/` and `concepts/` page the source touches, then append a one-line entry to `wiki/log.md`, then update `wiki/index.md` if pages were created.
+- *Answering a query* — synthesise from the wiki, and if the answer is non-trivial, **file the answer back** as a new `concepts/` or `roadmap/` page so the next agent doesn't have to redo the work.
+- *Linting* — periodically check that `path/to/file.rs:LINE` references still resolve and that roadmap pages whose backing PRD has shipped get moved/closed.
+
+The wiki is *not* a replacement for `README.md`, `CONTEXT.md`, or this file — those remain the canonical raw sources. The wiki is the navigable, cross-linked overlay on top.
 
 ---
 
@@ -107,7 +135,7 @@ Two configs:
 
 ```
 src/
-  messages.rs         — Pure data types. Console, Player, GameState, SimSnapshot, ClientMessage, ServerMessage
+  messages.rs         — Pure data types. Console, Player, GameState, SimSnapshot, ClientMessage, ServerMessage. Wire types for shields, phaser banks, torpedo tubes.
   codec.rs            — MessageCodec trait + JsonCodec impl. ONLY place serde_json is used directly.
   session.rs          — SessionManager: tokens → players, console assignment, reconnect/vacancy logic
   lobby_handler.rs    — Pure lobby message handler: process_message(), process_disconnect(). No Bevy.
@@ -116,18 +144,38 @@ src/
   ship_physics.rs     — Pure Rust physics controller (no Bevy). Input/output function, fully testable.
   ship_state.rs       — ShipState resource: position, yaw, speed, red_alert, hull, phaser state
   asteroid_spawner.rs — Pure Rust asteroid position generator (seeded, deterministic)
+  asteroid_lifecycle.rs — Bevy systems: range-gated asteroid spawn/despawn around the ship.
   radar.rs            — Pure radar projection math. Shared by server renderer and client helm panel.
+  radar_config.rs     — Pure radar viewport config used by helm + weapons radars.
   damage.rs           — collision_damage() formula + HullIntegrity struct. No Bevy.
   breakdown.rs        — BreakdownQueue FIFO + breakdowns_from_damage() formula. No Bevy.
+  phaser.rs           — Pure phaser bank state machine: lock, fire, sever, cooldown.
+  torpedo.rs          — Pure torpedo + tube state machine: load, launch, homing, expiry.
+  shield.rs           — Pure four-quadrant shield model: HP, online/offline, regen.
+  impulse.rs          — Pure impulse-drive charge state machine.
+  beam_render.rs      — Bevy plugin: renders the active phaser beam(s) as line meshes (server only).
+  entity_config.rs    — TOML entity config types (`EntityConfig`, asteroid + ship + station fields).
+  map_config.rs       — TOML map config: spawn anchors, asteroid fields, default scenario reference.
+  config_cache.rs     — `ConfigCachePlugin` — preloads map + entity TOML files via JS fetch on WASM, exposes them as Bevy resources.
+  entity_tags.rs      — String-tag helpers for `tags = [...]` lookups across entity configs.
   renderer.rs         — Bevy plugin: lobby UI, 3D camera, Red Alert border overlay (server only)
   bridge.rs           — wasm-bindgen exports. Compiled when `server` feature is active.
 
   client_lobby.rs     — Pure client lobby state model: LobbyState, LobbyView, ConsoleSlot. No Bevy.
   client_sim.rs       — Pure client sim-state model: ClientSimState. No Bevy.
   client_helm.rs      — Pure joystick logic: drag/release/tick, clamp_to_circle. No Bevy.
-  client_app.rs       — Bevy plugin: lobby panel, captain panel, helm panel, radar drawing.
+  client_app.rs       — Bevy plugin: lobby panel, captain panel, helm panel, weapons/tactical panel, science panel, radar drawing.
   client_bridge.rs    — wasm-bindgen exports. Compiled when `client` feature is active.
   lib.rs              — Module declarations + feature gates
+
+src/server/, src/client/, src/shared/  — Draft refactor of the flat layout into subdirectories. NOT
+                                         wired into `lib.rs` and NOT compiled. Treat as dead code
+                                         until a refactor PRD lands. PRD #115 explicitly excludes it.
+
+assets/
+  maps/default.toml             — Default map: anchors, asteroid fields, default scenario path.
+  entities/asteroid_*.toml      — Asteroid variants (large, small, cosmetic).
+  entities/player_ship.toml     — Ship config: physics, phaser banks, torpedo tubes, shields, impulse.
 
 server.html           — Host page: loads server WASM, runs Bevy, owns PeerJS host peer
 client.html           — Client page: loads client WASM, connects to host via PeerJS peer ID in URL hash
@@ -135,6 +183,8 @@ Cargo.toml            — Single crate: cdylib (WASM) + rlib (tests). Features: 
 Trunk.toml            — Build config for server.html (default = server feature)
 client-trunk.toml     — Build config for client.html (client feature)
 .github/workflows/    — CI: builds both pages, deploys to gh-pages
+wiki/                 — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.
+docs/                 — Draft design notes (numbered). Drafts 9-11 cover AI, regions, complexity.
 ```
 
 ---
@@ -265,9 +315,10 @@ Deterministic seeded generation. Fixed layout per game session. Spheres at rando
 ### Consoles
 
 - **CaptainChair:** Red Alert toggle (exclusive). Only captain can `StartGame` and `ToggleRedAlert`. View selector (Fore/Aft/Port/Starboard or Radar).
-- **Helm:** Thrust + steering joystick. Sends `HelmInput` at 10Hz while active. Ship only moves when Helm is occupied. Displays radar overlay and "On Screen" button to push radar to the viewscreen.
-- **Tactical:** Target lock (`SetTarget`), fire phasers (`FirePhaser`). Receives `WeaponsUpdate` at 10Hz with lock status, fire readiness, and cooldown. Beam events (`BeamStarted`, `BeamEnded`) broadcast to all.
-- **Engineering:** Repair hull breakdowns (`Repair`). Receives `RepairState` at 10Hz with cooldown status. Repairing without authorization incurs a penalty cooldown.
+- **Helm:** Thrust + steering joystick. Sends `HelmInput` at 10Hz while active. Ship only moves when Helm is occupied. Displays radar overlay and "On Screen" button to push radar to the viewscreen. Triggers impulse charge via `StartImpulseCharge`.
+- **Tactical:** Target lock (`SetTarget`), fire phasers (`FirePhaser`), set phaser mode (`SetPhaserMode { Auto | Manual }`), fire torpedoes (`FireTorpedo { tube, target_uuid }`). Receives `WeaponsUpdate` at 10Hz with lock status, fire readiness, cooldown, torpedo magazine, and per-tube reload state. Beam events (`BeamStarted`, `BeamEnded`, `PhaserFired`) and torpedo events (`TorpedoLaunched`, `TorpedoDestroyed`) broadcast to all.
+- **Engineering:** Repair hull breakdowns (`Repair { console }`). Receives `RepairState` at 10Hz with cooldown status. Repairing without authorization incurs a penalty cooldown.
+- **Science:** Long-range radar overlay, system chart on viewscreen, advisory target suggestion (`SetScienceTarget`), cancel an active impulse charge (`CancelImpulse`). View modes `ScienceRadar` and `SystemChart` are pushed to the viewscreen by Science.
 
 ---
 

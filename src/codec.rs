@@ -559,6 +559,20 @@ mod tests {
     }
 
     #[test]
+    fn server_shield_status_round_trips() {
+        let msg = ServerMessage::ShieldStatus {
+            facings: vec![
+                ShieldFacingStatus { label: "Fore".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Port".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 7.5 },
+                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Starboard".into(), hp: 55, max_hp: 100, online: true, offline_remaining: 0.0 },
+            ],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn welcome_with_world_none_round_trips() {
         let msg = ServerMessage::Welcome { state: state() };
         assert_server_roundtrip(&JsonCodec, msg.clone());

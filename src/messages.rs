@@ -1,5 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+/// A serialisable snapshot of a single shield facing for broadcasting.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ShieldFacingStatus {
+    pub label: String,
+    pub hp: i32,
+    pub max_hp: i32,
+    pub online: bool,
+    /// Remaining offline seconds (0.0 when online).
+    pub offline_remaining: f32,
+}
+
 /// Which phaser bank to address. Used in `SetPhaserMode` and `PhaserFired`.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PhaserBank {
@@ -209,4 +220,7 @@ pub enum ServerMessage {
     /// (penalty or repair) in seconds, whether a repair action is currently
     /// in progress, and whether the last cooldown was a penalty.
     RepairState { remaining_cooldown_secs: f32, in_progress: bool, penalty: bool },
+    /// Sent at 10 Hz (or on change) to all players. Contains HP and online
+    /// status for every shield facing.
+    ShieldStatus { facings: Vec<ShieldFacingStatus> },
 }

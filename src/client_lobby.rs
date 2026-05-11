@@ -93,7 +93,8 @@ impl LobbyState {
             | ServerMessage::AsteroidDestroyed { .. }
             | ServerMessage::ScienceTargetSuggestion { .. }
             | ServerMessage::PhaserFired { .. }
-            | ServerMessage::RepairState { .. } => {
+            | ServerMessage::RepairState { .. }
+            | ServerMessage::ShieldStatus { .. } => {
                 // Not relevant to the lobby model.
             }
         }

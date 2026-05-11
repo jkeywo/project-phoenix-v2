@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 
-use crate::beam_render;
 use crate::lobby::{CurrentPhase, GameStateCache, WorldResource};
 use crate::messages::{GamePhase, PhaserBank, ViewDirection, ViewMode};
 use crate::radar;
 use crate::ship_state::ShipState;
-use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx};
+use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig};
+use crate::beam_render;
 
 // ── VFX Components ────────────────────────────────────────────────
 
@@ -432,10 +432,12 @@ fn draw_radar_overlay(
 /// The origin of each beam is offset laterally from the ship centre to the
 /// appropriate hull side via `beam_render::bank_origin`.  The endpoint is
 /// the asteroid position, clamped to max range via `beam_render::beam_endpoint`.
+/// The beam colour is taken from `PhaserRenderConfig` (configurable via ship TOML).
 fn draw_beam_vfx(
     phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
     beam: Res<ActiveBeam>,
+    render_cfg: Res<PhaserRenderConfig>,
     world: Option<Res<WorldResource>>,
     mut gizmos: Gizmos,
 ) {
@@ -449,18 +451,15 @@ fn draw_beam_vfx(
         return;
     };
 
-    // Resolve max range: use WEAPONS_RADAR_RANGE as the reference range.
-    let max_range = crate::radar::WEAPONS_RADAR_RANGE;
-
-    // Endpoint clamped to max range.
+    // Endpoint clamped to configured max range.
     let (end_x, end_z) = beam_render::beam_endpoint(
         ship.x, ship.z,
         asteroid.x, asteroid.z,
-        max_range,
+        render_cfg.beam_range,
     );
 
-    // Resolve beam colour (empty vec → default orange).
-    let [r, g, b, a] = beam_render::DEFAULT_BEAM_COLOR;
+    // Resolve beam colour from config.
+    let [r, g, b, a] = render_cfg.beam_color;
     let beam_color = Color::srgba(r, g, b, a);
     let glow_color = Color::srgba(r, g * 1.5, b * 2.0, a * 0.35);
 

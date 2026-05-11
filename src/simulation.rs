@@ -101,6 +101,26 @@ impl Default for CurrentPhaserMode {
     }
 }
 
+/// Rendering config for the phaser beam (colour, max range).
+/// Populated from ship entity TOML during world setup; defaults are used if
+/// the TOML is absent.
+#[derive(Resource, Clone, Debug)]
+pub struct PhaserRenderConfig {
+    /// RGBA beam colour in 0.0–1.0.
+    pub beam_color: [f32; 4],
+    /// Maximum beam range (world units); beam endpoint is clamped to this.
+    pub beam_range: f32,
+}
+
+impl Default for PhaserRenderConfig {
+    fn default() -> Self {
+        Self {
+            beam_color: crate::beam_render::DEFAULT_BEAM_COLOR,
+            beam_range: 40.0,
+        }
+    }
+}
+
 // ── Repair constants ──────────
 const REPAIR_DURATION_SECS: f32 = 30.0;
 const REPAIR_HP_PER_SEC: f32 = 1.0 / 3.0; // +1 HP every 3 seconds
@@ -232,6 +252,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<ActiveBeam>()
             .init_resource::<PhaserCooldown>()
             .init_resource::<CurrentPhaserMode>()
+            .init_resource::<PhaserRenderConfig>()
             .init_resource::<ActiveRepair>()
             .init_resource::<RepairPenalties>()
             .init_resource::<BreakdownQueueResource>()
@@ -571,10 +592,15 @@ fn handle_fire_phaser(
             });
         }
 
-        // Start new beam.
+        // Start new beam. Alternate banks: port first, then starboard, etc.
+        let next_bank = match beam.bank {
+            Some(crate::messages::PhaserBank::Port) => crate::messages::PhaserBank::Starboard,
+            _ => crate::messages::PhaserBank::Port,
+        };
         beam.target_uuid = Some(target_uuid.clone());
         beam.remaining_secs = BEAM_DURATION_SECS;
         beam.damage_accumulator = 0.0;
+        beam.bank = Some(next_bank);
 
         writer.write(OutboundMessage {
             target: Target::All,
@@ -1098,8 +1124,15 @@ fn setup_world_from_config(
             // Get hull integrity
             let hull_integrity = ship_config.hull.as_ref().map(|h| h.hull_integrity).unwrap_or(100);
             
-            // Spawn ship - store hull integrity in resource
+            // Store hull integrity in resource
             commands.insert_resource(ShipHullIntegrity(HullIntegrity::with_hp(hull_integrity)));
+
+            // Populate phaser render config from weapons_console settings.
+            if let Some(wc) = &ship_config.weapons_console {
+                let beam_color = crate::beam_render::resolve_beam_color(&wc.beam_color);
+                let beam_range = if wc.beam_range > 0.0 { wc.beam_range } else { 40.0 };
+                commands.insert_resource(PhaserRenderConfig { beam_color, beam_range });
+            }
         
         commands.spawn((
             Ship,

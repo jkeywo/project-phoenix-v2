@@ -1,3 +1,4 @@
+pub mod entity_tags;
 pub mod asteroid_lifecycle;
 pub mod phaser;
 pub mod asteroid_spawner;

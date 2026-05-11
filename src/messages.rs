@@ -117,6 +117,9 @@ pub struct AsteroidInfo {
     pub x: f32,
     pub z: f32,
     pub radius: f32,
+    /// Semantic tags for this entity (e.g. `["asteroid"]`).
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// Static world data sent once per game (after `StartGame`) and replayed

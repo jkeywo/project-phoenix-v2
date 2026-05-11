@@ -358,6 +358,7 @@ mod tests {
                         x: 12.5,
                         z: -8.0,
                         radius: 2.0,
+                        tags: vec![],
                     },
                 ],
             },
@@ -371,8 +372,8 @@ mod tests {
         let msg = ServerMessage::WorldSetup {
             world: WorldData {
                 asteroids: vec![
-                    AsteroidInfo { uuid: "a1b2c3d4-e5f6-4789-8abc-def012345678".into(), x: 1.0, z: 2.0, radius: 2.0 },
-                    AsteroidInfo { uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(), x: -3.5, z: 4.25, radius: 1.5 },
+                    AsteroidInfo { uuid: "a1b2c3d4-e5f6-4789-8abc-def012345678".into(), x: 1.0, z: 2.0, radius: 2.0, tags: vec![] },
+                    AsteroidInfo { uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(), x: -3.5, z: 4.25, radius: 1.5, tags: vec![] },
                 ],
             },
         };
@@ -387,7 +388,7 @@ mod tests {
                 phase: GamePhase::InProgress,
                 players: vec![player()],
                 world: Some(WorldData {
-                    asteroids: vec![AsteroidInfo { uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(), x: 0.0, z: 0.0, radius: 2.0 }],
+                    asteroids: vec![AsteroidInfo { uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(), x: 0.0, z: 0.0, radius: 2.0, tags: vec![] }],
                 }),
             },
         };

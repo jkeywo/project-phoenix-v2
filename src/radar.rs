@@ -8,6 +8,7 @@
 // independently unit-testable.
 
 use crate::messages::AsteroidInfo;
+use crate::entity_tags::{EntityTag, matches_any, parse_tags};
 
 /// Range, in world units, that the radar covers from its centre to the
 /// outer ring. Anything beyond is clipped.
@@ -103,6 +104,26 @@ pub fn radar_dots<'a>(
     asteroids.iter().filter_map(move |a| project_asteroid(a, ship_x, ship_z, ship_yaw))
 }
 
+/// Like `radar_dots` but only includes entities whose tags match **at least
+/// one** tag in `filter_tags` (OR logic).  If `filter_tags` is empty, no
+/// entities are returned.
+pub fn radar_dots_filtered<'a>(
+    asteroids: &'a [AsteroidInfo],
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    filter_tags: &'a [EntityTag],
+) -> impl Iterator<Item = (f32, f32, f32)> + 'a {
+    asteroids.iter().filter_map(move |a| {
+        let entity_tags = parse_tags(&a.tags);
+        if matches_any(&entity_tags, filter_tags) {
+            project_asteroid(a, ship_x, ship_z, ship_yaw)
+        } else {
+            None
+        }
+    })
+}
+
 /// Project an asteroid to radar coordinates plus its scaled radius.
 ///
 /// Returns `None` if the asteroid centre is outside `RADAR_RANGE`. The
@@ -179,14 +200,14 @@ mod tests {
 
     #[test]
     fn project_asteroid_scales_radius_by_range() {
-        let a = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0 };
+        let a = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0, tags: vec![] };
         let (_rx, _ry, r) = project_asteroid(&a, 0.0, 0.0, 0.0).unwrap();
         close(r, 2.0 / RADAR_RANGE);
     }
 
     #[test]
     fn project_asteroid_outside_range_returns_none() {
-        let a = AsteroidInfo { uuid: "".into(), x: 100.0, z: 100.0, radius: 2.0 };
+        let a = AsteroidInfo { uuid: "".into(), x: 100.0, z: 100.0, radius: 2.0, tags: vec![] };
         assert!(project_asteroid(&a, 0.0, 0.0, 0.0).is_none());
     }
 
@@ -199,7 +220,7 @@ mod tests {
 
     #[test]
     fn radar_dots_single_in_range_matches_project_asteroid() {
-        let asteroid = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0 };
+        let asteroid = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0, tags: vec![] };
         let dots: Vec<_> = radar_dots(&[asteroid.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(dots.len(), 1);
         let expected = project_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap();
@@ -208,8 +229,8 @@ mod tests {
 
     #[test]
     fn radar_dots_skips_out_of_range_asteroids() {
-        let far = AsteroidInfo { uuid: "".into(), x: 100.0, z: 100.0, radius: 2.0 };
-        let near = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0 };
+        let far = AsteroidInfo { uuid: "".into(), x: 100.0, z: 100.0, radius: 2.0, tags: vec![] };
+        let near = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0, tags: vec![] };
         let dots: Vec<_> = radar_dots(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(dots.len(), 1);
         assert_eq!(dots[0], project_asteroid(&near, 0.0, 0.0, 0.0).unwrap());
@@ -218,6 +239,60 @@ mod tests {
     #[test]
     fn radar_dots_empty_slice_returns_empty_iterator() {
         let dots: Vec<_> = radar_dots(&[], 0.0, 0.0, 0.0).collect();
+        assert!(dots.is_empty());
+    }
+
+    // ── radar_dots_filtered ────────────────────────────────────────────────
+
+    fn asteroid_with_tags(x: f32, z: f32, tags: &[&str]) -> AsteroidInfo {
+        AsteroidInfo {
+            uuid: "".into(),
+            x,
+            z,
+            radius: 1.0,
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn radar_dots_filtered_returns_only_matching_tag_entities() {
+        let asteroid = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
+        let ship = asteroid_with_tags(0.0, -15.0, &["ship"]);
+        let filter = vec![EntityTag::Asteroid];
+        let dots: Vec<_> = radar_dots_filtered(&[asteroid.clone(), ship], 0.0, 0.0, 0.0, &filter).collect();
+        assert_eq!(dots.len(), 1);
+        assert_eq!(dots[0], project_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap());
+    }
+
+    #[test]
+    fn radar_dots_filtered_or_logic_includes_either_tag() {
+        let a = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
+        let s = asteroid_with_tags(5.0, -10.0, &["ship"]);
+        let filter = vec![EntityTag::Asteroid, EntityTag::Ship];
+        let dots: Vec<_> = radar_dots_filtered(&[a, s], 0.0, 0.0, 0.0, &filter).collect();
+        assert_eq!(dots.len(), 2);
+    }
+
+    #[test]
+    fn radar_dots_filtered_empty_filter_returns_nothing() {
+        let a = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
+        let dots: Vec<_> = radar_dots_filtered(&[a], 0.0, 0.0, 0.0, &[]).collect();
+        assert!(dots.is_empty());
+    }
+
+    #[test]
+    fn radar_dots_filtered_skips_out_of_range_even_if_tag_matches() {
+        let far = asteroid_with_tags(100.0, 100.0, &["asteroid"]);
+        let filter = vec![EntityTag::Asteroid];
+        let dots: Vec<_> = radar_dots_filtered(&[far], 0.0, 0.0, 0.0, &filter).collect();
+        assert!(dots.is_empty());
+    }
+
+    #[test]
+    fn radar_dots_filtered_skips_no_tag_entity() {
+        let a = asteroid_with_tags(0.0, -10.0, &[]);
+        let filter = vec![EntityTag::Asteroid];
+        let dots: Vec<_> = radar_dots_filtered(&[a], 0.0, 0.0, 0.0, &filter).collect();
         assert!(dots.is_empty());
     }
 

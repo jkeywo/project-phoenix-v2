@@ -171,8 +171,8 @@ mod tests {
         let mut s = ClientSimState::default();
         let world = WorldData {
             asteroids: vec![
-                AsteroidInfo { uuid: "a".into(), x:  3.0, z:  4.0, radius: 2.0 },
-                AsteroidInfo { uuid: "b".into(), x: -1.5, z:  0.0, radius: 1.0 },
+                AsteroidInfo { uuid: "a".into(), x:  3.0, z:  4.0, radius: 2.0, tags: vec![] },
+                AsteroidInfo { uuid: "b".into(), x: -1.5, z:  0.0, radius: 1.0, tags: vec![] },
             ],
         };
         s.apply(&ServerMessage::WorldSetup { world: world.clone() });
@@ -193,7 +193,7 @@ mod tests {
             last_phaser_target: None,
         };
         let world = WorldData {
-            asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5 }],
+            asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -218,7 +218,7 @@ mod tests {
             view_mode: ViewMode::default(),
             ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
             world: WorldData {
-                asteroids: vec![AsteroidInfo { uuid: "d".into(), x: 0.0, z: 0.0, radius: 1.0 }],
+                asteroids: vec![AsteroidInfo { uuid: "d".into(), x: 0.0, z: 0.0, radius: 1.0, tags: vec![] }],
             },
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
@@ -243,7 +243,7 @@ mod tests {
             view_mode: ViewMode::Camera(ViewDirection::Port),
             ship_x: 5.0, ship_z: 6.0, ship_yaw: 0.7,
             world: WorldData {
-                asteroids: vec![AsteroidInfo { uuid: "e".into(), x: 0.0, z: 0.0, radius: 1.0 }],
+                asteroids: vec![AsteroidInfo { uuid: "e".into(), x: 0.0, z: 0.0, radius: 1.0, tags: vec![] }],
             },
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,

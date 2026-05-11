@@ -1029,6 +1029,7 @@ fn setup_world_from_config(
                     x: spawn.x,
                     z: spawn.z,
                     radius: 2.0,
+                    tags: vec!["asteroid".to_string()],
                 });
             }
         }
@@ -1061,6 +1062,7 @@ fn setup_world_from_config(
                     x: spawn.x,
                     z: spawn.z,
                     radius,
+                    tags: vec!["asteroid".to_string()],
                 });
                 cosmetic_start_idx += 1;
             }
@@ -1311,7 +1313,7 @@ fn test_app() -> App {
         let mut app = test_app();
         // Pre-populate world data so the broadcast has something to emit.
         app.world_mut().insert_resource(WorldResource(WorldData {
-            asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 5.0, z: -1.0, radius: 2.0 }],
+            asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 5.0, z: -1.0, radius: 2.0, tags: vec![] }],
         }));
 
         // Bring the game up to the point of pressing StartGame
@@ -1349,7 +1351,7 @@ fn test_app() -> App {
     fn world_setup_is_not_broadcast_during_lobby() {
         let mut app = test_app();
         app.world_mut().insert_resource(WorldResource(WorldData {
-            asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 0.0, z: 0.0, radius: 2.0 }],
+            asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 0.0, z: 0.0, radius: 2.0, tags: vec![] }],
         }));
         // Identify and select a console but don't start the game.
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
@@ -1466,6 +1468,7 @@ fn test_app() -> App {
                 x: asteroid_x,
                 z: asteroid_z,
                 radius: 2.0,
+                tags: vec![],
             }],
         }));
     }
@@ -1816,8 +1819,8 @@ fn test_app() -> App {
         // Set up two asteroids.
         app.world_mut().insert_resource(WorldResource(WorldData {
             asteroids: vec![
-                AsteroidInfo { uuid: "t1".into(), x: 0.0, z: -20.0, radius: 2.0 },
-                AsteroidInfo { uuid: "t2".into(), x: 0.0, z: -15.0, radius: 2.0 },
+                AsteroidInfo { uuid: "t1".into(), x: 0.0, z: -20.0, radius: 2.0, tags: vec![] },
+                AsteroidInfo { uuid: "t2".into(), x: 0.0, z: -15.0, radius: 2.0, tags: vec![] },
             ],
         }));
         start_game_with_weapons(&mut app);

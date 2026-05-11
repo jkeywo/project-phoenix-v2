@@ -22,6 +22,14 @@ pub const HELM_RADAR_RANGE: f32 = 50.0;
 /// Range used by the Weapons console radar — target acquisition range.
 pub const WEAPONS_RADAR_RANGE: f32 = 60.0;
 
+/// Maximum range for the Science console long-range radar at full power.
+///
+/// This is hardcoded to the max-power value.
+/// TODO: integrate with the power system so that Science radar range scales
+///       with allocated power once the Engineering/Power Console PRD is
+///       implemented.
+pub const SCIENCE_RADAR_RANGE: f32 = 200.0;
+
 /// Returns the `RadarConfig` for the Helm console radar.
 ///
 /// Short-range situational awareness: shows asteroids within `HELM_RADAR_RANGE`.
@@ -42,6 +50,37 @@ pub fn weapons_radar_config() -> RadarConfig {
         range: WEAPONS_RADAR_RANGE,
         shows: vec![EntityTag::Asteroid],
     }
+}
+
+/// Returns the `RadarConfig` for the Science console long-range radar.
+///
+/// Hardcoded to the maximum-power range (`SCIENCE_RADAR_RANGE`). Shows
+/// asteroids, ships, and asteroid fields — the entities relevant for
+/// long-range situational awareness.
+///
+/// TODO: scale `range` by the Science console's allocated power level once
+///       the Engineering/Power Console PRD is implemented.
+pub fn science_radar_config() -> RadarConfig {
+    RadarConfig {
+        range: SCIENCE_RADAR_RANGE,
+        shows: vec![EntityTag::Asteroid, EntityTag::Ship, EntityTag::AsteroidField],
+    }
+}
+
+/// Compute the Science console long-range radar view from the current client state.
+///
+/// Filters to asteroids, ships, and asteroid fields within `SCIENCE_RADAR_RANGE`.
+/// Normalises all coordinates to `[-1, 1]` using `science_radar_config().range`.
+pub fn compute_science_long_range_radar_view(state: &ClientSimState) -> ScienceRadarView {
+    let config = science_radar_config();
+    compute_science_radar_view(
+        &state.world.asteroids,
+        &state.world.asteroid_fields,
+        state.ship_x,
+        state.ship_z,
+        state.ship_yaw,
+        &config,
+    )
 }
 
 /// Compute the Helm console radar view from the current client state.
@@ -1037,5 +1076,59 @@ mod tests {
         let weapons_view = compute_weapons_radar_view(&s);
         assert!(helm_view.dots.is_empty(), "helm should NOT see asteroid beyond its range");
         assert_eq!(weapons_view.dots.len(), 1, "weapons SHOULD see asteroid within its range");
+    }
+
+    // ── science_radar_config ─────────────────────────────────────────────
+
+    #[test]
+    fn science_radar_config_range_matches_constant() {
+        let cfg = science_radar_config();
+        assert_eq!(cfg.range, SCIENCE_RADAR_RANGE);
+    }
+
+    #[test]
+    fn science_radar_config_range_is_greater_than_weapons_range() {
+        assert!(
+            SCIENCE_RADAR_RANGE > WEAPONS_RADAR_RANGE,
+            "science radar ({}) must have longer range than weapons ({})",
+            SCIENCE_RADAR_RANGE,
+            WEAPONS_RADAR_RANGE,
+        );
+    }
+
+    #[test]
+    fn science_radar_config_shows_asteroids_and_ships() {
+        use crate::entity_tags::EntityTag;
+        let cfg = science_radar_config();
+        assert!(cfg.shows.contains(&EntityTag::Asteroid), "science radar must show asteroids");
+        assert!(cfg.shows.contains(&EntityTag::Ship), "science radar must show ships");
+    }
+
+    // ── compute_science_long_range_radar_view ────────────────────────────
+
+    #[test]
+    fn science_long_range_radar_view_empty_world_produces_empty_view() {
+        let s = ClientSimState::default();
+        let view = compute_science_long_range_radar_view(&s);
+        assert!(view.dots.is_empty());
+        assert!(view.rings.is_empty());
+    }
+
+    #[test]
+    fn science_long_range_radar_view_includes_asteroid_within_science_range() {
+        use crate::messages::{AsteroidInfo, WorldData};
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            asteroids: vec![AsteroidInfo {
+                uuid: "a1".into(),
+                x: 0.0,
+                z: -(SCIENCE_RADAR_RANGE * 0.5),
+                radius: 1.0,
+                tags: vec!["asteroid".into()],
+            }],
+            asteroid_fields: vec![],
+        };
+        let view = compute_science_long_range_radar_view(&s);
+        assert_eq!(view.dots.len(), 1, "science radar must show asteroid within range");
     }
 }

@@ -9,6 +9,7 @@
 
 use crate::messages::AsteroidInfo;
 use crate::entity_tags::{EntityTag, matches_any, parse_tags};
+use crate::radar_config::RadarConfig;
 
 /// Range, in world units, that the radar covers from its centre to the
 /// outer ring. Anything beyond is clipped.
@@ -132,6 +133,58 @@ pub fn radar_dots_filtered<'a>(
 pub fn project_asteroid(asteroid: &AsteroidInfo, ship_x: f32, ship_z: f32, ship_yaw: f32) -> Option<(f32, f32, f32)> {
     let (rx, ry) = project_to_radar(asteroid.x, asteroid.z, ship_x, ship_z, ship_yaw)?;
     Some((rx, ry, asteroid.radius / RADAR_RANGE))
+}
+
+/// Project a world-space point onto the radar's unit square using a `RadarConfig`.
+///
+/// Behaves identically to `project_to_radar` but uses the range from
+/// `config.range` instead of the global `RADAR_RANGE` constant.  Output is
+/// normalised to `[-1.0, 1.0]` on both axes where ±1.0 = `config.range`.
+pub fn project_to_radar_with_config(
+    world_x: f32,
+    world_z: f32,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    config: &RadarConfig,
+) -> Option<(f32, f32)> {
+    let dx = world_x - ship_x;
+    let dz = world_z - ship_z;
+    let range = config.range;
+
+    if dx * dx + dz * dz > range * range {
+        return None;
+    }
+
+    let cos_y = ship_yaw.cos();
+    let sin_y = ship_yaw.sin();
+
+    let radar_x = (dx * cos_y + dz * sin_y) / range;
+    let radar_y = (dx * sin_y - dz * cos_y) / range;
+    Some((radar_x, radar_y))
+}
+
+/// Iterator of `(radar_x, radar_y, scaled_radius)` tuples for entities within
+/// `config.range`, filtered by `config.shows` using OR tag logic.
+///
+/// - Entities outside `config.range` are skipped.
+/// - Entities whose tags do not overlap `config.shows` are skipped.
+/// - If `config.shows` is empty, no entities are returned.
+pub fn radar_dots_with_config<'a>(
+    asteroids: &'a [AsteroidInfo],
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    config: &'a RadarConfig,
+) -> impl Iterator<Item = (f32, f32, f32)> + 'a {
+    asteroids.iter().filter_map(move |a| {
+        let entity_tags = parse_tags(&a.tags);
+        if !matches_any(&entity_tags, &config.shows) {
+            return None;
+        }
+        let (rx, ry) = project_to_radar_with_config(a.x, a.z, ship_x, ship_z, ship_yaw, config)?;
+        Some((rx, ry, a.radius / config.range))
+    })
 }
 
 #[cfg(test)]
@@ -347,4 +400,85 @@ mod tests {
         // Same target but ship now faces -X (yaw = -π/2): target is aft.
         assert!(!is_fire_ready(20.0, 0.0, 0.0, 0.0, -yaw));
     }
+
+    // ── project_to_radar_with_config ──────────────────────────────────────
+
+    fn helm_config() -> RadarConfig {
+        RadarConfig {
+            range: 50.0,
+            shows: vec![EntityTag::Asteroid],
+        }
+    }
+
+    #[test]
+    fn config_project_ahead_matches_fixed_function() {
+        let cfg = helm_config();
+        let fixed = project_to_radar(0.0, -25.0, 0.0, 0.0, 0.0).unwrap();
+        let with_cfg = project_to_radar_with_config(0.0, -25.0, 0.0, 0.0, 0.0, &cfg).unwrap();
+        close(with_cfg.0, fixed.0);
+        close(with_cfg.1, fixed.1);
+    }
+
+    #[test]
+    fn config_project_clips_at_config_range() {
+        // Config range = 30; point at 35 units ahead is out of range.
+        let cfg = RadarConfig { range: 30.0, shows: vec![EntityTag::Asteroid] };
+        assert!(project_to_radar_with_config(0.0, -35.0, 0.0, 0.0, 0.0, &cfg).is_none());
+        // Same point is within the global RADAR_RANGE (50) — ensure we use config range.
+        assert!(project_to_radar(0.0, -35.0, 0.0, 0.0, 0.0).is_some());
+    }
+
+    #[test]
+    fn config_project_normalises_to_config_range() {
+        // Point at config.range ahead should map to radar_y = 1.0.
+        let cfg = RadarConfig { range: 80.0, shows: vec![] };
+        let p = project_to_radar_with_config(0.0, -80.0, 0.0, 0.0, 0.0, &cfg).unwrap();
+        close(p.1, 1.0);
+    }
+
+    // ── radar_dots_with_config ────────────────────────────────────────────
+
+    #[test]
+    fn dots_with_config_filters_by_shows() {
+        let asteroid = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
+        let ship_entity = asteroid_with_tags(5.0, -10.0, &["ship"]);
+        let cfg = RadarConfig {
+            range: 50.0,
+            shows: vec![EntityTag::Asteroid],
+        };
+        let dots: Vec<_> = radar_dots_with_config(&[asteroid.clone(), ship_entity], 0.0, 0.0, 0.0, &cfg).collect();
+        assert_eq!(dots.len(), 1);
+        // Scaled radius should use config.range.
+        close(dots[0].2, asteroid.radius / cfg.range);
+    }
+
+    #[test]
+    fn dots_with_config_empty_shows_returns_nothing() {
+        let asteroid = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
+        let cfg = RadarConfig { range: 50.0, shows: vec![] };
+        let dots: Vec<_> = radar_dots_with_config(&[asteroid], 0.0, 0.0, 0.0, &cfg).collect();
+        assert!(dots.is_empty());
+    }
+
+    #[test]
+    fn dots_with_config_clips_at_config_range_not_global() {
+        // Asteroid at 40 units (inside RADAR_RANGE=50 but outside config range=30).
+        let asteroid = asteroid_with_tags(0.0, -40.0, &["asteroid"]);
+        let cfg = RadarConfig { range: 30.0, shows: vec![EntityTag::Asteroid] };
+        let dots: Vec<_> = radar_dots_with_config(&[asteroid], 0.0, 0.0, 0.0, &cfg).collect();
+        assert!(dots.is_empty());
+    }
+
+    #[test]
+    fn dots_with_config_or_logic_for_multiple_shows() {
+        let a = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
+        let s = asteroid_with_tags(5.0, -10.0, &["ship"]);
+        let cfg = RadarConfig {
+            range: 50.0,
+            shows: vec![EntityTag::Asteroid, EntityTag::Ship],
+        };
+        let dots: Vec<_> = radar_dots_with_config(&[a, s], 0.0, 0.0, 0.0, &cfg).collect();
+        assert_eq!(dots.len(), 2);
+    }
 }
+

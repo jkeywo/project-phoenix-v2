@@ -16,6 +16,7 @@ pub mod lobby_handler;
 pub mod lobby;
 pub mod simulation;
 pub mod radar;
+pub mod radar_config;
 pub mod renderer;
 pub mod client_lobby;
 pub mod client_sim;

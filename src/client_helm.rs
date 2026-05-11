@@ -10,6 +10,7 @@
 //!   - Releasing snaps to centre and emits a final `(0, 0)` `HelmInput`.
 
 use crate::messages::ClientMessage;
+use crate::impulse::{ImpulseState, ImpulsePhase};
 use bevy::prelude::Resource;
 
 /// Local-only state for the helm joystick. Lives as a `Resource` on the
@@ -118,6 +119,38 @@ pub fn tick(state: &HelmJoystickState) -> Option<ClientMessage> {
         thrust: state.last_thrust,
         steering: state.last_steering,
     })
+}
+
+/// View of the impulse button the UI can render without exposing `ImpulseState`
+/// internals.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ImpulseButtonView {
+    /// Drive is idle — button is ready to press.
+    Ready,
+    /// Drive is charging — `progress` is 0.0..=1.0.
+    Charging { progress: f32 },
+    /// Drive is active (engaged).
+    Active,
+}
+
+/// Derive the current button view from an `ImpulseState`.
+pub fn impulse_button_view(state: &ImpulseState) -> ImpulseButtonView {
+    match state.phase {
+        ImpulsePhase::Idle => ImpulseButtonView::Ready,
+        ImpulsePhase::Charging => ImpulseButtonView::Charging { progress: state.charge_progress },
+        ImpulsePhase::Active => ImpulseButtonView::Active,
+    }
+}
+
+/// Called when the player presses the impulse button.
+/// Returns the `ClientMessage` to send if the drive is idle (ready to charge),
+/// or `None` if already charging/active.
+pub fn press_impulse_button(state: &ImpulseState) -> Option<ClientMessage> {
+    if state.phase == ImpulsePhase::Idle {
+        Some(ClientMessage::StartImpulseCharge)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -250,5 +283,55 @@ mod tests {
 
         release(&mut s);
         assert!(tick(&s).is_none(), "no resend after release");
+    }
+
+    // --- impulse button ---
+
+    #[test]
+    fn impulse_button_ready_when_idle() {
+        let s = ImpulseState::new();
+        assert_eq!(impulse_button_view(&s), ImpulseButtonView::Ready);
+    }
+
+    #[test]
+    fn impulse_button_press_sends_start_charge_when_idle() {
+        let s = ImpulseState::new();
+        assert_eq!(press_impulse_button(&s), Some(ClientMessage::StartImpulseCharge));
+    }
+
+    #[test]
+    fn impulse_button_press_noop_when_charging() {
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        assert_eq!(press_impulse_button(&s), None);
+    }
+
+    #[test]
+    fn impulse_button_press_noop_when_active() {
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION);
+        assert_eq!(press_impulse_button(&s), None);
+    }
+
+    #[test]
+    fn impulse_button_shows_charge_progress() {
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION / 2.0);
+        match impulse_button_view(&s) {
+            ImpulseButtonView::Charging { progress } => {
+                assert!((progress - 0.5).abs() < 0.01);
+            }
+            other => panic!("expected Charging, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn impulse_button_active_when_fully_charged() {
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION);
+        assert_eq!(impulse_button_view(&s), ImpulseButtonView::Active);
     }
 }

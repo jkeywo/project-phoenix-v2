@@ -174,6 +174,8 @@ pub enum ClientMessage {
     StartGame,
     ToggleRedAlert,
     HelmInput { thrust: f32, steering: f32 },
+    /// Sent by the Helm officer to begin charging the impulse drive.
+    StartImpulseCharge,
     SetView { mode: ViewMode },
     SetTarget { uuid: String },
     /// Science officer taps an entity on their radar to suggest it as a target

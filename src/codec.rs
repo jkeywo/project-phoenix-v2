@@ -168,6 +168,13 @@ mod tests {
     }
 
     #[test]
+    fn client_start_impulse_charge() {
+        let msg = ClientMessage::StartImpulseCharge;
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_select_console_helm() {
         let msg = ClientMessage::SelectConsole { console: Console::Helm };
         assert_client_roundtrip(&JsonCodec, msg.clone());

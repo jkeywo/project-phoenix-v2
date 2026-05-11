@@ -1,11 +1,9 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
-use std::collections::HashMap;
 
 use crate::asteroid_spawner::generate_donut_field;
 use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
 use crate::damage::{collision_damage, HullIntegrity};
-use crate::entity_config::EntityConfig;
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
@@ -883,7 +881,7 @@ fn setup_world_from_config(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut world: ResMut<WorldResource>,
     map_config: MapConfig,
-    config_cache: HashMap<String, EntityConfig>,
+    config_cache: crate::config_cache::ConfigCache,
 ) {
     
     // Spawn stars as unlit emissive sphere meshes

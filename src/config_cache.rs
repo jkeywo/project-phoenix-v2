@@ -31,13 +31,13 @@ thread_local! {
     static MAP_CONFIG: RefCell<Option<MapConfig>> = const { RefCell::new(None) };
     
     /// Cache of loaded entity configs by path.
-    static CONFIG_CACHE: RefCell<HashMap<String, EntityConfig>> = const { RefCell::new(HashMap::new()) };
+    static CONFIG_CACHE: RefCell<HashMap<String, EntityConfig>> = RefCell::new(HashMap::new());
     
     /// Queue of entity paths that need to be loaded.
-    static PENDING_QUEUE: RefCell<VecDeque<String>> = const { RefCell::new(VecDeque::new()) };
+    static PENDING_QUEUE: RefCell<VecDeque<String>> = RefCell::new(VecDeque::new());
     
     /// Set of paths currently being fetched to prevent duplicates.
-    static IN_FLIGHT: RefCell<HashSet<String>> = const { RefCell::new(HashSet::new()) };
+    static IN_FLIGHT: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     
     /// JS callback for requesting config fetches. Set by set_config_request_callback.
     static CONFIG_REQUEST_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
@@ -165,8 +165,8 @@ pub fn get_map_config() -> Option<MapConfig> {
 
 /// Get a reference to the config cache.
 #[cfg(target_arch = "wasm32")]
-pub fn get_config_cache() -> HashMap<String, EntityConfig> {
-    CONFIG_CACHE.with(|cache| cache.borrow().clone())
+pub fn get_config_cache() -> ConfigCache {
+    ConfigCache(CONFIG_CACHE.with(|cache| cache.borrow().clone()))
 }
 
 /// Queue a path for fetching and fire the callback.
@@ -200,6 +200,23 @@ fn queue_and_fire(path: String) {
 
 // ── Bevy Setup ──────────────────────────────────────────────────────────────
 
+/// Newtype wrapper so HashMap<String, EntityConfig> can be inserted as a Bevy Resource.
+#[cfg(target_arch = "wasm32")]
+#[derive(Resource)]
+pub struct ConfigCache(pub HashMap<String, EntityConfig>);
+
+#[cfg(target_arch = "wasm32")]
+impl std::ops::Deref for ConfigCache {
+    type Target = HashMap<String, EntityConfig>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// On non-wasm, ConfigCache is just a plain HashMap (no Bevy Resource needed).
+#[cfg(not(target_arch = "wasm32"))]
+pub type ConfigCache = std::collections::HashMap<String, crate::entity_config::EntityConfig>;
+
 /// Bevy plugin for setting up config resources from the preloaded state.
 /// This should be added to the app in wasm_init().
 #[cfg(target_arch = "wasm32")]
@@ -219,9 +236,6 @@ impl Plugin for ConfigCachePlugin {
 }
 
 // ── Native stubs ─────────────────────────────────────────────────────────────
-
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashMap;
 
 #[cfg(not(target_arch = "wasm32"))]
 use wasm_bindgen::prelude::*;
@@ -250,8 +264,8 @@ pub fn get_map_config() -> Option<crate::map_config::MapConfig> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_config_cache() -> HashMap<String, crate::entity_config::EntityConfig> {
-    HashMap::new()
+pub fn get_config_cache() -> ConfigCache {
+    ConfigCache::new()
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────────

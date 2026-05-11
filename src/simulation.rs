@@ -635,6 +635,7 @@ fn tick_active_beam(
     mut world: ResMut<WorldResource>,
     mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut AsteroidDamage)>,
     mut commands: Commands,
+    mut destroyed_asteroids: ResMut<crate::asteroid_lifecycle::DestroyedAsteroids>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -697,29 +698,32 @@ fn tick_active_beam(
             }
         }
 
-        if destroyed {
-            // Remove from world data.
-            world.0.asteroids.retain(|a| a.uuid != target_uuid);
+ if destroyed {
+ // Add to destroyed set to prevent respawning
+ destroyed_asteroids.0.insert(target_uuid.clone());
 
-            // Fire VFX event with the asteroid's last known position so the
-            // renderer can play the destruction ripple. `info` holds the position
-            // captured before the retain() call above.
-            vfx_events.write(AsteroidDestroyedVfx { x: info.x, z: info.z });
+ // Remove from world data.
+ world.0.asteroids.retain(|a| a.uuid != target_uuid);
 
-            beam.target_uuid = None;
-            beam.remaining_secs = 0.0;
-            beam.damage_accumulator = 0.0;
-            cooldown.start();
+ // Fire VFX event with the asteroid's last known position so the
+ // renderer can play the destruction ripple. `info` holds the position
+ // captured before the retain() call above.
+ vfx_events.write(AsteroidDestroyedVfx { x: info.x, z: info.z });
 
-            writer.write(OutboundMessage {
-                target: Target::All,
-                msg: ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() },
-            });
-            writer.write(OutboundMessage {
-                target: Target::All,
-                msg: ServerMessage::BeamEnded { target_uuid },
-            });
-            return;
+ beam.target_uuid = None;
+ beam.remaining_secs = 0.0;
+ beam.damage_accumulator = 0.0;
+ cooldown.start();
+
+ writer.write(OutboundMessage {
+ target: Target::All,
+ msg: ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() },
+ });
+ writer.write(OutboundMessage {
+ target: Target::All,
+ msg: ServerMessage::BeamEnded { target_uuid },
+ });
+ return;
         }
     }
 
@@ -1039,7 +1043,7 @@ fn setup_world_hardcoded(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut world: ResMut<WorldResource>,
+    _world: ResMut<WorldResource>,
 ) {
 
     // ── Starfield skybox ───────────────────────────────────────────────
@@ -1098,31 +1102,32 @@ mod tests {
         }
     }
 
-    fn test_app() -> App {
-        let mut app = App::new();
-        // Use a 1-nanosecond timer so that any non-zero time delta finishes
-        // the broadcast cycle, letting tests observe the snapshot after a
-        // couple of update ticks.
-        app.add_plugins(LobbyPlugin)
-            .add_plugins(bevy::time::TimePlugin)
-            .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
-            .init_resource::<WorldResource>()
-            .init_resource::<WorldSetupBroadcast>()
-            .init_resource::<WeaponsTarget>()
-            .init_resource::<ActiveBeam>()
-            .add_message::<AsteroidDestroyedVfx>()
-            .init_resource::<PhaserCooldown>()
-            .init_resource::<ActiveRepair>()
-            .init_resource::<RepairPenalties>()
-            .init_resource::<BreakdownQueueResource>()
-            .insert_resource(SimBroadcastTimer(Timer::new(
-                std::time::Duration::from_nanos(1), TimerMode::Repeating)))
-            .init_resource::<Outbox>()
-            .add_systems(Update, (handle_set_view, handle_set_target, handle_fire_phaser, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
-            .add_systems(PostUpdate, collect);
-        app
-    }
+fn test_app() -> App {
+    let mut app = App::new();
+    // Use a 1-nanosecond timer so that any non-zero time delta finishes
+    // the broadcast cycle, letting tests observe the snapshot after a
+    // couple of update ticks.
+    app.add_plugins(LobbyPlugin)
+        .add_plugins(bevy::time::TimePlugin)
+        .insert_resource(ShipState::new())
+        .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+        .init_resource::<WorldResource>()
+        .init_resource::<WorldSetupBroadcast>()
+        .init_resource::<WeaponsTarget>()
+        .init_resource::<ActiveBeam>()
+        .add_message::<AsteroidDestroyedVfx>()
+        .init_resource::<PhaserCooldown>()
+        .init_resource::<ActiveRepair>()
+        .init_resource::<RepairPenalties>()
+        .init_resource::<BreakdownQueueResource>()
+        .init_resource::<crate::asteroid_lifecycle::DestroyedAsteroids>()
+        .insert_resource(SimBroadcastTimer(Timer::new(
+            std::time::Duration::from_nanos(1), TimerMode::Repeating)))
+        .init_resource::<Outbox>()
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_fire_phaser, handle_repair, tick_active_beam, tick_repair, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+        .add_systems(PostUpdate, collect);
+    app
+}
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()

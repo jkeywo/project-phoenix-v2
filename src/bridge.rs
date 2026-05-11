@@ -5,6 +5,7 @@
 
 #[cfg(target_arch = "wasm32")]
 use {
+    crate::asteroid_lifecycle::AsteroidLifecyclePlugin,
     crate::codec::{JsonCodec, MessageCodec},
     crate::config_cache::ConfigCachePlugin,
     crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
@@ -53,6 +54,7 @@ pub fn wasm_init() {
         ..default()
     }))
     .add_plugins(ConfigCachePlugin)
+    .add_plugins(AsteroidLifecyclePlugin)
     .add_plugins(LobbyPlugin)
     .add_plugins(SimulationPlugin)
     .add_plugins(RendererPlugin)

@@ -3,14 +3,6 @@ target = "server.html"
 dist = "dist"
 public_url = "./"
 
-[[copy_dir]]
-source = "assets"
-destination = "assets"
-
-[[copy_dir]]
-source = "client"
-destination = "client"
-
 [watch]
 watch_path = ["assets/", "client/"]
 include = "*.toml"

@@ -24,6 +24,13 @@ phaser_range = 200.0
 phaser_damage = 10
 phaser_cooldown = 0.5
 
+[weapons_console]
+beam_range = 40.0
+beam_damage_per_sec = 5.0
+beam_duration_secs = 6.0
+cooldown_secs = 6.0
+beam_color = [1.0, 0.4, 0.1, 1.0]
+
 [console]
 captain_console = { enabled = true }
 helm_console = { enabled = true }

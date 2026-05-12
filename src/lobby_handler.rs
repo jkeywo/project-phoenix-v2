@@ -89,8 +89,6 @@ pub fn process_message(
                         .unwrap_or(false);
                     let is_already_spectator = sessions.spectator_queue().contains(id_token);
                     if !player_has_consoles && !is_already_spectator {
-                        // Check if there are any available station slots
-                        let total_connected = sessions.players().iter().filter(|p| p.connected).count() as u32;
                         let at_capacity = connected_with_consoles >= ship_stations.max_players;
                         if at_capacity {
                             sessions.push_spectator(id_token.clone());

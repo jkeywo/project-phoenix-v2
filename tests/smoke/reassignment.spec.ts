@@ -26,22 +26,39 @@ async function lastAssignment(client: TestClient, token: string) {
   ) as Promise<any>;
 }
 
+/**
+ * Send SelectStation and wait for a StationAssigned *for this client's token*
+ * so we don't accidentally catch advance broadcasts for other players.
+ */
+async function selectAndWait(client: TestClient, station: string, timeout = 5_000) {
+  await client.send('SelectStation', { station });
+  await client.page.waitForFunction(
+    (t) => (window as any).__messages?.some(
+      (m: any) => m.type === 'StationAssigned' && m.data.token === t
+    ),
+    client.token,
+    { timeout },
+  );
+}
+
 test('3 players can each claim a station at 3P layout', async ({ context }) => {
   const hostId = await bootServer(context);
 
+  // Build up 1P→2P→3P one player at a time, selecting between joins,
+  // so advance_on_join works naturally and there are no stale messages.
   const c1 = await createTestClient(context, hostId, { name: 'P1' });
+
+  // At 1P only "Captain" exists. Select it — advance_on_join will move c1 to
+  // Helm at 2P/3P when the others join.
+  await selectAndWait(c1, 'Captain');
+
   const c2 = await createTestClient(context, hostId, { name: 'P2' });
+  // advance_on_join already moved c1→Helm at 2P. c2 selects Tactical.
+  await selectAndWait(c2, 'Tactical');
+
   const c3 = await createTestClient(context, hostId, { name: 'P3' });
-
-  // At 3P layout: Helm, Tactical, Engineering
-  await c1.send('SelectStation', { station: 'Helm' });
-  await c1.waitForMessage('StationAssigned', 5_000);
-
-  await c2.send('SelectStation', { station: 'Tactical' });
-  await c2.waitForMessage('StationAssigned', 5_000);
-
-  await c3.send('SelectStation', { station: 'Engineering' });
-  await c3.waitForMessage('StationAssigned', 5_000);
+  // advance_on_join moved c1→Helm, c2→Tactical at 3P. c3 selects Engineering.
+  await selectAndWait(c3, 'Engineering');
 
   const a1 = await lastAssignment(c1, c1.token) as any;
   const a2 = await lastAssignment(c2, c2.token) as any;
@@ -62,17 +79,13 @@ test('3→2 player leave: remaining players keep their stations', async ({ conte
   const hostId = await bootServer(context);
 
   const c1 = await createTestClient(context, hostId, { name: 'P1' });
+  await selectAndWait(c1, 'Captain');
+
   const c2 = await createTestClient(context, hostId, { name: 'P2' });
-
-  await c1.send('SelectStation', { station: 'Helm' });
-  await c1.waitForMessage('StationAssigned', 5_000);
-
-  await c2.send('SelectStation', { station: 'Tactical' });
-  await c2.waitForMessage('StationAssigned', 5_000);
+  await selectAndWait(c2, 'Tactical');
 
   const c3 = await createTestClient(context, hostId, { name: 'P3' });
-  await c3.send('SelectStation', { station: 'Engineering' });
-  await c3.waitForMessage('StationAssigned', 5_000);
+  await selectAndWait(c3, 'Engineering');
 
   // c3 disconnects — 3P→2P leave cascade
   await c3.close();
@@ -86,6 +99,9 @@ test('3→2 player leave: remaining players keep their stations', async ({ conte
 
   expect(a1.data.station).toBe('Helm');
   expect(a2.data.station).toBe('Tactical');
+
+  await c1.close();
+  await c2.close();
 });
 
 test('leave at max_players allows spectator to claim vacated station', async ({ context }) => {
@@ -93,17 +109,13 @@ test('leave at max_players allows spectator to claim vacated station', async ({ 
 
   // Fill all 3 stations (max_players = 3)
   const c1 = await createTestClient(context, hostId, { name: 'P1' });
+  await selectAndWait(c1, 'Captain');
+
   const c2 = await createTestClient(context, hostId, { name: 'P2' });
+  await selectAndWait(c2, 'Tactical');
+
   const c3 = await createTestClient(context, hostId, { name: 'P3' });
-
-  await c1.send('SelectStation', { station: 'Helm' });
-  await c1.waitForMessage('StationAssigned', 5_000);
-
-  await c2.send('SelectStation', { station: 'Tactical' });
-  await c2.waitForMessage('StationAssigned', 5_000);
-
-  await c3.send('SelectStation', { station: 'Engineering' });
-  await c3.waitForMessage('StationAssigned', 5_000);
+  await selectAndWait(c3, 'Engineering');
 
   // 4th player joins as spectator (at max_players)
   const c4 = await createTestClient(context, hostId, { name: 'Spectator' });
@@ -117,15 +129,14 @@ test('leave at max_players allows spectator to claim vacated station', async ({ 
     { timeout: 5_000 },
   );
 
-  // c3 disconnects (held Engineering) — c4 should now be able to claim it
+  // c3 disconnects (held Engineering) → consoles cleared. c4 can claim it.
   await c3.close();
 
   // Wait for cascade to settle
   await c4.page.waitForTimeout(500);
 
-  // c4 claims Engineering (now vacant at the current 3-connected-player count)
+  // c4 claims Engineering (vacated by c3's disconnect)
   await c4.send('SelectStation', { station: 'Engineering' });
-
   await c4.page.waitForFunction(
     (token) => ((window as any).__messages as any[]).some(
       (m: any) => m.type === 'StationAssigned' && m.data.token === token && m.data.station !== null

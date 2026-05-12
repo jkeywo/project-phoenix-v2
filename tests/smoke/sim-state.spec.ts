@@ -4,6 +4,16 @@ import { test, expect, type TestClient } from './fixtures';
 import { readHostPeerId, createTestClient } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
 
+async function waitForStation(client: { page: import('@playwright/test').Page; token: string }, timeout = 5_000) {
+  await client.page.waitForFunction(
+    (t) => (window as any).__messages?.some(
+      (m: any) => m.type === 'StationAssigned' && m.data.token === t
+    ),
+    client.token,
+    { timeout },
+  );
+}
+
 async function startGame(context: BrowserContext): Promise<{ captain: TestClient; helm: TestClient }> {
   const serverPage = await context.newPage();
   await serverPage.goto('/');
@@ -17,10 +27,10 @@ async function startGame(context: BrowserContext): Promise<{ captain: TestClient
   // 2P layout: Helm station (CaptainChair+Helm) and Tactical station.
   // The Helm station also carries CaptainChair, so the helm player is the captain.
   await helm.send('SelectStation', { station: 'Helm' });
-  await helm.waitForMessage('StationAssigned', 5_000);
+  await waitForStation(helm);
 
   await captain.send('SelectStation', { station: 'Tactical' });
-  await captain.waitForMessage('StationAssigned', 5_000);
+  await waitForStation(captain);
 
   await helm.send('StartGame');
   await helm.waitForMessage('GameStarted', 5_000);

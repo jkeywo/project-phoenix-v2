@@ -4,6 +4,16 @@
 import { test, expect } from './fixtures';
 import { readHostPeerId, createTestClient } from './fixtures';
 
+async function waitForStation(client: { page: import('@playwright/test').Page; token: string }, timeout = 5_000) {
+  await client.page.waitForFunction(
+    (t) => (window as any).__messages?.some(
+      (m: any) => m.type === 'StationAssigned' && m.data.token === t
+    ),
+    client.token,
+    { timeout },
+  );
+}
+
 test('SelectStation — claims station and both clients receive StationAssigned', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/');
@@ -16,16 +26,25 @@ test('SelectStation — claims station and both clients receive StationAssigned'
 
   // Client A claims the Helm station (2P layout has "Helm" and "Tactical")
   await clientA.send('SelectStation', { station: 'Helm' });
+  await waitForStation(clientA);
 
-  const selA = await clientA.waitForMessage('StationAssigned', 5_000) as any;
-  expect(selA.data.token).toBe(clientA.token);
+  const selA = await clientA.page.evaluate(
+    (t) => (window as any).__messages.find(
+      (m: any) => m.type === 'StationAssigned' && m.data.token === t
+    ),
+    clientA.token,
+  ) as any;
   expect(selA.data.station).toBe('Helm');
   expect(Array.isArray(selA.data.consoles)).toBe(true);
   expect(selA.data.consoles.length).toBeGreaterThan(0);
 
   // Client B should also receive the StationAssigned broadcast
-  const selAonB = await clientB.waitForMessage('StationAssigned', 5_000) as any;
-  expect(selAonB.data.token).toBe(clientA.token);
+  const selAonB = await clientB.page.evaluate(
+    (t) => (window as any).__messages.find(
+      (m: any) => m.type === 'StationAssigned' && m.data.token === t
+    ),
+    clientA.token,
+  ) as any;
   expect(selAonB.data.station).toBe('Helm');
 
   await clientA.close();
@@ -44,10 +63,10 @@ test('non-captain StartGame is ignored', async ({ context }) => {
   const clientB = await createTestClient(context, hostId, { name: 'Tactical' });
 
   await clientA.send('SelectStation', { station: 'Helm' });
-  await clientA.waitForMessage('StationAssigned', 5_000);
+  await waitForStation(clientA);
 
   await clientB.send('SelectStation', { station: 'Tactical' });
-  await clientB.waitForMessage('StationAssigned', 5_000);
+  await waitForStation(clientB);
 
   // Non-captain (B / Tactical station) attempts StartGame — should be ignored
   await clientB.send('StartGame');
@@ -73,7 +92,7 @@ test('StartGame with unfilled stations is ignored', async ({ context }) => {
 
   // Only A claims Helm — Tactical station is unfilled
   await clientA.send('SelectStation', { station: 'Helm' });
-  await clientA.waitForMessage('StationAssigned', 5_000);
+  await waitForStation(clientA);
 
   // A is the captain (holds CaptainChair via Helm station) but stations are not all filled
   await clientA.send('StartGame');
@@ -98,10 +117,10 @@ test('captain starts game — both clients receive GameStarted', async ({ contex
 
   // 2P layout: Helm (CaptainChair+Helm) + Tactical (Tactical+Engineering)
   await clientA.send('SelectStation', { station: 'Helm' });
-  await clientA.waitForMessage('StationAssigned', 5_000);
+  await waitForStation(clientA);
 
   await clientB.send('SelectStation', { station: 'Tactical' });
-  await clientB.waitForMessage('StationAssigned', 5_000);
+  await waitForStation(clientB);
 
   // Captain (A, holds CaptainChair via Helm station) sends StartGame
   await clientA.send('StartGame');

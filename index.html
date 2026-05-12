@@ -60,7 +60,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-744f76e9d3bab770.js" crossorigin="anonymous" integrity="sha384-+dowQWLRzkkGsmmCDVeEfuD5GIagRqCzNfNDoc7IWeNLMqu76EeLaMR0jFg+eAQc"><link rel="preload" href="./project-phoenix-744f76e9d3bab770_bg.wasm" crossorigin="anonymous" integrity="sha384-mD+qZhPNZBss7bBJoPa6LVy92aZgHvpb63oLujMVcVxBn4kCiWWaa6hlRX4XAJMZ" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-6fc3ce1d59c3e298.js" crossorigin="anonymous" integrity="sha384-PQRgFlH+7C2xr4Z2cZYzBdHTgrMvr+vQ13gRlJHJjAqRV+b/acTuZZyTO3ovlzYS"><link rel="preload" href="./project-phoenix-6fc3ce1d59c3e298_bg.wasm" crossorigin="anonymous" integrity="sha384-8GbH6Tp7WBzeW2PZXfupDnivpbvGdSSekgEojZuHTiVcf78eTOixTik+Szw7cpr2" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">
@@ -92,8 +92,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-744f76e9d3bab770.js';
-const wasm = await init({ module_or_path: './project-phoenix-744f76e9d3bab770_bg.wasm' });
+import init, * as bindings from './project-phoenix-6fc3ce1d59c3e298.js';
+const wasm = await init({ module_or_path: './project-phoenix-6fc3ce1d59c3e298_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -326,11 +326,49 @@ function finishInit() {
   if (_finishInitCalled) return;
   _finishInitCalled = true;
   const spinner = document.getElementById('wasm-spinner');
-  if (spinner) spinner.style.display = 'none';
   
   window.wasm_init = wasmBindings.wasm_init;
   window.wasm_receive_message = wasmBindings.wasm_receive_message;
   window.set_message_callback = wasmBindings.set_message_callback;
+  window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
+
+  // Validate station config before starting PeerJS or the Bevy app.
+  // A malformed [stations] section must refuse to boot.
+  fetch('assets/entities/player_ship.toml')
+    .then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+    .then(toml => {
+      try {
+        wasm_validate_stations(toml);
+      } catch (err) {
+        showFatalError('Station config error: ' + (err && err.message ? err.message : String(err)));
+        return;
+      }
+      startServer();
+    })
+    .catch(err => {
+      showFatalError('Failed to load player_ship.toml: ' + String(err));
+    });
+}
+
+function showFatalError(message) {
+  const spinner = document.getElementById('wasm-spinner');
+  if (spinner) {
+    spinner.innerHTML =
+      '<div style="color:#f44;padding:2rem;text-align:center;font-family:monospace;max-width:40rem;">' +
+      '<strong>Fatal configuration error</strong><br><br>' +
+      message.replace(/</g, '&lt;') +
+      '<br><br>Fix the TOML and reload the page.</div>';
+    spinner.style.display = 'flex';
+  }
+  // PeerJS is already constructed but we never call startServer(), so it
+  // will open its peer but never receive connections that matter.
+  console.error('[Phoenix] Fatal:', message);
+}
+
+function startServer() {
+  const spinner = document.getElementById('wasm-spinner');
+  if (spinner) spinner.style.display = 'none';
+
   set_message_callback(routeOutbound);
   
   // Flush before wasm_init: App::run() in WASM unwinds the JS stack by

@@ -35,3 +35,43 @@ captain_console = { enabled = true }
 helm_console = { enabled = true }
 weapons_console = { enabled = true }
 engineering_console = { enabled = true }
+
+[stations]
+min_players = 1
+max_players = 3
+
+[[stations.1]]
+name = "Captain"
+description = "Solo crew: pilot, fight, and command the bridge."
+consoles = ["CaptainChair", "Helm", "Tactical", "Engineering"]
+next = "Helm"
+
+[[stations.2]]
+name = "Helm"
+description = "Pilot the ship and command the bridge."
+consoles = ["CaptainChair", "Helm"]
+next = "Helm"
+previous = "Captain"
+
+[[stations.2]]
+name = "Tactical"
+description = "Weapons and damage control."
+consoles = ["Tactical", "Engineering"]
+next = "Tactical"
+
+[[stations.3]]
+name = "Helm"
+description = "Pilot the ship and command the bridge."
+consoles = ["CaptainChair", "Helm"]
+previous = "Helm"
+
+[[stations.3]]
+name = "Tactical"
+description = "Manage weapons systems."
+consoles = ["Tactical"]
+previous = "Tactical"
+
+[[stations.3]]
+name = "Engineering"
+description = "Maintain and repair ship systems."
+consoles = ["Engineering"]

@@ -317,6 +317,25 @@ pub fn message_for_station_slot_click(slot: &StationSlot) -> Option<ClientMessag
     }
 }
 
+/// Decides which console to land on after a `StationAssigned` update.
+///
+/// Returns `current` if it is present in `new_consoles`; otherwise returns
+/// `new_consoles[0]`. Called by `apply_inbound_messages` when a
+/// `StationAssigned` targets the local player.
+///
+/// # Panics
+/// Panics if `new_consoles` is empty (caller must guard against spectator
+/// assignment with an empty bundle before calling).
+pub fn reconcile_active_console(current: Option<Console>, new_consoles: &[Console]) -> Console {
+    assert!(!new_consoles.is_empty(), "reconcile_active_console called with empty bundle");
+    if let Some(c) = current {
+        if new_consoles.contains(&c) {
+            return c;
+        }
+    }
+    new_consoles[0].clone()
+}
+
 /// The local player's session token, set once by JS via the bridge.
 /// Held as a separate resource so the lobby UI can derive "mine" without
 /// polluting `LobbyState`.
@@ -791,5 +810,31 @@ consoles = ["Tactical"]
     fn clicking_spectator_slot_yields_no_message() {
         let msg = message_for_station_slot_click(&StationSlot::Spectator { player_name: "Alice".into() });
         assert!(msg.is_none());
+    }
+
+    // ── reconcile_active_console ────────────────────────────────────
+
+    #[test]
+    fn reconcile_keeps_current_when_present_in_bundle() {
+        let result = reconcile_active_console(
+            Some(Console::Helm),
+            &[Console::CaptainChair, Console::Helm],
+        );
+        assert_eq!(result, Console::Helm);
+    }
+
+    #[test]
+    fn reconcile_jumps_to_first_when_current_not_in_bundle() {
+        let result = reconcile_active_console(
+            Some(Console::Science),
+            &[Console::CaptainChair, Console::Helm],
+        );
+        assert_eq!(result, Console::CaptainChair);
+    }
+
+    #[test]
+    fn reconcile_none_lands_on_first_console() {
+        let result = reconcile_active_console(None, &[Console::Tactical]);
+        assert_eq!(result, Console::Tactical);
     }
 }

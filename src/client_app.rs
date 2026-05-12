@@ -14,8 +14,8 @@ use bevy::prelude::*;
 
 use crate::client_helm::{drag, release, tick, HelmJoystickState};
 use crate::client_lobby::{
-    engage_message, message_for_slot_click, ConsoleSlot, LobbyState, LobbyView, LocalPlayerToken,
-    ActiveConsole,
+    engage_message, message_for_slot_click, reconcile_active_console, ConsoleSlot, LobbyState,
+    LobbyView, LocalPlayerToken, ActiveConsole,
 };
 use crate::client_sim::{
     message_for_direction_press, on_screen_message, red_alert_toggle_message,
@@ -165,6 +165,15 @@ struct TorpedoCountLabel;
 #[derive(Component)]
 struct TubeStatusLabel(crate::messages::TorpedoTube);
 
+/// Marks the root node of the console tab bar, shown when the local player
+/// holds 2+ consoles while in-game.
+#[derive(Component)]
+struct TabBarRoot;
+
+/// Marks a single tab button in the tab bar; carries the console it selects.
+#[derive(Component)]
+struct TabButton(Console);
+
 // ── Plugin ─────────────────────────────────────────────────────────
 
 pub struct ClientAppPlugin;
@@ -185,7 +194,7 @@ impl Plugin for ClientAppPlugin {
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
-            .add_systems(Startup, (setup_lobby_ui, setup_captain_ui, setup_helm_ui, setup_science_ui, setup_weapons_ui))
+            .add_systems(Startup, (setup_lobby_ui, setup_captain_ui, setup_helm_ui, setup_science_ui, setup_weapons_ui, setup_tab_bar_ui))
             .add_systems(
                 Update,
                 (
@@ -220,6 +229,8 @@ impl Plugin for ClientAppPlugin {
                         handle_torpedo_tube_button_press,
                         handle_fire_torpedo_button_press,
                         refresh_torpedo_ui,
+                        rebuild_tab_bar,
+                        handle_tab_button_press,
                     ),
                 ),
             );
@@ -305,8 +316,20 @@ fn apply_inbound_messages(
     mut reader: MessageReader<InboundServerMessage>,
     mut lobby: ResMut<LobbyState>,
     mut sim: ResMut<ClientSimState>,
+    token: Res<LocalPlayerToken>,
+    mut active: ResMut<ActiveConsole>,
 ) {
     for ev in reader.read() {
+        // Before updating lobby state, intercept StationAssigned for the
+        // local player to reconcile the active-console tab.
+        if let ServerMessage::StationAssigned { token: t, consoles, .. } = &ev.0 {
+            if t == &token.0 && !consoles.is_empty() {
+                active.0 = Some(reconcile_active_console(active.0.clone(), consoles));
+            } else if t == &token.0 && consoles.is_empty() {
+                // Spectator — clear active console.
+                active.0 = None;
+            }
+        }
         lobby.apply(&ev.0);
         sim.apply(&ev.0);
     }
@@ -1524,6 +1547,110 @@ fn refresh_torpedo_ui(
         } else {
             **text = "FIRE TORPEDO".to_string();
             *color = TextColor(Color::srgb(0.3, 1.0, 0.3));
+        }
+    }
+}
+
+// ── Tab Bar ────────────────────────────────────────────────────────
+
+fn setup_tab_bar_ui(mut commands: Commands) {
+    commands.spawn((
+        TabBarRoot,
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.0),
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            height: Val::Px(44.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(4.0),
+            padding: UiRect::all(Val::Px(4.0)),
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.05, 0.05, 0.15, 0.92)),
+        Visibility::Hidden,
+    ));
+}
+
+/// Rebuilds the tab bar whenever the lobby / active-console state changes.
+/// Spawns one button child per console in the local player's bundle.
+fn rebuild_tab_bar(
+    mut commands: Commands,
+    lobby: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    active: Res<ActiveConsole>,
+    tab_root_q: Query<Entity, With<TabBarRoot>>,
+    mut tab_vis_q: Query<&mut Visibility, With<TabBarRoot>>,
+    children_q: Query<&Children>,
+) {
+    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
+        return;
+    }
+
+    let Ok(root) = tab_root_q.single() else { return };
+
+    let view = LobbyView::new(&lobby, &token.0);
+    let my_consoles = view.my_consoles();
+    let in_game = lobby.phase == GamePhase::InProgress;
+    let show_tabs = in_game && my_consoles.len() >= 2;
+
+    // Show/hide the bar.
+    if let Ok(mut vis) = tab_vis_q.single_mut() {
+        *vis = if show_tabs { Visibility::Visible } else { Visibility::Hidden };
+    }
+
+    // Rebuild children.
+    if let Ok(children) = children_q.get(root) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
+    }
+
+    if !show_tabs {
+        return;
+    }
+
+    commands.entity(root).with_children(|parent| {
+        for console in my_consoles {
+            let is_active = active.0.as_ref() == Some(console);
+            let bg = if is_active {
+                Color::srgb(0.20, 0.40, 0.80)
+            } else {
+                Color::srgb(0.10, 0.15, 0.30)
+            };
+            let mut btn = parent.spawn((
+                Node {
+                    padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(bg),
+            ));
+            btn.insert((Button, TabButton(console.clone())));
+            btn.with_children(|inner| {
+                inner.spawn((
+                    Text::new(console.display_name()),
+                    TextFont { font_size: 14.0, ..default() },
+                    TextColor(Color::WHITE),
+                ));
+            });
+        }
+    });
+}
+
+/// Handles tab button presses by updating `ActiveConsole` directly (bypasses
+/// JS `wasm_client_set_active_console` — the Bevy resource is the source of
+/// truth; the bridge forwards the JS value only when JS calls that function).
+fn handle_tab_button_press(
+    mut interactions: Query<
+        (&Interaction, &TabButton),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut active: ResMut<ActiveConsole>,
+) {
+    for (interaction, TabButton(console)) in interactions.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            active.0 = Some(console.clone());
         }
     }
 }

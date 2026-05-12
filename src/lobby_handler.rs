@@ -2,7 +2,7 @@ use crate::messages::{
     ClientMessage, Console, GamePhase, GameState, ServerMessage, WorldData,
 };
 use crate::session::SessionManager;
-use crate::stations::{all_stations_filled, get_station, reassign_on_join, reassign_on_leave, ShipStations, StationAssignments};
+use crate::stations::{all_stations_filled, get_station, reassign_on_leave, ShipStations, StationAssignments};
 
 #[derive(Clone, Debug)]
 pub enum Target {

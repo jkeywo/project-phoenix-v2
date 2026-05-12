@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "server")]
 use bevy::prelude::Resource;
 pub use crate::messages::{ModifierSlot, ModifierSource};
 
@@ -60,8 +59,7 @@ pub enum ModifierEvent {
 /// - `sum = Σ bonus` for all entries on that slot
 /// - if `sum >= 0` → multiplier = `1.0 + sum`
 /// - if `sum < 0`  → multiplier = `1.0 / (1.0 + |sum|)`
-#[cfg_attr(feature = "server", derive(Resource))]
-#[derive(Clone, Debug)]
+#[derive(Resource, Clone, Debug)]
 pub struct ShipModifiers {
     /// Sparse table: `(source, slot) → bonus`.
     table: HashMap<(ModifierSource, ModifierSlot), f32>,

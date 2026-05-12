@@ -1,7 +1,5 @@
 use std::collections::{HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "server")]
 use bevy::prelude::Resource;
 
 use crate::messages::Console;
@@ -21,8 +19,7 @@ pub struct StationDef {
 }
 
 /// The fully-parsed, validated station configuration.
-#[cfg_attr(feature = "server", derive(Resource))]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Resource, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ShipStations {
     /// Map from player count → ordered list of station definitions.
     pub configs: HashMap<u32, Vec<StationDef>>,

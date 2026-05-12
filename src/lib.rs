@@ -12,6 +12,7 @@ pub mod damage;
 pub mod entity_config;
 pub mod map_config;
 pub mod messages;
+pub mod stations;
 pub mod modifiers;
 pub mod codec;
 pub mod session;

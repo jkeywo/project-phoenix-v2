@@ -1,6 +1,7 @@
 // Pure Rust module for generating asteroid positions in a donut-shaped field.
 // No Bevy, no physics engine — input → output design for isolated unit testing.
 
+use crate::map_config::GridConfig;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -13,6 +14,8 @@ pub struct AsteroidSpawn {
     pub x: f32,
     /// Z position (meters)
     pub z: f32,
+    /// Y position (meters)
+    pub y: f32,
     /// Path to the entity config for this asteroid
     pub config_path: String,
 }
@@ -23,6 +26,19 @@ pub struct DonutFieldResult {
     /// All asteroid spawns
     pub spawns: Vec<AsteroidSpawn>,
     /// Total number of asteroids generated
+    pub count: usize,
+}
+
+/// Result of grid-based asteroid generation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AsteroidGridResult {
+    /// Gameplay asteroids (Y=0 plane).
+    pub gameplay: Vec<AsteroidSpawn>,
+    /// Cosmetic asteroids in the upper layer (Y > 0).
+    pub cosmetic_upper: Vec<AsteroidSpawn>,
+    /// Cosmetic asteroids in the lower layer (Y < 0).
+    pub cosmetic_lower: Vec<AsteroidSpawn>,
+    /// Total count across all layers.
     pub count: usize,
 }
 
@@ -116,6 +132,137 @@ pub fn generate_donut_field(
     }
 }
 
+/// Generate asteroid positions using a grid + Perlin noise system.
+///
+/// Grid cells within the bounding box (inner_radius..outer_radius on the XZ plane)
+/// are tested for spawn eligibility. Cells outside the torus (inner hole or beyond
+/// outer_radius) are skipped. Each passing cell spawns at its center position plus
+/// a jitter offset derived from spatial Perlin noise.
+pub fn generate_grid_field(
+    inner_radius: f32,
+    outer_radius: f32,
+    grid: GridConfig,
+    seed_offset: u64,
+    gameplay_type_paths: &[String],
+    cosmetic_type_paths: &[String],
+) -> AsteroidGridResult {
+    let mut rng = StdRng::seed_from_u64(seed_offset);
+
+    let r_min = inner_radius;
+    let r_max = outer_radius;
+    let res = grid.resolution;
+
+    let half_extent = r_max;
+    let min_cell_x = (-half_extent / res).floor() as i32;
+    let max_cell_x = (half_extent / res).floor() as i32;
+    let min_cell_z = (-half_extent / res).floor() as i32;
+    let max_cell_z = (half_extent / res).floor() as i32;
+
+    let mut gameplay = Vec::new();
+    let mut cosmetic_upper = Vec::new();
+    let mut cosmetic_lower = Vec::new();
+
+    let y_base = grid.cosmetic_y_offset;
+
+    for cx in min_cell_x..=max_cell_x {
+        for cz in min_cell_z..=max_cell_z {
+            let cell_center_x = (cx as f32) * res;
+            let cell_center_z = (cz as f32) * res;
+            let dist = (cell_center_x * cell_center_x + cell_center_z * cell_center_z).sqrt();
+
+            if dist < r_min || dist > r_max {
+                continue;
+            }
+
+            let density = compute_density(cx, cz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
+
+            if density >= grid.fill_gameplay && !gameplay_type_paths.is_empty() {
+                let jitter = compute_jitter(cell_center_x, cell_center_z, r_min, r_max, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
+                let x = cell_center_x + jitter.0;
+                let z = cell_center_z + jitter.1;
+                let config_path = gameplay_type_paths[rng.random_range(0..gameplay_type_paths.len())].clone();
+                gameplay.push(AsteroidSpawn { x, z, y: 0.0, config_path });
+            }
+
+            let cos_y = compute_density(cx, cz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
+            if cos_y >= grid.fill_cosmetic && !cosmetic_type_paths.is_empty() {
+                let jitter = compute_jitter(cell_center_x, cell_center_z, r_min, r_max, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
+                let x = cell_center_x + jitter.0;
+                let z = cell_center_z + jitter.1;
+                let y_offset = y_base * (0.5 + rng.random::<f32>() * 0.5);
+                let config_path = cosmetic_type_paths[rng.random_range(0..cosmetic_type_paths.len())].clone();
+                cosmetic_upper.push(AsteroidSpawn { x, z, y: y_offset, config_path }); // y stored separately
+            }
+
+            let cos_y2 = compute_density(cx, cz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
+            if cos_y2 >= grid.fill_cosmetic && !cosmetic_type_paths.is_empty() {
+                let jitter = compute_jitter(cell_center_x, cell_center_z, r_min, r_max, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
+                let x = cell_center_x + jitter.0;
+                let z = cell_center_z + jitter.1;
+                let y_offset = y_base * (0.5 + rng.random::<f32>() * 0.5);
+                let config_path = cosmetic_type_paths[rng.random_range(0..cosmetic_type_paths.len())].clone();
+                cosmetic_lower.push(AsteroidSpawn { x, z, y: -y_offset, config_path }); // y stored separately
+            }
+        }
+    }
+
+    let count = gameplay.len() + cosmetic_upper.len() + cosmetic_lower.len();
+    AsteroidGridResult { gameplay, cosmetic_upper, cosmetic_lower, count }
+}
+
+/// Compute the density value for a grid cell using rand + normalized perlin noise.
+fn compute_density(
+    cell_x: i32,
+    cell_z: i32,
+    freq: f32,
+    octaves: u32,
+    uniformity: f32,
+    rng: &mut StdRng,
+) -> f32 {
+    let raw_rand = rng.random::<f32>();
+    let noise_sample = perlin2d_octaves(cell_x as f32 * freq, cell_z as f32 * freq, octaves);
+    let normalized_noise = (noise_sample + 1.0) / 2.0;
+    raw_rand * uniformity + normalized_noise * (1.0 - uniformity)
+}
+
+/// Compute jitter offset using spatial perlin noise, clamped so the final
+/// position cannot go outside the [r_min, r_max] torus.
+fn compute_jitter(
+    cell_center_x: f32,
+    cell_center_z: f32,
+    r_min: f32,
+    r_max: f32,
+    jitter: f32,
+    freq: f32,
+    octaves: u32,
+    rng: &mut StdRng,
+) -> (f32, f32) {
+    let dist = (cell_center_x * cell_center_x + cell_center_z * cell_center_z).sqrt();
+    let max_push_inward = if dist > r_min { dist - r_min } else { 0.0 };
+    let max_push_outward = r_max - dist;
+    let max_jitter = max_push_inward.min(max_push_outward).min(jitter);
+    let angle = perlin2d_octaves(cell_center_x * freq, cell_center_z * freq, octaves) * PI;
+    let magnitude = rng.random::<f32>() * max_jitter;
+    (angle.cos() * magnitude, angle.sin() * magnitude)
+}
+
+/// Compute perlin noise with octaves.
+fn perlin2d_octaves(x: f32, y: f32, octaves: u32) -> f32 {
+    use noise::NoiseFn;
+    let source = noise::Perlin::new(0);
+    let mut result = 0.0;
+    let mut amp = 1.0;
+    let mut freq = 1.0;
+    let mut max_amp = 0.0;
+    for _ in 0..octaves {
+        result += source.get([x as f64 * freq as f64, y as f64 * freq as f64]) as f32 * amp;
+        max_amp += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    result / max_amp
+}
+
 /// Generate a single asteroid spawn at a random position in the donut.
 fn generate_single_spawn(
     rng: &mut StdRng,
@@ -145,6 +292,7 @@ fn generate_single_spawn(
     AsteroidSpawn {
         x,
         z,
+        y: 0.0,
         config_path,
     }
 }
@@ -488,5 +636,130 @@ mod tests {
         );
         assert!(result.spawns.is_empty());
         assert_eq!(result.count, 0);
+    }
+
+    #[test]
+    fn grid_positions_within_torus_bounds() {
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.4,
+            fill_cosmetic: 0.15,
+            uniformity: 0.3,
+            noise_freq: 0.02,
+            noise_octaves: 3,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 2,
+            jitter: 10.0,
+            cosmetic_y_offset: 15.0,
+        };
+        let result = generate_grid_field(
+            100.0,
+            200.0,
+            grid,
+            42,
+            &["gameplay.toml".to_string()],
+            &["cosmetic.toml".to_string()],
+        );
+        for spawn in &result.gameplay {
+            let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
+            assert!(
+                dist >= 100.0 && dist <= 200.0,
+                "Gameplay pos ({}, {}) dist={} outside torus [100,200]",
+                spawn.x, spawn.z, dist
+            );
+        }
+        for spawn in &result.cosmetic_upper {
+            let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
+            assert!(
+                dist >= 100.0 && dist <= 200.0,
+                "Cosmetic upper pos ({}, {}) dist={} outside torus [100,200]",
+                spawn.x, spawn.z, dist
+            );
+        }
+        for spawn in &result.cosmetic_lower {
+            let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
+            assert!(
+                dist >= 100.0 && dist <= 200.0,
+                "Cosmetic lower pos ({}, {}) dist={} outside torus [100,200]",
+                spawn.x, spawn.z, dist
+            );
+        }
+    }
+
+    #[test]
+    fn grid_same_params_same_output() {
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.4,
+            fill_cosmetic: 0.15,
+            uniformity: 0.3,
+            noise_freq: 0.02,
+            noise_octaves: 3,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 2,
+            jitter: 10.0,
+            cosmetic_y_offset: 15.0,
+        };
+        let result_a = generate_grid_field(
+            100.0,
+            200.0,
+            grid.clone(),
+            42,
+            &["gameplay.toml".to_string()],
+            &["cosmetic.toml".to_string()],
+        );
+        let result_b = generate_grid_field(
+            100.0,
+            200.0,
+            grid,
+            42,
+            &["gameplay.toml".to_string()],
+            &["cosmetic.toml".to_string()],
+        );
+        assert_eq!(result_a.gameplay, result_b.gameplay, "Gameplay must be deterministic");
+        assert_eq!(result_a.cosmetic_upper, result_b.cosmetic_upper, "Cosmetic upper must be deterministic");
+        assert_eq!(result_a.cosmetic_lower, result_b.cosmetic_lower, "Cosmetic lower must be deterministic");
+        assert_eq!(result_a.count, result_b.count);
+    }
+
+    #[test]
+    fn grid_cosmetic_y_offsets_correct_sign() {
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.0,
+            fill_cosmetic: 1.0,
+            uniformity: 0.0,
+            noise_freq: 0.02,
+            noise_octaves: 1,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 1,
+            jitter: 0.0,
+            cosmetic_y_offset: 15.0,
+        };
+        let result = generate_grid_field(
+            100.0,
+            200.0,
+            grid,
+            42,
+            &[],
+            &["cosmetic.toml".to_string()],
+        );
+        for spawn in &result.gameplay {
+            assert_eq!(spawn.y, 0.0, "Gameplay Y must be 0");
+        }
+        for spawn in &result.cosmetic_upper {
+            assert!(
+                spawn.y > 0.0 && spawn.y <= 15.0,
+                "Cosmetic upper Y={} must be in (0, 15]",
+                spawn.y
+            );
+        }
+        for spawn in &result.cosmetic_lower {
+            assert!(
+                spawn.y < 0.0 && spawn.y >= -15.0,
+                "Cosmetic lower Y={} must be in [-15, 0)",
+                spawn.y
+            );
+        }
     }
 }

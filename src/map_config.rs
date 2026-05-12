@@ -58,6 +58,47 @@ pub struct PlanetConfig {
     pub tags: Vec<String>,
 }
 
+/// Configuration for the grid-based asteroid spawner.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct GridConfig {
+    /// Cell size in world units (same for x and z).
+    pub resolution: f32,
+    /// Probability threshold for gameplay layer.
+    #[serde(default = "default_fill_gameplay")]
+    pub fill_gameplay: f32,
+    /// Probability threshold for each cosmetic layer.
+    #[serde(default = "default_fill_cosmetic")]
+    pub fill_cosmetic: f32,
+    /// Weight between random (1.0) and noise-driven (0.0).
+    #[serde(default)]
+    pub uniformity: f32,
+    /// Spatial noise frequency (cycles/meter) for jitter.
+    #[serde(default = "default_noise_freq")]
+    pub noise_freq: f32,
+    /// Octaves for spatial noise.
+    #[serde(default = "default_noise_octaves")]
+    pub noise_octaves: u32,
+    /// Perlin frequency for density field.
+    #[serde(default = "default_density_noise_freq")]
+    pub density_noise_freq: f32,
+    /// Octaves for density noise.
+    #[serde(default = "default_density_noise_octaves")]
+    pub density_noise_octaves: u32,
+    /// Max offset from cell center in meters.
+    #[serde(default)]
+    pub jitter: f32,
+    /// Base Y offset for cosmetic layers.
+    #[serde(default)]
+    pub cosmetic_y_offset: f32,
+}
+
+fn default_fill_gameplay() -> f32 { 0.4 }
+fn default_fill_cosmetic() -> f32 { 0.15 }
+fn default_noise_freq() -> f32 { 0.02 }
+fn default_noise_octaves() -> u32 { 3 }
+fn default_density_noise_freq() -> f32 { 0.01 }
+fn default_density_noise_octaves() -> u32 { 2 }
+
 /// Configuration for an asteroid field.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct AsteroidFieldConfig {
@@ -82,6 +123,9 @@ pub struct AsteroidFieldConfig {
     /// Tags for categorization.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Grid-based spawner configuration. When present, overrides donut-based generation.
+    #[serde(default)]
+    pub grid: Option<GridConfig>,
 }
 
 fn default_spawn_distance() -> f32 {

@@ -164,3 +164,16 @@ Open questions surfaced:
 - #120 vs #116 — save format also doesn't restore the spectator FIFO.
 - Captain `SetView` authority vs Science / Comms viewscreen pushes — needs an
   explicit override path. PRD #119 user story 13 calls this out for Comms.
+
+## [2026-05-12] ingest | Issue #182 — viewscreen static border frame
+
+Second slice of PRD #180. `ViewscreenBorderPlugin` (`src/viewscreen_border.rs`)
+now loads all ten normal-state border PNGs and, on `GameStarted`, spawns a
+viewport-filling root `Node` with ten `ImageNode` children: four 240×140 corners,
+top cap (320×56), bottom cap (520×56), and four edges using
+`NodeImageMode::Tiled`. The root carries a `ViewscreenBorderRoot` marker and is
+despawned on transition back to `Lobby` (defensive — current code never returns).
+No alert state, vignette, or HUD readouts yet — those land in #183 and #184.
+No new tests: per the PRD, the plugin is Bevy plumbing with no testable surface
+in this slice; pure helpers (`yaw_to_compass_bearing`, `pulse_intensity`) land
+with #184.

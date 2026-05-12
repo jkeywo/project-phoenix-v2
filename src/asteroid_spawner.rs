@@ -349,6 +349,59 @@ pub fn generate_donut_uuids(
         .collect()
 }
 
+/// Generate deterministic UUID strings for asteroids in a grid field.
+///
+/// Returns (gameplay_uuids, cosmetic_upper_uuids, cosmetic_lower_uuids).
+/// Uses the same seed derivation as generate_grid_field plus a UUID-specific offset.
+pub fn generate_grid_uuids(
+    inner_radius: f32,
+    outer_radius: f32,
+    grid: &GridConfig,
+    seed_offset: u64,
+    gameplay_count: usize,
+    cosmetic_upper_count: usize,
+    cosmetic_lower_count: usize,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let seed = {
+        let mut seed: u64 = seed_offset;
+        seed = seed.wrapping_add(inner_radius.to_bits() as u64);
+        seed = seed.wrapping_add(outer_radius.to_bits() as u64);
+        seed = seed.wrapping_add(grid.resolution.to_bits() as u64);
+        seed = seed.wrapping_mul(2654435761);
+        seed
+    };
+
+    let uuid_seed = seed.wrapping_add(0xDEAD_BEEF_CAFE_1234);
+    let mut rng = StdRng::seed_from_u64(uuid_seed);
+
+    let make_uuid = |rng: &mut StdRng| -> String {
+        let a: u64 = rng.random();
+        let b: u64 = rng.random();
+        let bytes: [u8; 16] = [
+            (a >> 56) as u8, (a >> 48) as u8, (a >> 40) as u8, (a >> 32) as u8,
+            (a >> 24) as u8, (a >> 16) as u8,
+            0x40 | ((a >> 8) as u8 & 0x0f), a as u8,
+            0x80 | ((b >> 56) as u8 & 0x3f),
+            (b >> 48) as u8, (b >> 40) as u8, (b >> 32) as u8,
+            (b >> 24) as u8, (b >> 16) as u8, (b >> 8) as u8, b as u8,
+        ];
+        format!(
+            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5],
+            bytes[6], bytes[7],
+            bytes[8], bytes[9],
+            bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+        )
+    };
+
+    let gameplay: Vec<String> = (0..gameplay_count).map(|_| make_uuid(&mut rng)).collect();
+    let cosmetic_upper: Vec<String> = (0..cosmetic_upper_count).map(|_| make_uuid(&mut rng)).collect();
+    let cosmetic_lower: Vec<String> = (0..cosmetic_lower_count).map(|_| make_uuid(&mut rng)).collect();
+
+    (gameplay, cosmetic_upper, cosmetic_lower)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

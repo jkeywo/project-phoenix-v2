@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 use std::collections::HashSet;
 
-use crate::asteroid_spawner::{generate_donut_field, generate_donut_uuids};
+use crate::asteroid_spawner::{generate_donut_field, generate_donut_uuids, generate_grid_field, generate_grid_uuids};
 use crate::map_config::MapConfig;
 use crate::messages::ServerMessage;
 use crate::lobby::{OutboundMessage, Target};
@@ -59,7 +59,7 @@ pub fn check_destroyed_asteroids(
 /// System to spawn asteroids lazily based on ship position.
 /// Runs on a timer, spawns at most one asteroid per frame.
 pub fn lazy_asteroid_spawn(
-    commands: Commands,
+    mut commands: Commands,
     time: Res<Time>,
     mut spawn_timer: ResMut<AsteroidSpawnTimer>,
     destroyed: Res<DestroyedAsteroids>,
@@ -85,58 +85,111 @@ pub fn lazy_asteroid_spawn(
         .map(|uuid| uuid.0.clone())
         .collect();
     
- // Check each asteroid field
- for (field_idx, field) in map_config.asteroid_fields.iter().enumerate() {
- // Check if ship is within spawn distance of this field
- // For now, assume field is centered at origin
- let ship_dist = (ship_state.x * ship_state.x + ship_state.z * ship_state.z).sqrt();
+// Check each asteroid field
+    for (field_idx, field) in map_config.asteroid_fields.iter().enumerate() {
+        let ship_dist = (ship_state.x * ship_state.x + ship_state.z * ship_state.z).sqrt();
 
- // Only process fields where ship is within spawn distance
- if ship_dist <= field.spawn_distance {
- // Generate candidate positions using donut model
- let seed_offset = field_idx as u64;
- let candidates = generate_donut_field(
- field.inner_radius,
- field.outer_radius,
- field.density,
- seed_offset,
- &field.asteroid_type_paths,
- &field.cosmetic_type_paths,
- );
+        if ship_dist <= field.spawn_distance {
+            let seed_offset = field_idx as u64;
 
- // Generate UUIDs for this field
- let uuids = generate_donut_uuids(
- field.inner_radius,
- field.outer_radius,
- field.density,
- seed_offset,
- candidates.spawns.len(),
- );
+            if let Some(ref grid) = field.grid {
+                let result = generate_grid_field(
+                    field.inner_radius,
+                    field.outer_radius,
+                    grid.clone(),
+                    seed_offset,
+                    &field.asteroid_type_paths,
+                    &field.cosmetic_type_paths,
+                );
+                let (gameplay_uuids, cosmetic_upper_uuids, cosmetic_lower_uuids) = generate_grid_uuids(
+                    field.inner_radius,
+                    field.outer_radius,
+                    grid,
+                    seed_offset,
+                    result.gameplay.len(),
+                    result.cosmetic_upper.len(),
+                    result.cosmetic_lower.len(),
+                );
 
- // For each candidate, check if it should be spawned
- for (spawn_idx, spawn) in candidates.spawns.iter().enumerate() {
- // Use the proper UUID for this spawn
- let uuid = uuids[spawn_idx].clone();
+                for (i, spawn) in result.gameplay.iter().enumerate() {
+                    let uuid = &gameplay_uuids[i];
+                    if existing_uuids.contains(uuid) || destroyed.0.contains(uuid) {
+                        continue;
+                    }
+                    commands.spawn((
+                        Asteroid,
+                        AsteroidUuid(uuid.clone()),
+                        AsteroidDamage { max_hp: 30, current_hp: 30 },
+                        Transform::from_xyz(spawn.x, spawn.y, spawn.z),
+                        bevy_rapier3d::prelude::Collider::ball(2.0),
+                        bevy_rapier3d::prelude::RigidBody::Fixed,
+                    ));
+                    return;
+                }
 
- // Skip if already spawned or destroyed
- if existing_uuids.contains(&uuid) || destroyed.0.contains(&uuid) {
- continue;
- }
+                for (i, spawn) in result.cosmetic_upper.iter().enumerate() {
+                    let uuid = &cosmetic_upper_uuids[i];
+                    if existing_uuids.contains(uuid) || destroyed.0.contains(uuid) {
+                        continue;
+                    }
+                    commands.spawn((
+                        Asteroid,
+                        AsteroidUuid(uuid.clone()),
+                        Transform::from_xyz(spawn.x, spawn.y, spawn.z),
+                    ));
+                    return;
+                }
 
- // Spawn the asteroid
- spawn_asteroid_entity(
- commands,
- spawn.x,
- spawn.z,
- uuid.clone(),
- field.asteroid_type_paths.contains(&spawn.config_path),
- );
+                for (i, spawn) in result.cosmetic_lower.iter().enumerate() {
+                    let uuid = &cosmetic_lower_uuids[i];
+                    if existing_uuids.contains(uuid) || destroyed.0.contains(uuid) {
+                        continue;
+                    }
+                    commands.spawn((
+                        Asteroid,
+                        AsteroidUuid(uuid.clone()),
+                        Transform::from_xyz(spawn.x, spawn.y, spawn.z),
+                    ));
+                    return;
+                }
+            } else {
+                let candidates = generate_donut_field(
+                    field.inner_radius,
+                    field.outer_radius,
+                    field.density,
+                    seed_offset,
+                    &field.asteroid_type_paths,
+                    &field.cosmetic_type_paths,
+                );
 
- // At most one spawn per frame
- return;
- } 
- } 
- }
+                let uuids = generate_donut_uuids(
+                    field.inner_radius,
+                    field.outer_radius,
+                    field.density,
+                    seed_offset,
+                    candidates.spawns.len(),
+                );
+
+                for (spawn_idx, spawn) in candidates.spawns.iter().enumerate() {
+                    let uuid = uuids[spawn_idx].clone();
+
+                    if existing_uuids.contains(&uuid) || destroyed.0.contains(&uuid) {
+                        continue;
+                    }
+
+                    spawn_asteroid_entity(
+                        commands,
+                        spawn.x,
+                        spawn.z,
+                        uuid.clone(),
+                        field.asteroid_type_paths.contains(&spawn.config_path),
+                    );
+
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// System to despawn asteroids that are too far from the ship.

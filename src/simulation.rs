@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::asteroid_spawner::generate_donut_field;
+use crate::asteroid_spawner::{generate_donut_field, generate_grid_field, generate_grid_uuids};
 use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
 use crate::damage::{apply_damage_with_shields, collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
@@ -1310,88 +1310,170 @@ fn setup_world_from_config(
     let mut all_asteroid_infos = Vec::new();
     
     for (field_idx, field) in map_config.asteroid_fields.iter().enumerate() {
-        let donut_result = generate_donut_field(
-            field.inner_radius,
-            field.outer_radius,
-            field.density,
-            field_idx as u64,
-            &field.asteroid_type_paths,
-            &field.cosmetic_type_paths,
-        );
-        
-        // Generate UUIDs for this field
-        let uuids = crate::asteroid_spawner::generate_donut_uuids(
-            field.inner_radius,
-            field.outer_radius,
-            field.density,
-            field_idx as u64,
-            donut_result.spawns.len(),
-        );
-        
-        // Spawn gameplay asteroids
-        let asteroid_mat = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.4, 0.35, 0.3),
-            ..default()
-        });
-        let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
-        
-        let mut gameplay_count = 0;
-        for spawn in &donut_result.spawns {
-            // Check if this is a gameplay type
-            if field.asteroid_type_paths.contains(&spawn.config_path) {
-                gameplay_count += 1;
+        if let Some(ref grid) = field.grid {
+            let result = generate_grid_field(
+                field.inner_radius,
+                field.outer_radius,
+                grid.clone(),
+                field_idx as u64,
+                &field.asteroid_type_paths,
+                &field.cosmetic_type_paths,
+            );
+            let (gameplay_uuids, cosmetic_upper_uuids, cosmetic_lower_uuids) = generate_grid_uuids(
+                field.inner_radius,
+                field.outer_radius,
+                grid,
+                field_idx as u64,
+                result.gameplay.len(),
+                result.cosmetic_upper.len(),
+                result.cosmetic_lower.len(),
+            );
+
+            let asteroid_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.4, 0.35, 0.3),
+                ..default()
+            });
+            let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
+
+            for (i, spawn) in result.gameplay.iter().enumerate() {
                 commands.spawn((
                     Asteroid,
-                    AsteroidUuid(uuids[gameplay_count - 1].clone()),
+                    AsteroidUuid(gameplay_uuids[i].clone()),
                     AsteroidDamage { max_hp: 30, current_hp: 30 },
                     Mesh3d(asteroid_mesh.clone()),
                     MeshMaterial3d(asteroid_mat.clone()),
-                    Transform::from_xyz(spawn.x, 0.0, spawn.z),
+                    Transform::from_xyz(spawn.x, spawn.y, spawn.z),
                     Collider::ball(2.0),
                     RigidBody::Fixed,
                 ));
-                
                 all_asteroid_infos.push(AsteroidInfo {
-                    uuid: uuids[gameplay_count - 1].clone(),
+                    uuid: gameplay_uuids[i].clone(),
                     x: spawn.x,
                     z: spawn.z,
                     radius: 2.0,
                     tags: vec!["asteroid".to_string()],
                 });
             }
-        }
-        
-        // Spawn cosmetic asteroids above/below the play plane
-        let cosmetic_mat = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.35, 0.3, 0.28),
-            perceptual_roughness: 0.95,
-            ..default()
-        });
-        
-        let mut cosmetic_start_idx = gameplay_count;
-        for (i, spawn) in donut_result.spawns.iter().enumerate() {
-            if field.cosmetic_type_paths.contains(&spawn.config_path) {
-                let idx = i;
-                let h = ((idx as u32).wrapping_mul(2654435761)) ^ 0x9E3779B9;
-                let above = (h & 1) == 0;
-                let mag = 10.0 + ((h >> 1) % 5000) as f32 / 100.0; // 10..60
-                let y = if above { mag } else { -mag };
-                let radius = 0.5 + ((h >> 13) % 250) as f32 / 100.0; // 0.5..3.0
+
+            let cosmetic_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.35, 0.3, 0.28),
+                perceptual_roughness: 0.95,
+                ..default()
+            });
+
+            for (i, spawn) in result.cosmetic_upper.iter().enumerate() {
+                let radius = 0.5 + (i as f32 * 0.1).fract();
                 let mesh = meshes.add(Sphere { radius });
                 commands.spawn((
                     Mesh3d(mesh),
                     MeshMaterial3d(cosmetic_mat.clone()),
-                    Transform::from_xyz(spawn.x, y, spawn.z),
+                    Transform::from_xyz(spawn.x, spawn.y, spawn.z),
                 ));
-                
                 all_asteroid_infos.push(AsteroidInfo {
-                    uuid: uuids[cosmetic_start_idx].clone(),
+                    uuid: cosmetic_upper_uuids[i].clone(),
                     x: spawn.x,
                     z: spawn.z,
                     radius,
                     tags: vec!["asteroid".to_string()],
                 });
-                cosmetic_start_idx += 1;
+            }
+
+            for (i, spawn) in result.cosmetic_lower.iter().enumerate() {
+                let radius = 0.5 + (i as f32 * 0.1).fract();
+                let mesh = meshes.add(Sphere { radius });
+                commands.spawn((
+                    Mesh3d(mesh),
+                    MeshMaterial3d(cosmetic_mat.clone()),
+                    Transform::from_xyz(spawn.x, spawn.y, spawn.z),
+                ));
+                all_asteroid_infos.push(AsteroidInfo {
+                    uuid: cosmetic_lower_uuids[i].clone(),
+                    x: spawn.x,
+                    z: spawn.z,
+                    radius,
+                    tags: vec!["asteroid".to_string()],
+                });
+            }
+        } else {
+            let donut_result = generate_donut_field(
+                field.inner_radius,
+                field.outer_radius,
+                field.density,
+                field_idx as u64,
+                &field.asteroid_type_paths,
+                &field.cosmetic_type_paths,
+            );
+
+            let uuids = crate::asteroid_spawner::generate_donut_uuids(
+                field.inner_radius,
+                field.outer_radius,
+                field.density,
+                field_idx as u64,
+                donut_result.spawns.len(),
+            );
+
+            let asteroid_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.4, 0.35, 0.3),
+                ..default()
+            });
+            let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
+
+            let mut gameplay_count = 0;
+            for spawn in &donut_result.spawns {
+                if field.asteroid_type_paths.contains(&spawn.config_path) {
+                    gameplay_count += 1;
+                    commands.spawn((
+                        Asteroid,
+                        AsteroidUuid(uuids[gameplay_count - 1].clone()),
+                        AsteroidDamage { max_hp: 30, current_hp: 30 },
+                        Mesh3d(asteroid_mesh.clone()),
+                        MeshMaterial3d(asteroid_mat.clone()),
+                        Transform::from_xyz(spawn.x, 0.0, spawn.z),
+                        Collider::ball(2.0),
+                        RigidBody::Fixed,
+                    ));
+
+                    all_asteroid_infos.push(AsteroidInfo {
+                        uuid: uuids[gameplay_count - 1].clone(),
+                        x: spawn.x,
+                        z: spawn.z,
+                        radius: 2.0,
+                        tags: vec!["asteroid".to_string()],
+                    });
+                }
+            }
+
+            let cosmetic_mat = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.35, 0.3, 0.28),
+                perceptual_roughness: 0.95,
+                ..default()
+            });
+
+            let mut cosmetic_start_idx = gameplay_count;
+            for (i, spawn) in donut_result.spawns.iter().enumerate() {
+                if field.cosmetic_type_paths.contains(&spawn.config_path) {
+                    let idx = i;
+                    let h = ((idx as u32).wrapping_mul(2654435761)) ^ 0x9E3779B9;
+                    let above = (h & 1) == 0;
+                    let mag = 10.0 + ((h >> 1) % 5000) as f32 / 100.0;
+                    let y = if above { mag } else { -mag };
+                    let radius = 0.5 + ((h >> 13) % 250) as f32 / 100.0;
+                    let mesh = meshes.add(Sphere { radius });
+                    commands.spawn((
+                        Mesh3d(mesh),
+                        MeshMaterial3d(cosmetic_mat.clone()),
+                        Transform::from_xyz(spawn.x, y, spawn.z),
+                    ));
+
+                    all_asteroid_infos.push(AsteroidInfo {
+                        uuid: uuids[cosmetic_start_idx].clone(),
+                        x: spawn.x,
+                        z: spawn.z,
+                        radius,
+                        tags: vec!["asteroid".to_string()],
+                    });
+                    cosmetic_start_idx += 1;
+                }
             }
         }
     }

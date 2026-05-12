@@ -14,19 +14,19 @@ test('SelectStation — claims station and both clients receive StationAssigned'
   const clientA = await createTestClient(context, hostId, { name: 'Alpha' });
   const clientB = await createTestClient(context, hostId, { name: 'Beta' });
 
-  // Client A claims the Captain station (1P layout has a single "Captain" station)
-  await clientA.send('SelectStation', { station: 'Captain' });
+  // Client A claims the Helm station (2P layout has "Helm" and "Tactical")
+  await clientA.send('SelectStation', { station: 'Helm' });
 
   const selA = await clientA.waitForMessage('StationAssigned', 5_000) as any;
   expect(selA.data.token).toBe(clientA.token);
-  expect(selA.data.station).toBe('Captain');
+  expect(selA.data.station).toBe('Helm');
   expect(Array.isArray(selA.data.consoles)).toBe(true);
   expect(selA.data.consoles.length).toBeGreaterThan(0);
 
   // Client B should also receive the StationAssigned broadcast
   const selAonB = await clientB.waitForMessage('StationAssigned', 5_000) as any;
   expect(selAonB.data.token).toBe(clientA.token);
-  expect(selAonB.data.station).toBe('Captain');
+  expect(selAonB.data.station).toBe('Helm');
 
   await clientA.close();
   await clientB.close();

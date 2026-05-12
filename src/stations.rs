@@ -352,6 +352,53 @@ pub fn reassign_on_join(
     new_map
 }
 
+/// Lobby-safe variant of `reassign_on_join`.
+///
+/// Advances every existing assigned player along their `next` chain to the
+/// N+1 station layout, but does NOT assign the new player.  The new player
+/// remains unassigned and must select a station explicitly.
+///
+/// Returns the updated assignment map (same keys as `current`, different
+/// values when a station name changes at the new count).
+pub fn advance_on_join(
+    stations: &ShipStations,
+    current: &StationAssignments,
+) -> StationAssignments {
+    let n = current.len() as u32;
+    let n1 = n + 1;
+
+    // If there are no assigned players there is nothing to advance.
+    if n == 0 {
+        return current.clone();
+    }
+
+    // At or above max_players nothing changes (caller handles spectator queue).
+    if n1 > stations.max_players {
+        return current.clone();
+    }
+
+    let Some(current_defs) = stations.configs.get(&n) else {
+        return current.clone();
+    };
+
+    // n+1 defs must exist for the advance to make sense.
+    if !stations.configs.contains_key(&n1) {
+        return current.clone();
+    }
+
+    let mut new_map: StationAssignments = HashMap::new();
+    for (token, station_name) in current.iter() {
+        let resolved_next = resolve_next(current_defs, station_name, n1);
+        if let Some(next_name) = resolved_next {
+            new_map.insert(token.clone(), next_name);
+        } else {
+            // Station has no next entry — keep where they are.
+            new_map.insert(token.clone(), station_name.clone());
+        }
+    }
+    new_map
+}
+
 /// Given the current N-player assignment map, the token of the departing
 /// player, and the current spectator queue, return the N-1 assignment map plus
 /// the (possibly shorter) spectator queue.
@@ -920,6 +967,58 @@ consoles = ["CaptainChair", "Helm"]
         // Current unchanged; dave is not in the map (caller adds to spectator queue)
         assert!(!result.contains_key("dave"), "dave should be a spectator");
         assert_eq!(result.len(), 3);
+    }
+
+    // ── advance_on_join ──────────────────────────────────────────────────────
+
+    #[test]
+    fn advance_on_join_empty_map_returns_empty() {
+        let stations = worked_example_stations();
+        let current = StationAssignments::new();
+        let result = advance_on_join(&stations, &current);
+        assert!(result.is_empty(), "no assigned players → nothing to advance");
+    }
+
+    #[test]
+    fn advance_on_join_1p_to_2p_existing_player_follows_next_no_new_assignment() {
+        let stations = worked_example_stations();
+        // Alice is at 1P Captain (next=Helm). Bob joins (unassigned).
+        let current: StationAssignments =
+            [("alice".to_string(), "Captain".to_string())].into();
+        let result = advance_on_join(&stations, &current);
+        assert_eq!(result.get("alice").map(String::as_str), Some("Helm"),
+            "alice follows next to Helm at 2P");
+        assert!(!result.contains_key("bob"),
+            "new player is NOT assigned by advance_on_join");
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn advance_on_join_2p_to_3p_existing_players_follow_next_no_new_assignment() {
+        let stations = worked_example_stations();
+        let current: StationAssignments = [
+            ("alice".to_string(), "Helm".to_string()),
+            ("bob".to_string(), "Tactical".to_string()),
+        ].into();
+        let result = advance_on_join(&stations, &current);
+        assert_eq!(result.get("alice").map(String::as_str), Some("Helm"),
+            "alice stays Helm at 3P (next=Helm)");
+        assert_eq!(result.get("bob").map(String::as_str), Some("Tactical"),
+            "bob stays Tactical at 3P (next=Tactical)");
+        assert_eq!(result.len(), 2, "carol is NOT auto-assigned");
+    }
+
+    #[test]
+    fn advance_on_join_at_max_players_returns_current_unchanged() {
+        let stations = worked_example_stations();
+        // All 3 stations filled — max_players reached. New joiner is spectator.
+        let current: StationAssignments = [
+            ("alice".to_string(), "Helm".to_string()),
+            ("bob".to_string(), "Tactical".to_string()),
+            ("carol".to_string(), "Engineering".to_string()),
+        ].into();
+        let result = advance_on_join(&stations, &current);
+        assert_eq!(result, current, "at max_players advance_on_join returns current unchanged");
     }
 
     // ── reassign_on_leave ────────────────────────────────────────────────────

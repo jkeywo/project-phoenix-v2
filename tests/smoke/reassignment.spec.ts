@@ -88,7 +88,7 @@ test('3→2 player leave: remaining players keep their stations', async ({ conte
   expect(a2.data.station).toBe('Tactical');
 });
 
-test('leave at max_players promotes front spectator', async ({ context }) => {
+test('leave at max_players allows spectator to claim vacated station', async ({ context }) => {
   const hostId = await bootServer(context);
 
   // Fill all 3 stations (max_players = 3)
@@ -108,7 +108,7 @@ test('leave at max_players promotes front spectator', async ({ context }) => {
   // 4th player joins as spectator (at max_players)
   const c4 = await createTestClient(context, hostId, { name: 'Spectator' });
 
-  // Wait for spectator StationAssigned
+  // Wait for spectator StationAssigned (station: null)
   await c4.page.waitForFunction(
     (token) => ((window as any).__messages as any[]).some(
       (m: any) => m.type === 'StationAssigned' && m.data.token === token && m.data.station === null
@@ -117,10 +117,15 @@ test('leave at max_players promotes front spectator', async ({ context }) => {
     { timeout: 5_000 },
   );
 
-  // c3 disconnects (held Engineering, the bottom-of-chain at 3P) — c4 should be promoted
+  // c3 disconnects (held Engineering) — c4 should now be able to claim it
   await c3.close();
 
-  // c4 should receive a StationAssigned with a real station (Engineering)
+  // Wait for cascade to settle
+  await c4.page.waitForTimeout(500);
+
+  // c4 claims Engineering (now vacant at the current 3-connected-player count)
+  await c4.send('SelectStation', { station: 'Engineering' });
+
   await c4.page.waitForFunction(
     (token) => ((window as any).__messages as any[]).some(
       (m: any) => m.type === 'StationAssigned' && m.data.token === token && m.data.station !== null

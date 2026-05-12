@@ -2,7 +2,7 @@ use crate::messages::{
     ClientMessage, Console, GamePhase, GameState, ServerMessage, WorldData,
 };
 use crate::session::SessionManager;
-use crate::stations::{all_stations_filled, get_station, reassign_on_join, reassign_on_leave, ShipStations, StationAssignments};
+use crate::stations::{advance_on_join, all_stations_filled, get_station, reassign_on_leave, ShipStations, StationAssignments};
 
 #[derive(Clone, Debug)]
 pub enum Target {
@@ -60,17 +60,17 @@ pub fn process_message(
                 outbound.push((Target::Token(id_token.clone()), ServerMessage::Welcome { state, ship_stations: ship_stations.clone() }));
                 outbound.push((Target::AllExcept(id_token.clone()), ServerMessage::PlayerJoined { player }));
 
-                // Auto-shuffle stations on join: if a station config is loaded and
-                // this is a fresh join (not a reconnect, not currently a spectator),
-                // run reassign_on_join to fold the new player into the layout.
-                // Existing players follow their `next` chain to the new player count;
-                // the new player lands on the no-`previous` station at the new count.
+                // Lobby-safe station advance on join: existing assigned players
+                // follow their `next` chain to the new player-count layout.
+                // The new joiner is NOT auto-assigned — they must SelectStation.
                 if !ship_stations.configs.is_empty()
                     && !is_reconnect
                     && !sessions.spectator_queue().contains(id_token)
                 {
-                    let new_map = reassign_on_join(ship_stations, &old_map, id_token);
-                    let new_count = new_map.len() as u32;
+                    let new_map = advance_on_join(ship_stations, &old_map);
+                    // new_count is the total connected players (including the new joiner),
+                    // which is the layout count the advanced stations now target.
+                    let new_count = sessions.players().iter().filter(|p| p.connected).count() as u32;
                     let cascade = apply_station_assignments(sessions, &new_map, &old_map, ship_stations, new_count);
                     outbound.extend(cascade);
                 }
@@ -301,8 +301,12 @@ fn apply_station_assignments(
     outbound
 }
 
-/// Mark a peer as disconnected, run the station leave cascade, promote any
-/// spectator from the front of the queue, and return the outbound broadcasts.
+/// Mark a peer as disconnected, run the station leave cascade (existing
+/// assigned players follow their `previous` chain; unassigned players are
+/// unchanged), and return the outbound broadcasts.
+///
+/// Spectator promotion is intentionally suppressed in lobby: players without
+/// a station have no automatic change when someone leaves.
 pub fn process_disconnect_with_stations(
     token: &str,
     sessions: &mut SessionManager,
@@ -314,15 +318,14 @@ pub fn process_disconnect_with_stations(
     // Remove the leaver from the spectator queue in case they were queued.
     sessions.remove_spectator(token);
 
-    let (new_map, new_spectators) = reassign_on_leave(
+    // Pass an empty spectator queue so reassign_on_leave never auto-promotes.
+    // The session spectator queue is left intact (minus the leaver above).
+    let (new_map, _) = reassign_on_leave(
         ship_stations,
         &old_map,
         token,
-        sessions.spectator_queue(),
+        &std::collections::VecDeque::new(),
     );
-
-    // Apply the new spectator queue back into sessions
-    *sessions.spectator_queue_mut() = new_spectators;
 
     let new_count = new_map.len() as u32;
     let mut outbound = apply_station_assignments(sessions, &new_map, &old_map, ship_stations, new_count);
@@ -797,4 +800,93 @@ mod tests {
         let _ = result;
         assert_eq!(sessions.spectator_queue().len(), 1, "spectator queue must persist regardless of phase change");
     }
+
+    // ── Lobby join/leave station rules ────────────────────────────────────
+
+    #[test]
+    fn joining_player_is_never_auto_assigned_a_station_in_lobby() {
+        let stations = ship_stations();
+        // t1 identifies fresh (no prior players).
+        let mut sessions = SessionManager::new();
+        let msg = ClientMessage::Identify { token: "t1".into(), name: "Alice".into() };
+        let result = process_message("t1", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
+        // t1 must have no consoles — no auto-assignment.
+        let consoles = sessions.players().iter()
+            .find(|p| p.token == "t1")
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        assert!(consoles.is_empty(), "new joiner should not be auto-assigned a station");
+        // No StationAssigned broadcast targeted at t1 with a real station.
+        let auto_assigned = result.outbound.iter().any(|(_, m)| matches!(m,
+            ServerMessage::StationAssigned { token, station: Some(_), .. } if token == "t1"
+        ));
+        assert!(!auto_assigned, "no StationAssigned with a station should be emitted for the joiner");
+    }
+
+    #[test]
+    fn existing_assigned_player_follows_next_when_second_player_joins() {
+        let stations = ship_stations();
+        // t1 is already in the lobby and has selected Captain (1P station).
+        let mut sessions = SessionManager::new();
+        sessions.register("t1".into(), "Alice".into()).unwrap();
+        // Manually assign t1 to Captain station (1P).
+        let captain_def = crate::stations::get_station(&stations, 1, "Captain").unwrap();
+        for c in &captain_def.consoles {
+            let _ = sessions.toggle_console("t1", c.clone());
+        }
+
+        // t2 joins.
+        let msg = ClientMessage::Identify { token: "t2".into(), name: "Bob".into() };
+        let result = process_message("t2", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
+
+        // t1 should be moved to Helm (next of Captain at 2P).
+        let t1_consoles = sessions.players().iter()
+            .find(|p| p.token == "t1")
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        assert!(
+            t1_consoles.contains(&crate::messages::Console::CaptainChair)
+                && t1_consoles.contains(&crate::messages::Console::Helm),
+            "t1 should be on Helm station at 2P (CaptainChair+Helm)"
+        );
+
+        // A StationAssigned should be emitted for t1 (their station changed).
+        let t1_station_assigned = result.outbound.iter().any(|(_, m)| matches!(m,
+            ServerMessage::StationAssigned { token, station: Some(s), .. }
+                if token == "t1" && s == "Helm"
+        ));
+        assert!(t1_station_assigned, "StationAssigned for t1 moving to Helm should be emitted");
+
+        // t2 must NOT be auto-assigned.
+        let t2_consoles = sessions.players().iter()
+            .find(|p| p.token == "t2")
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        assert!(t2_consoles.is_empty(), "t2 should not be auto-assigned a station on join");
+    }
+
+    #[test]
+    fn disconnect_does_not_promote_spectator_in_lobby() {
+        // At 3P (max), all stations filled, t4 is spectator. t1 disconnects.
+        // In lobby, spectators should NOT be auto-promoted.
+        let stations = ship_stations();
+        let mut sessions = sessions_at_max(&stations);
+        sessions.register("t4".into(), "Dave".into()).unwrap();
+        sessions.push_spectator("t4".into());
+
+        let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
+
+        // t4 must still be in the spectator queue (not promoted).
+        assert!(
+            sessions.spectator_queue().contains(&"t4".to_string()),
+            "spectator must NOT be auto-promoted on disconnect in lobby"
+        );
+        // t4 must still have no consoles.
+        let t4_consoles = sessions.players().iter()
+            .find(|p| p.token == "t4")
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        assert!(t4_consoles.is_empty(), "spectator t4 must not receive consoles automatically");
+    }
 }
+

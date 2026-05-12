@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::messages::{Console, Player};
 
@@ -19,6 +19,8 @@ pub struct SessionManager {
     /// Available consoles based on the ship's EntityConfig.
     /// If None, all consoles are available (default for backward compatibility).
     available_consoles: Option<Vec<Console>>,
+    /// FIFO queue of spectator tokens — players waiting for a station slot.
+    spectator_queue: VecDeque<String>,
 }
 
 impl SessionManager {
@@ -27,6 +29,7 @@ impl SessionManager {
             players: Vec::new(), 
             last_consoles: HashMap::new(),
             available_consoles: None,
+            spectator_queue: VecDeque::new(),
         }
     }
     
@@ -53,6 +56,7 @@ impl SessionManager {
             players: Vec::new(), 
             last_consoles: HashMap::new(),
             available_consoles: Some(available),
+            spectator_queue: VecDeque::new(),
         }
     }
 
@@ -71,15 +75,8 @@ impl SessionManager {
     pub fn reconnect(&mut self, token: &str) -> Option<&mut Player> {
         let idx = self.idx(token)?;
         self.players[idx].connected = true;
-        if let Some(last) = self.last_consoles.get(token).cloned() {
-            for console in last {
-                let taken = self.players.iter()
-                    .any(|p| p.connected && p.token != token && p.consoles.contains(&console));
-                if !taken {
-                    self.players[idx].consoles.push(console.clone());
-                }
-            }
-        }
+        // Issue #130: reconnect treats the player as a fresh joiner — no preferential
+        // reassignment. Discard any saved consoles.
         self.last_consoles.remove(token);
         Some(&mut self.players[idx])
     }
@@ -189,6 +186,33 @@ impl SessionManager {
         self.players.iter()
             .find(|p| p.token == token && p.connected)
             .is_some_and(|p| p.consoles.contains(&console))
+    }
+
+    /// Append a token to the back of the spectator queue (if not already queued).
+    pub fn push_spectator(&mut self, token: String) {
+        if !self.spectator_queue.contains(&token) {
+            self.spectator_queue.push_back(token);
+        }
+    }
+
+    /// Remove and return the front of the spectator queue.
+    pub fn pop_spectator(&mut self) -> Option<String> {
+        self.spectator_queue.pop_front()
+    }
+
+    /// Read-only view of the spectator queue.
+    pub fn spectator_queue(&self) -> &VecDeque<String> {
+        &self.spectator_queue
+    }
+
+    /// Mutable access to the spectator queue (for applying cascade results).
+    pub fn spectator_queue_mut(&mut self) -> &mut VecDeque<String> {
+        &mut self.spectator_queue
+    }
+
+    /// Remove a token from the spectator queue (e.g. when they are promoted to a station).
+    pub fn remove_spectator(&mut self, token: &str) {
+        self.spectator_queue.retain(|t| t != token);
     }
 }
 
@@ -301,39 +325,24 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_still_free_restores_console() {
+    fn reconnect_marks_player_as_connected() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.toggle_console("t1", Console::CaptainChair).unwrap();
         sm.disconnect("t1");
+        assert!(!sm.players()[0].connected);
         sm.reconnect("t1");
-        assert!(sm.players()[0].consoles.contains(&Console::CaptainChair));
+        assert!(sm.players()[0].connected);
     }
 
     #[test]
-    fn reconnect_multiple_consoles() {
+    fn reconnect_does_not_restore_consoles_fresh_joiner_semantics() {
+        // Issue #130: reconnect is a fresh join — no console restore.
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.toggle_console("t1", Console::CaptainChair).unwrap();
-        sm.toggle_console("t1", Console::Helm).unwrap();
         sm.disconnect("t1");
         sm.reconnect("t1");
-        assert!(sm.players()[0].consoles.contains(&Console::CaptainChair));
-        assert!(sm.players()[0].consoles.contains(&Console::Helm));
-    }
-
-    #[test]
-    fn reconnect_partial_restore_when_some_taken() {
-        let mut sm = sm();
-        sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.toggle_console("t1", Console::CaptainChair).unwrap();
-        sm.toggle_console("t1", Console::Helm).unwrap();
-        sm.disconnect("t1");
-        sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.toggle_console("t2", Console::Helm).unwrap();
-        sm.reconnect("t1");
-        assert!(sm.players()[0].consoles.contains(&Console::CaptainChair));
-        assert!(!sm.players()[0].consoles.contains(&Console::Helm));
+        assert!(sm.players()[0].consoles.is_empty());
     }
 
     #[test]
@@ -444,13 +453,15 @@ mod tests {
     }
 
     #[test]
-    fn engineering_console_restored_on_reconnect_if_free() {
+    fn engineering_console_selectable_by_another_player_after_disconnect() {
+        // After disconnect the console is free; another player can take it.
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.toggle_console("t1", Console::Engineering).unwrap();
         sm.disconnect("t1");
-    sm.reconnect("t1");
-    assert!(sm.players()[0].consoles.contains(&Console::Engineering));
+        sm.register("t2".into(), "Bob".into()).unwrap();
+        sm.toggle_console("t2", Console::Engineering).unwrap();
+        assert!(sm.players()[1].consoles.contains(&Console::Engineering));
     }
     
     // ── Console Selectability Tests ────────────────────────────────────────
@@ -541,5 +552,75 @@ mod tests {
         sm.register("t1".into(), "Alice".into()).unwrap();
         let result = sm.toggle_console("t1", Console::Science);
         assert!(result.is_ok(), "Science console toggle must succeed, got: {:?}", result);
+    }
+
+    // ── Spectator queue ───────────────────────────────────────────────────
+
+    #[test]
+    fn spectator_queue_starts_empty() {
+        let sm = SessionManager::new();
+        assert!(sm.spectator_queue().is_empty());
+    }
+
+    #[test]
+    fn push_spectator_appends_token() {
+        let mut sm = SessionManager::new();
+        sm.push_spectator("t1".into());
+        assert_eq!(sm.spectator_queue().len(), 1);
+        assert_eq!(sm.spectator_queue().front().map(|s| s.as_str()), Some("t1"));
+    }
+
+    #[test]
+    fn push_spectator_does_not_add_duplicate() {
+        let mut sm = SessionManager::new();
+        sm.push_spectator("t1".into());
+        sm.push_spectator("t1".into());
+        assert_eq!(sm.spectator_queue().len(), 1);
+    }
+
+    #[test]
+    fn push_spectator_maintains_fifo_order() {
+        let mut sm = SessionManager::new();
+        sm.push_spectator("t1".into());
+        sm.push_spectator("t2".into());
+        sm.push_spectator("t3".into());
+        let queue: Vec<_> = sm.spectator_queue().iter().cloned().collect();
+        assert_eq!(queue, vec!["t1", "t2", "t3"]);
+    }
+
+    #[test]
+    fn pop_spectator_returns_front() {
+        let mut sm = SessionManager::new();
+        sm.push_spectator("t1".into());
+        sm.push_spectator("t2".into());
+        assert_eq!(sm.pop_spectator(), Some("t1".into()));
+        assert_eq!(sm.spectator_queue().len(), 1);
+    }
+
+    #[test]
+    fn pop_spectator_returns_none_when_empty() {
+        let mut sm = SessionManager::new();
+        assert_eq!(sm.pop_spectator(), None);
+    }
+
+    #[test]
+    fn remove_spectator_removes_token_from_queue() {
+        let mut sm = SessionManager::new();
+        sm.push_spectator("t1".into());
+        sm.push_spectator("t2".into());
+        sm.remove_spectator("t1");
+        assert_eq!(sm.spectator_queue().len(), 1);
+        assert_eq!(sm.spectator_queue().front().map(|s| s.as_str()), Some("t2"));
+    }
+
+    #[test]
+    fn reconnect_does_not_restore_consoles() {
+        // Issue #130: reconnect treats player as fresh joiner — no console restore.
+        let mut sm = SessionManager::new();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.toggle_console("t1", Console::CaptainChair).unwrap();
+        sm.disconnect("t1");
+        sm.reconnect("t1");
+        assert!(sm.players()[0].consoles.is_empty(), "reconnect must not restore consoles");
     }
 }

@@ -639,6 +639,49 @@ mod tests {
     }
 
     #[test]
+    fn server_modifier_added_round_trips() {
+        let msg = ServerMessage::ModifierAdded {
+            source: crate::messages::ModifierSource::ImpulseDrive,
+            slot: crate::messages::ModifierSlot::MaxSpeed,
+            bonus: 0.5,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_modifier_added_console_source_round_trips() {
+        let msg = ServerMessage::ModifierAdded {
+            source: crate::messages::ModifierSource::Console(crate::messages::Console::Science),
+            slot: crate::messages::ModifierSlot::RadarRange,
+            bonus: 1.0,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_modifier_added_region_source_round_trips() {
+        let msg = ServerMessage::ModifierAdded {
+            source: crate::messages::ModifierSource::RegionEffect { region_id: "nebula-7".into() },
+            slot: crate::messages::ModifierSlot::HullDamageTaken,
+            bonus: -0.3,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_modifier_removed_round_trips() {
+        let msg = ServerMessage::ModifierRemoved {
+            source: crate::messages::ModifierSource::ImpulseDrive,
+            slot: crate::messages::ModifierSlot::MaxYawRate,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn welcome_with_world_none_round_trips() {
         let msg = ServerMessage::Welcome { state: state() };
         assert_server_roundtrip(&JsonCodec, msg.clone());

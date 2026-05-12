@@ -1,17 +1,6 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::messages::Console;
-
-/// Which ship attribute a modifier affects.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ModifierSlot {
-    MaxSpeed,
-    MaxYawRate,
-    RadarRange,
-    PhaserDamage,
-    HullDamageTaken,
-    RepairRate,
-}
+pub use crate::messages::{ModifierSlot, ModifierSource};
 
 impl ModifierSlot {
     pub const COUNT: usize = 6;
@@ -38,14 +27,6 @@ impl ModifierSlot {
             ModifierSlot::RepairRate,
         ]
     }
-}
-
-/// Who or what applied a modifier.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum ModifierSource {
-    Console(Console),
-    ImpulseDrive,
-    RegionEffect { region_id: String },
 }
 
 /// A single modifier entry: which source, which slot, and the bonus magnitude.
@@ -130,28 +111,6 @@ impl Default for ShipModifiers {
     }
 }
 
-// ─── impl Hash for ModifierSource (needed as HashMap key) ────────────────────
-
-impl Eq for ModifierSource {}
-
-impl std::hash::Hash for ModifierSource {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            ModifierSource::Console(c) => {
-                0u8.hash(state);
-                // Console derives PartialEq/Eq but not Hash — discriminant is enough
-                std::mem::discriminant(c).hash(state);
-            }
-            ModifierSource::ImpulseDrive => {
-                1u8.hash(state);
-            }
-            ModifierSource::RegionEffect { region_id } => {
-                2u8.hash(state);
-                region_id.hash(state);
-            }
-        }
-    }
-}
 
 
 #[cfg(test)]

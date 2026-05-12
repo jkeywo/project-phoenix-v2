@@ -1,5 +1,45 @@
 use serde::{Deserialize, Serialize};
 
+/// Which ship attribute a modifier affects. Defined here so it can be used in
+/// wire messages without creating a circular dependency with `modifiers.rs`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModifierSlot {
+    MaxSpeed,
+    MaxYawRate,
+    RadarRange,
+    PhaserDamage,
+    HullDamageTaken,
+    RepairRate,
+}
+
+/// Who or what applied a modifier.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ModifierSource {
+    Console(Console),
+    ImpulseDrive,
+    RegionEffect { region_id: String },
+}
+
+impl Eq for ModifierSource {}
+
+impl std::hash::Hash for ModifierSource {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            ModifierSource::Console(c) => {
+                0u8.hash(state);
+                std::mem::discriminant(c).hash(state);
+            }
+            ModifierSource::ImpulseDrive => {
+                1u8.hash(state);
+            }
+            ModifierSource::RegionEffect { region_id } => {
+                2u8.hash(state);
+                region_id.hash(state);
+            }
+        }
+    }
+}
+
 /// A serialisable snapshot of a single shield facing for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ShieldFacingStatus {
@@ -259,4 +299,8 @@ pub enum ServerMessage {
     TorpedoLaunched { uuid: String, tube: TorpedoTube, x: f32, z: f32, heading: f32 },
     /// Broadcast to all when a torpedo is destroyed (expired or hit something).
     TorpedoDestroyed { uuid: String },
+    /// Broadcast when a modifier is added or updated on the ship.
+    ModifierAdded { source: ModifierSource, slot: ModifierSlot, bonus: f32 },
+    /// Broadcast when a modifier is removed from the ship.
+    ModifierRemoved { source: ModifierSource, slot: ModifierSlot },
 }

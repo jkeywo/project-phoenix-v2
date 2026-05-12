@@ -96,7 +96,9 @@ impl LobbyState {
             | ServerMessage::RepairState { .. }
             | ServerMessage::ShieldStatus { .. }
             | ServerMessage::TorpedoLaunched { .. }
-            | ServerMessage::TorpedoDestroyed { .. } => {
+            | ServerMessage::TorpedoDestroyed { .. }
+            | ServerMessage::ModifierAdded { .. }
+            | ServerMessage::ModifierRemoved { .. } => {
                 // Not relevant to the lobby model.
             }
         }

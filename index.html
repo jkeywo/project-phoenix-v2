@@ -25,24 +25,6 @@
       background: none; border: none; color: #cce; font-size: 1.1rem;
       cursor: pointer; padding: 0; line-height: 1;
     }
-/* Soft red-alert vignette overlay */
-    #red-alert-overlay {
-      position: fixed; inset: 0; pointer-events: none; z-index: 15;
-      box-shadow: inset 0 0 180px 40px rgba(255, 20, 20, 0.0);
-      background: radial-gradient(ellipse at center,
-        rgba(255,0,0,0) 55%, rgba(255,0,0,0.0) 75%, rgba(255,0,0,0.0) 100%);
-      transition: box-shadow 0.4s ease, background 0.4s ease;
-    }
-    #red-alert-overlay.active {
-      box-shadow: inset 0 0 60px 10px rgba(255, 30, 30, 0.7);
-      background: radial-gradient(ellipse at center,
-        rgba(255,0,0,0) 65%, rgba(255,0,0,0.08) 85%, rgba(255,0,0,0.3) 100%);
-      animation: redalert-pulse 1.4s ease-in-out infinite;
-    }
-    @keyframes redalert-pulse {
-      0%, 100% { filter: brightness(1.0); }
-      50%      { filter: brightness(1.35); }
-    }
     #wasm-spinner {
       position: fixed; inset: 0; z-index: 100;
       background: #000;
@@ -60,7 +42,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-17d99299eff6c39b.js" crossorigin="anonymous" integrity="sha384-OgoQEok8nm0ke4ROr/d/B/xTtO7c1tI7UCQy/LzuqxI4PZImaV0qNm8Cs0Og/DOK"><link rel="preload" href="./project-phoenix-17d99299eff6c39b_bg.wasm" crossorigin="anonymous" integrity="sha384-7a9/60/JByDN8/HRvoLrkTwRKPKFW/aWaYwz0bQQtjJchC110fqR6YWgtMKdEdTK" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-631c9ad49c26b894.js" crossorigin="anonymous" integrity="sha384-sHAcpyVxhB12GvBvWso7yRTlB+mGDxRzf/U82DEKfg8aS+JENgP4FF+MA8jmvgCO"><link rel="preload" href="./project-phoenix-631c9ad49c26b894_bg.wasm" crossorigin="anonymous" integrity="sha384-qbnNu5eBbOlb5UC8FH+f6ztH2OJCV7IGsorDL6kgrrwrWZ+kqB0Dz/088q31Hlls" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">
@@ -86,14 +68,12 @@
     </div>
   </div>
 
-  <div id="red-alert-overlay"></div>
-
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-17d99299eff6c39b.js';
-const wasm = await init({ module_or_path: './project-phoenix-17d99299eff6c39b_bg.wasm' });
+import init, * as bindings from './project-phoenix-631c9ad49c26b894.js';
+const wasm = await init({ module_or_path: './project-phoenix-631c9ad49c26b894_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -224,11 +204,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted')
           document.getElementById('overlay').style.display = 'none';
-        if (parsed.type === 'SimState') {
-          const ra = !!(parsed.data && parsed.data.snapshot && parsed.data.snapshot.red_alert);
-          const ov = document.getElementById('red-alert-overlay');
-          if (ra) ov.classList.add('active'); else ov.classList.remove('active');
-        }
       } catch (_) {}
 
       if (target === 'all') {

@@ -11,6 +11,7 @@ use {
     crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
     crate::renderer::RendererPlugin,
     crate::simulation::SimulationPlugin,
+    crate::stations::ShipStations,
     bevy::{prelude::*, DefaultPlugins},
     js_sys::Function,
     std::cell::RefCell,
@@ -33,9 +34,37 @@ thread_local! {
     /// JS callback registered by the host page to receive outbound messages.
     /// Signature: callback(target: string, payload: string)
     static OUTBOUND_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// Validated ShipStations config, stored by wasm_validate_stations() so
+    /// wasm_init() can insert it as a Bevy resource.
+    static SHIP_STATIONS: RefCell<Option<ShipStations>> = const { RefCell::new(None) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
+
+/// Called by JS with the raw player_ship.toml content to validate the
+/// `[stations]` section before starting the server.
+///
+/// On success, stores the parsed `ShipStations` internally and returns
+/// `Ok(JsValue::UNDEFINED)`. On failure, returns `Err(JsValue)` with a
+/// human-readable error string. PeerJS should not start when this returns
+/// an error.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_validate_stations(toml_str: &str) -> Result<JsValue, JsValue> {
+    match crate::stations::parse_and_validate(toml_str) {
+        Ok(stations) => {
+            SHIP_STATIONS.with(|slot| {
+                *slot.borrow_mut() = Some(stations);
+            });
+            Ok(JsValue::UNDEFINED)
+        }
+        Err(e) => Err(JsValue::from_str(&format!(
+            "Station config validation failed: {}",
+            e
+        ))),
+    }
+}
 
 /// Called by JS on page load. Builds and runs the Bevy app.
 ///
@@ -44,8 +73,8 @@ thread_local! {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_init() {
-    App::new()
-    .add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
         primary_window: Some(bevy::window::Window {
             canvas: Some("#canvas".into()),
             fit_canvas_to_parent: true,
@@ -58,8 +87,16 @@ pub fn wasm_init() {
     .add_plugins(LobbyPlugin)
     .add_plugins(SimulationPlugin)
     .add_plugins(RendererPlugin)
-    .add_systems(Update, (drain_inbound, drain_disconnects, flush_outbound))
-    .run();
+    .add_systems(Update, (drain_inbound, drain_disconnects, flush_outbound));
+
+    // Insert the validated ShipStations resource if it was pre-validated.
+    SHIP_STATIONS.with(|slot| {
+        if let Some(stations) = slot.borrow().clone() {
+            app.insert_resource(stations);
+        }
+    });
+
+    app.run();
 }
 
 /// Called by JS to deliver an inbound message from a peer into Bevy.

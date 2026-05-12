@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use serde::Deserialize;
 
+#[cfg(feature = "server")]
+use bevy::prelude::Resource;
+
 use crate::messages::Console;
 
 // ── TOML schema types ────────────────────────────────────────────────────────
@@ -18,6 +21,7 @@ pub struct StationDef {
 }
 
 /// The fully-parsed, validated station configuration.
+#[cfg_attr(feature = "server", derive(Resource))]
 #[derive(Clone, Debug)]
 pub struct ShipStations {
     /// Map from player count → ordered list of station definitions.
@@ -613,5 +617,40 @@ consoles = ["CaptainChair", "Helm"]
 "#;
         let result = parse_and_validate(toml);
         assert!(result.is_ok(), "explicit next failed: {:?}", result);
+    }
+
+    // ── player_ship.toml integration ─────────────────────────────────────────
+
+    /// Verify that the actual `assets/entities/player_ship.toml` file contains a
+    /// valid `[stations]` section that passes `parse_and_validate`.
+    #[test]
+    fn player_ship_toml_stations_section_is_valid() {
+        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let result = parse_and_validate(toml_str);
+        assert!(
+            result.is_ok(),
+            "player_ship.toml stations section is invalid: {:?}",
+            result
+        );
+    }
+
+    /// Verify that the 1-player station at player_ship.toml gives access to
+    /// every console (CaptainChair, Helm, Tactical, Engineering).
+    #[test]
+    fn player_ship_1p_station_covers_all_consoles() {
+        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let stations = parse_and_validate(toml_str).unwrap();
+        let current = vec![
+            Console::CaptainChair,
+            Console::Helm,
+            Console::Tactical,
+            Console::Engineering,
+        ];
+        // all_stations_filled should return true at 1P when the solo player
+        // holds all consoles.
+        assert!(
+            all_stations_filled(&stations, 1, &current),
+            "1P station should be filled when player holds all expected consoles"
+        );
     }
 }

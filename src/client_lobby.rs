@@ -256,6 +256,29 @@ impl<'a> LobbyView<'a> {
         slots
     }
 
+    /// True if the local player is currently a spectator (no consoles assigned).
+    pub fn is_spectator(&self) -> bool {
+        self.my_consoles().is_empty()
+    }
+
+    /// True when the lobby panel should be visible.
+    ///
+    /// The lobby panel is shown during the `Lobby` phase (everyone sees it)
+    /// and during the `InProgress` phase for spectators who haven't been
+    /// promoted to a station yet.
+    pub fn show_lobby_panel(&self) -> bool {
+        match self.state.phase {
+            GamePhase::Lobby => true,
+            GamePhase::InProgress => self.is_spectator(),
+        }
+    }
+
+    /// True when the "Game in progress" banner should appear at the top of
+    /// the lobby panel.  Only shown to spectators watching an active game.
+    pub fn game_in_progress_banner(&self) -> bool {
+        self.state.phase == GamePhase::InProgress && self.is_spectator()
+    }
+
     /// True if every station at the current player count is filled,
     /// using `ShipStations` as the source of truth.
     pub fn all_stations_filled(&self) -> bool {
@@ -836,5 +859,75 @@ consoles = ["Tactical"]
     fn reconcile_none_lands_on_first_console() {
         let result = reconcile_active_console(None, &[Console::Tactical]);
         assert_eq!(result, Console::Tactical);
+    }
+
+    // ── Spectator UI: InProgress visibility ───────────────────
+
+    #[test]
+    fn is_spectator_true_when_local_player_has_no_consoles() {
+        let mut s = LobbyState::default();
+        s.players = vec![p("me", "Me", vec![])];
+        assert!(LobbyView::new(&s, "me").is_spectator());
+    }
+
+    #[test]
+    fn is_spectator_false_when_local_player_holds_a_console() {
+        let mut s = LobbyState::default();
+        s.players = vec![p("me", "Me", vec![Console::Helm])];
+        assert!(!LobbyView::new(&s, "me").is_spectator());
+    }
+
+    #[test]
+    fn is_spectator_true_when_token_not_found() {
+        let s = LobbyState::default();
+        assert!(LobbyView::new(&s, "ghost").is_spectator());
+    }
+
+    #[test]
+    fn show_lobby_panel_true_during_lobby_phase_regardless_of_consoles() {
+        let mut s = LobbyState::default();
+        s.phase = GamePhase::Lobby;
+        s.players = vec![p("me", "Me", vec![Console::Helm])];
+        assert!(LobbyView::new(&s, "me").show_lobby_panel());
+    }
+
+    #[test]
+    fn show_lobby_panel_true_during_in_progress_when_spectator() {
+        let mut s = LobbyState::default();
+        s.phase = GamePhase::InProgress;
+        s.players = vec![p("me", "Me", vec![])];
+        assert!(LobbyView::new(&s, "me").show_lobby_panel());
+    }
+
+    #[test]
+    fn show_lobby_panel_false_during_in_progress_when_stationed() {
+        let mut s = LobbyState::default();
+        s.phase = GamePhase::InProgress;
+        s.players = vec![p("me", "Me", vec![Console::Helm])];
+        assert!(!LobbyView::new(&s, "me").show_lobby_panel());
+    }
+
+    #[test]
+    fn game_in_progress_banner_true_when_in_progress_and_spectator() {
+        let mut s = LobbyState::default();
+        s.phase = GamePhase::InProgress;
+        s.players = vec![p("me", "Me", vec![])];
+        assert!(LobbyView::new(&s, "me").game_in_progress_banner());
+    }
+
+    #[test]
+    fn game_in_progress_banner_false_during_lobby_phase() {
+        let mut s = LobbyState::default();
+        s.phase = GamePhase::Lobby;
+        s.players = vec![p("me", "Me", vec![])];
+        assert!(!LobbyView::new(&s, "me").game_in_progress_banner());
+    }
+
+    #[test]
+    fn game_in_progress_banner_false_when_in_progress_and_stationed() {
+        let mut s = LobbyState::default();
+        s.phase = GamePhase::InProgress;
+        s.players = vec![p("me", "Me", vec![Console::Helm])];
+        assert!(!LobbyView::new(&s, "me").game_in_progress_banner());
     }
 }

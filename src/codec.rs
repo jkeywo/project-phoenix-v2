@@ -650,6 +650,7 @@ mod tests {
                 name: "Captain".into(),
                 description: "The big chair".into(),
                 consoles: vec![Console::CaptainChair],
+                rank: "Cpt.".into(),
                 next: None,
                 previous: None,
             },

@@ -12,6 +12,8 @@ pub struct StationDef {
     pub name: String,
     pub description: String,
     pub consoles: Vec<Console>,
+    /// Rank displayed for players at this station (e.g., "Cpt.", "Ltn.")
+    pub rank: String,
     /// Name of the station that this station promotes to when a player joins.
     pub next: Option<String>,
     /// Name of the station that this station demotes to when a player leaves.
@@ -97,6 +99,8 @@ struct RawStationDef {
     #[serde(default)]
     description: String,
     consoles: Vec<String>,
+    #[serde(default)]
+    rank: String,
     next: Option<String>,
     previous: Option<String>,
 }
@@ -174,10 +178,21 @@ pub fn parse_and_validate(toml_str: &str) -> Result<ShipStations, StationConfigE
                 .map(|c| parse_console(c, count, &raw_def.name))
                 .collect::<Result<Vec<_>, _>>()?;
 
+            let rank = if raw_def.rank.is_empty() {
+                if raw_def.consoles.iter().any(|c| c == "CaptainChair") {
+                    "Cpt.".to_string()
+                } else {
+                    "Ltn.".to_string()
+                }
+            } else {
+                raw_def.rank.clone()
+            };
+
             defs.push(StationDef {
                 name: raw_def.name.clone(),
                 description: raw_def.description.clone(),
                 consoles,
+                rank,
                 next: raw_def.next.clone(),
                 previous: raw_def.previous.clone(),
             });

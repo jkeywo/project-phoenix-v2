@@ -216,12 +216,10 @@
 
     // ── Persistence ─────────────────────────────────────────────
 
-    const RANKS = ['Ensign', 'Lieutenant', 'Commander', 'Captain', 'Admiral'];
-    const STARS = ['Vega', 'Altair', 'Rigel', 'Deneb', 'Sirius', 'Nova', 'Quasar', 'Nebula', 'Pulsar', 'Proxima'];
+    const NAMES = ['Vega', 'Altair', 'Rigel', 'Deneb', 'Sirius', 'Nova', 'Quasar', 'Nebula', 'Pulsar', 'Proxima'];
 
     function randomName() {
-      return RANKS[Math.floor(Math.random() * RANKS.length)] + ' ' +
-             STARS[Math.floor(Math.random() * STARS.length)];
+      return NAMES[Math.floor(Math.random() * NAMES.length)];
     }
 
     let myToken = localStorage.getItem('session-token');

@@ -25,24 +25,6 @@
       background: none; border: none; color: #cce; font-size: 1.1rem;
       cursor: pointer; padding: 0; line-height: 1;
     }
-/* Soft red-alert vignette overlay */
-    #red-alert-overlay {
-      position: fixed; inset: 0; pointer-events: none; z-index: 15;
-      box-shadow: inset 0 0 180px 40px rgba(255, 20, 20, 0.0);
-      background: radial-gradient(ellipse at center,
-        rgba(255,0,0,0) 55%, rgba(255,0,0,0.0) 75%, rgba(255,0,0,0.0) 100%);
-      transition: box-shadow 0.4s ease, background 0.4s ease;
-    }
-    #red-alert-overlay.active {
-      box-shadow: inset 0 0 60px 10px rgba(255, 30, 30, 0.7);
-      background: radial-gradient(ellipse at center,
-        rgba(255,0,0,0) 65%, rgba(255,0,0,0.08) 85%, rgba(255,0,0,0.3) 100%);
-      animation: redalert-pulse 1.4s ease-in-out infinite;
-    }
-    @keyframes redalert-pulse {
-      0%, 100% { filter: brightness(1.0); }
-      50%      { filter: brightness(1.35); }
-    }
     #wasm-spinner {
       position: fixed; inset: 0; z-index: 100;
       background: #000;
@@ -85,8 +67,6 @@
       <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
     </div>
   </div>
-
-  <div id="red-alert-overlay"></div>
 
   <!-- Trunk replaces this with the compiled WASM bundle. It fires
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
@@ -213,11 +193,6 @@
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted')
           document.getElementById('overlay').style.display = 'none';
-        if (parsed.type === 'SimState') {
-          const ra = !!(parsed.data && parsed.data.snapshot && parsed.data.snapshot.red_alert);
-          const ov = document.getElementById('red-alert-overlay');
-          if (ra) ov.classList.add('active'); else ov.classList.remove('active');
-        }
       } catch (_) {}
 
       if (target === 'all') {

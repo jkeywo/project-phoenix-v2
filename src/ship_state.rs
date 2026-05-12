@@ -30,6 +30,13 @@ impl ShipState {
         self.red_alert = !self.red_alert;
     }
 
+    /// Read-only accessor for the red-alert flag (the field itself is
+    /// private). Used by the viewscreen border plugin to drive the
+    /// alert texture swap and vignette pulse.
+    pub fn red_alert(&self) -> bool {
+        self.red_alert
+    }
+
     pub fn snapshot(&self, hull_integrity: i32, authorized_repair_console: Option<Console>) -> SimSnapshot {
         SimSnapshot {
             red_alert: self.red_alert,

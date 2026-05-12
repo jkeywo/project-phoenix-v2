@@ -177,3 +177,22 @@ No alert state, vignette, or HUD readouts yet â€” those land in #183 and #184.
 No new tests: per the PRD, the plugin is Bevy plumbing with no testable surface
 in this slice; pure helpers (`yaw_to_compass_bearing`, `pulse_intensity`) land
 with #184.
+
+## [2026-05-12] ingest | Issue #183 — red-alert visual: border swap + UiMaterial vignette + remove CSS overlay
+
+Landed the final slice of PRD #180 inside iewscreen_border. Added ten alert-variant
+image handles, a BorderSlot marker on every border ImageNode, and a per-frame
+swap_border_textures system that flips each handle on ShipState.red_alert change.
+Introduced RedAlertVignetteMaterial (single intensity uniform) registered via
+UiMaterialPlugin, with a full-bleed MaterialNode spawned as the FIRST child of the
+border root so border sprites occlude the outer ring (the demo's leak-from-behind
+look). Replaced the placeholder WGSL with the real two-stop inset radial-gradient
+shader. Added pure helper pulse_intensity(time, alert, prev, dt) -> f32 that combines
+a quarter-second on/off ease with a 1.3s sine pulse between 0.55 and 1.0; driven each
+frame by drive_vignette_intensity. 7 unit tests cover idle, ease in/out monotonicity,
+steady-state band, and sine phase points; an 8th test confirms BorderSlot::handle`nswitches variants. Removed the #red-alert-overlay div, its CSS (ox-shadow,
+adial-gradient, edalert-pulse keyframes), and the SimState red-alert handler
+in server.html's outeOutbound — Bevy now owns the alert visual end-to-end.
+Added pub fn ShipState::red_alert(&self) -> bool accessor so the plugin can read
+the flag without exposing the field. All 659 lib tests pass; cargo check passes
+for both native and wasm32 with --features server.

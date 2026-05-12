@@ -135,8 +135,18 @@ pub fn process_message(
                 return LobbyHandlerResult { new_phase, outbound };
             }
 
-            // Look up the station at the current player count
-            let Some(station_def) = get_station(ship_stations, player_count, station) else {
+            // Look up the station. First try the current player count; if not found
+            // (e.g. a disconnect is pending and the session count hasn't been
+            // updated yet), search all other available counts.  This avoids silently
+            // dropping SelectStation when a player tries to claim a station that is
+            // valid at the post-disconnect count but not at the pre-disconnect count.
+            let station_def = get_station(ship_stations, player_count, station)
+                .or_else(|| {
+                    (ship_stations.min_players..=ship_stations.max_players)
+                        .filter(|&c| c != player_count)
+                        .find_map(|c| get_station(ship_stations, c, station))
+                });
+            let Some(station_def) = station_def else {
                 // Unknown station — silently drop
                 return LobbyHandlerResult { new_phase, outbound };
             };

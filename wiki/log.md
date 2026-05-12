@@ -196,3 +196,25 @@ in server.html's outeOutbound � Bevy now owns the alert visual end-to-end.
 Added pub fn ShipState::red_alert(&self) -> bool accessor so the plugin can read
 the flag without exposing the field. All 659 lib tests pass; cargo check passes
 for both native and wasm32 with --features server.
+
+## [2026-05-12] ingest | Issue #184 — designation + HEADING/HULL/CONDITION HUD; PRD #180 wiki | touched: src/viewscreen_border.rs, wiki/sources/prd-180-viewscreen-frame.md, wiki/concepts/ui-materials.md, wiki/concepts/view-modes.md, wiki/index.md
+
+Final slice of PRD #180. Added the static designation `"AEV-074 · PHOENIX"` centred on
+the top cap (Chakra Petch) and a three-column status strip on the bottom cap with
+`HEADING` / `HULL` / `CONDITION` labels (Chakra Petch, neutral `#b8c0c8`) above their
+value cells (JetBrains Mono, signal-cyan / alert-red). Introduced pure helper
+`yaw_to_compass_bearing(yaw_radians: f32) -> u32` (8 unit tests covering 0/90/180/270/360
+cardinals, negative yaw, multi-turn yaw, and the 359.5° rounding boundary that wraps to 0).
+Added `update_hud` per-frame system that formats heading as `{:03}`, hull as integer
+percent (read from `ShipHullIntegrity`), and condition as `NOMINAL`/`ALERT`, then toggles
+`TextColor` on the designation and value cells based on `ShipState.red_alert`. Labels never
+swap colour. Loaded the JetBrains Mono font handle alongside Chakra Petch in
+`ViewscreenAssets`. All 667 lib tests pass; `cargo check --features server` passes for
+native and wasm32.
+
+Wiki: created `wiki/sources/prd-180-viewscreen-frame.md` summarising the parent PRD across
+its four shipped child slices (#181/#182/#183/#184); created `wiki/concepts/ui-materials.md`
+documenting the `UiMaterial` + WGSL shader pattern with `RedAlertVignetteMaterial` as the
+worked example and PRD #119 station chrome / comms / future damage indicators flagged as
+follow-on candidates; updated `wiki/concepts/view-modes.md` to mention the new viewscreen
+chrome around the camera output; added both new pages to `wiki/index.md`.

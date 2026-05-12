@@ -40,6 +40,7 @@ Architecture, patterns, processes.
 - **[Asteroid Field](./concepts/asteroid-field.md)** — Seeded generator, clear zone, deterministic layout.
 - **[Radar Projection](./concepts/radar-projection.md)** — Shared pure iterator, server + helm reuse.
 - **[View Modes](./concepts/view-modes.md)** — Camera (Fore/Aft/Port/Starboard) vs Radar.
+- **[UiMaterial Shader Pattern](./concepts/ui-materials.md)** — Custom WGSL fragment shaders behind UI nodes (Red Alert vignette as worked example).
 - **[View-Model Pattern](./concepts/view-model-pattern.md)** — Pure derived snapshots for renderers.
 - **[Console Plugin Pattern](./concepts/console-plugin-pattern.md)** — One Bevy plugin per console.
 - **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.
@@ -59,6 +60,7 @@ Shipped:
 - **[PRD #36 — Captain View Selector](./sources/prd-036-captain-view-selector.md)** — Closed. Fore/aft/port/starboard hull cameras.
 - **[PRD #51 — Smoke Test Harness](./sources/prd-051-smoke-test-harness.md)** — Closed. Playwright + BroadcastChannel PeerJS shim.
 - **[PRD #66 — Weapons & Engineering Consoles](./sources/prd-066-weapons-and-engineering.md)** — Shipped. Tactical (phasers, lock), Engineering (repair loop), hull integrity, breakdown queue.
+- **[PRD #180 — Viewscreen Frame](./sources/prd-180-viewscreen-frame.md)** — Shipped. Bevy UI border, `RedAlertVignetteMaterial`, designation + HEADING / HULL / CONDITION HUD.
 
 Open (planned work):
 

@@ -52,7 +52,12 @@ Ignored otherwise — silently, no error.
 
 `SimSnapshot.view_mode` is included in the 10 Hz broadcast, so a captain who refreshes their phone immediately sees the correct button highlighted. Same mechanism keeps the client UI in sync after a brief disconnect.
 
+## Viewscreen chrome (PRD #180)
+
+The 3D camera output is now framed by the viewscreen border (`ViewscreenBorderPlugin`, `src/viewscreen_border.rs`): a ten-sprite tiled pixel-art frame with a designation label (`AEV-074 · PHOENIX`) centred on the top cap and a three-column `HEADING / HULL / CONDITION` HUD strip on the bottom cap. The frame is gated to `GameState::InProgress` and is independent of the current `ViewMode` — both `Camera(_)` and `Radar` modes render inside the same chrome. On Red Alert the border sprites swap to their alert variants, the designation and HUD values turn alert-red (labels stay neutral), and a [`UiMaterial`](./ui-materials.md) vignette pulses behind the frame.
+
 ## Related
 
 - [Captain Console](../entities/captain-console.md) · [Radar Projection](./radar-projection.md)
-- [PRD #36](../sources/prd-036-captain-view-selector.md)
+- [PRD #36](../sources/prd-036-captain-view-selector.md) · [PRD #180](../sources/prd-180-viewscreen-frame.md)
+- [`UiMaterial` shader pattern](./ui-materials.md)

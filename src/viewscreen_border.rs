@@ -50,6 +50,7 @@ use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 use crate::lobby::CurrentPhase;
 use crate::messages::GamePhase;
 use crate::ship_state::ShipState;
+use crate::simulation::ShipHullIntegrity;
 
 // ── Layout constants ─────────────────────────────────────────────────
 //
@@ -79,6 +80,24 @@ const MIN_INTENSITY: f32 = 0.55;
 
 /// Vignette intensity at the crest of the sine pulse.
 const MAX_INTENSITY: f32 = 1.0;
+
+// ── HUD constants ────────────────────────────────────────────────────
+
+/// Signal-cyan `#5fd8e8` — designation + status values when nominal.
+const COLOR_SIGNAL_CYAN: Color = Color::srgb(0.373, 0.847, 0.910);
+
+/// Alert-red `#ff3344` — designation + status values at red alert.
+const COLOR_ALERT_RED: Color = Color::srgb(1.0, 0.2, 0.267);
+
+/// Neutral `#b8c0c8` — status labels (never swap colour).
+const COLOR_NEUTRAL_LABEL: Color = Color::srgb(0.722, 0.753, 0.784);
+
+/// Static designation displayed on the top cap.
+const DESIGNATION_TEXT: &str = "AEV-074 \u{00B7} PHOENIX";
+
+const DESIGNATION_FONT_SIZE: f32 = 18.0;
+const STATUS_LABEL_FONT_SIZE: f32 = 11.0;
+const STATUS_VALUE_FONT_SIZE: f32 = 18.0;
 
 // ── Resources ────────────────────────────────────────────────────────
 
@@ -112,6 +131,8 @@ pub struct ViewscreenAssets {
     pub cap_bottom_alert: Handle<Image>,
     /// Display font for HUD readouts (added in #184).
     pub font_display: Handle<Font>,
+    /// Monospace font for the HUD numeric value cells (added in #184).
+    pub font_mono: Handle<Font>,
 }
 
 /// Cached handle to the single `RedAlertVignetteMaterial` instance,
@@ -172,6 +193,23 @@ impl BorderSlot {
     }
 }
 
+// ── HUD marker components ────────────────────────────────────────────
+
+/// Marker for the designation `Text` node on the top cap. Driven by
+/// [`update_hud`] — toggles between signal-cyan and alert-red.
+#[derive(Component)]
+struct DesignationText;
+
+/// Identifies which HUD value cell a `Text` node is, so [`update_hud`]
+/// can write the formatted heading / hull / condition string into the
+/// right entity.
+#[derive(Component, Copy, Clone, Debug, PartialEq, Eq)]
+enum HudValue {
+    Heading,
+    Hull,
+    Condition,
+}
+
 // ── Red Alert vignette material ──────────────────────────────────────
 
 /// `UiMaterial` driving the inset radial-gradient red vignette behind
@@ -207,6 +245,7 @@ impl Plugin for ViewscreenBorderPlugin {
                     sync_border_to_phase,
                     swap_border_textures,
                     drive_vignette_intensity,
+                    update_hud,
                 ),
             );
     }
@@ -237,6 +276,7 @@ fn load_viewscreen_assets(mut commands: Commands, asset_server: Res<AssetServer>
         cap_top_alert: asset_server.load("viewscreen/cap-top-alert.png"),
         cap_bottom_alert: asset_server.load("viewscreen/cap-bottom-alert.png"),
         font_display: asset_server.load("fonts/ChakraPetch-SemiBold.ttf"),
+        font_mono: asset_server.load("fonts/JetBrainsMono-Regular.ttf"),
     };
     commands.insert_resource(assets);
 }
@@ -373,6 +413,17 @@ fn approach(current: f32, target: f32, max_step: f32) -> f32 {
     } else {
         current - max_step
     }
+}
+
+/// Convert a ship yaw in radians to a 0–359 integer compass bearing.
+///
+/// `yaw == 0` means the ship faces forward; the bearing increases
+/// clockwise as viewed from above. Negative yaw and multi-turn yaw
+/// wrap correctly. The rounding boundary at 359.5° rounds up to 360
+/// then wraps back to 0 (never returns 360).
+pub fn yaw_to_compass_bearing(yaw_radians: f32) -> u32 {
+    let degrees = yaw_radians.to_degrees().rem_euclid(360.0);
+    (degrees.round() as u32) % 360
 }
 
 // ── Spawning ─────────────────────────────────────────────────────────
@@ -635,7 +686,139 @@ fn spawn_border_frame(
                         stretch_value: 1.0,
                     }),
             ));
+
+            // ── Designation (centred on top cap) ─────────────────────
+            parent
+                .spawn(Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Percent(50.0),
+                    width: Val::Px(CAP_TOP_W),
+                    height: Val::Px(CAP_H),
+                    margin: UiRect {
+                        left: Val::Px(-CAP_TOP_W / 2.0),
+                        ..default()
+                    },
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|d| {
+                    d.spawn((
+                        DesignationText,
+                        Text::new(DESIGNATION_TEXT),
+                        TextFont {
+                            font: assets.font_display.clone(),
+                            font_size: DESIGNATION_FONT_SIZE,
+                            ..default()
+                        },
+                        TextColor(COLOR_SIGNAL_CYAN),
+                    ));
+                });
+
+            // ── Bottom cap status strip (HEADING / HULL / CONDITION) ─
+            parent
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        bottom: Val::Px(0.0),
+                        left: Val::Percent(50.0),
+                        width: Val::Px(CAP_BOTTOM_W),
+                        height: Val::Px(CAP_H),
+                        margin: UiRect {
+                            left: Val::Px(-CAP_BOTTOM_W / 2.0),
+                            ..default()
+                        },
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceAround,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                ))
+                .with_children(|strip| {
+                    spawn_status_column(strip, assets, "HEADING", "000", HudValue::Heading);
+                    spawn_status_column(strip, assets, "HULL", "100", HudValue::Hull);
+                    spawn_status_column(strip, assets, "CONDITION", "NOMINAL", HudValue::Condition);
+                });
         });
+}
+
+/// Build one HEADING/HULL/CONDITION column inside the bottom-cap strip:
+/// a Chakra Petch label above a JetBrains Mono value cell.
+fn spawn_status_column(
+    parent: &mut ChildSpawnerCommands,
+    assets: &ViewscreenAssets,
+    label: &str,
+    initial_value: &str,
+    value_kind: HudValue,
+) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
+        .with_children(|col| {
+            col.spawn((
+                Text::new(label),
+                TextFont {
+                    font: assets.font_display.clone(),
+                    font_size: STATUS_LABEL_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(COLOR_NEUTRAL_LABEL),
+            ));
+            col.spawn((
+                value_kind,
+                Text::new(initial_value),
+                TextFont {
+                    font: assets.font_mono.clone(),
+                    font_size: STATUS_VALUE_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(COLOR_SIGNAL_CYAN),
+            ));
+        });
+}
+
+/// Per-frame system: format heading / hull / condition strings, write
+/// them into the value `Text` nodes, and toggle `TextColor` on the
+/// designation and value cells between signal-cyan and alert-red.
+///
+/// Runs unconditionally — no change-detection plumbing. Per the PRD,
+/// the cost (three `format!` calls + a few component writes) is
+/// negligible and the simplicity is worth more than the saving.
+fn update_hud(
+    ship: Option<Res<ShipState>>,
+    hull: Option<Res<ShipHullIntegrity>>,
+    mut designation: Query<&mut TextColor, (With<DesignationText>, Without<HudValue>)>,
+    mut values: Query<(&HudValue, &mut Text, &mut TextColor), Without<DesignationText>>,
+) {
+    let Some(ship) = ship else { return };
+    let Some(hull) = hull else { return };
+    let alert = ship.red_alert();
+    let active_color = if alert { COLOR_ALERT_RED } else { COLOR_SIGNAL_CYAN };
+
+    for mut color in designation.iter_mut() {
+        if color.0 != active_color {
+            *color = TextColor(active_color);
+        }
+    }
+
+    for (kind, mut text, mut color) in values.iter_mut() {
+        let new_value = match kind {
+            HudValue::Heading => format!("{:03}", yaw_to_compass_bearing(ship.yaw)),
+            HudValue::Hull => format!("{}", hull.0.current().clamp(0, 100)),
+            HudValue::Condition => if alert { "ALERT" } else { "NOMINAL" }.to_string(),
+        };
+        if text.0 != new_value {
+            text.0 = new_value;
+        }
+        if color.0 != active_color {
+            *color = TextColor(active_color);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -781,6 +964,53 @@ mod tests {
         assert!((approach(1.0, 0.0, 0.25) - 0.75).abs() < 1e-6);
     }
 
+    // ── yaw_to_compass_bearing ───────────────────────────────────────
+
+    #[test]
+    fn bearing_zero_yaw_is_zero() {
+        assert_eq!(yaw_to_compass_bearing(0.0), 0);
+    }
+
+    #[test]
+    fn bearing_quarter_turn_is_ninety() {
+        assert_eq!(yaw_to_compass_bearing(std::f32::consts::FRAC_PI_2), 90);
+    }
+
+    #[test]
+    fn bearing_half_turn_is_one_eighty() {
+        assert_eq!(yaw_to_compass_bearing(std::f32::consts::PI), 180);
+    }
+
+    #[test]
+    fn bearing_three_quarter_turn_is_two_seventy() {
+        assert_eq!(yaw_to_compass_bearing(3.0 * std::f32::consts::FRAC_PI_2), 270);
+    }
+
+    #[test]
+    fn bearing_full_turn_wraps_to_zero() {
+        assert_eq!(yaw_to_compass_bearing(std::f32::consts::TAU), 0);
+    }
+
+    #[test]
+    fn bearing_negative_yaw_wraps_positive() {
+        // -π/2 rad = -90° → 270°
+        assert_eq!(yaw_to_compass_bearing(-std::f32::consts::FRAC_PI_2), 270);
+    }
+
+    #[test]
+    fn bearing_multi_turn_yaw_wraps() {
+        // 2.5 turns: 2τ + π/2 → 90°
+        let yaw = 2.0 * std::f32::consts::TAU + std::f32::consts::FRAC_PI_2;
+        assert_eq!(yaw_to_compass_bearing(yaw), 90);
+    }
+
+    #[test]
+    fn bearing_rounds_359_5_to_zero_not_360() {
+        // 359.5° rounds to 360 then wraps to 0.
+        let yaw = 359.5_f32.to_radians();
+        assert_eq!(yaw_to_compass_bearing(yaw), 0);
+    }
+
     #[test]
     fn slot_handle_picks_normal_or_alert_variant() {
         // Sanity check that BorderSlot::handle returns distinct asset
@@ -820,6 +1050,7 @@ mod tests {
             cap_top_alert: h(19),
             cap_bottom_alert: h(20),
             font_display: f(21),
+            font_mono: f(22),
         }
     }
 }

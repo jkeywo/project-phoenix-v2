@@ -14,11 +14,11 @@ async function startGameWithEngineering(context: BrowserContext) {
   const captain = await createTestClient(context, hostId, { name: 'Cap' });
   const engineer = await createTestClient(context, hostId, { name: 'Eng' });
 
-  await captain.send('SelectConsole', { console: 'CaptainChair' });
-  await captain.waitForMessage('ConsoleSelected', 5_000);
+  await captain.send('SelectStation', { station: 'Helm' });
+  await captain.waitForMessage('StationAssigned', 5_000);
 
-  await engineer.send('SelectConsole', { console: 'Engineering' });
-  await engineer.waitForMessage('ConsoleSelected', 5_000);
+  await engineer.send('SelectStation', { station: 'Tactical' });
+  await engineer.waitForMessage('StationAssigned', 5_000);
 
   await captain.send('StartGame');
   await captain.waitForMessage('GameStarted', 5_000);

@@ -14,11 +14,12 @@ async function startGame(context: BrowserContext): Promise<{ captain: TestClient
   const captain = await createTestClient(context, hostId, { name: 'Cap' });
   const helm = await createTestClient(context, hostId, { name: 'Helm' });
 
-  await captain.send('SelectConsole', { console: 'CaptainChair' });
-  await captain.waitForMessage('ConsoleSelected', 5_000);
+  // 2P layout: Helm station (CaptainChair+Helm) and Tactical station
+  await captain.send('SelectStation', { station: 'Helm' });
+  await captain.waitForMessage('StationAssigned', 5_000);
 
-  await helm.send('SelectConsole', { console: 'Helm' });
-  await helm.waitForMessage('ConsoleSelected', 5_000);
+  await helm.send('SelectStation', { station: 'Tactical' });
+  await helm.waitForMessage('StationAssigned', 5_000);
 
   await captain.send('StartGame');
   await captain.waitForMessage('GameStarted', 5_000);

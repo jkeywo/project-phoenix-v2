@@ -1,9 +1,10 @@
-// Issues #56 + #57 — Smoke tests: lobby console selection and game start.
+// Issue #134 — Smoke tests: station-based lobby protocol.
+// Rewrites issues #56 + #57 for SelectStation / StationAssigned.
 
 import { test, expect } from './fixtures';
 import { readHostPeerId, createTestClient } from './fixtures';
 
-test('console selection — both clients receive ConsoleSelected broadcasts', async ({ context }) => {
+test('SelectStation — claims station and both clients receive StationAssigned', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
@@ -13,64 +14,102 @@ test('console selection — both clients receive ConsoleSelected broadcasts', as
   const clientA = await createTestClient(context, hostId, { name: 'Alpha' });
   const clientB = await createTestClient(context, hostId, { name: 'Beta' });
 
-  // Client A claims Captain's Chair
-  await clientA.send('SetName', { name: 'Alpha' });
-  await clientA.send('SelectConsole', { console: 'CaptainChair' });
+  // Client A claims the Captain station (1P layout has a single "Captain" station)
+  await clientA.send('SelectStation', { station: 'Captain' });
 
-  const selA = await clientA.waitForMessage('ConsoleSelected', 5_000) as any;
+  const selA = await clientA.waitForMessage('StationAssigned', 5_000) as any;
   expect(selA.data.token).toBe(clientA.token);
-  expect(selA.data.consoles).toContain('CaptainChair');
+  expect(selA.data.station).toBe('Captain');
+  expect(Array.isArray(selA.data.consoles)).toBe(true);
+  expect(selA.data.consoles.length).toBeGreaterThan(0);
 
-  // Client B should also receive the broadcast for A's selection
-  const selAonB = await clientB.waitForMessage('ConsoleSelected', 5_000) as any;
+  // Client B should also receive the StationAssigned broadcast
+  const selAonB = await clientB.waitForMessage('StationAssigned', 5_000) as any;
   expect(selAonB.data.token).toBe(clientA.token);
-
-  // Clear clientB's message queue so the next waitForMessage sees only new messages
-  await clientB.page.evaluate(() => { (window as any).__messages = []; });
-
-  // Client B claims Helm
-  await clientB.send('SetName', { name: 'Beta' });
-  await clientB.send('SelectConsole', { console: 'Helm' });
-
-  const selB = await clientB.waitForMessage('ConsoleSelected', 5_000) as any;
-  expect(selB.data.token).toBe(clientB.token);
-  expect(selB.data.consoles).toContain('Helm');
+  expect(selAonB.data.station).toBe('Captain');
 
   await clientA.close();
   await clientB.close();
 });
 
-test('captain starts game — both clients receive GameStarted with InProgress', async ({ context }) => {
+test('non-captain StartGame is ignored', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);
 
-  const clientA = await createTestClient(context, hostId, { name: 'Cap' });
-  const clientB = await createTestClient(context, hostId, { name: 'Helm' });
+  // Two clients: A takes Helm (CaptainChair), B takes Tactical
+  const clientA = await createTestClient(context, hostId, { name: 'Helm' });
+  const clientB = await createTestClient(context, hostId, { name: 'Tactical' });
 
-  await clientA.send('SelectConsole', { console: 'CaptainChair' });
-  await clientA.waitForMessage('ConsoleSelected', 5_000);
+  await clientA.send('SelectStation', { station: 'Helm' });
+  await clientA.waitForMessage('StationAssigned', 5_000);
 
-  await clientB.send('SelectConsole', { console: 'Helm' });
-  await clientB.waitForMessage('ConsoleSelected', 5_000);
+  await clientB.send('SelectStation', { station: 'Tactical' });
+  await clientB.waitForMessage('StationAssigned', 5_000);
 
-  // Non-captain (B) attempting StartGame should be ignored
+  // Non-captain (B / Tactical station) attempts StartGame — should be ignored
   await clientB.send('StartGame');
 
-  // Neither client should receive GameStarted yet
   await clientA.page.waitForTimeout(500);
   const earlyA = await clientA.lastMessage('GameStarted');
   expect(earlyA).toBeNull();
 
-  // Captain (A) sends StartGame — both clients must receive it
+  await clientA.close();
+  await clientB.close();
+});
+
+test('StartGame with unfilled stations is ignored', async ({ context }) => {
+  const serverPage = await context.newPage();
+  await serverPage.goto('/');
+  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+
+  const hostId = await readHostPeerId(serverPage);
+
+  // Two clients join; only one claims a station
+  const clientA = await createTestClient(context, hostId, { name: 'Helm' });
+  const clientB = await createTestClient(context, hostId, { name: 'Spectator' });
+
+  // Only A claims Helm — Tactical station is unfilled
+  await clientA.send('SelectStation', { station: 'Helm' });
+  await clientA.waitForMessage('StationAssigned', 5_000);
+
+  // A is the captain (holds CaptainChair via Helm station) but stations are not all filled
+  await clientA.send('StartGame');
+
+  await clientA.page.waitForTimeout(500);
+  const earlyA = await clientA.lastMessage('GameStarted');
+  expect(earlyA).toBeNull();
+
+  await clientA.close();
+  await clientB.close();
+});
+
+test('captain starts game — both clients receive GameStarted', async ({ context }) => {
+  const serverPage = await context.newPage();
+  await serverPage.goto('/');
+  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+
+  const hostId = await readHostPeerId(serverPage);
+
+  const clientA = await createTestClient(context, hostId, { name: 'Helm' });
+  const clientB = await createTestClient(context, hostId, { name: 'Tactical' });
+
+  // 2P layout: Helm (CaptainChair+Helm) + Tactical (Tactical+Engineering)
+  await clientA.send('SelectStation', { station: 'Helm' });
+  await clientA.waitForMessage('StationAssigned', 5_000);
+
+  await clientB.send('SelectStation', { station: 'Tactical' });
+  await clientB.waitForMessage('StationAssigned', 5_000);
+
+  // Captain (A, holds CaptainChair via Helm station) sends StartGame
   await clientA.send('StartGame');
 
   await clientA.waitForMessage('GameStarted', 5_000);
   await clientB.waitForMessage('GameStarted', 5_000);
 
-  // Verify the Welcome state had Lobby phase and now we've transitioned
+  // Welcome was sent with Lobby phase before game started
   const welcomeA = await clientA.page.evaluate(
     () => (window as any).__messages.find((m: any) => m.type === 'Welcome'),
   ) as any;

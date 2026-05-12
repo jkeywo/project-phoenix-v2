@@ -92,14 +92,14 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-a3f56759d1cab1b7.js" crossorigin="anonymous" integrity="sha384-p6GIiElNhDniNMnMBYSDa6Q+AVlGb6cX16V7lPRhevuWN6lWK7zpNAS7vmaW/R9J"><link rel="preload" href="./project-phoenix-a3f56759d1cab1b7_bg.wasm" crossorigin="anonymous" integrity="sha384-EtISgk63aIOrMyLzH8/Coqvev04A/SQRTOjmrcDaalsci9DoSjW25wYCMCHBeceD" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-598500ec4aeb1cb0.js" crossorigin="anonymous" integrity="sha384-p6GIiElNhDniNMnMBYSDa6Q+AVlGb6cX16V7lPRhevuWN6lWK7zpNAS7vmaW/R9J"><link rel="preload" href="./project-phoenix-598500ec4aeb1cb0_bg.wasm" crossorigin="anonymous" integrity="sha384-euupS6cGBL3kFPId2z6IvaLX6tfuaMVYKsDDmnQIcP9PxMrlOLeuF6KMBU3tKIaF" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-a3f56759d1cab1b7.js';
-const wasm = await init({ module_or_path: './project-phoenix-a3f56759d1cab1b7_bg.wasm' });
+import init, * as bindings from './project-phoenix-598500ec4aeb1cb0.js';
+const wasm = await init({ module_or_path: './project-phoenix-598500ec4aeb1cb0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -227,12 +227,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     // ── Persistence ─────────────────────────────────────────────
 
-    const RANKS = ['Ensign', 'Lieutenant', 'Commander', 'Captain', 'Admiral'];
-    const STARS = ['Vega', 'Altair', 'Rigel', 'Deneb', 'Sirius', 'Nova', 'Quasar', 'Nebula', 'Pulsar', 'Proxima'];
+    const NAMES = ['Vega', 'Altair', 'Rigel', 'Deneb', 'Sirius', 'Nova', 'Quasar', 'Nebula', 'Pulsar', 'Proxima'];
 
     function randomName() {
-      return RANKS[Math.floor(Math.random() * RANKS.length)] + ' ' +
-             STARS[Math.floor(Math.random() * STARS.length)];
+      return NAMES[Math.floor(Math.random() * NAMES.length)];
     }
 
     let myToken = localStorage.getItem('session-token');

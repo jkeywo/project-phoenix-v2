@@ -6,8 +6,9 @@
 //! buttons. Bevy-free so it can be exhaustively unit-tested on native.
 
 use bevy::prelude::Resource;
+use std::collections::HashMap;
 
-use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube};
+use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -196,6 +197,9 @@ pub struct ClientSimState {
     /// In-flight torpedoes: (uuid, x, z, heading, tube).
     /// Updated by `TorpedoLaunched` and `TorpedoDestroyed` messages.
     pub torpedoes_in_flight: Vec<(String, f32, f32, f32, TorpedoTube)>,
+    /// Active modifier table: maps `(source, slot)` → bonus value.
+    /// Updated by `ModifierAdded` and `ModifierRemoved` messages. Cleared on `Welcome`.
+    pub modifiers: HashMap<(ModifierSource, ModifierSlot), f32>,
 }
 
 impl Default for ClientSimState {
@@ -224,6 +228,7 @@ impl Default for ClientSimState {
             aft_loaded: true,
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
+            modifiers: HashMap::new(),
         }
     }
 }
@@ -248,8 +253,7 @@ impl ClientSimState {
                 let preserved_world = state.world.clone().unwrap_or_default();
                 *self = Self::default();
                 self.world = preserved_world;
-            }
-            ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty } => {
+            }            ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty } => {
                 self.repair_cooldown_secs = *remaining_cooldown_secs;
                 self.repair_in_progress = *in_progress;
                 self.repair_penalty = *penalty;
@@ -287,6 +291,12 @@ impl ClientSimState {
             ServerMessage::TorpedoDestroyed { uuid } => {
                 self.torpedoes_in_flight.retain(|(id, ..)| id != uuid);
             }
+            ServerMessage::ModifierAdded { source, slot, bonus } => {
+                self.modifiers.insert((source.clone(), slot.clone()), *bonus);
+            }
+            ServerMessage::ModifierRemoved { source, slot } => {
+                self.modifiers.remove(&(source.clone(), slot.clone()));
+            }
             _ => {}
         }
     }
@@ -295,6 +305,11 @@ impl ClientSimState {
     /// the given direction. Radar mode highlights nothing in the cross.
     pub fn is_active_camera_direction(&self, direction: &ViewDirection) -> bool {
         matches!(&self.view_mode, ViewMode::Camera(d) if d == direction)
+    }
+
+    /// Returns the bonus value for the given `(source, slot)` pair, if present.
+    pub fn modifier_bonus(&self, source: &ModifierSource, slot: &ModifierSlot) -> Option<f32> {
+        self.modifiers.get(&(source.clone(), slot.clone())).copied()
     }
 }
 
@@ -542,6 +557,7 @@ mod tests {
             aft_loaded: true,
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
+            modifiers: HashMap::new(),
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
@@ -590,6 +606,7 @@ mod tests {
             aft_loaded: true,
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
+            modifiers: HashMap::new(),
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -628,6 +645,7 @@ mod tests {
             aft_loaded: true,
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
+            modifiers: HashMap::new(),
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -1442,5 +1460,91 @@ mod tests {
         s.apply(&ServerMessage::TorpedoDestroyed { uuid: "t1".into() });
         assert_eq!(s.torpedoes_in_flight.len(), 1);
         assert_eq!(s.torpedoes_in_flight[0].0, "t2");
+    }
+
+    // ── modifier table in ClientSimState ────────────────────────────────
+
+    #[test]
+    fn modifier_added_is_stored_in_client_state() {
+        use crate::messages::{ModifierSlot, ModifierSource};
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::ModifierAdded {
+            source: ModifierSource::ImpulseDrive,
+            slot: ModifierSlot::MaxSpeed,
+            bonus: 0.5,
+        });
+        let bonus = s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed);
+        assert!((bonus.unwrap() - 0.5).abs() < 1e-6, "expected bonus 0.5");
+    }
+
+    #[test]
+    fn modifier_added_replaces_existing_same_source_slot() {
+        use crate::messages::{ModifierSlot, ModifierSource};
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::ModifierAdded {
+            source: ModifierSource::ImpulseDrive,
+            slot: ModifierSlot::MaxSpeed,
+            bonus: 0.5,
+        });
+        s.apply(&ServerMessage::ModifierAdded {
+            source: ModifierSource::ImpulseDrive,
+            slot: ModifierSlot::MaxSpeed,
+            bonus: 0.9,
+        });
+        let bonus = s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed);
+        assert!((bonus.unwrap() - 0.9).abs() < 1e-6, "expected updated bonus 0.9");
+        // Only one entry for this source+slot.
+        assert_eq!(
+            s.modifiers.values()
+                .filter(|&&b| (b - 0.9_f32).abs() < 1e-6)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn modifier_removed_clears_entry() {
+        use crate::messages::{ModifierSlot, ModifierSource};
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::ModifierAdded {
+            source: ModifierSource::ImpulseDrive,
+            slot: ModifierSlot::MaxSpeed,
+            bonus: 0.5,
+        });
+        s.apply(&ServerMessage::ModifierRemoved {
+            source: ModifierSource::ImpulseDrive,
+            slot: ModifierSlot::MaxSpeed,
+        });
+        assert!(s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed).is_none());
+    }
+
+    #[test]
+    fn modifier_removed_unknown_is_noop() {
+        use crate::messages::{ModifierSlot, ModifierSource};
+        let mut s = ClientSimState::default();
+        // Should not panic or corrupt state.
+        s.apply(&ServerMessage::ModifierRemoved {
+            source: ModifierSource::ImpulseDrive,
+            slot: ModifierSlot::MaxSpeed,
+        });
+        assert!(s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed).is_none());
+    }
+
+    #[test]
+    fn welcome_clears_modifiers() {
+        use crate::messages::{GamePhase, GameState, ModifierSlot, ModifierSource};
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::ModifierAdded {
+            source: ModifierSource::ImpulseDrive,
+            slot: ModifierSlot::MaxSpeed,
+            bonus: 1.0,
+        });
+        s.apply(&ServerMessage::Welcome {
+            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+        });
+        assert!(
+            s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed).is_none(),
+            "Welcome must clear modifier table"
+        );
     }
 }

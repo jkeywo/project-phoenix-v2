@@ -294,6 +294,7 @@ impl Plugin for SimulationPlugin {
                 broadcast_repair_state.after(broadcast_sim_state),
                 broadcast_shield_status.after(broadcast_sim_state),
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
+                broadcast_modifier_events,
             ));
     }
 }
@@ -1159,6 +1160,26 @@ fn broadcast_world_setup_on_start(
     state.sent = true;
 }
 
+/// Drain pending modifier events from `ShipModifiers` and broadcast them to all clients.
+fn broadcast_modifier_events(
+    mut modifiers: ResMut<ShipModifiers>,
+    mut writer: MessageWriter<OutboundMessage>,
+) {
+    use crate::modifiers::ModifierEvent;
+    let events: Vec<_> = std::mem::take(&mut modifiers.pending_events);
+    for event in events {
+        let msg = match event {
+            ModifierEvent::Added { source, slot, bonus } => {
+                ServerMessage::ModifierAdded { source, slot, bonus }
+            }
+            ModifierEvent::Removed { source, slot } => {
+                ServerMessage::ModifierRemoved { source, slot }
+            }
+        };
+        writer.write(OutboundMessage { target: Target::All, msg });
+    }
+}
+
 // ── World Setup ──────────────
 fn setup_world(
     commands: Commands,
@@ -1470,7 +1491,7 @@ fn test_app() -> App {
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_impulse_messages, tick_active_beam, tick_repair, tick_torpedo_system, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_impulse_messages, tick_active_beam, tick_repair, tick_torpedo_system, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events))
         .add_systems(PostUpdate, collect);
     app
 }
@@ -2789,6 +2810,72 @@ fn test_app() -> App {
 
     /// HullDamageTaken modifier at -1 (→ 0.5× multiplier) halves collision damage.
     /// At zero ship speed, base collision_damage=5. With 0.5× modifier: round(5×0.5)=3.
+    // ── modifier broadcast tests ──────────────────────────────────────────────
+
+    #[test]
+    fn add_modifier_broadcasts_modifier_added_message() {
+        use crate::modifiers::{Modifier, ShipModifiers};
+        use crate::messages::{ModifierSlot, ModifierSource};
+
+        let mut app = test_app();
+        start_game(&mut app);
+        tick(&mut app); // consume startup messages
+
+        // Register a modifier on the live resource.
+        {
+            let mut mods = app.world_mut().resource_mut::<ShipModifiers>();
+            mods.add_or_update(Modifier {
+                source: ModifierSource::ImpulseDrive,
+                slot: ModifierSlot::MaxSpeed,
+                bonus: 0.5,
+            });
+        }
+        let out = tick(&mut app);
+
+        let found = out.iter().any(|m| matches!(
+            &m.msg,
+            ServerMessage::ModifierAdded { source, slot, bonus }
+                if *source == ModifierSource::ImpulseDrive
+                && *slot == ModifierSlot::MaxSpeed
+                && (*bonus - 0.5).abs() < 1e-6
+        ));
+        assert!(found, "expected ModifierAdded in outbound messages");
+    }
+
+    #[test]
+    fn remove_modifier_broadcasts_modifier_removed_message() {
+        use crate::modifiers::{Modifier, ShipModifiers};
+        use crate::messages::{ModifierSlot, ModifierSource};
+
+        let mut app = test_app();
+        start_game(&mut app);
+        // Add first so there's something to remove.
+        {
+            let mut mods = app.world_mut().resource_mut::<ShipModifiers>();
+            mods.add_or_update(Modifier {
+                source: ModifierSource::ImpulseDrive,
+                slot: ModifierSlot::MaxSpeed,
+                bonus: 0.5,
+            });
+        }
+        tick(&mut app);
+
+        // Now remove it.
+        {
+            let mut mods = app.world_mut().resource_mut::<ShipModifiers>();
+            mods.remove(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed);
+        }
+        let out = tick(&mut app);
+
+        let found = out.iter().any(|m| matches!(
+            &m.msg,
+            ServerMessage::ModifierRemoved { source, slot }
+                if *source == ModifierSource::ImpulseDrive
+                && *slot == ModifierSlot::MaxSpeed
+        ));
+        assert!(found, "expected ModifierRemoved in outbound messages");
+    }
+
     #[test]
     fn hull_damage_modifier_halves_collision_damage() {
         use crate::modifiers::{Modifier, ShipModifiers};

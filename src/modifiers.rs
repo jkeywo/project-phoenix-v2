@@ -43,6 +43,14 @@ pub struct Modifier {
     pub bonus: f32,
 }
 
+/// An event queued inside `ShipModifiers` when a modifier is added/updated or removed.
+/// Drained by the simulation broadcast system to emit `OutboundMessage`s.
+#[derive(Clone, Debug)]
+pub enum ModifierEvent {
+    Added { source: ModifierSource, slot: ModifierSlot, bonus: f32 },
+    Removed { source: ModifierSource, slot: ModifierSlot },
+}
+
 /// All active modifiers for a ship, plus an eagerly-maintained multiplier cache.
 ///
 /// Identity: `(source, slot)` pair. Re-adding the same source+slot replaces the
@@ -59,6 +67,8 @@ pub struct ShipModifiers {
     table: HashMap<(ModifierSource, ModifierSlot), f32>,
     /// Pre-computed multipliers, indexed by `ModifierSlot::index()`.
     cache: [f32; ModifierSlot::COUNT],
+    /// Pending broadcast events. Drained each frame by `broadcast_modifier_events`.
+    pub pending_events: Vec<ModifierEvent>,
 }
 
 impl ShipModifiers {
@@ -67,12 +77,18 @@ impl ShipModifiers {
         Self {
             table: HashMap::new(),
             cache: [1.0; ModifierSlot::COUNT],
+            pending_events: Vec::new(),
         }
     }
 
     /// Inserts or replaces the modifier for the given `(source, slot)` pair,
     /// then rebuilds the cache.
     pub fn add_or_update(&mut self, modifier: Modifier) {
+        self.pending_events.push(ModifierEvent::Added {
+            source: modifier.source.clone(),
+            slot: modifier.slot.clone(),
+            bonus: modifier.bonus,
+        });
         let key = (modifier.source, modifier.slot);
         self.table.insert(key, modifier.bonus);
         self.rebuild_cache();
@@ -82,7 +98,12 @@ impl ShipModifiers {
     /// then rebuilds the cache.
     pub fn remove(&mut self, source: &ModifierSource, slot: &ModifierSlot) {
         let key = (source.clone(), slot.clone());
-        self.table.remove(&key);
+        if self.table.remove(&key).is_some() {
+            self.pending_events.push(ModifierEvent::Removed {
+                source: source.clone(),
+                slot: slot.clone(),
+            });
+        }
         self.rebuild_cache();
     }
 

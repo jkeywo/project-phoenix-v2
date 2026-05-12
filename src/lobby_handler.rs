@@ -2,7 +2,7 @@ use crate::messages::{
     ClientMessage, Console, GamePhase, GameState, ServerMessage, WorldData,
 };
 use crate::session::SessionManager;
-use crate::stations::{all_stations_filled, get_station, reassign_on_leave, ShipStations, StationAssignments};
+use crate::stations::{all_stations_filled, get_station, reassign_on_join, reassign_on_leave, ShipStations, StationAssignments};
 
 #[derive(Clone, Debug)]
 pub enum Target {
@@ -42,6 +42,10 @@ pub fn process_message(
 
     match msg {
         ClientMessage::Identify { token: id_token, name } => {
+            // Snapshot the station map BEFORE register so reassign_on_join can
+            // diff against it once the new player is added.
+            let old_map = build_station_assignments(sessions, ship_stations);
+
             let is_reconnect = sessions.reconnect(id_token).is_some();
             let joined = if is_reconnect {
                 true
@@ -55,6 +59,21 @@ pub fn process_message(
                 let state = derive_game_state(sessions, &phase, world);
                 outbound.push((Target::Token(id_token.clone()), ServerMessage::Welcome { state, ship_stations: ship_stations.clone() }));
                 outbound.push((Target::AllExcept(id_token.clone()), ServerMessage::PlayerJoined { player }));
+
+                // Auto-shuffle stations on join: if a station config is loaded and
+                // this is a fresh join (not a reconnect, not currently a spectator),
+                // run reassign_on_join to fold the new player into the layout.
+                // Existing players follow their `next` chain to the new player count;
+                // the new player lands on the no-`previous` station at the new count.
+                if !ship_stations.configs.is_empty()
+                    && !is_reconnect
+                    && !sessions.spectator_queue().contains(id_token)
+                {
+                    let new_map = reassign_on_join(ship_stations, &old_map, id_token);
+                    let new_count = new_map.len() as u32;
+                    let cascade = apply_station_assignments(sessions, &new_map, &old_map, ship_stations, new_count);
+                    outbound.extend(cascade);
+                }
 
                 // Spectator queue: if station config is loaded, check if stations are full.
                 // If the joining player has no consoles (they haven't selected a station,
@@ -234,22 +253,36 @@ fn apply_station_assignments(
 ) -> Vec<(Target, ServerMessage)> {
     let mut outbound = Vec::new();
 
-    // Players who are now assigned a different station
+    // Players who are now assigned a different station OR whose station name is
+    // unchanged but whose console set differs at the new player count (e.g.
+    // Tactical at 2P holds [Tactical, Engineering] but at 3P holds [Tactical]).
     for (token, station_name) in new_map.iter() {
         let old = old_map.get(token);
-        if old.map(|s| s != station_name).unwrap_or(true) {
-            // Changed or newly assigned
+        let name_changed = old.map(|s| s != station_name).unwrap_or(true);
+
+        // Look up the station def at the new count to know the target consoles.
+        let Some(station_def) = crate::stations::get_station(ship_stations, new_count, station_name) else {
+            continue;
+        };
+
+        // Detect console-set drift even when the station name is the same.
+        let current_consoles: Vec<Console> = sessions.players()
+            .iter()
+            .find(|p| p.token == *token)
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        let consoles_changed = current_consoles != station_def.consoles;
+
+        if name_changed || consoles_changed {
             sessions.clear_consoles(token);
-            if let Some(station_def) = crate::stations::get_station(ship_stations, new_count, station_name) {
-                for console in &station_def.consoles {
-                    let _ = sessions.toggle_console(token, console.clone());
-                }
-                outbound.push((Target::All, ServerMessage::StationAssigned {
-                    token: token.clone(),
-                    station: Some(station_name.clone()),
-                    consoles: station_def.consoles.clone(),
-                }));
+            for console in &station_def.consoles {
+                let _ = sessions.toggle_console(token, console.clone());
             }
+            outbound.push((Target::All, ServerMessage::StationAssigned {
+                token: token.clone(),
+                station: Some(station_name.clone()),
+                consoles: station_def.consoles.clone(),
+            }));
         }
     }
 

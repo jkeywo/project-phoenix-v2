@@ -12,6 +12,7 @@ use {
     crate::renderer::RendererPlugin,
     crate::simulation::SimulationPlugin,
     crate::stations::ShipStations,
+    crate::viewscreen_border::ViewscreenBorderPlugin,
     bevy::{prelude::*, DefaultPlugins},
     js_sys::Function,
     std::cell::RefCell,
@@ -87,6 +88,7 @@ pub fn wasm_init() {
     .add_plugins(LobbyPlugin)
     .add_plugins(SimulationPlugin)
     .add_plugins(RendererPlugin)
+    .add_plugins(ViewscreenBorderPlugin)
     .add_systems(Update, (drain_inbound, drain_disconnects, flush_outbound));
 
     // Insert the validated ShipStations resource if it was pre-validated.

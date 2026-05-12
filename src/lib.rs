@@ -32,5 +32,8 @@ pub mod client_app;
 #[cfg(feature = "server")]
 pub mod bridge;
 
+#[cfg(feature = "server")]
+pub mod viewscreen_border;
+
 #[cfg(feature = "client")]
 pub mod client_bridge;

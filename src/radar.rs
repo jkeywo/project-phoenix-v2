@@ -78,11 +78,24 @@ pub fn is_fire_ready(
     ship_z: f32,
     ship_yaw: f32,
 ) -> bool {
+    is_fire_ready_with_range(target_x, target_z, ship_x, ship_z, ship_yaw, PHASER_RANGE)
+}
+
+/// Like `is_fire_ready` but accepts a caller-supplied `phaser_range`, allowing
+/// modifier-scaled range checks without changing the constant.
+pub fn is_fire_ready_with_range(
+    target_x: f32,
+    target_z: f32,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    phaser_range: f32,
+) -> bool {
     let dx = target_x - ship_x;
     let dz = target_z - ship_z;
 
-    // Range gate: must be within PHASER_RANGE.
-    if dx * dx + dz * dz > PHASER_RANGE * PHASER_RANGE {
+    // Range gate: must be within phaser_range.
+    if dx * dx + dz * dz > phaser_range * phaser_range {
         return false;
     }
 

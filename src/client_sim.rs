@@ -249,7 +249,7 @@ impl ClientSimState {
             ServerMessage::WorldSetup { world } => {
                 self.world = world.clone();
             }
-            ServerMessage::Welcome { state } => {
+            ServerMessage::Welcome { state, .. } => {
                 let preserved_world = state.world.clone().unwrap_or_default();
                 *self = Self::default();
                 self.world = preserved_world;
@@ -569,6 +569,7 @@ mod tests {
                 players: vec![],
                 world: Some(world.clone()),
             },
+            ship_stations: crate::stations::ShipStations::default(),
         });
         // Everything except `world` must reset to defaults.
         assert!(!s.red_alert);
@@ -614,6 +615,7 @@ mod tests {
                 players: vec![],
                 world: None,
             },
+            ship_stations: crate::stations::ShipStations::default(),
         });
         assert_eq!(s, ClientSimState::default());
     }
@@ -714,6 +716,7 @@ mod tests {
         s.apply(&ServerMessage::ScienceTargetSuggestion { uuid: "some-entity".into() });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            ship_stations: crate::stations::ShipStations::default(),
         });
         assert!(s.science_target_suggestion.is_none());
     }
@@ -872,6 +875,7 @@ mod tests {
         });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            ship_stations: crate::stations::ShipStations::default(),
         });
         assert!(s.shield_facings.is_empty());
     }
@@ -1541,6 +1545,7 @@ mod tests {
         });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            ship_stations: crate::stations::ShipStations::default(),
         });
         assert!(
             s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed).is_none(),

@@ -19,12 +19,12 @@ use crate::impulse::ImpulseState;
 use crate::modifiers::ShipModifiers;
 use crate::messages::ModifierSlot;
 
-// ── Beam constants ────────────
+// â”€â”€ Beam constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const BEAM_DURATION_SECS: f32 = 6.0;
 const BEAM_DAMAGE_PER_SEC: f32 = 5.0;
 const BEAM_COOLDOWN_SECS: f32 = 6.0;
 
-// ── Marker Components ────────
+// â”€â”€ Marker Components â”€â”€â”€â”€â”€â”€â”€â”€
 #[derive(Component)]
 pub struct Ship;
 
@@ -42,14 +42,14 @@ pub struct AsteroidDamage {
     pub current_hp: i32,
 }
 
-// ── Resources ────────────────
+// â”€â”€ Resources â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
 
 #[derive(Resource)]
 struct HelmInputTimer(Timer);
 
-/// Ship-wide Hull Integrity (0–100). Tracked as a Bevy resource so systems
+/// Ship-wide Hull Integrity (0â€“100). Tracked as a Bevy resource so systems
 /// can read/write it independently of `ShipState`.
 #[derive(Resource)]
 pub struct ShipHullIntegrity(pub HullIntegrity);
@@ -109,7 +109,7 @@ impl Default for CurrentPhaserMode {
 /// the TOML is absent.
 #[derive(Resource, Clone, Debug)]
 pub struct PhaserRenderConfig {
-    /// RGBA beam colour in 0.0–1.0.
+    /// RGBA beam colour in 0.0â€“1.0.
     pub beam_color: [f32; 4],
     /// Maximum beam range (world units); beam endpoint is clamped to this.
     pub beam_range: f32,
@@ -124,7 +124,7 @@ impl Default for PhaserRenderConfig {
     }
 }
 
-// ── Repair constants ──────────
+// â”€â”€ Repair constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const REPAIR_DURATION_SECS: f32 = 30.0;
 const REPAIR_HP_PER_SEC: f32 = 1.0 / 3.0; // +1 HP every 3 seconds
 const REPAIR_MAX_HP: i32 = 10;
@@ -242,7 +242,7 @@ impl PhaserCooldown {
     }
 }
 
-// ── Plugin ───────────────────
+// â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 pub struct SimulationPlugin;
 
 impl Plugin for SimulationPlugin {
@@ -299,7 +299,7 @@ impl Plugin for SimulationPlugin {
     }
 }
 
-// ── Systems ──────────────────
+// â”€â”€ Systems â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 fn handle_toggle(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
@@ -457,7 +457,7 @@ fn process_helm_inputs(
         }
     }
 
-    // Compute physics — use the timer's nominal period, not the frame delta.
+    // Compute physics â€” use the timer's nominal period, not the frame delta.
     // The timer fires every 100 ms; time.delta_secs() is only one frame (~16 ms).
     let dt = timer.0.duration().as_secs_f32();
     let state = ShipPhysicsState {
@@ -792,7 +792,7 @@ fn handle_repair(
         } else if !is_authorized && authorized.is_some() {
             penalties.penalise(token);
         }
-        // No breakdowns pending, or repair already active → silent no-op.
+        // No breakdowns pending, or repair already active â†’ silent no-op.
     }
 }
 
@@ -870,7 +870,7 @@ fn tick_repair(
 
     repair.remaining_secs -= dt;
     if repair.remaining_secs <= 0.0 || repair.hp_restored >= REPAIR_MAX_HP {
-        // Repair complete — advance the breakdown queue.
+        // Repair complete â€” advance the breakdown queue.
         breakdowns.queue.pop_front();
         repair.remaining_secs = 0.0;
         repair.hp_accumulator = 0.0;
@@ -1180,7 +1180,7 @@ fn broadcast_modifier_events(
     }
 }
 
-// ── World Setup ──────────────
+// â”€â”€ World Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 fn setup_world(
     commands: Commands,
     meshes: ResMut<Assets<Mesh>>,
@@ -1408,7 +1408,7 @@ fn setup_world_hardcoded(
     _world: ResMut<WorldResource>,
 ) {
 
-    // ── Starfield skybox ───────────────────────────────────────────────
+    // â”€â”€ Starfield skybox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Procedural points: many small unlit white spheres at radius ~2000
     // around the origin. Cheap and works on WebGL2.
     let star_mat = materials.add(StandardMaterial {
@@ -1437,7 +1437,7 @@ fn setup_world_hardcoded(
         ));
     }
 
-    // Spawn ship — kinematic so we drive position directly from ShipState;
+    // Spawn ship â€” kinematic so we drive position directly from ShipState;
     // collision events fire so handle_collisions can zero velocity on impact.
     commands.spawn((
         Ship,
@@ -1448,7 +1448,7 @@ fn setup_world_hardcoded(
     ));
 }
 
-// ── Tests ────────────────────
+// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1512,7 +1512,7 @@ fn test_app() -> App {
     fn start_game(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
-        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -1523,9 +1523,9 @@ fn test_app() -> App {
         let mut app = test_app();
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(&mut app);
-        // Still in Lobby — game not started
+        // Still in Lobby â€” game not started
         push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) });
         tick(&mut app);
         assert_eq!(
@@ -1563,11 +1563,11 @@ fn test_app() -> App {
     fn start_game_with_helm(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
-        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "helm", ClientMessage::Identify { token: "helm".into(), name: "Bob".into() });
         tick(app);
-        push(app, "helm", ClientMessage::SelectConsole { console: Console::Helm });
+        push(app, "helm", ClientMessage::SelectStation { station: "Helm".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -1576,11 +1576,11 @@ fn test_app() -> App {
     fn start_game_with_science(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
-        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
         tick(app);
-        push(app, "science", ClientMessage::SelectConsole { console: Console::Science });
+        push(app, "science", ClientMessage::SelectStation { station: "Science".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -1700,7 +1700,7 @@ fn test_app() -> App {
         // Bring the game up to the point of pressing StartGame
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(&mut app);
         // The StartGame tick should produce the WorldSetup broadcast
         push(&mut app, "captain", ClientMessage::StartGame);
@@ -1738,7 +1738,7 @@ fn test_app() -> App {
         // Identify and select a console but don't start the game.
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         let out = tick(&mut app);
         assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. })),
             "WorldSetup should not be broadcast in the Lobby phase");
@@ -1841,7 +1841,7 @@ fn test_app() -> App {
         assert_ne!(first, second, "consecutive entries are different consoles");
     }
 
-    // ── SetTarget / TargetLock tests ──────────────────────────────────
+    // â”€â”€ SetTarget / TargetLock tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     fn setup_weapons_world(app: &mut App, asteroid_x: f32, asteroid_z: f32) {
         app.world_mut().insert_resource(WorldResource(WorldData {
@@ -1871,11 +1871,11 @@ fn test_app() -> App {
     fn start_game_with_weapons(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
-        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
         tick(app);
-        push(app, "weapons", ClientMessage::SelectConsole { console: Console::Tactical });
+        push(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -1884,7 +1884,7 @@ fn test_app() -> App {
     #[test]
     fn valid_target_within_range_replies_with_target_lock_confirmed() {
         let mut app = test_app();
-        // Asteroid at (30, 0) — 30 units from ship origin, within 60-unit range.
+        // Asteroid at (30, 0) â€” 30 units from ship origin, within 60-unit range.
         setup_weapons_world(&mut app, 30.0, 0.0);
         start_game_with_weapons(&mut app);
 
@@ -1908,7 +1908,7 @@ fn test_app() -> App {
     #[test]
     fn asteroid_outside_weapons_range_replies_with_target_lock_rejected() {
         let mut app = test_app();
-        // Asteroid at (80, 0) — 80 units away, outside 60-unit Weapons range.
+        // Asteroid at (80, 0) â€” 80 units away, outside 60-unit Weapons range.
         setup_weapons_world(&mut app, 80.0, 0.0);
         start_game_with_weapons(&mut app);
 
@@ -1940,9 +1940,9 @@ fn test_app() -> App {
         assert!(app.world().resource::<WeaponsTarget>().0.is_none());
     }
 
-    // ── WeaponsUpdate / fire_ready tests ──────────────────────────────────────
+    // â”€â”€ WeaponsUpdate / fire_ready tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    /// Target locked, within 40-unit phaser range, in forward arc → fire_ready = true.
+    /// Target locked, within 40-unit phaser range, in forward arc â†’ fire_ready = true.
     #[test]
     fn weapons_update_fire_ready_true_when_target_in_range_and_arc() {
         let mut app = test_app();
@@ -1965,11 +1965,11 @@ fn test_app() -> App {
         assert!(update.1, "expected fire_ready=true for in-range, forward-arc target");
     }
 
-    /// Target locked but beyond 40-unit phaser range (within 60u lock range) → fire_ready = false.
+    /// Target locked but beyond 40-unit phaser range (within 60u lock range) â†’ fire_ready = false.
     #[test]
     fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
         let mut app = test_app();
-        // Ship at origin, yaw=0. Asteroid at (0, -50): directly ahead, 50 units — within lock range
+        // Ship at origin, yaw=0. Asteroid at (0, -50): directly ahead, 50 units â€” within lock range
         // (60u) but outside phaser range (40u).
         setup_weapons_world(&mut app, 0.0, -50.0);
         start_game_with_weapons(&mut app);
@@ -1987,7 +1987,7 @@ fn test_app() -> App {
         assert!(!update.1, "expected fire_ready=false for beyond-phaser-range target");
     }
 
-    // ── FirePhaser / beam lifecycle tests ──────────────────────────────────────
+    // â”€â”€ FirePhaser / beam lifecycle tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Helper: lock target then fire phaser; returns messages from the fire tick.
     fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<OutboundMessage> {
@@ -2005,7 +2005,7 @@ fn test_app() -> App {
     #[test]
     fn fire_phaser_on_valid_target_broadcasts_beam_started() {
         let mut app = test_app();
-        // Asteroid directly ahead at 20 units (yaw=0 → facing -Z → asteroid at (0,-20)).
+        // Asteroid directly ahead at 20 units (yaw=0 â†’ facing -Z â†’ asteroid at (0,-20)).
         let out = lock_and_fire(&mut app, 0.0, -20.0);
 
         let beam_started = out.iter().find(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. }));
@@ -2057,17 +2057,17 @@ fn test_app() -> App {
             "captain should not be able to fire phaser");
     }
 
-    /// When the beam fires at a target outside the 180° arc, it is rejected.
+    /// When the beam fires at a target outside the 180Â° arc, it is rejected.
     #[test]
     fn fire_phaser_rejected_when_target_behind_ship() {
         let mut app = test_app();
-        // Yaw=0 means ship faces -Z. Asteroid at (0, +20) is directly behind — in rear arc.
+        // Yaw=0 means ship faces -Z. Asteroid at (0, +20) is directly behind â€” in rear arc.
         setup_weapons_world(&mut app, 0.0, 20.0);
         start_game_with_weapons(&mut app);
-        // Lock (within 60u range) — lock doesn't require arc.
+        // Lock (within 60u range) â€” lock doesn't require arc.
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
         let _ = tick(&mut app);
-        // Fire — rejected because target is behind.
+        // Fire â€” rejected because target is behind.
         push(&mut app, "weapons", ClientMessage::FirePhaser);
         let out = tick(&mut app);
 
@@ -2075,7 +2075,7 @@ fn test_app() -> App {
             "FirePhaser should be rejected when target is in rear arc");
     }
 
-    /// A 6-second natural beam kills the asteroid (5 HP/s × 6s = 30 HP total).
+    /// A 6-second natural beam kills the asteroid (5 HP/s Ã— 6s = 30 HP total).
     ///
     /// The test accelerates time by manipulating the beam state directly
     /// after confirming the beam started, then runs ticks with large deltas.
@@ -2138,13 +2138,13 @@ fn test_app() -> App {
             "asteroid entity should be despawned");
     }
 
-    /// Beam severs when ship rotates target out of the 180° forward arc.
+    /// Beam severs when ship rotates target out of the 180Â° forward arc.
     #[test]
     fn beam_severs_when_target_leaves_forward_arc() {
         let mut app = test_app();
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
-        // Now rotate ship so the asteroid is behind it (yaw = π → facing +Z, asteroid at (0,-20) is behind).
+        // Now rotate ship so the asteroid is behind it (yaw = Ï€ â†’ facing +Z, asteroid at (0,-20) is behind).
         app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
 
         let out = tick(&mut app);
@@ -2176,7 +2176,7 @@ fn test_app() -> App {
             "cooldown should start after range sever");
     }
 
-    /// No damage refund on sever — whatever HP was dealt is permanent.
+    /// No damage refund on sever â€” whatever HP was dealt is permanent.
     #[test]
     fn no_damage_refund_on_sever() {
         let mut app = test_app();
@@ -2251,18 +2251,18 @@ fn test_app() -> App {
         assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t2"));
     }
 
-    // ── Repair helpers ────────────────────────────────────────────────────
+    // â”€â”€ Repair helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Set up a game with a captain, engineering player, enqueue one breakdown
     /// targeting Engineering, and apply 10 HP damage so HP = 90.
     fn start_game_with_breakdown_for_engineering(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
-        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "eng", ClientMessage::Identify { token: "eng".into(), name: "Bob".into() });
         tick(app);
-        push(app, "eng", ClientMessage::SelectConsole { console: Console::Engineering });
+        push(app, "eng", ClientMessage::SelectStation { station: "Engineering".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -2316,7 +2316,7 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_breakdown_for_engineering(&mut app);
 
-        // Captain presses Repair — they hold CaptainChair, not Engineering.
+        // Captain presses Repair â€” they hold CaptainChair, not Engineering.
         push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
 
@@ -2331,12 +2331,12 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_breakdown_for_engineering(&mut app);
 
-        // Captain presses once — gets penalty.
+        // Captain presses once â€” gets penalty.
         push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
         assert!(app.world().resource::<RepairPenalties>().is_penalised("captain"));
 
-        // Captain presses again — should still be penalised (no change).
+        // Captain presses again â€” should still be penalised (no change).
         push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
         // Penalty remaining should still be close to 10s (only a tiny dt elapsed).
@@ -2417,7 +2417,7 @@ fn test_app() -> App {
             "RepairState with penalty=true should be broadcast to the penalised captain");
     }
 
-    // ── SetPhaserMode tests ────────────────────────────────────────────────────
+    // â”€â”€ SetPhaserMode tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// The Weapons console holder can change the phaser mode to Manual.
     #[test]
@@ -2447,35 +2447,35 @@ fn test_app() -> App {
         );
     }
 
-    // ── SetScienceTarget / ScienceTargetSuggestion tests ─────────────────
+    // â”€â”€ SetScienceTarget / ScienceTargetSuggestion tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     fn start_game_with_science_and_weapons(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
-        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
         tick(app);
-        push(app, "science", ClientMessage::SelectConsole { console: Console::Science });
+        push(app, "science", ClientMessage::SelectStation { station: "Science".into() });
         tick(app);
         push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
         tick(app);
-        push(app, "weapons", ClientMessage::SelectConsole { console: Console::Tactical });
+        push(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
 
-    // ── Impulse Drive / Damage Cancellation tests ────────────────────────
+    // â”€â”€ Impulse Drive / Damage Cancellation tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     fn start_game_with_helm_and_science(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
-        push(app, "captain", ClientMessage::SelectConsole { console: Console::CaptainChair });
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "helm", ClientMessage::Identify { token: "helm".into(), name: "Hikaru".into() });
         tick(app);
-        push(app, "helm", ClientMessage::SelectConsole { console: Console::Helm });
+        push(app, "helm", ClientMessage::SelectStation { station: "Helm".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -2546,7 +2546,7 @@ fn test_app() -> App {
         push(&mut app, "helm", ClientMessage::StartImpulseCharge);
         tick(&mut app);
 
-        // No damage applied — tick without damage.
+        // No damage applied â€” tick without damage.
         tick(&mut app);
 
         assert_eq!(
@@ -2628,7 +2628,7 @@ fn test_app() -> App {
         let mut app = test_app();
         push(&mut app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
         tick(&mut app);
-        push(&mut app, "science", ClientMessage::SelectConsole { console: Console::Science });
+        push(&mut app, "science", ClientMessage::SelectStation { station: "Science".into() });
         tick(&mut app);
 
         push(&mut app, "science", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
@@ -2640,7 +2640,7 @@ fn test_app() -> App {
         );
     }
 
-    // ── FireTorpedo tests ──────────────────────────────────────────────────
+    // â”€â”€ FireTorpedo tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
@@ -2681,7 +2681,7 @@ fn test_app() -> App {
         let mut app = test_app();
         push(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::SelectConsole { console: Console::Tactical });
+        push(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         tick(&mut app);
 
         push(&mut app, "weapons", ClientMessage::FireTorpedo {
@@ -2715,7 +2715,7 @@ fn test_app() -> App {
         );
     }
 
-    // ── ShipModifiers integration tests ──────────────────────────────────────
+    // â”€â”€ ShipModifiers integration tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Empty modifier table: phaser damage is identical to the base BEAM_DAMAGE_PER_SEC
     /// (5 HP/s). After 1 second of beam fire on a 30-HP asteroid the HP decreases by 5.
@@ -2738,10 +2738,10 @@ fn test_app() -> App {
         // running a known number of frames equivalent to >1 second.
         // BEAM_DAMAGE_PER_SEC = 5; asteroid starts at 30 HP.
         // After enough ticks (>6 s at 5 HP/s) the asteroid should be destroyed.
-        // With identity modifier this should work; with a 2× modifier it would be faster.
+        // With identity modifier this should work; with a 2Ã— modifier it would be faster.
 
-        // Run 500 ms worth of ticks at ~16ms each (≈31 ticks).
-        // After that, asteroid should have taken ~2–3 HP (not destroyed yet).
+        // Run 500 ms worth of ticks at ~16ms each (â‰ˆ31 ticks).
+        // After that, asteroid should have taken ~2â€“3 HP (not destroyed yet).
         let hp_before = {
             let world = app.world().resource::<WorldResource>();
             world.0.asteroids.iter().find(|a| a.uuid == "target-uuid").map(|_| true)
@@ -2749,26 +2749,26 @@ fn test_app() -> App {
         assert!(hp_before.is_some(), "asteroid should still exist after <1s");
     }
 
-    /// PhaserDamage modifier at 2× doubles the kill rate.
+    /// PhaserDamage modifier at 2Ã— doubles the kill rate.
     /// With BEAM_DAMAGE_PER_SEC=5 and 30-HP asteroid:
     /// - Base: 6 seconds to destroy
-    /// - 2× modifier (bonus=1.0): 3 seconds to destroy
-    /// Test: after running ~4s of game time, the asteroid is destroyed with 2× but not with 1×.
+    /// - 2Ã— modifier (bonus=1.0): 3 seconds to destroy
+    /// Test: after running ~4s of game time, the asteroid is destroyed with 2Ã— but not with 1Ã—.
     #[test]
     fn phaser_damage_modifier_doubles_kill_rate() {
         use crate::modifiers::{Modifier, ShipModifiers};
         use crate::messages::{ModifierSlot, ModifierSource};
 
-        // --- App with 2× PhaserDamage modifier ---
+        // --- App with 2Ã— PhaserDamage modifier ---
         let mut app_fast = test_app();
         setup_weapons_world_with_entity(&mut app_fast, 0.0, -20.0);
-        // Apply 2× phaser damage modifier before game starts.
+        // Apply 2Ã— phaser damage modifier before game starts.
         {
             let mut mods = app_fast.world_mut().resource_mut::<ShipModifiers>();
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::PhaserDamage,
-                bonus: 1.0,  // → multiplier 2.0
+                bonus: 1.0,  // â†’ multiplier 2.0
             });
         }
         start_game_with_weapons(&mut app_fast);
@@ -2777,7 +2777,7 @@ fn test_app() -> App {
         push(&mut app_fast, "weapons", ClientMessage::FirePhaser);
         tick(&mut app_fast); // processes FirePhaser, beam becomes active
 
-        // Inject accumulated damage: 3.5s × (5 HP/s × 2×) = 35 HP → enough to destroy 30-HP asteroid.
+        // Inject accumulated damage: 3.5s Ã— (5 HP/s Ã— 2Ã—) = 35 HP â†’ enough to destroy 30-HP asteroid.
         {
             let mut beam = app_fast.world_mut().resource_mut::<ActiveBeam>();
             beam.damage_accumulator = BEAM_DAMAGE_PER_SEC * 2.0 * 3.5;
@@ -2786,9 +2786,9 @@ fn test_app() -> App {
 
         let still_exists_fast = app_fast.world().resource::<WorldResource>()
             .0.asteroids.iter().any(|a| a.uuid == "target-uuid");
-        assert!(!still_exists_fast, "with 2× phaser damage modifier, asteroid should be destroyed after 3.5s of beam");
+        assert!(!still_exists_fast, "with 2Ã— phaser damage modifier, asteroid should be destroyed after 3.5s of beam");
 
-        // --- App with identity modifier (baseline): same damage injected but at 1× ---
+        // --- App with identity modifier (baseline): same damage injected but at 1Ã— ---
         let mut app_base = test_app();
         setup_weapons_world_with_entity(&mut app_base, 0.0, -20.0);
         start_game_with_weapons(&mut app_base);
@@ -2796,7 +2796,7 @@ fn test_app() -> App {
         tick(&mut app_base);
         push(&mut app_base, "weapons", ClientMessage::FirePhaser);
         tick(&mut app_base); // processes FirePhaser, beam becomes active
-        // Inject same real time but at base rate: 3.5s × 5 HP/s = 17.5 HP accumulated
+        // Inject same real time but at base rate: 3.5s Ã— 5 HP/s = 17.5 HP accumulated
         {
             let mut beam = app_base.world_mut().resource_mut::<ActiveBeam>();
             beam.damage_accumulator = BEAM_DAMAGE_PER_SEC * 1.0 * 3.5;
@@ -2808,9 +2808,9 @@ fn test_app() -> App {
         assert!(still_exists_base, "with identity modifier, asteroid should survive 3.5s of beam (only 17.5/30 HP removed)");
     }
 
-    /// HullDamageTaken modifier at -1 (→ 0.5× multiplier) halves collision damage.
-    /// At zero ship speed, base collision_damage=5. With 0.5× modifier: round(5×0.5)=3.
-    // ── modifier broadcast tests ──────────────────────────────────────────────
+    /// HullDamageTaken modifier at -1 (â†’ 0.5Ã— multiplier) halves collision damage.
+    /// At zero ship speed, base collision_damage=5. With 0.5Ã— modifier: round(5Ã—0.5)=3.
+    // â”€â”€ modifier broadcast tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn add_modifier_broadcasts_modifier_added_message() {
@@ -2889,19 +2889,19 @@ fn test_app() -> App {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::HullDamageTaken,
-                bonus: -1.0,  // → multiplier 0.5
+                bonus: -1.0,  // â†’ multiplier 0.5
             });
         }
 
         // Apply collision damage directly through the formula used in handle_collisions.
         // Ship at zero speed: collision_damage(0, max_speed) = 5.
-        // With 0.5× modifier: (5 * 0.5).round() = 3.
+        // With 0.5Ã— modifier: (5 * 0.5).round() = 3.
         let max_speed = ShipPhysicsConfig::new().max_speed;
         let mods = app.world().resource::<ShipModifiers>().clone();
         let base_damage = collision_damage(0.0, max_speed); // 5
         let scaled_damage = (base_damage as f32 * mods.get(&ModifierSlot::HullDamageTaken)).round() as i32;
         assert_eq!(base_damage, 5, "base collision damage at zero speed should be 5");
-        assert_eq!(scaled_damage, 3, "with 0.5× modifier, damage should be 3 (round(5×0.5)=3)");
+        assert_eq!(scaled_damage, 3, "with 0.5Ã— modifier, damage should be 3 (round(5Ã—0.5)=3)");
 
         // Verify the hull loses only the scaled amount by triggering damage through the resource.
         app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(scaled_damage);

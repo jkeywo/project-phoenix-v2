@@ -41,7 +41,7 @@ impl LobbyState {
     /// the lobby (e.g. `SimState`, `WorldSetup`) are ignored.
     pub fn apply(&mut self, msg: &ServerMessage) {
         match msg {
-            ServerMessage::Welcome { state } => {
+            ServerMessage::Welcome { state, .. } => {
                 self.replace_from(state.clone());
             }
             ServerMessage::PlayerJoined { player } => {
@@ -59,8 +59,8 @@ impl LobbyState {
                     p.name = name.clone();
                 }
             }
-            ServerMessage::ConsoleSelected { token, consoles } => {
-                // The server's authoritative ConsoleSelected carries the
+            ServerMessage::StationAssigned { token, consoles, .. } => {
+                // The server's authoritative StationAssigned carries the
                 // *holder's* full console list, but the same console can
                 // only be held by one player — so first clear any other
                 // player who used to hold any of these consoles, then
@@ -74,11 +74,6 @@ impl LobbyState {
                 }
                 if let Some(p) = self.players.iter_mut().find(|p| &p.token == token) {
                     p.consoles = consoles.clone();
-                }
-            }
-            ServerMessage::ConsoleCleared { token } => {
-                if let Some(p) = self.players.iter_mut().find(|p| &p.token == token) {
-                    p.consoles.clear();
                 }
             }
             ServerMessage::GameStarted => {
@@ -188,12 +183,12 @@ impl<'a> LobbyView<'a> {
 
 /// Returns the `ClientMessage` to send when the lobby UI activates the
 /// given console slot. `Occupied` slots are unclickable, so they yield
-/// `None`; `Available` and `Mine` both send `SelectConsole`, which the
-/// server treats as a toggle.
+/// `None`; `Available` and `Mine` both send `SelectStation`, which the
+/// server will process in a later slice.
 pub fn message_for_slot_click(slot: &ConsoleSlot) -> Option<ClientMessage> {
     match slot {
         ConsoleSlot::Available { console } | ConsoleSlot::Mine { console } => {
-            Some(ClientMessage::SelectConsole { console: console.clone() })
+            Some(ClientMessage::SelectStation { station: console.display_name().to_string() })
         }
         ConsoleSlot::Occupied { .. } => None,
     }
@@ -242,6 +237,7 @@ mod tests {
                 players: vec![p("a", "Alice", vec![Console::CaptainChair])],
                 world: None,
             },
+            ship_stations: crate::stations::ShipStations::default(),
         });
         assert_eq!(s.players.len(), 1);
         assert_eq!(s.players[0].name, "Alice");
@@ -284,11 +280,12 @@ mod tests {
     }
 
     #[test]
-    fn console_selected_assigns_to_named_player() {
+    fn station_assigned_assigns_consoles_to_named_player() {
         let mut s = LobbyState::default();
         s.players = vec![p("a", "Alice", vec![]), p("b", "Bob", vec![])];
-        s.apply(&ServerMessage::ConsoleSelected {
+        s.apply(&ServerMessage::StationAssigned {
             token: "a".into(),
+            station: Some("Captain".into()),
             consoles: vec![Console::CaptainChair],
         });
         assert_eq!(s.players[0].consoles, vec![Console::CaptainChair]);
@@ -296,14 +293,15 @@ mod tests {
     }
 
     #[test]
-    fn console_selected_steals_from_previous_holder() {
+    fn station_assigned_steals_from_previous_holder() {
         let mut s = LobbyState::default();
         s.players = vec![
             p("a", "Alice", vec![Console::Helm]),
             p("b", "Bob",   vec![]),
         ];
-        s.apply(&ServerMessage::ConsoleSelected {
+        s.apply(&ServerMessage::StationAssigned {
             token: "b".into(),
+            station: Some("Helm".into()),
             consoles: vec![Console::Helm],
         });
         assert!(s.players[0].consoles.is_empty(), "old holder loses the console");
@@ -311,10 +309,14 @@ mod tests {
     }
 
     #[test]
-    fn console_cleared_empties_named_players_consoles() {
+    fn station_assigned_spectator_clears_consoles() {
         let mut s = LobbyState::default();
         s.players = vec![p("a", "Alice", vec![Console::CaptainChair, Console::Helm])];
-        s.apply(&ServerMessage::ConsoleCleared { token: "a".into() });
+        s.apply(&ServerMessage::StationAssigned {
+            token: "a".into(),
+            station: None,
+            consoles: vec![],
+        });
         assert!(s.players[0].consoles.is_empty());
     }
 
@@ -415,15 +417,15 @@ mod tests {
     // ── Outbound messages ──────────────────────────────────────
 
     #[test]
-    fn clicking_available_slot_sends_select_console() {
+    fn clicking_available_slot_sends_select_station() {
         let msg = message_for_slot_click(&ConsoleSlot::Available { console: Console::Helm });
-        assert_eq!(msg, Some(ClientMessage::SelectConsole { console: Console::Helm }));
+        assert_eq!(msg, Some(ClientMessage::SelectStation { station: "Helm".into() }));
     }
 
     #[test]
-    fn clicking_my_slot_sends_select_console_to_toggle_off() {
+    fn clicking_my_slot_sends_select_station_to_toggle_off() {
         let msg = message_for_slot_click(&ConsoleSlot::Mine { console: Console::CaptainChair });
-        assert_eq!(msg, Some(ClientMessage::SelectConsole { console: Console::CaptainChair }));
+        assert_eq!(msg, Some(ClientMessage::SelectStation { station: "Captain's Chair".into() }));
     }
 
     #[test]

@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::lobby_handler::{self, LobbyHandlerResult};
 use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage, WorldData};
 use crate::session::SessionManager;
+use crate::stations::ShipStations;
 
 /// Cached `GameState` snapshot derived from `Sessions` + `CurrentPhase` each frame.
 /// Renderer systems read this instead of accessing `Sessions` directly.
@@ -103,6 +104,7 @@ pub fn process_lobby(
     mut sessions: ResMut<Sessions>,
     mut phase: ResMut<CurrentPhase>,
     world: Option<Res<WorldResource>>,
+    ship_stations: Option<Res<ShipStations>>,
 ) {
     // Only consume inbound messages during the Lobby phase.  In InProgress the
     // simulation systems own the message queue; draining here would silently
@@ -110,6 +112,8 @@ pub fn process_lobby(
     if phase.0 != GamePhase::Lobby {
         return;
     }
+    let default_stations = ShipStations::default();
+    let stations = ship_stations.as_ref().map(|s| s.as_ref()).unwrap_or(&default_stations);
     let world_data = world.as_ref().map(|w| &w.0);
     for ev in inbound.read() {
         let result = lobby_handler::process_message(
@@ -118,6 +122,7 @@ pub fn process_lobby(
             &mut sessions.0,
             phase.0.clone(),
             world_data,
+            stations,
         );
         apply_result(result, &mut outbound, &mut phase);
     }

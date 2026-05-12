@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::stations::ShipStations;
 
 /// Which ship attribute a modifier affects. Defined here so it can be used in
 /// wire messages without creating a circular dependency with `modifiers.rs`.
@@ -217,8 +218,8 @@ pub struct WorldData {
 pub enum ClientMessage {
     Identify { token: String, name: String },
     SetName { name: String },
-    SelectConsole { console: Console },
-    ClearConsole,
+    SelectStation { station: String },
+    ReleaseStation,
     StartGame,
     ToggleRedAlert,
     HelmInput { thrust: f32, steering: f32 },
@@ -241,11 +242,10 @@ pub enum ClientMessage {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {
-    Welcome { state: GameState },
+    Welcome { state: GameState, ship_stations: ShipStations },
     PlayerJoined { player: Player },
     PlayerLeft { token: String },
-    ConsoleSelected { token: String, consoles: Vec<Console> },
-    ConsoleCleared { token: String },
+    StationAssigned { token: String, station: Option<String>, consoles: Vec<Console> },
     NameChanged { token: String, name: String },
     GameStarted,
     SimState { snapshot: SimSnapshot },

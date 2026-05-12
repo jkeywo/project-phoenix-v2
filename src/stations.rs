@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "server")]
 use bevy::prelude::Resource;
@@ -9,7 +9,7 @@ use crate::messages::Console;
 // ── TOML schema types ────────────────────────────────────────────────────────
 
 /// A single station definition within a player-count bucket.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StationDef {
     pub name: String,
     pub description: String,
@@ -22,12 +22,22 @@ pub struct StationDef {
 
 /// The fully-parsed, validated station configuration.
 #[cfg_attr(feature = "server", derive(Resource))]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ShipStations {
     /// Map from player count → ordered list of station definitions.
     pub configs: HashMap<u32, Vec<StationDef>>,
     pub min_players: u32,
     pub max_players: u32,
+}
+
+impl Default for ShipStations {
+    fn default() -> Self {
+        Self {
+            configs: HashMap::new(),
+            min_players: 0,
+            max_players: 0,
+        }
+    }
 }
 
 // ── Error type ───────────────────────────────────────────────────────────────

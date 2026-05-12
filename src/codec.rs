@@ -67,6 +67,10 @@ mod tests {
         GameState { phase: GamePhase::Lobby, players: vec![player()], world: None }
     }
 
+    fn empty_ship_stations() -> crate::stations::ShipStations {
+        crate::stations::ShipStations::default()
+    }
+
     // ClientMessage round-trips
 
     #[test]
@@ -79,20 +83,6 @@ mod tests {
     #[test]
     fn client_set_name() {
         let msg = ClientMessage::SetName { name: "Carol".into() };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_select_console() {
-        let msg = ClientMessage::SelectConsole { console: Console::CaptainChair };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_clear_console() {
-        let msg = ClientMessage::ClearConsole;
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -181,60 +171,11 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
-    #[test]
-    fn client_select_console_helm() {
-        let msg = ClientMessage::SelectConsole { console: Console::Helm };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_select_console_weapons() {
-        let msg = ClientMessage::SelectConsole { console: Console::Tactical };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_select_console_engineering() {
-        let msg = ClientMessage::SelectConsole { console: Console::Engineering };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_select_console_science() {
-        let msg = ClientMessage::SelectConsole { console: Console::Science };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn server_console_selected_science() {
-        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Science] };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn server_console_selected_weapons() {
-        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Tactical] };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn server_console_selected_engineering() {
-        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Engineering] };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
     // ServerMessage round-trips
 
     #[test]
     fn server_welcome() {
-        let msg = ServerMessage::Welcome { state: state() };
+        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -249,27 +190,6 @@ mod tests {
     #[test]
     fn server_player_left() {
         let msg = ServerMessage::PlayerLeft { token: "tok".into() };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn server_console_selected() {
-        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::CaptainChair] };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn server_console_selected_helm() {
-        let msg = ServerMessage::ConsoleSelected { token: "tok".into(), consoles: vec![Console::Helm] };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn server_console_cleared() {
-        let msg = ServerMessage::ConsoleCleared { token: "tok".into() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -436,6 +356,7 @@ mod tests {
                     asteroid_fields: vec![],
                 }),
             },
+            ship_stations: empty_ship_stations(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -681,13 +602,71 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    // ── New station wire types ────────────────────────────────────────────────
+
+    #[test]
+    fn client_select_station_round_trips() {
+        let msg = ClientMessage::SelectStation { station: "Captain".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_release_station_round_trips() {
+        let msg = ClientMessage::ReleaseStation;
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_station_assigned_with_station_round_trips() {
+        let msg = ServerMessage::StationAssigned {
+            token: "tok".into(),
+            station: Some("Captain".into()),
+            consoles: vec![Console::CaptainChair],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_station_assigned_spectator_round_trips() {
+        let msg = ServerMessage::StationAssigned {
+            token: "tok".into(),
+            station: None,
+            consoles: vec![],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn welcome_with_ship_stations_round_trips() {
+        use crate::stations::{ShipStations, StationDef};
+        use std::collections::HashMap;
+        let mut configs = HashMap::new();
+        configs.insert(1u32, vec![
+            StationDef {
+                name: "Captain".into(),
+                description: "The big chair".into(),
+                consoles: vec![Console::CaptainChair],
+                next: None,
+                previous: None,
+            },
+        ]);
+        let ship_stations = ShipStations { configs, min_players: 1, max_players: 1 };
+        let msg = ServerMessage::Welcome { state: state(), ship_stations };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
     #[test]
     fn welcome_with_world_none_round_trips() {
-        let msg = ServerMessage::Welcome { state: state() };
+        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
         match msg {
-            ServerMessage::Welcome { state } => assert!(state.world.is_none()),
+            ServerMessage::Welcome { state, .. } => assert!(state.world.is_none()),
             _ => panic!("expected Welcome"),
         }
     }

@@ -64,7 +64,7 @@ struct ConsoleButton(Console);
 /// shown only when the local player holds CaptainChair and the phase is
 /// InProgress.
 #[derive(Component)]
-struct CaptainPanel;
+pub struct CaptainPanel;
 
 /// Marks one direction button in the view-selector cross.
 #[derive(Component)]
@@ -83,7 +83,7 @@ struct RedAlertLabel;
 /// Marks the root of the helm joystick UI; shown only when the local
 /// player holds Helm and the phase is InProgress.
 #[derive(Component)]
-struct HelmPanel;
+pub struct HelmPanel;
 
 /// Marks the circular pad that captures pointer drag events.
 #[derive(Component)]
@@ -118,12 +118,12 @@ struct RepairButtonLabel;
 /// Marks the root of the science console UI; shown only when the local
 /// player holds Science and the phase is InProgress.
 #[derive(Component)]
-struct SciencePanel;
+pub struct SciencePanel;
 
 /// Marks the root of the weapons console UI; shown only when the local
 /// player holds Tactical and the phase is InProgress.
 #[derive(Component)]
-struct WeaponsPanel;
+pub struct WeaponsPanel;
 
 /// Marks the "FIRE PHASERS" button on the Weapons console.
 #[derive(Component)]
@@ -168,7 +168,7 @@ struct TubeStatusLabel(crate::messages::TorpedoTube);
 /// Marks the root node of the console tab bar, shown when the local player
 /// holds 2+ consoles while in-game.
 #[derive(Component)]
-struct TabBarRoot;
+pub struct TabBarRoot;
 
 /// Marks a single tab button in the tab bar; carries the console it selects.
 #[derive(Component)]

@@ -24,6 +24,7 @@ use {
     crate::client_lobby::{ActiveConsole, LocalPlayerToken},
     crate::messages::Console,
     crate::codec::{JsonCodec, MessageCodec},
+    crate::phone_border::PhoneBorderPlugin,
     bevy::{prelude::*, DefaultPlugins},
     js_sys::Function,
     std::cell::RefCell,
@@ -106,6 +107,7 @@ pub fn wasm_client_init() {
             ..default()
         }))
         .add_plugins(ClientAppPlugin)
+        .add_plugins(PhoneBorderPlugin)
         .add_plugins(ClientRendererPlugin)
         .add_systems(Update, (
             forward_local_token,

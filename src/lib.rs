@@ -38,3 +38,6 @@ pub mod viewscreen_border;
 
 #[cfg(feature = "client")]
 pub mod client_bridge;
+
+#[cfg(feature = "client")]
+pub mod phone_border;

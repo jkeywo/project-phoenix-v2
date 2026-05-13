@@ -57,6 +57,7 @@
   Connection.prototype.constructor = Connection;
 
   Connection.prototype.send = function (data) {
+    console.log('[shim] send', this._lid.slice(0,8), '->', this._rid.slice(0,8), typeof data === 'string' ? data.slice(0, 80) : data);
     getChannel().postMessage({ t: 'data', from: this._lid, to: this._rid, data: data });
   };
 
@@ -134,6 +135,7 @@
   Peer.prototype.constructor = Peer;
 
   Peer.prototype.connect = function (remoteId) {
+    console.log('[shim] connect', this.id.slice(0,8), '->', remoteId.slice(0,8));
     var conn = new Connection(this.id, remoteId);
     this._conns.set(remoteId, conn);
     getChannel().postMessage({ t: 'connect', from: this.id, to: remoteId });
@@ -171,6 +173,7 @@
     var self = this;
     switch (msg.t) {
       case 'connect': {
+        console.log('[shim] _recv connect from', msg.from.slice(0,8));
         var inConn = new Connection(this.id, msg.from);
         this._conns.set(msg.from, inConn);
         // Send accept first, then surface to caller so they can register handlers
@@ -188,6 +191,7 @@
         break;
       }
       case 'data': {
+        console.log('[shim] _recv data from', msg.from.slice(0,8), 'to', this.id.slice(0,8), typeof msg.data === 'string' ? msg.data.slice(0,80) : msg.data);
         var dataConn = this._conns.get(msg.from);
         if (dataConn) dataConn._data(msg.data);
         break;

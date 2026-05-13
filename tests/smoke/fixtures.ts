@@ -36,6 +36,15 @@ export const test = base.extend({
       route.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }),
     );
 
+    // Capture console messages from all pages for debugging
+    ctx.on('page', (page) => {
+      page.on('console', (msg) => {
+        if (msg.type() === 'error' || msg.text().includes('[shim]') || msg.text().includes('[Phoenix]')) {
+          console.log(`[page ${page.url().slice(-30)}] ${msg.type()}: ${msg.text().slice(0, 200)}`);
+        }
+      });
+    });
+
     await use(ctx);
     await ctx.close();
   },
@@ -66,6 +75,8 @@ export async function createTestClient(
   const name = opts.name ?? 'Tester';
 
   const page = await ctx.newPage();
+  // Capture console output from this page for debugging
+  page.on('console', msg => console.log(`[client-page ${token.slice(0,8)}] ${msg.type()}: ${msg.text()}`));
   const routeKey = Math.random().toString(16).slice(2, 10);
 
   await page.route(`**/blank-${routeKey}`, (r) =>

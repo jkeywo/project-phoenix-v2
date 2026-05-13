@@ -98,13 +98,13 @@ impl BreakdownQueue {
 ///
 /// Example: 0→9 = 0, 0→10 = 1, 9→25 = 1 (crosses only the 10 boundary),
 /// 0→25 = 2 (crosses 10 and 20).
-pub fn breakdowns_from_damage(damage_taken_before: i32, damage_taken_after: i32) -> u32 {
+pub fn breakdowns_from_damage(damage_taken_before: f32, damage_taken_after: f32) -> u32 {
     if damage_taken_after <= damage_taken_before {
         return 0;
     }
-    let buckets_before = damage_taken_before / 10;
-    let buckets_after = damage_taken_after / 10;
-    (buckets_after - buckets_before).max(0) as u32
+    let buckets_before = (damage_taken_before / 10.0).floor() as u32;
+    let buckets_after = (damage_taken_after / 10.0).floor() as u32;
+    buckets_after.saturating_sub(buckets_before)
 }
 
 #[cfg(test)]
@@ -210,35 +210,35 @@ mod tests {
 
     #[test]
     fn no_breakdowns_when_no_damage() {
-        assert_eq!(breakdowns_from_damage(0, 0), 0);
+        assert_eq!(breakdowns_from_damage(0.0, 0.0), 0);
     }
 
     #[test]
     fn damage_within_first_bucket_gives_no_breakdown() {
         // 0 → 9 damage taken: hasn't filled 10 HP bucket yet
-        assert_eq!(breakdowns_from_damage(0, 9), 0);
+        assert_eq!(breakdowns_from_damage(0.0, 9.0), 0);
     }
 
     #[test]
     fn exactly_10_damage_gives_one_breakdown() {
-        assert_eq!(breakdowns_from_damage(0, 10), 1);
+        assert_eq!(breakdowns_from_damage(0.0, 10.0), 1);
     }
 
     #[test]
     fn partial_extra_damage_does_not_add_breakdown() {
         // 9 → 15: crosses the 10-mark once
-        assert_eq!(breakdowns_from_damage(9, 15), 1);
+        assert_eq!(breakdowns_from_damage(9.0, 15.0), 1);
     }
 
     #[test]
     fn taking_25_damage_from_zero_gives_two_breakdowns() {
         // 0 → 25: completes 10-HP buckets at 10 and 20; remainder 5 not counted
-        assert_eq!(breakdowns_from_damage(0, 25), 2);
+        assert_eq!(breakdowns_from_damage(0.0, 25.0), 2);
     }
 
     #[test]
     fn crossing_two_more_buckets_mid_game() {
         // Already taken 5 damage; now take 20 more (total 25). Crosses 10 and 20.
-        assert_eq!(breakdowns_from_damage(5, 25), 2);
+        assert_eq!(breakdowns_from_damage(5.0, 25.0), 2);
     }
 }

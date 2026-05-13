@@ -513,7 +513,7 @@ mod tests {
                 red_alert: true,
                 view_mode: ViewMode::default(),
                 ship_x: 1.0, ship_z: 2.0, ship_yaw: 0.5,
-                hull_integrity: 100,
+                hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
             },

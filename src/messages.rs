@@ -193,7 +193,7 @@ pub struct SimSnapshot {
     pub ship_x: f32,
     pub ship_z: f32,
     pub ship_yaw: f32,
-    pub hull_integrity: i32,
+    pub hull_integrity: f32,
     /// Current power allocation levels (Helm, Weapons, Science).
     /// Added to SimSnapshot so all clients see the current configuration.
     #[serde(default = "default_power_levels")]

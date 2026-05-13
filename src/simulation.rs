@@ -2,8 +2,10 @@
 use bevy_rapier3d::prelude::*;
 
 use crate::asteroid_spawner::{generate_donut_field, generate_grid_field, generate_grid_uuids};
-use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
-use crate::damage::{apply_damage_with_shields, collision_damage, HullIntegrity};
+use crate::breakdown::BreakdownQueue;
+#[cfg(test)]
+use crate::breakdown::breakdowns_from_damage;
+use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::repair_teams::RepairTeams;
 use crate::shield::{attacker_bearing_relative, ShieldSystem};
@@ -127,7 +129,7 @@ impl Default for PhaserRenderConfig {
 
 // â”€â”€ Repair constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /// HP restored per completed repair team.
-const REPAIR_TEAM_HP: i32 = 10;
+const REPAIR_TEAM_HP: f32 = 10.0;
 
 /// Bevy resource wrapping the pure `RepairTeams` state machine.
 #[derive(Resource)]
@@ -205,7 +207,7 @@ pub struct TorpedoSystemResource(pub TorpedoSystem);
 pub struct BreakdownQueueResource {
     pub queue: BreakdownQueue,
     /// Cumulative damage taken since game start (tracks 10-HP bucket crossings).
-    pub cumulative_damage: i32,
+    pub cumulative_damage: f32,
     rng: rand::rngs::SmallRng,
 }
 
@@ -214,7 +216,7 @@ impl Default for BreakdownQueueResource {
         use rand::SeedableRng as _;
         Self {
             queue: BreakdownQueue::new(),
-            cumulative_damage: 0,
+            cumulative_damage: 0.0,
             rng: rand::rngs::SmallRng::from_os_rng(),
         }
     }
@@ -536,8 +538,8 @@ fn handle_collisions(
             return;
         }
         let max_speed = ShipPhysicsConfig::new().max_speed;
-        let damage = (collision_damage(ship.forward_speed, max_speed) as f32
-            * modifiers.get(&ModifierSlot::HullDamageTaken)).round() as i32;
+        let damage = collision_damage(ship.forward_speed, max_speed) as f32
+            * modifiers.get(&ModifierSlot::HullDamageTaken);
 
         // Determine which shield facing absorbs the hit by finding the
         // attacker's world-space position and computing its bearing relative
@@ -556,12 +558,15 @@ fn handle_collisions(
             })
             .unwrap_or(0.0); // fallback: treat as fore hit
 
-        // Route damage: shields absorb first, overflow goes to hull.
-        let hull_damage = apply_damage_with_shields(damage, bearing, &mut shields.0, &mut hull.0);
-        if hull_damage > 0 {
-            let before = breakdowns.cumulative_damage;
-            breakdowns.cumulative_damage += hull_damage;
-            let new_count = breakdowns_from_damage(before, breakdowns.cumulative_damage);
+        // Route damage through shields and apply remaining to hull via the shared helper.
+        let hull_damage_from_shields = apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
+        if hull_damage_from_shields > 0 {
+            let (_, new_cumulative, new_count) = apply_hull_damage(
+                &mut hull.0,
+                hull_damage_from_shields as f32,
+                breakdowns.cumulative_damage,
+            );
+            breakdowns.cumulative_damage = new_cumulative;
             let BreakdownQueueResource { queue, rng, .. } = &mut *breakdowns;
             for _ in 0..new_count {
                 queue.push_random(rng);
@@ -936,11 +941,11 @@ fn handle_impulse_messages(
     mut impulse: ResMut<ShipImpulse>,
     phase: Res<CurrentPhase>,
     hull: Res<ShipHullIntegrity>,
-    mut last_hull_hp: Local<i32>,
+    mut last_hull_hp: Local<f32>,
 ) {
     // Initialise on first call.
-    if *last_hull_hp == 0 && hull.0.current() == 100 {
-        *last_hull_hp = 100;
+    if *last_hull_hp == 0.0 && (hull.0.current() - 100.0).abs() < 1e-6 {
+        *last_hull_hp = 100.0;
     }
 
     // Cancel impulse if hull HP decreased since last frame.
@@ -1463,7 +1468,7 @@ fn setup_world_from_config(
         let collider_half_height = ship_config.collider.as_ref().map(|c| c.length / 2.0).unwrap_or(3.0);
         
             // Get hull integrity
-            let hull_integrity = ship_config.hull.as_ref().map(|h| h.hull_integrity).unwrap_or(100);
+            let hull_integrity = ship_config.hull.as_ref().map(|h| h.hull_integrity).unwrap_or(100.0);
             
             // Store hull integrity in resource
             commands.insert_resource(ShipHullIntegrity(HullIntegrity::with_hp(hull_integrity)));
@@ -2067,7 +2072,7 @@ fn test_app() -> App {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
             _ => None,
         }).expect("expected a SimState broadcast");
-        assert_eq!(snap.hull_integrity, 100);
+        assert!((snap.hull_integrity - 100.0).abs() < 1e-6);
     }
 
     #[test]
@@ -2078,14 +2083,14 @@ fn test_app() -> App {
         // Directly apply damage to the resource (simulates collision at ~half speed).
         app.world_mut()
             .resource_mut::<ShipHullIntegrity>()
-            .0.apply_damage(10);
+            .0.apply_damage(10.0);
 
         let out = tick(&mut app);
         let snap = out.iter().find_map(|m| match &m.msg {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
             _ => None,
         }).expect("expected a SimState broadcast");
-        assert_eq!(snap.hull_integrity, 90);
+        assert!((snap.hull_integrity - 90.0).abs() < 1e-6);
     }
 
     #[test]
@@ -2097,8 +2102,8 @@ fn test_app() -> App {
         // mimicking how handle_collisions would do it via breakdowns_from_damage.
         {
             let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            let before = bd.cumulative_damage; // 0
-            bd.cumulative_damage += 25;
+            let before = bd.cumulative_damage; // 0.0
+            bd.cumulative_damage += 25.0;
             let new_count = breakdowns_from_damage(before, bd.cumulative_damage);
             assert_eq!(new_count, 2, "25 HP should create exactly 2 breakdowns");
             let BreakdownQueueResource { queue, rng, .. } = &mut *bd;
@@ -2122,7 +2127,7 @@ fn test_app() -> App {
         // Seed 2 breakdowns.
         {
             let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bd.cumulative_damage = 25;
+            bd.cumulative_damage = 25.0;
             let BreakdownQueueResource { queue, rng, .. } = &mut *bd;
             queue.push_random(rng);
             queue.push_random(rng);
@@ -2568,7 +2573,7 @@ fn test_app() -> App {
         tick(app);
 
         // Apply 10 damage so HP = 90.
-        app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10);
+        app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10.0);
 
         // Push a single breakdown with the requested shape and Repair console.
         {
@@ -2707,6 +2712,8 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_repair_shape(&mut app, Shape::Triangle);
 
+        fn near(a: f32, b: f32) -> bool { (a - b).abs() < 1e-6 }
+
         let initial_hp = app.world().resource::<ShipHullIntegrity>().0.current(); // 90
 
         // Dispatch team 0 via correct shape press.
@@ -2724,7 +2731,7 @@ fn test_app() -> App {
         }
 
         let hp_after = app.world().resource::<ShipHullIntegrity>().0.current();
-        assert_eq!(hp_after, initial_hp + REPAIR_TEAM_HP,
+        assert!(near(hp_after, initial_hp + REPAIR_TEAM_HP),
             "HP should increase by {} after repair team completion", REPAIR_TEAM_HP);
     }
 
@@ -2847,7 +2854,7 @@ fn test_app() -> App {
         // Direct hull damage (simulates a collision landing hull damage).
         app.world_mut()
             .resource_mut::<ShipHullIntegrity>()
-            .0.apply_damage(10);
+            .0.apply_damage(10.0);
         tick(&mut app);
 
         // Impulse should have been cancelled.
@@ -2875,7 +2882,7 @@ fn test_app() -> App {
         // Apply hull damage.
         app.world_mut()
             .resource_mut::<ShipHullIntegrity>()
-            .0.apply_damage(10);
+            .0.apply_damage(10.0);
         tick(&mut app);
 
         assert_eq!(
@@ -3243,12 +3250,13 @@ fn test_app() -> App {
         // Apply collision damage directly through the formula used in handle_collisions.
         // Ship at zero speed: collision_damage(0, max_speed) = 5.
         // With 0.5Ã— modifier: (5 * 0.5).round() = 3.
+        fn near(a: f32, b: f32) -> bool { (a - b).abs() < 1e-6 }
         let max_speed = ShipPhysicsConfig::new().max_speed;
         let mods = app.world().resource::<ShipModifiers>().clone();
-        let base_damage = collision_damage(0.0, max_speed); // 5
-        let scaled_damage = (base_damage as f32 * mods.get(&ModifierSlot::HullDamageTaken)).round() as i32;
-        assert_eq!(base_damage, 5, "base collision damage at zero speed should be 5");
-        assert_eq!(scaled_damage, 3, "with 0.5Ã— modifier, damage should be 3 (round(5Ã—0.5)=3)");
+        let base_damage = collision_damage(0.0, max_speed) as f32; // 5
+        let scaled_damage = (base_damage * mods.get(&ModifierSlot::HullDamageTaken)).round();
+        assert!(near(base_damage, 5.0), "base collision damage at zero speed should be 5");
+        assert!(near(scaled_damage, 3.0), "with 0.5Ã— modifier, damage should be 3 (round(5Ã—0.5)=3)");
 
         // Verify the hull loses only the scaled amount by triggering damage through the resource.
         app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(scaled_damage);
@@ -3257,7 +3265,7 @@ fn test_app() -> App {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
             _ => None,
         }).expect("expected SimState");
-        assert_eq!(snap.hull_integrity, 97, "hull should be 100 - 3 = 97 with halved collision damage");
+        assert!(near(snap.hull_integrity, 97.0), "hull should be 100 - 3 = 97 with halved collision damage");
     }
     // ── Repair icon broadcast tests ────────────────────────────────────────
 

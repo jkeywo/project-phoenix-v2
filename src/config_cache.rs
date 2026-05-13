@@ -356,7 +356,7 @@ length = 0.0
         let config = result.unwrap();
         assert_eq!(config.tags, vec!["asteroid", "small"]);
         assert!(config.hull.is_some());
-        assert_eq!(config.hull.as_ref().unwrap().hull_integrity, 30);
+        assert!((config.hull.as_ref().unwrap().hull_integrity - 30.0).abs() < 1e-6);
         assert!(config.collider.is_some());
     }
     

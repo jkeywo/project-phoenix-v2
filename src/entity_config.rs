@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct HullConfig {
-    pub hull_integrity: i32,
+    pub hull_integrity: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -210,7 +210,7 @@ penalty_cooldown_secs = 10.0
         );
 
         assert!(config.hull.is_some());
-        assert_eq!(config.hull.as_ref().unwrap().hull_integrity, 100);
+        assert!((config.hull.as_ref().unwrap().hull_integrity - 100.0).abs() < 1e-6);
 
         assert!(config.collider.is_some());
         let c = config.collider.as_ref().unwrap();
@@ -253,7 +253,7 @@ hull_integrity = 80
             vec!["gameplay".to_string(), "asteroid".to_string()]
         );
         assert!(config.hull.is_some());
-        assert_eq!(config.hull.as_ref().unwrap().hull_integrity, 80);
+        assert!((config.hull.as_ref().unwrap().hull_integrity - 80.0).abs() < 1e-6);
         assert!(config.collider.is_none());
         assert!(config.appearance.is_none());
         assert!(config.helm_console.is_none());

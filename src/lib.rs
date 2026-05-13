@@ -6,6 +6,7 @@ pub mod asteroid_lifecycle;
 pub mod phaser;
 pub mod torpedo;
 pub mod asteroid_spawner;
+pub mod asteroid_window;
 pub mod breakdown;
 pub mod config_cache;
 pub mod damage;

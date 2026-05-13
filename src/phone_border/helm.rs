@@ -825,10 +825,10 @@ fn refresh_phone_helm_readout(
 fn update_radar_readouts(
     sim: Res<ClientSimState>,
     mut speed: ResMut<PhoneShipSpeed>,
-    mut hdg: Query<&mut Text, (With<PhoneHdgReadout>, Without<PhoneSpdReadout>)>,
-    mut spd: Query<&mut Text, (With<PhoneSpdReadout>, Without<PhoneXReadout>)>,
-    mut x_read: Query<&mut Text, (With<PhoneXReadout>, Without<PhoneZReadout>)>,
-    mut z_read: Query<&mut Text, With<PhoneZReadout>>,
+    mut hdg: Query<&mut Text, (With<PhoneHdgReadout>, Without<PhoneSpdReadout>, Without<PhoneXReadout>, Without<PhoneZReadout>)>,
+    mut spd: Query<&mut Text, (With<PhoneSpdReadout>, Without<PhoneHdgReadout>, Without<PhoneXReadout>, Without<PhoneZReadout>)>,
+    mut x_read: Query<&mut Text, (With<PhoneXReadout>, Without<PhoneHdgReadout>, Without<PhoneSpdReadout>, Without<PhoneZReadout>)>,
+    mut z_read: Query<&mut Text, (With<PhoneZReadout>, Without<PhoneHdgReadout>, Without<PhoneSpdReadout>, Without<PhoneXReadout>)>,
 ) {
     if !sim.is_changed() {
         return;

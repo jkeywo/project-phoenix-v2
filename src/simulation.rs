@@ -926,11 +926,14 @@ fn tick_repair_teams(
 /// - `penalty` if any team is on cooldown.
 /// - `remaining_cooldown_secs` derived from team with the longest remaining
 ///   time (repair or cooldown).
+/// - `teams` copied from the current team slots.
+/// - `current_breakdown` from the front of the breakdown queue.
 fn broadcast_repair_state(
     timer: Res<SimBroadcastTimer>,
     mut writer: MessageWriter<OutboundMessage>,
     sessions: Res<Sessions>,
     teams: Res<ShipRepairTeams>,
+    breakdowns: Res<BreakdownQueueResource>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -940,7 +943,7 @@ fn broadcast_repair_state(
         return;
     }
 
-    use crate::repair_teams::TeamSlot;
+    use crate::messages::TeamSlot;
     let slots = teams.0.slots();
     let in_progress = slots.iter().any(|s| matches!(s, TeamSlot::Repairing { .. }));
     let penalty = slots.iter().any(|s| matches!(s, TeamSlot::Cooldown { .. }));
@@ -950,12 +953,20 @@ fn broadcast_repair_state(
         TeamSlot::Idle => 0.0,
     }).fold(0.0_f32, f32::max);
 
+    let current_breakdown = breakdowns.queue.front().map(|entry| (entry.console.clone(), entry.shape));
+
     let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power];
     for console in &all_consoles {
         let Some(token) = sessions.0.console_holder(console.clone()) else { continue };
         writer.write(OutboundMessage {
             target: Target::Token(token.to_string()),
-            msg: ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty },
+            msg: ServerMessage::RepairState {
+                remaining_cooldown_secs,
+                in_progress,
+                penalty,
+                teams: *slots,
+                current_breakdown: current_breakdown.clone(),
+            },
         });
     }
 }
@@ -2464,15 +2475,15 @@ fn test_app() -> App {
 
     /// Helpers to check RepairTeams team state.
     fn team_is_repairing(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::repair_teams::TeamSlot::Repairing { .. })
+        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Repairing { .. })
     }
 
     fn team_is_cooldown(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::repair_teams::TeamSlot::Cooldown { .. })
+        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Cooldown { .. })
     }
 
     fn team_is_idle(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::repair_teams::TeamSlot::Idle)
+        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Idle)
     }
 
     // ── Shape-matching repair tests ──────────────────────────────────────

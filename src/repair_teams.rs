@@ -1,18 +1,7 @@
+use crate::messages::TeamSlot;
+
 const REPAIR_DURATION: f32 = 30.0;
 const COOLDOWN_DURATION: f32 = 10.0;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TeamSlot {
-    Idle,
-    Repairing { progress: f32 },
-    Cooldown { progress: f32 },
-}
-
-impl Default for TeamSlot {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct RepairTeams {

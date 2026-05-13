@@ -8,7 +8,7 @@
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
-use crate::messages::{ClientMessage, ServerMessage, Shape, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
+use crate::messages::{ClientMessage, Console, ServerMessage, Shape, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -209,6 +209,10 @@ pub struct ClientSimState {
     pub power_levels: (u8, u8, u8),
     /// Latest PowerState from the Power console's dedicated 10Hz broadcast.
     pub power_state_payload: Option<(u8, u8, u8, f32, bool)>,
+    /// Current state of the three repair teams, updated by `RepairState` messages.
+    pub repair_teams: [TeamSlot; 3],
+    /// The current breakdown (console + shape) or `None` when queue is empty.
+    pub current_breakdown: Option<(Console, Shape)>,
 }
 
 impl Default for ClientSimState {
@@ -241,6 +245,8 @@ impl Default for ClientSimState {
             repair_icon: None,
             power_levels: (2, 2, 2),
             power_state_payload: None,
+            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
+            current_breakdown: None,
         }
     }
 }
@@ -266,10 +272,12 @@ impl ClientSimState {
                 let preserved_world = state.world.clone().unwrap_or_default();
                 *self = Self::default();
                 self.world = preserved_world;
-            }            ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty } => {
+            }            ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty, teams, current_breakdown } => {
                 self.repair_cooldown_secs = *remaining_cooldown_secs;
                 self.repair_in_progress = *in_progress;
                 self.repair_penalty = *penalty;
+                self.repair_teams = *teams;
+                self.current_breakdown = current_breakdown.clone();
             }
             ServerMessage::PhaserFired { target_uuid, .. } => {
                 self.last_phaser_target = Some(target_uuid.clone());
@@ -584,6 +592,8 @@ mod tests {
             repair_icon: None,
             power_levels: (2, 2, 2),
             power_state_payload: None,
+            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
+            current_breakdown: None,
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
@@ -637,6 +647,8 @@ mod tests {
             repair_icon: None,
             power_levels: (2, 2, 2),
             power_state_payload: None,
+            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
+            current_breakdown: None,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -680,6 +692,8 @@ mod tests {
             repair_icon: None,
             power_levels: (2, 2, 2),
             power_state_payload: None,
+            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
+            current_breakdown: None,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -1659,6 +1673,8 @@ mod tests {
             repair_icon: None,
             power_levels: (4, 1, 3),
             power_state_payload: Some((4, 2, 2, 100.0, false)),
+            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
+            current_breakdown: None,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
@@ -1666,5 +1682,58 @@ mod tests {
         });
         assert_eq!(s.power_levels, (2, 2, 2), "power_levels reset to default on Welcome");
         assert_eq!(s.power_state_payload, None, "power_state_payload cleared on Welcome");
+    }
+
+    // ── RepairState teams + current_breakdown ──────────────────────────
+
+    #[test]
+    fn repair_state_updates_teams_and_current_breakdown() {
+        let mut s = ClientSimState::default();
+        assert_eq!(s.repair_teams, [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle]);
+        assert_eq!(s.current_breakdown, None);
+
+        s.apply(&ServerMessage::RepairState {
+            remaining_cooldown_secs: 0.0,
+            in_progress: true,
+            penalty: false,
+            teams: [TeamSlot::Repairing { progress: 0.4 }, TeamSlot::Idle, TeamSlot::Cooldown { progress: 0.2 }],
+            current_breakdown: Some((Console::Helm, Shape::Square)),
+        });
+
+        assert_eq!(s.repair_teams[0], TeamSlot::Repairing { progress: 0.4 });
+        assert!(matches!(s.repair_teams[1], TeamSlot::Idle));
+        assert_eq!(s.current_breakdown, Some((Console::Helm, Shape::Square)));
+    }
+
+    #[test]
+    fn repair_state_clears_current_breakdown_when_queue_empty() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::RepairState {
+            remaining_cooldown_secs: 0.0,
+            in_progress: false,
+            penalty: false,
+            teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
+            current_breakdown: None,
+        });
+        assert_eq!(s.current_breakdown, None);
+        assert!(s.repair_teams.iter().all(|t| matches!(t, TeamSlot::Idle)));
+    }
+
+    #[test]
+    fn welcome_resets_repair_teams_and_current_breakdown() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::RepairState {
+            remaining_cooldown_secs: 5.0,
+            in_progress: true,
+            penalty: false,
+            teams: [TeamSlot::Repairing { progress: 0.5 }, TeamSlot::Cooldown { progress: 0.3 }, TeamSlot::Idle],
+            current_breakdown: Some((Console::Tactical, Shape::Circle)),
+        });
+        s.apply(&ServerMessage::Welcome {
+            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            ship_stations: crate::stations::ShipStations::default(),
+        });
+        assert_eq!(s.repair_teams, [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle]);
+        assert_eq!(s.current_breakdown, None);
     }
 }

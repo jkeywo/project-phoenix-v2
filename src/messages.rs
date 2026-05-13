@@ -86,6 +86,20 @@ pub enum Shape {
     Circle,
 }
 
+/// The state of a single repair team, broadcast as part of `RepairState`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub enum TeamSlot {
+    Idle,
+    Repairing { progress: f32 },
+    Cooldown { progress: f32 },
+}
+
+impl Default for TeamSlot {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ViewDirection {
     #[default]
@@ -317,8 +331,16 @@ pub enum ServerMessage {
     PhaserFired { bank: PhaserBank, target_uuid: String },
     /// Sent at 10 Hz to each console player.  Carries the remaining cooldown
     /// (penalty or repair) in seconds, whether a repair action is currently
-    /// in progress, and whether the last cooldown was a penalty.
-    RepairState { remaining_cooldown_secs: f32, in_progress: bool, penalty: bool },
+    /// in progress, whether the last cooldown was a penalty, the current
+    /// team slot statuses, and the current breakdown (console + shape) or
+    /// `None` when the queue is empty.
+    RepairState {
+        remaining_cooldown_secs: f32,
+        in_progress: bool,
+        penalty: bool,
+        teams: [TeamSlot; 3],
+        current_breakdown: Option<(Console, Shape)>,
+    },
     /// Sent at 10 Hz (or on change) to all players. Contains HP and online
     /// status for every shield facing.
     ShieldStatus { facings: Vec<ShieldFacingStatus> },

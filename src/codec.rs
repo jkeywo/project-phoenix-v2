@@ -464,10 +464,13 @@ mod tests {
 
     #[test]
     fn server_repair_state_round_trips() {
+        use crate::messages::{Console, Shape, TeamSlot};
         let msg = ServerMessage::RepairState {
             remaining_cooldown_secs: 12.5,
             in_progress: true,
             penalty: false,
+            teams: [TeamSlot::Idle, TeamSlot::Repairing { progress: 0.3 }, TeamSlot::Cooldown { progress: 0.5 }],
+            current_breakdown: Some((Console::Helm, Shape::Triangle)),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

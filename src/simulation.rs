@@ -5,6 +5,7 @@ use crate::asteroid_spawner::{generate_donut_field, generate_grid_field, generat
 use crate::breakdown::{breakdowns_from_damage, BreakdownQueue};
 use crate::damage::{apply_damage_with_shields, collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
+use crate::repair_teams::RepairTeams;
 use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
@@ -125,60 +126,12 @@ impl Default for PhaserRenderConfig {
 }
 
 // â”€â”€ Repair constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const REPAIR_DURATION_SECS: f32 = 30.0;
-const REPAIR_HP_PER_SEC: f32 = 1.0 / 3.0; // +1 HP every 3 seconds
-const REPAIR_MAX_HP: i32 = 10;
-const REPAIR_PENALTY_SECS: f32 = 10.0;
+/// HP restored per completed repair team.
+const REPAIR_TEAM_HP: i32 = 10;
 
-/// Active repair action. `Some` while a repair is underway; the authorised
-/// console is healing the ship. Resets to `None` when time expires or
-/// `REPAIR_MAX_HP` is restored.
-#[derive(Resource, Default)]
-pub struct ActiveRepair {
-    /// How many seconds remain in the current repair action.
-    pub remaining_secs: f32,
-    /// Fractional HP accumulator so 1 HP/3 s is applied accurately.
-    pub hp_accumulator: f32,
-    /// Total HP restored so far in this repair action (capped at REPAIR_MAX_HP).
-    pub hp_restored: i32,
-}
-
-impl ActiveRepair {
-    pub fn is_active(&self) -> bool {
-        self.remaining_secs > 0.0
-    }
-
-    pub fn start(&mut self) {
-        self.remaining_secs = REPAIR_DURATION_SECS;
-        self.hp_accumulator = 0.0;
-        self.hp_restored = 0;
-    }
-}
-
-/// Per-token penalty cooldown. When a player presses Repair on an unauthorised
-/// console, their token is entered here and locked out for `REPAIR_PENALTY_SECS`.
-#[derive(Resource, Default)]
-pub struct RepairPenalties(pub std::collections::HashMap<String, f32>);
-
-impl RepairPenalties {
-    pub fn is_penalised(&self, token: &str) -> bool {
-        self.0.get(token).map_or(false, |&secs| secs > 0.0)
-    }
-
-    pub fn penalise(&mut self, token: &str) {
-        self.0.insert(token.to_string(), REPAIR_PENALTY_SECS);
-    }
-
-    pub fn tick(&mut self, dt: f32) {
-        for secs in self.0.values_mut() {
-            *secs = (*secs - dt).max(0.0);
-        }
-    }
-
-    pub fn remaining(&self, token: &str) -> f32 {
-        self.0.get(token).copied().unwrap_or(0.0)
-    }
-}
+/// Bevy resource wrapping the pure `RepairTeams` state machine.
+#[derive(Resource)]
+pub struct ShipRepairTeams(pub RepairTeams);
 
 /// Bevy message fired (with world-space position) when an asteroid is destroyed
 /// by phaser fire. The renderer uses this to spawn a ripple VFX at the site.
@@ -260,8 +213,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<PhaserCooldown>()
             .init_resource::<CurrentPhaserMode>()
             .init_resource::<PhaserRenderConfig>()
-            .init_resource::<ActiveRepair>()
-            .init_resource::<RepairPenalties>()
+            .insert_resource(ShipRepairTeams(RepairTeams::new()))
             .init_resource::<BreakdownQueueResource>()
             .init_resource::<LastHelmInput>()
             .init_resource::<CollisionCooldown>()
@@ -281,7 +233,7 @@ impl Plugin for SimulationPlugin {
                 handle_repair,
                 handle_impulse_messages,
                 tick_active_beam,
-                tick_repair,
+                tick_repair_teams,
                 tick_torpedo_system,
                 tick_shields,
                 process_helm_inputs,
@@ -746,53 +698,52 @@ fn tick_torpedo_system(
     }
 }
 
-/// Handle `Repair` messages from any console player.
+/// Handle `Repair { shape }` messages from the Repair console.
 ///
-/// Validates: game is in-progress, sender holds a console.
-/// - If the sender's console is the `authorized_repair_console` and no repair is
-///   already active and they are not penalised: start a 30-second repair action.
-/// - Otherwise: apply a 30-second penalty cooldown to that player (ignored if
-///   they are already penalised or a repair is in progress for them).
+/// Validates: game is in-progress, sender holds `Console::Repair`.
+/// - If no free team exists: message ignored.
+/// - If queue head shape matches pressed shape: lowest-numbered free team
+///   dispatched, breakdown popped from queue.
+/// - If queue head shape does not match (or queue empty): lowest-numbered
+///   free team penalised.
 fn handle_repair(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
-    breakdowns: Res<BreakdownQueueResource>,
-    mut repair: ResMut<ActiveRepair>,
-    mut penalties: ResMut<RepairPenalties>,
+    mut breakdowns: ResMut<BreakdownQueueResource>,
+    mut teams: ResMut<ShipRepairTeams>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
     }
     for ev in reader.read() {
-        let repair_console = match &ev.msg {
-            ClientMessage::Repair { console } => console.clone(),
+        let pressed_shape = match &ev.msg {
+            ClientMessage::Repair { shape } => *shape,
             _ => continue,
         };
-        let token = ev.token.as_str();
-        // Sender must actually hold the console they claim to be pressing.
-        let sender_consoles = sessions.0.players()
-            .iter()
-            .find(|p| p.token == token)
-            .map(|p| p.consoles.clone())
-            .unwrap_or_default();
-        if !sender_consoles.contains(&repair_console) {
+        // Only the Repair console holder may send shape-matching presses.
+        let Some(repair_token) = sessions.0.console_holder(Console::Repair) else {
+            continue;
+        };
+        if ev.token.as_str() != repair_token {
             continue;
         }
-        // Ignore presses during an active penalty for this player.
-        if penalties.is_penalised(token) {
+        // Must have a free team to act.
+        let Some(team_idx) = teams.0.lowest_free_team() else {
             continue;
+        };
+        // Check queue front shape (or empty queue).
+        match breakdowns.queue.front() {
+            Some(entry) if entry.shape == pressed_shape => {
+                // Correct shape: dispatch team and pop breakdown.
+                teams.0.dispatch(team_idx);
+                breakdowns.queue.pop_front();
+            }
+            _ => {
+                // Wrong shape or queue empty: penalise the free team.
+                teams.0.penalise(team_idx);
+            }
         }
-        // Check if the specific console pressed is the authorized one.
-        let authorized = breakdowns.queue.front().map(|e| e.console.clone());
-        let is_authorized = authorized.as_ref().map_or(false, |auth| *auth == repair_console);
-
-        if is_authorized && !repair.is_active() {
-            repair.start();
-        } else if !is_authorized && authorized.is_some() {
-            penalties.penalise(token);
-        }
-        // No breakdowns pending, or repair already active â†’ silent no-op.
     }
 }
 
@@ -834,14 +785,12 @@ fn handle_impulse_messages(
     }
 }
 
-/// Tick the active repair each frame: restore HP, advance breakdown queue on
-/// completion.
-fn tick_repair(
+/// Tick repair teams each frame: advance progress, apply HP for completed
+/// repairs.
+fn tick_repair_teams(
     time: Res<Time>,
-    mut repair: ResMut<ActiveRepair>,
-    mut penalties: ResMut<RepairPenalties>,
+    mut teams: ResMut<ShipRepairTeams>,
     mut hull: ResMut<ShipHullIntegrity>,
-    mut breakdowns: ResMut<BreakdownQueueResource>,
     phase: Res<CurrentPhase>,
     modifiers: Res<ShipModifiers>,
 ) {
@@ -849,42 +798,25 @@ fn tick_repair(
         return;
     }
     let dt = time.delta_secs();
-    // Tick per-token penalty timers.
-    penalties.tick(dt);
-
-    if !repair.is_active() {
-        return;
-    }
-
-    repair.hp_accumulator += REPAIR_HP_PER_SEC * modifiers.get(&ModifierSlot::RepairRate) * dt;
-    let hp_to_apply = repair.hp_accumulator.floor() as i32;
-    if hp_to_apply > 0 {
-        repair.hp_accumulator -= hp_to_apply as f32;
-        let remaining_budget = REPAIR_MAX_HP - repair.hp_restored;
-        let actual = hp_to_apply.min(remaining_budget);
-        if actual > 0 {
-            hull.0.restore(actual);
-            repair.hp_restored += actual;
-        }
-    }
-
-    repair.remaining_secs -= dt;
-    if repair.remaining_secs <= 0.0 || repair.hp_restored >= REPAIR_MAX_HP {
-        // Repair complete â€” advance the breakdown queue.
-        breakdowns.queue.pop_front();
-        repair.remaining_secs = 0.0;
-        repair.hp_accumulator = 0.0;
-        repair.hp_restored = 0;
+    let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
+    let completed = teams.0.tick(dt * repair_mult);
+    for _team_idx in completed {
+        hull.0.restore(REPAIR_TEAM_HP);
     }
 }
 
 /// Broadcast `RepairState` at 10 Hz to every console holder.
+///
+/// Derives state from the `RepairTeams` resource:
+/// - `in_progress` if any team is repairing.
+/// - `penalty` if any team is on cooldown.
+/// - `remaining_cooldown_secs` derived from team with the longest remaining
+///   time (repair or cooldown).
 fn broadcast_repair_state(
     timer: Res<SimBroadcastTimer>,
     mut writer: MessageWriter<OutboundMessage>,
     sessions: Res<Sessions>,
-    repair: Res<ActiveRepair>,
-    penalties: Res<RepairPenalties>,
+    teams: Res<ShipRepairTeams>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -894,18 +826,19 @@ fn broadcast_repair_state(
         return;
     }
 
-    use crate::messages::Console;
-    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Power];
+    use crate::repair_teams::TeamSlot;
+    let slots = teams.0.slots();
+    let in_progress = slots.iter().any(|s| matches!(s, TeamSlot::Repairing { .. }));
+    let penalty = slots.iter().any(|s| matches!(s, TeamSlot::Cooldown { .. }));
+    let remaining_cooldown_secs = slots.iter().map(|s| match s {
+        TeamSlot::Repairing { progress } => (1.0 - progress) * 30.0,
+        TeamSlot::Cooldown { progress } => progress * 10.0,
+        TeamSlot::Idle => 0.0,
+    }).fold(0.0_f32, f32::max);
+
+    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power];
     for console in &all_consoles {
         let Some(token) = sessions.0.console_holder(console.clone()) else { continue };
-        let penalty_remaining = penalties.remaining(token);
-        let (remaining_cooldown_secs, in_progress, penalty) = if repair.is_active() {
-            (repair.remaining_secs, true, false)
-        } else if penalty_remaining > 0.0 {
-            (penalty_remaining, false, true)
-        } else {
-            (0.0, false, false)
-        };
         writer.write(OutboundMessage {
             target: Target::Token(token.to_string()),
             msg: ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty },
@@ -1038,17 +971,15 @@ fn broadcast_sim_state(
     mut writer: MessageWriter<OutboundMessage>,
     ship: Res<ShipState>,
     hull: Res<ShipHullIntegrity>,
-    breakdowns: Res<BreakdownQueueResource>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
     }
     if timer.0.tick(time.delta()).just_finished() {
-        let authorized = breakdowns.queue.front().map(|e| e.console.clone());
         writer.write(OutboundMessage {
             target: Target::All,
-            msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current(), authorized) },
+            msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current()) },
         });
     }
 }
@@ -1558,15 +1489,14 @@ fn test_app() -> App {
         .add_message::<AsteroidDestroyedVfx>()
         .init_resource::<PhaserCooldown>()
         .init_resource::<CurrentPhaserMode>()
-        .init_resource::<ActiveRepair>()
-        .init_resource::<RepairPenalties>()
+        .insert_resource(ShipRepairTeams(RepairTeams::new()))
         .init_resource::<BreakdownQueueResource>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_impulse_messages, tick_active_beam, tick_repair, tick_torpedo_system, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events))
         .add_systems(PostUpdate, collect);
     app
 }
@@ -1868,25 +1798,11 @@ fn test_app() -> App {
             }
         }
 
-        let out = tick(&mut app);
-        let snap = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-            _ => None,
-        }).expect("expected a SimState broadcast");
+        let _out = tick(&mut app);
 
-        // Queue has 2 entries; snapshot shows the front (not None).
-        assert!(
-            snap.authorized_repair_console.is_some(),
-            "snapshot should show the authorized repair console"
-        );
         // Verify queue length via resource.
         let bd = app.world().resource::<BreakdownQueueResource>();
         assert_eq!(bd.queue.len(), 2, "2 breakdowns should be queued");
-        assert_eq!(
-            snap.authorized_repair_console.as_ref(),
-            bd.queue.front().map(|e| &e.console),
-            "snapshot authorized_repair_console matches queue front"
-        );
     }
 
     #[test]
@@ -2328,9 +2244,9 @@ fn test_app() -> App {
 
     // â”€â”€ Repair helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    /// Set up a game with a captain, repair player, enqueue one breakdown
-    /// targeting Repair, and apply 10 HP damage so HP = 90.
-    fn start_game_with_breakdown_for_repair(app: &mut App) {
+    /// Set up a game with a captain, repair player, and a single breakdown
+    /// with a known shape (Triangle) at the front. HP = 90.
+    fn start_game_with_repair_shape(app: &mut App, shape: Shape) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
         push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
@@ -2345,128 +2261,171 @@ fn test_app() -> App {
         // Apply 10 damage so HP = 90.
         app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10);
 
-        // Force the breakdown queue to have Repair at the front using a seeded
-        // RNG that deterministically yields Repair first.
+        // Push a single breakdown with the requested shape and Repair console.
         {
-            use rand::SeedableRng as _;
-            let mut bdr = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bdr.rng = rand::rngs::SmallRng::seed_from_u64(0);
-        }
-        // Push entries until Repair is at the front.
-        loop {
-            let front_console = {
-                let bdr = app.world().resource::<BreakdownQueueResource>();
-                bdr.queue.front().map(|e| e.console.clone())
-            };
-            if front_console == Some(Console::Repair) {
-                break;
-            }
-            // If front is Some (wrong console), pop it so push_random produces
-            // a new candidate. None shouldn't happen here, but guard anyway.
-            {
-                let bdr = app.world_mut().resource_mut::<BreakdownQueueResource>();
-                let BreakdownQueueResource { queue, rng, .. } = &mut *bdr.into_inner();
-                if front_console.is_some() {
-                    queue.pop_front();
-                }
-                queue.push_random(rng);
-            }
+            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
+            bd.queue.push_front(crate::breakdown::BreakdownEntry {
+                console: Console::Repair,
+                shape,
+            });
         }
     }
 
-    #[test]
-    fn authorized_repair_press_starts_repair_action() {
-        let mut app = test_app();
-        start_game_with_breakdown_for_repair(&mut app);
-
-        // Repair player presses Repair.
-        push(&mut app, "eng", ClientMessage::Repair { console: Console::Repair });
-        tick(&mut app);
-
-        assert!(app.world().resource::<ActiveRepair>().is_active(),
-            "repair should be active after authorized press");
+    /// Helpers to check RepairTeams team state.
+    fn team_is_repairing(teams: &ShipRepairTeams, idx: usize) -> bool {
+        matches!(teams.0.slots()[idx], crate::repair_teams::TeamSlot::Repairing { .. })
     }
 
-    #[test]
-    fn unauthorized_repair_press_starts_penalty_not_repair() {
-        let mut app = test_app();
-        start_game_with_breakdown_for_repair(&mut app);
-
-        // Captain presses Repair — they hold CaptainChair, not Repair.
-        push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
-        tick(&mut app);
-
-        assert!(!app.world().resource::<ActiveRepair>().is_active(),
-            "repair should NOT be active after unauthorized press");
-        assert!(app.world().resource::<RepairPenalties>().is_penalised("captain"),
-            "captain should have penalty after unauthorized press");
+    fn team_is_cooldown(teams: &ShipRepairTeams, idx: usize) -> bool {
+        matches!(teams.0.slots()[idx], crate::repair_teams::TeamSlot::Cooldown { .. })
     }
 
-    #[test]
-    fn repair_during_cooldown_is_ignored() {
-        let mut app = test_app();
-        start_game_with_breakdown_for_repair(&mut app);
-
-        // Captain presses once — gets penalty.
-        push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
-        tick(&mut app);
-        assert!(app.world().resource::<RepairPenalties>().is_penalised("captain"));
-
-        // Captain presses again — should still be penalised (no change).
-        push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
-        tick(&mut app);
-        // Penalty remaining should still be close to 10s (only a tiny dt elapsed).
-        let remaining = app.world().resource::<RepairPenalties>().remaining("captain");
-        assert!(remaining > 5.0,
-            "penalty should still be near 10s, got {remaining}");
+    fn team_is_idle(teams: &ShipRepairTeams, idx: usize) -> bool {
+        matches!(teams.0.slots()[idx], crate::repair_teams::TeamSlot::Idle)
     }
 
+    // ── Shape-matching repair tests ──────────────────────────────────────
+
+    /// Non-Repair console holder sending `Repair { shape }` is ignored.
     #[test]
-    fn authorized_repair_restores_hp_over_time() {
+    fn non_repair_sender_is_ignored() {
         let mut app = test_app();
-        start_game_with_breakdown_for_repair(&mut app);
+        start_game_with_repair_shape(&mut app, Shape::Triangle);
 
-        push(&mut app, "eng", ClientMessage::Repair { console: Console::Repair });
+        // Captain (not Repair holder) presses a shape.
+        push(&mut app, "captain", ClientMessage::Repair { shape: Shape::Triangle });
         tick(&mut app);
 
-        let initial_hp = app.world().resource::<ShipHullIntegrity>().0.current();
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(team_is_idle(&teams, 0), "team 0 should remain idle after non-Repair press");
+        assert!(team_is_idle(&teams, 1), "team 1 should remain idle");
+        assert!(team_is_idle(&teams, 2), "team 2 should remain idle");
+    }
 
-        // Simulate 3 seconds of repair (should restore 1 HP).
-        app.world_mut().resource_mut::<ActiveRepair>().hp_accumulator = 0.999; // just under 1
-        // Manually advance time is hard in Bevy tests; instead inject hp_accumulator directly.
-        app.world_mut().resource_mut::<ActiveRepair>().hp_accumulator = 1.0;
+    /// Correct shape dispatches a team and pops the queue.
+    #[test]
+    fn correct_shape_dispatches_team_and_pops_queue() {
+        let mut app = test_app();
+        start_game_with_repair_shape(&mut app, Shape::Triangle);
+
+        // Repair holder presses the matching shape.
+        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
         tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(team_is_repairing(&teams, 0), "team 0 should be repairing after correct shape press");
+        // Queue should be empty after pop.
+        assert!(app.world().resource::<BreakdownQueueResource>().queue.is_empty(),
+            "breakdown queue should be empty after correct shape repair");
+    }
+
+    /// Wrong shape penalises the lowest free team and leaves queue intact.
+    #[test]
+    fn wrong_shape_penalises_team_and_leaves_queue() {
+        let mut app = test_app();
+        start_game_with_repair_shape(&mut app, Shape::Triangle);
+
+        // Repair holder presses the WRONG shape (Square, not Triangle).
+        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Square });
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(team_is_cooldown(&teams, 0), "team 0 should be on cooldown after wrong shape press");
+        // Queue should still have the breakdown.
+        assert_eq!(app.world().resource::<BreakdownQueueResource>().queue.len(), 1,
+            "breakdown queue should be unchanged after wrong shape press");
+    }
+
+    /// All-busy teams: no free team → further presses are ignored.
+    #[test]
+    fn all_busy_teams_ignore_further_presses() {
+        let mut app = test_app();
+        start_game_with_repair_shape(&mut app, Shape::Triangle);
+
+        // First press: correct shape, dispatches team 0.
+        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
+        tick(&mut app);
+        assert!(team_is_repairing(&app.world().resource::<ShipRepairTeams>(), 0));
+
+        // Push another breakdown.
+        {
+            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
+            use crate::breakdown::BreakdownEntry;
+            bd.queue.push_back(BreakdownEntry { console: Console::Repair, shape: Shape::Circle });
+        }
+
+        // Manually dispatch teams 1 and 2 so all three are busy.
+        app.world_mut().resource_mut::<ShipRepairTeams>().0.dispatch(1);
+        app.world_mut().resource_mut::<ShipRepairTeams>().0.dispatch(2);
+
+        // Third press should be ignored (no free team).
+        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Circle });
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(team_is_repairing(&teams, 0));
+        assert!(team_is_repairing(&teams, 1));
+        assert!(team_is_repairing(&teams, 2));
+        // Queue should still have the second breakdown.
+        assert_eq!(app.world().resource::<BreakdownQueueResource>().queue.len(), 1,
+            "breakdown queue should remain unchanged when all teams are busy");
+    }
+
+    /// Empty-queue press penalises the lowest free team.
+    #[test]
+    fn empty_queue_press_penalises_team() {
+        let mut app = test_app();
+        start_game_with_repair_shape(&mut app, Shape::Triangle);
+
+        // Pop the queue so it's empty.
+        app.world_mut().resource_mut::<BreakdownQueueResource>().queue.pop_front();
+        assert!(app.world().resource::<BreakdownQueueResource>().queue.is_empty());
+
+        // Repair holder presses any shape.
+        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
+        tick(&mut app);
+
+        let teams = app.world().resource::<ShipRepairTeams>();
+        assert!(team_is_cooldown(&teams, 0), "team 0 should be on cooldown after empty-queue press");
+    }
+
+    /// Repair team tick restores HP on completion.
+    ///
+    /// We test this by manually running the equivalent of `tick_repair_teams`
+    /// system logic: advance the team to completion, then verify HP restoration.
+    #[test]
+    fn repair_team_completion_restores_hp() {
+        let mut app = test_app();
+        start_game_with_repair_shape(&mut app, Shape::Triangle);
+
+        let initial_hp = app.world().resource::<ShipHullIntegrity>().0.current(); // 90
+
+        // Dispatch team 0 via correct shape press.
+        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
+        tick(&mut app);
+        assert!(team_is_repairing(&app.world().resource::<ShipRepairTeams>(), 0));
+
+        // Advance team 0 to completion via the team's own tick method.
+        let completed = app.world_mut().resource_mut::<ShipRepairTeams>().0.tick(30.0);
+        assert_eq!(completed, vec![0], "team 0 should complete after 30s");
+
+        // Manually apply HP as the system would: for each completed team, restore HP.
+        for _ in completed {
+            app.world_mut().resource_mut::<ShipHullIntegrity>().0.restore(REPAIR_TEAM_HP);
+        }
 
         let hp_after = app.world().resource::<ShipHullIntegrity>().0.current();
-        assert_eq!(hp_after, initial_hp + 1, "HP should increase by 1 after accumulator reaches 1.0");
+        assert_eq!(hp_after, initial_hp + REPAIR_TEAM_HP,
+            "HP should increase by {} after repair team completion", REPAIR_TEAM_HP);
     }
 
+    /// RepairState broadcast shows in_progress when team is repairing.
     #[test]
-    fn repair_completion_advances_breakdown_queue() {
+    fn repair_state_shows_in_progress() {
         let mut app = test_app();
-        start_game_with_breakdown_for_repair(&mut app);
+        start_game_with_repair_shape(&mut app, Shape::Triangle);
 
-        push(&mut app, "eng", ClientMessage::Repair { console: Console::Repair });
-        tick(&mut app);
-
-        // Fast-complete the repair: set hp_restored to the cap so the next tick
-        // triggers queue advancement.
-        app.world_mut().resource_mut::<ActiveRepair>().hp_restored = REPAIR_MAX_HP;
-        tick(&mut app);
-
-        // Queue should be empty after the single breakdown is resolved.
-        assert!(app.world().resource::<BreakdownQueueResource>().queue.is_empty(),
-            "breakdown queue should be empty after repair completion");
-        assert!(!app.world().resource::<ActiveRepair>().is_active(),
-            "repair should no longer be active after completion");
-    }
-
-    #[test]
-    fn repair_state_broadcast_sent_to_repair_console() {
-        let mut app = test_app();
-        start_game_with_breakdown_for_repair(&mut app);
-
-        push(&mut app, "eng", ClientMessage::Repair { console: Console::Repair });
+        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
         let out = tick(&mut app);
 
         let repair_state = out.iter().find(|m| {
@@ -2477,20 +2436,23 @@ fn test_app() -> App {
             "RepairState with in_progress=true should be broadcast to repair console");
     }
 
+    /// RepairState broadcast shows penalty when team is on cooldown.
     #[test]
-    fn penalty_repair_state_broadcast_to_penalised_player() {
+    fn repair_state_shows_penalty() {
         let mut app = test_app();
-        start_game_with_breakdown_for_repair(&mut app);
+        start_game_with_repair_shape(&mut app, Shape::Triangle);
 
-        push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
+        // Press wrong shape to penalise team 0.
+        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Square });
         let out = tick(&mut app);
 
+        // The penalty RepairState is broadcast to all consoles.
         let penalty_msg = out.iter().find(|m| {
             matches!(&m.msg, ServerMessage::RepairState { penalty: true, .. })
-                && matches!(&m.target, Target::Token(t) if t == "captain")
+                && matches!(&m.target, Target::Token(t) if t == "eng")
         });
         assert!(penalty_msg.is_some(),
-            "RepairState with penalty=true should be broadcast to the penalised captain");
+            "RepairState with penalty=true should be broadcast after wrong shape press");
     }
 
     // â”€â”€ SetPhaserMode tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -8,7 +8,7 @@
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
-use crate::messages::{ClientMessage, ServerMessage, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
+use crate::messages::{ClientMessage, ServerMessage, Shape, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -332,7 +332,7 @@ pub fn on_screen_message() -> ClientMessage {
 
 /// `ClientMessage` for the Repair button: sends a repair request to the server.
 pub fn repair_message() -> ClientMessage {
-    ClientMessage::Repair { console: crate::messages::Console::Helm }
+    ClientMessage::Repair { shape: Shape::Triangle }
 }
 
 /// `ClientMessage` to fire a torpedo from the given tube with an optional homing target.
@@ -474,7 +474,7 @@ mod tests {
     use crate::messages::{AsteroidInfo, Console, GamePhase, GameState, Player, SimSnapshot};
 
     fn snap(red_alert: bool, view_mode: ViewMode) -> SimSnapshot {
-        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100, authorized_repair_console: None }
+        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100 }
     }
 
     fn snap_pose(x: f32, z: f32, yaw: f32) -> SimSnapshot {
@@ -485,7 +485,6 @@ mod tests {
             ship_z: z,
             ship_yaw: yaw,
             hull_integrity: 100,
-            authorized_repair_console: None,
         }
     }
 

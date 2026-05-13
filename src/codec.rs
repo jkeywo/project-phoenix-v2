@@ -218,7 +218,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 100,
-                authorized_repair_console: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -235,7 +234,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 100,
-                authorized_repair_console: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -252,7 +250,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 100,
-                authorized_repair_console: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -269,7 +266,6 @@ mod tests {
                 ship_z: -8.25,
                 ship_yaw: 1.5707,
                 hull_integrity: 100,
-                authorized_repair_console: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -286,24 +282,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 75,
-                authorized_repair_console: None,
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn sim_snapshot_carries_authorized_repair_console() {
-        let msg = ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0,
-                ship_z: 0.0,
-                ship_yaw: 0.0,
-                hull_integrity: 75,
-                authorized_repair_console: Some(Console::Repair),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -466,17 +444,12 @@ mod tests {
     }
 
     #[test]
-    fn client_repair_round_trips() {
-        let msg = ClientMessage::Repair { console: crate::messages::Console::Repair };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn client_repair_with_power_console_round_trips() {
-        let msg = ClientMessage::Repair { console: crate::messages::Console::Power };
-        assert_client_roundtrip(&JsonCodec, msg.clone());
-        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    fn client_repair_with_shape_round_trips() {
+        for shape in &[Shape::Square, Shape::Triangle, Shape::Circle] {
+            let msg = ClientMessage::Repair { shape: *shape };
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_client_roundtrip(&PrettyJsonCodec, msg);
+        }
     }
 
     #[test]

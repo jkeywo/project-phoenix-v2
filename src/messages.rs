@@ -178,10 +178,6 @@ pub struct SimSnapshot {
     pub ship_z: f32,
     pub ship_yaw: f32,
     pub hull_integrity: i32,
-    /// The console currently authorized to perform a repair action.
-    /// `None` means there are no pending breakdowns.
-    #[serde(default)]
-    pub authorized_repair_console: Option<Console>,
 }
 
 /// An asteroid field defined as a donut-shaped ring in world space.
@@ -245,7 +241,7 @@ pub enum ClientMessage {
     SetScienceTarget { uuid: String },
     FirePhaser,
     SetPhaserMode { mode: PhaserMode },
-    Repair { console: Console },
+    Repair { shape: Shape },
     /// Fire a torpedo from the specified tube. `target_uuid` is optional homing target.
     FireTorpedo { tube: TorpedoTube, target_uuid: Option<String> },
 }

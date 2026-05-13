@@ -64,6 +64,16 @@ impl BreakdownQueue {
         self.queue.pop_front()
     }
 
+    /// Push an entry to the front of the queue (for deterministic tests).
+    pub fn push_front(&mut self, entry: BreakdownEntry) {
+        self.queue.push_front(entry);
+    }
+
+    /// Push an entry to the back of the queue (for deterministic tests).
+    pub fn push_back(&mut self, entry: BreakdownEntry) {
+        self.queue.push_back(entry);
+    }
+
     /// Number of pending breakdowns.
     pub fn len(&self) -> usize {
         self.queue.len()

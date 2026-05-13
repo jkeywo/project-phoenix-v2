@@ -250,10 +250,21 @@ enum LobbyHudValue {
 /// shader fades the red glow from invisible at 0.0 to fully bright at
 /// 1.0. Driven each frame by [`drive_vignette_intensity`] via the pure
 /// helper [`pulse_intensity`].
+///
+/// The struct is padded to 16 bytes (4×f32) so the uniform buffer binding
+/// satisfies `BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED` requirements on
+/// downlevel WebGL2 devices (integrated GPUs, SwiftShader in CI).
 #[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
 pub struct RedAlertVignetteMaterial {
     #[uniform(0)]
     pub intensity: f32,
+    /// Padding — keeps the uniform block 16-byte aligned on downlevel WebGL2.
+    #[uniform(0)]
+    _pad0: f32,
+    #[uniform(0)]
+    _pad1: f32,
+    #[uniform(0)]
+    _pad2: f32,
 }
 
 impl UiMaterial for RedAlertVignetteMaterial {
@@ -323,7 +334,7 @@ fn spawn_border_on_startup(
     assets: Res<ViewscreenAssets>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
 ) {
-    let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0 });
+    let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0, _pad0: 0.0, _pad1: 0.0, _pad2: 0.0 });
     commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
     let root = spawn_border_frame(&mut commands, &assets, vignette);
     // Attach the initial lobby HUD strip as a child of the border root.

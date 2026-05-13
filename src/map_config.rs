@@ -90,6 +90,12 @@ pub struct GridConfig {
     /// Base Y offset for cosmetic layers.
     #[serde(default)]
     pub cosmetic_y_offset: f32,
+    /// Number of cells beyond the spawn ring to start spawning asteroids.
+    #[serde(default = "default_spawn_cells")]
+    pub spawn_cells: u32,
+    /// Number of cells beyond the despawn ring to despawn asteroids.
+    #[serde(default = "default_despawn_cells")]
+    pub despawn_cells: u32,
 }
 
 fn default_fill_gameplay() -> f32 { 0.4 }
@@ -98,6 +104,8 @@ fn default_noise_freq() -> f32 { 0.02 }
 fn default_noise_octaves() -> u32 { 3 }
 fn default_density_noise_freq() -> f32 { 0.01 }
 fn default_density_noise_octaves() -> u32 { 2 }
+fn default_spawn_cells() -> u32 { 10 }
+fn default_despawn_cells() -> u32 { 12 }
 
 /// Configuration for an asteroid field.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -242,6 +250,19 @@ pub fn parse_and_validate_map_config(toml_str: &str) -> Result<MapConfig, String
                 field.inner_radius,
                 field.outer_radius
             ));
+        }
+    }
+    
+    // Validate that despawn_cells >= spawn_cells for grid fields
+    for field in &config.asteroid_fields {
+        if let Some(grid) = &field.grid {
+            if grid.despawn_cells < grid.spawn_cells {
+                return Err(format!(
+                    "Asteroid field grid has despawn_cells ({}) < spawn_cells ({})",
+                    grid.despawn_cells,
+                    grid.spawn_cells
+                ));
+            }
         }
     }
     
@@ -505,6 +526,24 @@ despawn_distance = 250.0
     }
 
     #[test]
+    fn validate_rejects_despawn_less_than_spawn_cells() {
+        let toml = r#"
+[[asteroid_field]]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+
+[asteroid_field.grid]
+resolution = 10.0
+spawn_cells = 15
+despawn_cells = 10
+"#;
+        let result = parse_and_validate_map_config(toml);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("despawn_cells"));
+    }
+
+    #[test]
     fn validate_rejects_inner_geq_outer() {
         let toml = r#"
 [[asteroid_field]]
@@ -573,6 +612,44 @@ density = 0.005
         assert_eq!(config.asteroid_fields.len(), 1);
         assert!(config.asteroid_fields[0].asteroid_type_paths.is_empty());
         assert!(config.asteroid_fields[0].cosmetic_type_paths.is_empty());
+    }
+
+    #[test]
+    fn grid_config_default_spawn_despawn_cells() {
+        let toml = r#"
+[[asteroid_field]]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+
+[asteroid_field.grid]
+resolution = 10.0
+"#;
+        let config = parse_map_config(toml).unwrap();
+        let field = &config.asteroid_fields[0];
+        let grid = field.grid.as_ref().unwrap();
+        assert_eq!(grid.spawn_cells, 10);
+        assert_eq!(grid.despawn_cells, 12);
+    }
+
+    #[test]
+    fn grid_config_custom_spawn_despawn_cells() {
+        let toml = r#"
+[[asteroid_field]]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+
+[asteroid_field.grid]
+resolution = 10.0
+spawn_cells = 5
+despawn_cells = 8
+"#;
+        let config = parse_map_config(toml).unwrap();
+        let field = &config.asteroid_fields[0];
+        let grid = field.grid.as_ref().unwrap();
+        assert_eq!(grid.spawn_cells, 5);
+        assert_eq!(grid.despawn_cells, 8);
     }
 
     #[test]

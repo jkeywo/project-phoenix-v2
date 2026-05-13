@@ -132,22 +132,80 @@ pub fn generate_donut_field(
     }
 }
 
+/// Evaluate a single world cell for asteroid content.
+/// Returns `Some(AsteroidSpawn)` if this cell passes the density check,
+/// or `None` if no asteroid should spawn.
+///
+/// The density check is deterministic: seeded from `(field_idx, cell_gx, cell_gz)`.
+/// When `gameplay_type_paths` is non-empty, checks against `fill_gameplay`.
+/// When only `cosmetic_type_paths` is non-empty, checks against `fill_cosmetic`.
+pub fn eval_cell(
+    field_idx: u64,
+    cell_gx: i32,
+    cell_gz: i32,
+    grid: &GridConfig,
+    inner_radius: f32,
+    outer_radius: f32,
+    gameplay_type_paths: &[String],
+    cosmetic_type_paths: &[String],
+) -> Option<AsteroidSpawn> {
+    let seed = {
+        let mut s = field_idx;
+        s = s.wrapping_mul(2654435761);
+        s = s.wrapping_add(cell_gx as u64);
+        s = s.wrapping_mul(2654435761);
+        s = s.wrapping_add(cell_gz as u64);
+        s
+    };
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    let cell_center_x = (cell_gx as f32) * grid.resolution;
+    let cell_center_z = (cell_gz as f32) * grid.resolution;
+
+    if !gameplay_type_paths.is_empty() {
+        let density = compute_density(cell_gx, cell_gz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
+        if density >= grid.fill_gameplay {
+            let jitter = compute_jitter(cell_center_x, cell_center_z, inner_radius, outer_radius, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
+            let x = cell_center_x + jitter.0;
+            let z = cell_center_z + jitter.1;
+            let config_path = gameplay_type_paths[rng.random_range(0..gameplay_type_paths.len())].clone();
+            return Some(AsteroidSpawn { x, z, y: 0.0, config_path });
+        }
+        return None;
+    }
+
+    if !cosmetic_type_paths.is_empty() {
+        let density = compute_density(cell_gx, cell_gz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
+        if density >= grid.fill_cosmetic {
+            let jitter = compute_jitter(cell_center_x, cell_center_z, inner_radius, outer_radius, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
+            let x = cell_center_x + jitter.0;
+            let z = cell_center_z + jitter.1;
+            let y_offset = grid.cosmetic_y_offset * (0.5 + rng.random::<f32>() * 0.5);
+            let config_path = cosmetic_type_paths[rng.random_range(0..cosmetic_type_paths.len())].clone();
+            return Some(AsteroidSpawn { x, z, y: y_offset, config_path });
+        }
+        return None;
+    }
+
+    None
+}
+
 /// Generate asteroid positions using a grid + Perlin noise system.
 ///
 /// Grid cells within the bounding box (inner_radius..outer_radius on the XZ plane)
 /// are tested for spawn eligibility. Cells outside the torus (inner hole or beyond
 /// outer_radius) are skipped. Each passing cell spawns at its center position plus
 /// a jitter offset derived from spatial Perlin noise.
+///
+/// Calls `eval_cell` internally for each cell-layer combination.
 pub fn generate_grid_field(
     inner_radius: f32,
     outer_radius: f32,
     grid: GridConfig,
-    seed_offset: u64,
+    _seed_offset: u64,
     gameplay_type_paths: &[String],
     cosmetic_type_paths: &[String],
 ) -> AsteroidGridResult {
-    let mut rng = StdRng::seed_from_u64(seed_offset);
-
     let r_min = inner_radius;
     let r_max = outer_radius;
     let res = grid.resolution;
@@ -162,8 +220,7 @@ pub fn generate_grid_field(
     let mut cosmetic_upper = Vec::new();
     let mut cosmetic_lower = Vec::new();
 
-    let y_base = grid.cosmetic_y_offset;
-
+    let mut cell_id: u64 = 0;
     for cx in min_cell_x..=max_cell_x {
         for cz in min_cell_z..=max_cell_z {
             let cell_center_x = (cx as f32) * res;
@@ -174,35 +231,23 @@ pub fn generate_grid_field(
                 continue;
             }
 
-            let density = compute_density(cx, cz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
-
-            if density >= grid.fill_gameplay && !gameplay_type_paths.is_empty() {
-                let jitter = compute_jitter(cell_center_x, cell_center_z, r_min, r_max, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
-                let x = cell_center_x + jitter.0;
-                let z = cell_center_z + jitter.1;
-                let config_path = gameplay_type_paths[rng.random_range(0..gameplay_type_paths.len())].clone();
-                gameplay.push(AsteroidSpawn { x, z, y: 0.0, config_path });
+            if !gameplay_type_paths.is_empty() {
+                if let Some(spawn) = eval_cell(cell_id * 3, cx, cz, &grid, r_min, r_max, gameplay_type_paths, &[]) {
+                    gameplay.push(spawn);
+                }
             }
 
-            let cos_y = compute_density(cx, cz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
-            if cos_y >= grid.fill_cosmetic && !cosmetic_type_paths.is_empty() {
-                let jitter = compute_jitter(cell_center_x, cell_center_z, r_min, r_max, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
-                let x = cell_center_x + jitter.0;
-                let z = cell_center_z + jitter.1;
-                let y_offset = y_base * (0.5 + rng.random::<f32>() * 0.5);
-                let config_path = cosmetic_type_paths[rng.random_range(0..cosmetic_type_paths.len())].clone();
-                cosmetic_upper.push(AsteroidSpawn { x, z, y: y_offset, config_path }); // y stored separately
+            if !cosmetic_type_paths.is_empty() {
+                if let Some(spawn) = eval_cell(cell_id * 3 + 1, cx, cz, &grid, r_min, r_max, &[], cosmetic_type_paths) {
+                    cosmetic_upper.push(spawn);
+                }
+                if let Some(mut spawn) = eval_cell(cell_id * 3 + 2, cx, cz, &grid, r_min, r_max, &[], cosmetic_type_paths) {
+                    spawn.y = -spawn.y;
+                    cosmetic_lower.push(spawn);
+                }
             }
 
-            let cos_y2 = compute_density(cx, cz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
-            if cos_y2 >= grid.fill_cosmetic && !cosmetic_type_paths.is_empty() {
-                let jitter = compute_jitter(cell_center_x, cell_center_z, r_min, r_max, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
-                let x = cell_center_x + jitter.0;
-                let z = cell_center_z + jitter.1;
-                let y_offset = y_base * (0.5 + rng.random::<f32>() * 0.5);
-                let config_path = cosmetic_type_paths[rng.random_range(0..cosmetic_type_paths.len())].clone();
-                cosmetic_lower.push(AsteroidSpawn { x, z, y: -y_offset, config_path }); // y stored separately
-            }
+            cell_id += 1;
         }
     }
 
@@ -692,6 +737,84 @@ mod tests {
     }
 
     #[test]
+    fn eval_cell_deterministic() {
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.4,
+            fill_cosmetic: 0.15,
+            uniformity: 0.3,
+            noise_freq: 0.02,
+            noise_octaves: 3,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 2,
+            jitter: 10.0,
+            cosmetic_y_offset: 15.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        };
+        let a = eval_cell(
+            0, 5, 3, &grid, 100.0, 200.0,
+            &["gameplay.toml".to_string()], &[],
+        );
+        let b = eval_cell(
+            0, 5, 3, &grid, 100.0, 200.0,
+            &["gameplay.toml".to_string()], &[],
+        );
+        assert_eq!(a, b, "eval_cell must be deterministic");
+    }
+
+    #[test]
+    fn eval_cell_returns_none_for_failed_density() {
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 1.0,
+            fill_cosmetic: 1.0,
+            uniformity: 1.0,
+            noise_freq: 0.02,
+            noise_octaves: 1,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 1,
+            jitter: 10.0,
+            cosmetic_y_offset: 15.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        };
+        let result = eval_cell(
+            0, 5, 3, &grid, 100.0, 200.0,
+            &["gameplay.toml".to_string()], &[],
+        );
+        assert!(result.is_none(), "Should be None when fill is 1.0");
+    }
+
+    #[test]
+    fn eval_cell_returns_some_for_gameplay() {
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.0,
+            fill_cosmetic: 0.0,
+            uniformity: 0.0,
+            noise_freq: 0.02,
+            noise_octaves: 1,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 1,
+            jitter: 0.0,
+            cosmetic_y_offset: 15.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        };
+        let result = eval_cell(
+            0, 5, 3, &grid, 100.0, 200.0,
+            &["gameplay.toml".to_string()], &[],
+        );
+        assert!(result.is_some(), "Should be Some when fill is 0.0");
+        let spawn = result.unwrap();
+        assert_eq!(spawn.x, 75.0, "Cell center X = cx * resolution");
+        assert_eq!(spawn.z, 45.0, "Cell center Z = cz * resolution");
+        assert_eq!(spawn.y, 0.0, "Gameplay Y must be 0");
+        assert!(spawn.config_path.contains("gameplay"));
+    }
+
+    #[test]
     fn grid_positions_within_torus_bounds() {
         let grid = GridConfig {
             resolution: 15.0,
@@ -704,6 +827,8 @@ mod tests {
             density_noise_octaves: 2,
             jitter: 10.0,
             cosmetic_y_offset: 15.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
         };
         let result = generate_grid_field(
             100.0,
@@ -752,6 +877,8 @@ mod tests {
             density_noise_octaves: 2,
             jitter: 10.0,
             cosmetic_y_offset: 15.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
         };
         let result_a = generate_grid_field(
             100.0,
@@ -788,6 +915,8 @@ mod tests {
             density_noise_octaves: 1,
             jitter: 0.0,
             cosmetic_y_offset: 15.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
         };
         let result = generate_grid_field(
             100.0,

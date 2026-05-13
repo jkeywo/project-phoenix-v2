@@ -15,6 +15,7 @@ pub mod map_config;
 pub mod messages;
 pub mod stations;
 pub mod modifiers;
+pub mod power_system;
 pub mod codec;
 pub mod session;
 pub mod ship_state;

@@ -498,6 +498,62 @@ pub fn shield_status_view(facings: &[ShieldFacingStatus]) -> Vec<ShieldArcView> 
         .collect()
 }
 
+/// Returns the sum of the three power allocation levels.
+pub fn power_total(levels: &(u8, u8, u8)) -> u8 {
+    levels.0 + levels.1 + levels.2
+}
+
+/// Returns `true` when the Power console may send an `IncreasePower` for the
+/// given `console`: not locked, total below 8, and that console below 4.
+pub fn can_increase_power(levels: &(u8, u8, u8), console: &Console, locked: bool) -> bool {
+    if locked || power_total(levels) >= 8 {
+        return false;
+    }
+    match console {
+        Console::Helm => levels.0 < 4,
+        Console::Tactical => levels.1 < 4,
+        Console::Science => levels.2 < 4,
+        _ => false,
+    }
+}
+
+/// Returns `true` when the Power console may send a `DecreasePower` for the
+/// given `console`: not locked and that console above 1.
+pub fn can_decrease_power(levels: &(u8, u8, u8), console: &Console, locked: bool) -> bool {
+    if locked {
+        return false;
+    }
+    match console {
+        Console::Helm => levels.0 > 1,
+        Console::Tactical => levels.1 > 1,
+        Console::Science => levels.2 > 1,
+        _ => false,
+    }
+}
+
+/// Build an `IncreasePower` message for the given console.
+pub fn increase_power_message(console: Console) -> ClientMessage {
+    ClientMessage::IncreasePower { console }
+}
+
+/// Build a `DecreasePower` message for the given console.
+pub fn decrease_power_message(console: Console) -> ClientMessage {
+    ClientMessage::DecreasePower { console }
+}
+
+/// Returns the battery charge value from the `PowerState` payload, or `0.0`
+/// if no payload has been received yet. The returned value is in the range
+/// `[0.0, capacity]` (default capacity is 100.0).
+pub fn battery_percentage(payload: &Option<(u8, u8, u8, f32, bool)>) -> f32 {
+    payload.map_or(0.0, |p| p.3)
+}
+
+/// Returns `true` when the `PowerState` payload indicates the power system is
+/// locked (battery exhausted). Returns `false` when no payload has arrived yet.
+pub fn is_power_locked(payload: &Option<(u8, u8, u8, f32, bool)>) -> bool {
+    payload.map_or(false, |p| p.4)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1735,5 +1791,104 @@ mod tests {
         });
         assert_eq!(s.repair_teams, [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle]);
         assert_eq!(s.current_breakdown, None);
+    }
+
+    // ── Power helper functions ──────────────────────────────────────────
+
+    #[test]
+    fn power_total_sums_three_levels() {
+        assert_eq!(power_total(&(2, 2, 2)), 6);
+        assert_eq!(power_total(&(4, 2, 1)), 7);
+        assert_eq!(power_total(&(4, 4, 4)), 12);
+    }
+
+    #[test]
+    fn can_increase_power_returns_true_when_allowed() {
+        assert!(can_increase_power(&(2, 2, 2), &Console::Helm, false));
+        assert!(can_increase_power(&(2, 2, 2), &Console::Tactical, false));
+        assert!(can_increase_power(&(2, 2, 2), &Console::Science, false));
+    }
+
+    #[test]
+    fn can_increase_power_false_when_locked() {
+        assert!(!can_increase_power(&(2, 2, 2), &Console::Helm, true));
+        assert!(!can_increase_power(&(2, 2, 2), &Console::Tactical, true));
+        assert!(!can_increase_power(&(2, 2, 2), &Console::Science, true));
+    }
+
+    #[test]
+    fn can_increase_power_false_when_console_at_four() {
+        assert!(!can_increase_power(&(4, 1, 1), &Console::Helm, false));
+        assert!(!can_increase_power(&(1, 4, 1), &Console::Tactical, false));
+        assert!(!can_increase_power(&(1, 1, 4), &Console::Science, false));
+    }
+
+    #[test]
+    fn can_increase_power_false_when_total_at_cap() {
+        assert!(!can_increase_power(&(3, 3, 2), &Console::Science, false));
+        assert!(!can_increase_power(&(4, 2, 2), &Console::Helm, false));
+    }
+
+    #[test]
+    fn can_increase_power_false_for_non_power_console() {
+        assert!(!can_increase_power(&(2, 2, 2), &Console::Repair, false));
+        assert!(!can_increase_power(&(2, 2, 2), &Console::CaptainChair, false));
+    }
+
+    #[test]
+    fn can_decrease_power_returns_true_when_allowed() {
+        assert!(can_decrease_power(&(4, 3, 2), &Console::Helm, false));
+        assert!(can_decrease_power(&(2, 3, 2), &Console::Tactical, false));
+        assert!(can_decrease_power(&(2, 2, 3), &Console::Science, false));
+    }
+
+    #[test]
+    fn can_decrease_power_false_when_locked() {
+        assert!(!can_decrease_power(&(4, 2, 2), &Console::Helm, true));
+    }
+
+    #[test]
+    fn can_decrease_power_false_when_console_at_one() {
+        assert!(!can_decrease_power(&(1, 2, 2), &Console::Helm, false));
+        assert!(!can_decrease_power(&(2, 1, 2), &Console::Tactical, false));
+        assert!(!can_decrease_power(&(2, 2, 1), &Console::Science, false));
+    }
+
+    #[test]
+    fn can_decrease_power_false_for_non_power_console() {
+        assert!(!can_decrease_power(&(2, 2, 2), &Console::Repair, false));
+        assert!(!can_decrease_power(&(2, 2, 2), &Console::CaptainChair, false));
+    }
+
+    #[test]
+    fn power_message_builders_produce_correct_messages() {
+        assert_eq!(
+            increase_power_message(Console::Helm),
+            ClientMessage::IncreasePower { console: Console::Helm },
+        );
+        assert_eq!(
+            decrease_power_message(Console::Science),
+            ClientMessage::DecreasePower { console: Console::Science },
+        );
+    }
+
+    #[test]
+    fn battery_percentage_returns_charge_from_payload_or_zero() {
+        let none: Option<(u8, u8, u8, f32, bool)> = None;
+        assert!((battery_percentage(&none) - 0.0).abs() < 1e-4);
+        let payload = Some((2, 2, 2, 75.0, false));
+        assert!((battery_percentage(&payload) - 75.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn is_power_locked_returns_false_when_no_payload() {
+        let none: Option<(u8, u8, u8, f32, bool)> = None;
+        assert!(!is_power_locked(&none));
+    }
+
+    #[test]
+    fn is_power_locked_matches_payload_field() {
+        assert!(is_power_locked(&Some((1, 1, 1, 5.0, true))));
+        assert!(!is_power_locked(&Some((2, 2, 2, 80.0, false))));
     }
 }

@@ -20,7 +20,15 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // Use SwiftShader software rasterizer so wgpu/WebGL2 works in headless CI
+        // without a real GPU. Without this Bevy panics with a wgpu validation error
+        // in Device::create_render_pipeline, killing the RAF loop.
+        launchOptions: {
+          args: ['--use-gl=angle', '--use-angle=swiftshader'],
+        },
+      },
     },
   ],
 

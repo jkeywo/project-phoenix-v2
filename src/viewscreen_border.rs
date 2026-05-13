@@ -1,10 +1,10 @@
 //! Viewscreen border frame.
 //!
-//! This module owns the viewscreen border frame around the 3D scene
-//! (PRD #180). It loads the ten normal-state and ten alert-variant
-//! border PNGs, the HUD font, and the Red Alert vignette WGSL shader
-//! through `AssetServer` at startup, spawns the frame on `GameStarted`,
-//! and despawns it on any transition back to `Lobby`.
+//! This module owns the viewscreen border frame around the 3D scene.
+//! It loads the ten normal-state and ten alert-variant border PNGs,
+//! the HUD font, and the Red Alert vignette WGSL shader through
+//! `AssetServer` at startup, and spawns the frame immediately at
+//! startup (visible in both Lobby and InProgress phases).
 //!
 //! Server-only — gated by the `server` feature in `lib.rs`.
 //!
@@ -26,6 +26,18 @@
 //! `FpsText` (top-right) sit at fixed pixel positions outside the
 //! corner/cap footprint and remain visible.
 //!
+//! ## Bottom cap HUD strip
+//!
+//! Two separate node trees are swapped on phase transition:
+//!
+//! - **Lobby strip** (spawned at startup): CLOCK / PLAYERS / STATUS.
+//!   CLOCK shows the real-world `hh:mm:ss` via `js_sys::Date`.
+//!   PLAYERS shows `connected / max_players` from `SessionManager` and
+//!   `ShipStations`. STATUS shows `AWAITING CREW` when any connected
+//!   player has no console, `READY FOR DEPARTURE` when all do.
+//! - **In-game strip** (spawned on `InProgress`, lobby strip despawned):
+//!   HEADING / HULL / CONDITION driven by `ShipState`.
+//!
 //! ## Red Alert
 //!
 //! When `ShipState.red_alert` flips:
@@ -46,11 +58,14 @@ use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 use bevy::ui::widget::NodeImageMode;
 use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
+#[cfg(target_arch = "wasm32")]
+use js_sys::Date;
 
-use crate::lobby::CurrentPhase;
+use crate::lobby::{CurrentPhase, Sessions};
 use crate::messages::GamePhase;
 use crate::ship_state::ShipState;
 use crate::simulation::ShipHullIntegrity;
+use crate::stations::ShipStations;
 
 // ── Layout constants ─────────────────────────────────────────────────
 //
@@ -210,6 +225,24 @@ enum HudValue {
     Condition,
 }
 
+/// Marker for the root node of the in-game HUD strip.
+/// Despawned when transitioning back to Lobby.
+#[derive(Component)]
+struct InGameHudStrip;
+
+/// Marker for the root node of the lobby HUD strip.
+/// Despawned when transitioning to InProgress.
+#[derive(Component)]
+struct LobbyHudStrip;
+
+/// Identifies which lobby HUD value cell a `Text` node is.
+#[derive(Component, Copy, Clone, Debug, PartialEq, Eq)]
+enum LobbyHudValue {
+    Clock,
+    Players,
+    Status,
+}
+
 // ── Red Alert vignette material ──────────────────────────────────────
 
 /// `UiMaterial` driving the inset radial-gradient red vignette behind
@@ -238,14 +271,15 @@ pub struct ViewscreenBorderPlugin;
 impl Plugin for ViewscreenBorderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiMaterialPlugin::<RedAlertVignetteMaterial>::default())
-            .add_systems(Startup, load_viewscreen_assets)
+            .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup).chain())
             .add_systems(
                 Update,
                 (
-                    sync_border_to_phase,
+                    sync_hud_strips_to_phase,
                     swap_border_textures,
                     drive_vignette_intensity,
                     update_hud,
+                    update_lobby_hud,
                 ),
             );
     }
@@ -281,37 +315,65 @@ fn load_viewscreen_assets(mut commands: Commands, asset_server: Res<AssetServer>
     commands.insert_resource(assets);
 }
 
-/// Spawn the border root on transition into `InProgress`; despawn it on
-/// any transition back to `Lobby`.
+/// Spawns the border frame and lobby HUD strip at app startup.
+/// The frame is always visible; the lobby strip is replaced by the in-game
+/// strip when the phase transitions to `InProgress`.
+fn spawn_border_on_startup(
+    mut commands: Commands,
+    assets: Res<ViewscreenAssets>,
+    mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
+) {
+    let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0 });
+    commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
+    let root = spawn_border_frame(&mut commands, &assets, vignette);
+    // Attach the initial lobby HUD strip as a child of the border root.
+    let strip = spawn_lobby_hud_strip(&mut commands, &assets);
+    commands.entity(root).add_child(strip);
+}
+
+/// Swaps HUD strips on phase transition.
 ///
-/// Idempotent on phase change — re-entering `InProgress` while the root
-/// already exists is a no-op (defensive; current code never re-enters).
-fn sync_border_to_phase(
+/// - `Lobby → InProgress`: despawn lobby strip, spawn in-game strip.
+/// - `InProgress → Lobby`: despawn in-game strip, spawn lobby strip.
+///
+/// Idempotent — re-entering a phase while the correct strip already
+/// exists is a no-op.
+fn sync_hud_strips_to_phase(
     mut commands: Commands,
     phase: Res<CurrentPhase>,
     assets: Option<Res<ViewscreenAssets>>,
-    mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
-    existing: Query<Entity, With<ViewscreenBorderRoot>>,
+    border_root: Query<Entity, With<ViewscreenBorderRoot>>,
+    lobby_strip: Query<Entity, With<LobbyHudStrip>>,
+    ingame_strip: Query<Entity, With<InGameHudStrip>>,
 ) {
     if !phase.is_changed() {
         return;
     }
+    let Some(assets) = assets else { return };
+    let Ok(root) = border_root.single() else { return };
 
     match phase.0 {
         GamePhase::InProgress => {
-            let Some(assets) = assets else { return };
-            if !existing.is_empty() {
-                return;
+            // Despawn lobby strip.
+            for e in lobby_strip.iter() {
+                commands.entity(e).despawn();
             }
-            let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0 });
-            commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
-            spawn_border_frame(&mut commands, &assets, vignette);
+            // Spawn in-game strip if not already present.
+            if ingame_strip.is_empty() {
+                let strip = spawn_ingame_hud_strip(&mut commands, &assets);
+                commands.entity(root).add_child(strip);
+            }
         }
         GamePhase::Lobby => {
-            for entity in existing.iter() {
-                commands.entity(entity).despawn();
+            // Despawn in-game strip.
+            for e in ingame_strip.iter() {
+                commands.entity(e).despawn();
             }
-            commands.remove_resource::<VignetteMaterialHandle>();
+            // Spawn lobby strip if not already present.
+            if lobby_strip.is_empty() {
+                let strip = spawn_lobby_hud_strip(&mut commands, &assets);
+                commands.entity(root).add_child(strip);
+            }
         }
     }
 }
@@ -426,13 +488,81 @@ pub fn yaw_to_compass_bearing(yaw_radians: f32) -> u32 {
     (degrees.round() as u32) % 360
 }
 
-// ── Spawning ─────────────────────────────────────────────────────────
+/// Per-frame system: update lobby HUD values (CLOCK / PLAYERS / STATUS).
+/// Reads wall-clock time via `js_sys::Date`, player counts from
+/// `Sessions` + `ShipStations`.
+fn update_lobby_hud(
+    sessions: Option<Res<Sessions>>,
+    ship_stations: Option<Res<ShipStations>>,
+    mut values: Query<(&LobbyHudValue, &mut Text)>,
+) {
+    if values.is_empty() {
+        return;
+    }
+
+    // ── Clock ────────────────────────────────────────────────────────
+    #[cfg(target_arch = "wasm32")]
+    let clock_str = {
+        let date = Date::new_0();
+        format!(
+            "{:02}:{:02}:{:02}",
+            date.get_hours() as u32,
+            date.get_minutes() as u32,
+            date.get_seconds() as u32,
+        )
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let clock_str = "--:--:--".to_string();
+
+    // ── Players ──────────────────────────────────────────────────────
+    let (connected, max) = if let (Some(sessions), Some(stations)) = (&sessions, &ship_stations) {
+        let count = sessions
+            .0
+            .players()
+            .iter()
+            .filter(|p| p.connected && !p.consoles.is_empty())
+            .count() as u32;
+        (count, stations.max_players)
+    } else {
+        (0, 0)
+    };
+    let players_str = format!("{}/{}", connected, max);
+
+    // ── Status ───────────────────────────────────────────────────────
+    let status_str = if let Some(sessions) = &sessions {
+        let all_have_console = sessions
+            .0
+            .players()
+            .iter()
+            .filter(|p| p.connected)
+            .all(|p| !p.consoles.is_empty());
+        let any_connected = sessions.0.players().iter().any(|p| p.connected);
+        if any_connected && all_have_console {
+            "READY FOR DEPARTURE"
+        } else {
+            "AWAITING CREW"
+        }
+    } else {
+        "AWAITING CREW"
+    };
+
+    for (kind, mut text) in values.iter_mut() {
+        let new_value = match kind {
+            LobbyHudValue::Clock => clock_str.clone(),
+            LobbyHudValue::Players => players_str.clone(),
+            LobbyHudValue::Status => status_str.to_string(),
+        };
+        if text.0 != new_value {
+            text.0 = new_value;
+        }
+    }
+}
 
 fn spawn_border_frame(
     commands: &mut Commands,
     assets: &ViewscreenAssets,
     vignette: Handle<RedAlertVignetteMaterial>,
-) {
+) -> Entity {
     commands
         .spawn((
             ViewscreenBorderRoot,
@@ -716,31 +846,73 @@ fn spawn_border_frame(
                     ));
                 });
 
-            // ── Bottom cap status strip (HEADING / HULL / CONDITION) ─
-            parent
-                .spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        bottom: Val::Px(0.0),
-                        left: Val::Percent(50.0),
-                        width: Val::Px(CAP_BOTTOM_W),
-                        height: Val::Px(CAP_H),
-                        margin: UiRect {
-                            left: Val::Px(-CAP_BOTTOM_W / 2.0),
-                            ..default()
-                        },
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::SpaceAround,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                ))
-                .with_children(|strip| {
-                    spawn_status_column(strip, assets, "HEADING", "000", HudValue::Heading);
-                    spawn_status_column(strip, assets, "HULL", "100", HudValue::Hull);
-                    spawn_status_column(strip, assets, "CONDITION", "NOMINAL", HudValue::Condition);
-                });
-        });
+            // The bottom cap HUD strip is spawned separately as either
+            // a lobby strip or an in-game strip, and swapped on phase
+            // transition.  The initial lobby strip is added after the
+            // border frame is spawned (see `spawn_border_on_startup`).
+        })
+        .id()
+}
+
+/// Spawn the lobby HUD strip (CLOCK / PLAYERS / STATUS) anchored to the
+/// bottom cap position. Returns the entity so it can be attached as a
+/// child of the border root.
+fn spawn_lobby_hud_strip(commands: &mut Commands, assets: &ViewscreenAssets) -> Entity {
+    commands
+        .spawn((
+            LobbyHudStrip,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(0.0),
+                left: Val::Percent(50.0),
+                width: Val::Px(CAP_BOTTOM_W),
+                height: Val::Px(CAP_H),
+                margin: UiRect {
+                    left: Val::Px(-CAP_BOTTOM_W / 2.0),
+                    ..default()
+                },
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceAround,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+        ))
+        .with_children(|strip| {
+            spawn_lobby_column(strip, assets, "CLOCK", "--:--:--", LobbyHudValue::Clock);
+            spawn_lobby_column(strip, assets, "PLAYERS", "0/0", LobbyHudValue::Players);
+            spawn_lobby_column(strip, assets, "STATUS", "AWAITING CREW", LobbyHudValue::Status);
+        })
+        .id()
+}
+
+/// Spawn the in-game HUD strip (HEADING / HULL / CONDITION). Returns the
+/// entity so it can be attached as a child of the border root.
+fn spawn_ingame_hud_strip(commands: &mut Commands, assets: &ViewscreenAssets) -> Entity {
+    commands
+        .spawn((
+            InGameHudStrip,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(0.0),
+                left: Val::Percent(50.0),
+                width: Val::Px(CAP_BOTTOM_W),
+                height: Val::Px(CAP_H),
+                margin: UiRect {
+                    left: Val::Px(-CAP_BOTTOM_W / 2.0),
+                    ..default()
+                },
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceAround,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+        ))
+        .with_children(|strip| {
+            spawn_status_column(strip, assets, "HEADING", "000", HudValue::Heading);
+            spawn_status_column(strip, assets, "HULL", "100", HudValue::Hull);
+            spawn_status_column(strip, assets, "CONDITION", "NOMINAL", HudValue::Condition);
+        })
+        .id()
 }
 
 /// Build one HEADING/HULL/CONDITION column inside the bottom-cap strip:
@@ -751,6 +923,44 @@ fn spawn_status_column(
     label: &str,
     initial_value: &str,
     value_kind: HudValue,
+) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
+        .with_children(|col| {
+            col.spawn((
+                Text::new(label),
+                TextFont {
+                    font: assets.font_display.clone(),
+                    font_size: STATUS_LABEL_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(COLOR_NEUTRAL_LABEL),
+            ));
+            col.spawn((
+                value_kind,
+                Text::new(initial_value),
+                TextFont {
+                    font: assets.font_mono.clone(),
+                    font_size: STATUS_VALUE_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(COLOR_SIGNAL_CYAN),
+            ));
+        });
+}
+
+/// Build one CLOCK/PLAYERS/STATUS column inside the lobby bottom-cap strip.
+fn spawn_lobby_column(
+    parent: &mut ChildSpawnerCommands,
+    assets: &ViewscreenAssets,
+    label: &str,
+    initial_value: &str,
+    value_kind: LobbyHudValue,
 ) {
     parent
         .spawn(Node {

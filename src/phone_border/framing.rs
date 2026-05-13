@@ -1,8 +1,8 @@
 //! Phone bezel frame — corners, edges, vignette, status banner and orientation.
 //!
-//! This module owns the phone bezel frame that wraps console panels during the
-//! InProgress phase. It mirrors the server-side `ViewscreenBorderPlugin` but
-//! for the client WASM app (phone HTML). The bezel consists of:
+//! This module owns the phone bezel frame that wraps console panels. It mirrors
+//! the server-side `ViewscreenBorderPlugin` but for the client WASM app (phone
+//! HTML). The bezel is always visible (both Lobby and InProgress). It consists of:
 //!
 //! - 4 corner sprites (top-left, top-right, bottom-left, bottom-right)
 //! - 4 edge sprites (top, bottom, left, right) using `NodeImageMode::Tiled`
@@ -11,8 +11,6 @@
 //! - A "RED ALERT" status banner at the top centre during Red Alert
 //! - A `DeviceOrientation` resource that auto-detects portrait/landscape
 //!
-//! During the Lobby phase the border is not visible. On transition to
-//! InProgress the bezel root is spawned; on return to Lobby it is despawned.
 //! When Red Alert is active the bezel textures swap to alert variants and
 //! the vignette pulses.
 
@@ -22,7 +20,6 @@ use bevy::shader::ShaderRef;
 use bevy::ui::widget::NodeImageMode;
 use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 
-use crate::client_lobby::LobbyState;
 use crate::client_sim::ClientSimState;
 
 // ── Layout constants ─────────────────────────────────────────────────
@@ -153,19 +150,18 @@ struct AlertBannerText;
 // ── Plugin ───────────────────────────────────────────────────────────
 
 /// Loads phone bezel assets, registers the Red Alert vignette material,
-/// and renders the bezel frame during the InProgress phase.
+/// and renders the bezel frame. The bezel is always visible.
 pub struct PhoneBorderPlugin;
 
 impl Plugin for PhoneBorderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiMaterialPlugin::<RedAlertVignetteMaterial>::default())
             .init_resource::<DeviceOrientation>()
-            .add_systems(Startup, load_phone_assets)
+            .add_systems(Startup, (load_phone_assets, spawn_bezel_on_startup).chain())
             .add_systems(
                 Update,
                 (
                     detect_orientation,
-                    sync_border_to_phase,
                     reparent_panels_into_bezel,
                     swap_bezel_textures,
                     drive_vignette_intensity,
@@ -222,41 +218,15 @@ fn detect_orientation(
     }
 }
 
-/// Spawn the bezel root on transition into `InProgress`; hide on
-/// transition back to `Lobby`. Uses visibility toggling instead of
-/// spawn/despawn so that console panels (reparented as children of the
-/// bezel content area) are not recursively despawned.
-fn sync_border_to_phase(
+/// Spawn the bezel frame at app startup. The bezel is always visible.
+fn spawn_bezel_on_startup(
     mut commands: Commands,
-    lobby: Res<LobbyState>,
-    assets: Option<Res<PhoneAssets>>,
+    assets: Res<PhoneAssets>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
-    mut bezel_vis: Query<&mut Visibility, With<PhoneBorderRoot>>,
 ) {
-    if !lobby.is_changed() {
-        return;
-    }
-
-    match lobby.phase {
-        crate::messages::GamePhase::InProgress => {
-            if let Ok(mut vis) = bezel_vis.single_mut() {
-                // Bezel already exists — just show it.
-                *vis = Visibility::Visible;
-                return;
-            }
-            // First time entering InProgress: spawn the bezel.
-            let Some(assets) = assets else { return };
-            let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0 });
-            commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
-            spawn_bezel_frame(&mut commands, &assets, vignette);
-        }
-        crate::messages::GamePhase::Lobby => {
-            if let Ok(mut vis) = bezel_vis.single_mut() {
-                *vis = Visibility::Hidden;
-            }
-            commands.remove_resource::<VignetteMaterialHandle>();
-        }
-    }
+    let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0 });
+    commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
+    spawn_bezel_frame(&mut commands, &assets, vignette);
 }
 
 /// Reparent existing console panel root entities into the bezel content

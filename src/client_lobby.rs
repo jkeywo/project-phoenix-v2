@@ -99,7 +99,9 @@ impl LobbyState {
             | ServerMessage::TorpedoDestroyed { .. }
             | ServerMessage::ModifierAdded { .. }
             | ServerMessage::ModifierRemoved { .. }
-            | ServerMessage::AsteroidSpawned { .. } => {
+            | ServerMessage::AsteroidSpawned { .. }
+            | ServerMessage::ShowRepairIcon { .. }
+            | ServerMessage::ClearRepairIcon => {
                 // Not relevant to the lobby model.
             }
         }

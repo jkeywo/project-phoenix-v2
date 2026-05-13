@@ -575,6 +575,22 @@ mod tests {
     }
 
     #[test]
+    fn server_show_repair_icon_round_trips() {
+        for shape in &[Shape::Square, Shape::Triangle, Shape::Circle] {
+            let msg = ServerMessage::ShowRepairIcon { shape: *shape };
+            assert_server_roundtrip(&JsonCodec, msg.clone());
+            assert_server_roundtrip(&PrettyJsonCodec, msg);
+        }
+    }
+
+    #[test]
+    fn server_clear_repair_icon_round_trips() {
+        let msg = ServerMessage::ClearRepairIcon;
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn server_modifier_added_console_source_round_trips() {
         let msg = ServerMessage::ModifierAdded {
             source: crate::messages::ModifierSource::Console(crate::messages::Console::Science),

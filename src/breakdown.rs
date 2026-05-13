@@ -2,7 +2,7 @@ use crate::messages::{Console, Shape};
 use rand::Rng;
 
 /// All consoles that can receive a breakdown assignment.
-const ALL_CONSOLES: [Console; 5] = [
+pub const ALL_CONSOLES: [Console; 5] = [
     Console::CaptainChair,
     Console::Helm,
     Console::Tactical,
@@ -57,6 +57,11 @@ impl BreakdownQueue {
     /// The current authorized repair target — the front of the queue.
     pub fn front(&self) -> Option<&BreakdownEntry> {
         self.queue.front()
+    }
+
+    /// Iterate over all entries front-to-back.
+    pub fn entries(&self) -> impl Iterator<Item = &BreakdownEntry> {
+        self.queue.iter()
     }
 
     /// Remove the front entry (called after a successful repair).

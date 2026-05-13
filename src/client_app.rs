@@ -21,7 +21,7 @@ use crate::client_sim::{
     message_for_direction_press, on_screen_message, red_alert_toggle_message,
     fire_phaser_message, set_phaser_mode_message, fire_torpedo_message, ClientSimState,
 };
-use crate::messages::{ClientMessage, Console, GamePhase, PhaserMode, ServerMessage, ViewDirection};
+use crate::messages::{ClientMessage, Console, GamePhase, PhaserMode, ServerMessage, Shape, ViewDirection};
 
 // ── Events ─────────────────────────────────────────────────────────
 
@@ -110,6 +110,11 @@ pub struct RepairButton;
 /// Marks the text label inside the Repair button (used to refresh cooldown text).
 #[derive(Component)]
 pub struct RepairButtonLabel;
+
+/// Marks a text node that displays the current repair icon shape (or clearance).
+/// Spawned on any panel that should show it (Helm, Tactical, Science at minimum).
+#[derive(Component)]
+pub struct RepairIconLabel;
 
 /// Marks the root of the science console UI; shown only when the local
 /// player holds Science and the phase is InProgress.
@@ -216,6 +221,7 @@ impl Plugin for ClientAppPlugin {
                         handle_on_screen_button_press,
                         handle_repair_button_press,
                         refresh_repair_button,
+                        refresh_repair_icon,
                         draw_helm_radar,
                         toggle_science_panel_visibility,
                         toggle_weapons_panel_visibility,
@@ -662,8 +668,10 @@ fn setup_science_ui(mut commands: Commands) {
             top:    Val::Px(0.0),
             right:  Val::Px(0.0),
             bottom: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
+            row_gap: Val::Px(8.0),
             ..default()
         },
         Visibility::Hidden,
@@ -673,6 +681,14 @@ fn setup_science_ui(mut commands: Commands) {
             Text::new("Science Console"),
             TextFont { font_size: 32.0, ..default() },
             TextColor(Color::srgb(0.8, 0.8, 1.0)),
+        ));
+        // Repair icon label — shows when a breakdown or decoy icon
+        // targets this console.
+        panel.spawn((
+            RepairIconLabel,
+            Text::new(""),
+            TextFont { font_size: 14.0, ..default() },
+            TextColor(Color::srgb(0.8, 0.5, 0.2)),
         ));
     });
 }
@@ -867,6 +883,25 @@ fn draw_helm_radar(
     gizmos.line_2d(nose, left,  RADAR_SHIP_COLOR);
     gizmos.line_2d(left, right, RADAR_SHIP_COLOR);
     gizmos.line_2d(right, nose, RADAR_SHIP_COLOR);
+}
+
+/// Update repair icon label on every frame where `ClientSimState.repair_icon` changes.
+fn refresh_repair_icon(
+    sim: Res<ClientSimState>,
+    mut labels: Query<&mut Text, With<RepairIconLabel>>,
+) {
+    if !sim.is_changed() {
+        return;
+    }
+    let text = match sim.repair_icon {
+        Some(Shape::Square) => "■ REPAIR",
+        Some(Shape::Triangle) => "▲ REPAIR",
+        Some(Shape::Circle) => "● REPAIR",
+        None => "",
+    };
+    for mut label in labels.iter_mut() {
+        **label = text.to_string();
+    }
 }
 
 fn handle_repair_button_press(
@@ -1080,6 +1115,15 @@ fn setup_weapons_ui(mut commands: Commands) {
                         TextColor(Color::srgb(1.0, 0.5, 0.2)),
                     ));
                 });
+
+            // Repair icon label — shows when a breakdown or decoy icon
+            // targets this console.
+            panel.spawn((
+                RepairIconLabel,
+                Text::new(""),
+                TextFont { font_size: 14.0, ..default() },
+                TextColor(Color::srgb(0.8, 0.5, 0.2)),
+            ));
         });
 }
 

@@ -200,6 +200,10 @@ pub struct ClientSimState {
     /// Active modifier table: maps `(source, slot)` → bonus value.
     /// Updated by `ModifierAdded` and `ModifierRemoved` messages. Cleared on `Welcome`.
     pub modifiers: HashMap<(ModifierSource, ModifierSlot), f32>,
+    /// The shape of the repair icon currently shown on this player's console.
+    /// `None` means no icon is shown (no breakdown involving this console and
+    /// no decoy). Updated by `ShowRepairIcon` / `ClearRepairIcon` messages.
+    pub repair_icon: Option<Shape>,
 }
 
 impl Default for ClientSimState {
@@ -229,6 +233,7 @@ impl Default for ClientSimState {
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
+            repair_icon: None,
         }
     }
 }
@@ -296,6 +301,12 @@ impl ClientSimState {
             }
             ServerMessage::ModifierRemoved { source, slot } => {
                 self.modifiers.remove(&(source.clone(), slot.clone()));
+            }
+            ServerMessage::ShowRepairIcon { shape } => {
+                self.repair_icon = Some(*shape);
+            }
+            ServerMessage::ClearRepairIcon => {
+                self.repair_icon = None;
             }
             _ => {}
         }
@@ -557,6 +568,7 @@ mod tests {
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
+            repair_icon: None,
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
@@ -607,6 +619,7 @@ mod tests {
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
+            repair_icon: None,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -647,6 +660,7 @@ mod tests {
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
+            repair_icon: None,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {

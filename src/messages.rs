@@ -122,7 +122,7 @@ mod view_mode_tests {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Console {
     CaptainChair,
     Helm,
@@ -321,4 +321,9 @@ pub enum ServerMessage {
         max_hp: i32,
         current_hp: i32,
     },
+    /// Sent to a specific console holder to show a repair icon with the
+    /// given shape. Indistinguishable from a decoy icon on the wire.
+    ShowRepairIcon { shape: Shape },
+    /// Sent to a specific console holder to clear their repair icon.
+    ClearRepairIcon,
 }

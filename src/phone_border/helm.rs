@@ -12,7 +12,7 @@
 use bevy::prelude::*;
 
 use crate::client_app::{
-    HelmPanel, OnScreenButton, RepairButton, RepairButtonLabel,
+    HelmPanel, OnScreenButton, RepairButton, RepairButtonLabel, RepairIconLabel,
     OutboundClientMessage,
 };
 use crate::client_helm::{HelmJoystickState, drag, release};
@@ -709,6 +709,19 @@ fn spawn_phone_helm_ui(
                                 TextColor(Color::srgb(0.5, 1.0, 0.5)),
                             ));
                         });
+
+                        // Repair icon label — shows ■/▲/● when a breakdown or
+                        // decoy icon is active on this console.
+                        row.spawn((
+                            RepairIconLabel,
+                            Text::new(""),
+                            TextFont {
+                                font: assets.font_display.clone(),
+                                font_size: 12.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.8, 0.5, 0.2)),
+                        ));
                     });
                 });
         });

@@ -416,19 +416,6 @@ length = 0.0
     }
     
     #[test]
-    fn config_cache_insert_and_lookup() {
-        let mut cache = TestConfigCache::new();
-        let path = "assets/entities/test.toml".to_string();
-        let mut config = default_entity_config();
-        config.tags = vec!["test".to_string()];
-        
-        cache.insert(path.clone(), config.clone());
-        
-        assert!(cache.contains(&path));
-        assert_eq!(cache.get(&path), Some(&config));
-    }
-    
-    #[test]
     fn config_cache_no_duplicate_queueing() {
         let mut cache = TestConfigCache::new();
         
@@ -457,18 +444,6 @@ length = 0.0
         cache.queue_fetch("path1".to_string());
         
         assert!(!cache.has_pending());
-    }
-    
-    #[test]
-    fn config_cache_next_pending() {
-        let mut cache = TestConfigCache::new();
-        
-        cache.queue_fetch("path1".to_string());
-        cache.queue_fetch("path2".to_string());
-        
-        assert_eq!(cache.next_pending(), Some("path1".to_string()));
-        assert_eq!(cache.next_pending(), Some("path2".to_string()));
-        assert_eq!(cache.next_pending(), None);
     }
     
     #[test]

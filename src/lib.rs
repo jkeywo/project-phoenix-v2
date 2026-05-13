@@ -14,6 +14,7 @@ pub mod flag_kind;
 pub mod config_cache;
 pub mod damage;
 pub mod entity_config;
+pub mod entity_override;
 pub mod map_config;
 pub mod messages;
 pub mod stations;

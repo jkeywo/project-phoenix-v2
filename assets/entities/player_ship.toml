@@ -24,11 +24,20 @@ phaser_damage = 10
 phaser_cooldown = 0.5
 
 [weapons_console]
+power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 beam_range = 40.0
 beam_damage_per_sec = 5.0
 beam_duration_secs = 6.0
 cooldown_secs = 6.0
 beam_color = [1.0, 0.4, 0.1, 1.0]
+
+[science_console]
+power_multipliers = [-0.5, 0.0, 0.25, 0.5]
+
+[power]
+capacity = 100.0
+rates = [6.0, 5.0, 4.0, 2.0, -2.0, -6.0]
+emergency_threshold = 25.0
 
 [console]
 captain_console = { enabled = true }

@@ -571,6 +571,21 @@ mod tests {
     }
 
     #[test]
+    fn server_asteroid_spawned_round_trips() {
+        let msg = ServerMessage::AsteroidSpawned {
+            uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            x: 100.0,
+            y: 0.0,
+            z: -50.0,
+            config_path: "assets/entities/asteroid_small.toml".into(),
+            max_hp: 30,
+            current_hp: 30,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn server_modifier_added_console_source_round_trips() {
         let msg = ServerMessage::ModifierAdded {
             source: crate::messages::ModifierSource::Console(crate::messages::Console::Science),

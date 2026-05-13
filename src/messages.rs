@@ -303,4 +303,15 @@ pub enum ServerMessage {
     ModifierAdded { source: ModifierSource, slot: ModifierSlot, bonus: f32 },
     /// Broadcast when a modifier is removed from the ship.
     ModifierRemoved { source: ModifierSource, slot: ModifierSlot },
+    /// Broadcast when an asteroid is spawned by the window lifecycle system.
+    /// Sent to all players so the client can track the new entity.
+    AsteroidSpawned {
+        uuid: String,
+        x: f32,
+        y: f32,
+        z: f32,
+        config_path: String,
+        max_hp: i32,
+        current_hp: i32,
+    },
 }

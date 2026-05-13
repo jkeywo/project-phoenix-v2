@@ -929,7 +929,6 @@ fn tick_active_beam(
     mut world: ResMut<WorldResource>,
     mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut AsteroidDamage)>,
     mut commands: Commands,
-    mut destroyed_asteroids: ResMut<crate::asteroid_lifecycle::DestroyedAsteroids>,
     phase: Res<CurrentPhase>,
     modifiers: Res<ShipModifiers>,
 ) {
@@ -990,36 +989,31 @@ fn tick_active_beam(
                     destroyed = true;
                     commands.entity(entity).despawn();
                 }
-                break;
             }
         }
 
- if destroyed {
- // Add to destroyed set to prevent respawning
- destroyed_asteroids.0.insert(target_uuid.clone());
+        if destroyed {
+            // Remove from world data.
+            world.0.asteroids.retain(|a| a.uuid != target_uuid);
 
- // Remove from world data.
- world.0.asteroids.retain(|a| a.uuid != target_uuid);
+            // Fire VFX event with the asteroid's last known position so the
+            // renderer can play the destruction ripple.
+            vfx_events.write(AsteroidDestroyedVfx { x: info.x, z: info.z });
 
- // Fire VFX event with the asteroid's last known position so the
- // renderer can play the destruction ripple. `info` holds the position
- // captured before the retain() call above.
- vfx_events.write(AsteroidDestroyedVfx { x: info.x, z: info.z });
+            beam.target_uuid = None;
+            beam.remaining_secs = 0.0;
+            beam.damage_accumulator = 0.0;
+            cooldown.start();
 
- beam.target_uuid = None;
- beam.remaining_secs = 0.0;
- beam.damage_accumulator = 0.0;
- cooldown.start();
-
- writer.write(OutboundMessage {
- target: Target::All,
- msg: ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() },
- });
- writer.write(OutboundMessage {
- target: Target::All,
- msg: ServerMessage::BeamEnded { target_uuid },
- });
- return;
+            writer.write(OutboundMessage {
+                target: Target::All,
+                msg: ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() },
+            });
+            writer.write(OutboundMessage {
+                target: Target::All,
+                msg: ServerMessage::BeamEnded { target_uuid },
+            });
+            return;
         }
     }
 
@@ -1567,7 +1561,6 @@ fn test_app() -> App {
         .init_resource::<ActiveRepair>()
         .init_resource::<RepairPenalties>()
         .init_resource::<BreakdownQueueResource>()
-        .init_resource::<crate::asteroid_lifecycle::DestroyedAsteroids>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
         .insert_resource(SimBroadcastTimer(Timer::new(

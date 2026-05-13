@@ -98,7 +98,8 @@ impl LobbyState {
             | ServerMessage::TorpedoLaunched { .. }
             | ServerMessage::TorpedoDestroyed { .. }
             | ServerMessage::ModifierAdded { .. }
-            | ServerMessage::ModifierRemoved { .. } => {
+            | ServerMessage::ModifierRemoved { .. }
+            | ServerMessage::AsteroidSpawned { .. } => {
                 // Not relevant to the lobby model.
             }
         }

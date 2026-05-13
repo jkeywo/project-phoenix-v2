@@ -24,7 +24,7 @@ async function startGameWithEngineering(context: BrowserContext) {
   const captain = await createTestClient(context, hostId, { name: 'Cap' });
   const engineer = await createTestClient(context, hostId, { name: 'Eng' });
 
-  // 2P layout: Helm (CaptainChair+Helm) + Tactical (Tactical+Engineering)
+  // 2P layout: Helm (CaptainChair+Helm) + Tactical (Tactical+Repair)
   await captain.send('SelectStation', { station: 'Helm' });
   await waitForStation(captain);
 

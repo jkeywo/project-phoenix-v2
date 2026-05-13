@@ -115,7 +115,7 @@ test('captain starts game — both clients receive GameStarted', async ({ contex
   const clientA = await createTestClient(context, hostId, { name: 'Helm' });
   const clientB = await createTestClient(context, hostId, { name: 'Tactical' });
 
-  // 2P layout: Helm (CaptainChair+Helm) + Tactical (Tactical+Engineering)
+  // 2P layout: Helm (CaptainChair+Helm) + Tactical (Tactical+Repair)
   await clientA.send('SelectStation', { station: 'Helm' });
   await waitForStation(clientA);
 

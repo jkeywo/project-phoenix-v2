@@ -145,7 +145,7 @@ test('first connector when full becomes spectator', async ({ context }) => {
   await c2.send('SelectStation', { station: 'Tactical' });
   await c2.waitForMessage('StationAssigned', 5_000);
 
-  await c3.send('SelectStation', { station: 'Engineering' });
+  await c3.send('SelectStation', { station: 'Repair' });
   await c3.waitForMessage('StationAssigned', 5_000);
 
   // 4th player joins — at max_players (3), should be spectator

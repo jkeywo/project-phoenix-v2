@@ -57,8 +57,9 @@ test('3 players can each claim a station at 3P layout', async ({ context }) => {
   await selectAndWait(c2, 'Tactical');
 
   const c3 = await createTestClient(context, hostId, { name: 'P3' });
-  // advance_on_join moved c1→Helm, c2→Tactical at 3P. c3 selects Engineering.
-  await selectAndWait(c3, 'Engineering');
+  // advance_on_join moved c1→Helm, c2→Tactical at 3P. c3 selects Repair.
+
+  await selectAndWait(c3, 'Repair');
 
   const a1 = await lastAssignment(c1, c1.token) as any;
   const a2 = await lastAssignment(c2, c2.token) as any;
@@ -67,8 +68,8 @@ test('3 players can each claim a station at 3P layout', async ({ context }) => {
   expect(a1.data.station).toBe('Helm');
   expect(a1.data.consoles).toContain('CaptainChair');
   expect(a2.data.station).toBe('Tactical');
-  expect(a3.data.station).toBe('Engineering');
-  expect(a3.data.consoles).toContain('Engineering');
+  expect(a3.data.station).toBe('Repair');
+  expect(a3.data.consoles).toContain('Repair');
 
   await c1.close();
   await c2.close();
@@ -85,7 +86,7 @@ test('3→2 player leave: remaining players keep their stations', async ({ conte
   await selectAndWait(c2, 'Tactical');
 
   const c3 = await createTestClient(context, hostId, { name: 'P3' });
-  await selectAndWait(c3, 'Engineering');
+  await selectAndWait(c3, 'Repair');
 
   // c3 disconnects — 3P→2P leave cascade
   await c3.close();
@@ -115,7 +116,7 @@ test('leave at max_players allows spectator to claim vacated station', async ({ 
   await selectAndWait(c2, 'Tactical');
 
   const c3 = await createTestClient(context, hostId, { name: 'P3' });
-  await selectAndWait(c3, 'Engineering');
+  await selectAndWait(c3, 'Repair');
 
   // 4th player joins as spectator (at max_players)
   const c4 = await createTestClient(context, hostId, { name: 'Spectator' });
@@ -129,14 +130,14 @@ test('leave at max_players allows spectator to claim vacated station', async ({ 
     { timeout: 5_000 },
   );
 
-  // c3 disconnects (held Engineering) → consoles cleared. c4 can claim it.
+  // c3 disconnects (held Repair) → consoles cleared. c4 can claim it.
   await c3.close();
 
   // Wait for cascade to settle
   await c4.page.waitForTimeout(500);
 
-  // c4 claims Engineering (vacated by c3's disconnect)
-  await c4.send('SelectStation', { station: 'Engineering' });
+  // c4 claims Repair (vacated by c3's disconnect)
+  await c4.send('SelectStation', { station: 'Repair' });
   await c4.page.waitForFunction(
     (token) => ((window as any).__messages as any[]).some(
       (m: any) => m.type === 'StationAssigned' && m.data.token === token && m.data.station !== null

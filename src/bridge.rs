@@ -89,7 +89,8 @@ pub fn wasm_init() {
     .add_plugins(SimulationPlugin)
     .add_plugins(RendererPlugin)
     .add_plugins(ViewscreenBorderPlugin)
-    .add_systems(Update, (drain_inbound, drain_disconnects, flush_outbound));
+    .add_systems(PreUpdate, (drain_inbound, drain_disconnects))
+    .add_systems(PostUpdate, flush_outbound);
 
     // Insert the validated ShipStations resource if it was pre-validated.
     SHIP_STATIONS.with(|slot| {

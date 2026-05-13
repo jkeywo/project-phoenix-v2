@@ -133,9 +133,14 @@ fn handle_disconnect(
     mut outbound: MessageWriter<OutboundMessage>,
     mut sessions: ResMut<Sessions>,
     mut phase: ResMut<CurrentPhase>,
+    ship_stations: Option<Res<ShipStations>>,
 ) {
     for ev in events.read() {
-        let result = lobby_handler::process_disconnect(&ev.token, &mut sessions.0);
+        let result = if let Some(stations) = ship_stations.as_ref() {
+            lobby_handler::process_disconnect_with_stations(&ev.token, &mut sessions.0, stations)
+        } else {
+            lobby_handler::process_disconnect(&ev.token, &mut sessions.0)
+        };
         apply_result(result, &mut outbound, &mut phase);
     }
 }

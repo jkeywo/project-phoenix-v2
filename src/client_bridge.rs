@@ -108,6 +108,7 @@ pub fn wasm_client_init() {
         }))
         .add_plugins(ClientAppPlugin)
         .add_plugins(PhoneBorderPlugin)
+        .add_plugins(crate::phone_border::HelmPanelPlugin)
         .add_plugins(ClientRendererPlugin)
         .add_systems(Update, (
             forward_local_token,

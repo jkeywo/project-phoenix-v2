@@ -12,7 +12,7 @@
 
 use bevy::prelude::*;
 
-use crate::client_helm::{drag, release, tick, HelmJoystickState};
+use crate::client_helm::{release, tick, HelmJoystickState};
 use crate::client_lobby::{
     engage_message, message_for_slot_click, reconcile_active_console, ConsoleSlot, LobbyState,
     LobbyView, LocalPlayerToken, ActiveConsole,
@@ -85,35 +85,31 @@ struct RedAlertLabel;
 #[derive(Component)]
 pub struct HelmPanel;
 
-/// Marks the circular pad that captures pointer drag events.
+/// Marks the radar panel container. Retained for the (now-inert)
+/// `draw_helm_radar` gizmo system.
 #[derive(Component)]
-struct HelmPad;
+pub struct RadarPanel;
 
 /// Marks the small movable knob nested inside the pad.
 #[derive(Component)]
-struct HelmKnob;
+pub struct HelmKnob;
 
 /// Marks the text node showing live "Thrust X% / Steering Y%" values.
 #[derive(Component)]
-struct HelmReadout;
-
-/// Marks the radar panel container. Its `ComputedNode` size and on-screen
-/// position drive the gizmos that draw the radar visuals.
-#[derive(Component)]
-struct RadarPanel;
+pub struct HelmReadout;
 
 /// Marks the "On Screen" button on the helm console; pressing it sends
 /// `SetView { mode: Radar }` so the server viewscreen mirrors the radar.
 #[derive(Component)]
-struct OnScreenButton;
+pub struct OnScreenButton;
 
 /// Marks the Repair button on the helm console.
 #[derive(Component)]
-struct RepairButton;
+pub struct RepairButton;
 
 /// Marks the text label inside the Repair button (used to refresh cooldown text).
 #[derive(Component)]
-struct RepairButtonLabel;
+pub struct RepairButtonLabel;
 
 /// Marks the root of the science console UI; shown only when the local
 /// player holds Science and the phase is InProgress.
@@ -708,154 +704,13 @@ fn handle_red_alert_button_press(
 const HELM_PAD_SIZE: f32 = 200.0;
 /// Radius of the knob disc, in pixels.
 const HELM_KNOB_RADIUS: f32 = 24.0;
-/// Background colour of the joystick pad.
-const HELM_PAD_BG: Color = Color::srgb(0.10, 0.10, 0.18);
-/// Knob colour while idle.
-const HELM_KNOB_BG_IDLE: Color = Color::srgb(0.27, 0.27, 0.40);
-/// Knob colour while being dragged.
-const HELM_KNOB_BG_ACTIVE: Color = Color::srgb(0.40, 0.40, 0.67);
 
-/// Effective max drag radius, derived from `HELM_PAD_SIZE` and
-/// `HELM_KNOB_RADIUS` exactly the way the JS code did. Centralised so
-/// pad/knob/clamp logic agree.
-fn helm_max_radius() -> f32 {
-    (HELM_PAD_SIZE / 2.0) - HELM_KNOB_RADIUS - 2.0
-}
 
-fn setup_helm_ui(mut commands: Commands) {
-    let mut pad_entity: Option<Entity> = None;
-
-    commands
-        .spawn((
-            HelmPanel,
-            Node {
-                // Cover the full viewport so the radar panel fills the screen.
-                position_type: PositionType::Absolute,
-                left:   Val::Px(0.0),
-                top:    Val::Px(0.0),
-                right:  Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-            Visibility::Hidden,
-        ))
-        .with_children(|panel| {
-            // ── Radar fills the entire screen ────────────────────────
-            // Gizmos draw in Camera2d world-space anchored to this node's
-            // centre; no BackgroundColor so the gizmos are not occluded.
-            panel.spawn((
-                RadarPanel,
-                Node {
-                    width:  Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-            ));
-
-            // ── Joystick: absolute bottom-left ───────────────────────
-            panel
-                .spawn(Node {
-                    position_type: PositionType::Absolute,
-                    left:   Val::Px(16.0),
-                    bottom: Val::Px(16.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::FlexStart,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|col| {
-                    col.spawn((
-                        HelmReadout,
-                        Text::new("Thrust 0% / Steering 0%"),
-                        TextFont { font_size: 14.0, ..default() },
-                        TextColor(Color::srgb(0.6, 0.7, 0.73)),
-                    ));
-
-                    let pad = col
-                        .spawn((
-                            HelmPad,
-                            Button,
-                            Node {
-                                width:  Val::Px(HELM_PAD_SIZE),
-                                height: Val::Px(HELM_PAD_SIZE),
-                                position_type: PositionType::Relative,
-                                ..default()
-                            },
-                            BackgroundColor(HELM_PAD_BG),
-                        ))
-                        .with_children(|pad| {
-                            pad.spawn((
-                                HelmKnob,
-                                Node {
-                                    width:  Val::Px(HELM_KNOB_RADIUS * 2.0),
-                                    height: Val::Px(HELM_KNOB_RADIUS * 2.0),
-                                    position_type: PositionType::Absolute,
-                                    left: Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
-                                    top:  Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
-                                    ..default()
-                                },
-                                BackgroundColor(HELM_KNOB_BG_IDLE),
-                            ));
-                        })
-                        .id();
-                    pad_entity = Some(pad);
-                });
-
-            // ── On Screen + Repair: absolute bottom-right ────────────
-            panel
-                .spawn(Node {
-                    position_type: PositionType::Absolute,
-                    right:  Val::Px(16.0),
-                    bottom: Val::Px(16.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::FlexEnd,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|col| {
-                    col.spawn((
-                        OnScreenButton,
-                        Button,
-                        Node {
-                            padding: UiRect::all(Val::Px(10.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.13, 0.13, 0.27)),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("On Screen"),
-                            TextFont { font_size: 16.0, ..default() },
-                            TextColor(Color::srgb(0.93, 0.93, 1.0)),
-                        ));
-                    });
-
-                    col.spawn((
-                        RepairButton,
-                        Button,
-                        Node {
-                            padding: UiRect::all(Val::Px(10.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.13, 0.27, 0.13)),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            RepairButtonLabel,
-                            Text::new("REPAIR"),
-                            TextFont { font_size: 16.0, ..default() },
-                            TextColor(Color::srgb(0.5, 1.0, 0.5)),
-                        ));
-                    });
-                });
-        });
-
-    // Pointer-event observers on the pad.
-    if let Some(pad) = pad_entity {
-        commands.entity(pad).observe(on_helm_drag_start);
-        commands.entity(pad).observe(on_helm_drag);
-        commands.entity(pad).observe(on_helm_drag_end);
-    }
+fn setup_helm_ui(_commands: Commands) {
+    // Replaced by phone_border::helm::HelmPanelPlugin.
+    // The old UI (radar gizmos + plain thumbstick) is no longer spawned
+    // here — the phone-border compass-ring radar + polished thumbstick
+    // plugin takes over all helm panel rendering.
 }
 
 fn setup_science_ui(mut commands: Commands) {
@@ -935,46 +790,7 @@ fn toggle_helm_panel_visibility(
     }
 }
 
-fn on_helm_drag_start(
-    trigger: On<Pointer<DragStart>>,
-    mut state: ResMut<HelmJoystickState>,
-    mut knob_bg: Query<&mut BackgroundColor, With<HelmKnob>>,
-) {
-    // Just mark active — don't emit zero thrust. The first Drag event
-    // will supply the real position and send the actual HelmInput.
-    let _ = trigger;
-    state.active = true;
-    for mut bg in knob_bg.iter_mut() {
-        bg.0 = HELM_KNOB_BG_ACTIVE;
-    }
-}
 
-fn on_helm_drag(
-    trigger: On<Pointer<Drag>>,
-    mut state: ResMut<HelmJoystickState>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    let drag_event = trigger.event();
-    let new_dx = state.knob_dx + drag_event.delta.x;
-    let new_dy = state.knob_dy + drag_event.delta.y;
-    if let Some(msg) = drag(&mut state, new_dx, new_dy, helm_max_radius()) {
-        outbound.write(OutboundClientMessage(msg));
-    }
-}
-
-fn on_helm_drag_end(
-    trigger: On<Pointer<DragEnd>>,
-    mut state: ResMut<HelmJoystickState>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-    mut knob_bg: Query<&mut BackgroundColor, With<HelmKnob>>,
-) {
-    let _ = trigger;
-    let msg = release(&mut state);
-    outbound.write(OutboundClientMessage(msg));
-    for mut bg in knob_bg.iter_mut() {
-        bg.0 = HELM_KNOB_BG_IDLE;
-    }
-}
 
 /// 10Hz repeating timer: while the joystick is active, resend the most
 /// recent `HelmInput` so the server keeps applying it.

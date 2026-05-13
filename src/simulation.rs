@@ -17,8 +17,8 @@ use crate::messages::TorpedoTube as MsgTorpedoTube;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 use crate::impulse::ImpulseState;
-use crate::modifiers::ShipModifiers;
-use crate::messages::ModifierSlot;
+use crate::modifiers::{ShipModifiers, Modifier};
+use crate::messages::{ModifierSlot, ModifierSource};
 
 // â”€â”€ Beam constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const BEAM_DURATION_SECS: f32 = 6.0;
@@ -169,6 +169,27 @@ pub struct ShipPowerSystem(pub crate::power_system::PowerSystem);
 #[derive(Resource)]
 pub struct PowerConfigResource(pub crate::power_system::PowerConfig);
 
+/// Per-console power multiplier configuration: `[f32; 4]` indexed by level−1
+/// (index 0 = level 1, index 3 = level 4). Defaults give `[-0.5, 0.0, 0.25, 0.5]`
+/// for every console unless overridden in the ship TOML.
+#[derive(Resource, Clone, Debug)]
+pub struct PowerMultiplierResource {
+    pub multipliers: std::collections::HashMap<Console, [f32; 4]>,
+}
+
+impl Default for PowerMultiplierResource {
+    fn default() -> Self {
+        let defaults = [-0.5, 0.0, 0.25, 0.5];
+        Self {
+            multipliers: std::collections::HashMap::from([
+                (Console::Helm, defaults),
+                (Console::Tactical, defaults),
+                (Console::Science, defaults),
+            ]),
+        }
+    }
+}
+
 impl Default for PowerConfigResource {
     fn default() -> Self {
         Self(crate::power_system::PowerConfig::default())
@@ -256,6 +277,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<RepairIconState>()
             .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
+            .init_resource::<PowerMultiplierResource>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -797,6 +819,8 @@ fn handle_power_messages(
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
     mut power: ResMut<ShipPowerSystem>,
+    mut modifiers: ResMut<ShipModifiers>,
+    mult_cfg: Res<PowerMultiplierResource>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -806,11 +830,13 @@ fn handle_power_messages(
             ClientMessage::IncreasePower { console } => {
                 if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
                     power.0.increase(console.clone());
+                    sync_power_modifiers(&power.0, &mult_cfg, &mut modifiers);
                 }
             }
             ClientMessage::DecreasePower { console } => {
                 if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
                     power.0.decrease(console.clone());
+                    sync_power_modifiers(&power.0, &mult_cfg, &mut modifiers);
                 }
             }
             _ => {}
@@ -824,12 +850,17 @@ fn tick_power_system(
     phase: Res<CurrentPhase>,
     mut power: ResMut<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
+    mut modifiers: ResMut<ShipModifiers>,
+    mult_cfg: Res<PowerMultiplierResource>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
     }
     let dt = time.delta_secs();
-    power.0.tick(dt, &config.0);
+    let changed = power.0.tick(dt, &config.0);
+    if changed {
+        sync_power_modifiers(&power.0, &mult_cfg, &mut modifiers);
+    }
 }
 
 /// Broadcast `PowerState` at 10 Hz to the Power console holder only.
@@ -858,6 +889,52 @@ fn broadcast_power_state(
             battery_charge: power.0.battery_charge,
             locked: power.0.locked,
         },
+    });
+}
+
+/// Synchronise the `ShipModifiers` cache with the current power allocation levels.
+///
+/// Called whenever a power level changes (increase, decrease, or exhaustion
+/// forcing all consoles to 1). Registers/updates a `Modifier` per affected
+/// slot using `ModifierSource::Console(console)`, so re-registration replaces
+/// the previous entry (no stacking).
+fn sync_power_modifiers(
+    power: &crate::power_system::PowerSystem,
+    mult_cfg: &PowerMultiplierResource,
+    modifiers: &mut ShipModifiers,
+) {
+    let default_mult = [-0.5, 0.0, 0.25, 0.5];
+
+    // Helm → MaxSpeed and MaxYawRate
+    let helm_level = (power.helm as usize).saturating_sub(1).min(3);
+    let helm_bonus = mult_cfg.multipliers.get(&Console::Helm).unwrap_or(&default_mult)[helm_level];
+    modifiers.add_or_update(Modifier {
+        source: ModifierSource::Console(Console::Helm),
+        slot: ModifierSlot::MaxSpeed,
+        bonus: helm_bonus,
+    });
+    modifiers.add_or_update(Modifier {
+        source: ModifierSource::Console(Console::Helm),
+        slot: ModifierSlot::MaxYawRate,
+        bonus: helm_bonus,
+    });
+
+    // Weapons (Tactical) → PhaserDamage
+    let weapons_level = (power.weapons as usize).saturating_sub(1).min(3);
+    let weapons_bonus = mult_cfg.multipliers.get(&Console::Tactical).unwrap_or(&default_mult)[weapons_level];
+    modifiers.add_or_update(Modifier {
+        source: ModifierSource::Console(Console::Tactical),
+        slot: ModifierSlot::PhaserDamage,
+        bonus: weapons_bonus,
+    });
+
+    // Science → RadarRange
+    let science_level = (power.science as usize).saturating_sub(1).min(3);
+    let science_bonus = mult_cfg.multipliers.get(&Console::Science).unwrap_or(&default_mult)[science_level];
+    modifiers.add_or_update(Modifier {
+        source: ModifierSource::Console(Console::Science),
+        slot: ModifierSlot::RadarRange,
+        bonus: science_bonus,
     });
 }
 
@@ -1406,6 +1483,44 @@ fn setup_world_from_config(
                 let beam_range = if wc.beam_range > 0.0 { wc.beam_range } else { 40.0 };
                 commands.insert_resource(PhaserRenderConfig { beam_color, beam_range });
             }
+
+            // Populate power config from ship entity config
+            if let Some(pc) = &ship_config.power {
+                commands.insert_resource(PowerConfigResource(
+                    crate::power_system::PowerConfig {
+                        capacity: pc.capacity,
+                        rates: pc.rates,
+                        emergency_threshold: pc.emergency_threshold,
+                    }
+                ));
+            }
+
+            // Populate power multipliers from ship entity config (fallback to defaults)
+            {
+                use std::collections::HashMap;
+                let defaults = [-0.5, 0.0, 0.25, 0.5];
+                let mut multipliers: HashMap<Console, [f32; 4]> = HashMap::from([
+                    (Console::Helm, defaults),
+                    (Console::Tactical, defaults),
+                    (Console::Science, defaults),
+                ]);
+                if let Some(hc) = &ship_config.helm_console {
+                    if let Some(pm) = hc.power_multipliers {
+                        multipliers.insert(Console::Helm, pm);
+                    }
+                }
+                if let Some(wc) = &ship_config.weapons_console {
+                    if let Some(pm) = wc.power_multipliers {
+                        multipliers.insert(Console::Tactical, pm);
+                    }
+                }
+                if let Some(sc) = &ship_config.science_console {
+                    if let Some(pm) = sc.power_multipliers {
+                        multipliers.insert(Console::Science, pm);
+                    }
+                }
+                commands.insert_resource(PowerMultiplierResource { multipliers });
+            }
         
         commands.spawn((
             Ship,
@@ -1694,6 +1809,7 @@ fn test_app() -> App {
         .init_resource::<RepairIconState>()
         .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
         .init_resource::<PowerConfigResource>()
+        .init_resource::<PowerMultiplierResource>()
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
@@ -3539,6 +3655,90 @@ fn test_app() -> App {
             _ => None,
         }).expect("expected a PowerState message");
         assert_eq!(power_state, 4, "helm should stay at 4 (max bound enforced by PowerSystem)");
+    }
+
+    // ── Power → Modifier wiring integration tests ─────────────────────────
+
+    #[test]
+    fn increasing_helm_power_updates_max_speed_via_modifiers() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Override multipliers for Helm so level 2 → 0.0, level 3 → 1.0
+        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
+            Console::Helm, [-0.5, 0.0, 1.0, 2.0],
+        );
+
+        // Increase Helm from 2 → 3
+        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        let _ = tick(&mut app);
+
+        // Level 3 → index 2 → bonus 1.0 → MaxSpeed multiplier = 2.0
+        let mult = app.world().resource::<ShipModifiers>().get(&ModifierSlot::MaxSpeed);
+        assert!((mult - 2.0).abs() < 1e-6,
+            "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}");
+    }
+
+    #[test]
+    fn decreasing_weapons_power_updates_phaser_damage_via_modifiers() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Override multipliers for Tactical: level 2 → 0.0, level 1 → -0.5
+        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
+            Console::Tactical, [-0.5, 0.0, 0.25, 0.5],
+        );
+
+        // Decrease Weapons from 2 → 1
+        push(&mut app, "power", ClientMessage::DecreasePower { console: Console::Tactical });
+        let _ = tick(&mut app);
+
+        // Level 1 → index 0 → bonus -0.5 (negative) → 1.0 / (1.0 + 0.5) = 0.666...
+        let expected = 1.0 / 1.5;
+        let mult = app.world().resource::<ShipModifiers>().get(&ModifierSlot::PhaserDamage);
+        assert!((mult - expected).abs() < 1e-6,
+            "Weapons power 1 should give PhaserDamage multiplier {expected}, got {mult}");
+    }
+
+    #[test]
+    fn exhaustion_forces_consoles_to_one_and_updates_all_modifiers() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Set known multipliers for all three
+        let defaults = [-0.5, 0.0, 0.25, 0.5];
+        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
+            Console::Helm, defaults);
+        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
+            Console::Tactical, defaults);
+        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
+            Console::Science, defaults);
+
+        // Set state that will trigger exhaustion on the next tick:
+        // total=8 (negative rate), battery already at 0 → tick keeps it at 0
+        // and forces all consoles to 1 + lock.
+        {
+            let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
+            ps.0.helm = 4;
+            ps.0.weapons = 2;
+            ps.0.science = 2;
+            ps.0.battery_charge = 0.0;
+            ps.0.locked = false;
+        }
+
+        // Tick triggers exhaustion → lock changes → sync_power_modifiers runs
+        tick(&mut app);
+
+        // All three forced to 1 → bonus -0.5 (negative) → multiplier = 1.0 / (1.0 + 0.5) ≈ 0.666...
+        let expected = 1.0 / 1.5;
+        let mods = app.world().resource::<ShipModifiers>();
+
+        assert!((mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,
+            "after exhaustion MaxSpeed should be {expected}, got {}", mods.get(&ModifierSlot::MaxSpeed));
+        assert!((mods.get(&ModifierSlot::PhaserDamage) - expected).abs() < 1e-6,
+            "after exhaustion PhaserDamage should be {expected}, got {}", mods.get(&ModifierSlot::PhaserDamage));
+        assert!((mods.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
+            "after exhaustion RadarRange should be {expected}, got {}", mods.get(&ModifierSlot::RadarRange));
     }
 
     #[test]

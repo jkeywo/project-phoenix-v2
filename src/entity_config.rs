@@ -41,6 +41,8 @@ pub struct HelmConsoleConfig {
     pub radar_range: f32,
     #[serde(default)]
     pub radar_shows: bool,
+    #[serde(default)]
+    pub power_multipliers: Option<[f32; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -63,6 +65,8 @@ pub struct WeaponsConsoleConfig {
     /// When absent (empty vec), the renderer falls back to `beam_render::DEFAULT_BEAM_COLOR`.
     #[serde(default)]
     pub beam_color: Vec<f32>,
+    #[serde(default)]
+    pub power_multipliers: Option<[f32; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -80,6 +84,19 @@ pub struct EngineeringConsoleConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaptainConsoleConfig {}
 
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct PowerConfigSection {
+    pub capacity: f32,
+    pub rates: [f32; 6],
+    pub emergency_threshold: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ScienceConsoleConfig {
+    #[serde(default)]
+    pub power_multipliers: Option<[f32; 4]>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityConfig {
     pub tags: Vec<String>,
@@ -90,6 +107,8 @@ pub struct EntityConfig {
     pub weapons_console: Option<WeaponsConsoleConfig>,
     pub engineering_console: Option<EngineeringConsoleConfig>,
     pub captain_console: Option<CaptainConsoleConfig>,
+    pub power: Option<PowerConfigSection>,
+    pub science_console: Option<ScienceConsoleConfig>,
 }
 
 #[derive(Deserialize)]
@@ -104,6 +123,8 @@ struct TomlConfig {
     engineering_console: Option<EngineeringConsoleConfig>,
     #[serde(default)]
     captain_console: Option<serde::de::IgnoredAny>,
+    power: Option<PowerConfigSection>,
+    science_console: Option<ScienceConsoleConfig>,
 }
 
 impl EntityConfig {
@@ -123,6 +144,8 @@ impl EntityConfig {
             } else {
                 None
             },
+            power: raw.power,
+            science_console: raw.science_console,
         })
     }
 }
@@ -337,5 +360,80 @@ beam_range = 40.0
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let w = config.weapons_console.expect("weapons_console must be Some");
         assert!(w.beam_color.is_empty(), "beam_color should default to empty vec when omitted");
+    }
+
+    // ── Power section tests ────────────────────────────────────────────────
+
+    #[test]
+    fn power_section_parses_capacity_rates_emergency_threshold() {
+        let toml_str = r##"
+[power]
+capacity = 150.0
+rates = [10.0, 8.0, 6.0, 4.0, -4.0, -10.0]
+emergency_threshold = 30.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let p = config.power.expect("power must be Some");
+        assert!((p.capacity - 150.0).abs() < 0.001);
+        assert_eq!(p.rates, [10.0, 8.0, 6.0, 4.0, -4.0, -10.0]);
+        assert!((p.emergency_threshold - 30.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn power_section_omitted_when_not_in_toml() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.power.is_none(), "power should be None when not specified");
+    }
+
+    #[test]
+    fn science_console_parses_with_power_multipliers() {
+        let toml_str = r##"
+[science_console]
+power_multipliers = [-1.0, 0.0, 1.0, 2.0]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let s = config.science_console.expect("science_console must be Some");
+        assert_eq!(s.power_multipliers, Some([-1.0, 0.0, 1.0, 2.0]));
+    }
+
+    #[test]
+    fn science_console_omitted_when_not_in_toml() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.science_console.is_none());
+    }
+
+    #[test]
+    fn helm_console_power_multipliers_parses() {
+        let toml_str = r##"
+[helm_console]
+power_multipliers = [-0.8, 0.0, 0.4, 0.8]
+max_speed = 50.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        assert_eq!(h.power_multipliers, Some([-0.8, 0.0, 0.4, 0.8]));
+    }
+
+    #[test]
+    fn weapons_console_power_multipliers_parses() {
+        let toml_str = r##"
+[weapons_console]
+power_multipliers = [-0.3, 0.0, 0.15, 0.3]
+beam_range = 40.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let w = config.weapons_console.expect("weapons_console must be Some");
+        assert_eq!(w.power_multipliers, Some([-0.3, 0.0, 0.15, 0.3]));
+    }
+
+    #[test]
+    fn power_multipliers_defaults_to_none_when_omitted() {
+        let toml_str = r##"
+[helm_console]
+max_speed = 30.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        assert!(h.power_multipliers.is_none());
     }
 }

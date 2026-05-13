@@ -305,6 +305,8 @@ mod tests {
             weapons_console: None,
             engineering_console: None,
             captain_console: None,
+            power: None,
+            science_console: None,
         }
     }
     

@@ -2,6 +2,8 @@ pub mod beam_render;
 pub mod impulse;
 pub mod shield;
 pub mod entity_tags;
+pub mod region_effects;
+pub mod region_shape;
 pub mod asteroid_lifecycle;
 pub mod phaser;
 pub mod torpedo;

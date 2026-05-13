@@ -290,6 +290,7 @@ fn toggle_lobby_items(
 
 fn update_player_list(
     cache: Res<GameStateCache>,
+    ship_stations: Option<Res<crate::stations::ShipStations>>,
     mut query: Query<&mut Text, With<PlayerListText>>,
 ) {
     if !cache.is_changed() {
@@ -297,19 +298,21 @@ fn update_player_list(
     }
     let Ok(mut text) = query.single_mut() else { return };
     let mut content = "Players:\n".to_string();
+
+    // Determine player count (non-spectators) for station lookup.
+    let player_count = cache.0.players.iter().filter(|p| !p.consoles.is_empty()).count() as u32;
+
     for p in &cache.0.players {
-        let consoles: String = {
-            let names: Vec<String> = p.consoles.iter().map(|c| c.display_name().to_string()).collect();
-            if names.is_empty() {
-                String::new()
-            } else {
-                format!("({})", names.join(", "))
-            }
-        };
-        if consoles.is_empty() {
-            content.push_str(&format!("• {}\n", p.name));
+        if p.consoles.is_empty() {
+            content.push_str(&format!("• {} — (spectating)\n", p.name));
         } else {
-            content.push_str(&format!("• {} — {}\n", p.name, consoles));
+            // Find the station name whose consoles intersect this player's consoles.
+            let station_name = ship_stations.as_ref().and_then(|ss| {
+                ss.configs.get(&player_count).and_then(|defs| {
+                    defs.iter().find(|d| d.consoles.iter().any(|c| p.consoles.contains(c))).map(|d| d.name.as_str())
+                })
+            }).unwrap_or("(unknown)");
+            content.push_str(&format!("• {} — {}\n", p.name, station_name));
         }
     }
     **text = content;

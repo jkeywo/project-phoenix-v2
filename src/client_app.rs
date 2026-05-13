@@ -14,8 +14,8 @@ use bevy::prelude::*;
 
 use crate::client_helm::{release, tick, HelmJoystickState};
 use crate::client_lobby::{
-    engage_message, message_for_slot_click, reconcile_active_console, ConsoleSlot, LobbyState,
-    LobbyView, LocalPlayerToken, ActiveConsole,
+    engage_message, message_for_station_slot_click, reconcile_active_console, StationSlot,
+    LobbyState, LobbyView, LocalPlayerToken, ActiveConsole,
 };
 use crate::client_sim::{
     message_for_direction_press, on_screen_message, red_alert_toggle_message,
@@ -56,9 +56,9 @@ struct PlayerListRoot;
 #[derive(Component)]
 struct EngageButton;
 
-/// Marks one console-row button and remembers which `Console` it acts on.
+/// Marks one station-row button and remembers which station name it acts on.
 #[derive(Component)]
-struct ConsoleButton(Console);
+struct StationButton(String);
 
 /// Marks the root of the captain console UI (view selector + Red Alert);
 /// shown only when the local player holds CaptainChair and the phase is
@@ -208,7 +208,7 @@ impl Plugin for ClientAppPlugin {
                         refresh_red_alert_button,
                     ),
                     (
-                        handle_console_button_press,
+                        handle_station_button_press,
                         handle_engage_button_press,
                         handle_view_dir_button_press,
                         handle_red_alert_button_press,
@@ -372,8 +372,8 @@ fn rebuild_lobby_ui_on_change(
             }
         }
         commands.entity(root).with_children(|parent| {
-            for slot in view.console_slots() {
-                spawn_console_row(parent, &slot);
+            for slot in view.station_slots() {
+                spawn_station_row(parent, &slot);
             }
         });
     }
@@ -404,9 +404,9 @@ fn rebuild_lobby_ui_on_change(
         });
     }
 
-    // Engage visibility — only show when captain, in lobby, and all consoles filled.
+    // Engage visibility — only show when captain, in lobby, and all stations filled.
     if let Ok(mut vis) = engage.single_mut() {
-        *vis = if view.is_captain() && state.phase == GamePhase::Lobby && view.all_consoles_filled() {
+        *vis = if view.is_captain() && state.phase == GamePhase::Lobby && view.all_stations_filled() {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -414,25 +414,31 @@ fn rebuild_lobby_ui_on_change(
     }
 }
 
-fn spawn_console_row(parent: &mut ChildSpawnerCommands, slot: &ConsoleSlot) {
-    let (label, console_for_click, bg, fg) = match slot {
-        ConsoleSlot::Available { console } => (
-            format!("{}: available", console.display_name()),
-            Some(console.clone()),
+fn spawn_station_row(parent: &mut ChildSpawnerCommands, slot: &StationSlot) {
+    let (label, station_for_click, bg, fg) = match slot {
+        StationSlot::Available { station, description } => (
+            format!("{}: available — {}", station, description),
+            Some(station.clone()),
             Color::srgb(0.13, 0.13, 0.27),
             Color::srgb(0.93, 0.93, 1.0),
         ),
-        ConsoleSlot::Occupied { console, holder_name } => (
-            format!("{}: {}", console.display_name(), holder_name),
+        StationSlot::Occupied { station, description, holder_name } => (
+            format!("{}: {} — {}", station, holder_name, description),
             None,
             Color::srgb(0.07, 0.07, 0.10),
             Color::srgb(0.42, 0.49, 0.55),
         ),
-        ConsoleSlot::Mine { console } => (
-            format!("{}: Mine — release", console.display_name()),
-            Some(console.clone()),
+        StationSlot::Mine { station, description } => (
+            format!("{}: Mine — {} (leave)", station, description),
+            None,
             Color::srgb(0.20, 0.24, 0.40),
             Color::srgb(0.55, 0.70, 1.0),
+        ),
+        StationSlot::Spectator { player_name } => (
+            format!("{} — (spectating)", player_name),
+            None,
+            Color::srgb(0.07, 0.07, 0.10),
+            Color::srgb(0.42, 0.49, 0.55),
         ),
     };
 
@@ -443,8 +449,8 @@ fn spawn_console_row(parent: &mut ChildSpawnerCommands, slot: &ConsoleSlot) {
         },
         BackgroundColor(bg),
     ));
-    if let Some(c) = console_for_click {
-        row.insert((Button, ConsoleButton(c)));
+    if let Some(s) = station_for_click {
+        row.insert((Button, StationButton(s)));
     }
     row.with_children(|inner| {
         inner.spawn((
@@ -455,21 +461,19 @@ fn spawn_console_row(parent: &mut ChildSpawnerCommands, slot: &ConsoleSlot) {
     });
 }
 
-fn handle_console_button_press(
+fn handle_station_button_press(
     mut interactions: Query<
-        (&Interaction, &ConsoleButton),
+        (&Interaction, &StationButton),
         (Changed<Interaction>, With<Button>),
     >,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
-    for (interaction, ConsoleButton(c)) in interactions.iter_mut() {
+    for (interaction, StationButton(s)) in interactions.iter_mut() {
         if *interaction != Interaction::Pressed {
             continue;
         }
-        // Re-derive the message via the slot helper so the same rule
-        // (ConsoleSlot → ClientMessage) governs both code paths.
-        let slot = ConsoleSlot::Available { console: c.clone() };
-        if let Some(msg) = message_for_slot_click(&slot) {
+        let slot = StationSlot::Available { station: s.clone(), description: String::new() };
+        if let Some(msg) = message_for_station_slot_click(&slot) {
             outbound.write(OutboundClientMessage(msg));
         }
     }

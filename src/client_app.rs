@@ -136,6 +136,7 @@ struct RepairShapeButtonRoot;
 
 /// Marks a team row container (index 0, 1, or 2).
 #[derive(Component)]
+#[allow(dead_code)]
 struct RepairTeamRow(usize);
 
 /// Marks the progress-bar fill inside a team row.
@@ -580,53 +581,6 @@ fn setup_captain_ui(_commands: Commands) {
     // The old captain UI (direction grid + red alert text toggle) is no
     // longer spawned here — the phone-border captain panel plugin takes
     // over all captain panel rendering.
-}
-
-fn spawn_view_dir_button(
-    grid: &mut ChildSpawnerCommands,
-    direction: ViewDirection,
-    glyph: &str,
-    column: i16,
-    row: i16,
-) {
-    grid.spawn((
-        ViewDirButton(direction),
-        Button,
-        Node {
-            grid_column: GridPlacement::start(column),
-            grid_row:    GridPlacement::start(row),
-            justify_content: JustifyContent::Center,
-            align_items:     AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(VIEW_BTN_BG_INACTIVE),
-    ))
-    .with_children(|inner| {
-        inner.spawn((
-            Text::new(glyph),
-            TextFont { font_size: 22.0, ..default() },
-            TextColor(Color::srgb(0.93, 0.93, 1.0)),
-        ));
-    });
-}
-
-fn spawn_view_label(grid: &mut ChildSpawnerCommands, column: i16, row: i16) {
-    grid.spawn((
-        Node {
-            grid_column: GridPlacement::start(column),
-            grid_row:    GridPlacement::start(row),
-            justify_content: JustifyContent::Center,
-            align_items:     AlignItems::Center,
-            ..default()
-        },
-    ))
-    .with_children(|inner| {
-        inner.spawn((
-            Text::new("View"),
-            TextFont { font_size: 12.0, ..default() },
-            TextColor(Color::srgb(0.6, 0.7, 0.73)),
-        ));
-    });
 }
 
 fn toggle_captain_panel_visibility(

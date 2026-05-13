@@ -679,15 +679,6 @@ fn to_tube_id(tube: MsgTorpedoTube) -> TorpedoTubeId {
     }
 }
 
-/// Convert a `torpedo::TorpedoTubeId` back to a `messages::TorpedoTube`.
-fn to_msg_tube(tube: TorpedoTubeId) -> MsgTorpedoTube {
-    match tube {
-        TorpedoTubeId::ForePort => MsgTorpedoTube::ForePort,
-        TorpedoTubeId::ForeStarboard => MsgTorpedoTube::ForeStarboard,
-        TorpedoTubeId::Aft => MsgTorpedoTube::Aft,
-    }
-}
-
 /// Handle `FireTorpedo` messages from the Tactical console.
 ///
 /// Validates: sender is Tactical holder, game is in-progress, tube is loaded,

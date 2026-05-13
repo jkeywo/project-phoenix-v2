@@ -41,7 +41,8 @@ pub enum Console {
     CaptainChair,
     Helm,
     Tactical,
-    Engineering,
+    Repair,
+    Power,
 }
 
 impl Console {
@@ -51,7 +52,8 @@ impl Console {
             Console::CaptainChair => "Captain's Chair",
             Console::Helm => "Helm",
             Console::Tactical => "Tactical",
-            Console::Engineering => "Engineering",
+            Console::Repair => "Repair",
+            Console::Power => "Power",
         }
     }
 }

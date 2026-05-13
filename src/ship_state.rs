@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn snapshot_includes_authorized_repair_console() {
         let s = ShipState::new();
-        assert_eq!(s.snapshot(100, Some(Console::Engineering)).authorized_repair_console, Some(Console::Engineering));
+        assert_eq!(s.snapshot(100, Some(Console::Repair)).authorized_repair_console, Some(Console::Repair));
         assert_eq!(s.snapshot(100, None).authorized_repair_console, None);
     }
 }

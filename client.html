@@ -151,8 +151,8 @@
         onclick="send('Repair', { console: 'Tactical' })">REPAIR</button>
     </section>
 
-    <section id="engineering-ui">
-      <h2 style="margin:0 0 1rem;font-size:1.1rem;letter-spacing:.1em;color:#8af">ENGINEERING</h2>
+    <section id="repair-ui">
+      <h2 style="margin:0 0 1rem;font-size:1.1rem;letter-spacing:.1em;color:#8af">REPAIR</h2>
       <p style="margin:0 0 0.5rem;font-size:0.85rem;color:#aaa">HULL INTEGRITY</p>
       <p id="eng-hp-text" style="font-size:2.5rem;font-weight:bold;margin:0 0 1rem;color:#4cf">100 / 100</p>
       <div id="eng-hp-bar" style="display:flex;gap:4px" aria-label="Hull integrity bar"></div>
@@ -164,7 +164,7 @@
         style="margin-top:1.5rem;padding:0.75rem 2rem;font-size:1.1rem;font-weight:bold;
                letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
                cursor:pointer;width:100%"
-        onclick="send('Repair', { console: 'Engineering' })">REPAIR</button>
+        onclick="send('Repair', { console: 'Repair' })">REPAIR</button>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -270,12 +270,13 @@
 
     // ── Rendering ───────────────────────────────────────────────
 
-    const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Engineering'];
+    const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power'];
     const CONSOLE_LABEL = {
       CaptainChair: "Captain's Chair",
       Helm: 'Helm',
       Tactical: 'Tactical',
-      Engineering: 'Engineering',
+      Repair: 'Repair',
+      Power: 'Power',
     };
 
     // Defer re-render so rapid server messages don't steal pointer events.
@@ -325,7 +326,7 @@
       // Console sections: only the active one is visible while in-game.
       $('game-ui').className = (inGame && activeConsole === 'CaptainChair') ? 'active' : '';
       $('weapons-ui').className = (inGame && activeConsole === 'Tactical') ? 'active' : '';
-      $('engineering-ui').className = (inGame && activeConsole === 'Engineering') ? 'active' : '';
+      $('repair-ui').className = (inGame && activeConsole === 'Repair') ? 'active' : '';
       // Helm console UI is rendered by Bevy WASM (#49).
 
       // Tabs only appear when in-game with 2+ consoles.
@@ -391,7 +392,7 @@
       // once the in-game UI also migrates and no JS callers exist.
     }
 
-    function renderEngineering(hp, repairTarget) {
+    function renderRepair(hp, repairTarget) {
       const clamped = Math.max(0, Math.min(100, hp));
       const text = $('eng-hp-text');
       const bar = $('eng-hp-bar');
@@ -422,7 +423,8 @@
             CaptainChair: "CAPTAIN'S CHAIR",
             Helm: 'HELM',
             Tactical: 'TACTICAL',
-            Engineering: 'ENGINEERING',
+            Repair: 'REPAIR',
+            Power: 'POWER',
           };
           targetLabel.textContent = names[repairTarget] || repairTarget;
           targetBox.style.display = '';
@@ -435,7 +437,7 @@
     const REPAIR_BTN_MAP = {
       CaptainChair: 'captain-repair-btn',
       Tactical: 'weapons-repair-btn',
-      Engineering: 'eng-repair-btn',
+      Repair: 'eng-repair-btn',
     };
 
     function renderRepairButtons(s) {
@@ -794,7 +796,7 @@
           if (typeof hp === 'number' && (state.hullIntegrity !== hp || state.repairTarget !== repairTarget)) {
             state.hullIntegrity = hp;
             state.repairTarget = repairTarget;
-            renderEngineering(hp, repairTarget);
+            renderRepair(hp, repairTarget);
           }
           renderWeaponsRadar();
           // View-direction highlighting is handled by the Bevy WASM UI (#48).

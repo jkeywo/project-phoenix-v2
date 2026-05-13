@@ -197,7 +197,8 @@ fn forward_active_console(mut active: ResMut<ActiveConsole>) {
             "CaptainChair" => Some(Console::CaptainChair),
             "Helm"         => Some(Console::Helm),
             "Tactical"     => Some(Console::Tactical),
-            "Engineering"  => Some(Console::Engineering),
+            "Repair"       => Some(Console::Repair),
+            "Power"        => Some(Console::Power),
             _              => None,
         };
         if active.0 != parsed {

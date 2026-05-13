@@ -2,11 +2,12 @@ use crate::messages::Console;
 use rand::Rng;
 
 /// All consoles that can receive a breakdown assignment.
-const ALL_CONSOLES: [Console; 4] = [
+const ALL_CONSOLES: [Console; 5] = [
     Console::CaptainChair,
     Console::Helm,
     Console::Tactical,
-    Console::Engineering,
+    Console::Repair,
+    Console::Power,
 ];
 
 /// FIFO queue of console breakdown assignments.

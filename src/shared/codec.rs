@@ -291,7 +291,7 @@ mod tests {
                 ship_x: 0.0,
                 ship_z: 0.0,
                 ship_yaw: 0.0,
-                authorized_repair_console: Some(Console::Engineering),
+                authorized_repair_console: Some(Console::Repair),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

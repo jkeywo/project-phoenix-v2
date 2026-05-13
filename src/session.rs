@@ -47,7 +47,7 @@ impl SessionManager {
             available.push(Console::Tactical);
         }
         if config.engineering_console.is_some() {
-            available.push(Console::Engineering);
+            available.push(Console::Repair);
         }
         // Science has no dedicated TOML config section; always available when a ship entity is loaded.
         available.push(Console::Science);
@@ -153,8 +153,9 @@ impl SessionManager {
             Console::CaptainChair,
             Console::Helm,
             Console::Tactical,
-            Console::Engineering,
+            Console::Repair,
             Console::Science,
+            Console::Power,
         ]);
         
         all_available
@@ -435,12 +436,12 @@ mod tests {
     }
 
     #[test]
-    fn engineering_console_can_be_selected_and_is_available_when_free() {
+    fn repair_console_can_be_selected_and_is_available_when_free() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        assert!(sm.available_consoles().contains(&Console::Engineering));
-        sm.toggle_console("t1", Console::Engineering).unwrap();
-        assert!(!sm.available_consoles().contains(&Console::Engineering));
+        assert!(sm.available_consoles().contains(&Console::Repair));
+        sm.toggle_console("t1", Console::Repair).unwrap();
+        assert!(!sm.available_consoles().contains(&Console::Repair));
     }
 
     #[test]
@@ -453,15 +454,15 @@ mod tests {
     }
 
     #[test]
-    fn engineering_console_selectable_by_another_player_after_disconnect() {
+    fn repair_console_selectable_by_another_player_after_disconnect() {
         // After disconnect the console is free; another player can take it.
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.toggle_console("t1", Console::Engineering).unwrap();
+        sm.toggle_console("t1", Console::Repair).unwrap();
         sm.disconnect("t1");
         sm.register("t2".into(), "Bob".into()).unwrap();
-        sm.toggle_console("t2", Console::Engineering).unwrap();
-        assert!(sm.players()[1].consoles.contains(&Console::Engineering));
+        sm.toggle_console("t2", Console::Repair).unwrap();
+        assert!(sm.players()[1].consoles.contains(&Console::Repair));
     }
     
     // ── Console Selectability Tests ────────────────────────────────────────
@@ -478,13 +479,13 @@ mod tests {
             Console::CaptainChair,
             Console::Helm,
             Console::Tactical,
-            Console::Engineering,
+            Console::Repair,
         ]);
         let available = sm.available_consoles();
         assert!(available.contains(&Console::CaptainChair));
         assert!(available.contains(&Console::Helm));
         assert!(available.contains(&Console::Tactical));
-        assert!(available.contains(&Console::Engineering));
+        assert!(available.contains(&Console::Repair));
     }
     
     #[test]
@@ -492,7 +493,7 @@ mod tests {
         let sm = sm_with_config(vec![
             Console::CaptainChair,
             Console::Helm,
-            Console::Engineering,
+            Console::Repair,
         ]);
         let available = sm.available_consoles();
         assert!(!available.contains(&Console::Tactical));
@@ -503,7 +504,7 @@ mod tests {
         let sm = sm_with_config(vec![
             Console::Helm,
             Console::Tactical,
-            Console::Engineering,
+            Console::Repair,
         ]);
         let available = sm.available_consoles();
         assert!(!available.contains(&Console::CaptainChair));
@@ -514,7 +515,7 @@ mod tests {
         let mut sm = sm_with_config(vec![
             Console::CaptainChair,
             Console::Helm,
-            Console::Engineering,
+            Console::Repair,
         ]);
         sm.register("t1".into(), "Alice".into()).unwrap();
         // Weapons console is not available
@@ -529,8 +530,9 @@ mod tests {
         assert!(available.contains(&Console::CaptainChair));
         assert!(available.contains(&Console::Helm));
         assert!(available.contains(&Console::Tactical));
-        assert!(available.contains(&Console::Engineering));
+        assert!(available.contains(&Console::Repair));
         assert!(available.contains(&Console::Science));
+        assert!(available.contains(&Console::Power));
     }
 
     #[test]

@@ -43,7 +43,7 @@ max_players = 3
 [[stations.1]]
 name = "Captain"
 description = "Solo crew: pilot, fight, and command the bridge."
-consoles = ["CaptainChair", "Helm", "Tactical", "Engineering"]
+consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power"]
 rank = "Cpt."
 next = "Helm"
 
@@ -58,7 +58,7 @@ previous = "Captain"
 [[stations.2]]
 name = "Tactical"
 description = "Weapons and damage control."
-consoles = ["Tactical", "Engineering"]
+consoles = ["Tactical", "Repair"]
 rank = "Ltn."
 next = "Tactical"
 
@@ -77,7 +77,7 @@ rank = "Ltn."
 previous = "Tactical"
 
 [[stations.3]]
-name = "Engineering"
+name = "Repair"
 description = "Maintain and repair ship systems."
-consoles = ["Engineering"]
+consoles = ["Repair", "Power"]
 rank = "Ltn."

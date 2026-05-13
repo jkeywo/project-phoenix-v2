@@ -108,7 +108,7 @@ impl LobbyState {
 
 /// All consoles the lobby UI knows how to render. Listed in the order
 /// they appear on screen.
-pub const ALL_CONSOLES: [Console; 5] = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Engineering, Console::Science];
+pub const ALL_CONSOLES: [Console; 6] = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power];
 
 /// One console row as the lobby UI should render it.
 #[derive(Clone, Debug, PartialEq)]
@@ -161,6 +161,16 @@ impl<'a> LobbyView<'a> {
     /// True if the local player currently holds the science console.
     pub fn is_science(&self) -> bool {
         self.my_consoles().contains(&Console::Science)
+    }
+
+    /// True if the local player currently holds the repair console.
+    pub fn is_repair(&self) -> bool {
+        self.my_consoles().contains(&Console::Repair)
+    }
+
+    /// True if the local player currently holds the power console.
+    pub fn is_power(&self) -> bool {
+        self.my_consoles().contains(&Console::Power)
     }
 
     /// Consoles held by the local player (empty if no matching token).
@@ -604,6 +614,30 @@ mod tests {
     }
 
     #[test]
+    fn is_repair_is_true_only_when_i_hold_the_repair_console() {
+        let mut s = LobbyState::default();
+        s.players = vec![
+            p("a", "Alice", vec![Console::Helm]),
+            p("b", "Bob",   vec![Console::Repair]),
+        ];
+        assert!(!LobbyView::new(&s, "a").is_repair());
+        assert!( LobbyView::new(&s, "b").is_repair());
+        assert!(!LobbyView::new(&s, "ghost").is_repair());
+    }
+
+    #[test]
+    fn is_power_is_true_only_when_i_hold_the_power_console() {
+        let mut s = LobbyState::default();
+        s.players = vec![
+            p("a", "Alice", vec![Console::Helm]),
+            p("b", "Bob",   vec![Console::Power]),
+        ];
+        assert!(!LobbyView::new(&s, "a").is_power());
+        assert!( LobbyView::new(&s, "b").is_power());
+        assert!(!LobbyView::new(&s, "ghost").is_power());
+    }
+
+    #[test]
     fn is_science_is_true_only_when_i_hold_the_science_console() {
         let mut s = LobbyState::default();
         s.players = vec![
@@ -622,20 +656,21 @@ mod tests {
             p("a", "Alice", vec![Console::CaptainChair]),
             p("b", "Bob",   vec![Console::Helm]),
             p("c", "Carol", vec![Console::Tactical]),
-            // Engineering not taken
+            // Repair not taken
         ];
         assert!(!LobbyView::new(&s, "a").all_consoles_filled());
     }
 
     #[test]
-    fn all_consoles_filled_is_true_when_all_five_consoles_are_held() {
+    fn all_consoles_filled_is_true_when_all_six_consoles_are_held() {
         let mut s = LobbyState::default();
         s.players = vec![
             p("a", "Alice", vec![Console::CaptainChair]),
             p("b", "Bob",   vec![Console::Helm]),
             p("c", "Carol", vec![Console::Tactical]),
-            p("d", "Dave",  vec![Console::Engineering]),
+            p("d", "Dave",  vec![Console::Repair]),
             p("e", "Eve",   vec![Console::Science]),
+            p("f", "Frank", vec![Console::Power]),
         ];
         assert!(LobbyView::new(&s, "a").all_consoles_filled());
     }
@@ -790,7 +825,7 @@ consoles = ["Tactical"]
         // To truly test "2P, one station empty" we need 2 non-spectator players:
         s.players = vec![
             p("a", "Alice", vec![Console::CaptainChair, Console::Helm]),
-            p("b", "Bob",   vec![Console::Engineering]),  // Engineering not in Tactical station
+            p("b", "Bob",   vec![Console::Repair]),  // Repair not in Tactical station
         ];
         // 2P config: Helm (needs Helm|CaptainChair) + Tactical (needs Tactical).
         // Alice covers Helm, Bob holds Engineering which doesn't cover Tactical → not filled.

@@ -115,7 +115,7 @@ pub fn process_message(
             if ship_stations.configs.is_empty() {
                 // No station config loaded (e.g. in integration tests): fall back to
                 // display-name-based console toggle for backward compatibility.
-                let console = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Engineering, Console::Science]
+                let console = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power]
                     .into_iter()
                     .find(|c| c.display_name() == station.as_str());
                 if let Some(c) = console {
@@ -263,7 +263,7 @@ fn apply_station_assignments(
 
     // Players who are now assigned a different station OR whose station name is
     // unchanged but whose console set differs at the new player count (e.g.
-    // Tactical at 2P holds [Tactical, Engineering] but at 3P holds [Tactical]).
+    // Tactical at 2P holds [Tactical, Repair] but at 3P holds [Tactical]).
     for (token, station_name) in new_map.iter() {
         let old = old_map.get(token);
         let name_changed = old.map(|s| s != station_name).unwrap_or(true);
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn select_empty_station_assigns_consoles_and_broadcasts() {
         let mut sessions = sessions_with("t1", "Alice");
-        // 1 player → station "Captain" with CaptainChair,Helm,Tactical,Engineering
+        // 1 player → station "Captain" with CaptainChair,Helm,Tactical,Repair,Power
         let msg = ClientMessage::SelectStation { station: "Captain".into() };
         let result = pm_stations("t1", &msg, &mut sessions, GamePhase::Lobby, None);
         let assigned = result.outbound.iter().find_map(|(_, m)| match m {
@@ -578,7 +578,7 @@ mod tests {
         // Now t1 tries to take Tactical — but it's occupied. Still a no-op.
         // Let's instead test t1 moves from Helm to an empty station by registering a 3rd player.
         // Actually at 2P there are only 2 stations (Helm, Tactical). Both taken. 
-        // Register 3rd player so 3P layout has Helm, Tactical, Engineering. 
+        // Register 3rd player so 3P layout has Helm, Tactical, Repair. 
         // Release t2's Tactical first, then t1 (on Helm) can swap to Tactical.
         pm_stations("t2", &ClientMessage::ReleaseStation, &mut sessions, GamePhase::Lobby, None);
         // t1 is on Helm, Tactical is now free → t1 swaps from Helm to Tactical (at 2P)
@@ -669,8 +669,8 @@ mod tests {
             sessions.register(tok.into(), name.into()).unwrap();
         }
         let player_count = 3u32;
-        // At 3P: "Helm" (CaptainChair+Helm), "Tactical", "Engineering"
-        for (tok, station_name) in [("t1", "Helm"), ("t2", "Tactical"), ("t3", "Engineering")] {
+        // At 3P: "Helm" (CaptainChair+Helm), "Tactical", "Repair"
+        for (tok, station_name) in [("t1", "Helm"), ("t2", "Tactical"), ("t3", "Repair")] {
             let station_def = crate::stations::get_station(stations, player_count, station_name).unwrap();
             for console in &station_def.consoles {
                 let _ = sessions.toggle_console(tok, console.clone());
@@ -782,7 +782,7 @@ mod tests {
         assert!(result.outbound.iter().any(|(_, m)| {
             matches!(m, ServerMessage::PlayerLeft { token } if token == "t1")
         }));
-        // Station cascade: t3 (no-prev=Engineering) moves to fill t1's slot (Helm at 2P).
+        // Station cascade: t3 (no-prev=Repair) moves to fill t1's slot (Helm at 2P).
         // At least one StationAssigned should be emitted for t3 getting a new station.
         let any_station_assigned = result.outbound.iter().any(|(_, m)| {
             matches!(m, ServerMessage::StationAssigned { .. })

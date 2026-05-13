@@ -112,8 +112,9 @@ fn parse_console(s: &str, count: u32, station: &str) -> Result<Console, StationC
         "CaptainChair" => Ok(Console::CaptainChair),
         "Helm" => Ok(Console::Helm),
         "Tactical" => Ok(Console::Tactical),
-        "Engineering" => Ok(Console::Engineering),
+        "Repair" => Ok(Console::Repair),
         "Science" => Ok(Console::Science),
+        "Power" => Ok(Console::Power),
         other => Err(StationConfigError::UnknownConsole {
             count,
             station: station.to_string(),
@@ -616,7 +617,7 @@ consoles = ["Tactical"]
 
 [[stations.3]]
 name = "Ops"
-consoles = ["Engineering"]
+consoles = ["Repair"]
 
 [[stations.4]]
 name = "Bridge"
@@ -628,7 +629,7 @@ consoles = ["Tactical"]
 
 [[stations.4]]
 name = "Ops"
-consoles = ["Engineering"]
+consoles = ["Repair"]
 
 [[stations.4]]
 name = "Science"
@@ -684,7 +685,7 @@ consoles = ["Science"]
         let s = parse_and_validate(multi_count_toml()).unwrap();
         let def = get_station(&s, 3, "Ops");
         assert!(def.is_some());
-        assert_eq!(def.unwrap().consoles, vec![Console::Engineering]);
+        assert_eq!(def.unwrap().consoles, vec![Console::Repair]);
     }
 
     #[test]
@@ -919,12 +920,12 @@ consoles = ["CaptainChair", "Helm"]
     // ── reassign_on_join ─────────────────────────────────────────────────────
 
     /// The worked-example layout from the PRD/player_ship.toml:
-    /// 1P: Captain [Helm,CaptainChair,Tactical,Engineering]  next=Helm
+    /// 1P: Captain [Helm,CaptainChair,Tactical,Repair,Power]  next=Helm
     /// 2P: Helm    [CaptainChair,Helm]  next=Helm  prev=Captain
-    ///     Tactical [Tactical,Engineering]  next=Tactical
+    ///     Tactical [Tactical,Repair]  next=Tactical
     /// 3P: Helm    [CaptainChair,Helm]  prev=Helm
     ///     Tactical [Tactical]  prev=Tactical
-    ///     Engineering [Engineering]  (no prev)
+    ///     Repair [Repair, Power]  (no prev)
     fn worked_example_stations() -> ShipStations {
         let toml_str = include_str!("../assets/entities/player_ship.toml");
         parse_and_validate(toml_str).unwrap()
@@ -964,8 +965,8 @@ consoles = ["CaptainChair", "Helm"]
         let result = reassign_on_join(&stations, &current, "carol");
         assert_eq!(result.get("alice").map(String::as_str), Some("Helm"));
         assert_eq!(result.get("bob").map(String::as_str), Some("Tactical"));
-        assert_eq!(result.get("carol").map(String::as_str), Some("Engineering"),
-            "carol gets Engineering which has no previous at 3P");
+        assert_eq!(result.get("carol").map(String::as_str), Some("Repair"),
+            "carol gets Repair which has no previous at 3P");
         assert_eq!(result.len(), 3);
     }
 
@@ -976,7 +977,7 @@ consoles = ["CaptainChair", "Helm"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Engineering".to_string()),
+            ("carol".to_string(), "Repair".to_string()),
         ].into();
         let result = reassign_on_join(&stations, &current, "dave");
         // Current unchanged; dave is not in the map (caller adds to spectator queue)
@@ -1030,7 +1031,7 @@ consoles = ["CaptainChair", "Helm"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Engineering".to_string()),
+            ("carol".to_string(), "Repair".to_string()),
         ].into();
         let result = advance_on_join(&stations, &current);
         assert_eq!(result, current, "at max_players advance_on_join returns current unchanged");
@@ -1044,9 +1045,9 @@ consoles = ["CaptainChair", "Helm"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Engineering".to_string()),
+            ("carol".to_string(), "Repair".to_string()),
         ].into();
-        // Carol holds Engineering which has no previous at 3P → carol is no-prev holder
+        // Carol holds Repair which has no previous at 3P → carol is no-prev holder
         // Carol leaves → alice follows prev(Helm)=Helm, bob follows prev(Tactical)=Tactical
         let (result, remaining_q) = reassign_on_leave(
             &stations, &current, "carol", &VecDeque::new()
@@ -1061,13 +1062,13 @@ consoles = ["CaptainChair", "Helm"]
     #[test]
     fn leave_3p_when_non_no_prev_player_leaves_no_prev_holder_fills_vacated_slot() {
         let stations = worked_example_stations();
-        // Alice=Helm, Bob=Tactical, Carol=Engineering (no-prev)
+        // Alice=Helm, Bob=Tactical, Carol=Repair (no-prev)
         // Bob leaves (Tactical) → Carol (no-prev holder) claims Tactical's prev = Tactical
         // Alice follows her own prev = Helm
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Engineering".to_string()),
+            ("carol".to_string(), "Repair".to_string()),
         ].into();
         let (result, _) = reassign_on_leave(
             &stations, &current, "bob", &VecDeque::new()
@@ -1120,7 +1121,7 @@ consoles = ["CaptainChair", "Helm"]
         let _current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Engineering".to_string()),
+            ("carol".to_string(), "Repair".to_string()),
         ].into();
         let mut spectators: VecDeque<String> = VecDeque::new();
         spectators.push_back("dave".to_string());
@@ -1292,7 +1293,7 @@ consoles = ["Tactical"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Engineering".to_string()),
+            ("carol".to_string(), "Repair".to_string()),
         ].into();
         let mut spectators: VecDeque<String> = VecDeque::new();
         spectators.push_back("dave".to_string());
@@ -1359,7 +1360,7 @@ consoles = ["Tactical"]
     }
 
     /// Verify that the 1-player station at player_ship.toml gives access to
-    /// every console (CaptainChair, Helm, Tactical, Engineering).
+    /// every console (CaptainChair, Helm, Tactical, Repair, Power).
     #[test]
     fn player_ship_1p_station_covers_all_consoles() {
         let toml_str = include_str!("../assets/entities/player_ship.toml");
@@ -1368,7 +1369,7 @@ consoles = ["Tactical"]
             Console::CaptainChair,
             Console::Helm,
             Console::Tactical,
-            Console::Engineering,
+            Console::Repair,
         ];
         // all_stations_filled should return true at 1P when the solo player
         // holds all consoles.

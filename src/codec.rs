@@ -303,7 +303,7 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 75,
-                authorized_repair_console: Some(Console::Engineering),
+                authorized_repair_console: Some(Console::Repair),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -458,7 +458,14 @@ mod tests {
 
     #[test]
     fn client_repair_round_trips() {
-        let msg = ClientMessage::Repair { console: crate::messages::Console::Engineering };
+        let msg = ClientMessage::Repair { console: crate::messages::Console::Repair };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_repair_with_power_console_round_trips() {
+        let msg = ClientMessage::Repair { console: crate::messages::Console::Power };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }

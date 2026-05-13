@@ -895,7 +895,7 @@ fn broadcast_repair_state(
     }
 
     use crate::messages::Console;
-    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Engineering];
+    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Power];
     for console in &all_consoles {
         let Some(token) = sessions.0.console_holder(console.clone()) else { continue };
         let penalty_remaining = penalties.remaining(token);
@@ -2328,16 +2328,16 @@ fn test_app() -> App {
 
     // â”€â”€ Repair helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    /// Set up a game with a captain, engineering player, enqueue one breakdown
-    /// targeting Engineering, and apply 10 HP damage so HP = 90.
-    fn start_game_with_breakdown_for_engineering(app: &mut App) {
+    /// Set up a game with a captain, repair player, enqueue one breakdown
+    /// targeting Repair, and apply 10 HP damage so HP = 90.
+    fn start_game_with_breakdown_for_repair(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
         push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "eng", ClientMessage::Identify { token: "eng".into(), name: "Bob".into() });
         tick(app);
-        push(app, "eng", ClientMessage::SelectStation { station: "Engineering".into() });
+        push(app, "eng", ClientMessage::SelectStation { station: "Repair".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -2345,23 +2345,23 @@ fn test_app() -> App {
         // Apply 10 damage so HP = 90.
         app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10);
 
-        // Force the breakdown queue to have Engineering at the front using a seeded
-        // RNG that deterministically yields Engineering first.
+        // Force the breakdown queue to have Repair at the front using a seeded
+        // RNG that deterministically yields Repair first.
         {
             use rand::SeedableRng as _;
             let mut bdr = app.world_mut().resource_mut::<BreakdownQueueResource>();
             bdr.rng = rand::rngs::SmallRng::seed_from_u64(0);
         }
-        // Push entries until Engineering is at the front.
+        // Push entries until Repair is at the front.
         loop {
             let front = {
                 let bdr = app.world().resource::<BreakdownQueueResource>();
                 bdr.queue.front().cloned()
             };
-            if front == Some(Console::Engineering) {
+            if front == Some(Console::Repair) {
                 break;
             }
-            // If front is None or wrong, push + pop until Engineering.
+            // If front is None or wrong, push + pop until Repair.
             {
                 let bdr = app.world_mut().resource_mut::<BreakdownQueueResource>();
                 let BreakdownQueueResource { queue, rng, .. } = &mut *bdr.into_inner();
@@ -2376,10 +2376,10 @@ fn test_app() -> App {
     #[test]
     fn authorized_repair_press_starts_repair_action() {
         let mut app = test_app();
-        start_game_with_breakdown_for_engineering(&mut app);
+        start_game_with_breakdown_for_repair(&mut app);
 
-        // Engineering player presses Repair.
-        push(&mut app, "eng", ClientMessage::Repair { console: Console::Engineering });
+        // Repair player presses Repair.
+        push(&mut app, "eng", ClientMessage::Repair { console: Console::Repair });
         tick(&mut app);
 
         assert!(app.world().resource::<ActiveRepair>().is_active(),
@@ -2389,9 +2389,9 @@ fn test_app() -> App {
     #[test]
     fn unauthorized_repair_press_starts_penalty_not_repair() {
         let mut app = test_app();
-        start_game_with_breakdown_for_engineering(&mut app);
+        start_game_with_breakdown_for_repair(&mut app);
 
-        // Captain presses Repair â€” they hold CaptainChair, not Engineering.
+        // Captain presses Repair — they hold CaptainChair, not Repair.
         push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
 
@@ -2404,14 +2404,14 @@ fn test_app() -> App {
     #[test]
     fn repair_during_cooldown_is_ignored() {
         let mut app = test_app();
-        start_game_with_breakdown_for_engineering(&mut app);
+        start_game_with_breakdown_for_repair(&mut app);
 
-        // Captain presses once â€” gets penalty.
+        // Captain presses once — gets penalty.
         push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
         assert!(app.world().resource::<RepairPenalties>().is_penalised("captain"));
 
-        // Captain presses again â€” should still be penalised (no change).
+        // Captain presses again — should still be penalised (no change).
         push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         tick(&mut app);
         // Penalty remaining should still be close to 10s (only a tiny dt elapsed).
@@ -2423,9 +2423,9 @@ fn test_app() -> App {
     #[test]
     fn authorized_repair_restores_hp_over_time() {
         let mut app = test_app();
-        start_game_with_breakdown_for_engineering(&mut app);
+        start_game_with_breakdown_for_repair(&mut app);
 
-        push(&mut app, "eng", ClientMessage::Repair { console: Console::Engineering });
+        push(&mut app, "eng", ClientMessage::Repair { console: Console::Repair });
         tick(&mut app);
 
         let initial_hp = app.world().resource::<ShipHullIntegrity>().0.current();
@@ -2443,9 +2443,9 @@ fn test_app() -> App {
     #[test]
     fn repair_completion_advances_breakdown_queue() {
         let mut app = test_app();
-        start_game_with_breakdown_for_engineering(&mut app);
+        start_game_with_breakdown_for_repair(&mut app);
 
-        push(&mut app, "eng", ClientMessage::Repair { console: Console::Engineering });
+        push(&mut app, "eng", ClientMessage::Repair { console: Console::Repair });
         tick(&mut app);
 
         // Fast-complete the repair: set hp_restored to the cap so the next tick
@@ -2461,11 +2461,11 @@ fn test_app() -> App {
     }
 
     #[test]
-    fn repair_state_broadcast_sent_to_engineering_console() {
+    fn repair_state_broadcast_sent_to_repair_console() {
         let mut app = test_app();
-        start_game_with_breakdown_for_engineering(&mut app);
+        start_game_with_breakdown_for_repair(&mut app);
 
-        push(&mut app, "eng", ClientMessage::Repair { console: Console::Engineering });
+        push(&mut app, "eng", ClientMessage::Repair { console: Console::Repair });
         let out = tick(&mut app);
 
         let repair_state = out.iter().find(|m| {
@@ -2473,13 +2473,13 @@ fn test_app() -> App {
                 && matches!(&m.target, Target::Token(t) if t == "eng")
         });
         assert!(repair_state.is_some(),
-            "RepairState with in_progress=true should be broadcast to engineering");
+            "RepairState with in_progress=true should be broadcast to repair console");
     }
 
     #[test]
     fn penalty_repair_state_broadcast_to_penalised_player() {
         let mut app = test_app();
-        start_game_with_breakdown_for_engineering(&mut app);
+        start_game_with_breakdown_for_repair(&mut app);
 
         push(&mut app, "captain", ClientMessage::Repair { console: Console::CaptainChair });
         let out = tick(&mut app);

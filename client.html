@@ -97,9 +97,9 @@
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   <link data-trunk rel="rust" data-wasm-opt="z" data-cargo-no-default-features data-cargo-features="client" />
-  <link data-trunk rel="copy-dir" href="assets/phone_border" />
-  <link data-trunk rel="copy-dir" href="assets/fonts" />
-  <link data-trunk rel="copy-dir" href="assets/shaders" />
+  <link data-trunk rel="copy-dir" href="assets/phone_border" data-target-path="assets/phone_border" />
+  <link data-trunk rel="copy-dir" href="assets/fonts" data-target-path="assets/fonts" />
+  <link data-trunk rel="copy-dir" href="assets/shaders" data-target-path="assets/shaders" />
 
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">

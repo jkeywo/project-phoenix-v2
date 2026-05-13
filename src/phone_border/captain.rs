@@ -304,7 +304,7 @@ pub fn direction_press_message(dir: ViewDirection) -> ClientMessage {
 /// Highlights the active direction button's background and LED.
 fn refresh_dir_highlights(
     sim: Res<ClientSimState>,
-    mut buttons: Query<(&DirButton, &Children, &mut BackgroundColor)>,
+    mut buttons: Query<(&DirButton, &Children, &mut BackgroundColor), Without<DirLed>>,
     mut leds: Query<&mut BackgroundColor, With<DirLed>>,
 ) {
     if !sim.is_changed() {

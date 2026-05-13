@@ -60,16 +60,21 @@ Shipped:
 - **[PRD #36 — Captain View Selector](./sources/prd-036-captain-view-selector.md)** — Closed. Fore/aft/port/starboard hull cameras.
 - **[PRD #51 — Smoke Test Harness](./sources/prd-051-smoke-test-harness.md)** — Closed. Playwright + BroadcastChannel PeerJS shim.
 - **[PRD #66 — Weapons & Engineering Consoles](./sources/prd-066-weapons-and-engineering.md)** — Shipped. Tactical (phasers, lock), Engineering (repair loop), hull integrity, breakdown queue.
+- **[PRD #115 — Native PC Server](./sources/prd-115-native-pc-server.md)** — PRD itself closed; deployment slices #135–#141 are still on hold and not built.
+- **[PRD #117 — Modifier System](./sources/prd-117-modifier-system.md)** — Shipped. Pure `modifiers.rs` cache + `ModifierAdded`/`ModifierRemoved` wire.
+- **[PRD #118 — Repair + Power Consoles](./sources/prd-118-repair-and-power-consoles.md)** — Shipped. `Engineering` → `Repair`; new `Power` console; shape-matching repair with three teams; 6+2 power allocation.
+- **[PRD #120 — Station-Based Lobby](./sources/prd-120-station-based-lobby.md)** — Shipped. Per-station picking, auto-shuffle, spectator FIFO. `SelectStation` / `ReleaseStation` / `StationAssigned` wire.
+- **[PRD #153 — Region Entities, Component-Driven Spawning & Modifier Flags](./sources/prd-153-region-entities-and-entity-pipeline.md)** — Shipped. Single `[[entity]]` pipeline; six region effects; `f32` hull; `FlagKind`; unified `EntitySnapshot`.
+- **[PRD #154 — Console Complexity: UI Hiding + AI Automation](./sources/prd-154-console-complexity.md)** — Shipped. Per-console `Low`/`Full` presets; hide UI + server-side `console_ai` to operate hidden controls.
 - **[PRD #180 — Viewscreen Frame](./sources/prd-180-viewscreen-frame.md)** — Shipped. Bevy UI border, `RedAlertVignetteMaterial`, designation + HEADING / HULL / CONDITION HUD.
+- **[PRD #187 — Phone Console HUD — Diegetic Bezel Frame](./sources/prd-187-phone-bezel.md)** — Shipped. `phone_border/` plugin: bezel wraps every console; full helm + captain chrome.
+- **[PRD #191 — Grid-Based Asteroid Lifecycle](./sources/prd-191-grid-asteroid-lifecycle.md)** — Shipped. `asteroid_window.rs`, player-centred ring buffer, destroyed asteroids respawn on return.
 
 Open (planned work):
 
-- **[PRD #115 — Native PC Server](./sources/prd-115-native-pc-server.md)** — Native binary host with bundled cloudflared tunnel + WebSocket transport. New `native` Cargo feature.
 - **[PRD #116 — Save/Load Game Sessions](./sources/prd-116-save-load-sessions.md)** — `localStorage` save slots; `save.rs` is the second sanctioned `serde_json` surface.
-- **[PRD #117 — Modifier System](./sources/prd-117-modifier-system.md)** — Pure `modifiers.rs` infrastructure for cross-console multipliers.
-- **[PRD #118 — Repair + Power Consoles](./sources/prd-118-repair-and-power-consoles.md)** — Splits Engineering; shape-matching repair; 6+2 power allocation. Depends on #117.
-- **[PRD #119 — Stations, Scenarios & Comms](./sources/prd-119-stations-scenarios-comms.md)** — TOML scenario engine, station entities, `Console::Comms`.
-- **[PRD #120 — Station-Based Lobby](./sources/prd-120-station-based-lobby.md)** — Per-station picking with auto-shuffle and spectator FIFO.
+- **[PRD #119 — Stations, Scenarios & Comms](./sources/prd-119-stations-scenarios-comms.md)** — TOML scenario engine, station entities, `Console::Comms`. Builds on PRD #153's entity pipeline.
+- **[PRD #142 — AI and Behaviour System](./sources/prd-142-ai-and-behaviour.md)** — Data-driven state-machine NPCs that emit the same input messages as players. Depends on #119.
 
 ### Design drafts (`docs/`)
 

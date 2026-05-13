@@ -178,7 +178,7 @@ No new tests: per the PRD, the plugin is Bevy plumbing with no testable surface
 in this slice; pure helpers (`yaw_to_compass_bearing`, `pulse_intensity`) land
 with #184.
 
-## [2026-05-12] ingest | Issue #183 � red-alert visual: border swap + UiMaterial vignette + remove CSS overlay
+## [2026-05-12] ingest | Issue #183 � red-alert visual: border swap + UiMaterial vignette + remove CSS overlay
 
 Landed the final slice of PRD #180 inside iewscreen_border. Added ten alert-variant
 image handles, a BorderSlot marker on every border ImageNode, and a per-frame
@@ -192,7 +192,7 @@ a quarter-second on/off ease with a 1.3s sine pulse between 0.55 and 1.0; driven
 frame by drive_vignette_intensity. 7 unit tests cover idle, ease in/out monotonicity,
 steady-state band, and sine phase points; an 8th test confirms BorderSlot::handle`nswitches variants. Removed the #red-alert-overlay div, its CSS (ox-shadow,
 adial-gradient, edalert-pulse keyframes), and the SimState red-alert handler
-in server.html's outeOutbound � Bevy now owns the alert visual end-to-end.
+in server.html's outeOutbound � Bevy now owns the alert visual end-to-end.
 Added pub fn ShipState::red_alert(&self) -> bool accessor so the plugin can read
 the flag without exposing the field. All 659 lib tests pass; cargo check passes
 for both native and wasm32 with --features server.
@@ -218,3 +218,39 @@ documenting the `UiMaterial` + WGSL shader pattern with `RedAlertVignetteMateria
 worked example and PRD #119 station chrome / comms / future damage indicators flagged as
 follow-on candidates; updated `wiki/concepts/view-modes.md` to mention the new viewscreen
 chrome around the camera output; added both new pages to `wiki/index.md`.
+
+## [2026-05-13] ingest | Doc-sync pass: PRDs #115/#117/#118/#120/#153/#154/#187/#191 shipped; six-console roster | touched: AGENTS.md, README.md, CONTEXT.md, wiki/index.md, wiki/entities/console.md, wiki/sources/prd-115/117/118/120/142/153/154/187/191, wiki/log.md
+
+Audit + sync pass against the live codebase and gh issue tracker. The wiki had drifted: it still listed four consoles including `Engineering`, treated PRDs #115/#117/#118/#120 as open, and had no source pages for the wave of PRDs that closed since 2026-05-12 (#153, #154, #187, #191).
+
+Confirmed via `gh issue view`:
+
+- #115 closed 2026-05-11 (PRD itself; deployment slices #135–#141 remain on hold — no implementation has shipped)
+- #117 closed 2026-05-11 (modifier system, `src/modifiers.rs`)
+- #118 closed 2026-05-12 (`Engineering` → `Repair`; `Power` added; `repair_teams.rs` + `power_system.rs`)
+- #120 closed 2026-05-11 (station-based lobby, `stations.rs`)
+- #153 closed (region entities, `f32` hull, `FlagKind`, unified `EntitySnapshot` wire)
+- #154 closed (per-console Low/Full complexity + `console_ai`)
+- #187 closed (phone bezel, `phone_border/`)
+- #191 closed (grid-based asteroid lifecycle, `asteroid_window.rs`)
+
+Console enum (`src/messages.rs:142`) is now six variants: `CaptainChair, Helm, Tactical, Repair, Science, Power`. `Engineering` is gone from code, wire, and tests.
+
+Pages updated:
+
+- Root docs (`README.md`, `AGENTS.md`, `CONTEXT.md`) brought in line with the six-console / station-picking / `f32`-hull / shape-repair / 6+2-power / region-effect / streaming-asteroids / phone-bezel reality. PRD lists split into Shipped vs Open. Module Map test bullets and file layout refreshed for the new modules (`flag_kind`, `modifiers`, `power_system`, `repair_teams`, `stations`, `asteroid_window`, `viewscreen_border`, `phone_border/`).
+- `wiki/index.md` PRD lists rewritten: shipped includes #66/#115/#117/#118/#120/#153/#154/#180/#187/#191; open list reduced to #116/#119/#142.
+- `wiki/entities/console.md` rewritten for six consoles + station model + complexity invariant.
+- `wiki/sources/prd-115/#117/#118/#120` status front-matter flipped to `shipped` (or `shipped-prd-on-hold-slices` for #115); status sections rewritten to reflect actual landed code.
+
+Pages created:
+
+- `wiki/sources/prd-142-ai-and-behaviour.md` — open. Depends on #119; shares action vocabulary with #154's `console_ai`.
+- `wiki/sources/prd-153-region-entities.md` — shipped. Unified `[[entity]]` pipeline, six region effects, `f32` hull, `FlagKind`, `EntitySnapshot` wire.
+- `wiki/sources/prd-154-console-complexity.md` — shipped. `Low`/`Full` per-console presets, `console_ai` operates hidden controls.
+- `wiki/sources/prd-187-phone-console-hud.md` — shipped. `phone_border/` plugin; full helm + captain chrome.
+- `wiki/sources/prd-191-grid-based-asteroid-lifecycle.md` — shipped. Player-centred ring buffer; deterministic per-cell respawn-on-return.
+
+Open PRDs now: #116 (Save/Load), #119 (Stations + Scenarios + Comms), #142 (AI). #116 and #119 are blockers/shaping-influences for #142.
+
+Pages still not yet updated in this pass (deferred — facts mostly correct but file paths / line numbers may drift): `concepts/architecture`, `concepts/testing-strategy`, `concepts/console-plugin-pattern`, `concepts/view-model-pattern`, `entities/helm-console`, `entities/captain-console`, `entities/bridge-crew-stations-planned` (now superseded by `stations.rs` — candidate for retirement), `roadmap/combat-and-damage`, `roadmap/console-expansion`, `roadmap/data-driven-content`, `roadmap/open-architectural-questions`, `roadmap/overview` (the open-PRD list inside it still mentions #115/#117/#118/#120 as planned).

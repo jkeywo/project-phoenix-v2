@@ -1,10 +1,10 @@
 ---
 title: PRD #120 — Station-Based Lobby & Crew Assignment
 type: source
-tags: [prd, lobby, station, crew, spectator, planned]
+tags: [prd, lobby, station, crew, spectator, shipped]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/120
-status: open
-updated: 2026-05-11
+status: shipped
+updated: 2026-05-13
 ---
 
 # PRD #120 — Station-Based Lobby & Crew Assignment
@@ -13,7 +13,7 @@ Replace per-console picking with per-station picking. A station is one player's 
 
 ## Status
 
-Open. Single big-bang PR — coexistence with the per-console model not pursued.
+Shipped (2026-05-11). `src/stations.rs` carries the pure model; `SelectStation` / `ReleaseStation` / `StationAssigned` are on the wire; `[stations]` blocks live in `assets/entities/player_ship.toml`.
 
 ## Problem
 

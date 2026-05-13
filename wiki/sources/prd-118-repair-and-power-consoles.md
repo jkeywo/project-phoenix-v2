@@ -1,10 +1,10 @@
 ---
 title: PRD #118 — Engineering Split: Repair + Power Consoles
 type: source
-tags: [prd, console, engineering, repair, power, modifier, planned]
+tags: [prd, console, engineering, repair, power, modifier, shipped]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/118
-status: open
-updated: 2026-05-11
+status: shipped
+updated: 2026-05-13
 ---
 
 # PRD #118 — Engineering Split: Repair + Power Consoles
@@ -13,7 +13,7 @@ Splits the existing `Engineering` console into two: a `Repair` console with a sh
 
 ## Status
 
-Open. Depends on #117.
+Shipped (2026-05-12). `Console::Engineering` removed; `Console::Repair` and `Console::Power` are live. Pure modules `src/repair_teams.rs` and `src/power_system.rs` carry the logic. Consumes PRD #117's `ShipModifiers`.
 
 ## Problem
 

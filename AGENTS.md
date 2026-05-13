@@ -11,16 +11,22 @@ A browser-based spaceship bridge simulator. One browser tab shows a shared 3D vi
 - **PRD #36:** [Captain View Selector](https://github.com/jkeywo/project-phoenix-v2/issues/36)
 - **PRD #51:** [Smoke Test Harness](https://github.com/jkeywo/project-phoenix-v2/issues/51)
 - **PRD #66:** [Weapons & Engineering Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/66) — Phasers, hull integrity, breakdown queue, repair loop
+- **PRD #115:** [Native PC Server](https://github.com/jkeywo/project-phoenix-v2/issues/115) — PRD itself closed; deployment slices #135–#141 are on hold and not yet built
+- **PRD #117:** [Modifier System](https://github.com/jkeywo/project-phoenix-v2/issues/117) — Pure `modifiers.rs` cache + `ModifierAdded`/`ModifierRemoved` wire
+- **PRD #118:** [Repair + Power Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/118) — Renamed `Engineering` → `Repair`, added `Power`, shape-matching repair with three teams, 6+2 power allocation
+- **PRD #120:** [Station-Based Lobby & Crew Assignment](https://github.com/jkeywo/project-phoenix-v2/issues/120) — Per-station picking, auto-shuffle, spectator FIFO. `SelectStation`/`ReleaseStation`/`StationAssigned` wire
+- **PRD #153:** [Region Entities, Component-Driven Spawning & Modifier Flags](https://github.com/jkeywo/project-phoenix-v2/issues/153) — Single `[[entity]]` pipeline, six region effects, `f32` hull, `FlagKind`, unified `EntitySnapshot` wire
+- **PRD #154:** [Console Complexity: UI Hiding + AI Automation](https://github.com/jkeywo/project-phoenix-v2/issues/154) — Per-console `Low`/`Full` presets, hide UI + server-side `console_ai` to operate hidden controls
+- **PRD #180:** [Viewscreen Frame](https://github.com/jkeywo/project-phoenix-v2/issues/180) — Bevy UI border, `RedAlertVignetteMaterial`, designation + HEADING / HULL / CONDITION HUD
+- **PRD #187:** [Phone Console HUD — Diegetic Bezel Frame](https://github.com/jkeywo/project-phoenix-v2/issues/187) — `phone_border/` plugin: bezel wraps every console; full helm + captain chrome
+- **PRD #191:** [Grid-Based Asteroid Lifecycle with Deterministic Ring Buffer Window](https://github.com/jkeywo/project-phoenix-v2/issues/191) — `asteroid_window.rs`, player-centred grid, destroyed asteroids respawn on return
 
 **Open PRDs (planned work):**
-- **PRD #115:** [Native PC Server](https://github.com/jkeywo/project-phoenix-v2/issues/115) — Native binary host with bundled cloudflared tunnel and embedded WebSocket transport. Adds a `native` Cargo feature alongside `server`/`client`.
 - **PRD #116:** [Save/Load Game Sessions](https://github.com/jkeywo/project-phoenix-v2/issues/116) — `localStorage`-backed save slots, periodic + lifecycle saves, version-gated load. Introduces `save.rs` (the *second* sanctioned `serde_json` surface).
-- **PRD #117:** [Modifier System for Cross-Console Multipliers](https://github.com/jkeywo/project-phoenix-v2/issues/117) — Pure `modifiers.rs`: `ModifierSlot`, `ModifierSource`, `ShipModifiers` cache. Infrastructure for #118 and beyond.
-- **PRD #118:** [Engineering Split: Repair + Power Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/118) — Renames `Engineering` → `Repair`, adds `Power` console, shape-matching repair with 3 teams, 6+2 power allocation. Depends on #117.
-- **PRD #119:** [Space Stations, Scenario Engine & Comms Console](https://github.com/jkeywo/project-phoenix-v2/issues/119) — TOML scenarios with triggers/actions, station entities, `Console::Comms`. Depends on Science + Power.
-- **PRD #120:** [Station-Based Lobby & Crew Assignment](https://github.com/jkeywo/project-phoenix-v2/issues/120) — Replaces per-console picking with per-station picking; auto-shuffle on join/leave; spectator FIFO queue.
+- **PRD #119:** [Space Stations, Scenario Engine & Comms Console](https://github.com/jkeywo/project-phoenix-v2/issues/119) — TOML scenarios with triggers/actions, station entities, `Console::Comms`. Builds on the PRD #153 entity pipeline.
+- **PRD #142:** [AI and Behaviour System](https://github.com/jkeywo/project-phoenix-v2/issues/142) — Data-driven state-machine NPCs that emit the same input messages as players. Depends on #119.
 
-**Current state:** Five consoles in the wire types (`CaptainChair`, `Helm`, `Tactical`, `Engineering`, `Science`). Full simulation: ship physics, destroyable asteroid field, phaser banks (port/starboard), torpedoes, four-quadrant shields, impulse drive, hull damage, breakdown/repair loop. Data-driven entities and maps loaded from TOML via `assets/`. Client is a full Bevy/WASM app. See **[wiki/](./wiki/)** for the deeper map of the codebase.
+**Current state:** Six consoles in the wire types (`CaptainChair`, `Helm`, `Tactical`, `Repair`, `Science`, `Power`). Players join *stations* (bundles of one or more consoles defined per player count in `player_ship.toml`), not individual consoles. Full simulation: ship physics, grid-based streaming asteroid field, phaser banks (port/starboard), torpedoes, four-quadrant shields, impulse drive, hull damage, shape-matching repair with three teams, 6+2 power allocation driving cross-system modifiers, region effects (damage zones, slow zones, comms/sensor jammers), per-console complexity presets with server-side AI to operate hidden controls. Viewscreen and phone consoles both have diegetic bezel frames with red-alert vignette + HUD. Data-driven entities and maps loaded from TOML via `assets/`. Client is a full Bevy/WASM app. See **[wiki/](./wiki/)** for the deeper map of the codebase.
 
 ---
 
@@ -153,29 +159,36 @@ src/
   torpedo.rs          — Pure torpedo + tube state machine: load, launch, homing, expiry.
   shield.rs           — Pure four-quadrant shield model: HP, online/offline, regen.
   impulse.rs          — Pure impulse-drive charge state machine.
+  modifiers.rs        — Pure cross-console multiplier table + flag set (PRD #117 + #153 extension).
+  flag_kind.rs        — Typed boolean flags (`CommsJammed`, `SensorBlind`) carried by `ShipModifiers`.
+  power_system.rs     — Pure 6+2 power allocation, battery, exhaustion lock (PRD #118).
+  repair_teams.rs     — Pure three-team shape-matching repair dispatch (PRD #118).
+  stations.rs         — Pure station model: parse, validate, lookup, reassign-on-join/leave (PRD #120).
   beam_render.rs      — Bevy plugin: renders the active phaser beam(s) as line meshes (server only).
-  entity_config.rs    — TOML entity config types (`EntityConfig`, asteroid + ship + station fields).
+  entity_config.rs    — TOML entity config types (`EntityConfig`, asteroid + ship + station + region fields).
   map_config.rs       — TOML map config: spawn anchors, asteroid fields, default scenario reference.
   config_cache.rs     — `ConfigCachePlugin` — preloads map + entity TOML files via JS fetch on WASM, exposes them as Bevy resources.
   entity_tags.rs      — String-tag helpers for `tags = [...]` lookups across entity configs.
-  renderer.rs         — Bevy plugin: lobby UI, 3D camera, Red Alert border overlay (server only)
+  asteroid_window.rs  — Pure ring-buffer window: player-centred grid lifecycle (PRD #191).
+  asteroid_lifecycle.rs — Bevy systems: spawn/despawn cells as the player moves; broadcast deltas.
+  renderer.rs         — Bevy plugin: lobby UI, 3D camera, console panels (server only).
+  viewscreen_border.rs — Bevy plugin: viewscreen bezel + `RedAlertVignetteMaterial` + HUD (server only, PRD #180).
   bridge.rs           — wasm-bindgen exports. Compiled when `server` feature is active.
 
   client_lobby.rs     — Pure client lobby state model: LobbyState, LobbyView, ConsoleSlot. No Bevy.
   client_sim.rs       — Pure client sim-state model: ClientSimState. No Bevy.
   client_helm.rs      — Pure joystick logic: drag/release/tick, clamp_to_circle. No Bevy.
-  client_app.rs       — Bevy plugin: lobby panel, captain panel, helm panel, weapons/tactical panel, science panel, radar drawing.
+  client_app.rs       — Bevy plugin: lobby panel + tactical / repair / power / science panels.
+  phone_border/       — Bevy plugin: phone bezel framing + full helm + captain chrome (client, PRD #187).
   client_bridge.rs    — wasm-bindgen exports. Compiled when `client` feature is active.
   lib.rs              — Module declarations + feature gates
-
-src/server/, src/client/, src/shared/  — Draft refactor of the flat layout into subdirectories. NOT
-                                         wired into `lib.rs` and NOT compiled. Treat as dead code
-                                         until a refactor PRD lands. PRD #115 explicitly excludes it.
 
 assets/
   maps/default.toml             — Default map: anchors, asteroid fields, default scenario path.
   entities/asteroid_*.toml      — Asteroid variants (large, small, cosmetic).
-  entities/player_ship.toml     — Ship config: physics, phaser banks, torpedo tubes, shields, impulse.
+  entities/player_ship.toml     — Ship config: physics, phaser banks, torpedo tubes, shields, impulse, [stations] block.
+  entities/region_*.toml        — Region templates per effect type (PRD #153).
+  complexity/*.toml             — Per-console complexity presets (Low / Full) + AI tuning (PRD #154).
 
 server.html           — Host page: loads server WASM, runs Bevy, owns PeerJS host peer
 client.html           — Client page: loads client WASM, connects to host via PeerJS peer ID in URL hash
@@ -184,7 +197,7 @@ Trunk.toml            — Build config for server.html (default = server feature
 client-trunk.toml     — Build config for client.html (client feature)
 .github/workflows/    — CI: builds both pages, deploys to gh-pages
 wiki/                 — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.
-docs/                 — Draft design notes (numbered). Drafts 9-11 cover AI, regions, complexity.
+docs/                 — Draft design notes (numbered). Drafts 1-8 mostly shipped or absorbed into PRDs; draft 9 (AI) is still the basis for open PRD #142; drafts 10 (regions) and 11 (complexity) shipped via PRDs #153 and #154.
 ```
 
 ---
@@ -238,32 +251,38 @@ This project uses Bevy's new **pull-based message system** (`add_message<T>()`, 
 ### 1. Lobby Phase
 
 - Players scan QR → open `client.html#<peerId>` → connect to host
-- Server sends `Welcome` with full `GameState` snapshot
-- Players edit name, pick console (CaptainChair or Helm)
-- Only the player at CaptainChair sees and can press "Engage"
-- Server validates: `captain_token() == sender && phase == Lobby`
+- Server sends `Welcome` with full `GameState` snapshot **and** `ShipStations` (the parsed `[stations]` block from `player_ship.toml` for the current player count)
+- Players edit name and pick a **station** via `SelectStation { station }` / `ReleaseStation`. A station bundles one or more consoles, so picking a station may grant Helm + Tactical (etc.) at once
+- Server broadcasts `StationAssigned { token, station, consoles }`. Joining/leaving auto-shuffles via `reassign_on_join` / `reassign_on_leave` (`stations.rs`); spectators wait in a FIFO queue managed by `SessionManager`
+- Only the player whose station contains `CaptainChair` sees and can press "Engage"
+- Server validates: captain owns `CaptainChair`, all stations filled, `phase == Lobby`
 - On `StartGame`: phase → `InProgress`, broadcast `GameStarted` to all
 
 ### 2. In-Progress Phase
 
 - **Captain:** toggles Red Alert via `ToggleRedAlert`; changes view via `SetView`
-- **Helm:** sends `HelmInput { thrust, steering }` at 10Hz; can push radar to viewscreen via `SetView { Radar }`
-- **Tactical:** sends `SetTarget { uuid }` to lock an asteroid; sends `FirePhaser` to start a beam (must be in range and forward arc)
-- **Engineering:** sends `Repair` to clear the current breakdown; wrong-console repairs incur a penalty cooldown
+- **Helm:** sends `HelmInput { thrust, steering }` at 10Hz; can push radar to viewscreen via `SetView { Radar }`; triggers impulse via `StartImpulseCharge`
+- **Tactical:** sends `SetTarget { uuid }` to lock a target; sends `FirePhaser` (in range + forward arc); fires torpedoes via `FireTorpedo { tube, target_uuid }`; sets `SetPhaserMode { Auto | Manual }`
+- **Repair:** sends `Repair { shape }` — must match the head of `BreakdownQueue`; dispatched to one of three repair teams (`repair_teams.rs`); wrong shape, wrong console, or no free team incurs a penalty cooldown
+- **Power:** sends `IncreasePower { console }` / `DecreasePower { console }` distributing 6 base + up to 2 battery points across `Helm` / `Tactical` / `Science`; battery exhaustion locks all to level 1 until recharged
+- **Science:** `SetScienceTarget { uuid }` for advisory target hand-off; `CancelImpulse` to abort Helm's charge; pushes `ScienceRadar` / `SystemChart` view modes
+- **Console Complexity (PRD #154):** any console may switch via `SetComplexity { console, preset_name }`; broadcast as `ComplexityChanged`. Low complexity hides UI elements and runs `console_ai` server-side to operate hidden controls (auto-fire torpedoes, auto-match phaser frequency, auto-manage power overflow)
 - **Server simulation:**
-  - Reads helm inputs tagged with `helm_token()`
-  - Feeds into `compute_physics()` (pure function in `ship_physics.rs`)
+  - Reads helm inputs tagged with the helm holder's token
+  - Feeds into `compute_physics()` (pure function in `ship_physics.rs`), modulated by `ShipModifiers`
   - Applies to ship's Rapier rigid body as direct velocity
-  - Collision → `collision_damage()` → `HullIntegrity::apply_damage()` → `breakdowns_from_damage()` → `BreakdownQueue::push_random()`
-  - Every 100ms: broadcasts `SimState { red_alert, hull_integrity, authorized_repair_console, … }` snapshot; sends `WeaponsUpdate` to Tactical; sends `RepairState` to Engineering
-- **Renderer:** 3D camera follows ship, Red Alert border shows on view screen, phaser beam drawn when active
+  - Region containment runs each tick; entry/exit fires `RegionEntered`/`RegionExited` events that register/remove modifiers and `FlagKind` flags via `ShipModifiers`
+  - Asteroid lifecycle: `update_asteroid_window` (PRD #191) tracks player grid cell, despawns cells outside `despawn_cells`, evaluates fresh density in cells entering `spawn_cells`; broadcasts `EntitySpawned` / `AsteroidDestroyed`
+  - Damage from collisions and `damage_zone` regions both call the shared `apply_hull_damage` helper → `f32` hull → `breakdowns_from_damage()` → `BreakdownQueue::push_random()` (each breakdown gets a random `Shape`)
+  - Every 100ms: broadcasts `SimState` (red alert, `f32` hull, `power_levels`, `flags`, `entity_states`, `radar_state`); sends `WeaponsUpdate` to Tactical; sends `RepairState` (teams + current breakdown shape) to Repair; sends `PowerState` to Power; emits `ModifierAdded` / `ModifierRemoved` deltas
+- **Renderer:** 3D camera follows ship; `viewscreen_border.rs` wraps the viewscreen with a Bevy UI bezel + red-alert vignette + designation/HEADING/HULL/CONDITION HUD; phaser beams drawn when active (`beam_render.rs`); phone clients render their own bezel via `phone_border/`
 
 ### 3. Disconnection / Reconnection
 
 - JS fires `wasm_player_disconnected(token)` when peer drops
-- Server marks player disconnected, console becomes vacant immediately
-- On re-identify with same token: auto-reassign previous console if still free
-- `PlayerJoined` broadcast to others on reconnect
+- Server marks player disconnected; their station becomes vacant immediately and `reassign_on_leave` cascades the next eligible spectator into it
+- On re-identify with same token: auto-reassign previous station if still free, otherwise the player goes to the back of the spectator queue
+- `PlayerJoined` and `StationAssigned` broadcast to others on reconnect
 
 ---
 
@@ -274,21 +293,40 @@ This project uses Bevy's new **pull-based message system** (`add_message<T>()`, 
 | `messages.rs` | Pure data types. No logic. | serde | No |
 | `codec.rs` | MessageCodec trait + JsonCodec | messages, serde_json | No |
 | `session.rs` | SessionManager: player lifecycle | messages | No |
-| `lobby_handler.rs` | Pure lobby message handler | messages, session | No |
+| `stations.rs` | Pure station model + reassignment | messages | No |
+| `lobby_handler.rs` | Pure lobby message handler | messages, session, stations | No |
 | `lobby.rs` | Bevy plugin: lobby message routing | lobby_handler, session | Yes |
-| `simulation.rs` | Bevy plugin: physics + weapons + damage | messages, session, ship_physics, ship_state, asteroid_spawner, radar, damage, breakdown | Yes |
+| `simulation.rs` | Bevy plugin: physics + weapons + damage + regions | messages, session, ship_physics, ship_state, asteroid_window, radar, damage, breakdown, modifiers, repair_teams, power_system | Yes |
 | `ship_physics.rs` | Pure physics: inputs → new state | None (pure Rust) | No |
 | `ship_state.rs` | ShipState resource | messages | Yes |
-| `asteroid_spawner.rs` | Pure asteroid position generator | rand | No |
+| `asteroid_spawner.rs` | Pure per-cell density evaluation | rand, noise | No |
+| `asteroid_window.rs` | Pure ring-buffer grid window | messages | No |
+| `asteroid_lifecycle.rs` | Bevy systems: streaming spawn/despawn | asteroid_window, asteroid_spawner | Yes |
 | `radar.rs` | Pure radar projection + fire-ready check | messages | No |
-| `damage.rs` | collision_damage() + HullIntegrity | None (pure Rust) | No |
-| `breakdown.rs` | BreakdownQueue + breakdowns_from_damage() | messages, rand | No |
+| `radar_config.rs` | Pure radar viewport configs | messages | No |
+| `damage.rs` | apply_hull_damage + HullIntegrity (`f32`) | breakdown | No |
+| `breakdown.rs` | BreakdownQueue + Shape + breakdowns_from_damage() | messages, rand | No |
+| `repair_teams.rs` | Pure 3-team dispatch + cooldowns | messages | No |
+| `modifiers.rs` | ShipModifiers cache + flag-set | messages, flag_kind | No |
+| `flag_kind.rs` | FlagKind enum (`CommsJammed`, `SensorBlind`) | serde | No |
+| `power_system.rs` | 6+2 power allocation + battery + lock | messages | No |
+| `phaser.rs` | Pure phaser bank state machine | messages | No |
+| `torpedo.rs` | Pure torpedo + tube state machine | messages | No |
+| `shield.rs` | Pure four-quadrant shield model | messages | No |
+| `impulse.rs` | Pure impulse-drive charge state machine | messages | No |
+| `entity_config.rs` | TOML entity config types | serde | No |
+| `entity_tags.rs` | String-tag helpers | serde | No |
+| `map_config.rs` | TOML map config | serde | No |
+| `config_cache.rs` | Bevy plugin: TOML preload via JS fetch | entity_config, map_config | Yes |
+| `beam_render.rs` | Bevy plugin: phaser beam meshes | messages | Yes (server) |
+| `viewscreen_border.rs` | Bevy plugin: viewscreen bezel + vignette + HUD | messages, ship_state | Yes (server) |
 | `renderer.rs` | Bevy plugin: 2D lobby + 3D game view | messages, session, ship_state | Yes (server) |
 | `bridge.rs` | wasm-bindgen exports (server feature) | codec, lobby, renderer, simulation | WASM+server |
-| `client_lobby.rs` | Pure client lobby state + LobbyView | messages | No |
+| `client_lobby.rs` | Pure client lobby state + LobbyView | messages, stations | No |
 | `client_sim.rs` | Pure client sim state (ClientSimState) | messages | No |
 | `client_helm.rs` | Pure joystick logic | messages | No |
-| `client_app.rs` | Bevy plugin: all client UI panels | client_lobby, client_sim, client_helm | Yes (client) |
+| `client_app.rs` | Bevy plugin: lobby + tactical/repair/power/science panels | client_lobby, client_sim | Yes (client) |
+| `phone_border/` | Bevy plugin: phone bezel + helm/captain chrome | client_lobby, client_sim, client_helm | Yes (client) |
 | `client_bridge.rs` | wasm-bindgen exports (client feature) | codec, client_app | WASM+client |
 
 ---
@@ -308,17 +346,20 @@ Pure function. No framework, no Bevy. Takes current ship state + helm inputs + d
 - **Movement:** XZ plane, Y-up. Ship's forward is along negative Z when yaw=0.
 - **Collision:** Ship hits asteroid → velocity zeroed (handled in `simulation.rs`).
 
-### Asteroid Field (`asteroid_spawner.rs`)
+### Asteroid Field (`asteroid_spawner.rs` + `asteroid_window.rs`)
 
-Deterministic seeded generation. Fixed layout per game session. Spheres at randomized positions within spawn radius, with clear zone around origin. Called once during world setup.
+Player-centred ring-buffer grid (PRD #191). The world is divided into `resolution × resolution` cells. A `WindowedGrid` of size `(2 × despawn_cells + 1)²` sits centred on the player. As the player moves between grid cells, `update_asteroid_window` (Bevy system) computes which cells just entered the despawn ring (`None` them out — destroyed asteroids are forgotten and will respawn fresh on return) and which cells just entered the spawn ring (evaluate density from `(field_idx, gx, gz) + Perlin noise`; if the density check passes, spawn an `EntitySnapshot`-broadcast asteroid). The donut-bounded `asteroid_spawner.rs` density formula is preserved; only the lifecycle changed. No persistent destroyed-asteroid set.
 
 ### Consoles
 
 - **CaptainChair:** Red Alert toggle (exclusive). Only captain can `StartGame` and `ToggleRedAlert`. View selector (Fore/Aft/Port/Starboard or Radar).
 - **Helm:** Thrust + steering joystick. Sends `HelmInput` at 10Hz while active. Ship only moves when Helm is occupied. Displays radar overlay and "On Screen" button to push radar to the viewscreen. Triggers impulse charge via `StartImpulseCharge`.
 - **Tactical:** Target lock (`SetTarget`), fire phasers (`FirePhaser`), set phaser mode (`SetPhaserMode { Auto | Manual }`), fire torpedoes (`FireTorpedo { tube, target_uuid }`). Receives `WeaponsUpdate` at 10Hz with lock status, fire readiness, cooldown, torpedo magazine, and per-tube reload state. Beam events (`BeamStarted`, `BeamEnded`, `PhaserFired`) and torpedo events (`TorpedoLaunched`, `TorpedoDestroyed`) broadcast to all.
-- **Engineering:** Repair hull breakdowns (`Repair { console }`). Receives `RepairState` at 10Hz with cooldown status. Repairing without authorization incurs a penalty cooldown.
+- **Repair:** Shape-matching repair via `Repair { shape: Shape }` — shape must match the head of `BreakdownQueue`. Three repair teams accept dispatched work in parallel (`repair_teams.rs`); wrong shape, wrong console, or no free team incurs a penalty cooldown. `ShowRepairIcon` / `ClearRepairIcon` broadcasts add decoy shapes to the puzzle. Receives `RepairState` at 10Hz with team statuses + current breakdown shape.
+- **Power:** Distributes 6 base + up to 2 battery points across `Helm`, `Tactical`, `Science` via `IncreasePower { console }` / `DecreasePower { console }`. Levels register modifiers on each console's relevant slots through `power_system.rs`. Battery exhaustion locks all consoles to level 1 until recharged to an emergency threshold. Receives `PowerState` at 10Hz; broadcast `power_levels` rides on `SimSnapshot`.
 - **Science:** Long-range radar overlay, system chart on viewscreen, advisory target suggestion (`SetScienceTarget`), cancel an active impulse charge (`CancelImpulse`). View modes `ScienceRadar` and `SystemChart` are pushed to the viewscreen by Science.
+
+Any console may switch its complexity preset via `SetComplexity { console, preset_name }` (PRD #154). At Low complexity, hidden controls are operated server-side by `console_ai`; at Full complexity, all controls are visible and human-driven.
 
 ---
 
@@ -328,17 +369,24 @@ Deterministic seeded generation. Fixed layout per game session. Spheres at rando
 
 Tests live inline with modules (`#[cfg(test)] mod tests`).
 
-- **`session.rs`** — Player registration, duplicate tokens, console assignment/clearing, disconnect vacancy, reconnect auto-assign, `helm_token()` / `captain_token()` lookups, conflict resolution
-- **`codec.rs`** — Round-trip serialization for every `ClientMessage` and `ServerMessage` variant
-- **`lobby_handler.rs`** — Pure handler: Identify → Welcome, console select → broadcast, captain only can start, HelmInput ignored in lobby, disconnect handling
+- **`session.rs`** — Player registration, duplicate tokens, station assignment/clearing, disconnect vacancy + spectator promotion, reconnect auto-assign, `helm_token()` / `captain_token()` lookups, conflict resolution
+- **`stations.rs`** — TOML parse + validation, `get_station`, `all_stations_filled`, `reassign_on_join` / `advance_on_join` / `reassign_on_leave` cascade, spectator FIFO interaction
+- **`codec.rs`** — Round-trip serialization for every `ClientMessage` and `ServerMessage` variant (incl. `SelectStation`, `StationAssigned`, `ModifierAdded`/`Removed`, `EntitySnapshot`, `PowerState`, `RepairState`, `SetComplexity`, `ComplexityChanged`)
+- **`lobby_handler.rs`** — Pure handler: Identify → Welcome (with `ShipStations`), `SelectStation`/`ReleaseStation` → broadcast, captain-by-CaptainChair authority, all-stations-filled gate, HelmInput ignored in lobby, disconnect handling
 - **`ship_physics.rs`** — Zero input, thrust curve, deceleration curve, steering yaw, diagonal motion, dt scaling, speed cap
-- **`asteroid_spawner.rs`** — Exact count, within bounds, clear zone, no duplicates
+- **`asteroid_spawner.rs`** — Per-cell density determinism, donut bounds, Y offsets, cosmetic vs gameplay layers
+- **`asteroid_window.rs`** — Player grid-cell math, slot index wrapping, `eval_on_player_move` (despawn list + spawn list), large-jump fallback
 - **`ship_state.rs`** — Red alert toggle, snapshot generation
 - **`radar.rs`** — project_to_radar (yaw rotation, range cull), project_asteroid, radar_dots iterator, is_fire_ready (range + arc gates)
-- **`damage.rs`** — collision_damage formula (zero speed, max speed, mid speed, clamp), HullIntegrity (apply/restore/floor/ceiling)
-- **`breakdown.rs`** — BreakdownQueue push/pop/front, no-repeat picker, breakdowns_from_damage bucket math
-- **`client_lobby.rs`** — LobbyState message application (Welcome, PlayerJoined/Left, ConsoleSelected/Cleared, GameStarted), LobbyView derivation (slots, is_captain, is_helm, all_consoles_filled), outbound message builders
-- **`client_sim.rs`** — ClientSimState message application (SimState, WorldSetup, Welcome, RepairState), is_active_camera_direction, message builders
+- **`damage.rs`** — collision_damage formula (zero speed, max speed, mid speed, clamp), `f32` HullIntegrity (apply/restore/floor/ceiling), shared `apply_hull_damage` helper returns expected breakdowns
+- **`breakdown.rs`** — BreakdownQueue push/pop/front (with random `Shape`), no-repeat picker, breakdowns_from_damage bucket math (float input)
+- **`repair_teams.rs`** — Dispatch to free slot, no-free-slot returns penalty, cooldown tick, wrong-shape penalty
+- **`modifiers.rs`** — Bonus aggregation formula (`s ≥ 0` → `1+s`; `s < 0` → `1/(1+|s|)`), per-source removal, flag set OR-aggregation across sources, `RegionEffect { uuid }` source identity
+- **`flag_kind.rs`** — Enum + serde round-trip
+- **`power_system.rs`** — Base 6 distribution, battery exhaustion lock, recharge re-engage threshold, modifier registration per level
+- **`stations.rs`** — see above
+- **`client_lobby.rs`** — LobbyState message application (Welcome+ShipStations, PlayerJoined/Left, StationAssigned, GameStarted), LobbyView derivation (station rows, is_captain, is_helm, all_filled), outbound message builders
+- **`client_sim.rs`** — ClientSimState message application (SimState, WorldSetup, Welcome, RepairState, PowerState, EntitySpawned/Despawned, ModifierAdded/Removed), is_active_camera_direction, message builders
 - **`client_helm.rs`** — clamp_to_circle, compute_thrust_steering, press/drag/release/tick state machine
 
 ### Smoke tests (`tests/smoke/`, Playwright + Chromium)
@@ -380,7 +428,7 @@ End-to-end tests that boot the real server WASM in a headless browser and exerci
 3. **Captain authority.** Only the player at `CaptainChair` can `StartGame` and `ToggleRedAlert`. The server enforces this.
 4. **Console vacancy on disconnect.** Immediately — in all game phases.
 5. **Helm sends at 10Hz.** Simulation reads helm inputs at 10Hz tick intervals.
-6. **Deterministic asteroids.** Seeded generator, fixed per session.
+6. **Deterministic asteroids.** Per-cell density is seeded from `(field_idx, gx, gz) + Perlin noise`, so the same world cell always produces the same asteroid. Destroyed asteroids respawn fresh when the player leaves the cell and returns (no persistent destroyed-set).
 7. **WebGL2 rendering.** For broad browser support.
 8. **PeerJS cloud broker.** Not self-hosted (deferred post-PoC).
 9. **Pure modules are Bevy-free.** `lobby_handler`, `radar`, `damage`, `breakdown`, `client_lobby`, `client_sim`, `client_helm` have no Bevy imports — they are fully unit-testable on native and shared between server and client.

@@ -1,10 +1,10 @@
 ---
 title: PRD #115 — Native PC Server
 type: source
-tags: [prd, native, transport, websocket, cloudflared, tunnel, distribution, planned]
+tags: [prd, native, transport, websocket, cloudflared, tunnel, distribution, on-hold]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/115
-status: open
-updated: 2026-05-11
+status: shipped-prd-on-hold-slices
+updated: 2026-05-13
 ---
 
 # PRD #115 — Native PC Server
@@ -13,7 +13,7 @@ Ship a native PC binary that runs the full bridge simulator server as a regular 
 
 ## Status
 
-Open. No code yet. WASM deployment continues alongside.
+PRD itself closed (2026-05-11) but no implementation slices have landed. Deployment slice issues (#135–#141) are on hold; the WASM deployment continues to be the only shipped target.
 
 ## Problem
 

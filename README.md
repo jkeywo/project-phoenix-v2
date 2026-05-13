@@ -21,10 +21,13 @@ A browser-based spaceship bridge simulator for groups. One browser tab on a shar
 | **Captain's Chair** | Toggle Red Alert; switch view camera |
 | **Helm** | Joystick — up/down = thrust/reverse, left/right = steering; radar overlay; trigger impulse charge |
 | **Tactical** | Lock targets, fire phaser banks (port/starboard), launch torpedoes |
-| **Engineering** | Repair hull breakdowns |
+| **Repair** | Shape-matching repair: dispatch the head breakdown to one of three repair teams |
+| **Power** | Distribute 6 base + 2 battery power points across Helm / Tactical / Science |
 | **Science** | Long-range radar, system chart, suggest targets, cancel impulse |
 
-See [`wiki/`](./wiki/) for a deeper architectural map and [GitHub PRDs](https://github.com/jkeywo/project-phoenix-v2/issues?q=label%3APRD) for upcoming work (native PC server, save/load, modifier system, scenarios + comms console, station-based crew assignment).
+Players join *stations* (bundles of one or more consoles, defined per player count in `assets/entities/player_ship.toml`) rather than individual consoles. Joining and leaving auto-shuffles the crew; spectators wait in a FIFO queue.
+
+See [`wiki/`](./wiki/) for a deeper architectural map and [GitHub PRDs](https://github.com/jkeywo/project-phoenix-v2/issues?q=label%3APRD) for upcoming work (save/load, scenarios + comms console, AI behaviours).
 
 ---
 
@@ -99,7 +102,7 @@ The smoke tests boot the real WASM build in a headless browser and exercise the 
 ```bash
 # 1. Build dist/ (required before running smoke tests)
 trunk build --release
-mkdir -p dist/client && cp client.html dist/client/index.html
+trunk build --release --config client-trunk.toml
 
 # 2. Install Playwright deps (one-time)
 cd tests/smoke
@@ -139,20 +142,26 @@ CI builds both pages on every push to `main` and deploys to GitHub Pages automat
 
 ```
 src/
-  messages.rs         — wire types (ClientMessage, ServerMessage, Console, ViewMode, etc.)
+  messages.rs         — wire types (ClientMessage, ServerMessage, Console, ViewMode, EntitySnapshot, etc.)
   codec.rs            — JSON serialization (only place serde_json is used)
-  session.rs          — player lifecycle: tokens, consoles, reconnect
+  session.rs          — player lifecycle: tokens, consoles, reconnect, spectator queue
+  stations.rs         — pure station model: parse, validate, lookup, reassign-on-join/leave
   lobby_handler.rs    — pure lobby message handler (no Bevy, fully testable)
   lobby.rs            — Bevy plugin: lobby phase message routing
   simulation.rs       — Bevy plugin: physics, helm input, weapons, collisions
   ship_physics.rs     — pure Rust physics function (fully unit-tested)
   ship_state.rs       — ShipState Bevy resource
-  asteroid_spawner.rs — deterministic seeded asteroid placement
-  asteroid_lifecycle.rs — Bevy systems: range-gated asteroid spawn/despawn
+  asteroid_spawner.rs — pure Rust per-cell density evaluation
+  asteroid_window.rs  — pure ring-buffer window: player-centred grid lifecycle
+  asteroid_lifecycle.rs — Bevy systems: spawn/despawn cells as the player moves
   radar.rs            — pure radar projection math (server + client share)
-  radar_config.rs     — pure radar viewport configs (helm + weapons)
-  damage.rs           — hull integrity and collision damage formula
-  breakdown.rs        — breakdown queue mechanic
+  radar_config.rs     — pure radar viewport configs (helm + weapons + science)
+  damage.rs           — hull integrity (f32) + shared apply_hull_damage helper
+  breakdown.rs        — breakdown queue + Shape assignment
+  repair_teams.rs     — pure three-team repair dispatch model
+  modifiers.rs        — pure cross-console multiplier table + flag set
+  flag_kind.rs        — typed boolean flags (CommsJammed, SensorBlind)
+  power_system.rs     — pure 6+2 power allocation, battery, exhaustion lock
   phaser.rs           — pure phaser bank state machine
   torpedo.rs          — pure torpedo + tube state machine
   shield.rs           — pure four-quadrant shield model
@@ -163,17 +172,20 @@ src/
   config_cache.rs     — Bevy plugin: preloads TOML configs via JS fetch on WASM
   entity_tags.rs      — string-tag helpers for entity configs
   renderer.rs         — Bevy plugin: 2D lobby UI + 3D game camera (server)
+  viewscreen_border.rs — Bevy plugin: viewscreen bezel + red-alert vignette + HUD (server)
   bridge.rs           — wasm-bindgen exports (server feature only)
 
   client_lobby.rs     — pure lobby state model (client, Bevy-free)
   client_sim.rs       — pure sim-state model (client, Bevy-free)
   client_helm.rs      — pure joystick logic (client, Bevy-free)
   client_app.rs       — Bevy plugin: lobby + console UI panels (client)
+  phone_border/       — Bevy plugin: phone bezel frame + helm/captain chrome (client)
   client_bridge.rs    — wasm-bindgen exports (client feature only)
 
 assets/
   maps/default.toml             — default map config
   entities/*.toml               — asteroid + ship entity configs
+  complexity/*.toml             — per-console complexity presets (Low / Full)
 
 server.html           — host page: loads WASM, owns PeerJS host peer
 client.html           — client page: loads client WASM, connects via PeerJS

@@ -1,10 +1,10 @@
 ---
 title: PRD #117 — Modifier System for Cross-Console Multipliers
 type: source
-tags: [prd, modifier, infrastructure, simulation, planned]
+tags: [prd, modifier, infrastructure, simulation, shipped]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/117
-status: open
-updated: 2026-05-11
+status: shipped
+updated: 2026-05-13
 ---
 
 # PRD #117 — Modifier System for Cross-Console Multipliers
@@ -13,7 +13,7 @@ A central, pure-Rust system for applying multiplicative bonuses across consoles,
 
 ## Status
 
-Open. Pure module; no Bevy. Should land before any feature that depends on it.
+Shipped (2026-05-11). Pure module landed in `src/modifiers.rs`; consumed by PRD #118 (Power) and PRD #153 (Region effects, which extended `ShipModifiers` with a flag set keyed by `FlagKind`).
 
 ## Problem
 

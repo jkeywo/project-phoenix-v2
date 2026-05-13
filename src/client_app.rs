@@ -869,10 +869,10 @@ fn toggle_repair_panel_visibility(
 /// Refresh the repair panel: breakdown text, shape button states, team status.
 fn refresh_repair_panel(
     sim: Res<ClientSimState>,
-    mut breakdown_label: Query<&mut Text, With<RepairBreakdownLabel>>,
-    mut shape_btn_bg: Query<(&mut BackgroundColor, &RepairShapeButton)>,
-    mut team_fill: Query<(&mut Node, &mut BackgroundColor, &RepairTeamFill)>,
-    mut team_status: Query<(&mut Text, &mut TextColor, &RepairTeamStatusText)>,
+    mut breakdown_label: Query<&mut Text, (With<RepairBreakdownLabel>, Without<RepairTeamStatusText>)>,
+    mut shape_btn_bg: Query<(&mut BackgroundColor, &RepairShapeButton), Without<RepairTeamFill>>,
+    mut team_fill: Query<(&mut Node, &mut BackgroundColor, &RepairTeamFill), Without<RepairShapeButton>>,
+    mut team_status: Query<(&mut Text, &mut TextColor, &RepairTeamStatusText), Without<RepairBreakdownLabel>>,
 ) {
     if !sim.is_changed() {
         return;
@@ -1791,12 +1791,12 @@ fn toggle_power_panel_visibility(
 /// Refresh the power panel: power levels, button enable/disable, battery bar, lock state.
 fn refresh_power_panel(
     sim: Res<ClientSimState>,
-    mut row_bg: Query<(&mut BackgroundColor, &PowerRow)>,
-    mut level_labels: Query<(&mut Text, &PowerRowLevel)>,
-    mut inc_buttons: Query<(&mut BackgroundColor, &PowerIncButton)>,
-    mut dec_buttons: Query<(&mut BackgroundColor, &PowerDecButton)>,
+    mut row_bg: Query<(&mut BackgroundColor, &PowerRow), (Without<PowerIncButton>, Without<PowerDecButton>)>,
+    mut level_labels: Query<(&mut Text, &PowerRowLevel), Without<BatteryLabel>>,
+    mut inc_buttons: Query<(&mut BackgroundColor, &PowerIncButton), (Without<PowerRow>, Without<PowerDecButton>)>,
+    mut dec_buttons: Query<(&mut BackgroundColor, &PowerDecButton), (Without<PowerRow>, Without<PowerIncButton>)>,
     mut battery_bar: Query<&mut Node, With<BatteryBar>>,
-    mut battery_label: Query<&mut Text, With<BatteryLabel>>,
+    mut battery_label: Query<&mut Text, (With<BatteryLabel>, Without<PowerRowLevel>)>,
 ) {
     if !sim.is_changed() {
         return;

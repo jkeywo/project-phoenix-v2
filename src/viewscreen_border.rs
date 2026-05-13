@@ -73,12 +73,12 @@ use crate::stations::ShipStations;
 // exactly. No proportional scaling — the server is a desktop / large-
 // screen target.
 
-const CORNER_W: f32 = 240.0;
-const CORNER_H: f32 = 140.0;
+pub(crate) const CORNER_W: f32 = 240.0;
+pub(crate) const CORNER_H: f32 = 140.0;
 const CAP_TOP_W: f32 = 320.0;
 const CAP_BOTTOM_W: f32 = 520.0;
 const CAP_H: f32 = 56.0;
-const EDGE_THICKNESS: f32 = 56.0;
+const EDGE_THICKNESS: f32 = 44.0;
 
 // ── Pulse constants ──────────────────────────────────────────────────
 //
@@ -282,7 +282,7 @@ pub struct ViewscreenBorderPlugin;
 impl Plugin for ViewscreenBorderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiMaterialPlugin::<RedAlertVignetteMaterial>::default())
-            .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup).chain())
+            .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup, attach_initial_strip).chain())
             .add_systems(
                 Update,
                 (
@@ -326,9 +326,7 @@ fn load_viewscreen_assets(mut commands: Commands, asset_server: Res<AssetServer>
     commands.insert_resource(assets);
 }
 
-/// Spawns the border frame and lobby HUD strip at app startup.
-/// The frame is always visible; the lobby strip is replaced by the in-game
-/// strip when the phase transitions to `InProgress`.
+/// Spawns the border frame (vignette, corners, edges, caps, designation).
 fn spawn_border_on_startup(
     mut commands: Commands,
     assets: Res<ViewscreenAssets>,
@@ -336,10 +334,25 @@ fn spawn_border_on_startup(
 ) {
     let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0, _pad0: 0.0, _pad1: 0.0, _pad2: 0.0 });
     commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
-    let root = spawn_border_frame(&mut commands, &assets, vignette);
-    // Attach the initial lobby HUD strip as a child of the border root.
+    spawn_border_frame(&mut commands, &assets, vignette);
+}
+
+/// Startup system that runs after `spawn_border_on_startup` to attach the
+/// initial lobby HUD strip as a child of the bottom cap entity.
+fn attach_initial_strip(
+    mut commands: Commands,
+    assets: Res<ViewscreenAssets>,
+    slots: Query<(&BorderSlot, Entity)>,
+) {
+    let Some(parent) = slots
+        .iter()
+        .find(|(slot, _)| **slot == BorderSlot::CapBottom)
+        .map(|(_, e)| e)
+    else {
+        return;
+    };
     let strip = spawn_lobby_hud_strip(&mut commands, &assets);
-    commands.entity(root).add_child(strip);
+    commands.entity(parent).add_child(strip);
 }
 
 /// Swaps HUD strips on phase transition.
@@ -353,7 +366,7 @@ fn sync_hud_strips_to_phase(
     mut commands: Commands,
     phase: Res<CurrentPhase>,
     assets: Option<Res<ViewscreenAssets>>,
-    border_root: Query<Entity, With<ViewscreenBorderRoot>>,
+    slots: Query<(&BorderSlot, Entity)>,
     lobby_strip: Query<Entity, With<LobbyHudStrip>>,
     ingame_strip: Query<Entity, With<InGameHudStrip>>,
 ) {
@@ -361,29 +374,33 @@ fn sync_hud_strips_to_phase(
         return;
     }
     let Some(assets) = assets else { return };
-    let Ok(root) = border_root.single() else { return };
+    let bottom_cap = slots
+        .iter()
+        .find(|(slot, _)| **slot == BorderSlot::CapBottom)
+        .map(|(_, e)| e)
+        .or_else(|| slots.iter().next().map(|(_, e)| e)); // fallback: any slot's parent
 
     match phase.0 {
         GamePhase::InProgress => {
-            // Despawn lobby strip.
             for e in lobby_strip.iter() {
                 commands.entity(e).despawn();
             }
-            // Spawn in-game strip if not already present.
             if ingame_strip.is_empty() {
                 let strip = spawn_ingame_hud_strip(&mut commands, &assets);
-                commands.entity(root).add_child(strip);
+                if let Some(parent) = bottom_cap {
+                    commands.entity(parent).add_child(strip);
+                }
             }
         }
         GamePhase::Lobby => {
-            // Despawn in-game strip.
             for e in ingame_strip.iter() {
                 commands.entity(e).despawn();
             }
-            // Spawn lobby strip if not already present.
             if lobby_strip.is_empty() {
                 let strip = spawn_lobby_hud_strip(&mut commands, &assets);
-                commands.entity(root).add_child(strip);
+                if let Some(parent) = bottom_cap {
+                    commands.entity(parent).add_child(strip);
+                }
             }
         }
     }
@@ -587,6 +604,14 @@ fn spawn_border_frame(
             },
         ))
         .with_children(|parent| {
+            // Spawn order determines z-order: later = on top.
+            //
+            // 1. Vignette (behind everything)
+            // 2. Corners
+            // 3. Edges (tiled)
+            // 4. Caps (cover the centre seam where edge segments meet)
+            // 5. Designation text (on top cap)
+
             // ── Vignette (spawned FIRST so border sprites occlude it) ─
             parent.spawn((
                 Node {
@@ -650,55 +675,15 @@ fn spawn_border_frame(
                 ImageNode::new(assets.corner_br.clone()),
             ));
 
-            // ── Top cap (centred along top edge) ─────────────────────
-            parent.spawn((
-                BorderSlot::CapTop,
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Percent(50.0),
-                    margin: UiRect {
-                        left: Val::Px(-CAP_TOP_W / 2.0),
-                        ..default()
-                    },
-                    width: Val::Px(CAP_TOP_W),
-                    height: Val::Px(CAP_H),
-                    ..default()
-                },
-                ImageNode::new(assets.cap_top.clone()),
-            ));
-
-            // ── Bottom cap (centred along bottom edge) ───────────────
-            parent.spawn((
-                BorderSlot::CapBottom,
-                Node {
-                    position_type: PositionType::Absolute,
-                    bottom: Val::Px(0.0),
-                    left: Val::Percent(50.0),
-                    margin: UiRect {
-                        left: Val::Px(-CAP_BOTTOM_W / 2.0),
-                        ..default()
-                    },
-                    width: Val::Px(CAP_BOTTOM_W),
-                    height: Val::Px(CAP_H),
-                    ..default()
-                },
-                ImageNode::new(assets.cap_bottom.clone()),
-            ));
-
             // ── Edges ────────────────────────────────────────────────
             //
-            // The top/bottom edges fill the horizontal gap between each
-            // corner and the centre cap. We spawn two segments per
-            // horizontal edge (left-of-cap, right-of-cap) so the cap
-            // can sit on top without a stretched section underneath.
+            // Edges fill the gap between corners using `NodeImageMode::Tiled`.
+            // The top/bottom edges are split into two segments (left-of-cap,
+            // right-of-cap). Both segments share the same `BorderSlot` marker
+            // so the swap system rewrites both in one query iteration.
             //
-            // Both segments share the `BorderSlot::EdgeTop` (or
-            // `EdgeBottom`) marker so the swap system rewrites both in
-            // one query iteration.
-            //
-            // The left/right edges fill the vertical gap between the
-            // top and bottom corners.
+            // The caps are spawned AFTER the edges so they render on top,
+            // covering the seam where the two edge segments meet.
 
             // Top edge — left segment (between TL corner and top cap).
             parent.spawn((
@@ -828,6 +813,44 @@ fn spawn_border_frame(
                     }),
             ));
 
+            // ── Caps (spawned AFTER edges so they render on top) ────
+
+            // Top cap (centred along top edge).
+            parent.spawn((
+                BorderSlot::CapTop,
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Percent(50.0),
+                    margin: UiRect {
+                        left: Val::Px(-CAP_TOP_W / 2.0),
+                        ..default()
+                    },
+                    width: Val::Px(CAP_TOP_W),
+                    height: Val::Px(CAP_H),
+                    ..default()
+                },
+                ImageNode::new(assets.cap_top.clone()),
+            ));
+
+            // Bottom cap (centred along bottom edge).
+            parent.spawn((
+                BorderSlot::CapBottom,
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(0.0),
+                    left: Val::Percent(50.0),
+                    margin: UiRect {
+                        left: Val::Px(-CAP_BOTTOM_W / 2.0),
+                        ..default()
+                    },
+                    width: Val::Px(CAP_BOTTOM_W),
+                    height: Val::Px(CAP_H),
+                    ..default()
+                },
+                ImageNode::new(assets.cap_bottom.clone()),
+            ));
+
             // ── Designation (centred on top cap) ─────────────────────
             parent
                 .spawn(Node {
@@ -865,23 +888,19 @@ fn spawn_border_frame(
         .id()
 }
 
-/// Spawn the lobby HUD strip (CLOCK / PLAYERS / STATUS) anchored to the
-/// bottom cap position. Returns the entity so it can be attached as a
-/// child of the border root.
+/// Spawn the lobby HUD strip (CLOCK / PLAYERS / STATUS) as an overlay
+/// that fills the bottom cap. The strip should be attached as a child of
+/// the bottom cap entity so it inherits the cap's position and size.
 fn spawn_lobby_hud_strip(commands: &mut Commands, assets: &ViewscreenAssets) -> Entity {
     commands
         .spawn((
             LobbyHudStrip,
             Node {
                 position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
-                left: Val::Percent(50.0),
-                width: Val::Px(CAP_BOTTOM_W),
-                height: Val::Px(CAP_H),
-                margin: UiRect {
-                    left: Val::Px(-CAP_BOTTOM_W / 2.0),
-                    ..default()
-                },
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::SpaceAround,
                 align_items: AlignItems::Center,
@@ -896,22 +915,19 @@ fn spawn_lobby_hud_strip(commands: &mut Commands, assets: &ViewscreenAssets) -> 
         .id()
 }
 
-/// Spawn the in-game HUD strip (HEADING / HULL / CONDITION). Returns the
-/// entity so it can be attached as a child of the border root.
+/// Spawn the in-game HUD strip (HEADING / HULL / CONDITION) as an overlay
+/// that fills the bottom cap. The strip should be attached as a child of
+/// the bottom cap entity.
 fn spawn_ingame_hud_strip(commands: &mut Commands, assets: &ViewscreenAssets) -> Entity {
     commands
         .spawn((
             InGameHudStrip,
             Node {
                 position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
-                left: Val::Percent(50.0),
-                width: Val::Px(CAP_BOTTOM_W),
-                height: Val::Px(CAP_H),
-                margin: UiRect {
-                    left: Val::Px(-CAP_BOTTOM_W / 2.0),
-                    ..default()
-                },
                 flex_direction: FlexDirection::Row,
                 justify_content: JustifyContent::SpaceAround,
                 align_items: AlignItems::Center,

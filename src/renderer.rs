@@ -90,6 +90,7 @@ impl Plugin for RendererPlugin {
             .add_systems(Startup, setup)
             .add_systems(Update, (
                 update_fps_counter,
+                update_camera_aspect,
                 toggle_cameras,
                 toggle_lobby_items,
                 update_player_list,
@@ -151,7 +152,12 @@ fn setup(
         ..default()
     });
 
-    // Lobby: panel anchored top-left via node UI
+    // Lobby: panel anchored top-left via node UI.
+    // Padding accounts for the viewscreen border corners and edges so that
+    // text doesn't overlap the border frame (which uses CORNER_W=240px and
+    // CORNER_H=140px for each corner; EDGE_THICKNESS=44px).
+    const CORNER_W: f32 = 240.0;
+    const CORNER_H: f32 = 140.0;
     commands
         .spawn((
             LobbyItem,
@@ -161,7 +167,12 @@ fn setup(
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::FlexStart,
                 align_items: AlignItems::FlexStart,
-                padding: UiRect::all(Val::Px(12.0)),
+                padding: UiRect {
+                    left: Val::Px(CORNER_W),
+                    top: Val::Px(CORNER_H),
+                    right: Val::Px(CORNER_W),
+                    bottom: Val::Px(CORNER_H + 8.0),
+                },
                 ..default()
             },
         ))
@@ -251,6 +262,29 @@ fn update_fps_counter(
         }
         tracker.0 = 0;
         tracker.1 = 0.0;
+    }
+}
+
+/// Updates the GameCamera's perspective projection aspect ratio to match
+/// the current window dimensions. Without this, the camera retains its
+/// initial aspect ratio — the 3D view appears stretched on resize.
+fn update_camera_aspect(
+    window: Query<&Window>,
+    mut game_cam: Query<&mut Projection, With<GameCamera>>,
+) {
+    let Ok(window) = window.single() else { return };
+    let w = window.width();
+    let h = window.height();
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let aspect = w / h;
+    for mut proj in game_cam.iter_mut() {
+        if let Projection::Perspective(ref mut p) = *proj {
+            if (p.aspect_ratio - aspect).abs() > 0.001 {
+                p.aspect_ratio = aspect;
+            }
+        }
     }
 }
 

@@ -346,6 +346,15 @@ mod tests {
     }
 
     #[test]
+    fn shape_enum_round_trips() {
+        for shape in &[Shape::Square, Shape::Triangle, Shape::Circle] {
+            let json = serde_json::to_string(shape).unwrap();
+            let decoded: Shape = serde_json::from_str(&json).unwrap();
+            assert_eq!(*shape, decoded);
+        }
+    }
+
+    #[test]
     fn welcome_with_world_some_round_trips() {
         let msg = ServerMessage::Welcome {
             state: GameState {

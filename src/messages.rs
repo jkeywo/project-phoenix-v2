@@ -75,6 +75,15 @@ pub enum PhaserMode {
     Manual,
 }
 
+/// A shape used for the repair mini-game. Assigned randomly to each
+/// breakdown entry and fixed for its lifetime.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum Shape {
+    Square,
+    Triangle,
+    Circle,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ViewDirection {
     #[default]

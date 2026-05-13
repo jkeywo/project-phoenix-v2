@@ -1,4 +1,4 @@
-use crate::messages::Console;
+use crate::messages::{Console, Shape};
 use rand::Rng;
 
 /// All consoles that can receive a breakdown assignment.
@@ -10,13 +10,22 @@ const ALL_CONSOLES: [Console; 5] = [
     Console::Power,
 ];
 
-/// FIFO queue of console breakdown assignments.
+/// One entry in the breakdown queue: a console that must perform a repair
+/// and a randomly-assigned shape for the repair mini-game.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BreakdownEntry {
+    pub console: Console,
+    pub shape: Shape,
+}
+
+/// FIFO queue of breakdown entries.
 ///
-/// Each entry names the console whose player must perform the repair action.
+/// Each entry names the console whose player must perform the repair action
+/// and carries a shape for the mini-game.
 /// The front of the queue is the *active* (authorized) repair target.
 #[derive(Debug, Clone, Default)]
 pub struct BreakdownQueue {
-    queue: std::collections::VecDeque<Console>,
+    queue: std::collections::VecDeque<BreakdownEntry>,
     last_picked: Option<Console>,
 }
 
@@ -25,8 +34,8 @@ impl BreakdownQueue {
         Self::default()
     }
 
-    /// Pick a random console, never the same as the previous pick, and push it
-    /// to the back of the queue.
+    /// Pick a random console (never the same as the previous pick), assign a
+    /// random shape, and push the entry to the back of the queue.
     ///
     /// Uses `rng` so callers can supply a seeded generator for deterministic tests.
     pub fn push_random<R: Rng>(&mut self, rng: &mut R) {
@@ -35,18 +44,23 @@ impl BreakdownQueue {
             .filter(|c| Some(*c) != self.last_picked.as_ref())
             .collect();
         let idx = rng.random_range(0..candidates.len());
-        let picked = candidates[idx].clone();
-        self.last_picked = Some(picked.clone());
-        self.queue.push_back(picked);
+        let console = candidates[idx].clone();
+        let shape = match rng.random_range(0..3) {
+            0 => Shape::Square,
+            1 => Shape::Triangle,
+            _ => Shape::Circle,
+        };
+        self.last_picked = Some(console.clone());
+        self.queue.push_back(BreakdownEntry { console, shape });
     }
 
     /// The current authorized repair target — the front of the queue.
-    pub fn front(&self) -> Option<&Console> {
+    pub fn front(&self) -> Option<&BreakdownEntry> {
         self.queue.front()
     }
 
     /// Remove the front entry (called after a successful repair).
-    pub fn pop_front(&mut self) -> Option<Console> {
+    pub fn pop_front(&mut self) -> Option<BreakdownEntry> {
         self.queue.pop_front()
     }
 
@@ -104,7 +118,10 @@ mod tests {
         let mut q = BreakdownQueue::new();
         let mut rng = SmallRng::seed_from_u64(0);
         q.push_random(&mut rng);
-        assert!(q.front().is_some());
+        let entry = q.front().unwrap();
+        // Entry carries both console and shape.
+        let _console = &entry.console;
+        let _shape = entry.shape;
     }
 
     #[test]
@@ -121,16 +138,52 @@ mod tests {
     }
 
     #[test]
+    fn push_random_assigns_one_of_three_shapes() {
+        let mut q = BreakdownQueue::new();
+        let mut rng = SmallRng::seed_from_u64(0);
+        let mut seen = std::collections::HashSet::new();
+        // Push enough entries to see all three shapes.
+        for _ in 0..30 {
+            q.push_random(&mut rng);
+            let entry = q.queue.back().unwrap();
+            seen.insert(entry.shape);
+        }
+        assert!(seen.contains(&Shape::Square), "should see Square");
+        assert!(seen.contains(&Shape::Triangle), "should see Triangle");
+        assert!(seen.contains(&Shape::Circle), "should see Circle");
+    }
+
+    #[test]
+    fn shape_stays_same_across_reads() {
+        let mut q = BreakdownQueue::new();
+        let mut rng = SmallRng::seed_from_u64(42);
+        q.push_random(&mut rng);
+        let s1 = q.front().unwrap().shape;
+        let s2 = q.front().unwrap().shape;
+        assert_eq!(s1, s2, "shape must not change between reads");
+    }
+
+    #[test]
+    fn pop_front_returns_entry() {
+        let mut q = BreakdownQueue::new();
+        let mut rng = SmallRng::seed_from_u64(0);
+        q.push_random(&mut rng);
+        let entry = q.pop_front();
+        assert!(entry.is_some());
+        assert!(q.is_empty());
+    }
+
+    #[test]
     fn picker_never_returns_same_console_twice_in_a_row() {
         let mut q = BreakdownQueue::new();
         let mut rng = SmallRng::seed_from_u64(1234);
         for _ in 0..100 {
-            let prev_back = q.queue.back().cloned();
+            let prev_back = q.queue.back().map(|e| e.console.clone());
             q.push_random(&mut rng);
-            let new_back = q.queue.back().unwrap();
+            let new_back = q.queue.back().unwrap().console.clone();
             if let Some(prev) = prev_back {
                 assert_ne!(
-                    &prev, new_back,
+                    prev, new_back,
                     "picker should never repeat the same console consecutively"
                 );
             }

@@ -784,7 +784,7 @@ fn handle_repair(
             continue;
         }
         // Check if the specific console pressed is the authorized one.
-        let authorized = breakdowns.queue.front().cloned();
+        let authorized = breakdowns.queue.front().map(|e| e.console.clone());
         let is_authorized = authorized.as_ref().map_or(false, |auth| *auth == repair_console);
 
         if is_authorized && !repair.is_active() {
@@ -1045,7 +1045,7 @@ fn broadcast_sim_state(
         return;
     }
     if timer.0.tick(time.delta()).just_finished() {
-        let authorized = breakdowns.queue.front().cloned();
+        let authorized = breakdowns.queue.front().map(|e| e.console.clone());
         writer.write(OutboundMessage {
             target: Target::All,
             msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current(), authorized) },
@@ -1884,7 +1884,7 @@ fn test_app() -> App {
         assert_eq!(bd.queue.len(), 2, "2 breakdowns should be queued");
         assert_eq!(
             snap.authorized_repair_console.as_ref(),
-            bd.queue.front(),
+            bd.queue.front().map(|e| &e.console),
             "snapshot authorized_repair_console matches queue front"
         );
     }
@@ -2354,18 +2354,19 @@ fn test_app() -> App {
         }
         // Push entries until Repair is at the front.
         loop {
-            let front = {
+            let front_console = {
                 let bdr = app.world().resource::<BreakdownQueueResource>();
-                bdr.queue.front().cloned()
+                bdr.queue.front().map(|e| e.console.clone())
             };
-            if front == Some(Console::Repair) {
+            if front_console == Some(Console::Repair) {
                 break;
             }
-            // If front is None or wrong, push + pop until Repair.
+            // If front is Some (wrong console), pop it so push_random produces
+            // a new candidate. None shouldn't happen here, but guard anyway.
             {
                 let bdr = app.world_mut().resource_mut::<BreakdownQueueResource>();
                 let BreakdownQueueResource { queue, rng, .. } = &mut *bdr.into_inner();
-                if front.is_some() {
+                if front_console.is_some() {
                     queue.pop_front();
                 }
                 queue.push_random(rng);

@@ -294,15 +294,23 @@ impl Plugin for ClientAppPlugin {
                     (
                         handle_fire_phaser_button_press,
                         handle_phaser_mode_toggle_press,
-                        refresh_weapons_panel,
                         handle_torpedo_tube_button_press,
                         handle_fire_torpedo_button_press,
+                    ),
+                    (
+                        refresh_weapons_panel,
                         refresh_torpedo_ui,
+                    ),
+                    (
                         refresh_repair_panel,
                         handle_repair_shape_button_press,
+                    ),
+                    (
                         refresh_power_panel,
                         handle_increase_power,
                         handle_decrease_power,
+                    ),
+                    (
                         rebuild_tab_bar,
                         handle_tab_button_press,
                     ),

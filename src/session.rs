@@ -51,6 +51,9 @@ impl SessionManager {
         }
         // Science has no dedicated TOML config section; always available when a ship entity is loaded.
         available.push(Console::Science);
+        // Power has no dedicated TOML config section; always available when a ship entity is loaded.
+        // Required for stations that include the Power console (e.g. Repair at 3P).
+        available.push(Console::Power);
         
         Self { 
             players: Vec::new(), 
@@ -554,6 +557,30 @@ mod tests {
         sm.register("t1".into(), "Alice".into()).unwrap();
         let result = sm.toggle_console("t1", Console::Science);
         assert!(result.is_ok(), "Science console toggle must succeed, got: {:?}", result);
+    }
+
+    #[test]
+    fn new_with_config_includes_power_console() {
+        use crate::entity_config::EntityConfig;
+        let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
+        let config = EntityConfig::from_toml(toml_str).unwrap();
+        let sm = SessionManager::new_with_config(&config);
+        let available = sm.available_consoles();
+        assert!(
+            available.contains(&Console::Power),
+            "Power must be in available_consoles after new_with_config — required for Repair at 3P station"
+        );
+    }
+
+    #[test]
+    fn power_console_selectable_after_new_with_config() {
+        use crate::entity_config::EntityConfig;
+        let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
+        let config = EntityConfig::from_toml(toml_str).unwrap();
+        let mut sm = SessionManager::new_with_config(&config);
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        let result = sm.toggle_console("t1", Console::Power);
+        assert!(result.is_ok(), "Power console toggle must succeed, got: {:?}", result);
     }
 
     // ── Spectator queue ───────────────────────────────────────────────────

@@ -796,6 +796,45 @@ mod tests {
     }
 
     #[test]
+    fn spectator_can_claim_station_vacated_by_disconnect_at_max_players() {
+        // Mirrors the smoke test reassignment.spec.ts "leave at max_players
+        // allows spectator to claim vacated station". 3 players hold all 3P
+        // stations, a 4th joins as spectator, one station-holder disconnects,
+        // then the spectator selects the vacated station.
+        let stations = ship_stations();
+        let mut sessions = sessions_at_max(&stations);
+        // Add t4 as spectator
+        sessions.register("t4".into(), "Dave".into()).unwrap();
+        sessions.push_spectator("t4".into());
+
+        // t3 (Repair) disconnects
+        let _ = process_disconnect_with_stations("t3", &mut sessions, &stations);
+
+        // t4 selects "Repair"
+        let result = pm_stations(
+            "t4",
+            &ClientMessage::SelectStation { station: "Repair".into() },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        // t4 must receive a StationAssigned with station = Some("Repair")
+        let assigned = result.outbound.iter().find_map(|(_, m)| match m {
+            ServerMessage::StationAssigned { token, station: Some(name), consoles }
+                if token == "t4" => Some((name.clone(), consoles.clone())),
+            _ => None,
+        });
+        assert!(
+            assigned.is_some(),
+            "t4 should receive StationAssigned with station=Some(Repair); got outbound: {:?}",
+            result.outbound
+        );
+        let (name, consoles) = assigned.unwrap();
+        assert_eq!(name, "Repair");
+        assert!(!consoles.is_empty(), "consoles should not be empty");
+    }
+
+    #[test]
     fn mid_game_disconnect_emits_player_left_and_station_assigned_changes() {
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);

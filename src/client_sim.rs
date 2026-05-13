@@ -496,7 +496,7 @@ mod tests {
     use crate::messages::{AsteroidInfo, Console, GamePhase, GameState, Player, SimSnapshot};
 
     fn snap(red_alert: bool, view_mode: ViewMode) -> SimSnapshot {
-        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100, power_levels: (2, 2, 2) }
+        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100, power_levels: (2, 2, 2), flags: vec![] }
     }
 
     fn snap_pose(x: f32, z: f32, yaw: f32) -> SimSnapshot {
@@ -508,6 +508,7 @@ mod tests {
             ship_yaw: yaw,
             hull_integrity: 100,
             power_levels: (2, 2, 2),
+            flags: vec![],
         }
     }
 
@@ -1596,6 +1597,7 @@ mod tests {
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
                 hull_integrity: 100,
                 power_levels: (4, 1, 3),
+                flags: vec![],
             },
         });
         assert_eq!(s.power_levels, (4, 1, 3));

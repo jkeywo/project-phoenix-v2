@@ -8,6 +8,7 @@ pub mod torpedo;
 pub mod asteroid_spawner;
 pub mod asteroid_window;
 pub mod breakdown;
+pub mod flag_kind;
 pub mod config_cache;
 pub mod damage;
 pub mod entity_config;

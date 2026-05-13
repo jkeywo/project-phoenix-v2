@@ -280,7 +280,7 @@ impl Plugin for SimulationPlugin {
                 handle_collisions,
             ))
             .add_systems(Update, (
-                broadcast_sim_state,
+                broadcast_sim_state.after(process_helm_inputs),
                 broadcast_weapons_update.after(broadcast_sim_state),
                 broadcast_repair_state.after(broadcast_sim_state),
                 broadcast_shield_status.after(broadcast_sim_state),
@@ -1087,6 +1087,7 @@ fn broadcast_sim_state(
     hull: Res<ShipHullIntegrity>,
     phase: Res<CurrentPhase>,
     power: Option<Res<ShipPowerSystem>>,
+    modifiers: Res<crate::modifiers::ShipModifiers>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1095,9 +1096,12 @@ fn broadcast_sim_state(
         let power_levels = power.as_ref()
             .map(|p| (p.0.helm, p.0.weapons, p.0.science))
             .unwrap_or((2, 2, 2));
+        let flags = modifiers.flags();
         writer.write(OutboundMessage {
             target: Target::All,
-            msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current(), power_levels) },
+            msg: ServerMessage::SimState {
+                snapshot: ship.snapshot(hull.0.current(), power_levels, flags),
+            },
         });
     }
 }

@@ -219,6 +219,7 @@ mod tests {
                 ship_yaw: 0.0,
                 hull_integrity: 100,
                 power_levels: (2, 2, 2),
+                flags: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -236,6 +237,7 @@ mod tests {
                 ship_yaw: 0.0,
                 hull_integrity: 100,
                 power_levels: (2, 2, 2),
+                flags: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -253,6 +255,7 @@ mod tests {
                 ship_yaw: 0.0,
                 hull_integrity: 100,
                 power_levels: (2, 2, 2),
+                flags: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -270,6 +273,7 @@ mod tests {
                 ship_yaw: 1.5707,
                 hull_integrity: 100,
                 power_levels: (2, 2, 2),
+                flags: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -287,6 +291,7 @@ mod tests {
                 ship_yaw: 0.0,
                 hull_integrity: 75,
                 power_levels: (2, 2, 2),
+                flags: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -609,7 +614,7 @@ mod tests {
     #[test]
     fn server_modifier_added_region_source_round_trips() {
         let msg = ServerMessage::ModifierAdded {
-            source: crate::messages::ModifierSource::RegionEffect { region_id: "nebula-7".into() },
+            source: crate::messages::ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(7) },
             slot: crate::messages::ModifierSlot::HullDamageTaken,
             bonus: -0.3,
         };
@@ -625,6 +630,15 @@ mod tests {
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn flag_kind_round_trips() {
+        for flag in &[crate::flag_kind::FlagKind::CommsJammed, crate::flag_kind::FlagKind::SensorBlind] {
+            let json = serde_json::to_string(flag).unwrap();
+            let decoded: crate::flag_kind::FlagKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(*flag, decoded);
+        }
     }
 
     // ── New station wire types ────────────────────────────────────────────────
@@ -748,6 +762,7 @@ mod tests {
                 ship_yaw: 0.0,
                 hull_integrity: 80,
                 power_levels: (4, 2, 1),
+                flags: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -763,6 +778,7 @@ mod tests {
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
                 hull_integrity: 100,
                 power_levels: (2, 2, 2),
+                flags: vec![],
             },
         };
         // Encoding then decoding should preserve (2, 2, 2) for power_levels.

@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use bevy::prelude::Resource;
 pub use crate::messages::{ModifierSlot, ModifierSource};
+use crate::flag_kind::FlagKind;
 
 impl ModifierSlot {
     pub const COUNT: usize = 6;
@@ -67,6 +68,9 @@ pub struct ShipModifiers {
     cache: [f32; ModifierSlot::COUNT],
     /// Pending broadcast events. Drained each frame by `broadcast_modifier_events`.
     pub pending_events: Vec<ModifierEvent>,
+    /// Boolean flags keyed by `FlagKind`, each backed by a set of sources.
+    /// A flag is set iff its source-set is non-empty.
+    flags: HashMap<FlagKind, HashSet<ModifierSource>>,
 }
 
 impl ShipModifiers {
@@ -76,6 +80,7 @@ impl ShipModifiers {
             table: HashMap::new(),
             cache: [1.0; ModifierSlot::COUNT],
             pending_events: Vec::new(),
+            flags: HashMap::new(),
         }
     }
 
@@ -108,6 +113,34 @@ impl ShipModifiers {
     /// Returns the computed multiplier for `slot`.
     pub fn get(&self, slot: &ModifierSlot) -> f32 {
         self.cache[slot.index()]
+    }
+
+    /// Adds `source` to the set for `flag`. Idempotent — adding the same
+    /// `(source, flag)` twice has no additional effect.
+    pub fn add_flag(&mut self, source: ModifierSource, flag: FlagKind) {
+        self.flags.entry(flag).or_default().insert(source);
+    }
+
+    /// Removes `source` from the set for `flag`. No-op if `source` was not
+    /// present. If the last source is removed, the flag becomes unset.
+    pub fn remove_flag(&mut self, source: ModifierSource, flag: FlagKind) {
+        if let Some(sources) = self.flags.get_mut(&flag) {
+            sources.remove(&source);
+            if sources.is_empty() {
+                self.flags.remove(&flag);
+            }
+        }
+    }
+
+    /// Returns `true` iff at least one source has set `flag`.
+    pub fn has_flag(&self, flag: &FlagKind) -> bool {
+        self.flags.contains_key(flag)
+    }
+
+    /// Returns all `FlagKind` values that are currently set (i.e. have at
+    /// least one source).
+    pub fn flags(&self) -> Vec<FlagKind> {
+        self.flags.keys().cloned().collect()
     }
 
     fn rebuild_cache(&mut self) {
@@ -180,7 +213,7 @@ mod tests {
         let mut mods = ShipModifiers::new();
         mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.3));
         mods.add_or_update(ms(
-            ModifierSource::RegionEffect { region_id: "nebula".into() },
+            ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) },
             ModifierSlot::MaxSpeed,
             0.2,
         ));
@@ -194,7 +227,7 @@ mod tests {
         let mut mods = ShipModifiers::new();
         mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 1.0));
         mods.add_or_update(ms(
-            ModifierSource::RegionEffect { region_id: "drag".into() },
+            ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(2) },
             ModifierSlot::MaxSpeed,
             -0.5,
         ));
@@ -251,12 +284,12 @@ mod tests {
     fn different_region_ids_stack_as_distinct_sources() {
         let mut mods = ShipModifiers::new();
         mods.add_or_update(ms(
-            ModifierSource::RegionEffect { region_id: "alpha".into() },
+            ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(3) },
             ModifierSlot::MaxSpeed,
             0.2,
         ));
         mods.add_or_update(ms(
-            ModifierSource::RegionEffect { region_id: "beta".into() },
+            ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(4) },
             ModifierSlot::MaxSpeed,
             0.3,
         ));
@@ -275,5 +308,84 @@ mod tests {
             1.0,
         ));
         assert!((mods.get(&ModifierSlot::RadarRange) - 2.0).abs() < 1e-6);
+    }
+
+    // ── Flag API tests ─────────────────────────────────────────────────────
+
+    use crate::flag_kind::FlagKind;
+
+    #[test]
+    fn single_source_adds_flag() {
+        let mut mods = ShipModifiers::new();
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        assert!(mods.has_flag(&FlagKind::CommsJammed));
+    }
+
+    #[test]
+    fn multiple_sources_or_aggregate() {
+        let mut mods = ShipModifiers::new();
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        mods.add_flag(ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) }, FlagKind::CommsJammed);
+        assert!(mods.has_flag(&FlagKind::CommsJammed));
+    }
+
+    #[test]
+    fn removing_one_source_leaves_flag_set_when_multiple_sources() {
+        let mut mods = ShipModifiers::new();
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        mods.add_flag(ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) }, FlagKind::CommsJammed);
+        mods.remove_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        assert!(mods.has_flag(&FlagKind::CommsJammed), "flag should remain because 2nd source still exists");
+    }
+
+    #[test]
+    fn removing_last_source_clears_flag() {
+        let mut mods = ShipModifiers::new();
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::SensorBlind);
+        mods.remove_flag(ModifierSource::ImpulseDrive, FlagKind::SensorBlind);
+        assert!(!mods.has_flag(&FlagKind::SensorBlind));
+    }
+
+    #[test]
+    fn idempotent_add_does_not_duplicate() {
+        let mut mods = ShipModifiers::new();
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        assert!(mods.has_flag(&FlagKind::CommsJammed));
+    }
+
+    #[test]
+    fn removing_unknown_source_is_noop() {
+        let mut mods = ShipModifiers::new();
+        mods.remove_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        assert!(!mods.has_flag(&FlagKind::CommsJammed));
+    }
+
+    #[test]
+    fn flag_storage_independent_from_numeric_modifiers() {
+        let mut mods = ShipModifiers::new();
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        // Flag should still be set
+        assert!(mods.has_flag(&FlagKind::CommsJammed));
+        // Modifier value should be unaffected
+        assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn flags_returns_all_set_flags() {
+        let mut mods = ShipModifiers::new();
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        mods.add_flag(ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) }, FlagKind::SensorBlind);
+        let result = mods.flags();
+        assert!(result.contains(&FlagKind::CommsJammed));
+        assert!(result.contains(&FlagKind::SensorBlind));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn flags_empty_when_no_flags_set() {
+        let mods = ShipModifiers::new();
+        assert!(mods.flags().is_empty());
     }
 }

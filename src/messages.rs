@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use crate::flag_kind::FlagKind;
 use crate::stations::ShipStations;
 
 /// Which ship attribute a modifier affects. Defined here so it can be used in
@@ -18,7 +20,7 @@ pub enum ModifierSlot {
 pub enum ModifierSource {
     Console(Console),
     ImpulseDrive,
-    RegionEffect { region_id: String },
+    RegionEffect { uuid: Uuid },
 }
 
 impl Eq for ModifierSource {}
@@ -33,9 +35,9 @@ impl std::hash::Hash for ModifierSource {
             ModifierSource::ImpulseDrive => {
                 1u8.hash(state);
             }
-            ModifierSource::RegionEffect { region_id } => {
+            ModifierSource::RegionEffect { uuid } => {
                 2u8.hash(state);
-                region_id.hash(state);
+                uuid.hash(state);
             }
         }
     }
@@ -182,6 +184,10 @@ pub struct SimSnapshot {
     /// Added to SimSnapshot so all clients see the current configuration.
     #[serde(default = "default_power_levels")]
     pub power_levels: (u8, u8, u8),
+    /// Boolean flags that are currently active on the ship.
+    /// Populated from `ShipModifiers::flags()` each tick.
+    #[serde(default)]
+    pub flags: Vec<FlagKind>,
 }
 
 fn default_power_levels() -> (u8, u8, u8) {

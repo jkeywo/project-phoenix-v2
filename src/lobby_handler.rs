@@ -313,8 +313,10 @@ fn apply_station_assignments(
 /// assigned players follow their `previous` chain; unassigned players are
 /// unchanged), and return the outbound broadcasts.
 ///
-/// Spectator promotion is intentionally suppressed in lobby: players without
-/// a station have no automatic change when someone leaves.
+/// When the leaver held a station and there are spectators in the queue,
+/// the cascade is skipped intentionally â€” spectators manually claim the
+/// vacated station via SelectStation.  Without spectators the normal
+/// Nâ†’N-1 cascade runs so remaining players absorb the leaver's role.
 pub fn process_disconnect_with_stations(
     token: &str,
     sessions: &mut SessionManager,
@@ -326,17 +328,38 @@ pub fn process_disconnect_with_stations(
     // Remove the leaver from the spectator queue in case they were queued.
     sessions.remove_spectator(token);
 
-    // Pass an empty spectator queue so reassign_on_leave never auto-promotes.
-    // The session spectator queue is left intact (minus the leaver above).
-    let (new_map, _) = reassign_on_leave(
-        ship_stations,
-        &old_map,
-        token,
-        &std::collections::VecDeque::new(),
-    );
+    // If the leaver held a station and spectators exist, skip the cascade
+    // so the spectator can claim the vacated station directly via SelectStation
+    // without having its consoles absorbed by another player's station.
+    let is_leaver_in_map = old_map.contains_key(token);
+    let has_spectators = !sessions.spectator_queue().is_empty();
 
-    let new_count = new_map.len() as u32;
-    let mut outbound = apply_station_assignments(sessions, &new_map, &old_map, ship_stations, new_count);
+    let (new_map, _) = if is_leaver_in_map && has_spectators {
+        let mut map = old_map.clone();
+        map.remove(token);
+        (map, std::collections::VecDeque::new())
+    } else {
+        // Pass an empty spectator queue so reassign_on_leave never auto-promotes.
+        reassign_on_leave(
+            ship_stations,
+            &old_map,
+            token,
+            &std::collections::VecDeque::new(),
+        )
+    };
+
+    // Use the current connected-player count as the layout size when the
+    // cascade was skipped, so remaining players keep their current console
+    // assignments rather than being downgraded to the N-1 layout.
+    let new_count = if is_leaver_in_map && has_spectators {
+        sessions.players().iter().filter(|p| p.connected).count() as u32
+    } else {
+        new_map.len() as u32
+    };
+
+    let mut outbound = apply_station_assignments(
+        sessions, &new_map, &old_map, ship_stations, new_count,
+    );
 
     // Always emit PlayerLeft for the disconnecting player
     outbound.push((Target::All, ServerMessage::PlayerLeft { token: token.to_string() }));

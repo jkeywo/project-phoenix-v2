@@ -515,6 +515,7 @@ mod tests {
                 ship_x: 1.0, ship_z: 2.0, ship_yaw: 0.5,
                 hull_integrity: 100,
                 power_levels: (2, 2, 2),
+                flags: vec![],
             },
         });
         assert_eq!(s, before);

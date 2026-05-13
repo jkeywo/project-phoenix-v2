@@ -150,6 +150,23 @@
     if (bc) { bc.close(); bc = null; }
   };
 
+  // Close all open connections cleanly when the page is being torn down so
+  // remote peers (the host) receive a 'close' event and can drive the
+  // wasm_player_disconnected lifecycle. Without this, page.close() in
+  // Playwright simply kills the BroadcastChannel listener, leaving the host
+  // with stale session state and consoles still "occupied" by the gone peer.
+  window.addEventListener('pagehide', function () {
+    registry.forEach(function (peer) {
+      peer._conns.forEach(function (conn) {
+        if (conn.open) {
+          try {
+            getChannel().postMessage({ t: 'close', from: conn._lid, to: conn._rid });
+          } catch (_) { /* channel already closed */ }
+        }
+      });
+    });
+  });
+
   Peer.prototype._recv = function (msg) {
     var self = this;
     switch (msg.t) {

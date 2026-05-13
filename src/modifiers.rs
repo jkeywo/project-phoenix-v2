@@ -143,6 +143,36 @@ impl ShipModifiers {
         self.flags.keys().cloned().collect()
     }
 
+    /// Removes ALL modifiers and flags originating from `source`.
+    /// Pushes a `ModifierEvent::Removed` for each modifier removed.
+    /// Rebuilds the cache after removal.
+    pub fn clear_source(&mut self, source: &ModifierSource) {
+        let keys: Vec<(ModifierSource, ModifierSlot)> = self.table.keys()
+            .filter(|(s, _)| s == source)
+            .cloned()
+            .collect();
+
+        for (src, slot) in keys {
+            self.table.remove(&(src.clone(), slot.clone()));
+            self.pending_events.push(ModifierEvent::Removed {
+                source: src,
+                slot,
+            });
+        }
+
+        let flag_kinds: Vec<FlagKind> = self.flags.keys().cloned().collect();
+        for flag in &flag_kinds {
+            if let Some(sources) = self.flags.get_mut(flag) {
+                sources.remove(source);
+                if sources.is_empty() {
+                    self.flags.remove(flag);
+                }
+            }
+        }
+
+        self.rebuild_cache();
+    }
+
     fn rebuild_cache(&mut self) {
         for slot in ModifierSlot::all() {
             let sum: f32 = self
@@ -387,5 +417,70 @@ mod tests {
     fn flags_empty_when_no_flags_set() {
         let mods = ShipModifiers::new();
         assert!(mods.flags().is_empty());
+    }
+
+    // ── clear_source tests ────────────────────────────────────────────────
+
+    #[test]
+    fn clear_source_removes_all_modifiers_and_flags_for_source() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::RadarRange, 0.3));
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        mods.clear_source(&ModifierSource::ImpulseDrive);
+        assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
+        assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
+        assert!(!mods.has_flag(&FlagKind::CommsJammed));
+    }
+
+    #[test]
+    fn clear_source_does_not_affect_other_sources() {
+        let mut mods = ShipModifiers::new();
+        let region = ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(10) };
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        mods.add_or_update(ms(region.clone(), ModifierSlot::MaxSpeed, 0.3));
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        mods.add_flag(region.clone(), FlagKind::SensorBlind);
+        mods.clear_source(&region);
+        // ImpulseDrive modifiers and flags should survive
+        assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
+        assert!(mods.has_flag(&FlagKind::CommsJammed));
+        // Region modifiers and flags should be gone
+        assert!(!mods.has_flag(&FlagKind::SensorBlind));
+    }
+
+    #[test]
+    fn clear_source_on_unknown_source_is_noop() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        mods.clear_source(&ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(99) });
+        assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn clear_source_on_region_exit_cleans_up_all_region_effects() {
+        let mut mods = ShipModifiers::new();
+        let region_uuid = uuid::Uuid::from_u128(42);
+        let region = ModifierSource::RegionEffect { uuid: region_uuid };
+        mods.add_or_update(ms(region.clone(), ModifierSlot::MaxSpeed, -0.2));
+        mods.add_or_update(ms(region.clone(), ModifierSlot::PhaserDamage, 0.5));
+        mods.add_flag(region.clone(), FlagKind::CommsJammed);
+        mods.add_flag(region.clone(), FlagKind::SensorBlind);
+        mods.clear_source(&region);
+        assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
+        assert_eq!(mods.get(&ModifierSlot::PhaserDamage), 1.0);
+        assert!(!mods.has_flag(&FlagKind::CommsJammed));
+        assert!(!mods.has_flag(&FlagKind::SensorBlind));
+    }
+
+    #[test]
+    fn clear_source_pushes_removed_events() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::RadarRange, 0.3));
+        mods.pending_events.clear();
+        mods.clear_source(&ModifierSource::ImpulseDrive);
+        assert_eq!(mods.pending_events.len(), 2);
+        assert!(mods.pending_events.iter().all(|e| matches!(e, ModifierEvent::Removed { .. })));
     }
 }

@@ -494,71 +494,11 @@ const RED_ALERT_BG_OFF: Color = Color::srgb(0.13, 0.13, 0.27);
 /// Background for the Red Alert toggle when alert is ON (deep red).
 const RED_ALERT_BG_ON:  Color = Color::srgb(0.40, 0.0, 0.0);
 
-fn setup_captain_ui(mut commands: Commands) {
-    commands
-        .spawn((
-            CaptainPanel,
-            Node {
-                // Full-viewport container so we can centre the controls.
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top:  Val::Px(0.0),
-                width:  Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items:     AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                row_gap: Val::Px(0.0),
-                ..default()
-            },
-            Visibility::Hidden,
-        ))
-        .with_children(|panel| {
-            // ── View selector cross — 3×3 grid ──────────────────────
-            panel
-                .spawn((
-                    Node {
-                        display: Display::Grid,
-                        grid_template_columns: vec![
-                            GridTrack::px(48.0), GridTrack::px(48.0), GridTrack::px(48.0),
-                        ],
-                        grid_template_rows: vec![
-                            GridTrack::px(40.0), GridTrack::px(40.0), GridTrack::px(40.0),
-                        ],
-                        column_gap: Val::Px(4.0),
-                        row_gap:    Val::Px(4.0),
-                        ..default()
-                    },
-                ))
-                .with_children(|grid| {
-                    spawn_view_dir_button(grid, ViewDirection::Fore,      "▲", 2, 1);
-                    spawn_view_dir_button(grid, ViewDirection::Port,      "◄", 1, 2);
-                    spawn_view_label(grid, 2, 2);
-                    spawn_view_dir_button(grid, ViewDirection::Starboard, "►", 3, 2);
-                    spawn_view_dir_button(grid, ViewDirection::Aft,       "▼", 2, 3);
-                });
-
-            // ── Red Alert toggle ────────────────────────────────────
-            panel
-                .spawn((
-                    RedAlertButton,
-                    Button,
-                    Node {
-                        padding: UiRect::all(Val::Px(10.0)),
-                        margin: UiRect::top(Val::Px(24.0)),
-                        ..default()
-                    },
-                    BackgroundColor(RED_ALERT_BG_OFF),
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        RedAlertLabel,
-                        Text::new("Red Alert: OFF"),
-                        TextFont { font_size: 16.0, ..default() },
-                        TextColor(Color::srgb(0.93, 0.93, 1.0)),
-                    ));
-                });
-        });
+fn setup_captain_ui(_commands: Commands) {
+    // Replaced by phone_border::captain::CaptainPanelPlugin.
+    // The old captain UI (direction grid + red alert text toggle) is no
+    // longer spawned here — the phone-border captain panel plugin takes
+    // over all captain panel rendering.
 }
 
 fn spawn_view_dir_button(

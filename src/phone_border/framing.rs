@@ -52,6 +52,7 @@ pub struct PhoneAssets {
     pub edge_left_alert: Handle<Image>,
     pub edge_right_alert: Handle<Image>,
     pub compass_ring: Handle<Image>,
+    pub needle: Handle<Image>,
     pub tab_corner: Handle<Image>,
     pub font_display: Handle<Font>,
     pub font_mono: Handle<Font>,
@@ -195,6 +196,7 @@ fn load_phone_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
         edge_left_alert: asset_server.load("phone_border/bezel-edge-left-alert.png"),
         edge_right_alert: asset_server.load("phone_border/bezel-edge-right-alert.png"),
         compass_ring: asset_server.load("phone_border/compass-ring.png"),
+        needle: asset_server.load("phone_border/needle.png"),
         tab_corner: asset_server.load("phone_border/tab-corner.png"),
         font_display: asset_server.load("fonts/ChakraPetch-SemiBold.ttf"),
         font_mono: asset_server.load("fonts/JetBrainsMono-Regular.ttf"),
@@ -716,9 +718,10 @@ mod tests {
             edge_left_alert: h(15),
             edge_right_alert: h(16),
             compass_ring: h(17),
-            tab_corner: h(18),
-            font_display: f(19),
-            font_mono: f(20),
+            needle: h(18),
+            tab_corner: h(19),
+            font_display: f(20),
+            font_mono: f(21),
         }
     }
 }

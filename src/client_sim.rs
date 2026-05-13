@@ -204,6 +204,11 @@ pub struct ClientSimState {
     /// `None` means no icon is shown (no breakdown involving this console and
     /// no decoy). Updated by `ShowRepairIcon` / `ClearRepairIcon` messages.
     pub repair_icon: Option<Shape>,
+    /// Latest power allocation levels from SimSnapshot.
+    /// Updated every `SimState` broadcast. Tuple is (Helm, Weapons, Science).
+    pub power_levels: (u8, u8, u8),
+    /// Latest PowerState from the Power console's dedicated 10Hz broadcast.
+    pub power_state_payload: Option<(u8, u8, u8, f32, bool)>,
 }
 
 impl Default for ClientSimState {
@@ -234,6 +239,8 @@ impl Default for ClientSimState {
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
             repair_icon: None,
+            power_levels: (2, 2, 2),
+            power_state_payload: None,
         }
     }
 }
@@ -250,6 +257,7 @@ impl ClientSimState {
                 self.ship_x   = snapshot.ship_x;
                 self.ship_z   = snapshot.ship_z;
                 self.ship_yaw = snapshot.ship_yaw;
+                self.power_levels = snapshot.power_levels;
             }
             ServerMessage::WorldSetup { world } => {
                 self.world = world.clone();
@@ -307,6 +315,9 @@ impl ClientSimState {
             }
             ServerMessage::ClearRepairIcon => {
                 self.repair_icon = None;
+            }
+            ServerMessage::PowerState { helm, weapons, science, battery_charge, locked } => {
+                self.power_state_payload = Some((*helm, *weapons, *science, *battery_charge, *locked));
             }
             _ => {}
         }
@@ -485,7 +496,7 @@ mod tests {
     use crate::messages::{AsteroidInfo, Console, GamePhase, GameState, Player, SimSnapshot};
 
     fn snap(red_alert: bool, view_mode: ViewMode) -> SimSnapshot {
-        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100 }
+        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100, power_levels: (2, 2, 2) }
     }
 
     fn snap_pose(x: f32, z: f32, yaw: f32) -> SimSnapshot {
@@ -496,6 +507,7 @@ mod tests {
             ship_z: z,
             ship_yaw: yaw,
             hull_integrity: 100,
+            power_levels: (2, 2, 2),
         }
     }
 
@@ -569,6 +581,8 @@ mod tests {
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
             repair_icon: None,
+            power_levels: (2, 2, 2),
+            power_state_payload: None,
         };
         let world = WorldData {
             asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
@@ -620,6 +634,8 @@ mod tests {
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
             repair_icon: None,
+            power_levels: (2, 2, 2),
+            power_state_payload: None,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -661,6 +677,8 @@ mod tests {
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
             repair_icon: None,
+            power_levels: (2, 2, 2),
+            power_state_payload: None,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -1564,5 +1582,87 @@ mod tests {
             s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed).is_none(),
             "Welcome must clear modifier table"
         );
+    }
+
+    // ── Power state in ClientSimState ────────────────────────────────
+
+    #[test]
+    fn sim_state_updates_power_levels_from_snapshot() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100,
+                power_levels: (4, 1, 3),
+            },
+        });
+        assert_eq!(s.power_levels, (4, 1, 3));
+    }
+
+    #[test]
+    fn power_state_message_sets_power_state_payload() {
+        let mut s = ClientSimState::default();
+        assert!(s.power_state_payload.is_none(), "default: no power state payload");
+        s.apply(&ServerMessage::PowerState {
+            helm: 3,
+            weapons: 2,
+            science: 4,
+            battery_charge: 75.0,
+            locked: false,
+        });
+        assert_eq!(s.power_state_payload, Some((3, 2, 4, 75.0, false)));
+    }
+
+    #[test]
+    fn second_power_state_message_overwrites_previous() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::PowerState {
+            helm: 1, weapons: 1, science: 1,
+            battery_charge: 10.0, locked: true,
+        });
+        s.apply(&ServerMessage::PowerState {
+            helm: 4, weapons: 2, science: 2,
+            battery_charge: 100.0, locked: false,
+        });
+        assert_eq!(s.power_state_payload, Some((4, 2, 2, 100.0, false)));
+    }
+
+    #[test]
+    fn welcome_resets_power_state_fields() {
+        let mut s = ClientSimState {
+            red_alert: false,
+            view_mode: ViewMode::default(),
+            ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+            world: WorldData::default(),
+            repair_cooldown_secs: 0.0,
+            repair_in_progress: false,
+            repair_penalty: false,
+            phaser_mode: PhaserMode::Auto,
+            last_phaser_target: None,
+            science_target_suggestion: None,
+            shield_facings: Vec::new(),
+            fire_ready: false,
+            on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true,
+            fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: true,
+            aft_reload_secs: 0.0,
+            torpedoes_in_flight: Vec::new(),
+            modifiers: HashMap::new(),
+            repair_icon: None,
+            power_levels: (4, 1, 3),
+            power_state_payload: Some((4, 2, 2, 100.0, false)),
+        };
+        s.apply(&ServerMessage::Welcome {
+            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            ship_stations: crate::stations::ShipStations::default(),
+        });
+        assert_eq!(s.power_levels, (2, 2, 2), "power_levels reset to default on Welcome");
+        assert_eq!(s.power_state_payload, None, "power_state_payload cleared on Welcome");
     }
 }

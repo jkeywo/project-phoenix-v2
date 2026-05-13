@@ -37,7 +37,7 @@ impl ShipState {
         self.red_alert
     }
 
-    pub fn snapshot(&self, hull_integrity: i32) -> SimSnapshot {
+    pub fn snapshot(&self, hull_integrity: i32, power_levels: (u8, u8, u8)) -> SimSnapshot {
         SimSnapshot {
             red_alert: self.red_alert,
             view_mode: self.view_mode.clone(),
@@ -45,6 +45,7 @@ impl ShipState {
             ship_z: self.z,
             ship_yaw: self.yaw,
             hull_integrity,
+            power_levels,
         }
     }
 }
@@ -72,9 +73,9 @@ mod tests {
     #[test]
     fn snapshot_reflects_current_state() {
         let mut s = ShipState::new();
-        assert!(!s.snapshot(100).red_alert);
+        assert!(!s.snapshot(100, (2, 2, 2)).red_alert);
         s.toggle_red_alert();
-        assert!(s.snapshot(100).red_alert);
+        assert!(s.snapshot(100, (2, 2, 2)).red_alert);
     }
 
     #[test]
@@ -87,7 +88,7 @@ mod tests {
     fn snapshot_includes_view_mode() {
         let mut s = ShipState::new();
         s.view_mode = ViewMode::Camera(ViewDirection::Port);
-        assert_eq!(s.snapshot(100).view_mode, ViewMode::Camera(ViewDirection::Port));
+        assert_eq!(s.snapshot(100, (2, 2, 2)).view_mode, ViewMode::Camera(ViewDirection::Port));
     }
 
     #[test]
@@ -96,7 +97,7 @@ mod tests {
         s.x = 3.0;
         s.z = -7.5;
         s.yaw = 1.25;
-        let snap = s.snapshot(100);
+        let snap = s.snapshot(100, (2, 2, 2));
         assert_eq!(snap.ship_x, 3.0);
         assert_eq!(snap.ship_z, -7.5);
         assert_eq!(snap.ship_yaw, 1.25);
@@ -106,12 +107,18 @@ mod tests {
     fn snapshot_view_mode_radar_round_trips_through_state() {
         let mut s = ShipState::new();
         s.view_mode = ViewMode::Radar;
-        assert_eq!(s.snapshot(100).view_mode, ViewMode::Radar);
+        assert_eq!(s.snapshot(100, (2, 2, 2)).view_mode, ViewMode::Radar);
     }
 
     #[test]
     fn snapshot_includes_hull_integrity() {
         let s = ShipState::new();
-        assert_eq!(s.snapshot(75).hull_integrity, 75);
+        assert_eq!(s.snapshot(75, (2, 2, 2)).hull_integrity, 75);
+    }
+
+    #[test]
+    fn snapshot_includes_power_levels() {
+        let s = ShipState::new();
+        assert_eq!(s.snapshot(100, (3, 4, 1)).power_levels, (3, 4, 1));
     }
 }

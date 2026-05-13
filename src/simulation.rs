@@ -161,6 +161,20 @@ impl Default for RepairIconState {
     }
 }
 
+/// Wraps the pure-Rust power system so it can be used as a Bevy resource.
+#[derive(Resource)]
+pub struct ShipPowerSystem(pub crate::power_system::PowerSystem);
+
+/// Wraps the power config for the ship's power system.
+#[derive(Resource)]
+pub struct PowerConfigResource(pub crate::power_system::PowerConfig);
+
+impl Default for PowerConfigResource {
+    fn default() -> Self {
+        Self(crate::power_system::PowerConfig::default())
+    }
+}
+
 /// Wraps the pure-Rust torpedo system so it can be used as a Bevy resource.
 #[derive(Resource)]
 pub struct TorpedoSystemResource(pub TorpedoSystem);
@@ -240,6 +254,8 @@ impl Plugin for SimulationPlugin {
             .insert_resource(ShipModifiers::new())
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .init_resource::<RepairIconState>()
+            .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
+            .init_resource::<PowerConfigResource>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -252,11 +268,13 @@ impl Plugin for SimulationPlugin {
                 handle_set_phaser_mode,
                 handle_fire_torpedo,
                 handle_repair,
+                handle_power_messages,
                 handle_impulse_messages,
                 tick_active_beam,
                 tick_repair_teams,
                 tick_torpedo_system,
                 tick_shields,
+                tick_power_system,
                 process_helm_inputs,
                 sync_ship_position,
                 handle_collisions,
@@ -266,6 +284,7 @@ impl Plugin for SimulationPlugin {
                 broadcast_weapons_update.after(broadcast_sim_state),
                 broadcast_repair_state.after(broadcast_sim_state),
                 broadcast_shield_status.after(broadcast_sim_state),
+                broadcast_power_state.after(broadcast_sim_state),
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
                 broadcast_modifier_events,
                 broadcast_repair_icons.after(broadcast_repair_state),
@@ -769,6 +788,79 @@ fn handle_repair(
     }
 }
 
+/// Handle `IncreasePower` and `DecreasePower` messages from the Power console.
+///
+/// Validates: game is in-progress, sender holds `Console::Power`.
+/// Forwards to `PowerSystem::increase` / `decrease` which enforce bounds and lock.
+fn handle_power_messages(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    mut power: ResMut<ShipPowerSystem>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        match &ev.msg {
+            ClientMessage::IncreasePower { console } => {
+                if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
+                    power.0.increase(console.clone());
+                }
+            }
+            ClientMessage::DecreasePower { console } => {
+                if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
+                    power.0.decrease(console.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Tick the power system battery charge each frame.
+fn tick_power_system(
+    time: Res<Time>,
+    phase: Res<CurrentPhase>,
+    mut power: ResMut<ShipPowerSystem>,
+    config: Res<PowerConfigResource>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    let dt = time.delta_secs();
+    power.0.tick(dt, &config.0);
+}
+
+/// Broadcast `PowerState` at 10 Hz to the Power console holder only.
+fn broadcast_power_state(
+    timer: Res<SimBroadcastTimer>,
+    mut writer: MessageWriter<OutboundMessage>,
+    sessions: Res<Sessions>,
+    power: Res<ShipPowerSystem>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    if !timer.0.just_finished() {
+        return;
+    }
+    let Some(power_token) = sessions.0.console_holder(Console::Power) else {
+        return;
+    };
+    writer.write(OutboundMessage {
+        target: Target::Token(power_token.to_string()),
+        msg: ServerMessage::PowerState {
+            helm: power.0.helm,
+            weapons: power.0.weapons,
+            science: power.0.science,
+            battery_charge: power.0.battery_charge,
+            locked: power.0.locked,
+        },
+    });
+}
+
 /// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/science.
 /// Also cancels impulse whenever the hull takes damage this frame.
 fn handle_impulse_messages(
@@ -994,14 +1086,18 @@ fn broadcast_sim_state(
     ship: Res<ShipState>,
     hull: Res<ShipHullIntegrity>,
     phase: Res<CurrentPhase>,
+    power: Option<Res<ShipPowerSystem>>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
     }
     if timer.0.tick(time.delta()).just_finished() {
+        let power_levels = power.as_ref()
+            .map(|p| (p.0.helm, p.0.weapons, p.0.science))
+            .unwrap_or((2, 2, 2));
         writer.write(OutboundMessage {
             target: Target::All,
-            msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current()) },
+            msg: ServerMessage::SimState { snapshot: ship.snapshot(hull.0.current(), power_levels) },
         });
     }
 }
@@ -1581,11 +1677,13 @@ fn test_app() -> App {
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
         .init_resource::<RepairIconState>()
+        .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
+        .init_resource::<PowerConfigResource>()
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), 
-broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state)))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_power_messages, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, tick_power_system))
+        .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_power_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state)))
         .add_systems(PostUpdate, collect);
     app
 }
@@ -3274,5 +3372,179 @@ broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_sta
         // No extra icons beyond the 5 damaged consoles: verify last_icons size.
         let state = app.world().resource::<RepairIconState>();
         assert_eq!(state.last_icons.len(), 5, "only 5 damaged consoles should have icons, no decoy");
+    }
+
+    // ── Power system integration tests ──────────────────────────────────────
+
+    /// Helper: captain + power console player, game started.
+    fn start_game_with_power(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        tick(app);
+        push(app, "power", ClientMessage::Identify { token: "power".into(), name: "Monty".into() });
+        tick(app);
+        push(app, "power", ClientMessage::SelectStation { station: "Power".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        let _ = tick(app);
+    }
+
+    #[test]
+    fn non_power_sender_increase_power_is_ignored() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Reset power to known state.
+        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 1;
+
+        // Captain (not Power holder) tries to increase Helm.
+        push(&mut app, "captain", ClientMessage::IncreasePower { console: Console::Helm });
+        let _ = tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipPowerSystem>().0.helm,
+            1,
+            "non-Power sender should not be able to increase power"
+        );
+    }
+
+    #[test]
+    fn non_power_sender_decrease_power_is_ignored() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Captain (not Power holder) tries to decrease Science.
+        push(&mut app, "captain", ClientMessage::DecreasePower { console: Console::Science });
+        let _ = tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipPowerSystem>().0.science,
+            2,
+            "non-Power sender should not be able to decrease power"
+        );
+    }
+
+    #[test]
+    fn power_sender_increase_reflected_in_next_power_state() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Power holder increases Helm from 2 to 3.
+        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        let _ = tick(&mut app);
+
+        let out = tick(&mut app);
+        let power_state = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::PowerState { helm, .. } => Some(*helm),
+            _ => None,
+        }).expect("expected a PowerState message for power holder");
+        assert_eq!(power_state, 3, "PowerState should show helm=3 after increase");
+    }
+
+    #[test]
+    fn power_sender_decrease_reflected_in_next_power_state() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Power holder decreases Weapons from 2 to 1.
+        push(&mut app, "power", ClientMessage::DecreasePower { console: Console::Tactical });
+        let _ = tick(&mut app);
+
+        let out = tick(&mut app);
+        let power_state = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::PowerState { weapons, .. } => Some(*weapons),
+            _ => None,
+        }).expect("expected a PowerState message");
+        assert_eq!(power_state, 1, "PowerState should show weapons=1 after decrease");
+    }
+
+    #[test]
+    fn power_state_only_sent_to_power_holder() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        let out = tick(&mut app);
+
+        // Every PowerState message should target the power holder.
+        for m in out.iter().filter(|m| matches!(&m.msg, ServerMessage::PowerState { .. })) {
+            assert!(
+                matches!(&m.target, Target::Token(t) if t == "power"),
+                "PowerState should only go to the Power holder, got {:?}",
+                m.target
+            );
+        }
+    }
+
+    #[test]
+    fn no_power_console_holder_no_power_state_broadcast() {
+        let mut app = test_app();
+        // Only captain, no power console holder.
+        start_game(&mut app);
+
+        let out = tick(&mut app);
+        let any_power_state = out.iter().any(|m| matches!(&m.msg, ServerMessage::PowerState { .. }));
+        assert!(!any_power_state, "no PowerState should be sent when no Power console holder exists");
+    }
+
+    #[test]
+    fn sim_state_includes_power_levels() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Increase Helm power via Power console.
+        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        // Increase Science power via Power console.
+        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Science });
+        let _ = tick(&mut app);
+        let out = tick(&mut app);
+
+        let snap = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        }).expect("expected a SimState broadcast");
+        // Default (2,2,2) → increase helm → (3,2,2) → increase science → (3,2,3)
+        assert_eq!(snap.power_levels, (3, 2, 3), "SimState.power_levels should reflect power system state");
+    }
+
+    #[test]
+    fn power_increase_respects_bounds_noop_at_four() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Manually set Helm to 4 (max).
+        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
+
+        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        let _ = tick(&mut app);
+        let out = tick(&mut app);
+
+        let power_state = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::PowerState { helm, .. } => Some(*helm),
+            _ => None,
+        }).expect("expected a PowerState message");
+        assert_eq!(power_state, 4, "helm should stay at 4 (max bound enforced by PowerSystem)");
+    }
+
+    #[test]
+    fn power_increase_respects_total_cap_of_eight() {
+        let mut app = test_app();
+        start_game_with_power(&mut app);
+
+        // Set total to 8: helm=4, weapons=2, science=2.
+        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
+
+        // Try to increase science — total is 8 (the cap), should be blocked.
+        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Science });
+        let _ = tick(&mut app);
+
+        let out = tick(&mut app);
+        let power_state = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::PowerState { science, .. } => Some(*science),
+            _ => None,
+        }).expect("expected a PowerState message");
+        assert_eq!(power_state, 2, "science should stay at 2 when total is already at the cap of 8");
+        assert_eq!(app.world().resource::<ShipPowerSystem>().0.total(), 8,
+            "total should remain 8");
     }
 }

@@ -228,7 +228,7 @@ pub fn process_message(
                 }
             }
         }
-        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::Repair { .. } | ClientMessage::SetScienceTarget { .. } | ClientMessage::StartImpulseCharge | ClientMessage::CancelImpulse | ClientMessage::FireTorpedo { .. } => {}
+        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::Repair { .. } | ClientMessage::SetScienceTarget { .. } | ClientMessage::StartImpulseCharge | ClientMessage::CancelImpulse | ClientMessage::FireTorpedo { .. } | ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. } => {}
     }
 
     LobbyHandlerResult { new_phase, outbound }

@@ -218,6 +218,7 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 100,
+                power_levels: (2, 2, 2),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -234,6 +235,7 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 100,
+                power_levels: (2, 2, 2),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -250,6 +252,7 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 100,
+                power_levels: (2, 2, 2),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -266,6 +269,7 @@ mod tests {
                 ship_z: -8.25,
                 ship_yaw: 1.5707,
                 hull_integrity: 100,
+                power_levels: (2, 2, 2),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -282,6 +286,7 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 hull_integrity: 75,
+                power_levels: (2, 2, 2),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -690,5 +695,79 @@ mod tests {
             ServerMessage::Welcome { state, .. } => assert!(state.world.is_none()),
             _ => panic!("expected Welcome"),
         }
+    }
+
+    #[test]
+    fn client_increase_power_round_trips() {
+        let msg = ClientMessage::IncreasePower { console: Console::Helm };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_decrease_power_round_trips() {
+        let msg = ClientMessage::DecreasePower { console: Console::Science };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_power_state_round_trips() {
+        let msg = ServerMessage::PowerState {
+            helm: 3,
+            weapons: 2,
+            science: 4,
+            battery_charge: 65.5,
+            locked: false,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_power_state_locked_round_trips() {
+        let msg = ServerMessage::PowerState {
+            helm: 1,
+            weapons: 1,
+            science: 1,
+            battery_charge: 0.0,
+            locked: true,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn sim_snapshot_with_power_levels_round_trips() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: true,
+                view_mode: ViewMode::Radar,
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
+                hull_integrity: 80,
+                power_levels: (4, 2, 1),
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn sim_snapshot_with_default_power_levels_serializes_correctly() {
+        let with_defaults = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100,
+                power_levels: (2, 2, 2),
+            },
+        };
+        // Encoding then decoding should preserve (2, 2, 2) for power_levels.
+        let encoded = serde_json::to_string(&with_defaults).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(with_defaults, decoded);
     }
 }

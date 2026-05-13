@@ -178,6 +178,14 @@ pub struct SimSnapshot {
     pub ship_z: f32,
     pub ship_yaw: f32,
     pub hull_integrity: i32,
+    /// Current power allocation levels (Helm, Weapons, Science).
+    /// Added to SimSnapshot so all clients see the current configuration.
+    #[serde(default = "default_power_levels")]
+    pub power_levels: (u8, u8, u8),
+}
+
+fn default_power_levels() -> (u8, u8, u8) {
+    (2, 2, 2)
 }
 
 /// An asteroid field defined as a donut-shaped ring in world space.
@@ -244,6 +252,12 @@ pub enum ClientMessage {
     Repair { shape: Shape },
     /// Fire a torpedo from the specified tube. `target_uuid` is optional homing target.
     FireTorpedo { tube: TorpedoTube, target_uuid: Option<String> },
+    /// Increase power allocation for a console. Validated server-side:
+    /// sender must hold `Console::Power`.
+    IncreasePower { console: Console },
+    /// Decrease power allocation for a console. Validated server-side:
+    /// sender must hold `Console::Power`.
+    DecreasePower { console: Console },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -326,4 +340,14 @@ pub enum ServerMessage {
     ShowRepairIcon { shape: Shape },
     /// Sent to a specific console holder to clear their repair icon.
     ClearRepairIcon,
+    /// Sent at 10 Hz to the Power console holder only. Carries the current
+    /// power allocation levels, battery charge fraction, and whether the
+    /// system is locked (exhaustion state).
+    PowerState {
+        helm: u8,
+        weapons: u8,
+        science: u8,
+        battery_charge: f32,
+        locked: bool,
+    },
 }

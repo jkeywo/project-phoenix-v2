@@ -1276,9 +1276,9 @@ fn refresh_torpedo_ui(
     sim: Res<ClientSimState>,
     selected: Res<SelectedTube>,
     mut count_label: Query<&mut Text, With<TorpedoCountLabel>>,
-    mut tube_status: Query<(&mut Text, &mut TextColor, &TubeStatusLabel), Without<TorpedoCountLabel>>,
+    mut tube_status: Query<(&mut Text, &mut TextColor, &TubeStatusLabel), (Without<TorpedoCountLabel>, Without<FireTorpedoLabel>)>,
     mut fire_bg: Query<&mut BackgroundColor, With<FireTorpedoButton>>,
-    mut fire_label: Query<(&mut Text, &mut TextColor), With<FireTorpedoLabel>>,
+    mut fire_label: Query<(&mut Text, &mut TextColor), (With<FireTorpedoLabel>, Without<TorpedoCountLabel>, Without<TubeStatusLabel>)>,
     mut tube_btn_bg: Query<(&mut BackgroundColor, &TorpedoTubeButton), Without<FireTorpedoButton>>,
 ) {
     if !sim.is_changed() && !selected.is_changed() {

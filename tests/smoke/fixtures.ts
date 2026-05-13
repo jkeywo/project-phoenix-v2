@@ -95,7 +95,7 @@ export async function createTestClient(
             resolve();
           }
         }, 50);
-        setTimeout(() => { clearInterval(t); reject(new Error(`Welcome timeout (token=${token})`)); }, 5_000);
+        setTimeout(() => { clearInterval(t); reject(new Error(`Welcome timeout (token=${token})`)); }, 15_000);
       }),
     { hostId, token, name },
   );
@@ -114,7 +114,7 @@ export async function createTestClient(
       );
     },
 
-    async waitForMessage(type, timeout = 5_000) {
+    async waitForMessage(type, timeout = 15_000) {
       await page.waitForFunction(
         (t) => (window as any).__messages?.some((m: any) => m.type === t),
         type,

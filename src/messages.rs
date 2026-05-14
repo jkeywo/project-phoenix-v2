@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+pub use crate::entity_tags::EntityTag;
 use crate::flag_kind::FlagKind;
 use crate::stations::ShipStations;
 
@@ -202,50 +203,164 @@ pub struct SimSnapshot {
     /// Populated from `ShipModifiers::flags()` each tick.
     #[serde(default)]
     pub flags: Vec<FlagKind>,
+    /// Per-tick entity state snapshots (position, yaw, hull, flags).
+    #[serde(default)]
+    pub entity_states: Vec<EntityStateSnapshot>,
+    /// Current radar configuration ranges.
+    #[serde(default)]
+    pub radar_state: RadarStateSnapshot,
 }
 
 fn default_power_levels() -> (u8, u8, u8) {
     (2, 2, 2)
 }
 
-/// An asteroid field defined as a donut-shaped ring in world space.
+/// A single entity in the unified wire format.
 ///
-/// The field has a centre (`x`, `z`), an `inner_radius` (the clear inner
-/// boundary) and an `outer_radius` (the dense outer boundary).  On radar
-/// these appear as concentric rings.
+/// Carries the minimum identifying fields plus optional aspect fields for
+/// visualisation.  Every entity has a `uuid` and `tags`; all other fields
+/// are `Option` and only present when relevant to the entity type.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct AsteroidField {
+pub struct EntitySnapshot {
     pub uuid: String,
-    pub x: f32,
-    pub z: f32,
-    pub inner_radius: f32,
-    pub outer_radius: f32,
-    /// Semantic tags for this entity (e.g. `["asteroid_field"]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 3]>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yaw: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hull_fraction: Option<f32>,
+    /// Inner radius for ring-shaped entities (e.g. asteroid fields).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner_radius: Option<f32>,
 }
 
-/// One asteroid in a `WorldData` snapshot — position on the play plane,
-/// collider radius, and stable UUID for client-side targeting.
+impl EntitySnapshot {
+    /// World-space X coordinate (play-plane horizontal). Returns 0.0 when `position` is `None`.
+    pub fn x(&self) -> f32 {
+        self.position.map(|p| p[0]).unwrap_or(0.0)
+    }
+
+    /// World-space Z coordinate (play-plane depth). Returns 0.0 when `position` is `None`.
+    pub fn z(&self) -> f32 {
+        self.position.map(|p| p[2]).unwrap_or(0.0)
+    }
+
+    /// Entity radius or 0.0 when missing.
+    pub fn radius_or_zero(&self) -> f32 {
+        self.radius.unwrap_or(0.0)
+    }
+
+    /// Entity inner radius or 0.0 when missing.
+    pub fn inner_radius_or_zero(&self) -> f32 {
+        self.inner_radius.unwrap_or(0.0)
+    }
+
+    /// Convenience constructor for an asteroid entity (the most common case).
+    pub fn asteroid(uuid: impl Into<String>, x: f32, z: f32, radius: f32) -> Self {
+        Self {
+            uuid: uuid.into(),
+            id: None,
+            position: Some([x, 0.0, z]),
+            tags: vec!["asteroid".into()],
+            shape: None,
+            radius: Some(radius),
+            colour: None,
+            yaw: None,
+            hull_fraction: None,
+            inner_radius: None,
+        }
+    }
+
+    /// Convenience constructor for an asteroid field entity.
+    pub fn asteroid_field(uuid: impl Into<String>, x: f32, z: f32, inner_radius: f32, outer_radius: f32) -> Self {
+        Self {
+            uuid: uuid.into(),
+            id: None,
+            position: Some([x, 0.0, z]),
+            tags: vec!["asteroid_field".into()],
+            shape: None,
+            radius: Some(outer_radius),
+            colour: None,
+            yaw: None,
+            hull_fraction: None,
+            inner_radius: Some(inner_radius),
+        }
+    }
+
+    /// Convenience constructor for a basic entity with position and tags (no extra aspects).
+    pub fn simple(uuid: impl Into<String>, x: f32, z: f32, tags: Vec<String>) -> Self {
+        Self {
+            uuid: uuid.into(),
+            id: None,
+            position: Some([x, 0.0, z]),
+            tags,
+            shape: None,
+            radius: None,
+            colour: None,
+            yaw: None,
+            hull_fraction: None,
+            inner_radius: None,
+        }
+    }
+}
+
+/// Per-tick state for a single entity.  Lighter than `EntitySnapshot` —
+/// only the fields that change every frame.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct AsteroidInfo {
+pub struct EntityStateSnapshot {
     pub uuid: String,
-    pub x: f32,
-    pub z: f32,
-    pub radius: f32,
-    /// Semantic tags for this entity (e.g. `["asteroid"]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yaw: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hull_fraction: Option<f32>,
     #[serde(default)]
-    pub tags: Vec<String>,
+    pub flags: Vec<FlagKind>,
+}
+
+/// Per-tick radar configuration snapshot.  Mirrors the effective ranges
+/// after modifier application so the client can display the correct scale.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RadarStateSnapshot {
+    /// Effective range of the helm radar (world units).
+    pub helm_range: f32,
+    /// Effective range of the tactical/weapons radar.
+    pub tactical_range: f32,
+    /// Effective range of the science long-range radar.
+    pub science_long_range: f32,
+    /// Range of the system chart (typically large / fixed).
+    pub science_system_map: f32,
+}
+
+impl Default for RadarStateSnapshot {
+    fn default() -> Self {
+        Self {
+            helm_range: 50.0,
+            tactical_range: 60.0,
+            science_long_range: 200.0,
+            science_system_map: 500.0,
+        }
+    }
 }
 
 /// Static world data sent once per game (after `StartGame`) and replayed
 /// on `Welcome` to clients reconnecting mid-game.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WorldData {
-    pub asteroids: Vec<AsteroidInfo>,
-    /// Asteroid field rings, for science radar and system chart rendering.
+    /// All static entities in the world (asteroids, fields, stations, …).
     #[serde(default)]
-    pub asteroid_fields: Vec<AsteroidField>,
+    pub entities: Vec<EntitySnapshot>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

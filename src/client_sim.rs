@@ -8,7 +8,7 @@
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
-use crate::messages::{ClientMessage, Console, ServerMessage, Shape, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
+use crate::messages::{ClientMessage, Console, EntitySnapshot, RadarStateSnapshot, ServerMessage, Shape, SimSnapshot, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -75,8 +75,7 @@ pub fn science_radar_config() -> RadarConfig {
 pub fn compute_science_long_range_radar_view(state: &ClientSimState) -> ScienceRadarView {
     let config = science_radar_config();
     compute_science_radar_view(
-        &state.world.asteroids,
-        &state.world.asteroid_fields,
+        &state.world.entities,
         state.ship_x,
         state.ship_z,
         state.ship_yaw,
@@ -91,8 +90,7 @@ pub fn compute_science_long_range_radar_view(state: &ClientSimState) -> ScienceR
 pub fn compute_helm_radar_view(state: &ClientSimState) -> ScienceRadarView {
     let config = helm_radar_config();
     compute_science_radar_view(
-        &state.world.asteroids,
-        &state.world.asteroid_fields,
+        &state.world.entities,
         state.ship_x,
         state.ship_z,
         state.ship_yaw,
@@ -107,8 +105,7 @@ pub fn compute_helm_radar_view(state: &ClientSimState) -> ScienceRadarView {
 pub fn compute_weapons_radar_view(state: &ClientSimState) -> ScienceRadarView {
     let config = weapons_radar_config();
     compute_science_radar_view(
-        &state.world.asteroids,
-        &state.world.asteroid_fields,
+        &state.world.entities,
         state.ship_x,
         state.ship_z,
         state.ship_yaw,
@@ -135,8 +132,7 @@ pub fn system_chart_config() -> RadarConfig {
 pub fn compute_system_chart_view(state: &ClientSimState) -> ScienceRadarView {
     let config = system_chart_config();
     compute_science_radar_view(
-        &state.world.asteroids,
-        &state.world.asteroid_fields,
+        &state.world.entities,
         state.ship_x,
         state.ship_z,
         state.ship_yaw,
@@ -557,10 +553,10 @@ pub fn is_power_locked(payload: &Option<(u8, u8, u8, f32, bool)>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{AsteroidInfo, Console, GamePhase, GameState, Player, SimSnapshot};
+    use crate::messages::{Console, EntitySnapshot, GamePhase, GameState, Player, SimSnapshot, WorldData};
 
     fn snap(red_alert: bool, view_mode: ViewMode) -> SimSnapshot {
-        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100.0, power_levels: (2, 2, 2), flags: vec![] }
+        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100.0, power_levels: (2, 2, 2), flags: vec![], entity_states: vec![], radar_state: RadarStateSnapshot::default() }
     }
 
     fn snap_pose(x: f32, z: f32, yaw: f32) -> SimSnapshot {
@@ -573,6 +569,8 @@ mod tests {
             hull_integrity: 100.0,
             power_levels: (2, 2, 2),
             flags: vec![],
+            entity_states: vec![],
+            radar_state: RadarStateSnapshot::default(),
         }
     }
 
@@ -584,7 +582,7 @@ mod tests {
         assert_eq!(s.ship_x, 0.0);
         assert_eq!(s.ship_z, 0.0);
         assert_eq!(s.ship_yaw, 0.0);
-        assert!(s.world.asteroids.is_empty());
+        assert!(s.world.entities.is_empty());
     }
 
     #[test]
@@ -610,11 +608,10 @@ mod tests {
     fn world_setup_message_populates_world_data() {
         let mut s = ClientSimState::default();
         let world = WorldData {
-            asteroids: vec![
-                AsteroidInfo { uuid: "a".into(), x:  3.0, z:  4.0, radius: 2.0, tags: vec![] },
-                AsteroidInfo { uuid: "b".into(), x: -1.5, z:  0.0, radius: 1.0, tags: vec![] },
+            entities: vec![
+                EntitySnapshot::asteroid("a",  3.0,  4.0, 2.0),
+                EntitySnapshot::asteroid("b", -1.5,  0.0, 1.0),
             ],
-            asteroid_fields: vec![],
         };
         s.apply(&ServerMessage::WorldSetup { world: world.clone() });
         assert_eq!(s.world, world);
@@ -652,8 +649,7 @@ mod tests {
             current_breakdown: None,
         };
         let world = WorldData {
-            asteroids: vec![AsteroidInfo { uuid: "c".into(), x: 1.0, z: 2.0, radius: 0.5, tags: vec![] }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("c", 1.0, 2.0, 0.5)],
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -679,8 +675,7 @@ mod tests {
             view_mode: ViewMode::default(),
             ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
             world: WorldData {
-                asteroids: vec![AsteroidInfo { uuid: "d".into(), x: 0.0, z: 0.0, radius: 1.0, tags: vec![] }],
-                asteroid_fields: vec![],
+                entities: vec![EntitySnapshot::asteroid("d", 0.0, 0.0, 1.0)],
             },
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
@@ -724,8 +719,7 @@ mod tests {
             view_mode: ViewMode::Camera(ViewDirection::Port),
             ship_x: 5.0, ship_z: 6.0, ship_yaw: 0.7,
             world: WorldData {
-                asteroids: vec![AsteroidInfo { uuid: "e".into(), x: 0.0, z: 0.0, radius: 1.0, tags: vec![] }],
-                asteroid_fields: vec![],
+                entities: vec![EntitySnapshot::asteroid("e", 0.0, 0.0, 1.0)],
             },
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
@@ -856,18 +850,10 @@ mod tests {
     // ── compute_system_chart_view ────────────────────────────────────────
 
     fn state_with_field(x: f32, z: f32) -> ClientSimState {
-        use crate::messages::{AsteroidField, WorldData};
         let mut s = ClientSimState::default();
         s.world = WorldData {
-            asteroids: vec![],
-            asteroid_fields: vec![
-                AsteroidField {
-                    uuid: "field-1".into(),
-                    x, z,
-                    inner_radius: 10.0,
-                    outer_radius: 30.0,
-                    tags: vec!["asteroid_field".into()],
-                },
+            entities: vec![
+                EntitySnapshot::asteroid_field("field-1", x, z, 10.0, 30.0),
             ],
         };
         s
@@ -900,13 +886,11 @@ mod tests {
 
     #[test]
     fn system_chart_view_excludes_individual_asteroids() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         s.world = WorldData {
-            asteroids: vec![
-                AsteroidInfo { uuid: "a1".into(), x: 0.0, z: -50.0, radius: 2.0, tags: vec!["asteroid".into()] }
+            entities: vec![
+                EntitySnapshot::asteroid("a1", 0.0, -50.0, 2.0)
             ],
-            asteroid_fields: vec![],
         };
         let view = compute_system_chart_view(&s);
         assert!(view.dots.is_empty(), "individual asteroids must not appear on system chart");
@@ -1180,17 +1164,9 @@ mod tests {
 
     #[test]
     fn helm_radar_view_includes_asteroid_within_helm_range() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         s.world = WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "a1".into(),
-                x: 0.0,
-                z: -(HELM_RADAR_RANGE - 5.0),
-                radius: 1.0,
-                tags: vec!["asteroid".into()],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("a1", 0.0, -(HELM_RADAR_RANGE - 5.0), 1.0)],
         };
         let view = compute_helm_radar_view(&s);
         assert_eq!(view.dots.len(), 1);
@@ -1199,19 +1175,11 @@ mod tests {
 
     #[test]
     fn helm_radar_view_excludes_asteroid_beyond_helm_range() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         // Place asteroid between helm range and weapons range.
         let beyond_helm = HELM_RADAR_RANGE + 5.0;
         s.world = WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "far".into(),
-                x: 0.0,
-                z: -beyond_helm,
-                radius: 1.0,
-                tags: vec!["asteroid".into()],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("far", 0.0, -beyond_helm, 1.0)],
         };
         let view = compute_helm_radar_view(&s);
         assert!(view.dots.is_empty(), "asteroid beyond helm range must not appear");
@@ -1219,17 +1187,9 @@ mod tests {
 
     #[test]
     fn helm_radar_dot_position_normalised_to_helm_range() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         s.world = WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "at-edge".into(),
-                x: 0.0,
-                z: -HELM_RADAR_RANGE,
-                radius: 1.0,
-                tags: vec!["asteroid".into()],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("at-edge", 0.0, -HELM_RADAR_RANGE, 1.0)],
         };
         let view = compute_helm_radar_view(&s);
         assert_eq!(view.dots.len(), 1);
@@ -1250,19 +1210,11 @@ mod tests {
 
     #[test]
     fn weapons_radar_view_includes_asteroid_within_weapons_range() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         // Between helm range and weapons range — weapons only.
         let between = (HELM_RADAR_RANGE + WEAPONS_RADAR_RANGE) / 2.0;
         s.world = WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "mid".into(),
-                x: 0.0,
-                z: -between,
-                radius: 1.0,
-                tags: vec!["asteroid".into()],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("mid", 0.0, -between, 1.0)],
         };
         let view = compute_weapons_radar_view(&s);
         assert_eq!(view.dots.len(), 1, "weapons radar should see asteroid between the two ranges");
@@ -1271,18 +1223,10 @@ mod tests {
 
     #[test]
     fn weapons_radar_view_excludes_asteroid_beyond_weapons_range() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         let beyond = WEAPONS_RADAR_RANGE + 5.0;
         s.world = WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "very-far".into(),
-                x: 0.0,
-                z: -beyond,
-                radius: 1.0,
-                tags: vec!["asteroid".into()],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("very-far", 0.0, -beyond, 1.0)],
         };
         let view = compute_weapons_radar_view(&s);
         assert!(view.dots.is_empty(), "asteroid beyond weapons range must not appear");
@@ -1290,17 +1234,9 @@ mod tests {
 
     #[test]
     fn weapons_radar_dot_position_normalised_to_weapons_range() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         s.world = WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "at-edge".into(),
-                x: 0.0,
-                z: -WEAPONS_RADAR_RANGE,
-                radius: 1.0,
-                tags: vec!["asteroid".into()],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("at-edge", 0.0, -WEAPONS_RADAR_RANGE, 1.0)],
         };
         let view = compute_weapons_radar_view(&s);
         assert_eq!(view.dots.len(), 1);
@@ -1310,19 +1246,11 @@ mod tests {
 
     #[test]
     fn helm_and_weapons_views_differ_for_asteroid_in_weapons_range_only() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         // Asteroid between helm and weapons range.
         let between = (HELM_RADAR_RANGE + WEAPONS_RADAR_RANGE) / 2.0;
         s.world = WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "between".into(),
-                x: 0.0,
-                z: -between,
-                radius: 1.0,
-                tags: vec!["asteroid".into()],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("between", 0.0, -between, 1.0)],
         };
         let helm_view = compute_helm_radar_view(&s);
         let weapons_view = compute_weapons_radar_view(&s);
@@ -1368,17 +1296,9 @@ mod tests {
 
     #[test]
     fn science_long_range_radar_view_includes_asteroid_within_science_range() {
-        use crate::messages::{AsteroidInfo, WorldData};
         let mut s = ClientSimState::default();
         s.world = WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "a1".into(),
-                x: 0.0,
-                z: -(SCIENCE_RADAR_RANGE * 0.5),
-                radius: 1.0,
-                tags: vec!["asteroid".into()],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("a1", 0.0, -(SCIENCE_RADAR_RANGE * 0.5), 1.0)],
         };
         let view = compute_science_long_range_radar_view(&s);
         assert_eq!(view.dots.len(), 1, "science radar must show asteroid within range");
@@ -1668,6 +1588,8 @@ mod tests {
                 hull_integrity: 100.0,
                 power_levels: (4, 1, 3),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
             },
         });
         assert_eq!(s.power_levels, (4, 1, 3));

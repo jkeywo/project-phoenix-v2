@@ -481,7 +481,7 @@ fn draw_radar_overlay(
 
     // Asteroid pips, projected through pure radar math.
     if let Some(world) = world {
-        for (rx, ry, rr) in radar::radar_dots(&world.0.asteroids, ship.x, ship.z, ship.yaw) {
+        for (rx, ry, rr) in radar::radar_dots(&world.0.entities, ship.x, ship.z, ship.yaw) {
             let pos = Vec2::new(rx * RADAR_PIXEL_RADIUS, ry * RADAR_PIXEL_RADIUS);
             let pix_radius = (rr * RADAR_PIXEL_RADIUS).max(2.0);
             gizmos.circle_2d(pos, pix_radius, aster);
@@ -512,14 +512,14 @@ fn draw_beam_vfx(
     let Some(target_uuid) = &beam.target_uuid else { return };
     let Some(world) = world else { return };
 
-    let Some(asteroid) = world.0.asteroids.iter().find(|a| &a.uuid == target_uuid) else {
+    let Some(asteroid) = world.0.entities.iter().find(|a| &a.uuid == target_uuid) else {
         return;
     };
 
     // Endpoint clamped to configured max range.
     let (end_x, end_z) = beam_render::beam_endpoint(
         ship.x, ship.z,
-        asteroid.x, asteroid.z,
+        asteroid.x(), asteroid.z(),
         render_cfg.beam_range,
     );
 

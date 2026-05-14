@@ -516,6 +516,8 @@ mod tests {
                 hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: crate::messages::RadarStateSnapshot::default(),
             },
         });
         assert_eq!(s, before);

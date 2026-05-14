@@ -220,6 +220,8 @@ mod tests {
                 hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -238,6 +240,8 @@ mod tests {
                 hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -256,6 +260,8 @@ mod tests {
                 hull_integrity: 100.0,
             power_levels: (2, 2, 2),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -274,6 +280,8 @@ mod tests {
                 hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -292,6 +300,8 @@ mod tests {
                 hull_integrity: 75.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -299,34 +309,57 @@ mod tests {
     }
 
     #[test]
-    fn asteroid_info_with_uuid_round_trips_in_world_setup() {
+    fn entity_snapshot_as_asteroid_round_trips_in_world_setup() {
         let msg = ServerMessage::WorldSetup {
             world: WorldData {
-                asteroids: vec![
-                    AsteroidInfo {
-                        uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
-                        x: 12.5,
-                        z: -8.0,
-                        radius: 2.0,
-                        tags: vec![],
+                entities: vec![EntitySnapshot {
+                    uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+                    id: None,
+                    position: Some([12.5, 0.0, -8.0]),
+                    tags: vec!["asteroid".into()],
+                    shape: None,
+                    radius: Some(2.0),
+                    colour: None,
+                    yaw: None,
+                    hull_fraction: None,
+                    inner_radius: None,
+                }],
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn world_data_with_multiple_entities_round_trips() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![
+                    EntitySnapshot {
+                        uuid: "a1b2c3d4-e5f6-4789-8abc-def012345678".into(),
+                        id: None,
+                        position: Some([1.0, 0.0, 2.0]),
+                        tags: vec!["asteroid".into()],
+                        shape: None,
+                        radius: Some(2.0),
+                        colour: None,
+                        yaw: None,
+                        hull_fraction: None,
+                        inner_radius: None,
+                    },
+                    EntitySnapshot {
+                        uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(),
+                        id: None,
+                        position: Some([-3.5, 0.0, 4.25]),
+                        tags: vec!["asteroid".into()],
+                        shape: None,
+                        radius: Some(1.5),
+                        colour: None,
+                        yaw: None,
+                        hull_fraction: None,
+                        inner_radius: None,
                     },
                 ],
-                asteroid_fields: vec![],
-            },
-        };
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
-
-    #[test]
-    fn world_data_with_asteroids_round_trips_inside_world_setup() {
-        let msg = ServerMessage::WorldSetup {
-            world: WorldData {
-                asteroids: vec![
-                    AsteroidInfo { uuid: "a1b2c3d4-e5f6-4789-8abc-def012345678".into(), x: 1.0, z: 2.0, radius: 2.0, tags: vec![] },
-                    AsteroidInfo { uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(), x: -3.5, z: 4.25, radius: 1.5, tags: vec![] },
-                ],
-                asteroid_fields: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -349,8 +382,18 @@ mod tests {
                 phase: GamePhase::InProgress,
                 players: vec![player()],
                 world: Some(WorldData {
-                    asteroids: vec![AsteroidInfo { uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(), x: 0.0, z: 0.0, radius: 2.0, tags: vec![] }],
-                    asteroid_fields: vec![],
+                    entities: vec![EntitySnapshot {
+                        uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(),
+                        id: None,
+                        position: Some([0.0, 0.0, 0.0]),
+                        tags: vec!["asteroid".into()],
+                        shape: None,
+                        radius: Some(2.0),
+                        colour: None,
+                        yaw: None,
+                        hull_fraction: None,
+                        inner_radius: None,
+                    }],
                 }),
             },
             ship_stations: empty_ship_stations(),
@@ -766,6 +809,8 @@ mod tests {
                 hull_integrity: 80.0,
                 power_levels: (4, 2, 1),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -782,11 +827,213 @@ mod tests {
                 hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
             },
         };
         // Encoding then decoding should preserve (2, 2, 2) for power_levels.
         let encoded = serde_json::to_string(&with_defaults).unwrap();
         let decoded: ServerMessage = serde_json::from_str(&encoded).unwrap();
         assert_eq!(with_defaults, decoded);
+    }
+
+    // ── EntitySnapshot / EntityState / RadarState tests ──────────────────
+
+    #[test]
+    fn entity_snapshot_minimal_round_trips() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![EntitySnapshot {
+                    uuid: "u1".into(),
+                    id: None,
+                    position: None,
+                    tags: vec!["asteroid".into()],
+                    shape: None,
+                    radius: None,
+                    colour: None,
+                    yaw: None,
+                    hull_fraction: None,
+                    inner_radius: None,
+                }],
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_snapshot_full_fields_round_trips() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![EntitySnapshot {
+                    uuid: "u1".into(),
+                    id: Some("station-alpha".into()),
+                    position: Some([10.5, 0.0, -20.3]),
+                    tags: vec!["station".into(), "ship".into()],
+                    shape: Some("sphere".into()),
+                    radius: Some(5.0),
+                    colour: Some([0.2, 0.5, 0.8]),
+                    yaw: Some(1.57),
+                    hull_fraction: Some(0.85),
+                    inner_radius: Some(2.0),
+                }],
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_snapshot_with_multiple_entities_round_trips() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![
+                    EntitySnapshot {
+                        uuid: "ast-1".into(),
+                        id: None,
+                        position: Some([0.0, 0.0, -25.0]),
+                        tags: vec!["asteroid".into()],
+                        shape: None,
+                        radius: Some(2.0),
+                        colour: None,
+                        yaw: None,
+                        hull_fraction: None,
+                        inner_radius: None,
+                    },
+                    EntitySnapshot {
+                        uuid: "field-1".into(),
+                        id: None,
+                        position: Some([50.0, 0.0, -100.0]),
+                        tags: vec!["asteroid_field".into()],
+                        shape: None,
+                        radius: Some(30.0),
+                        colour: None,
+                        yaw: None,
+                        hull_fraction: None,
+                        inner_radius: Some(10.0),
+                    },
+                ],
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_state_snapshot_minimal_round_trips() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100.0,
+                power_levels: (2, 2, 2),
+                flags: vec![],
+                entity_states: vec![EntityStateSnapshot {
+                    uuid: "ast-1".into(),
+                    position: Some([12.0, 0.0, -5.0]),
+                    yaw: Some(0.5),
+                    hull_fraction: Some(1.0),
+                    flags: vec![],
+                }],
+                radar_state: RadarStateSnapshot::default(),
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_state_snapshot_minimal_fields_round_trips() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100.0,
+                power_levels: (2, 2, 2),
+                flags: vec![],
+                entity_states: vec![EntityStateSnapshot {
+                    uuid: "ast-2".into(),
+                    position: None,
+                    yaw: None,
+                    hull_fraction: None,
+                    flags: vec![],
+                }],
+                radar_state: RadarStateSnapshot::default(),
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn radar_state_snapshot_custom_values_round_trips() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100.0,
+                power_levels: (2, 2, 2),
+                flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot {
+                    helm_range: 40.0,
+                    tactical_range: 55.0,
+                    science_long_range: 180.0,
+                    science_system_map: 600.0,
+                },
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn sim_snapshot_with_multiple_entity_states_round_trips() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: true,
+                view_mode: ViewMode::Radar,
+                ship_x: 10.0, ship_z: -20.0, ship_yaw: 1.0,
+                hull_integrity: 75.0,
+                power_levels: (3, 2, 1),
+                flags: vec![crate::flag_kind::FlagKind::SensorBlind],
+                entity_states: vec![
+                    EntityStateSnapshot {
+                        uuid: "e1".into(),
+                        position: Some([5.0, 0.0, -10.0]),
+                        yaw: Some(0.0),
+                        hull_fraction: Some(1.0),
+                        flags: vec![],
+                    },
+                    EntityStateSnapshot {
+                        uuid: "e2".into(),
+                        position: Some([20.0, 0.0, -30.0]),
+                        yaw: None,
+                        hull_fraction: Some(0.5),
+                        flags: vec![crate::flag_kind::FlagKind::CommsJammed],
+                    },
+                ],
+                radar_state: RadarStateSnapshot {
+                    helm_range: 50.0,
+                    tactical_range: 60.0,
+                    science_long_range: 200.0,
+                    science_system_map: 500.0,
+                },
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_tag_round_trips() {
+        for tag in &[EntityTag::Asteroid, EntityTag::Ship, EntityTag::AsteroidField, EntityTag::Star, EntityTag::Planet, EntityTag::Region] {
+            let json = serde_json::to_string(tag).unwrap();
+            let decoded: EntityTag = serde_json::from_str(&json).unwrap();
+            assert_eq!(*tag, decoded);
+        }
     }
 }

@@ -7,7 +7,7 @@
 // client). Keeping the math separate makes both renderers identical and
 // independently unit-testable.
 
-use crate::messages::{AsteroidInfo, AsteroidField};
+use crate::messages::EntitySnapshot;
 use crate::entity_tags::{EntityTag, matches_any, parse_tags};
 use crate::radar_config::RadarConfig;
 
@@ -107,45 +107,52 @@ pub fn is_fire_ready_with_range(
     radar_y > 0.0
 }
 
-/// Iterator of `(radar_x, radar_y, scaled_radius)` tuples for all asteroids
-/// within `RADAR_RANGE` of the ship. Out-of-range asteroids are silently skipped.
+/// Iterator of `(radar_x, radar_y, scaled_radius)` tuples for all entities
+/// with tag "asteroid" within `RADAR_RANGE` of the ship. Out-of-range entities
+/// are silently skipped.
 pub fn radar_dots<'a>(
-    asteroids: &'a [AsteroidInfo],
+    entities: &'a [EntitySnapshot],
     ship_x: f32,
     ship_z: f32,
     ship_yaw: f32,
 ) -> impl Iterator<Item = (f32, f32, f32)> + 'a {
-    asteroids.iter().filter_map(move |a| project_asteroid(a, ship_x, ship_z, ship_yaw))
+    entities.iter().filter_map(move |e| {
+        let tags = parse_tags(&e.tags);
+        if !tags.contains(&EntityTag::Asteroid) {
+            return None;
+        }
+        project_entity_as_asteroid(e, ship_x, ship_z, ship_yaw)
+    })
 }
 
 /// Like `radar_dots` but only includes entities whose tags match **at least
 /// one** tag in `filter_tags` (OR logic).  If `filter_tags` is empty, no
 /// entities are returned.
 pub fn radar_dots_filtered<'a>(
-    asteroids: &'a [AsteroidInfo],
+    entities: &'a [EntitySnapshot],
     ship_x: f32,
     ship_z: f32,
     ship_yaw: f32,
     filter_tags: &'a [EntityTag],
 ) -> impl Iterator<Item = (f32, f32, f32)> + 'a {
-    asteroids.iter().filter_map(move |a| {
-        let entity_tags = parse_tags(&a.tags);
+    entities.iter().filter_map(move |e| {
+        let entity_tags = parse_tags(&e.tags);
         if matches_any(&entity_tags, filter_tags) {
-            project_asteroid(a, ship_x, ship_z, ship_yaw)
+            project_entity_as_asteroid(e, ship_x, ship_z, ship_yaw)
         } else {
             None
         }
     })
 }
 
-/// Project an asteroid to radar coordinates plus its scaled radius.
+/// Project an entity to radar coordinates plus its scaled radius.
 ///
-/// Returns `None` if the asteroid centre is outside `RADAR_RANGE`. The
+/// Returns `None` if the entity centre is outside `RADAR_RANGE`. The
 /// scaled radius is in the same `[-1, 1]` units as the position (i.e. the
-/// asteroid's world radius divided by `RADAR_RANGE`).
-pub fn project_asteroid(asteroid: &AsteroidInfo, ship_x: f32, ship_z: f32, ship_yaw: f32) -> Option<(f32, f32, f32)> {
-    let (rx, ry) = project_to_radar(asteroid.x, asteroid.z, ship_x, ship_z, ship_yaw)?;
-    Some((rx, ry, asteroid.radius / RADAR_RANGE))
+/// entity's world radius divided by `RADAR_RANGE`).
+pub fn project_entity_as_asteroid(entity: &EntitySnapshot, ship_x: f32, ship_z: f32, ship_yaw: f32) -> Option<(f32, f32, f32)> {
+    let (rx, ry) = project_to_radar(entity.x(), entity.z(), ship_x, ship_z, ship_yaw)?;
+    Some((rx, ry, entity.radius_or_zero() / RADAR_RANGE))
 }
 
 /// Project a world-space point onto the radar's unit square using a `RadarConfig`.
@@ -184,43 +191,45 @@ pub fn project_to_radar_with_config(
 /// - Entities whose tags do not overlap `config.shows` are skipped.
 /// - If `config.shows` is empty, no entities are returned.
 pub fn radar_dots_with_config<'a>(
-    asteroids: &'a [AsteroidInfo],
+    entities: &'a [EntitySnapshot],
     ship_x: f32,
     ship_z: f32,
     ship_yaw: f32,
     config: &'a RadarConfig,
 ) -> impl Iterator<Item = (f32, f32, f32)> + 'a {
-    asteroids.iter().filter_map(move |a| {
-        let entity_tags = parse_tags(&a.tags);
+    entities.iter().filter_map(move |e| {
+        let entity_tags = parse_tags(&e.tags);
         if !matches_any(&entity_tags, &config.shows) {
             return None;
         }
-        let (rx, ry) = project_to_radar_with_config(a.x, a.z, ship_x, ship_z, ship_yaw, config)?;
-        Some((rx, ry, a.radius / config.range))
+        let (rx, ry) = project_to_radar_with_config(e.x(), e.z(), ship_x, ship_z, ship_yaw, config)?;
+        Some((rx, ry, e.radius_or_zero() / config.range))
     })
 }
 
-/// Project an asteroid field to radar ring coordinates.
+/// Project an asteroid field entity to radar ring coordinates.
 ///
 /// Returns `Some((centre_x, centre_y, inner_r, outer_r))` where all values are
 /// normalised to `[-1, 1]` units (i.e. divided by `RADAR_RANGE`).
 ///
 /// Returns `None` only if the *entire* ring is completely outside radar range
-/// — i.e., the distance from the ship to the field centre minus the outer
+/// — i.e., the distance from the ship to the entity centre minus the outer
 /// radius is greater than `RADAR_RANGE`.  Rings that partially overlap the
 /// radar view are returned (the renderer clips them).
-pub fn project_asteroid_field(
-    field: &AsteroidField,
+pub fn project_entity_as_field(
+    entity: &EntitySnapshot,
     ship_x: f32,
     ship_z: f32,
     ship_yaw: f32,
 ) -> Option<(f32, f32, f32, f32)> {
-    let dx = field.x - ship_x;
-    let dz = field.z - ship_z;
+    let dx = entity.x() - ship_x;
+    let dz = entity.z() - ship_z;
     let dist = (dx * dx + dz * dz).sqrt();
+    let outer_r = entity.radius_or_zero();
+    let inner_r = entity.inner_radius_or_zero();
 
     // Cull only when even the near edge of the ring is beyond radar range.
-    if dist - field.outer_radius > RADAR_RANGE {
+    if dist - outer_r > RADAR_RANGE {
         return None;
     }
 
@@ -229,22 +238,25 @@ pub fn project_asteroid_field(
     let centre_x = (dx * cos_y + dz * sin_y) / RADAR_RANGE;
     let centre_y = (dx * sin_y - dz * cos_y) / RADAR_RANGE;
 
-    let inner_r = field.inner_radius / RADAR_RANGE;
-    let outer_r = field.outer_radius / RADAR_RANGE;
-
-    Some((centre_x, centre_y, inner_r, outer_r))
+    Some((centre_x, centre_y, inner_r / RADAR_RANGE, outer_r / RADAR_RANGE))
 }
 
 /// Iterator of `(centre_x, centre_y, inner_r, outer_r)` tuples (all in radar
-/// unit-square coordinates) for all `AsteroidField` values that are at least
-/// partially within `RADAR_RANGE` of the ship.
+/// unit-square coordinates) for all `EntitySnapshot` values tagged
+/// `asteroid_field` that are at least partially within `RADAR_RANGE` of the ship.
 pub fn radar_rings<'a>(
-    fields: &'a [AsteroidField],
+    entities: &'a [EntitySnapshot],
     ship_x: f32,
     ship_z: f32,
     ship_yaw: f32,
 ) -> impl Iterator<Item = (f32, f32, f32, f32)> + 'a {
-    fields.iter().filter_map(move |f| project_asteroid_field(f, ship_x, ship_z, ship_yaw))
+    entities.iter().filter_map(move |e| {
+        let tags = parse_tags(&e.tags);
+        if !tags.contains(&EntityTag::AsteroidField) {
+            return None;
+        }
+        project_entity_as_field(e, ship_x, ship_z, ship_yaw)
+    })
 }
 
 // ── Science radar tab view model ──────────────────────────────────────────────
@@ -293,8 +305,7 @@ pub struct ScienceRadarView {
 
 /// Compute the Science console long-range radar view.
 ///
-/// - `asteroids`: individual entities (asteroids, ships, etc.) from `WorldData`.
-/// - `fields`: asteroid field rings from `WorldData`.
+/// - `entities`: all entities from `WorldData`.
 /// - `ship_x`, `ship_z`, `ship_yaw`: current ship pose.
 /// - `config`: Science radar configuration (range + tag filter).
 ///
@@ -302,42 +313,50 @@ pub struct ScienceRadarView {
 /// OR logic).  Fields are projected using `RADAR_RANGE`-normalised units
 /// re-scaled to `config.range`.
 pub fn compute_science_radar_view(
-    asteroids: &[AsteroidInfo],
-    fields: &[AsteroidField],
+    entities: &[EntitySnapshot],
     ship_x: f32,
     ship_z: f32,
     ship_yaw: f32,
     config: &RadarConfig,
 ) -> ScienceRadarView {
-    let dots = asteroids
+    let dots = entities
         .iter()
-        .filter_map(|a| {
-            let entity_tags = crate::entity_tags::parse_tags(&a.tags);
+        .filter_map(|e| {
+            let entity_tags = crate::entity_tags::parse_tags(&e.tags);
             if !crate::entity_tags::matches_any(&entity_tags, &config.shows) {
                 return None;
             }
-            let (rx, ry) = project_to_radar_with_config(a.x, a.z, ship_x, ship_z, ship_yaw, config)?;
+            // Skip field-type entities (they become rings, not dots).
+            if entity_tags.contains(&EntityTag::AsteroidField) {
+                return None;
+            }
+            let (rx, ry) = project_to_radar_with_config(e.x(), e.z(), ship_x, ship_z, ship_yaw, config)?;
             Some(ScienceRadarDot {
-                uuid: a.uuid.clone(),
+                uuid: e.uuid.clone(),
                 radar_x: rx,
                 radar_y: ry,
-                scaled_radius: a.radius / config.range,
+                scaled_radius: e.radius_or_zero() / config.range,
             })
         })
         .collect();
 
-    let rings = fields
+    let rings = entities
         .iter()
-        .filter_map(|f| {
-            let entity_tags = crate::entity_tags::parse_tags(&f.tags);
+        .filter_map(|e| {
+            let entity_tags = crate::entity_tags::parse_tags(&e.tags);
             if !crate::entity_tags::matches_any(&entity_tags, &config.shows) {
                 return None;
             }
+            // Only field-type entities become rings.
+            if !entity_tags.contains(&EntityTag::AsteroidField) {
+                return None;
+            }
             // Cull: if even the near edge of the ring is beyond config.range, skip.
-            let dx = f.x - ship_x;
-            let dz = f.z - ship_z;
+            let dx = e.x() - ship_x;
+            let dz = e.z() - ship_z;
             let dist = (dx * dx + dz * dz).sqrt();
-            if dist - f.outer_radius > config.range {
+            let outer_r = e.radius_or_zero();
+            if dist - outer_r > config.range {
                 return None;
             }
             let cos_y = ship_yaw.cos();
@@ -345,11 +364,11 @@ pub fn compute_science_radar_view(
             let centre_x = (dx * cos_y + dz * sin_y) / config.range;
             let centre_y = (dx * sin_y - dz * cos_y) / config.range;
             Some(ScienceRadarRing {
-                uuid: f.uuid.clone(),
+                uuid: e.uuid.clone(),
                 centre_x,
                 centre_y,
-                inner_r: f.inner_radius / config.range,
-                outer_r: f.outer_radius / config.range,
+                inner_r: e.inner_radius_or_zero() / config.range,
+                outer_r: outer_r / config.range,
             })
         })
         .collect();
@@ -422,16 +441,16 @@ mod tests {
     }
 
     #[test]
-    fn project_asteroid_scales_radius_by_range() {
-        let a = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0, tags: vec![] };
-        let (_rx, _ry, r) = project_asteroid(&a, 0.0, 0.0, 0.0).unwrap();
+    fn project_entity_as_asteroid_scales_radius_by_range() {
+        let a = EntitySnapshot::asteroid("", 0.0, -10.0, 2.0);
+        let (_rx, _ry, r) = project_entity_as_asteroid(&a, 0.0, 0.0, 0.0).unwrap();
         close(r, 2.0 / RADAR_RANGE);
     }
 
     #[test]
-    fn project_asteroid_outside_range_returns_none() {
-        let a = AsteroidInfo { uuid: "".into(), x: 100.0, z: 100.0, radius: 2.0, tags: vec![] };
-        assert!(project_asteroid(&a, 0.0, 0.0, 0.0).is_none());
+    fn project_entity_as_asteroid_outside_range_returns_none() {
+        let a = EntitySnapshot::asteroid("", 100.0, 100.0, 2.0);
+        assert!(project_entity_as_asteroid(&a, 0.0, 0.0, 0.0).is_none());
     }
 
     #[test]
@@ -441,22 +460,37 @@ mod tests {
         assert_eq!(RADAR_MID_RING, 25.0);
     }
 
+    fn entity_at(x: f32, z: f32, tags: &[&str]) -> EntitySnapshot {
+        EntitySnapshot {
+            uuid: "".into(),
+            id: None,
+            position: Some([x, 0.0, z]),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            shape: None,
+            radius: Some(1.0),
+            colour: None,
+            yaw: None,
+            hull_fraction: None,
+            inner_radius: None,
+        }
+    }
+
     #[test]
-    fn radar_dots_single_in_range_matches_project_asteroid() {
-        let asteroid = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0, tags: vec![] };
-        let dots: Vec<_> = radar_dots(&[asteroid.clone()], 0.0, 0.0, 0.0).collect();
+    fn radar_dots_single_in_range_matches_project_entity() {
+        let e = entity_at(0.0, -10.0, &["asteroid"]);
+        let dots: Vec<_> = radar_dots(&[e.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(dots.len(), 1);
-        let expected = project_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap();
+        let expected = project_entity_as_asteroid(&e, 0.0, 0.0, 0.0).unwrap();
         assert_eq!(dots[0], expected);
     }
 
     #[test]
     fn radar_dots_skips_out_of_range_asteroids() {
-        let far = AsteroidInfo { uuid: "".into(), x: 100.0, z: 100.0, radius: 2.0, tags: vec![] };
-        let near = AsteroidInfo { uuid: "".into(), x: 0.0, z: -10.0, radius: 2.0, tags: vec![] };
+        let far = entity_at(100.0, 100.0, &["asteroid"]);
+        let near = entity_at(0.0, -10.0, &["asteroid"]);
         let dots: Vec<_> = radar_dots(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(dots.len(), 1);
-        assert_eq!(dots[0], project_asteroid(&near, 0.0, 0.0, 0.0).unwrap());
+        assert_eq!(dots[0], project_entity_as_asteroid(&near, 0.0, 0.0, 0.0).unwrap());
     }
 
     #[test]
@@ -465,32 +499,29 @@ mod tests {
         assert!(dots.is_empty());
     }
 
-    // ── radar_dots_filtered ────────────────────────────────────────────────
-
-    fn asteroid_with_tags(x: f32, z: f32, tags: &[&str]) -> AsteroidInfo {
-        AsteroidInfo {
-            uuid: "".into(),
-            x,
-            z,
-            radius: 1.0,
-            tags: tags.iter().map(|s| s.to_string()).collect(),
-        }
+    #[test]
+    fn radar_dots_skips_non_asteroid_entities() {
+        let ship = entity_at(0.0, -10.0, &["ship"]);
+        let dots: Vec<_> = radar_dots(&[ship], 0.0, 0.0, 0.0).collect();
+        assert!(dots.is_empty(), "radar_dots should only show entities tagged 'asteroid'");
     }
+
+    // ── radar_dots_filtered ────────────────────────────────────────────────
 
     #[test]
     fn radar_dots_filtered_returns_only_matching_tag_entities() {
-        let asteroid = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
-        let ship = asteroid_with_tags(0.0, -15.0, &["ship"]);
+        let asteroid = entity_at(0.0, -10.0, &["asteroid"]);
+        let ship = entity_at(0.0, -15.0, &["ship"]);
         let filter = vec![EntityTag::Asteroid];
         let dots: Vec<_> = radar_dots_filtered(&[asteroid.clone(), ship], 0.0, 0.0, 0.0, &filter).collect();
         assert_eq!(dots.len(), 1);
-        assert_eq!(dots[0], project_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap());
+        assert_eq!(dots[0], project_entity_as_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap());
     }
 
     #[test]
     fn radar_dots_filtered_or_logic_includes_either_tag() {
-        let a = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
-        let s = asteroid_with_tags(5.0, -10.0, &["ship"]);
+        let a = entity_at(0.0, -10.0, &["asteroid"]);
+        let s = entity_at(5.0, -10.0, &["ship"]);
         let filter = vec![EntityTag::Asteroid, EntityTag::Ship];
         let dots: Vec<_> = radar_dots_filtered(&[a, s], 0.0, 0.0, 0.0, &filter).collect();
         assert_eq!(dots.len(), 2);
@@ -498,14 +529,14 @@ mod tests {
 
     #[test]
     fn radar_dots_filtered_empty_filter_returns_nothing() {
-        let a = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
+        let a = entity_at(0.0, -10.0, &["asteroid"]);
         let dots: Vec<_> = radar_dots_filtered(&[a], 0.0, 0.0, 0.0, &[]).collect();
         assert!(dots.is_empty());
     }
 
     #[test]
     fn radar_dots_filtered_skips_out_of_range_even_if_tag_matches() {
-        let far = asteroid_with_tags(100.0, 100.0, &["asteroid"]);
+        let far = entity_at(100.0, 100.0, &["asteroid"]);
         let filter = vec![EntityTag::Asteroid];
         let dots: Vec<_> = radar_dots_filtered(&[far], 0.0, 0.0, 0.0, &filter).collect();
         assert!(dots.is_empty());
@@ -513,7 +544,7 @@ mod tests {
 
     #[test]
     fn radar_dots_filtered_skips_no_tag_entity() {
-        let a = asteroid_with_tags(0.0, -10.0, &[]);
+        let a = entity_at(0.0, -10.0, &[]);
         let filter = vec![EntityTag::Asteroid];
         let dots: Vec<_> = radar_dots_filtered(&[a], 0.0, 0.0, 0.0, &filter).collect();
         assert!(dots.is_empty());
@@ -610,8 +641,8 @@ mod tests {
 
     #[test]
     fn dots_with_config_filters_by_shows() {
-        let asteroid = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
-        let ship_entity = asteroid_with_tags(5.0, -10.0, &["ship"]);
+        let asteroid = entity_at(0.0, -10.0, &["asteroid"]);
+        let ship_entity = entity_at(5.0, -10.0, &["ship"]);
         let cfg = RadarConfig {
             range: 50.0,
             shows: vec![EntityTag::Asteroid],
@@ -619,12 +650,12 @@ mod tests {
         let dots: Vec<_> = radar_dots_with_config(&[asteroid.clone(), ship_entity], 0.0, 0.0, 0.0, &cfg).collect();
         assert_eq!(dots.len(), 1);
         // Scaled radius should use config.range.
-        close(dots[0].2, asteroid.radius / cfg.range);
+        close(dots[0].2, 1.0 / cfg.range);
     }
 
     #[test]
     fn dots_with_config_empty_shows_returns_nothing() {
-        let asteroid = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
+        let asteroid = entity_at(0.0, -10.0, &["asteroid"]);
         let cfg = RadarConfig { range: 50.0, shows: vec![] };
         let dots: Vec<_> = radar_dots_with_config(&[asteroid], 0.0, 0.0, 0.0, &cfg).collect();
         assert!(dots.is_empty());
@@ -633,7 +664,7 @@ mod tests {
     #[test]
     fn dots_with_config_clips_at_config_range_not_global() {
         // Asteroid at 40 units (inside RADAR_RANGE=50 but outside config range=30).
-        let asteroid = asteroid_with_tags(0.0, -40.0, &["asteroid"]);
+        let asteroid = entity_at(0.0, -40.0, &["asteroid"]);
         let cfg = RadarConfig { range: 30.0, shows: vec![EntityTag::Asteroid] };
         let dots: Vec<_> = radar_dots_with_config(&[asteroid], 0.0, 0.0, 0.0, &cfg).collect();
         assert!(dots.is_empty());
@@ -641,8 +672,8 @@ mod tests {
 
     #[test]
     fn dots_with_config_or_logic_for_multiple_shows() {
-        let a = asteroid_with_tags(0.0, -10.0, &["asteroid"]);
-        let s = asteroid_with_tags(5.0, -10.0, &["ship"]);
+        let a = entity_at(0.0, -10.0, &["asteroid"]);
+        let s = entity_at(5.0, -10.0, &["ship"]);
         let cfg = RadarConfig {
             range: 50.0,
             shows: vec![EntityTag::Asteroid, EntityTag::Ship],
@@ -651,23 +682,27 @@ mod tests {
         assert_eq!(dots.len(), 2);
     }
 
-    // ── project_asteroid_field / radar_rings ──────────────────────────────
+    // ── project_entity_as_field / radar_rings ─────────────────────────────
 
-    fn make_field(x: f32, z: f32, inner: f32, outer: f32) -> crate::messages::AsteroidField {
-        crate::messages::AsteroidField {
+    fn field_entity(x: f32, z: f32, inner: f32, outer: f32) -> EntitySnapshot {
+        EntitySnapshot {
             uuid: "field-1".into(),
-            x,
-            z,
-            inner_radius: inner,
-            outer_radius: outer,
+            id: None,
+            position: Some([x, 0.0, z]),
             tags: vec!["asteroid_field".into()],
+            shape: None,
+            radius: Some(outer),
+            colour: None,
+            yaw: None,
+            hull_fraction: None,
+            inner_radius: Some(inner),
         }
     }
 
     #[test]
-    fn project_asteroid_field_centred_on_ship_maps_to_origin() {
-        let field = make_field(0.0, 0.0, 5.0, 15.0);
-        let (cx, cy, ir, or_) = project_asteroid_field(&field, 0.0, 0.0, 0.0).unwrap();
+    fn project_entity_as_field_centred_on_ship_maps_to_origin() {
+        let field = field_entity(0.0, 0.0, 5.0, 15.0);
+        let (cx, cy, ir, or_) = project_entity_as_field(&field, 0.0, 0.0, 0.0).unwrap();
         close(cx, 0.0);
         close(cy, 0.0);
         close(ir, 5.0 / RADAR_RANGE);
@@ -675,34 +710,34 @@ mod tests {
     }
 
     #[test]
-    fn project_asteroid_field_ahead_maps_to_positive_y() {
-        let field = make_field(0.0, -25.0, 5.0, 10.0);
-        let (cx, cy, _ir, _or) = project_asteroid_field(&field, 0.0, 0.0, 0.0).unwrap();
+    fn project_entity_as_field_ahead_maps_to_positive_y() {
+        let field = field_entity(0.0, -25.0, 5.0, 10.0);
+        let (cx, cy, _ir, _or) = project_entity_as_field(&field, 0.0, 0.0, 0.0).unwrap();
         close(cx, 0.0);
         close(cy, 0.5);
     }
 
     #[test]
-    fn project_asteroid_field_fully_out_of_range_returns_none() {
+    fn project_entity_as_field_fully_out_of_range_returns_none() {
         // Field centre at 100 units, outer radius 5 → nearest edge at 95 > 50.
-        let field = make_field(100.0, 0.0, 3.0, 5.0);
-        assert!(project_asteroid_field(&field, 0.0, 0.0, 0.0).is_none());
+        let field = field_entity(100.0, 0.0, 3.0, 5.0);
+        assert!(project_entity_as_field(&field, 0.0, 0.0, 0.0).is_none());
     }
 
     #[test]
-    fn project_asteroid_field_partially_in_range_returns_some() {
+    fn project_entity_as_field_partially_in_range_returns_some() {
         // Field centre at 55 units, outer radius 10 → near edge at 45 < 50.
-        let field = make_field(55.0, 0.0, 5.0, 10.0);
-        assert!(project_asteroid_field(&field, 0.0, 0.0, 0.0).is_some());
+        let field = field_entity(55.0, 0.0, 5.0, 10.0);
+        assert!(project_entity_as_field(&field, 0.0, 0.0, 0.0).is_some());
     }
 
     #[test]
     fn radar_rings_skips_fully_out_of_range_fields() {
-        let far = make_field(200.0, 0.0, 5.0, 10.0);
-        let near = make_field(0.0, -25.0, 5.0, 10.0);
+        let far = field_entity(200.0, 0.0, 5.0, 10.0);
+        let near = field_entity(0.0, -25.0, 5.0, 10.0);
         let rings: Vec<_> = radar_rings(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(rings.len(), 1);
-        let expected = project_asteroid_field(&near, 0.0, 0.0, 0.0).unwrap();
+        let expected = project_entity_as_field(&near, 0.0, 0.0, 0.0).unwrap();
         assert_eq!(rings[0], expected);
     }
 
@@ -710,6 +745,13 @@ mod tests {
     fn radar_rings_empty_slice_returns_empty() {
         let rings: Vec<_> = radar_rings(&[], 0.0, 0.0, 0.0).collect();
         assert!(rings.is_empty());
+    }
+
+    #[test]
+    fn radar_rings_skips_non_field_entities() {
+        let ast = entity_at(0.0, -10.0, &["asteroid"]);
+        let rings: Vec<_> = radar_rings(&[ast], 0.0, 0.0, 0.0).collect();
+        assert!(rings.is_empty(), "radar_rings should only show entities tagged 'asteroid_field'");
     }
 
     // ── ScienceRadarView ──────────────────────────────────────────────────
@@ -721,40 +763,40 @@ mod tests {
         }
     }
 
-    fn ast(uuid: &str, x: f32, z: f32) -> AsteroidInfo {
-        AsteroidInfo { uuid: uuid.into(), x, z, radius: 1.0, tags: vec!["asteroid".into()] }
+    fn ast_entity(uuid: &str, x: f32, z: f32) -> EntitySnapshot {
+        EntitySnapshot::asteroid(uuid, x, z, 1.0)
     }
 
-    fn field(uuid: &str, x: f32, z: f32) -> AsteroidField {
-        AsteroidField { uuid: uuid.into(), x, z, inner_radius: 5.0, outer_radius: 15.0, tags: vec!["asteroid_field".into()] }
+    fn fld_entity(uuid: &str, x: f32, z: f32) -> EntitySnapshot {
+        EntitySnapshot::asteroid_field(uuid, x, z, 5.0, 15.0)
     }
 
     #[test]
     fn science_radar_view_empty_world_produces_empty_view() {
-        let view = compute_science_radar_view(&[], &[], 0.0, 0.0, 0.0, &science_config());
+        let view = compute_science_radar_view(&[], 0.0, 0.0, 0.0, &science_config());
         assert!(view.dots.is_empty());
         assert!(view.rings.is_empty());
     }
 
     #[test]
     fn science_radar_view_includes_asteroid_dot_within_range() {
-        let a = ast("a1", 0.0, -50.0);
-        let view = compute_science_radar_view(&[a], &[], 0.0, 0.0, 0.0, &science_config());
+        let a = ast_entity("a1", 0.0, -50.0);
+        let view = compute_science_radar_view(&[a], 0.0, 0.0, 0.0, &science_config());
         assert_eq!(view.dots.len(), 1);
         assert_eq!(view.dots[0].uuid, "a1");
     }
 
     #[test]
     fn science_radar_view_excludes_asteroid_outside_range() {
-        let a = ast("far", 0.0, -200.0);
-        let view = compute_science_radar_view(&[a], &[], 0.0, 0.0, 0.0, &science_config());
+        let a = ast_entity("far", 0.0, -200.0);
+        let view = compute_science_radar_view(&[a], 0.0, 0.0, 0.0, &science_config());
         assert!(view.dots.is_empty());
     }
 
     #[test]
     fn science_radar_view_includes_field_ring_within_range() {
-        let f = field("f1", 0.0, -50.0);
-        let view = compute_science_radar_view(&[], &[f], 0.0, 0.0, 0.0, &science_config());
+        let f = fld_entity("f1", 0.0, -50.0);
+        let view = compute_science_radar_view(&[f], 0.0, 0.0, 0.0, &science_config());
         assert_eq!(view.rings.len(), 1);
         assert_eq!(view.rings[0].uuid, "f1");
     }
@@ -763,8 +805,8 @@ mod tests {
     fn science_radar_view_excludes_entity_not_in_shows() {
         // Config only shows asteroids; a "ship" tagged entity is excluded.
         let cfg = RadarConfig { range: 100.0, shows: vec![EntityTag::Asteroid] };
-        let ship = AsteroidInfo { uuid: "s1".into(), x: 0.0, z: -20.0, radius: 1.0, tags: vec!["ship".into()] };
-        let view = compute_science_radar_view(&[ship], &[], 0.0, 0.0, 0.0, &cfg);
+        let ship = EntitySnapshot::simple("s1", 0.0, -20.0, vec!["ship".into()]);
+        let view = compute_science_radar_view(&[ship], 0.0, 0.0, 0.0, &cfg);
         assert!(view.dots.is_empty());
     }
 
@@ -772,17 +814,28 @@ mod tests {
     fn science_radar_dot_position_is_normalised_to_config_range() {
         // Asteroid at exactly config.range ahead → radar_y = 1.0.
         let cfg = RadarConfig { range: 80.0, shows: vec![EntityTag::Asteroid] };
-        let a = ast("a2", 0.0, -80.0);
-        let view = compute_science_radar_view(&[a], &[], 0.0, 0.0, 0.0, &cfg);
+        let a = ast_entity("a2", 0.0, -80.0);
+        let view = compute_science_radar_view(&[a], 0.0, 0.0, 0.0, &cfg);
         assert_eq!(view.dots.len(), 1);
         close(view.dots[0].radar_y, 1.0);
     }
 
     #[test]
     fn science_radar_view_dot_carries_original_uuid() {
-        let a = ast("uuid-xyz", 0.0, -30.0);
-        let view = compute_science_radar_view(&[a], &[], 0.0, 0.0, 0.0, &science_config());
+        let a = ast_entity("uuid-xyz", 0.0, -30.0);
+        let view = compute_science_radar_view(&[a], 0.0, 0.0, 0.0, &science_config());
         assert_eq!(view.dots[0].uuid, "uuid-xyz");
+    }
+
+    #[test]
+    fn science_radar_view_separates_dots_and_rings() {
+        let ast = ast_entity("ast-1", 0.0, -30.0);
+        let fld = fld_entity("fld-1", 0.0, -30.0);
+        let view = compute_science_radar_view(&[ast, fld], 0.0, 0.0, 0.0, &science_config());
+        assert_eq!(view.dots.len(), 1, "asteroid should be a dot");
+        assert_eq!(view.dots[0].uuid, "ast-1");
+        assert_eq!(view.rings.len(), 1, "field should be a ring");
+        assert_eq!(view.rings[0].uuid, "fld-1");
     }
 }
 

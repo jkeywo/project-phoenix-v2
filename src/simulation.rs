@@ -1,7 +1,6 @@
 ﻿use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::asteroid_spawner::{generate_donut_field, generate_grid_field, generate_grid_uuids};
 use crate::breakdown::BreakdownQueue;
 #[cfg(test)]
 use crate::breakdown::breakdowns_from_damage;
@@ -12,7 +11,7 @@ use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::messages::{
-    AsteroidInfo, ClientMessage, Console, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewMode,
+    ClientMessage, Console, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewMode,
 };
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
 use crate::messages::TorpedoTube as MsgTorpedoTube;
@@ -284,6 +283,10 @@ impl Plugin for SimulationPlugin {
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
             .add_systems(Update, (
+                spawn_game_start_entities.after(crate::lobby::process_lobby),
+                render_spawned_entities.after(spawn_game_start_entities),
+            ))
+            .add_systems(Update, (
                 handle_toggle,
                 handle_set_view,
                 handle_set_target,
@@ -385,12 +388,12 @@ fn handle_set_target(
         // Validate: asteroid must exist in world data and be within WEAPONS_RADAR_RANGE.
         let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
         let effective_weapons_range = WEAPONS_RADAR_RANGE * radar_range_mult;
-        let asteroid = world.0.asteroids.iter().find(|a| &a.uuid == uuid);
+        let asteroid = world.0.entities.iter().find(|a| &a.uuid == uuid);
         let locked = match asteroid {
             None => false,
             Some(a) => {
-                let dx = a.x - ship.x;
-                let dz = a.z - ship.z;
+                let dx = a.x() - ship.x;
+                let dz = a.z() - ship.z;
                 dx * dx + dz * dz <= effective_weapons_range * effective_weapons_range
             }
         };
@@ -618,11 +621,11 @@ fn handle_fire_phaser(
         // Need a locked target.
         let Some(target_uuid) = &weapons_target.0 else { continue };
         // Target must still exist in world data and be fire-ready.
-        let Some(asteroid) = world.0.asteroids.iter().find(|a| &a.uuid == target_uuid) else {
+        let Some(asteroid) = world.0.entities.iter().find(|a| &a.uuid == target_uuid) else {
             continue;
         };
         let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
-        if !crate::radar::is_fire_ready_with_range(asteroid.x, asteroid.z, ship.x, ship.z, ship.yaw, effective_phaser_range) {
+        if !crate::radar::is_fire_ready_with_range(asteroid.x(), asteroid.z(), ship.x, ship.z, ship.yaw, effective_phaser_range) {
             continue;
         }
 
@@ -744,9 +747,9 @@ fn tick_torpedo_system(
         return;
     }
     let dt = time.delta_secs();
-    let target_positions: std::collections::HashMap<String, (f32, f32)> = world.0.asteroids
+    let target_positions: std::collections::HashMap<String, (f32, f32)> = world.0.entities
         .iter()
-        .map(|a| (a.uuid.clone(), (a.x, a.z)))
+        .map(|a| (a.uuid.clone(), (a.x(), a.z())))
         .collect();
     let result = torpedo_sys.0.tick(dt, &target_positions);
     for expired_uuid in result.expired {
@@ -1077,7 +1080,7 @@ fn tick_active_beam(
     };
 
     // Check sever: target no longer exists in world data.
-    let asteroid_info = world.0.asteroids.iter().find(|a| a.uuid == target_uuid).cloned();
+    let asteroid_info = world.0.entities.iter().find(|a| a.uuid == target_uuid).cloned();
     let Some(info) = asteroid_info else {
         // Target was already destroyed (e.g., double-tick race). End beam silently.
         beam.target_uuid = None;
@@ -1093,7 +1096,7 @@ fn tick_active_beam(
 
     // Check sever: out of range or out of arc.
     let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
-    if !crate::radar::is_fire_ready_with_range(info.x, info.z, ship.x, ship.z, ship.yaw, effective_phaser_range) {
+    if !crate::radar::is_fire_ready_with_range(info.x(), info.z(), ship.x, ship.z, ship.yaw, effective_phaser_range) {
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
@@ -1125,11 +1128,11 @@ fn tick_active_beam(
 
         if destroyed {
             // Remove from world data.
-            world.0.asteroids.retain(|a| a.uuid != target_uuid);
+            world.0.entities.retain(|a| a.uuid != target_uuid);
 
             // Fire VFX event with the asteroid's last known position so the
             // renderer can play the destruction ripple.
-            vfx_events.write(AsteroidDestroyedVfx { x: info.x, z: info.z });
+            vfx_events.write(AsteroidDestroyedVfx { x: info.x(), z: info.z() });
 
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
@@ -1172,6 +1175,7 @@ fn broadcast_sim_state(
     phase: Res<CurrentPhase>,
     power: Option<Res<ShipPowerSystem>>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
+    asteroid_query: Query<(&Transform, &AsteroidUuid, Option<&AsteroidDamage>)>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1181,10 +1185,34 @@ fn broadcast_sim_state(
             .map(|p| (p.0.helm, p.0.weapons, p.0.science))
             .unwrap_or((2, 2, 2));
         let flags = modifiers.flags();
+
+        // Build per-tick entity state from live ECS.
+        let entity_states: Vec<crate::messages::EntityStateSnapshot> = asteroid_query
+            .iter()
+            .map(|(transform, uuid, damage)| {
+                let hull_fraction = damage.map(|d| d.current_hp as f32 / d.max_hp as f32);
+                crate::messages::EntityStateSnapshot {
+                    uuid: uuid.0.clone(),
+                    position: Some([transform.translation.x, transform.translation.y, transform.translation.z]),
+                    yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                    hull_fraction,
+                    flags: vec![],
+                }
+            })
+            .collect();
+
+        let helm_range_mult = modifiers.get(&ModifierSlot::RadarRange);
+        let radar_state = crate::messages::RadarStateSnapshot {
+            helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
+            tactical_range: crate::client_sim::WEAPONS_RADAR_RANGE * helm_range_mult,
+            science_long_range: crate::client_sim::SCIENCE_RADAR_RANGE * helm_range_mult,
+            science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
+        };
+
         writer.write(OutboundMessage {
             target: Target::All,
             msg: ServerMessage::SimState {
-                snapshot: ship.snapshot(hull.0.current(), power_levels, flags),
+                snapshot: ship.snapshot(hull.0.current(), power_levels, flags, entity_states, radar_state),
             },
         });
     }
@@ -1248,9 +1276,9 @@ fn broadcast_weapons_update(
     let fire_ready = match &weapons_target.0 {
         None => false,
         Some(uuid) => {
-            world.0.asteroids.iter()
+            world.0.entities.iter()
                 .find(|a| &a.uuid == uuid)
-                .map(|a| crate::radar::is_fire_ready_with_range(a.x, a.z, ship.x, ship.z, ship.yaw, effective_phaser_range))
+                .map(|a| crate::radar::is_fire_ready_with_range(a.x(), a.z(), ship.x, ship.z, ship.yaw, effective_phaser_range))
                 .unwrap_or(false)
         }
     };
@@ -1397,15 +1425,63 @@ fn setup_world_from_config(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut world: ResMut<WorldResource>,
+    _world: ResMut<WorldResource>,
     map_config: MapConfig,
     config_cache: crate::config_cache::ConfigCache,
 ) {
+    // ── Spawn immediate entities from entity instances ────────────
+    for entity_inst in &map_config.entities {
+        if entity_inst.spawn_on != crate::map_config::EntityInstanceSpawnOn::Immediate {
+            continue;
+        }
+        spawn_entity_instance(&mut commands, &map_config, &config_cache, entity_inst);
+    }
+
+    // Also handle legacy typed sections for backward compatibility
+    // (stars, planets, asteroid_fields from old-format maps)
+    spawn_legacy_sections(&mut commands, &mut meshes, &mut materials, &map_config, &config_cache);
     
+    // ── Starfield skybox ──────────────────────────────────────────
+    spawn_starfield(&mut commands, &mut meshes, &mut materials);
+}
+
+/// Spawn a single entity instance: resolve template, apply overrides, spawn.
+fn spawn_entity_instance(
+    commands: &mut Commands,
+    _map_config: &MapConfig,
+    config_cache: &crate::config_cache::ConfigCache,
+    entity_inst: &crate::map_config::EntityInstance,
+) {
+    let config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
+        Ok(c) => c,
+        Err(e) => {
+            bevy::log::error!("Failed to resolve entity '{}': {}", entity_inst.template_path, e);
+            return;
+        }
+    };
+
+    let uuid = crate::entity_loader::assign_uuid();
+    let pos = if entity_inst.position.len() >= 3 {
+        Vec3::new(entity_inst.position[0], entity_inst.position[1], entity_inst.position[2])
+    } else {
+        Vec3::ZERO
+    };
+
+    crate::entity_spawner::spawn_entity(commands, &config, pos, uuid, entity_inst.id.clone());
+}
+
+/// Spawn entities from legacy typed sections ([[star]], [[planet]], [[asteroid_field]])
+/// for backward compatibility with old-format maps.
+fn spawn_legacy_sections(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    map_config: &MapConfig,
+    _config_cache: &crate::config_cache::ConfigCache,
+) {
     // Spawn stars as unlit emissive sphere meshes
     for star in &map_config.stars {
         let star_mesh = meshes.add(Sphere { radius: star.radius });
-        // Convert RGB vec to Color
         let star_color = Color::srgb(star.colour[0], star.colour[1], star.colour[2]);
         let star_mat = materials.add(StandardMaterial {
             base_color: star_color,
@@ -1413,12 +1489,13 @@ fn setup_world_from_config(
             ..default()
         });
         commands.spawn((
+            crate::entity_spawner::StarSection(star.clone()),
             Mesh3d(star_mesh),
             MeshMaterial3d(star_mat),
             Transform::from_xyz(star.position[0], star.position[1], star.position[2]),
         ));
     }
-    
+
     // Spawn planets as standard lit sphere meshes
     for planet in &map_config.planets {
         let planet_mesh = meshes.add(Sphere { radius: planet.radius });
@@ -1427,14 +1504,28 @@ fn setup_world_from_config(
             ..default()
         });
         commands.spawn((
+            crate::entity_spawner::PlanetSection(planet.clone()),
             Mesh3d(planet_mesh),
             MeshMaterial3d(planet_mat),
             Transform::from_xyz(planet.position[0], planet.position[1], planet.position[2]),
         ));
     }
-    
-    // Spawn starfield skybox
-    // Procedural points: many small unlit white spheres at radius ~2000
+
+    // Spawn asteroid field sections as AsteroidFieldSection markers
+    for field in &map_config.asteroid_fields {
+        commands.spawn((
+            crate::entity_spawner::AsteroidFieldSection(field.clone()),
+            Transform::default(),
+        ));
+    }
+}
+
+/// Spawn the procedural starfield skybox.
+fn spawn_starfield(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
     let star_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(1.0, 1.0, 1.0),
         unlit: true,
@@ -1444,44 +1535,87 @@ fn setup_world_from_config(
     let star_count = 400u32;
     let radius = 2000.0_f32;
     for i in 0..star_count {
-        // Deterministic pseudo-random unit vector via golden-spiral on a sphere.
         let frac = (i as f32 + 0.5) / star_count as f32;
         let phi = (1.0 - 2.0 * frac).acos();
         let theta = std::f32::consts::PI * (1.0 + 5_f32.sqrt()) * i as f32;
         let x = phi.sin() * theta.cos() * radius;
         let y = phi.sin() * theta.sin() * radius;
         let z = phi.cos() * radius;
-        // Hash for size variation
         let h = ((i.wrapping_mul(2654435761)) ^ 0xDEADBEEF) % 100;
-        let scale = 1.5 + (h as f32) / 25.0; // 1.5..5.5
+        let scale = 1.5 + (h as f32) / 25.0;
         commands.spawn((
             Mesh3d(star_mesh.clone()),
             MeshMaterial3d(star_mat.clone()),
             Transform::from_xyz(x, y, z).with_scale(Vec3::splat(scale)),
         ));
     }
-    
-    // Spawn player ship from EntityConfig
-    if let Some(ship_config) = config_cache.get("assets/entities/player_ship.toml") {
-        // Get collider config
-        let collider_radius = ship_config.collider.as_ref().map(|c| c.radius).unwrap_or(3.0);
-        let collider_half_height = ship_config.collider.as_ref().map(|c| c.length / 2.0).unwrap_or(3.0);
-        
-            // Get hull integrity
-            let hull_integrity = ship_config.hull.as_ref().map(|h| h.hull_integrity).unwrap_or(100.0);
-            
-            // Store hull integrity in resource
-            commands.insert_resource(ShipHullIntegrity(HullIntegrity::with_hp(hull_integrity)));
+}
 
-            // Populate phaser render config from weapons_console settings.
-            if let Some(wc) = &ship_config.weapons_console {
+/// Spawn entities with `spawn_on = GameStart` (e.g. player ship) when the
+/// game transitions to InProgress. Runs once per game.
+fn spawn_game_start_entities(
+    mut commands: Commands,
+    phase: Res<crate::lobby::CurrentPhase>,
+    map_config: Option<Res<MapConfig>>,
+    mut has_spawned: Local<bool>,
+) {
+    if *has_spawned {
+        return;
+    }
+    if phase.0 != crate::messages::GamePhase::InProgress {
+        return;
+    }
+
+    let mc = match map_config.as_deref() {
+        Some(mc) => mc,
+        None => return,
+    };
+
+    let config_cache = crate::config_cache::get_config_cache();
+
+    let mut ship_spawned = false;
+    for entity_inst in &mc.entities {
+        if entity_inst.spawn_on != crate::map_config::EntityInstanceSpawnOn::GameStart {
+            continue;
+        }
+        let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {
+            Ok(c) => c,
+            Err(e) => {
+                bevy::log::error!("Failed to resolve GameStart entity '{}': {}", entity_inst.template_path, e);
+                continue;
+            }
+        };
+
+        let uuid = crate::entity_loader::assign_uuid();
+        let pos = if entity_inst.position.len() >= 3 {
+            Vec3::new(entity_inst.position[0], entity_inst.position[1], entity_inst.position[2])
+        } else {
+            Vec3::ZERO
+        };
+
+        let spawned = crate::entity_spawner::spawn_entity(
+            &mut commands, &config, pos, uuid, entity_inst.id.clone(),
+        );
+
+        // The first GameStart entity with tags containing "ship" gets the Ship marker
+        if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
+            commands.entity(spawned).insert(Ship);
+            ship_spawned = true;
+
+            // Ship-specific resource setup
+            if let Some(hc) = &config.hull {
+                commands.insert_resource(ShipHullIntegrity(HullIntegrity::with_hp(hc.hull_integrity)));
+            } else {
+                commands.insert_resource(ShipHullIntegrity(HullIntegrity::new()));
+            }
+
+            if let Some(wc) = &config.weapons_console {
                 let beam_color = crate::beam_render::resolve_beam_color(&wc.beam_color);
                 let beam_range = if wc.beam_range > 0.0 { wc.beam_range } else { 40.0 };
                 commands.insert_resource(PhaserRenderConfig { beam_color, beam_range });
             }
 
-            // Populate power config from ship entity config
-            if let Some(pc) = &ship_config.power {
+            if let Some(pc) = &config.power {
                 commands.insert_resource(PowerConfigResource(
                     crate::power_system::PowerConfig {
                         capacity: pc.capacity,
@@ -1491,229 +1625,72 @@ fn setup_world_from_config(
                 ));
             }
 
-            // Populate power multipliers from ship entity config (fallback to defaults)
-            {
-                use std::collections::HashMap;
-                let defaults = [-0.5, 0.0, 0.25, 0.5];
-                let mut multipliers: HashMap<Console, [f32; 4]> = HashMap::from([
-                    (Console::Helm, defaults),
-                    (Console::Tactical, defaults),
-                    (Console::Science, defaults),
-                ]);
-                if let Some(hc) = &ship_config.helm_console {
-                    if let Some(pm) = hc.power_multipliers {
-                        multipliers.insert(Console::Helm, pm);
-                    }
-                }
-                if let Some(wc) = &ship_config.weapons_console {
-                    if let Some(pm) = wc.power_multipliers {
-                        multipliers.insert(Console::Tactical, pm);
-                    }
-                }
-                if let Some(sc) = &ship_config.science_console {
-                    if let Some(pm) = sc.power_multipliers {
-                        multipliers.insert(Console::Science, pm);
-                    }
-                }
-                commands.insert_resource(PowerMultiplierResource { multipliers });
-            }
-        
-        commands.spawn((
-            Ship,
-            Transform::default(),
-            RigidBody::KinematicPositionBased,
-            Collider::capsule_y(collider_half_height, collider_radius),
-            ActiveCollisionTypes::KINEMATIC_STATIC,
-        ));
-    } else {
-        // Fallback if no ship config
-        // Fallback hull integrity
-        commands.insert_resource(ShipHullIntegrity(HullIntegrity::new()));
-        
-        commands.spawn((
-            
-            Ship,
-            Transform::default(),
-            RigidBody::KinematicPositionBased,
-            Collider::capsule_y(3.0, 6.0),
-            ActiveCollisionTypes::KINEMATIC_STATIC,
-        ));
-    }
-    
-    // Spawn asteroids from asteroid fields
-    let mut all_asteroid_infos = Vec::new();
-    
-    for (field_idx, field) in map_config.asteroid_fields.iter().enumerate() {
-        if let Some(ref grid) = field.grid {
-            let result = generate_grid_field(
-                field.inner_radius,
-                field.outer_radius,
-                grid.clone(),
-                field_idx as u64,
-                &field.asteroid_type_paths,
-                &field.cosmetic_type_paths,
-            );
-            let (gameplay_uuids, cosmetic_upper_uuids, cosmetic_lower_uuids) = generate_grid_uuids(
-                field.inner_radius,
-                field.outer_radius,
-                grid,
-                field_idx as u64,
-                result.gameplay.len(),
-                result.cosmetic_upper.len(),
-                result.cosmetic_lower.len(),
-            );
-
-            let asteroid_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.4, 0.35, 0.3),
-                ..default()
-            });
-            let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
-
-            for (i, spawn) in result.gameplay.iter().enumerate() {
-                commands.spawn((
-                    Asteroid,
-                    AsteroidUuid(gameplay_uuids[i].clone()),
-                    AsteroidDamage { max_hp: 30, current_hp: 30 },
-                    Mesh3d(asteroid_mesh.clone()),
-                    MeshMaterial3d(asteroid_mat.clone()),
-                    Transform::from_xyz(spawn.x, spawn.y, spawn.z),
-                    Collider::ball(2.0),
-                    RigidBody::Fixed,
-                ));
-                all_asteroid_infos.push(AsteroidInfo {
-                    uuid: gameplay_uuids[i].clone(),
-                    x: spawn.x,
-                    z: spawn.z,
-                    radius: 2.0,
-                    tags: vec!["asteroid".to_string()],
-                });
-            }
-
-            let cosmetic_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.35, 0.3, 0.28),
-                perceptual_roughness: 0.95,
-                ..default()
-            });
-
-            for (i, spawn) in result.cosmetic_upper.iter().enumerate() {
-                let radius = 0.5 + (i as f32 * 0.1).fract();
-                let mesh = meshes.add(Sphere { radius });
-                commands.spawn((
-                    Mesh3d(mesh),
-                    MeshMaterial3d(cosmetic_mat.clone()),
-                    Transform::from_xyz(spawn.x, spawn.y, spawn.z),
-                ));
-                all_asteroid_infos.push(AsteroidInfo {
-                    uuid: cosmetic_upper_uuids[i].clone(),
-                    x: spawn.x,
-                    z: spawn.z,
-                    radius,
-                    tags: vec!["asteroid".to_string()],
-                });
-            }
-
-            for (i, spawn) in result.cosmetic_lower.iter().enumerate() {
-                let radius = 0.5 + (i as f32 * 0.1).fract();
-                let mesh = meshes.add(Sphere { radius });
-                commands.spawn((
-                    Mesh3d(mesh),
-                    MeshMaterial3d(cosmetic_mat.clone()),
-                    Transform::from_xyz(spawn.x, spawn.y, spawn.z),
-                ));
-                all_asteroid_infos.push(AsteroidInfo {
-                    uuid: cosmetic_lower_uuids[i].clone(),
-                    x: spawn.x,
-                    z: spawn.z,
-                    radius,
-                    tags: vec!["asteroid".to_string()],
-                });
-            }
-        } else {
-            let donut_result = generate_donut_field(
-                field.inner_radius,
-                field.outer_radius,
-                field.density,
-                field_idx as u64,
-                &field.asteroid_type_paths,
-                &field.cosmetic_type_paths,
-            );
-
-            let uuids = crate::asteroid_spawner::generate_donut_uuids(
-                field.inner_radius,
-                field.outer_radius,
-                field.density,
-                field_idx as u64,
-                donut_result.spawns.len(),
-            );
-
-            let asteroid_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.4, 0.35, 0.3),
-                ..default()
-            });
-            let asteroid_mesh = meshes.add(Sphere { radius: 2.0 });
-
-            let mut gameplay_count = 0;
-            for spawn in &donut_result.spawns {
-                if field.asteroid_type_paths.contains(&spawn.config_path) {
-                    gameplay_count += 1;
-                    commands.spawn((
-                        Asteroid,
-                        AsteroidUuid(uuids[gameplay_count - 1].clone()),
-                        AsteroidDamage { max_hp: 30, current_hp: 30 },
-                        Mesh3d(asteroid_mesh.clone()),
-                        MeshMaterial3d(asteroid_mat.clone()),
-                        Transform::from_xyz(spawn.x, 0.0, spawn.z),
-                        Collider::ball(2.0),
-                        RigidBody::Fixed,
-                    ));
-
-                    all_asteroid_infos.push(AsteroidInfo {
-                        uuid: uuids[gameplay_count - 1].clone(),
-                        x: spawn.x,
-                        z: spawn.z,
-                        radius: 2.0,
-                        tags: vec!["asteroid".to_string()],
-                    });
+            // Power multipliers
+            let defaults = [-0.5, 0.0, 0.25, 0.5];
+            let mut multipliers: std::collections::HashMap<Console, [f32; 4]> = std::collections::HashMap::from([
+                (Console::Helm, defaults),
+                (Console::Tactical, defaults),
+                (Console::Science, defaults),
+            ]);
+            if let Some(hc) = &config.helm_console {
+                if let Some(pm) = hc.power_multipliers {
+                    multipliers.insert(Console::Helm, pm);
                 }
             }
-
-            let cosmetic_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.35, 0.3, 0.28),
-                perceptual_roughness: 0.95,
-                ..default()
-            });
-
-            let mut cosmetic_start_idx = gameplay_count;
-            for (i, spawn) in donut_result.spawns.iter().enumerate() {
-                if field.cosmetic_type_paths.contains(&spawn.config_path) {
-                    let idx = i;
-                    let h = ((idx as u32).wrapping_mul(2654435761)) ^ 0x9E3779B9;
-                    let above = (h & 1) == 0;
-                    let mag = 10.0 + ((h >> 1) % 5000) as f32 / 100.0;
-                    let y = if above { mag } else { -mag };
-                    let radius = 0.5 + ((h >> 13) % 250) as f32 / 100.0;
-                    let mesh = meshes.add(Sphere { radius });
-                    commands.spawn((
-                        Mesh3d(mesh),
-                        MeshMaterial3d(cosmetic_mat.clone()),
-                        Transform::from_xyz(spawn.x, y, spawn.z),
-                    ));
-
-                    all_asteroid_infos.push(AsteroidInfo {
-                        uuid: uuids[cosmetic_start_idx].clone(),
-                        x: spawn.x,
-                        z: spawn.z,
-                        radius,
-                        tags: vec!["asteroid".to_string()],
-                    });
-                    cosmetic_start_idx += 1;
+            if let Some(wc) = &config.weapons_console {
+                if let Some(pm) = wc.power_multipliers {
+                    multipliers.insert(Console::Tactical, pm);
                 }
             }
+            if let Some(sc) = &config.science_console {
+                if let Some(pm) = sc.power_multipliers {
+                    multipliers.insert(Console::Science, pm);
+                }
+            }
+            commands.insert_resource(PowerMultiplierResource { multipliers });
         }
     }
-    
-    // Record asteroid layout
-    world.0.asteroids = all_asteroid_infos;
+
+    *has_spawned = true;
+}
+
+/// Add visual meshes and materials to spawned entities that have StarSection
+/// or PlanetSection but no mesh yet.
+fn render_spawned_entities(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    stars: Query<(Entity, &crate::entity_spawner::StarSection, &Transform), Without<Mesh3d>>,
+    planets: Query<(Entity, &crate::entity_spawner::PlanetSection, &Transform), Without<Mesh3d>>,
+) {
+    for (entity, star, _transform) in stars.iter() {
+        let mesh = meshes.add(Sphere { radius: star.0.radius });
+        let color = if star.0.colour.len() >= 3 {
+            Color::srgb(star.0.colour[0], star.0.colour[1], star.0.colour[2])
+        } else {
+            Color::srgb(1.0, 1.0, 1.0)
+        };
+        let mat = materials.add(StandardMaterial {
+            base_color: color,
+            emissive: LinearRgba::from(color) * 2.0,
+            ..default()
+        });
+        commands.entity(entity).insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+    }
+
+    for (entity, planet, _transform) in planets.iter() {
+        let mesh = meshes.add(Sphere { radius: planet.0.radius });
+        let color = if planet.0.colour.len() >= 3 {
+            Color::srgb(planet.0.colour[0], planet.0.colour[1], planet.0.colour[2])
+        } else {
+            Color::srgb(0.5, 0.5, 0.5)
+        };
+        let mat = materials.add(StandardMaterial {
+            base_color: color,
+            ..default()
+        });
+        commands.entity(entity).insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+    }
 }
 
 /// Fallback world setup with hardcoded values for development/testing
@@ -2012,8 +1989,7 @@ fn test_app() -> App {
         let mut app = test_app();
         // Pre-populate world data so the broadcast has something to emit.
         app.world_mut().insert_resource(WorldResource(WorldData {
-            asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 5.0, z: -1.0, radius: 2.0, tags: vec![] }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("test-uuid", 5.0, -1.0, 2.0)],
         }));
 
         // Bring the game up to the point of pressing StartGame
@@ -2031,8 +2007,8 @@ fn test_app() -> App {
         assert_eq!(world_setups.len(), 1, "expected exactly one WorldSetup on the StartGame tick");
         match &world_setups[0].msg {
             ServerMessage::WorldSetup { world } => {
-                assert_eq!(world.asteroids.len(), 1);
-                assert_eq!(world.asteroids[0].x, 5.0);
+                assert_eq!(world.entities.len(), 1);
+                assert_eq!(world.entities[0].x(), 5.0);
             }
             _ => unreachable!(),
         }
@@ -2051,8 +2027,7 @@ fn test_app() -> App {
     fn world_setup_is_not_broadcast_during_lobby() {
         let mut app = test_app();
         app.world_mut().insert_resource(WorldResource(WorldData {
-            asteroids: vec![AsteroidInfo { uuid: "test-uuid".into(), x: 0.0, z: 0.0, radius: 2.0, tags: vec![] }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("test-uuid", 0.0, 0.0, 2.0)],
         }));
         // Identify and select a console but don't start the game.
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
@@ -2150,14 +2125,7 @@ fn test_app() -> App {
 
     fn setup_weapons_world(app: &mut App, asteroid_x: f32, asteroid_z: f32) {
         app.world_mut().insert_resource(WorldResource(WorldData {
-            asteroids: vec![AsteroidInfo {
-                uuid: "target-uuid".into(),
-                x: asteroid_x,
-                z: asteroid_z,
-                radius: 2.0,
-                tags: vec![],
-            }],
-            asteroid_fields: vec![],
+            entities: vec![EntitySnapshot::asteroid("target-uuid", asteroid_x, asteroid_z, 2.0)],
         }));
     }
 
@@ -2427,7 +2395,7 @@ fn test_app() -> App {
 
         // Asteroid no longer in world data.
         assert!(
-            !app.world().resource::<WorldResource>().0.asteroids.iter().any(|a| a.uuid == "target-uuid"),
+            !app.world().resource::<WorldResource>().0.entities.iter().any(|a| a.uuid == "target-uuid"),
             "destroyed asteroid should be removed from WorldData"
         );
 
@@ -2469,7 +2437,7 @@ fn test_app() -> App {
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
         // Move asteroid position in WorldData to 50 units away (out of 40u range).
-        app.world_mut().resource_mut::<WorldResource>().0.asteroids[0].z = -50.0;
+        app.world_mut().resource_mut::<WorldResource>().0.entities[0].position = Some([0.0, 0.0, -50.0]);
 
         let out = tick(&mut app);
 
@@ -2518,11 +2486,10 @@ fn test_app() -> App {
 
         // Set up two asteroids.
         app.world_mut().insert_resource(WorldResource(WorldData {
-            asteroids: vec![
-                AsteroidInfo { uuid: "t1".into(), x: 0.0, z: -20.0, radius: 2.0, tags: vec![] },
-                AsteroidInfo { uuid: "t2".into(), x: 0.0, z: -15.0, radius: 2.0, tags: vec![] },
+            entities: vec![
+                EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
+                EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
             ],
-            asteroid_fields: vec![],
         }));
         start_game_with_weapons(&mut app);
 
@@ -3098,7 +3065,7 @@ fn test_app() -> App {
         // After that, asteroid should have taken ~2â€“3 HP (not destroyed yet).
         let hp_before = {
             let world = app.world().resource::<WorldResource>();
-            world.0.asteroids.iter().find(|a| a.uuid == "target-uuid").map(|_| true)
+            world.0.entities.iter().find(|a| a.uuid == "target-uuid").map(|_| true)
         };
         assert!(hp_before.is_some(), "asteroid should still exist after <1s");
     }
@@ -3139,7 +3106,7 @@ fn test_app() -> App {
         tick(&mut app_fast); // One tick to process the accumulated damage.
 
         let still_exists_fast = app_fast.world().resource::<WorldResource>()
-            .0.asteroids.iter().any(|a| a.uuid == "target-uuid");
+            .0.entities.iter().any(|a| a.uuid == "target-uuid");
         assert!(!still_exists_fast, "with 2Ã— phaser damage modifier, asteroid should be destroyed after 3.5s of beam");
 
         // --- App with identity modifier (baseline): same damage injected but at 1Ã— ---
@@ -3158,7 +3125,7 @@ fn test_app() -> App {
         tick(&mut app_base);
 
         let still_exists_base = app_base.world().resource::<WorldResource>()
-            .0.asteroids.iter().any(|a| a.uuid == "target-uuid");
+            .0.entities.iter().any(|a| a.uuid == "target-uuid");
         assert!(still_exists_base, "with identity modifier, asteroid should survive 3.5s of beam (only 17.5/30 HP removed)");
     }
 

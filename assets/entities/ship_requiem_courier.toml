@@ -1,0 +1,23 @@
+tags = ["ship", "npc", "comms_contact"]
+faction = "dddddddd-4444-4444-8444-dddddddddddd"
+
+[hull]
+hull_integrity = 40.0
+
+[collider]
+shape = "Capsule"
+radius = 1.5
+length = 4.0
+
+[behaviour]
+initial_state = "idle"
+
+[[behaviour.state]]
+name = "fleeing"
+kind = "fleeing"
+target_speed = 1.0
+
+[[behaviour.transition]]
+from = "idle"
+condition = "on_attacked"
+to = "fleeing"

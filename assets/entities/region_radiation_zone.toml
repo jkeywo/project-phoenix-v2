@@ -1,0 +1,10 @@
+tags = ["region", "damage_zone", "weapon_effect"]
+
+[shape]
+type = "sphere"
+radius = 120.0
+
+[effects]
+
+[effects.damage_zone]
+dps = 8.0

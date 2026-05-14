@@ -1,0 +1,180 @@
+# The Aphelion Protocol — Finale
+#
+# Loaded when Ironveil is destroyed OR after the 600 s fallback timer.
+# The Kobayashi Maru: the crew has four possible responses, none of which
+# prevent the war. Every outcome begins the Neutral Zone.
+#
+# Four responses (players may attempt any combination):
+#   1. Fight — navigate the nebula, destroy Ashrender before it fires.
+#              Partial detonation still damages Axiom Station. War: Harrow
+#              claims unprovoked attack on sovereign Imperium territory.
+#   2. Evacuate — Comms console coordinates evacuation of Axiom Station
+#              and Kaleth Prime. Station is lost but people survive. War.
+#   3. Shield containment — Engineering routes all power to shields;
+#              Helm positions Ardent between Ashrender and the station.
+#              Ardent absorbs the discharge (heavy hull damage, possible
+#              destruction). Station saved. War.
+#   4. Requiem override — Comms accepts the override code from Requiem.
+#              Weapon neutralised; Requiem is destroyed by Harrow as traitors;
+#              war starts via a different Casus Belli.
+#
+# Requires: Draft 10 (Region entities) for radiation zone spawn.
+
+preload = [
+    "assets/entities/region_radiation_zone.toml",
+]
+
+# ── SPAWN RADIATION ZONE CENTRED ON ASHRENDER ─────────────────────────────────
+
+[[spawn]]
+entity = "assets/entities/region_radiation_zone.toml"
+position = [620.0, 0.0, -380.0]
+name = "aphelion_radiation_zone"
+
+# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+
+[[objective]]
+id = "respond_to_the_protocol"
+text = "Respond to the Aphelion Protocol before it fires."
+auto_add = true
+
+[[objective]]
+id = "protect_axiom_station"
+text = "Protect Axiom Station from the weapon discharge."
+auto_add = true
+
+# ── OPENING COMMS ─────────────────────────────────────────────────────────────
+
+[[comms]]
+id = "aphelion_warning"
+from = "I.V. Ashrender"
+subject = "WARNING — APHELION PROTOCOL ACTIVE"
+message = "APHELION PROTOCOL IS NOW ACTIVE. Target: Axiom Station. Secondary: Kaleth Prime. Discharge in twenty minutes."
+trigger = "on_load"
+
+[[comms]]
+id = "starcorp_urgent"
+from = "Starcorp Command"
+subject = "URGENT"
+message = "Ardent, we are reading a weapons charge on I.V. Ashrender. You are authorised to use all necessary force. Stop that weapon."
+trigger = "on_load"
+
+[[comms]]
+id = "requiem_offer"
+from = "UNKNOWN — Encrypted Channel"
+subject = "We Can Stop This"
+message = "This is Requiem House. We have an override code for Ashrender's firing system. We'll transmit it — but there will be consequences for us. Do you want it?"
+trigger = "on_load"
+
+[[comms.responses]]
+text = "Send the code. Do it now."
+follow_up = "requiem_code_sent"
+
+[[comms.responses]]
+text = "What consequences? What are you not telling us?"
+follow_up = "requiem_consequences"
+
+[[comms.responses]]
+text = "We handle this ourselves. Acknowledge and stand clear."
+follow_up = "requiem_declined"
+
+[[comms]]
+id = "requiem_consequences"
+from = "UNKNOWN — Encrypted Channel"
+subject = "Re: Consequences"
+message = "Harrow will know we helped you. They'll call it treason — and they'll be right. But forty million people are worth it. Send the code?"
+
+[[comms.responses]]
+text = "Yes. Send it."
+follow_up = "requiem_code_sent"
+
+[[comms.responses]]
+text = "We won't ask that of you. We'll find another way."
+follow_up = "requiem_declined"
+
+[[comms]]
+id = "requiem_code_sent"
+from = "UNKNOWN — Encrypted Channel"
+subject = "Override Transmitted"
+message = "Code is away. Ashrender's weapon is neutralised. Get your people out of this system, Ardent. Whatever comes next — it comes fast."
+
+[[comms.responses]]
+text = "Understood. Thank you."
+follow_up = "war_begins_requiem"
+
+[[comms]]
+id = "war_begins_requiem"
+from = "Starcorp Command"
+subject = "State of Conflict"
+message = "Weapon confirmed cold. House Requiem has been denounced — Harrow calls it treason. Harrow is now calling our presence here a provocation. The Council is convening."
+
+[[comms]]
+id = "requiem_declined"
+from = "UNKNOWN — Encrypted Channel"
+subject = "Re: Understood"
+message = "Then we hope you succeed. We'll be watching from very far away."
+
+# ── TRIGGER — WEAPON FIRES (Ashrender survives to full discharge) ─────────────
+
+[[trigger]]
+condition = "on_timer"
+duration_secs = 1200
+actions = [
+    { fail_objective = "respond_to_the_protocol" },
+    { fail_objective = "protect_axiom_station" },
+    { push_comms = "weapon_fired" },
+]
+
+[[comms]]
+id = "weapon_fired"
+from = "I.V. Ashrender"
+subject = "APHELION — DISCHARGE COMPLETE"
+message = "Axiom Station — direct hit. Kaleth Prime — secondary discharge confirmed. The Accord is over."
+
+[[comms.responses]]
+text = "[No response]"
+follow_up = "war_begins"
+
+# ── TRIGGER — ASHRENDER DESTROYED ────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "ashrender"
+actions = [
+    { complete_objective = "respond_to_the_protocol" },
+    { push_comms = "ashrender_destroyed" },
+]
+
+[[comms]]
+id = "ashrender_destroyed"
+from = "Science"
+subject = "Ashrender Destroyed"
+message = "Ashrender is gone. Partial detonation on destruction — Axiom Station reports hull damage. Kaleth Prime shows atmospheric disturbance."
+
+[[comms.responses]]
+text = "Damage assessment. What's the status of the station?"
+follow_up = "war_begins"
+
+# ── TRIGGER — AXIOM STATION DESTROYED ────────────────────────────────────────
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "axiom_station"
+actions = [
+    { fail_objective = "protect_axiom_station" },
+    { push_comms = "axiom_final" },
+]
+
+[[comms]]
+id = "axiom_final"
+from = "Axiom Station — Adm. Chen"
+subject = "Final Transmission"
+message = "We tried. Whatever comes next — we tried. [SIGNAL LOST]"
+
+# ── WAR BEGINS ────────────────────────────────────────────────────────────────
+
+[[comms]]
+id = "war_begins"
+from = "Starcorp Command"
+subject = "State of Conflict — Alliance Wide"
+message = "The Alliance Council has confirmed a state of conflict with the Imperium. All vessels: defensive posture authorised. Ardent — whatever you did out there, we saw it."

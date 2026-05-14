@@ -1,0 +1,95 @@
+# Path C — The Soldier
+#
+# Loaded when Ironveil attacks the crew or the crew attacks Ironveil.
+# Reveals decrypted Harrow operational orders naming the weapon's targets.
+# This path gives operational context: who ordered it and why.
+
+# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+
+[[objective]]
+id = "repel_ironveil"
+text = "Repel or disable the Harrow patrol vessel."
+auto_add = true
+
+[[objective]]
+id = "decrypt_manifest"
+text = "Recover and transmit the Harrow operational orders."
+
+# ── OPENING COMMS ─────────────────────────────────────────────────────────────
+
+[[comms]]
+id = "ironveil_attack_warning"
+from = "Tactical"
+subject = "Incoming Fire"
+message = "Ironveil has opened fire. Shields responding. Target is confirmed hostile."
+trigger = "on_load"
+
+[[comms.responses]]
+text = "All stations: Red Alert. Return fire."
+
+[[comms.responses]]
+text = "Evasive manoeuvres. Do not escalate until we know what they're protecting."
+follow_up = "ironveil_evasive"
+
+[[comms]]
+id = "ironveil_evasive"
+from = "Tactical"
+subject = "Re: Evasive"
+message = "They're pursuing. Ironveil is not standing down. Engagement is unavoidable."
+
+# ── TRIGGERS — MANIFEST RECOVERED WHEN IRONVEIL DESTROYED ────────────────────
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "ironveil"
+actions = [
+    { complete_objective = "repel_ironveil" },
+    { push_comms = "manifest_recovered" },
+]
+
+[[comms]]
+id = "manifest_recovered"
+from = "Science"
+subject = "Encrypted Data Burst"
+message = "Pulling data from Ironveil's wreckage. Decrypting now."
+
+[[comms.responses]]
+text = "What does it say?"
+follow_up = "manifest_contents"
+
+[[comms]]
+id = "manifest_contents"
+from = "Science"
+subject = "Harrow Operational Orders — APHELION"
+message = "Targets: Axiom Station (primary), Kaleth Prime (secondary). Authorization: House Harrow High Command. Execute on confirmation from Ashrender."
+
+[[comms.responses]]
+text = "Ashrender has the weapon. Transmit this to Starcorp immediately."
+follow_up = "manifest_transmitted"
+
+[[comms.responses]]
+text = "Secondary target is the planet. How many people on Kaleth Prime?"
+follow_up = "manifest_population"
+
+[[comms]]
+id = "manifest_transmitted"
+from = "Starcorp Command"
+subject = "Re: Harrow Orders"
+message = "Orders received. This is confirmation of an act of war. Ardent, stop that weapon."
+
+[[comms]]
+id = "manifest_population"
+from = "Science"
+subject = "Re: Kaleth Prime"
+message = "Forty million. Agriculture and settlements, mostly. No military presence. They're not a target. They're a demonstration."
+
+[[comms.responses]]
+text = "Transmit the orders. Move to intercept Ashrender."
+follow_up = "manifest_transmitted"
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "ironveil"
+actions = [
+    { complete_objective = "decrypt_manifest" },
+]

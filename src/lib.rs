@@ -39,6 +39,7 @@ pub mod client_lobby;
 pub mod client_sim;
 pub mod client_helm;
 pub mod client_complexity;
+pub mod client_elements;
 pub mod client_app;
 
 #[cfg(feature = "server")]

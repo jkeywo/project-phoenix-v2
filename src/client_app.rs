@@ -22,6 +22,7 @@ use crate::client_sim::{
     fire_phaser_message, set_phaser_mode_message, fire_torpedo_message, ClientSimState,
 };
 use crate::client_complexity::{self, ComplexityStore};
+use crate::client_elements::HideableElementRegistry;
 use crate::messages::{ClientMessage, Console, GamePhase, PhaserMode, ServerMessage, Shape, ViewDirection};
 
 // ── Events ─────────────────────────────────────────────────────────
@@ -254,6 +255,11 @@ pub struct TabBarRoot;
 #[derive(Component)]
 struct TabButton(Console);
 
+/// Marks a UI element that can be hidden by complexity preset `hidden_elements`.
+/// The string name must match an entry in the complexity TOML for this console.
+#[derive(Component)]
+struct HideableElement(pub String);
+
 // ── Plugin ─────────────────────────────────────────────────────────
 
 pub struct ClientAppPlugin;
@@ -271,6 +277,7 @@ impl Plugin for ClientAppPlugin {
             .init_resource::<ActiveConsole>()
             .init_resource::<SelectedTube>()
             .init_resource::<ComplexityStore>()
+            .init_resource::<HideableElementRegistry>()
             .insert_resource(HelmJoystickState::default())
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
@@ -337,6 +344,10 @@ impl Plugin for ClientAppPlugin {
                             refresh_complexity_ui,
                             handle_complexity_preset_press,
                             handle_complexity_popup_confirm,
+                        ),
+                        (
+                            register_hideable_elements,
+                            sync_complexity_hiding,
                         ),
                     ),
                 );
@@ -1298,94 +1309,106 @@ fn setup_weapons_ui(mut commands: Commands) {
                 TextColor(Color::srgb(1.0, 0.5, 0.2)),
             ));
 
-            // Torpedo count label
+            // ── Torpedo section (hideable as "torpedo_tube_selector") ──
             panel.spawn((
-                TorpedoCountLabel,
-                Text::new("Torpedoes: 10"),
-                TextFont { font_size: 16.0, ..default() },
-                TextColor(Color::srgb(0.8, 0.8, 0.2)),
-            ));
-
-            // Torpedo tube selection row
-            panel.spawn((
+                HideableElement("torpedo_tube_selector".into()),
                 Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(8.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(8.0),
                     ..default()
                 },
-            )).with_children(|row| {
-                for (tube, label) in [
-                    (crate::messages::TorpedoTube::ForePort, "FWD PORT"),
-                    (crate::messages::TorpedoTube::ForeStarboard, "FWD STBD"),
-                    (crate::messages::TorpedoTube::Aft, "AFT"),
-                ] {
-                    row.spawn((
-                        TorpedoTubeButton(tube),
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.10, 0.20, 0.30)),
-                    )).with_children(|btn| {
-                        btn.spawn((
-                            Text::new(label),
-                            TextFont { font_size: 14.0, ..default() },
-                            TextColor(Color::srgb(0.6, 0.8, 1.0)),
-                        ));
-                    });
-                }
-            });
+            )).with_children(|container| {
+                // Torpedo count label
+                container.spawn((
+                    TorpedoCountLabel,
+                    Text::new("Torpedoes: 10"),
+                    TextFont { font_size: 16.0, ..default() },
+                    TextColor(Color::srgb(0.8, 0.8, 0.2)),
+                ));
 
-            // Tube status labels row
-            panel.spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                },
-            )).with_children(|row| {
-                for tube in [
-                    crate::messages::TorpedoTube::ForePort,
-                    crate::messages::TorpedoTube::ForeStarboard,
-                    crate::messages::TorpedoTube::Aft,
-                ] {
-                    row.spawn((
-                        TubeStatusLabel(tube),
-                        Text::new("LOADED"),
-                        TextFont { font_size: 12.0, ..default() },
-                        TextColor(Color::srgb(0.3, 1.0, 0.3)),
-                        Node {
-                            min_width: Val::Px(70.0),
-                            ..default()
-                        },
-                    ));
-                }
-            });
-
-            // Fire torpedo button
-            panel
-                .spawn((
-                    FireTorpedoButton,
-                    Button,
+                // Torpedo tube selection row
+                container.spawn((
                     Node {
-                        padding: UiRect::axes(Val::Px(32.0), Val::Px(16.0)),
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(8.0),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.10, 0.30, 0.10)),
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        FireTorpedoLabel,
-                        Text::new("FIRE TORPEDO"),
-                        TextFont { font_size: 22.0, ..default() },
-                        TextColor(Color::srgb(0.3, 1.0, 0.3)),
-                    ));
+                )).with_children(|row| {
+                    for (tube, label) in [
+                        (crate::messages::TorpedoTube::ForePort, "FWD PORT"),
+                        (crate::messages::TorpedoTube::ForeStarboard, "FWD STBD"),
+                        (crate::messages::TorpedoTube::Aft, "AFT"),
+                    ] {
+                        row.spawn((
+                            TorpedoTubeButton(tube),
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.10, 0.20, 0.30)),
+                        )).with_children(|btn| {
+                            btn.spawn((
+                                Text::new(label),
+                                TextFont { font_size: 14.0, ..default() },
+                                TextColor(Color::srgb(0.6, 0.8, 1.0)),
+                            ));
+                        });
+                    }
                 });
 
-            // Phaser mode toggle button
+                // Tube status labels row
+                container.spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    },
+                )).with_children(|row| {
+                    for tube in [
+                        crate::messages::TorpedoTube::ForePort,
+                        crate::messages::TorpedoTube::ForeStarboard,
+                        crate::messages::TorpedoTube::Aft,
+                    ] {
+                        row.spawn((
+                            TubeStatusLabel(tube),
+                            Text::new("LOADED"),
+                            TextFont { font_size: 12.0, ..default() },
+                            TextColor(Color::srgb(0.3, 1.0, 0.3)),
+                            Node {
+                                min_width: Val::Px(70.0),
+                                ..default()
+                            },
+                        ));
+                    }
+                });
+
+                // Fire torpedo button
+                container
+                    .spawn((
+                        FireTorpedoButton,
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(32.0), Val::Px(16.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.10, 0.30, 0.10)),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            FireTorpedoLabel,
+                            Text::new("FIRE TORPEDO"),
+                            TextFont { font_size: 22.0, ..default() },
+                            TextColor(Color::srgb(0.3, 1.0, 0.3)),
+                    ));
+                });
+            }); // ── end torpedo container ──
+
+            // Phaser mode toggle button (hideable as "phaser_mode_selector")
             panel
                 .spawn((
+                    HideableElement("phaser_mode_selector".into()),
                     PhaserModeButton,
                     Button,
                     Node {
@@ -2211,5 +2234,78 @@ fn handle_tab_button_press(
         if *interaction == Interaction::Pressed {
             active.0 = Some(console.clone());
         }
+    }
+}
+
+// ── Hideable element registration ────────────────────────────────
+
+/// One-shot system: scans all existing `HideableElement` markers and
+/// registers their names in the `HideableElementRegistry`.
+fn register_hideable_elements(
+    mut registry: ResMut<HideableElementRegistry>,
+    elements: Query<&HideableElement>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    for element in elements.iter() {
+        registry.register(element.0.clone());
+    }
+    *done = true;
+}
+
+/// Reads the `ComplexityStore` and applies hide/show to `HideableElement`
+/// entities when the effective preset changes for the local player's consoles.
+///
+/// - Only affects consoles held by the local player
+/// - Unknown TOML element names produce runtime warnings
+/// - Hidden elements get `Display::None`; restored elements get `Display::Flex`
+fn sync_complexity_hiding(
+    mut registry: ResMut<HideableElementRegistry>,
+    store: Res<ComplexityStore>,
+    mut elements: Query<(&mut Node, &HideableElement)>,
+    token: Res<LocalPlayerToken>,
+    lobby: Res<LobbyState>,
+) {
+    // Guard: if neither resource changed, skip.
+    if !store.is_changed() && !lobby.is_changed() && !token.is_changed() {
+        return;
+    }
+
+    let view = LobbyView::new(&lobby, &token.0);
+    for console in view.my_consoles() {
+        let Some(choice) = store.choices.get(console) else {
+            continue;
+        };
+        let current = choice.effective_preset().to_string();
+        let last = registry.last_applied.get(console).cloned();
+
+        if last.as_ref() == Some(&current) {
+            continue;
+        }
+
+        let changes = registry.planned_changes(console, &current);
+
+        // Log warnings for unknown element names from TOML.
+        for name in &changes.unknown {
+            bevy::log::warn!(
+                "Hideable element '{name}' is in TOML hidden_elements for {console:?} \
+                 but no UI element registered that name; check spelling or add a \
+                 HideableElement(\"{name}\") marker"
+            );
+        }
+
+        // Apply display: none / display: flex to matching entities.
+        for (mut node, element) in elements.iter_mut() {
+            if changes.to_hide.contains(&element.0) {
+                node.display = bevy::ui::Display::None;
+            } else if changes.to_show.contains(&element.0) {
+                node.display = bevy::ui::Display::Flex;
+            }
+        }
+
+        registry.apply_changes(&changes);
+        registry.last_applied.insert(console.clone(), current);
     }
 }

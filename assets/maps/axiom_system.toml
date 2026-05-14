@@ -1,0 +1,44 @@
+default_scenario = "assets/scenarios/before_the_fire.toml"
+
+[global]
+seed = 137
+
+[anchors]
+ironveil_patrol_a = [180.0, 0.0, -160.0]
+ironveil_patrol_b = [320.0, 0.0, -280.0]
+
+[[star]]
+name = "Axiom Prime"
+radius = 60.0
+colour = [1.0, 0.9, 0.7]
+position = [0.0, 0.0, -800.0]
+tags = ["star"]
+
+[[planet]]
+name = "Kaleth Prime"
+radius = 25.0
+colour = [0.4, 0.6, 0.3]
+position = [450.0, 0.0, 100.0]
+tags = ["planet", "habitable"]
+
+[[planet]]
+name = "Kaleth Arid"
+radius = 12.0
+colour = [0.8, 0.7, 0.5]
+position = [200.0, 0.0, -300.0]
+tags = ["planet"]
+
+[[asteroid_field]]
+inner_radius = 90.0
+outer_radius = 260.0
+density = 0.004
+spawn_distance = 170.0
+despawn_distance = 300.0
+asteroid_type_paths = [
+    "assets/entities/asteroid_small.toml",
+    "assets/entities/asteroid_large.toml",
+]
+cosmetic_type_paths = [
+    "assets/entities/asteroid_cosmetic.toml",
+]
+tags = ["field", "main"]

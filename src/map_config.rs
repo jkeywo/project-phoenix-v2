@@ -201,6 +201,9 @@ pub struct MapConfig {
     /// Generic entity instances declared in the map.
     #[serde(default, rename = "entity")]
     pub entities: Vec<EntityInstance>,
+    /// Path to the default scenario TOML to load at startup (relative to assets/).
+    #[serde(default)]
+    pub default_scenario: Option<String>,
 }
 
 impl Default for MapConfig {
@@ -212,6 +215,7 @@ impl Default for MapConfig {
             asteroid_fields: Vec::new(),
             anchors: HashMap::new(),
             entities: Vec::new(),
+            default_scenario: None,
         }
     }
 }
@@ -604,6 +608,7 @@ density = 0.005
         assert!(config.planets.is_empty());
         assert!(config.asteroid_fields.is_empty());
         assert!(config.anchors.is_empty());
+        assert!(config.default_scenario.is_none());
     }
 
     #[test]
@@ -702,5 +707,23 @@ density = 0.005
 "#;
         let config = parse_map_config(toml).unwrap();
         assert!(config.asteroid_fields[0].tags.is_empty());
+    }
+
+    #[test]
+    fn parse_default_scenario_path() {
+        let toml = r#"
+default_scenario = "scenarios/default.toml"
+"#;
+        let config = parse_map_config(toml).unwrap();
+        assert_eq!(
+            config.default_scenario.as_deref(),
+            Some("scenarios/default.toml")
+        );
+    }
+
+    #[test]
+    fn default_scenario_is_none_when_omitted() {
+        let config = parse_map_config("").unwrap();
+        assert!(config.default_scenario.is_none());
     }
 }

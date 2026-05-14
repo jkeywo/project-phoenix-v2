@@ -18,6 +18,7 @@
 use {
     crate::entity_config::EntityConfig,
     crate::map_config::MapConfig,
+    crate::scenario::ScenarioConfig,
     bevy::prelude::*,
     js_sys::Function,
     std::cell::RefCell,
@@ -72,6 +73,9 @@ thread_local! {
 
     /// Whether all pending configs have been loaded.
     static PRELOAD_COMPLETE: RefCell<bool> = const { RefCell::new(false) };
+
+    /// The loaded ScenarioConfig, if any. Set by wasm_load_scenario.
+    static SCENARIO_CONFIG: RefCell<Option<ScenarioConfig>> = const { RefCell::new(None) };
 }
 
 // ── Public WASM API ──────────────────────────────────────────────────────────
@@ -304,6 +308,35 @@ pub fn get_map_config() -> Option<MapConfig> {
     MAP_CONFIG.with(|slot| slot.borrow().clone())
 }
 
+/// Load a scenario TOML string, parse it, and store it for later use.
+///
+/// On success, returns `Ok(JsValue::TRUE)`.
+/// On parse failure, logs the error and returns `Err(JsValue)`.
+#[cfg(target_arch = "wasm32")]
+pub fn wasm_load_scenario(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    match crate::scenario::parse_scenario(&toml_str) {
+        Ok(scenario_config) => {
+            SCENARIO_CONFIG.with(|slot| {
+                *slot.borrow_mut() = Some(scenario_config);
+            });
+            Ok(JsValue::TRUE)
+        }
+        Err(e) => {
+            web_sys::console::error_1(&JsValue::from_str(&format!(
+                "Failed to parse scenario TOML at {}: {}",
+                path, e
+            )));
+            Err(JsValue::from_str(&format!("Scenario parse error at {}: {}", path, e)))
+        }
+    }
+}
+
+/// Get the loaded ScenarioConfig, if any.
+#[cfg(target_arch = "wasm32")]
+pub fn get_scenario_config() -> Option<ScenarioConfig> {
+    SCENARIO_CONFIG.with(|slot| slot.borrow().clone())
+}
+
 /// Get a reference to the config cache.
 #[cfg(target_arch = "wasm32")]
 pub fn get_config_cache() -> ConfigCache {
@@ -375,6 +408,19 @@ impl std::ops::Deref for ComplexityResources {
 #[cfg(not(target_arch = "wasm32"))]
 pub type ComplexityResources = std::collections::HashMap<String, crate::complexity::ComplexityConfig>;
 
+/// Newtype wrapper so `ScenarioConfig` can be inserted as a Bevy Resource.
+#[cfg(target_arch = "wasm32")]
+#[derive(Resource)]
+pub struct ScenarioResource(pub crate::scenario::ScenarioConfig);
+
+#[cfg(target_arch = "wasm32")]
+impl std::ops::Deref for ScenarioResource {
+    type Target = crate::scenario::ScenarioConfig;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Bevy plugin for setting up config resources from the preloaded state.
 /// This should be added to the app in wasm_init().
 #[cfg(target_arch = "wasm32")]
@@ -393,6 +439,11 @@ impl Plugin for ConfigCachePlugin {
 
         // Insert the ComplexityResources
         app.insert_resource(get_complexity_resources());
+
+        // Insert the ScenarioConfig if one was loaded
+        if let Some(scenario_config) = get_scenario_config() {
+            app.insert_resource(ScenarioResource(scenario_config));
+        }
     }
 }
 
@@ -437,6 +488,16 @@ pub fn wasm_load_complexity(_path: String, _toml_str: String) -> Result<JsValue,
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_complexity_resources() -> ComplexityResources {
     ComplexityResources::new()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn wasm_load_scenario(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
+    Ok(JsValue::from_bool(false))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_scenario_config() -> Option<crate::scenario::ScenarioConfig> {
+    None
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────────
@@ -713,5 +774,38 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         let mut pending = cache.all_pending();
         pending.sort();
         assert_eq!(pending, vec!["asteroid_cosmetic.toml", "asteroid_small.toml"]);
+    }
+
+    // ── wasm_load_scenario integration ────────────────────────────────────────
+
+    #[test]
+    fn scenario_toml_round_trip_via_parse_scenario() {
+        let toml = r#"
+[[spawn]]
+name = "asteroid_alpha"
+entity_path = "entities/asteroid_large.toml"
+position = [100.0, 0.0, 200.0]
+"#;
+        let config = crate::scenario::parse_scenario(toml).expect("parse must succeed");
+        assert_eq!(config.spawns.len(), 1);
+        assert_eq!(config.spawns[0].name, "asteroid_alpha");
+        assert_eq!(config.spawns[0].entity_path, "entities/asteroid_large.toml");
+    }
+
+    #[test]
+    fn scenario_anchor_resolution_uses_map_anchors() {
+        use std::collections::HashMap;
+        let toml = r#"
+[[spawn]]
+name = "station"
+entity_path = "entities/station.toml"
+anchor = "alpha_point"
+"#;
+        let config = crate::scenario::parse_scenario(toml).expect("parse must succeed");
+        let mut anchors: HashMap<String, Vec<f32>> = HashMap::new();
+        anchors.insert("alpha_point".to_string(), vec![50.0, 0.0, 100.0]);
+        let resolved = crate::scenario::resolve_positions(&config, &anchors)
+            .expect("resolve must succeed");
+        assert_eq!(resolved[0].position, [50.0, 0.0, 100.0]);
     }
 }

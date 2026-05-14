@@ -22,6 +22,8 @@ pub mod entity_loader;
 pub mod entity_override;
 pub mod entity_spawner;
 pub mod map_config;
+pub mod scenario;
+pub mod scenario_plugin;
 pub mod messages;
 pub mod stations;
 pub mod modifiers;

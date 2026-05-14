@@ -10,6 +10,7 @@ use {
     crate::config_cache::ConfigCachePlugin,
     crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
     crate::renderer::RendererPlugin,
+    crate::scenario_plugin::ScenarioPlugin,
     crate::simulation::SimulationPlugin,
     crate::stations::ShipStations,
     crate::viewscreen_border::ViewscreenBorderPlugin,
@@ -91,6 +92,7 @@ pub fn wasm_init() {
     .add_plugins(AsteroidLifecyclePlugin)
     .add_plugins(LobbyPlugin)
     .add_plugins(SimulationPlugin)
+    .add_plugins(ScenarioPlugin)
     .add_plugins(RendererPlugin)
     .add_plugins(ViewscreenBorderPlugin);
 
@@ -198,6 +200,16 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
 #[wasm_bindgen]
 pub fn wasm_is_preload_complete() -> bool {
     crate::config_cache::wasm_is_preload_complete()
+}
+
+/// Called by JS with the path and TOML content of a scenario file.
+///
+/// On success, parses and stores the scenario; returns `Ok(JsValue::TRUE)`.
+/// On parse failure, returns `Err(JsValue)` with a human-readable error.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_load_scenario(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    crate::config_cache::wasm_load_scenario(path, toml_str)
 }
 
 // ── Bevy bridge systems ────────────────────────────────────────────────────

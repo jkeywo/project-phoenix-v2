@@ -1,0 +1,8 @@
+tags = ["planet", "habitable"]
+
+[planet]
+name = "Earth"
+radius = 20.0
+colour = [0.0, 0.5, 1.0]
+position = [200.0, 0.0, 200.0]
+tags = ["planet", "habitable"]

@@ -145,11 +145,11 @@ pub enum ConsoleSlot {
 #[derive(Clone, Debug, PartialEq)]
 pub enum StationSlot {
     /// Station is unclaimed; clicking sends `SelectStation { station }`.
-    Available { station: String, description: String, preset_names: Vec<String> },
+    Available { station: String, short_code: String, description: String, rank: String, consoles: Vec<Console>, preset_names: Vec<String> },
     /// Station is held by another player; row is disabled.
-    Occupied { station: String, description: String, holder_name: String, preset_names: Vec<String> },
+    Occupied { station: String, short_code: String, description: String, rank: String, consoles: Vec<Console>, holder_name: String, preset_names: Vec<String> },
     /// Station is held by the local player; a "Leave" affordance should appear.
-    Mine { station: String, description: String, preset_names: Vec<String> },
+    Mine { station: String, short_code: String, description: String, rank: String, consoles: Vec<Console>, preset_names: Vec<String> },
     /// A spectator (player with no station assignment), shown in arrival order.
     Spectator { player_name: String },
 }
@@ -231,24 +231,22 @@ impl<'a> LobbyView<'a> {
     /// One slot per station in `ShipStations` at the current player count,
     /// classified by who holds it, followed by spectator rows in arrival order.
     ///
-    /// Player count is derived from the number of non-spectator players
-    /// (those with at least one console). If no station config exists for
-    /// that count, returns spectator rows only.
+    /// Player count is the number of connected players, clamped to max_players.
+    /// Spectator rows are only appended when connected players exceed max_players
+    /// (i.e. there are more players than station slots).
     pub fn station_slots(&self) -> Vec<StationSlot> {
-        let occupied_count = self
-            .state
-            .players
-            .iter()
-            .filter(|p| !p.consoles.is_empty())
-            .count() as u32;
+        let player_count = self.state.players.len() as u32;
+        let max = self.state.ship_stations.max_players;
 
-        // Determine which player count's station list to display.
-        // If no players are stationed yet, try min_players (1) so the UI
-        // always shows something.
-        let display_count = if occupied_count == 0 {
+        // Always show the layout for the current connected-player count so a
+        // newly-joined player who hasn't picked yet sees the right station list.
+        // Clamp to max_players so we never request a non-existent config entry.
+        let display_count = if player_count == 0 {
             self.state.ship_stations.min_players.max(1)
+        } else if max > 0 {
+            player_count.min(max)
         } else {
-            occupied_count
+            player_count
         };
 
         let mut slots: Vec<StationSlot> = Vec::new();
@@ -260,23 +258,32 @@ impl<'a> LobbyView<'a> {
                     p.consoles.iter().any(|c| def.consoles.contains(c))
                 });
                 let preset_names: Vec<String> = def.consoles.iter()
-                    .map(|c| self.complexity_preset_for(c).unwrap_or("Full").to_string())
+                    .map(|c| self.complexity_preset_for(c).unwrap_or("Std").to_string())
                     .collect();
                 let slot = match holder {
                     Some(p) if p.token == self.my_token => StationSlot::Mine {
                         station: def.name.clone(),
+                        short_code: def.short_code.clone(),
                         description: def.description.clone(),
+                        rank: def.rank.clone(),
+                        consoles: def.consoles.clone(),
                         preset_names: preset_names.clone(),
                     },
                     Some(p) => StationSlot::Occupied {
                         station: def.name.clone(),
+                        short_code: def.short_code.clone(),
                         description: def.description.clone(),
+                        rank: def.rank.clone(),
+                        consoles: def.consoles.clone(),
                         holder_name: p.name.clone(),
                         preset_names: preset_names.clone(),
                     },
                     None => StationSlot::Available {
                         station: def.name.clone(),
+                        short_code: def.short_code.clone(),
                         description: def.description.clone(),
+                        rank: def.rank.clone(),
+                        consoles: def.consoles.clone(),
                         preset_names,
                     },
                 };
@@ -284,9 +291,13 @@ impl<'a> LobbyView<'a> {
             }
         }
 
-        // Append spectator rows (players with no consoles) in arrival order.
-        for p in self.state.players.iter().filter(|p| p.consoles.is_empty()) {
-            slots.push(StationSlot::Spectator { player_name: p.name.clone() });
+        // Append spectator rows only when connected players exceed the total
+        // number of station slots (max_players). Below that threshold every
+        // unassigned player can still pick a station and is not a spectator.
+        if max > 0 && player_count > max {
+            for p in self.state.players.iter().filter(|p| p.consoles.is_empty()) {
+                slots.push(StationSlot::Spectator { player_name: p.name.clone() });
+            }
         }
 
         slots
@@ -804,6 +815,43 @@ consoles = ["Tactical"]
     }
 
     #[test]
+    fn station_slots_shows_np_layout_when_second_player_joins_but_has_no_consoles() {
+        // Regression: when player 2 joins before picking a station the UI must
+        // still show the 2P layout (not revert to 1P) so the new player can see
+        // and claim the available station.
+        let mut s = LobbyState::default();
+        s.ship_stations = two_station_ship();
+        s.players = vec![
+            p("a", "Alice", vec![Console::CaptainChair, Console::Helm]), // advanced to 2P Helm
+            p("b", "Bob",   vec![]),                                      // joined, not yet picked
+        ];
+        let slots = LobbyView::new(&s, "x").station_slots();
+        // 2P config: Helm (occupied by Alice) + Tactical (available) — no spectator rows
+        assert_eq!(slots.len(), 2, "must show 2P layout, not 1P");
+        assert!(matches!(&slots[0], StationSlot::Occupied { station, .. } if station == "Helm"));
+        assert!(matches!(&slots[1], StationSlot::Available { station, .. } if station == "Tactical"),
+            "Tactical must be available for Bob to pick");
+    }
+
+    #[test]
+    fn station_slots_propagates_short_code() {
+        let ship = crate::stations::parse_and_validate(r#"
+[stations]
+min_players = 1
+max_players = 1
+
+[[stations.1]]
+name = "Bridge"
+consoles = ["CaptainChair"]
+short_code = "BRG"
+"#).unwrap();
+        let mut s = LobbyState::default();
+        s.ship_stations = ship;
+        let slots = LobbyView::new(&s, "x").station_slots();
+        assert!(matches!(&slots[0], StationSlot::Available { short_code, .. } if short_code == "BRG"));
+    }
+
+    #[test]
     fn station_slots_shows_station_description() {
         let mut s = LobbyState::default();
         s.ship_stations = two_station_ship();
@@ -872,8 +920,11 @@ consoles = ["Tactical"]
     fn clicking_available_station_slot_sends_select_station() {
         let msg = message_for_station_slot_click(&StationSlot::Available {
             station: "Helm".into(),
+            short_code: "HLM".into(),
             description: "Pilot".into(),
-            preset_names: vec!["Full".into()],
+            rank: "Cpt.".into(),
+            consoles: vec![Console::Helm],
+            preset_names: vec!["Std".into()],
         });
         assert_eq!(msg, Some(ClientMessage::SelectStation { station: "Helm".into() }));
     }
@@ -882,9 +933,12 @@ consoles = ["Tactical"]
     fn clicking_occupied_station_slot_yields_no_message() {
         let msg = message_for_station_slot_click(&StationSlot::Occupied {
             station: "Helm".into(),
+            short_code: "HLM".into(),
             description: "Pilot".into(),
+            rank: "Ltn.".into(),
+            consoles: vec![Console::Helm],
             holder_name: "Alice".into(),
-            preset_names: vec!["Full".into()],
+            preset_names: vec!["Std".into()],
         });
         assert!(msg.is_none());
     }
@@ -893,8 +947,11 @@ consoles = ["Tactical"]
     fn clicking_mine_station_slot_yields_no_message() {
         let msg = message_for_station_slot_click(&StationSlot::Mine {
             station: "Helm".into(),
+            short_code: "HLM".into(),
             description: "Pilot".into(),
-            preset_names: vec!["Full".into()],
+            rank: "Cpt.".into(),
+            consoles: vec![Console::Helm],
+            preset_names: vec!["Std".into()],
         });
         assert!(msg.is_none());
     }
@@ -1013,7 +1070,7 @@ consoles = ["Tactical"]
     #[test]
     fn complexity_changed_overwrites_previous_value() {
         let mut s = LobbyState::default();
-        s.complexity.insert(Console::Helm, "Full".into());
+        s.complexity.insert(Console::Helm, "Std".into());
         s.apply(&ServerMessage::ComplexityChanged { console: Console::Helm, preset_name: "Low".into() });
         assert_eq!(s.complexity.get(&Console::Helm).map(|s| s.as_str()), Some("Low"));
     }
@@ -1021,9 +1078,9 @@ consoles = ["Tactical"]
     #[test]
     fn complexity_changed_for_unrelated_console_does_not_overwrite_others() {
         let mut s = LobbyState::default();
-        s.complexity.insert(Console::Helm, "Full".into());
+        s.complexity.insert(Console::Helm, "Std".into());
         s.apply(&ServerMessage::ComplexityChanged { console: Console::Tactical, preset_name: "Low".into() });
-        assert_eq!(s.complexity.get(&Console::Helm).map(|s| s.as_str()), Some("Full"));
+        assert_eq!(s.complexity.get(&Console::Helm).map(|s| s.as_str()), Some("Std"));
     }
 
     #[test]

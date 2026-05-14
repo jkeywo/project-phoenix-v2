@@ -62,6 +62,7 @@ name = "Captain"
 description = "Solo crew: pilot, fight, and command the bridge."
 consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power", "Science"]
 rank = "Cpt."
+short_code = "CAP"
 next = "Helm"
 
 [[stations.2]]
@@ -69,6 +70,7 @@ name = "Helm"
 description = "Pilot the ship and command the bridge."
 consoles = ["CaptainChair", "Helm"]
 rank = "Cpt."
+short_code = "HLM"
 next = "Helm"
 previous = "Captain"
 
@@ -77,6 +79,7 @@ name = "Tactical"
 description = "Weapons, science, and damage control."
 consoles = ["Tactical", "Repair", "Science"]
 rank = "Ltn."
+short_code = "TAC"
 next = "Tactical"
 
 [[stations.3]]
@@ -84,6 +87,7 @@ name = "Helm"
 description = "Pilot the ship and command the bridge."
 consoles = ["CaptainChair", "Helm"]
 rank = "Cpt."
+short_code = "HLM"
 previous = "Helm"
 
 [[stations.3]]
@@ -91,6 +95,7 @@ name = "Tactical"
 description = "Manage weapons systems."
 consoles = ["Tactical"]
 rank = "Ltn."
+short_code = "TAC"
 previous = "Tactical"
 
 [[stations.3]]
@@ -98,12 +103,14 @@ name = "Engineering"
 description = "Maintain, repair, and monitor ship systems."
 consoles = ["Repair", "Power", "Science"]
 rank = "Ltn."
+short_code = "ENG"
 
 [[stations.4]]
 name = "Helm"
 description = "Pilot the ship and command the bridge."
 consoles = ["CaptainChair", "Helm"]
 rank = "Cpt."
+short_code = "HLM"
 previous = "Helm"
 
 [[stations.4]]
@@ -111,6 +118,7 @@ name = "Tactical"
 description = "Manage weapons systems."
 consoles = ["Tactical"]
 rank = "Ltn."
+short_code = "TAC"
 previous = "Tactical"
 
 [[stations.4]]
@@ -118,6 +126,7 @@ name = "Engineering"
 description = "Maintain and repair ship systems."
 consoles = ["Repair", "Power"]
 rank = "Ltn."
+short_code = "ENG"
 previous = "Engineering"
 
 [[stations.4]]
@@ -125,18 +134,21 @@ name = "Science"
 description = "Monitor sensors and long-range radar."
 consoles = ["Science"]
 rank = "Ltn."
+short_code = "SCI"
 
 [[stations.5]]
 name = "Captain"
 description = "Command the bridge."
 consoles = ["CaptainChair"]
 rank = "Cpt."
+short_code = "CAP"
 
 [[stations.5]]
 name = "Helm"
 description = "Pilot the ship."
 consoles = ["Helm"]
 rank = "Ltn."
+short_code = "HLM"
 previous = "Helm"
 
 [[stations.5]]
@@ -144,6 +156,7 @@ name = "Tactical"
 description = "Manage weapons systems."
 consoles = ["Tactical"]
 rank = "Ltn."
+short_code = "TAC"
 previous = "Tactical"
 
 [[stations.5]]
@@ -151,6 +164,7 @@ name = "Engineering"
 description = "Maintain and repair ship systems."
 consoles = ["Repair", "Power"]
 rank = "Ltn."
+short_code = "ENG"
 previous = "Engineering"
 
 [[stations.5]]
@@ -158,4 +172,5 @@ name = "Science"
 description = "Monitor sensors and long-range radar."
 consoles = ["Science"]
 rank = "Ltn."
+short_code = "SCI"
 previous = "Science"

@@ -40,6 +40,10 @@ pub struct OutboundClientMessage(pub ClientMessage);
 
 // ── Marker components ──────────────────────────────────────────────
 
+/// Tracks whether the window is currently in landscape orientation.
+#[derive(Resource, Default, Clone, Copy, PartialEq)]
+pub struct LandscapeMode(pub bool);
+
 /// Marks the root node of the lobby UI so it can be shown/hidden when
 /// the phase changes, and reparented into the bezel content area.
 #[derive(Component)]
@@ -52,6 +56,7 @@ struct ConsoleListRoot;
 
 /// Marks the container of the player list lines.
 #[derive(Component)]
+#[allow(dead_code)]
 struct PlayerListRoot;
 
 /// Marks the Engage button so we can toggle its visibility per captaincy.
@@ -61,6 +66,50 @@ struct EngageButton;
 /// Marks one station-row button and remembers which station name it acts on.
 #[derive(Component)]
 struct StationButton(String);
+
+/// Marks the crew header node so it can be updated.
+#[derive(Component)]
+struct CrewHeader;
+
+/// Marks the crew count "current" text node.
+#[derive(Component)]
+struct CrewCountCurrent;
+
+/// Marks the crew count "max" text node.
+#[derive(Component)]
+struct CrewCountMax;
+
+/// Marks the ready pill text node.
+#[derive(Component)]
+struct ReadyPill;
+
+/// Marks the footer status text node.
+#[derive(Component)]
+struct FooterStatus;
+
+/// Marks the Release button on a Mine station row.
+#[derive(Component)]
+struct ReleaseStationButton;
+
+/// Marks the complexity segmented control container.
+#[derive(Component)]
+struct ComplexitySegControl;
+
+/// Marks a complexity option button; carries the wire preset name ("Low" or "Std").
+#[derive(Component)]
+struct ComplexityOptionButton(String);
+
+/// Marks the station detail panel root.
+#[derive(Component)]
+struct StationDetailPanel;
+
+/// Marks the station detail title text.
+#[derive(Component)]
+struct StationDetailTitle;
+
+/// Marks the consoles chip container inside the detail panel.
+#[derive(Component)]
+struct StationDetailConsoles;
 
 /// Marks the root of the captain console UI (view selector + Red Alert);
 /// shown only when the local player holds CaptainChair and the phase is
@@ -169,7 +218,7 @@ pub struct WeaponsRadarPanel;
 struct ComplexityPopupRoot;
 
 /// Marks a preset option button inside the pop-up or dropdown.
-/// Carries the preset name as payload (e.g. "Low", "Full").
+/// Carries the preset name as payload (e.g. "Low", "Std").
 #[derive(Component)]
 struct ComplexityPresetButton(String);
 
@@ -283,17 +332,22 @@ impl Plugin for ClientAppPlugin {
             .init_resource::<SelectedTube>()
             .init_resource::<ComplexityStore>()
             .init_resource::<HideableElementRegistry>()
+            .init_resource::<LandscapeMode>()
             .insert_resource(HelmJoystickState::default())
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
-            .add_systems(Startup, (setup_lobby_ui, setup_captain_ui, setup_helm_ui, setup_science_ui, setup_weapons_ui, setup_repair_ui, setup_power_ui, setup_tab_bar_ui))
+            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_captain_ui, setup_helm_ui, setup_science_ui, setup_weapons_ui, setup_repair_ui, setup_power_ui, setup_tab_bar_ui))
                 .add_systems(
                     Update,
                     (
                         (
                             apply_inbound_messages,
+                            detect_orientation_change,
                             rebuild_lobby_ui_on_change,
+                            refresh_crew_header,
+                            refresh_footer_status,
+                            refresh_station_detail,
                             toggle_lobby_visibility_on_phase,
                             toggle_captain_panel_visibility,
                             refresh_view_dir_highlights,
@@ -301,7 +355,9 @@ impl Plugin for ClientAppPlugin {
                         ),
                         (
                             handle_station_button_press,
+                            handle_release_station_button_press,
                             handle_engage_button_press,
+                            handle_complexity_option_press,
                             handle_view_dir_button_press,
                             handle_red_alert_button_press,
                         ),
@@ -367,71 +423,271 @@ struct HelmTickTimer(Timer);
 
 // ── Setup ──────────────────────────────────────────────────────────
 
-fn setup_lobby_ui(mut commands: Commands) {
+// ── Lobby colour palette ───────────────────────────────────────────
+const COL_GRAPHITE_DARK: Color = Color::srgb(0.078, 0.090, 0.110);
+const COL_GRAPHITE:      Color = Color::srgb(0.133, 0.149, 0.176);
+const COL_EDGE:          Color = Color::srgb(0.227, 0.251, 0.286);
+const COL_SIGNAL:        Color = Color::srgb(0.373, 0.847, 0.910);
+const COL_TEXT:          Color = Color::srgb(0.722, 0.753, 0.784);
+const COL_TEXT_DIM:      Color = Color::srgb(0.416, 0.447, 0.482);
+const COL_AMBER:         Color = Color::srgb(0.941, 0.627, 0.125);
+
+fn setup_lobby_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
     // 2D camera for UI rendering. `IsDefaultUiCamera` marks this as the
     // target for UI roots that don't carry an explicit `UiTargetCamera`,
     // which Bevy 0.18 requires for text glyph extraction to resolve a
     // camera deterministically.
     commands.spawn((Camera2d, IsDefaultUiCamera));
 
-    commands
-        .spawn((
-            LobbyRoot,
+    let chakra = asset_server.load("fonts/ChakraPetch-SemiBold.ttf");
+    let mono   = asset_server.load("fonts/JetBrainsMono-Regular.ttf");
+
+    commands.spawn((
+        LobbyRoot,
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(10.0)),
+            row_gap: Val::Px(8.0),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.04, 0.047, 0.063, 1.0)),
+    ))
+    .with_children(|root| {
+        // ── Crew header ──────────────────────────────────────────────
+        root.spawn((
+            CrewHeader,
             Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::FlexStart,
-                padding: UiRect::all(Val::Px(16.0)),
-                row_gap: Val::Px(8.0),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
                 ..default()
             },
+            BackgroundColor(COL_GRAPHITE_DARK),
         ))
-        .with_children(|root| {
-            root.spawn((
-                Text::new("Lobby"),
-                TextFont { font_size: 22.0, ..default() },
-                TextColor(Color::srgb(0.53, 0.67, 1.0)),
-            ));
+        .with_children(|hdr| {
+            // Ship name column
+            hdr.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(2.0), ..default() })
+            .with_children(|ship| {
+                ship.spawn((
+                    Text::new("PHOENIX"),
+                    TextFont { font: chakra.clone(), font_size: 11.0, ..default() },
+                    TextColor(COL_TEXT),
+                ));
+                ship.spawn((
+                    Text::new("PRE-FLIGHT"),
+                    TextFont { font: mono.clone(), font_size: 8.0, ..default() },
+                    TextColor(COL_TEXT_DIM),
+                ));
+            });
+            // Right side: crew count + ready pill
+            hdr.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() })
+            .with_children(|right| {
+                // Crew count
+                right.spawn(Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Baseline, column_gap: Val::Px(2.0), ..default() })
+                .with_children(|cc| {
+                    cc.spawn((
+                        Text::new("CREW "),
+                        TextFont { font: chakra.clone(), font_size: 8.0, ..default() },
+                        TextColor(COL_TEXT_DIM),
+                    ));
+                    cc.spawn((
+                        CrewCountCurrent,
+                        Text::new("0"),
+                        TextFont { font: mono.clone(), font_size: 16.0, ..default() },
+                        TextColor(COL_SIGNAL),
+                    ));
+                    cc.spawn((
+                        Text::new("/"),
+                        TextFont { font: mono.clone(), font_size: 12.0, ..default() },
+                        TextColor(COL_TEXT_DIM),
+                    ));
+                    cc.spawn((
+                        CrewCountMax,
+                        Text::new("0"),
+                        TextFont { font: mono.clone(), font_size: 12.0, ..default() },
+                        TextColor(COL_TEXT_DIM),
+                    ));
+                });
+                // Ready pill
+                right.spawn((
+                    ReadyPill,
+                    Node {
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.941, 0.627, 0.125, 0.08)),
+                ))
+                .with_children(|pill| {
+                    pill.spawn((
+                        ReadyPillText,
+                        Text::new("AWAITING"),
+                        TextFont { font: chakra.clone(), font_size: 8.0, ..default() },
+                        TextColor(COL_AMBER),
+                    ));
+                });
+            });
+        });
 
-            root.spawn((
-                ConsoleListRoot,
+        // ── Body — rebuilt by rebuild_lobby_ui_on_change ─────────────
+        root.spawn((
+            ConsoleListRoot,
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                row_gap: Val::Px(6.0),
+                ..default()
+            },
+        ));
+
+        // ── Station detail panel (portrait: sibling; landscape: built inline) ──
+        root.spawn((
+            StationDetailPanel,
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.078, 0.090, 0.110, 0.6)),
+        ))
+        .with_children(|detail| {
+            // Header row
+            detail.spawn(Node { flex_direction: FlexDirection::Row, justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() })
+            .with_children(|dh| {
+                dh.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0), ..default() })
+                .with_children(|titles| {
+                    titles.spawn((
+                        Text::new("// At your station"),
+                        TextFont { font: mono.clone(), font_size: 8.0, ..default() },
+                        TextColor(COL_TEXT_DIM),
+                    ));
+                    titles.spawn((
+                        StationDetailTitle,
+                        Text::new("— SELECT A STATION —"),
+                        TextFont { font: chakra.clone(), font_size: 12.0, ..default() },
+                        TextColor(COL_TEXT_DIM),
+                    ));
+                });
+            });
+            // Consoles label
+            detail.spawn((
+                Text::new("CONSOLES"),
+                TextFont { font: chakra.clone(), font_size: 8.0, ..default() },
+                TextColor(COL_TEXT_DIM),
+            ));
+            // Console chips container
+            detail.spawn((
+                StationDetailConsoles,
                 Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(4.0),
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(5.0),
+                    row_gap: Val::Px(5.0),
                     ..default()
                 },
             ));
+            // Complexity row
+            detail.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                padding: UiRect::top(Val::Px(6.0)),
+                ..default()
+            })
+            .with_children(|cmplx| {
+                cmplx.spawn((
+                    Text::new("COMPLEXITY"),
+                    TextFont { font: chakra.clone(), font_size: 9.0, ..default() },
+                    TextColor(COL_TEXT_DIM),
+                ));
+                // Segmented control
+                cmplx.spawn((
+                    ComplexitySegControl,
+                    Node { flex_direction: FlexDirection::Row, ..default() },
+                    BackgroundColor(COL_GRAPHITE_DARK),
+                ))
+                .with_children(|seg| {
+                    for (preset, label) in [("Low", "Low"), ("Std", "Normal")] {
+                        seg.spawn((
+                            ComplexityOptionButton(preset.to_string()),
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(COL_GRAPHITE_DARK),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new(label),
+                                TextFont { font: chakra.clone(), font_size: 9.0, ..default() },
+                                TextColor(COL_TEXT_DIM),
+                            ));
+                        });
+                    }
+                });
+            });
+        });
 
-            root.spawn((
+        // ── Footer ───────────────────────────────────────────────────
+        root.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            padding: UiRect::axes(Val::Px(2.0), Val::Px(0.0)),
+            ..default()
+        })
+        .with_children(|foot| {
+            foot.spawn((
+                FooterStatus,
+                Text::new(""),
+                TextFont { font: mono.clone(), font_size: 8.0, ..default() },
+                TextColor(COL_TEXT_DIM),
+            ));
+            foot.spawn((
                 EngageButton,
                 Button,
                 Node {
-                    padding: UiRect::all(Val::Px(10.0)),
-                    margin: UiRect::top(Val::Px(8.0)),
+                    padding: UiRect::axes(Val::Px(18.0), Val::Px(12.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.13, 0.13, 0.27)),
+                BackgroundColor(COL_GRAPHITE_DARK),
                 Visibility::Hidden,
             ))
             .with_children(|btn| {
                 btn.spawn((
-                    Text::new("Engage"),
-                    TextFont { font_size: 16.0, ..default() },
-                    TextColor(Color::srgb(0.93, 0.93, 1.0)),
+                    Text::new("ENGAGE"),
+                    TextFont { font: chakra.clone(), font_size: 11.0, ..default() },
+                    TextColor(COL_TEXT_DIM),
                 ));
             });
-
-            root.spawn((
-                PlayerListRoot,
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    margin: UiRect::top(Val::Px(12.0)),
-                    row_gap: Val::Px(2.0),
-                    ..default()
-                },
-            ));
         });
+    });
+}
+
+fn detect_initial_orientation(
+    windows: Query<&Window>,
+    mut landscape: ResMut<LandscapeMode>,
+) {
+    if let Ok(window) = windows.single() {
+        landscape.0 = window.width() > window.height();
+    }
+}
+
+fn detect_orientation_change(
+    windows: Query<&Window, Changed<Window>>,
+    mut landscape: ResMut<LandscapeMode>,
+) {
+    for window in windows.iter() {
+        let is_landscape = window.width() > window.height();
+        if landscape.0 != is_landscape {
+            landscape.0 = is_landscape;
+        }
+    }
 }
 
 // ── Systems ────────────────────────────────────────────────────────
@@ -483,60 +739,61 @@ fn rebuild_lobby_ui_on_change(
     mut commands: Commands,
     state: Res<LobbyState>,
     token: Res<LocalPlayerToken>,
+    landscape: Res<LandscapeMode>,
     console_root: Query<Entity, With<ConsoleListRoot>>,
-    player_root: Query<Entity, With<PlayerListRoot>>,
     children_q: Query<&Children>,
     mut engage: Query<&mut Visibility, With<EngageButton>>,
+    asset_server: Res<AssetServer>,
 ) {
-    if !state.is_changed() && !token.is_changed() {
+    if !state.is_changed() && !token.is_changed() && !landscape.is_changed() {
         return;
     }
+    let chakra = asset_server.load("fonts/ChakraPetch-SemiBold.ttf");
+    let mono   = asset_server.load("fonts/JetBrainsMono-Regular.ttf");
+
     let view = LobbyView::new(&state, &token.0);
 
-    // Console buttons.
-    if let Ok(root) = console_root.single() {
-        if let Ok(children) = children_q.get(root) {
-            for child in children.iter() {
-                commands.entity(child).despawn();
-            }
+    let Ok(body_root) = console_root.single() else { return };
+
+    // Clear existing body children.
+    if let Ok(children) = children_q.get(body_root) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
         }
-        commands.entity(root).with_children(|parent| {
-            for slot in view.station_slots() {
-                spawn_station_row(parent, &slot);
-            }
-        });
     }
 
-    // Player list lines.
-    if let Ok(root) = player_root.single() {
-        if let Ok(children) = children_q.get(root) {
-            for child in children.iter() {
-                commands.entity(child).despawn();
-            }
-        }
-        commands.entity(root).with_children(|parent| {
-            for p in &state.players {
-                let mark = if p.token == token.0 { "▶ " } else { "• " };
-                let consoles = if p.consoles.is_empty() {
-                    String::new()
-                } else {
-                    let names: Vec<String> =
-                        p.consoles.iter().map(|c| {
-                            let preset = state.complexity.get(c)
-                                .map(|s| format!(" ({})", s))
-                                .unwrap_or_default();
-                            format!("{}{preset}", c.display_name())
-                        }).collect();
-                    format!(" — {}", names.join(", "))
-                };
-                parent.spawn((
-                    Text::new(format!("{mark}{}{consoles}", p.name)),
-                    TextFont { font_size: 13.0, ..default() },
-                    TextColor(Color::srgb(0.6, 0.7, 0.73)),
-                ));
+    // Update ConsoleListRoot flex_direction based on orientation.
+    commands.entity(body_root).insert(Node {
+        flex_direction: if landscape.0 { FlexDirection::Row } else { FlexDirection::Column },
+        flex_grow: 1.0,
+        min_height: Val::Px(0.0),
+        column_gap: Val::Px(8.0),
+        row_gap: Val::Px(6.0),
+        ..default()
+    });
+
+    // In both orientations, spawn the station list as the first column/section.
+    let station_slots = view.station_slots();
+    commands.entity(body_root).with_children(|body| {
+        body.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            overflow: Overflow::clip_y(),
+            row_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|col| {
+            for slot in &station_slots {
+                spawn_station_row(col, slot, &chakra, &mono);
             }
         });
-    }
+
+        // In landscape, also build the detail panel content inline as the right column.
+        if landscape.0 {
+            let my_mine_slot = station_slots.iter().find(|s| matches!(s, StationSlot::Mine { .. }));
+            spawn_detail_column(body, my_mine_slot, &state, &token.0, &chakra, &mono);
+        }
+    });
 
     // Engage visibility — only show when captain, in lobby, and all stations filled.
     if let Ok(mut vis) = engage.single_mut() {
@@ -548,60 +805,409 @@ fn rebuild_lobby_ui_on_change(
     }
 }
 
-fn spawn_station_row(parent: &mut ChildSpawnerCommands, slot: &StationSlot) {
-    let (label, station_for_click, bg, fg) = match slot {
-        StationSlot::Available { station, description, preset_names } => {
-            let presets = if preset_names.is_empty() { String::new() } else {
-                format!(" [{}]", preset_names.join(", "))
-            };
-            (format!("{}: available — {}{}", station, description, presets),
-            Some(station.clone()),
-            Color::srgb(0.13, 0.13, 0.27),
-            Color::srgb(0.93, 0.93, 1.0))
+/// Spawn the station list row for one slot using the new visual design.
+fn spawn_station_row(
+    parent: &mut ChildSpawnerCommands,
+    slot: &StationSlot,
+    chakra: &Handle<Font>,
+    mono: &Handle<Font>,
+) {
+    match slot {
+        StationSlot::Available { station, short_code, description, rank, consoles, .. } => {
+            let mut row = parent.spawn((
+                StationButton(station.clone()),
+                Button,
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(10.0)),
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                },
+                BackgroundColor(COL_GRAPHITE),
+            ));
+            row.with_children(|inner| {
+                spawn_station_row_inner(inner, short_code, station, description, rank, consoles, false, chakra, mono);
+            });
         }
-        StationSlot::Occupied { station, description, holder_name, preset_names } => {
-            let presets = if preset_names.is_empty() { String::new() } else {
-                format!(" [{}]", preset_names.join(", "))
-            };
-            (format!("{}: {} — {}{}", station, holder_name, description, presets),
-            None,
-            Color::srgb(0.07, 0.07, 0.10),
-            Color::srgb(0.42, 0.49, 0.55))
+        StationSlot::Occupied { station, short_code, description, rank, consoles, holder_name, .. } => {
+            parent.spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(10.0)),
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                },
+                BackgroundColor(COL_GRAPHITE_DARK),
+            ))
+            .with_children(|inner| {
+                spawn_station_row_inner(inner, short_code, station, description, rank, consoles, false, chakra, mono);
+                // Holder badge on the right
+                inner.spawn(Node { flex_grow: 1.0, ..default() });
+                inner.spawn((
+                    Text::new(holder_name.to_uppercase()),
+                    TextFont { font: mono.clone(), font_size: 9.0, ..default() },
+                    TextColor(COL_TEXT_DIM),
+                ));
+            });
         }
-        StationSlot::Mine { station, description, preset_names } => {
-            let presets = if preset_names.is_empty() { String::new() } else {
-                format!(" [{}]", preset_names.join(", "))
-            };
-            (format!("{}: Mine — {} (leave){}", station, description, presets),
-            None,
-            Color::srgb(0.20, 0.24, 0.40),
-            Color::srgb(0.55, 0.70, 1.0))
+        StationSlot::Mine { station, short_code, description, rank, consoles, .. } => {
+            parent.spawn((
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(10.0)),
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.373, 0.847, 0.910, 0.07)),
+            ))
+            .with_children(|inner| {
+                spawn_station_row_inner(inner, short_code, station, description, rank, consoles, true, chakra, mono);
+                // Spacer + Release button
+                inner.spawn(Node { flex_grow: 1.0, ..default() });
+                inner.spawn((
+                    ReleaseStationButton,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(COL_EDGE),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new("LEAVE"),
+                        TextFont { font: chakra.clone(), font_size: 9.0, ..default() },
+                        TextColor(COL_TEXT_DIM),
+                    ));
+                });
+            });
         }
-        StationSlot::Spectator { player_name } => (
-            format!("{} — (spectating)", player_name),
-            None,
-            Color::srgb(0.07, 0.07, 0.10),
-            Color::srgb(0.42, 0.49, 0.55),
-        ),
+        StationSlot::Spectator { player_name } => {
+            parent.spawn((
+                Node {
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
+                    ..default()
+                },
+                BackgroundColor(COL_GRAPHITE_DARK),
+            ))
+            .with_children(|inner| {
+                inner.spawn((
+                    Text::new(format!("{} — SPECTATING", player_name.to_uppercase())),
+                    TextFont { font: chakra.clone(), font_size: 9.0, ..default() },
+                    TextColor(COL_TEXT_DIM),
+                ));
+            });
+        }
+    }
+}
+
+/// Inner content of a station row: short-code glyph, name/description column, consoles meta.
+fn spawn_station_row_inner(
+    parent: &mut ChildSpawnerCommands,
+    short_code: &str,
+    station: &str,
+    description: &str,
+    rank: &str,
+    consoles: &[Console],
+    is_mine: bool,
+    chakra: &Handle<Font>,
+    mono: &Handle<Font>,
+) {
+    let name_color = if is_mine { COL_SIGNAL } else { COL_TEXT };
+    let meta_color = if is_mine { Color::srgba(0.373, 0.847, 0.910, 0.6) } else { COL_TEXT_DIM };
+
+    // Short-code glyph
+    parent.spawn((
+        Text::new(short_code.to_uppercase()),
+        TextFont { font: mono.clone(), font_size: 11.0, ..default() },
+        TextColor(if is_mine { COL_SIGNAL } else { COL_EDGE }),
+    ));
+
+    // Name + description column
+    parent.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(2.0), flex_grow: 1.0, ..default() })
+    .with_children(|col| {
+        col.spawn((
+            Text::new(station.to_uppercase()),
+            TextFont { font: chakra.clone(), font_size: 11.0, ..default() },
+            TextColor(name_color),
+        ));
+        if !description.is_empty() {
+            col.spawn((
+                Text::new(description),
+                TextFont { font: mono.clone(), font_size: 9.0, ..default() },
+                TextColor(meta_color),
+            ));
+        }
+    });
+
+    // Rank + consoles meta
+    if !rank.is_empty() || !consoles.is_empty() {
+        parent.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, row_gap: Val::Px(2.0), ..default() })
+        .with_children(|meta| {
+            if !rank.is_empty() {
+                meta.spawn((
+                    Text::new(rank.to_uppercase()),
+                    TextFont { font: chakra.clone(), font_size: 8.0, ..default() },
+                    TextColor(meta_color),
+                ));
+            }
+            if !consoles.is_empty() {
+                let console_names: Vec<&str> = consoles.iter().map(|c| c.display_name()).collect();
+                meta.spawn((
+                    Text::new(console_names.join(" · ")),
+                    TextFont { font: mono.clone(), font_size: 8.0, ..default() },
+                    TextColor(meta_color),
+                ));
+            }
+        });
+    }
+}
+
+/// Spawn the detail panel as an inline column (used in landscape mode).
+fn spawn_detail_column(
+    parent: &mut ChildSpawnerCommands,
+    mine_slot: Option<&StationSlot>,
+    state: &LobbyState,
+    _my_token: &str,
+    chakra: &Handle<Font>,
+    mono: &Handle<Font>,
+) {
+    let (title, consoles, preset): (&str, Vec<Console>, Option<&str>) = match mine_slot {
+        Some(StationSlot::Mine { station, consoles, .. }) => {
+            let preset = consoles.first()
+                .and_then(|c| state.complexity.get(c).map(|s| s.as_str()));
+            (station.as_str(), consoles.clone(), preset)
+        }
+        _ => ("— SELECT A STATION —", vec![], None),
     };
 
-    let mut row = parent.spawn((
+    parent.spawn((
         Node {
-            padding: UiRect::all(Val::Px(8.0)),
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            row_gap: Val::Px(8.0),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
             ..default()
         },
-        BackgroundColor(bg),
-    ));
-    if let Some(s) = station_for_click {
-        row.insert((Button, StationButton(s)));
-    }
-    row.with_children(|inner| {
-        inner.spawn((
-            Text::new(label),
-            TextFont { font_size: 14.0, ..default() },
-            TextColor(fg),
+        BackgroundColor(Color::srgba(0.078, 0.090, 0.110, 0.6)),
+    ))
+    .with_children(|detail| {
+        // Header
+        detail.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0), ..default() })
+        .with_children(|titles| {
+            titles.spawn((
+                Text::new("// At your station"),
+                TextFont { font: mono.clone(), font_size: 8.0, ..default() },
+                TextColor(COL_TEXT_DIM),
+            ));
+            titles.spawn((
+                Text::new(title.to_uppercase()),
+                TextFont { font: chakra.clone(), font_size: 12.0, ..default() },
+                TextColor(if mine_slot.is_some() { COL_TEXT } else { COL_TEXT_DIM }),
+            ));
+        });
+        // Consoles label
+        detail.spawn((
+            Text::new("CONSOLES"),
+            TextFont { font: chakra.clone(), font_size: 8.0, ..default() },
+            TextColor(COL_TEXT_DIM),
         ));
+        // Console chips
+        detail.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(5.0),
+            row_gap: Val::Px(5.0),
+            ..default()
+        })
+        .with_children(|chips| {
+            for c in &consoles {
+                chips.spawn((
+                    Node {
+                        padding: UiRect::axes(Val::Px(7.0), Val::Px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(COL_GRAPHITE),
+                ))
+                .with_children(|chip| {
+                    chip.spawn((
+                        Text::new(c.display_name().to_uppercase()),
+                        TextFont { font: chakra.clone(), font_size: 9.0, ..default() },
+                        TextColor(COL_TEXT),
+                    ));
+                });
+            }
+        });
+        // Complexity row (only show when the player owns this station)
+        if mine_slot.is_some() {
+            detail.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                padding: UiRect::top(Val::Px(6.0)),
+                ..default()
+            })
+            .with_children(|cmplx| {
+                cmplx.spawn((
+                    Text::new("COMPLEXITY"),
+                    TextFont { font: chakra.clone(), font_size: 9.0, ..default() },
+                    TextColor(COL_TEXT_DIM),
+                ));
+                cmplx.spawn((
+                    Node { flex_direction: FlexDirection::Row, ..default() },
+                    BackgroundColor(COL_GRAPHITE_DARK),
+                ))
+                .with_children(|seg| {
+                    for (p, label) in [("Low", "Low"), ("Std", "Normal")] {
+                        let is_active = preset == Some(p);
+                        seg.spawn((
+                            ComplexityOptionButton(p.to_string()),
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(if is_active { COL_EDGE } else { COL_GRAPHITE_DARK }),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new(label),
+                                TextFont { font: chakra.clone(), font_size: 9.0, ..default() },
+                                TextColor(if is_active { COL_TEXT } else { COL_TEXT_DIM }),
+                            ));
+                        });
+                    }
+                });
+            });
+        }
     });
+}
+
+/// Update the persistent portrait-mode `StationDetailPanel` whenever state changes.
+fn refresh_station_detail(
+    state: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    landscape: Res<LandscapeMode>,
+    detail_panel: Query<(Entity, &Children), With<StationDetailPanel>>,
+    mut detail_title: Query<&mut Text, With<StationDetailTitle>>,
+    mut detail_consoles: Query<Entity, With<StationDetailConsoles>>,
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+) {
+    if !state.is_changed() && !token.is_changed() && !landscape.is_changed() {
+        return;
+    }
+    // In landscape mode the detail is built inline; hide the portrait panel.
+    let Ok((panel_entity, _)) = detail_panel.single() else { return };
+    if landscape.0 {
+        commands.entity(panel_entity).insert(Visibility::Hidden);
+        return;
+    }
+    commands.entity(panel_entity).insert(Visibility::Inherited);
+
+    let view = LobbyView::new(&state, &token.0);
+    let slots = view.station_slots();
+    let mine_slot = slots.iter().find(|s| matches!(s, StationSlot::Mine { .. }));
+
+    // Update title
+    let title = match mine_slot {
+        Some(StationSlot::Mine { station, .. }) => station.to_uppercase(),
+        _ => "— SELECT A STATION —".to_string(),
+    };
+    if let Ok(mut text) = detail_title.single_mut() {
+        **text = title;
+    }
+
+    // Rebuild console chips
+    if let Ok(chips_root) = detail_consoles.single_mut() {
+        commands.entity(chips_root).despawn_related::<Children>();
+        if let Some(StationSlot::Mine { consoles, .. }) = mine_slot {
+            let chakra: Handle<Font> = asset_server.load("fonts/ChakraPetch-SemiBold.ttf");
+            commands.entity(chips_root).with_children(|chips| {
+                for c in consoles {
+                    chips.spawn((
+                        Node {
+                            padding: UiRect::axes(Val::Px(7.0), Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(COL_GRAPHITE),
+                    ))
+                    .with_children(|chip| {
+                        chip.spawn((
+                            Text::new(c.display_name().to_uppercase()),
+                            TextFont { font: chakra.clone(), font_size: 9.0, ..default() },
+                            TextColor(COL_TEXT),
+                        ));
+                    });
+                }
+            });
+        }
+    }
+}
+
+/// Marks the text node *inside* the `ReadyPill` container.
+#[derive(Component)]
+struct ReadyPillText;
+
+/// Update the crew count and ready pill in the header.
+fn refresh_crew_header(
+    state: Res<LobbyState>,
+    mut current_q: Query<&mut Text, With<CrewCountCurrent>>,
+    mut max_q: Query<&mut Text, With<CrewCountMax>>,
+    mut pill_text_q: Query<&mut Text, With<ReadyPillText>>,
+    mut pill_bg_q: Query<&mut BackgroundColor, With<ReadyPill>>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    let stationed = state.players.iter().filter(|p| !p.consoles.is_empty()).count();
+    let total = state.players.len();
+
+    if let Ok(mut text) = current_q.single_mut() {
+        **text = stationed.to_string();
+    }
+    if let Ok(mut text) = max_q.single_mut() {
+        **text = total.to_string();
+    }
+
+    let all_assigned = stationed == total && total > 0;
+    if let Ok(mut bg) = pill_bg_q.single_mut() {
+        bg.0 = if all_assigned {
+            Color::srgba(0.373, 0.847, 0.910, 0.12)
+        } else {
+            Color::srgba(0.941, 0.627, 0.125, 0.08)
+        };
+    }
+    if let Ok(mut text) = pill_text_q.single_mut() {
+        **text = if all_assigned { "READY".to_string() } else { "AWAITING".to_string() };
+    }
+}
+
+/// Update the footer status text.
+fn refresh_footer_status(
+    state: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    mut status_q: Query<&mut Text, With<FooterStatus>>,
+) {
+    if !state.is_changed() && !token.is_changed() {
+        return;
+    }
+    let Ok(mut text) = status_q.single_mut() else { return };
+    let view = LobbyView::new(&state, &token.0);
+    **text = if view.is_captain() {
+        if view.all_stations_filled() {
+            "All stations filled — engage when ready".to_string()
+        } else {
+            "Waiting for crew to take their stations…".to_string()
+        }
+    } else if view.is_spectator() {
+        "Select a station to join the crew".to_string()
+    } else {
+        String::new()
+    };
 }
 
 fn handle_station_button_press(
@@ -615,7 +1221,7 @@ fn handle_station_button_press(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        let slot = StationSlot::Available { station: s.clone(), description: String::new(), preset_names: vec![] };
+        let slot = StationSlot::Available { station: s.clone(), short_code: String::new(), description: String::new(), rank: String::new(), consoles: vec![], preset_names: vec![] };
         if let Some(msg) = message_for_station_slot_click(&slot) {
             outbound.write(OutboundClientMessage(msg));
         }
@@ -632,6 +1238,47 @@ fn handle_engage_button_press(
     for interaction in interactions.iter_mut() {
         if *interaction == Interaction::Pressed {
             outbound.write(OutboundClientMessage(engage_message()));
+        }
+    }
+}
+
+fn handle_release_station_button_press(
+    mut interactions: Query<
+        &Interaction,
+        (Changed<Interaction>, With<Button>, With<ReleaseStationButton>),
+    >,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(
+                crate::client_lobby::release_station_message(),
+            ));
+        }
+    }
+}
+
+fn handle_complexity_option_press(
+    mut interactions: Query<
+        (&Interaction, &ComplexityOptionButton),
+        (Changed<Interaction>, With<Button>),
+    >,
+    state: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for (interaction, ComplexityOptionButton(preset)) in interactions.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // Find all consoles in the local player's current station and send
+        // SetComplexity for each one.
+        let view = LobbyView::new(&state, &token.0);
+        for console in view.my_consoles() {
+            outbound.write(OutboundClientMessage(ClientMessage::SetComplexity {
+                console: console.clone(),
+                preset_name: preset.clone(),
+            }));
         }
     }
 }
@@ -1572,7 +2219,7 @@ fn setup_weapons_ui(mut commands: Commands) {
                     TextFont { font_size: 13.0, ..default() },
                     TextColor(Color::srgb(0.6, 0.7, 0.8)),
                 ));
-                for (preset, label) in [("Low", "Low"), ("Full", "Full")] {
+                for (preset, label) in [("Low", "Low"), ("Std", "Normal")] {
                     row.spawn((
                         ComplexityPresetButton(preset.to_string()),
                         Button,
@@ -1619,7 +2266,7 @@ fn setup_weapons_ui(mut commands: Commands) {
                     TextFont { font_size: 13.0, ..default() },
                     TextColor(Color::srgb(0.6, 0.6, 0.8)),
                 ));
-                for (preset, label) in [("Low", "Low"), ("Full", "Full")] {
+                for (preset, label) in [("Low", "Low"), ("Std", "Normal")] {
                     popup.spawn((
                         ComplexityPresetButton(preset.to_string()),
                         Button,

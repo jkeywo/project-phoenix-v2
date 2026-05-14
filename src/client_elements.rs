@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn tactical_full_hides_nothing() {
         let r = HideableElementRegistry::default();
-        let changes = r.planned_changes(&Console::Tactical, "Full");
+        let changes = r.planned_changes(&Console::Tactical, "Std");
         assert!(changes.to_hide.is_empty());
         assert!(changes.to_show.is_empty());
         assert!(changes.unknown.is_empty());
@@ -191,7 +191,7 @@ mod tests {
         assert!(r.is_hidden("torpedo_tube_selector"));
 
         // Now switch to Full.
-        let full = r.planned_changes(&Console::Tactical, "Full");
+        let full = r.planned_changes(&Console::Tactical, "Std");
         assert!(full.to_hide.is_empty());
         assert_eq!(full.to_show.len(), 3);
         assert!(full.to_show.contains(&"phaser_mode_selector".to_string()));
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn science_full_hides_nothing() {
-        let names = hideable_element_names(&Console::Science, "Full");
+        let names = hideable_element_names(&Console::Science, "Std");
         assert!(names.is_empty(), "Science Full should hide nothing");
     }
 
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn power_full_hides_nothing() {
-        let names = hideable_element_names(&Console::Power, "Full");
+        let names = hideable_element_names(&Console::Power, "Std");
         assert!(names.is_empty(), "Power Full should hide nothing");
     }
 
@@ -302,7 +302,7 @@ mod tests {
         assert!(r.is_hidden("torpedo_tube_selector"));
 
         // Apply Full
-        let full = r.planned_changes(&Console::Tactical, "Full");
+        let full = r.planned_changes(&Console::Tactical, "Std");
         assert!(full.unknown.is_empty());
         r.apply_changes(&full);
 

@@ -14,6 +14,9 @@ pub struct StationDef {
     pub consoles: Vec<Console>,
     /// Rank displayed for players at this station (e.g., "Cpt.", "Ltn.")
     pub rank: String,
+    /// Short identifier used in UI labels (e.g. "TAC" renders as "STN-TAC").
+    #[serde(default)]
+    pub short_code: String,
     /// Name of the station that this station promotes to when a player joins.
     pub next: Option<String>,
     /// Name of the station that this station demotes to when a player leaves.
@@ -24,7 +27,7 @@ pub struct StationDef {
 fn default_complexity_presets() -> HashMap<Console, Vec<String>> {
     let mut m = HashMap::new();
     for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power] {
-        m.insert(c.clone(), vec!["Low".into(), "Full".into()]);
+        m.insert(c.clone(), vec!["Low".into(), "Std".into()]);
     }
     m
 }
@@ -114,6 +117,8 @@ struct RawStationDef {
     consoles: Vec<String>,
     #[serde(default)]
     rank: String,
+    #[serde(default)]
+    short_code: String,
     next: Option<String>,
     previous: Option<String>,
 }
@@ -207,6 +212,7 @@ pub fn parse_and_validate(toml_str: &str) -> Result<ShipStations, StationConfigE
                 description: raw_def.description.clone(),
                 consoles,
                 rank,
+                short_code: raw_def.short_code.clone(),
                 next: raw_def.next.clone(),
                 previous: raw_def.previous.clone(),
             });
@@ -648,6 +654,51 @@ consoles = ["Repair"]
 name = "Science"
 consoles = ["Science"]
 "#
+    }
+
+    // ── Full → Std rename ────────────────────────────────────────────────────
+
+    #[test]
+    fn default_complexity_presets_uses_std_not_full() {
+        let presets = default_complexity_presets();
+        for (console, names) in &presets {
+            assert!(
+                !names.iter().any(|n| n == "Full"),
+                "console {:?} still has 'Full' preset — should be 'Std'",
+                console
+            );
+            assert!(
+                names.iter().any(|n| n == "Std"),
+                "console {:?} missing 'Std' preset",
+                console
+            );
+        }
+    }
+
+    // ── short_code field ─────────────────────────────────────────────────────
+
+    #[test]
+    fn station_def_short_code_parsed_from_toml() {
+        let toml = r#"
+[stations]
+min_players = 1
+max_players = 1
+
+[[stations.1]]
+name = "Bridge"
+consoles = ["CaptainChair"]
+short_code = "BRG"
+"#;
+        let s = parse_and_validate(toml).unwrap();
+        let def = &s.configs[&1][0];
+        assert_eq!(def.short_code, "BRG");
+    }
+
+    #[test]
+    fn station_def_short_code_defaults_to_empty_when_omitted() {
+        let s = parse_and_validate(minimal_toml()).unwrap();
+        let def = &s.configs[&1][0];
+        assert_eq!(def.short_code, "");
     }
 
     // ── Tracer bullet: happy-path parse ──────────────────────────────────────

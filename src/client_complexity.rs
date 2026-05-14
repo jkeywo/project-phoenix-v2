@@ -35,7 +35,7 @@ impl ComplexityChoice {
     /// The preset name that should be active for this console.
     ///
     /// Returns the player's chosen preset, or `"Low"` if unset (the default
-    /// selection on the first-use pop-up), or `"Full"` if there's only one
+    /// selection on the first-use pop-up), or `"Std"` if there's only one
     /// preset.
     pub fn effective_preset(&self) -> &str {
         if let Some(ref c) = self.chosen {
@@ -88,7 +88,7 @@ impl ComplexityChoice {
 
 /// Default available presets for the Tactical console (Low + Full).
 pub fn tactical_available_presets() -> Vec<String> {
-    vec!["Low".into(), "Full".into()]
+    vec!["Low".into(), "Std".into()]
 }
 
 /// Build a `SetComplexity` message for the given console and preset name.
@@ -116,13 +116,13 @@ impl ComplexityStore {
     }
 
     /// Get the choice state for a console, creating a default one (single
-    /// "Full" preset, or ["Low","Full"] for Tactical/Science/Power) if none
+    /// "Std" preset, or ["Low","Std"] for Tactical/Science/Power) if none
     /// exists.
     pub fn for_console(&mut self, console: &Console) -> &mut ComplexityChoice {
         let presets = if matches!(console, Console::Tactical | Console::Science | Console::Power) {
-            vec!["Low".to_string(), "Full".to_string()]
+            vec!["Low".to_string(), "Std".to_string()]
         } else {
-            vec!["Full".to_string()]
+            vec!["Std".to_string()]
         };
         self.choices.entry(console.clone()).or_insert_with(|| {
             ComplexityChoice::new(presets, None)
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn multiple_presets_no_choice_shows_popup_and_dropdown_defaults_to_low() {
-        let c = ComplexityChoice::new(vec!["Low".into(), "Full".into()], None);
+        let c = ComplexityChoice::new(vec!["Low".into(), "Std".into()], None);
         assert!(c.show_dropdown(), "dropdown shown when >1 preset");
         assert!(c.show_popup(), "pop-up shown when no choice yet");
         assert_eq!(c.effective_preset(), "Low", "default effective preset is Low");
@@ -171,24 +171,24 @@ mod tests {
 
     #[test]
     fn stored_choice_uses_chosen_preset_and_suppresses_popup() {
-        let c = ComplexityChoice::new(vec!["Low".into(), "Full".into()], Some("Full".into()));
+        let c = ComplexityChoice::new(vec!["Low".into(), "Std".into()], Some("Std".into()));
         assert!(c.show_dropdown(), "dropdown still shown when >1 preset");
         assert!(!c.show_popup(), "no popup when choice already stored");
-        assert_eq!(c.effective_preset(), "Full", "effective preset is the stored one");
+        assert_eq!(c.effective_preset(), "Std", "effective preset is the stored one");
     }
 
     #[test]
     fn select_updates_chosen_and_marks_popup_shown() {
-        let mut c = ComplexityChoice::new(vec!["Low".into(), "Full".into()], None);
-        assert!(c.select("Full").is_ok());
-        assert_eq!(c.chosen, Some("Full".into()));
+        let mut c = ComplexityChoice::new(vec!["Low".into(), "Std".into()], None);
+        assert!(c.select("Std").is_ok());
+        assert_eq!(c.chosen, Some("Std".into()));
         assert!(c.popup_shown);
         assert!(!c.show_popup());
     }
 
     #[test]
     fn select_invalid_name_returns_error() {
-        let mut c = ComplexityChoice::new(vec!["Low".into(), "Full".into()], None);
+        let mut c = ComplexityChoice::new(vec!["Low".into(), "Std".into()], None);
         assert!(c.select("High").is_err());
         assert!(c.chosen.is_none());
     }
@@ -197,18 +197,18 @@ mod tests {
 
     #[test]
     fn single_preset_hides_dropdown_and_popup() {
-        let c = ComplexityChoice::new(vec!["Full".into()], None);
+        let c = ComplexityChoice::new(vec!["Std".into()], None);
         assert!(!c.show_dropdown(), "no dropdown with only one preset");
         assert!(!c.show_popup(), "no popup with only one preset");
-        assert_eq!(c.effective_preset(), "Full", "effective preset is the only one");
+        assert_eq!(c.effective_preset(), "Std", "effective preset is the only one");
     }
 
     #[test]
     fn single_preset_with_stored_still_hides_dropdown() {
-        let c = ComplexityChoice::new(vec!["Full".into()], Some("Full".into()));
+        let c = ComplexityChoice::new(vec!["Std".into()], Some("Std".into()));
         assert!(!c.show_dropdown());
         assert!(!c.show_popup());
-        assert_eq!(c.effective_preset(), "Full");
+        assert_eq!(c.effective_preset(), "Std");
     }
 
     // ── Message builder ─────────────────────────────────────────────
@@ -226,22 +226,22 @@ mod tests {
 
     #[test]
     fn stale_preset_detected_when_chosen_not_in_available() {
-        let c = ComplexityChoice::new(vec!["Low".into(), "Full".into()], Some("High".into()));
+        let c = ComplexityChoice::new(vec!["Low".into(), "Std".into()], Some("High".into()));
         assert!(c.is_stale(), "stored 'High' is not in available list");
         // A stale choice should re-trigger pop-up when reconstructed.
-        let fresh = ComplexityChoice::new(vec!["Low".into(), "Full".into()], None);
+        let fresh = ComplexityChoice::new(vec!["Low".into(), "Std".into()], None);
         assert!(fresh.show_popup(), "fresh start triggers popup");
     }
 
     #[test]
     fn not_stale_when_chosen_in_available() {
-        let c = ComplexityChoice::new(vec!["Low".into(), "Full".into()], Some("Full".into()));
+        let c = ComplexityChoice::new(vec!["Low".into(), "Std".into()], Some("Std".into()));
         assert!(!c.is_stale());
     }
 
     #[test]
     fn not_stale_when_no_choice() {
-        let c = ComplexityChoice::new(vec!["Low".into(), "Full".into()], None);
+        let c = ComplexityChoice::new(vec!["Low".into(), "Std".into()], None);
         assert!(!c.is_stale());
     }
 
@@ -251,7 +251,7 @@ mod tests {
     fn store_for_console_creates_tactical_with_low_full() {
         let mut store = ComplexityStore::new();
         let choice = store.for_console(&Console::Tactical);
-        assert_eq!(choice.available_presets, vec!["Low", "Full"]);
+        assert_eq!(choice.available_presets, vec!["Low", "Std"]);
         assert!(choice.show_dropdown());
     }
 
@@ -259,7 +259,7 @@ mod tests {
     fn store_for_console_creates_science_with_low_full() {
         let mut store = ComplexityStore::new();
         let choice = store.for_console(&Console::Science);
-        assert_eq!(choice.available_presets, vec!["Low", "Full"]);
+        assert_eq!(choice.available_presets, vec!["Low", "Std"]);
         assert!(choice.show_dropdown(), "Science should show complexity dropdown");
     }
 
@@ -267,7 +267,7 @@ mod tests {
     fn store_for_console_creates_power_with_low_full() {
         let mut store = ComplexityStore::new();
         let choice = store.for_console(&Console::Power);
-        assert_eq!(choice.available_presets, vec!["Low", "Full"]);
+        assert_eq!(choice.available_presets, vec!["Low", "Std"]);
         assert!(choice.show_dropdown(), "Power should show complexity dropdown");
     }
 
@@ -275,7 +275,7 @@ mod tests {
     fn store_for_console_creates_other_with_single_full() {
         let mut store = ComplexityStore::new();
         let choice = store.for_console(&Console::Helm);
-        assert_eq!(choice.available_presets, vec!["Full"]);
+        assert_eq!(choice.available_presets, vec!["Std"]);
         assert!(!choice.show_dropdown());
     }
 
@@ -283,10 +283,10 @@ mod tests {
     fn store_apply_stored_valid_preset_updates_choice() {
         let mut store = ComplexityStore::new();
         let mut stored = HashMap::new();
-        stored.insert(Console::Tactical, "Full".to_string());
+        stored.insert(Console::Tactical, "Std".to_string());
         store.apply_stored(&stored);
         let choice = store.for_console(&Console::Tactical);
-        assert_eq!(choice.effective_preset(), "Full");
+        assert_eq!(choice.effective_preset(), "Std");
         assert!(!choice.show_popup(), "valid stored preset suppresses popup");
     }
 
@@ -304,10 +304,10 @@ mod tests {
     #[test]
     fn resolving_stale_preset_creates_fresh_choice() {
         // Simulate: player had "High" stored, but TOML only has Low/Full.
-        let stale = ComplexityChoice::new(vec!["Low".into(), "Full".into()], Some("High".into()));
+        let stale = ComplexityChoice::new(vec!["Low".into(), "Std".into()], Some("High".into()));
         assert!(stale.is_stale());
         // On re-prompt: create a new ComplexityChoice without the stale stored value.
-        let fresh = ComplexityChoice::new(vec!["Low".into(), "Full".into()], None);
+        let fresh = ComplexityChoice::new(vec!["Low".into(), "Std".into()], None);
         assert!(fresh.show_popup(), "re-prompt triggers popup");
         assert_eq!(fresh.effective_preset(), "Low", "default back to Low");
     }

@@ -182,7 +182,7 @@ pub fn set_client_send_callback(callback: Function) {
 /// Called by JS on page load to tell WASM about previously-stored
 /// complexity presets from `localStorage`.
 ///
-/// `json` is a JSON object string like `{"Tactical":"Low","Helm":"Full"}`.
+/// `json` is a JSON object string like `{"Tactical":"Low","Helm":"Std"}`.
 /// Empty object `{}` means no stored presets.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]

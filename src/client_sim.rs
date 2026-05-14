@@ -2057,7 +2057,7 @@ mod tests {
     #[test]
     fn science_phaser_panel_not_visible_when_tactical_is_full() {
         let mut complexity = HashMap::new();
-        complexity.insert(Console::Tactical, "Full".into());
+        complexity.insert(Console::Tactical, "Std".into());
         assert!(!is_science_phaser_panel_visible(&complexity));
     }
 

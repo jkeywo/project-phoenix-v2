@@ -738,6 +738,7 @@ mod tests {
                 description: "The big chair".into(),
                 consoles: vec![Console::CaptainChair],
                 rank: "Cpt.".into(),
+                short_code: "CAP".into(),
                 next: None,
                 previous: None,
             },
@@ -1050,14 +1051,14 @@ mod tests {
 
     #[test]
     fn server_complexity_changed_round_trips() {
-        let msg = ServerMessage::ComplexityChanged { console: Console::Tactical, preset_name: "Full".into() };
+        let msg = ServerMessage::ComplexityChanged { console: Console::Tactical, preset_name: "Std".into() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn set_complexity_with_captain_chair_console_round_trips() {
-        let msg = ClientMessage::SetComplexity { console: Console::CaptainChair, preset_name: "Full".into() };
+        let msg = ClientMessage::SetComplexity { console: Console::CaptainChair, preset_name: "Std".into() };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }

@@ -5,7 +5,7 @@
 /// produce. AI only runs on **occupied** consoles whose complexity preset is
 /// currently "Low".
 ///
-/// If the holder switches from "Low" to "Full" (or back), the complexity
+/// If the holder switches from "Low" to "Std" (or back), the complexity
 /// state is updated and AI immediately stops generating actions.
 
 use bevy::prelude::*;
@@ -752,7 +752,7 @@ mod tests {
         app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
         // Tactical is Full (default / unset → not Low)
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Tactical, "Full".into());
+            .set(Console::Tactical, "Std".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
         let mut world_res = app.world_mut().resource_mut::<WorldResource>();
         world_res.0.entities.push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
@@ -866,7 +866,7 @@ mod tests {
         // Then switch back to Full
         push_outbound(&mut app, ServerMessage::ComplexityChanged {
             console: Console::Tactical,
-            preset_name: "Full".into(),
+            preset_name: "Std".into(),
         });
         app.update();
 
@@ -891,7 +891,7 @@ mod tests {
 
         // Switch to Full
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Tactical, "Full".into());
+            .set(Console::Tactical, "Std".into());
 
         // Next tick — AI should not fire
         let (inbound2, _) = tick(&mut app);
@@ -983,7 +983,7 @@ mod tests {
         setup_science_hint_conditions(&mut app);
         // Science Full → player sees the readout, no hint needed.
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Science, "Full".into());
+            .set(Console::Science, "Std".into());
         app.insert_resource(AutoHintDelaySecs(0.0));
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("hint-target".into()),
@@ -1150,7 +1150,7 @@ mod tests {
         setup_auto_match_conditions(&mut app);
         // Override Tactical to Full
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Tactical, "Full".into());
+            .set(Console::Tactical, "Std".into());
         app.insert_resource(AutoMatchDelaySecs(0.0));
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
@@ -1244,7 +1244,7 @@ mod tests {
         };
         // Flip Tactical to Full mid-countdown
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Tactical, "Full".into());
+            .set(Console::Tactical, "Std".into());
 
         let (inbound, _) = tick(&mut app);
         let matched: Vec<_> = inbound.iter()
@@ -1276,9 +1276,9 @@ mod tests {
 
         // Now flip both consoles to Full — trigger ends
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Tactical, "Full".into());
+            .set(Console::Tactical, "Std".into());
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Science, "Full".into());
+            .set(Console::Science, "Std".into());
 
         // Second tick — no revert message
         let (inbound2, _) = tick(&mut app);
@@ -1326,7 +1326,7 @@ mod tests {
         setup_power_low(&mut app);
         // Override to Full
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Power, "Full".into());
+            .set(Console::Power, "Std".into());
         app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
         // Pre-seed the movement state as if counting was underway
         app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
@@ -1469,7 +1469,7 @@ mod tests {
         app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 = EngageState::Engaged;
         // Switch to Full
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Power, "Full".into());
+            .set(Console::Power, "Std".into());
         app.world_mut().resource_mut::<ShipState>().toggle_red_alert();
 
         let (inbound, _) = tick(&mut app);

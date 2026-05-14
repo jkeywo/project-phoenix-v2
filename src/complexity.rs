@@ -50,12 +50,12 @@ impl ComplexityConfig {
     }
 }
 
-/// Default is a single implicit "Full" preset (backward compatible).
+/// Default is a single implicit "Std" preset (backward compatible).
 impl Default for ComplexityConfig {
     fn default() -> Self {
         Self {
             presets: vec![ComplexityPreset {
-                name: "Full".into(),
+                name: "Std".into(),
                 hidden_elements: vec![],
                 delegated: HashMap::new(),
                 ai: HashMap::new(),
@@ -87,7 +87,7 @@ Tactical = { controls = ["auto_fire"] }
 torpedo_aim = {}
 
 [[preset]]
-name = "Full"
+name = "Std"
 "##;
         let config = parse_complexity_config(toml).expect("parse should succeed");
         assert!(config.has_multiple_presets());
@@ -95,8 +95,8 @@ name = "Full"
         let low = config.get_preset("Low").expect("Low preset should exist");
         assert_eq!(low.name, "Low");
 
-        let full = config.get_preset("Full").expect("Full preset should exist");
-        assert_eq!(full.name, "Full");
+        let full = config.get_preset("Std").expect("Full preset should exist");
+        assert_eq!(full.name, "Std");
 
         assert!(config.get_preset("NonExistent").is_none());
     }
@@ -112,7 +112,7 @@ name = "Full"
         let config = ComplexityConfig::default();
         assert_eq!(config.presets.len(), 1);
         let preset = &config.presets[0];
-        assert_eq!(preset.name, "Full");
+        assert_eq!(preset.name, "Std");
         assert!(preset.hidden_elements.is_empty());
         assert!(preset.delegated.is_empty());
         assert!(preset.ai.is_empty());
@@ -152,10 +152,10 @@ hidden_elements = ["phaser_mode_selector", "torpedo_tube_selector", "fire_confir
     fn empty_hidden_elements_defaults_to_empty_vec() {
         let toml = r##"
 [[preset]]
-name = "Full"
+name = "Std"
 "##;
         let config = parse_complexity_config(toml).expect("parse should succeed");
-        let preset = config.get_preset("Full").unwrap();
+        let preset = config.get_preset("Std").unwrap();
         assert!(preset.hidden_elements.is_empty());
     }
 

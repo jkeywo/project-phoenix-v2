@@ -147,6 +147,107 @@ pub fn auto_fire_torpedo(input: &TorpedoAiInput) -> Vec<TorpedoTubeId> {
         .collect()
 }
 
+// ── Frequency auto-match state ────────────────────────────────────────────
+
+/// Persistent timer state for the frequency auto-match AI.
+///
+/// When both Tactical and Science are Low (or Science is unmanned), and a
+/// target is locked, the AI waits `delay_secs` then synthesises a
+/// `SetPhaserFrequency` to match the target's shield frequency.
+///
+/// Resets whenever the locked target changes or the trigger condition ends.
+/// The frequency persists at its last set value when the trigger ends — no
+/// auto-revert.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FrequencyMatchState {
+    /// UUID of the target for which the timer is currently running.
+    /// `None` means no timer is active.
+    pub current_target: Option<String>,
+    /// Accumulated elapsed time while the current target has been locked, in
+    /// seconds. Resets to 0.0 on target change.
+    pub elapsed_secs: f32,
+    /// Set to `true` once the `SetPhaserFrequency` has been synthesised for the
+    /// current target. Prevents repeated matches on the same lock.
+    pub match_sent: bool,
+}
+
+/// All inputs required by `tick_auto_match_frequency`.
+#[derive(Clone, Debug)]
+pub struct FrequencyMatchInput {
+    /// UUID of the currently locked target. `None` = no lock.
+    pub locked_target: Option<String>,
+    /// The target's shield frequency to match (0.0–1.0).
+    pub target_frequency: f32,
+    /// Seconds elapsed this frame (delta time).
+    pub dt: f32,
+    /// Configured delay before the match fires (from TOML / server config).
+    pub delay_secs: f32,
+    /// Whether the trigger condition is active (both Tactical and Science Low,
+    /// or Science unmanned). When `false`, reset state and return `None`.
+    pub trigger_active: bool,
+}
+
+/// Outcome of a single `tick_auto_match_frequency` call.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FrequencyMatchOutput {
+    /// No action this tick.
+    None,
+    /// Synthesise `SetPhaserFrequency` with this frequency.
+    Match { frequency: f32 },
+}
+
+/// Advance the auto-match timer by one tick.
+///
+/// Rules:
+/// - If `trigger_active` is `false`, reset state and return `None`.
+/// - If there is no locked target, reset the timer and return `None`.
+/// - If the locked target changes, reset the timer to 0 and return `None`.
+/// - If the timer has not yet reached `delay_secs`, accumulate `dt` and
+///   return `None`.
+/// - At the first tick where `elapsed_secs >= delay_secs` (and the match has
+///   not already been sent for this target), emit `Match { frequency }` and
+///   mark the match as sent.
+/// - On subsequent ticks with the same target (match already sent), return
+///   `None`.
+pub fn tick_auto_match_frequency(
+    state: &mut FrequencyMatchState,
+    input: &FrequencyMatchInput,
+) -> FrequencyMatchOutput {
+    if !input.trigger_active {
+        *state = FrequencyMatchState::default();
+        return FrequencyMatchOutput::None;
+    }
+
+    match &input.locked_target {
+        None => {
+            *state = FrequencyMatchState::default();
+            FrequencyMatchOutput::None
+        }
+        Some(uuid) => {
+            // Target changed → reset timer.
+            if state.current_target.as_deref() != Some(uuid.as_str()) {
+                *state = FrequencyMatchState {
+                    current_target: Some(uuid.clone()),
+                    elapsed_secs: 0.0,
+                    match_sent: false,
+                };
+            }
+
+            if state.match_sent {
+                return FrequencyMatchOutput::None;
+            }
+
+            state.elapsed_secs += input.dt;
+            if state.elapsed_secs >= input.delay_secs {
+                state.match_sent = true;
+                FrequencyMatchOutput::Match { frequency: input.target_frequency }
+            } else {
+                FrequencyMatchOutput::None
+            }
+        }
+    }
+}
+
 // ── Power AI ───────────────────────────────────────────────────────────────
 
 /// Engage state machine used by both Power Low AI rules.
@@ -409,6 +510,123 @@ mod tests {
         tick_frequency_hint(&mut state, &hint_input(None, 0.5, 1.0, 3.0));
         assert!(!state.hint_sent);
         assert!(state.current_target.is_none());
+    }
+
+    // ── tick_auto_match_frequency ─────────────────────────────────────────
+
+    fn match_input(
+        target: Option<&str>,
+        frequency: f32,
+        dt: f32,
+        delay: f32,
+        trigger_active: bool,
+    ) -> FrequencyMatchInput {
+        FrequencyMatchInput {
+            locked_target: target.map(str::to_owned),
+            target_frequency: frequency,
+            dt,
+            delay_secs: delay,
+            trigger_active,
+        }
+    }
+
+    #[test]
+    fn auto_match_trigger_inactive_returns_none_and_resets() {
+        let mut state = FrequencyMatchState {
+            current_target: Some("t1".into()),
+            elapsed_secs: 10.0,
+            match_sent: false,
+        };
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
+        assert_eq!(out, FrequencyMatchOutput::None);
+        assert!(state.current_target.is_none());
+        assert_eq!(state.elapsed_secs, 0.0);
+    }
+
+    #[test]
+    fn auto_match_no_target_returns_none_and_resets() {
+        let mut state = FrequencyMatchState::default();
+        let out = tick_auto_match_frequency(&mut state, &match_input(None, 0.5, 1.0, 3.0, true));
+        assert_eq!(out, FrequencyMatchOutput::None);
+        assert!(state.current_target.is_none());
+    }
+
+    #[test]
+    fn auto_match_under_delay_returns_none() {
+        let mut state = FrequencyMatchState::default();
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, true));
+        assert_eq!(out, FrequencyMatchOutput::None);
+        assert!(!state.match_sent);
+    }
+
+    #[test]
+    fn auto_match_at_delay_fires_with_correct_frequency() {
+        let mut state = FrequencyMatchState::default();
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.75, 3.0, 3.0, true));
+        assert_eq!(out, FrequencyMatchOutput::Match { frequency: 0.75 });
+        assert!(state.match_sent);
+    }
+
+    #[test]
+    fn auto_match_above_delay_fires() {
+        let mut state = FrequencyMatchState::default();
+        tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.0, 3.0, true));
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.0, 3.0, true));
+        assert_eq!(out, FrequencyMatchOutput::Match { frequency: 0.5 });
+    }
+
+    #[test]
+    fn auto_match_fires_only_once_per_target() {
+        let mut state = FrequencyMatchState::default();
+        tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 5.0, 3.0, true));
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 5.0, 3.0, true));
+        assert_eq!(out, FrequencyMatchOutput::None);
+    }
+
+    #[test]
+    fn auto_match_target_change_resets_timer() {
+        let mut state = FrequencyMatchState::default();
+        tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.9, 3.0, true));
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.5, 2.9, 3.0, true));
+        assert_eq!(out, FrequencyMatchOutput::None);
+        assert_eq!(state.current_target.as_deref(), Some("t2"));
+        assert!(!state.match_sent);
+    }
+
+    #[test]
+    fn auto_match_target_change_then_delay_fires_for_new_target() {
+        let mut state = FrequencyMatchState::default();
+        tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.9, 3.0, true));
+        // Switch target — timer resets to 0, accumulate enough for t2
+        tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.9, 1.0, 3.0, true));
+        tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.9, 1.0, 3.0, true));
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.9, 1.5, 3.0, true));
+        assert_eq!(out, FrequencyMatchOutput::Match { frequency: 0.9 });
+    }
+
+    #[test]
+    fn auto_match_trigger_flip_to_inactive_resets_state() {
+        let mut state = FrequencyMatchState::default();
+        // Nearly at delay
+        tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.9, 3.0, true));
+        // Trigger turns off (e.g. either console goes Full)
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
+        assert_eq!(out, FrequencyMatchOutput::None);
+        assert!(state.current_target.is_none(), "state must reset when trigger deactivates");
+        assert_eq!(state.elapsed_secs, 0.0);
+    }
+
+    #[test]
+    fn auto_match_no_auto_revert_after_match_sent_trigger_ends() {
+        let mut state = FrequencyMatchState::default();
+        // Fire the match
+        tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 5.0, 3.0, true));
+        assert!(state.match_sent);
+        // Trigger ends — state resets but we are NOT emitting a revert
+        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
+        // Must NOT emit a Match (which would be a revert) and must just return None
+        assert_eq!(out, FrequencyMatchOutput::None,
+            "frequency must persist at last value — no auto-revert when trigger ends");
     }
 
     fn tube(id: TorpedoTubeId, loaded: bool, in_arc: bool) -> TubeSummary {

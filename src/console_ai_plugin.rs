@@ -12,8 +12,10 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::console_ai::{
-    auto_fire_torpedo, tick_frequency_hint, tick_power_movement_rule, tick_power_red_alert_rule,
-    EngageState, FrequencyHintInput, FrequencyHintState, PowerEngageOutput, PowerMovementInput,
+    auto_fire_torpedo, tick_auto_match_frequency, tick_frequency_hint,
+    tick_power_movement_rule, tick_power_red_alert_rule,
+    EngageState, FrequencyHintInput, FrequencyHintState, FrequencyMatchInput,
+    FrequencyMatchState, PowerEngageOutput, PowerMovementInput,
     PowerRedAlertInput, TorpedoAiInput, TubeSummary,
 };
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions};
@@ -28,6 +30,9 @@ const LOW_PRESET: &str = "Low";
 
 /// Default delay (seconds) before the frequency hint fires when Science is Low.
 const DEFAULT_AUTO_HINT_DELAY_SECS: f32 = 3.0;
+
+/// Default delay (seconds) before the auto-match fires when both consoles are Low.
+const DEFAULT_AUTO_MATCH_DELAY_SECS: f32 = 3.0;
 
 // Power AI tuning defaults (used when TOML loading fails).
 const DEFAULT_THRUST_THRESHOLD: f32 = 0.7;
@@ -69,6 +74,39 @@ fn load_auto_hint_delay_secs() -> f32 {
         }
     }
     DEFAULT_AUTO_HINT_DELAY_SECS
+}
+
+/// Wraps `FrequencyMatchState` as a Bevy resource so it persists between frames.
+#[derive(Resource, Default)]
+pub struct FrequencyMatchTimer(pub FrequencyMatchState);
+
+/// Configurable delay (in seconds) before the auto-match fires.
+/// Loaded from `assets/complexity/tactical.toml` `[preset.ai] frequency_match`.
+#[derive(Resource)]
+pub struct AutoMatchDelaySecs(pub f32);
+
+impl Default for AutoMatchDelaySecs {
+    fn default() -> Self {
+        Self(load_auto_match_delay_secs())
+    }
+}
+
+/// Read `auto_match_delay_secs` from the embedded Tactical complexity TOML.
+/// Falls back to `DEFAULT_AUTO_MATCH_DELAY_SECS` on any parse failure.
+fn load_auto_match_delay_secs() -> f32 {
+    let toml_str = include_str!("../assets/complexity/tactical.toml");
+    if let Ok(config) = crate::complexity::parse_complexity_config(toml_str) {
+        if let Some(low) = config.get_preset("Low") {
+            if let Some(ai_cfg) = low.ai.get("frequency_match") {
+                if let Some(v) = ai_cfg.params.get("auto_match_delay_secs") {
+                    if let Some(f) = v.as_float() {
+                        return f as f32;
+                    }
+                }
+            }
+        }
+    }
+    DEFAULT_AUTO_MATCH_DELAY_SECS
 }
 
 /// Tuning parameters for the Power Low AI, loaded from `assets/complexity/power.toml`.
@@ -172,6 +210,8 @@ impl Plugin for ConsoleAiPlugin {
         app.init_resource::<ConsoleComplexityState>()
             .init_resource::<FrequencyHintTimer>()
             .init_resource::<AutoHintDelaySecs>()
+            .init_resource::<FrequencyMatchTimer>()
+            .init_resource::<AutoMatchDelaySecs>()
             .init_resource::<PowerAiConfig>()
             .init_resource::<PowerMovementEngageState>()
             .init_resource::<PowerRedAlertEngageState>()
@@ -179,6 +219,7 @@ impl Plugin for ConsoleAiPlugin {
                 track_complexity_changes,
                 run_tactical_ai.after(track_complexity_changes),
                 run_science_hint_ai.after(track_complexity_changes),
+                run_auto_match_ai.after(track_complexity_changes),
                 run_power_ai.after(track_complexity_changes),
             ));
     }
@@ -354,6 +395,76 @@ fn run_science_hint_ai(
         writer.write(OutboundMessage {
             target: Target::Token(tactical_token.to_string()),
             msg: ServerMessage::FrequencyHint { frequency },
+        });
+    }
+}
+
+/// Run the auto-match frequency AI when both Tactical and Science are Low
+/// (or Science is unmanned).
+///
+/// Conditions to run:
+/// 1. Game is InProgress
+/// 2. Tactical is **Low** (phaser-frequency control is delegated to AI)
+/// 3. Science is **Low** OR Science is unmanned (no holder)
+/// 4. Tactical console is occupied (someone to receive the synthesised message)
+/// 5. A target is currently locked on Tactical
+///
+/// After `auto_match_delay_secs` of continuous lock on the same target,
+/// synthesises `SetPhaserFrequency` as an `InboundMessage` from the Tactical
+/// holder token — the same path a human player would use.
+///
+/// The frequency persists at its last set value when the trigger ends.
+/// There is no auto-revert.
+///
+/// The pending countdown is cancelled when:
+/// - Either console flips to Full (trigger_active becomes false)
+/// - The locked target changes (handled inside `tick_auto_match_frequency`)
+fn run_auto_match_ai(
+    phase: Res<CurrentPhase>,
+    sessions: Res<Sessions>,
+    complexity: Res<ConsoleComplexityState>,
+    ship: Res<ShipState>,
+    weapons_target: Res<WeaponsTarget>,
+    time: Res<Time>,
+    delay: Res<AutoMatchDelaySecs>,
+    mut match_timer: ResMut<FrequencyMatchTimer>,
+    mut writer: MessageWriter<InboundMessage>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+
+    // Tactical must be Low for the AI to act.
+    if !complexity.is_low(&Console::Tactical) {
+        match_timer.0 = FrequencyMatchState::default();
+        return;
+    }
+
+    // Trigger: Science is Low OR Science is unmanned (no holder).
+    let science_is_low = complexity.is_low(&Console::Science);
+    let science_unmanned = sessions.0.console_holder(Console::Science).is_none();
+    let trigger_active = science_is_low || science_unmanned;
+
+    // Need a Tactical holder to synthesise the message on behalf of.
+    let Some(tactical_token) = sessions.0.console_holder(Console::Tactical) else {
+        match_timer.0 = FrequencyMatchState::default();
+        return;
+    };
+
+    let input = FrequencyMatchInput {
+        locked_target: weapons_target.0.clone(),
+        target_frequency: ship.phaser_frequency,
+        dt: time.delta_secs(),
+        delay_secs: delay.0,
+        trigger_active,
+    };
+
+    use crate::console_ai::FrequencyMatchOutput;
+
+    if let FrequencyMatchOutput::Match { frequency } = tick_auto_match_frequency(&mut match_timer.0, &input) {
+        writer.write(InboundMessage {
+            token: tactical_token.to_string(),
+            msg: ClientMessage::SetPhaserFrequency { frequency },
         });
     }
 }
@@ -951,6 +1062,230 @@ mod tests {
         // Confirm the timer is now tracking the new target.
         let state = app.world().resource::<FrequencyHintTimer>();
         assert_eq!(state.0.current_target.as_deref(), Some("new-target"));
+    }
+
+    // ── Auto-match frequency AI plugin tests ─────────────────────────────
+
+    /// Set up conditions for the auto-match AI:
+    /// both Tactical and Science Low, Tactical occupied, target locked.
+    fn setup_auto_match_conditions(app: &mut App) {
+        push_inbound(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        app.update();
+        push_inbound(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        app.update();
+        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Tactical, "Low".into());
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Science, "Low".into());
+        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
+        // Set a known phaser frequency to match against.
+        app.world_mut().resource_mut::<ShipState>().phaser_frequency = 0.65;
+    }
+
+    #[test]
+    fn auto_match_not_emitted_under_delay() {
+        let mut app = test_app();
+        setup_auto_match_conditions(&mut app);
+        // Very long delay — single tick won't fire.
+        app.insert_resource(AutoMatchDelaySecs(9999.0));
+
+        let (inbound, _) = tick(&mut app);
+        let matched: Vec<_> = inbound.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(matched.is_empty(), "auto-match must not fire before delay elapses");
+    }
+
+    #[test]
+    fn auto_match_emitted_when_delay_reached() {
+        let mut app = test_app();
+        setup_auto_match_conditions(&mut app);
+        // Zero delay — triggers immediately once any elapsed time is added.
+        app.insert_resource(AutoMatchDelaySecs(0.0));
+        // Pre-seed elapsed time so a single tick fires.
+        app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
+            current_target: Some("match-target".into()),
+            elapsed_secs: 5.0,
+            match_sent: false,
+        };
+
+        let (inbound, _) = tick(&mut app);
+        let matched: Vec<_> = inbound.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(!matched.is_empty(), "auto-match must fire when delay has elapsed");
+    }
+
+    #[test]
+    fn auto_match_emits_correct_frequency() {
+        let mut app = test_app();
+        setup_auto_match_conditions(&mut app);
+        app.insert_resource(AutoMatchDelaySecs(0.0));
+        app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
+            current_target: Some("match-target".into()),
+            elapsed_secs: 5.0,
+            match_sent: false,
+        };
+
+        let (inbound, _) = tick(&mut app);
+        let freq_msg = inbound.iter()
+            .find(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }));
+        if let Some(msg) = freq_msg {
+            if let ClientMessage::SetPhaserFrequency { frequency } = &msg.msg {
+                assert!(
+                    (*frequency - 0.65).abs() < 1e-5,
+                    "auto-match must set frequency to ship.phaser_frequency (0.65), got {}",
+                    frequency
+                );
+            }
+        } else {
+            panic!("expected SetPhaserFrequency message");
+        }
+    }
+
+    #[test]
+    fn auto_match_not_emitted_when_tactical_is_full() {
+        let mut app = test_app();
+        setup_auto_match_conditions(&mut app);
+        // Override Tactical to Full
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Tactical, "Full".into());
+        app.insert_resource(AutoMatchDelaySecs(0.0));
+        app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
+            current_target: Some("match-target".into()),
+            elapsed_secs: 5.0,
+            match_sent: false,
+        };
+
+        let (inbound, _) = tick(&mut app);
+        let matched: Vec<_> = inbound.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(matched.is_empty(), "auto-match must not fire when Tactical is Full");
+    }
+
+    #[test]
+    fn auto_match_fires_when_science_unmanned() {
+        let mut app = test_app();
+        // Set up Tactical Low but Science has no holder (unmanned).
+        push_inbound(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        app.update();
+        push_inbound(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        app.update();
+        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Tactical, "Low".into());
+        // Science NOT set to Low AND no holder → unmanned
+        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
+        app.world_mut().resource_mut::<ShipState>().phaser_frequency = 0.4;
+        app.insert_resource(AutoMatchDelaySecs(0.0));
+        app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
+            current_target: Some("match-target".into()),
+            elapsed_secs: 5.0,
+            match_sent: false,
+        };
+
+        let (inbound, _) = tick(&mut app);
+        let matched: Vec<_> = inbound.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(!matched.is_empty(), "auto-match must fire when Science is unmanned");
+    }
+
+    #[test]
+    fn auto_match_not_emitted_without_locked_target() {
+        let mut app = test_app();
+        setup_auto_match_conditions(&mut app);
+        app.world_mut().resource_mut::<WeaponsTarget>().0 = None;
+        app.insert_resource(AutoMatchDelaySecs(0.0));
+
+        let (inbound, _) = tick(&mut app);
+        let matched: Vec<_> = inbound.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(matched.is_empty(), "auto-match must not fire without a locked target");
+    }
+
+    #[test]
+    fn auto_match_not_emitted_without_tactical_holder() {
+        let mut app = test_app();
+        // No Tactical holder.
+        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Tactical, "Low".into());
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Science, "Low".into());
+        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
+        app.insert_resource(AutoMatchDelaySecs(0.0));
+        app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
+            current_target: Some("match-target".into()),
+            elapsed_secs: 5.0,
+            match_sent: false,
+        };
+
+        let (inbound, _) = tick(&mut app);
+        let matched: Vec<_> = inbound.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(matched.is_empty(), "auto-match must not fire without a Tactical holder");
+    }
+
+    #[test]
+    fn auto_match_timer_resets_when_tactical_flips_to_full() {
+        let mut app = test_app();
+        setup_auto_match_conditions(&mut app);
+        app.insert_resource(AutoMatchDelaySecs(100.0));
+        // Nearly at delay
+        app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
+            current_target: Some("match-target".into()),
+            elapsed_secs: 99.0,
+            match_sent: false,
+        };
+        // Flip Tactical to Full mid-countdown
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Tactical, "Full".into());
+
+        let (inbound, _) = tick(&mut app);
+        let matched: Vec<_> = inbound.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(matched.is_empty(), "pending match must be cancelled when Tactical flips to Full");
+        // Timer must be reset
+        let state = app.world().resource::<FrequencyMatchTimer>();
+        assert!(state.0.current_target.is_none(), "timer state must reset when Tactical goes Full");
+    }
+
+    #[test]
+    fn auto_match_no_auto_revert_after_trigger_ends() {
+        let mut app = test_app();
+        setup_auto_match_conditions(&mut app);
+        app.insert_resource(AutoMatchDelaySecs(0.0));
+        app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
+            current_target: Some("match-target".into()),
+            elapsed_secs: 5.0,
+            match_sent: false,
+        };
+
+        // First tick — match fires
+        let (inbound1, _) = tick(&mut app);
+        let matched1: Vec<_> = inbound1.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(!matched1.is_empty(), "match should fire on first qualifying tick");
+
+        // Now flip both consoles to Full — trigger ends
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Tactical, "Full".into());
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Science, "Full".into());
+
+        // Second tick — no revert message
+        let (inbound2, _) = tick(&mut app);
+        let matched2: Vec<_> = inbound2.iter()
+            .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
+            .collect();
+        assert!(matched2.is_empty(), "frequency must persist — no auto-revert when trigger ends");
     }
 
     // ── Power AI plugin tests ─────────────────────────────────────────────

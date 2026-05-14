@@ -297,3 +297,12 @@ New modules:
 - `src/console_ai_plugin.rs` — Bevy orchestrator. `ConsoleComplexityState` resource tracks current preset per console (updated from outbound `ComplexityChanged` messages). `run_tactical_ai` synthesises `FireTorpedo` `InboundMessage` each tick when Tactical is occupied and at Low complexity. Continuous re-fire on reload: the system re-evaluates every frame so any newly-loaded tube fires immediately. Switching to Full stops AI immediately (checked every tick).
 - `ConsoleAiPlugin` wired into `SimulationPlugin`.
 - Pre-existing compile error in `src/client_sim.rs` (missing `RadarStateSnapshot` import in tests) fixed as a prerequisite.
+
+## [2026-05-14] ingest | Issue #179 — auto-match frequency AI (both Tactical + Science Low or Science unmanned) | console_ai, console_ai_plugin, tactical.toml
+
+Implemented issue #179 via TDD (10 pure unit tests + 9 plugin integration tests, 1156 total).
+
+Changes:
+- `assets/complexity/tactical.toml` — added `auto_match_delay_secs = 3.0` to `[preset.ai] frequency_match`.
+- `src/console_ai.rs` — new `tick_auto_match_frequency(state, input) -> FrequencyMatchOutput` pure decision function + `FrequencyMatchState`, `FrequencyMatchInput`, `FrequencyMatchOutput` types. Trigger activates when both Tactical and Science are Low, or Science is unmanned. Timer resets on target change or when trigger deactivates. Frequency persists on trigger end — no auto-revert.
+- `src/console_ai_plugin.rs` — new `run_auto_match_ai` Bevy system; `FrequencyMatchTimer` and `AutoMatchDelaySecs` resources; `load_auto_match_delay_secs()` reads from embedded `tactical.toml`. Synthesises `SetPhaserFrequency` as an `InboundMessage` from the Tactical holder token after delay elapses. Either console flipping to Full cancels the pending countdown. Registered in `ConsoleAiPlugin` alongside existing AI systems.

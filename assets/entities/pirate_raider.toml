@@ -1,0 +1,125 @@
+# Pirate Raider
+#
+# A small, fast pirate attack ship. Patrols a route, engages on contact,
+# fights aggressively, flees when wounded, and warps out if not intercepted.
+# Used as the canonical NPC in assets/scenarios/patrol.toml.
+
+tags = ["ship", "npc", "enemy"]
+faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
+
+[hull]
+hull_integrity = 60.0
+
+[collider]
+shape = "Capsule"
+radius = 2.0
+length = 4.0
+
+[physics]
+mass = 60.0
+linear_damping = 0.9
+angular_damping = 0.9
+max_speed = 70.0
+acceleration = 25.0
+decceleration = 60.0
+max_yaw_rate = 2.0
+
+[helm_console]
+max_speed = 70.0
+max_reverse_speed = 0.0
+acceleration = 25.0
+deceleration = 60.0
+max_yaw_rate = 2.0
+
+[weapons_console]
+beam_range = 50.0
+beam_damage_per_sec = 6.0
+beam_duration_secs = 4.0
+cooldown_secs = 5.0
+beam_color = [1.0, 0.1, 0.1, 1.0]
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+
+[behaviour]
+initial_state = "patrol"
+
+[[behaviour.state]]
+name = "idle"
+kind = "idle"
+target_speed = 0.0
+
+[[behaviour.state]]
+name = "patrol"
+kind = "patrolling"
+waypoints = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
+loop_path = true
+target_speed = 0.5
+
+[[behaviour.state]]
+name = "pursue"
+kind = "pursuing"
+target_speed = 0.9
+
+[[behaviour.state]]
+name = "attack"
+kind = "attacking"
+maintain_range = 45.0
+target_speed = 0.8
+
+[[behaviour.state]]
+name = "flee"
+kind = "fleeing"
+target_speed = 1.0
+
+[[behaviour.state]]
+name = "warp_out"
+kind = "warping_out"
+duration_secs = 8.0
+target_speed = 1.0
+
+# ── Transitions ───────────────────────────────────────────────────────────────
+
+# Any state: attacked → pursue attacker immediately.
+[[behaviour.transition]]
+from = ["patrol", "idle", "pursue", "attack"]
+condition = "on_attacked"
+to = "pursue"
+
+# Patrolling or idle: enemy comes into detection range → pursue.
+[[behaviour.transition]]
+from = ["patrol", "idle"]
+condition = "enemy_in_range"
+radius = 200.0
+to = "pursue"
+
+# Pursuing: enemy enters weapons range → attack.
+[[behaviour.transition]]
+from = "pursue"
+condition = "in_weapons_range"
+to = "attack"
+
+# Attacking: target destroyed → return to patrol.
+[[behaviour.transition]]
+from = "attack"
+condition = "target_destroyed"
+to = "patrol"
+
+# Attacking: hull drops below 30 % → flee.
+[[behaviour.transition]]
+from = ["attack", "pursue"]
+condition = "hull_below"
+threshold = 0.3
+to = "flee"
+
+# Fleeing: after 10 s of fleeing, warp out.
+[[behaviour.transition]]
+from = "flee"
+condition = "on_timer"
+seconds = 10.0
+to = "warp_out"
+
+# Any active state: scenario unloaded → warp out gracefully.
+[[behaviour.transition]]
+from = ["patrol", "idle", "pursue", "attack", "flee"]
+condition = "on_scenario_unloaded"
+to = "warp_out"

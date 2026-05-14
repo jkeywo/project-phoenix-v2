@@ -1,0 +1,64 @@
+tags = ["ship", "npc"]
+faction = "cccccccc-3333-4333-8333-cccccccccccc"
+
+[hull]
+hull_integrity = 120.0
+
+[collider]
+shape = "Capsule"
+radius = 3.0
+length = 7.0
+
+[behaviour]
+initial_state = "patrolling"
+
+[[behaviour.state]]
+name = "patrolling"
+kind = "patrolling"
+waypoints = ["ironveil_patrol_a", "ironveil_patrol_b"]
+loop_path = true
+target_speed = 0.5
+
+[[behaviour.state]]
+name = "pursuing"
+kind = "pursuing"
+target_speed = 0.9
+
+[[behaviour.state]]
+name = "attacking"
+kind = "attacking"
+maintain_range = 80.0
+target_speed = 0.7
+
+[[behaviour.state]]
+name = "fleeing"
+kind = "fleeing"
+target_speed = 1.0
+
+[[behaviour.state]]
+name = "warping_out"
+kind = "warping_out"
+duration_secs = 6.0
+
+[[behaviour.transition]]
+from = "patrolling"
+condition = "enemy_in_range"
+radius = 250.0
+to = "pursuing"
+
+[[behaviour.transition]]
+from = "pursuing"
+condition = "in_weapons_range"
+to = "attacking"
+
+[[behaviour.transition]]
+from = "attacking"
+condition = "hull_below"
+threshold = 0.3
+to = "fleeing"
+
+[[behaviour.transition]]
+from = "fleeing"
+condition = "hull_below"
+threshold = 0.15
+to = "warping_out"

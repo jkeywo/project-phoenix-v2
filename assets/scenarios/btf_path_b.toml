@@ -1,0 +1,122 @@
+# Path B — The Scholar
+#
+# Loaded when the crew hails the Research Outpost.
+# Contact: Dr. Myst. Reveals the weapon's resonance signature and a faint
+# Singularity signal — the proto-echo of what will become the Neutral Zone.
+
+# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+
+[[objective]]
+id = "analyze_resonance"
+text = "Analyse the anomalous resonance readings from the outer system."
+auto_add = true
+
+[[objective]]
+id = "locate_signal_source"
+text = "Identify the vessel responsible for the resonance signature."
+
+# ── COMMS DIALOGUE ────────────────────────────────────────────────────────────
+
+[[comms]]
+id = "myst_intro"
+from = "Research Outpost — Dr. Myst"
+subject = "Anomalous Readings"
+message = "Ardent — I've been tracking a resonance signature from grid 62-Theta. It matches nothing in our database. It's not natural."
+trigger = "on_load"
+
+[[comms.responses]]
+text = "Can you narrow the source? Is it a vessel?"
+follow_up = "myst_source"
+
+[[comms.responses]]
+text = "What does the resonance do to local space?"
+follow_up = "myst_effect"
+
+[[comms]]
+id = "myst_source"
+from = "Research Outpost — Dr. Myst"
+subject = "Re: Signal Source"
+message = "My best triangulation puts the source at the Kaleth Nebula's edge. Something large is in there, and it's charging."
+
+[[comms.responses]]
+text = "We're going in. Send us the resonance frequency."
+follow_up = "myst_frequency"
+
+[[comms.responses]]
+text = "What kind of weapon produces that signature?"
+follow_up = "myst_weapon_type"
+
+[[comms]]
+id = "myst_frequency"
+from = "Research Outpost — Dr. Myst"
+subject = "Resonance Data Packet"
+message = "Transmitting now. Science console should be able to tune to it for a clean lock even through the nebula interference."
+
+[[comms]]
+id = "myst_weapon_type"
+from = "Research Outpost — Dr. Myst"
+subject = "Re: Weapon Type"
+message = "Stellar resonance class. If it fires at full charge, it won't just destroy the station — it'll create a persistent quantum interference zone. Unnavigable. For decades."
+
+[[comms.responses]]
+text = "How long do we have before full charge?"
+follow_up = "myst_timeline"
+
+[[comms]]
+id = "myst_timeline"
+from = "Research Outpost — Dr. Myst"
+subject = "Re: Weapon Timeline"
+message = "At current charge rate — maybe twenty minutes. There's also something else. The signal has a sub-harmonic I've never seen. Like a whisper underneath it."
+
+[[comms.responses]]
+text = "What kind of whisper?"
+follow_up = "myst_whisper"
+
+[[comms]]
+id = "myst_whisper"
+from = "Research Outpost — Dr. Myst"
+subject = "Re: Sub-harmonic"
+message = "It distorts subspace. A sustained discharge would leave that region permanently contested. I don't think that's a side effect. I think that's the point."
+
+[[comms.responses]]
+text = "They want a boundary. A neutral zone."
+follow_up = "myst_neutral_zone"
+
+[[comms]]
+id = "myst_neutral_zone"
+from = "Research Outpost — Dr. Myst"
+subject = "Re: Sub-harmonic"
+message = "Yes. They don't want to win the war. They want to redraw the map."
+
+[[comms]]
+id = "myst_effect"
+from = "Research Outpost — Dr. Myst"
+subject = "Re: Resonance Effects"
+message = "It distorts subspace. Sensors become unreliable within a significant radius. A sustained discharge would make that region of space permanently contested."
+
+[[comms.responses]]
+text = "Can you locate the source precisely?"
+follow_up = "myst_source"
+
+# ── TRIGGER — SIGNAL SOURCE CONFIRMED WHEN ENTERING NEBULA ───────────────────
+
+[[trigger]]
+condition = "on_entered_region"
+entity = "kaleth_nebula"
+actions = [
+    { complete_objective = "locate_signal_source" },
+    { push_comms = "myst_confirmed" },
+]
+
+[[comms]]
+id = "myst_confirmed"
+from = "Research Outpost — Dr. Myst"
+subject = "Source Confirmed"
+message = "That's it. The Harrow vessel in there — it's already charging. Science has the lock. You have to stop it."
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "ironveil"
+actions = [
+    { complete_objective = "analyze_resonance" },
+]

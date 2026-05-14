@@ -1,0 +1,198 @@
+# "Before the Fire" — Axiom System, T−35
+#
+# Main scenario file. Loaded at map start; never unloaded.
+# Owns all spawned entities. Branches load sub-scenarios via load_scenario.
+#
+# Setting: The last Alliance–Imperium peace talks, 35 years before the Neutral Zone.
+# House Harrow has decided the talks must fail.
+#
+# Requires: PRD #119 (Scenario Engine, Station entities, Comms console)
+#           PRD #142 (AI and Behaviour — already landed)
+#           Draft 10 (Region entities — already landed)
+
+preload = [
+    "assets/entities/station_axiom.toml",
+    "assets/entities/station_research_outpost.toml",
+    "assets/entities/ship_harrow_patrol.toml",
+    "assets/entities/ship_harrow_warhawk.toml",
+    "assets/entities/ship_requiem_courier.toml",
+    "assets/entities/region_kaleth_nebula.toml",
+]
+
+# ── SPAWNS ────────────────────────────────────────────────────────────────────
+
+[[spawn]]
+entity = "assets/entities/station_axiom.toml"
+position = [350.0, 0.0, 50.0]
+name = "axiom_station"
+
+[[spawn]]
+entity = "assets/entities/station_research_outpost.toml"
+position = [-100.0, 0.0, 450.0]
+name = "research_outpost"
+
+[[spawn]]
+entity = "assets/entities/ship_harrow_patrol.toml"
+position = [180.0, 0.0, -160.0]
+name = "ironveil"
+
+[[spawn]]
+entity = "assets/entities/ship_harrow_warhawk.toml"
+position = [620.0, 0.0, -380.0]
+name = "ashrender"
+
+[[spawn]]
+entity = "assets/entities/ship_requiem_courier.toml"
+position = [-230.0, 0.0, -80.0]
+name = "requiem_courier"
+
+[[spawn]]
+entity = "assets/entities/region_kaleth_nebula.toml"
+position = [680.0, 0.0, -440.0]
+name = "kaleth_nebula"
+
+# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+
+[[objective]]
+id = "reach_the_system"
+text = "Investigate the situation in the Axiom system."
+auto_add = true
+
+[[objective]]
+id = "make_contact"
+text = "Establish contact with a force in the system."
+auto_add = true
+
+[[objective]]
+id = "identify_the_threat"
+text = "Identify the source of the hostile activity."
+
+# ── OPENING COMMS ─────────────────────────────────────────────────────────────
+
+[[comms]]
+id = "starcorp_orders"
+from = "Starcorp Command"
+subject = "Deployment Orders — Axiom System"
+message = "Ardent, proceed to Axiom. Harrow ships are ignoring docking protocols. The Accord talks are at risk. Find out what's happening."
+trigger = "on_load"
+
+[[comms]]
+id = "axiom_hail"
+from = "Axiom Station"
+subject = "Please respond"
+message = "A.E.V. Ardent — are you receiving? A Harrow vessel is holding station without clearance. We need you here."
+trigger = "on_load"
+
+[[comms.responses]]
+text = "Acknowledged. En route to your position."
+follow_up = "axiom_hail_ack"
+
+[[comms.responses]]
+text = "Hold position. Do not provoke them."
+follow_up = "axiom_hail_hold"
+
+[[comms]]
+id = "axiom_hail_ack"
+from = "Axiom Station"
+subject = "Re: Please respond"
+message = "Understood. Administrator Chen will meet you on approach. Thank you, Ardent."
+
+[[comms]]
+id = "axiom_hail_hold"
+from = "Axiom Station"
+subject = "Re: Please respond"
+message = "Confirmed. We'll maintain protocols. Please hurry — the talks cannot be delayed."
+
+# ── TRIGGERS — PATH BRANCHES ─────────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_hailed"
+entity = "axiom_station"
+actions = [
+    { complete_objective = "make_contact" },
+    { load_scenario = "assets/scenarios/btf_path_a.toml" },
+]
+
+[[trigger]]
+condition = "on_hailed"
+entity = "research_outpost"
+actions = [
+    { complete_objective = "make_contact" },
+    { load_scenario = "assets/scenarios/btf_path_b.toml" },
+]
+
+[[trigger]]
+condition = "on_attacked"
+entity = "ironveil"
+actions = [
+    { complete_objective = "make_contact" },
+    { push_comms = "harrow_hostile" },
+    { load_scenario = "assets/scenarios/btf_path_c.toml" },
+]
+
+[[comms]]
+id = "harrow_hostile"
+from = "I.V. Ironveil"
+subject = "Incoming Transmission"
+message = "Alliance vessel — you are in restricted Imperium space. Withdraw or be destroyed."
+
+# ── TRIGGERS — WEAPON ARMING ─────────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "ironveil"
+actions = [
+    { complete_objective = "identify_the_threat" },
+    { push_comms = "harrow_escalates" },
+    { load_scenario = "assets/scenarios/btf_aphelion_protocol.toml" },
+]
+
+[[comms]]
+id = "harrow_escalates"
+from = "I.V. Ashrender"
+subject = "Incoming Transmission"
+message = "Ironveil is gone. Activating contingency. The Accord dies here."
+
+[[trigger]]
+condition = "on_timer"
+duration_secs = 600
+actions = [
+    { push_comms = "harrow_timer" },
+    { load_scenario = "assets/scenarios/btf_aphelion_protocol.toml" },
+]
+
+[[comms]]
+id = "harrow_timer"
+from = "I.V. Ashrender"
+subject = "Incoming Transmission"
+message = "The window for negotiation is closed. Initiating the Protocol."
+
+# ── TRIGGERS — REGION ENTRY ───────────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_entered_region"
+entity = "kaleth_nebula"
+actions = [
+    { push_comms = "nebula_warning" },
+]
+
+[[comms]]
+id = "nebula_warning"
+from = "Science"
+subject = "Nebula Alert"
+message = "Entering the Kaleth Nebula. Radar range reduced. Hull taking environmental damage."
+
+# ── TRIGGERS — AXIOM STATION DESTROYED ───────────────────────────────────────
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "axiom_station"
+actions = [
+    { push_comms = "axiom_lost" },
+]
+
+[[comms]]
+id = "axiom_lost"
+from = "Starcorp Command"
+subject = "Loss of Contact"
+message = "We've lost contact with Axiom Station. Whatever you did, Ardent — we saw it."

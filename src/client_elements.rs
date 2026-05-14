@@ -95,6 +95,8 @@ pub fn hideable_element_names(console: &Console, preset_name: &str) -> Vec<Strin
     let toml_str = match console {
         Console::Tactical => include_str!("../assets/complexity/tactical.toml"),
         Console::Sensors => include_str!("../assets/complexity/sensors.toml"),
+        Console::Shields => include_str!("../assets/complexity/shields.toml"),
+        Console::Navigation => include_str!("../assets/complexity/navigation.toml"),
         Console::Power => include_str!("../assets/complexity/power.toml"),
         _ => return vec![],
     };
@@ -224,21 +226,46 @@ mod tests {
         assert!(!r.is_hidden("a"));
     }
 
-    // ── Sensors Low ───────────────────────────────────────────────
+    // ── Sensors (no Low preset) ──────────────────────────────────
 
     #[test]
-    fn sensors_low_hides_shield_frequency_readout() {
+    fn sensors_has_no_low_preset_returns_empty() {
         let names = hideable_element_names(&Console::Sensors, "Low");
-        assert!(
-            names.contains(&"shield_frequency_readout".to_string()),
-            "Sensors Low must hide shield_frequency_readout"
-        );
+        assert!(names.is_empty(), "Sensors has no Low preset so should return empty");
     }
 
     #[test]
-    fn sensors_full_hides_nothing() {
+    fn sensors_std_hides_nothing() {
         let names = hideable_element_names(&Console::Sensors, "Std");
-        assert!(names.is_empty(), "Sensors Full should hide nothing");
+        assert!(names.is_empty(), "Sensors Std should hide nothing");
+    }
+
+    // ── Shields (no Low preset) ──────────────────────────────────
+
+    #[test]
+    fn shields_has_no_low_preset_returns_empty() {
+        let names = hideable_element_names(&Console::Shields, "Low");
+        assert!(names.is_empty(), "Shields has no Low preset so should return empty");
+    }
+
+    #[test]
+    fn shields_std_hides_nothing() {
+        let names = hideable_element_names(&Console::Shields, "Std");
+        assert!(names.is_empty(), "Shields Std should hide nothing");
+    }
+
+    // ── Navigation (no Low preset) ───────────────────────────────
+
+    #[test]
+    fn navigation_has_no_low_preset_returns_empty() {
+        let names = hideable_element_names(&Console::Navigation, "Low");
+        assert!(names.is_empty(), "Navigation has no Low preset so should return empty");
+    }
+
+    #[test]
+    fn navigation_std_hides_nothing() {
+        let names = hideable_element_names(&Console::Navigation, "Std");
+        assert!(names.is_empty(), "Navigation Std should hide nothing");
     }
 
     // ── Non-Tactical/Sensors/Power consoles ──────────────────────────

@@ -116,10 +116,10 @@ impl ComplexityStore {
     }
 
     /// Get the choice state for a console, creating a default one (single
-    /// "Std" preset, or ["Low","Std"] for Tactical/Sensors/Power) if none
+    /// "Std" preset, or ["Low","Std"] for Tactical/Power) if none
     /// exists.
     pub fn for_console(&mut self, console: &Console) -> &mut ComplexityChoice {
-        let presets = if matches!(console, Console::Tactical | Console::Sensors | Console::Power) {
+        let presets = if matches!(console, Console::Tactical | Console::Power) {
             vec!["Low".to_string(), "Std".to_string()]
         } else {
             vec!["Std".to_string()]
@@ -256,11 +256,27 @@ mod tests {
     }
 
     #[test]
-    fn store_for_console_creates_sensors_with_low_full() {
+    fn store_for_console_creates_sensors_with_only_std() {
         let mut store = ComplexityStore::new();
         let choice = store.for_console(&Console::Sensors);
-        assert_eq!(choice.available_presets, vec!["Low", "Std"]);
-        assert!(choice.show_dropdown(), "Sensors should show complexity dropdown");
+        assert_eq!(choice.available_presets, vec!["Std"]);
+        assert!(!choice.show_dropdown(), "Sensors should NOT show complexity dropdown when only Std");
+    }
+
+    #[test]
+    fn store_for_console_creates_shields_with_only_std() {
+        let mut store = ComplexityStore::new();
+        let choice = store.for_console(&Console::Shields);
+        assert_eq!(choice.available_presets, vec!["Std"]);
+        assert!(!choice.show_dropdown(), "Shields should NOT show complexity dropdown when only Std");
+    }
+
+    #[test]
+    fn store_for_console_creates_navigation_with_only_std() {
+        let mut store = ComplexityStore::new();
+        let choice = store.for_console(&Console::Navigation);
+        assert_eq!(choice.available_presets, vec!["Std"]);
+        assert!(!choice.show_dropdown(), "Navigation should NOT show complexity dropdown when only Std");
     }
 
     #[test]

@@ -26,8 +26,11 @@ pub struct StationDef {
 /// Return the default available complexity presets for every console.
 fn default_complexity_presets() -> HashMap<Console, Vec<String>> {
     let mut m = HashMap::new();
-    for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Sensors, Console::Shields, Console::Navigation, Console::Power, Console::Comms] {
+    for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Power, Console::Comms] {
         m.insert(c.clone(), vec!["Low".into(), "Full".into()]);
+    }
+    for c in &[Console::Sensors, Console::Shields, Console::Navigation] {
+        m.insert(c.clone(), vec!["Full".into()]);
     }
     m
 }
@@ -682,6 +685,30 @@ consoles = ["Sensors"]
                 console
             );
         }
+    }
+
+    #[test]
+    fn default_complexity_presets_sensors_only_full() {
+        let presets = default_complexity_presets();
+        let got = presets.get(&Console::Sensors).expect("Sensors should have presets");
+        assert_eq!(got.len(), 1, "Sensors should have exactly one preset");
+        assert_eq!(got[0], "Full", "Sensors preset should be 'Full'");
+    }
+
+    #[test]
+    fn default_complexity_presets_shields_only_full() {
+        let presets = default_complexity_presets();
+        let got = presets.get(&Console::Shields).expect("Shields should have presets");
+        assert_eq!(got.len(), 1, "Shields should have exactly one preset");
+        assert_eq!(got[0], "Full", "Shields preset should be 'Full'");
+    }
+
+    #[test]
+    fn default_complexity_presets_navigation_only_full() {
+        let presets = default_complexity_presets();
+        let got = presets.get(&Console::Navigation).expect("Navigation should have presets");
+        assert_eq!(got.len(), 1, "Navigation should have exactly one preset");
+        assert_eq!(got[0], "Full", "Navigation preset should be 'Full'");
     }
 
     // ── short_code field ─────────────────────────────────────────────────────

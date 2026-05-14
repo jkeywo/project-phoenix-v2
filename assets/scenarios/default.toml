@@ -1,0 +1,34 @@
+# Default scenario: Starbase Alpha
+#
+# Spawns Starbase Alpha near the alpha_point anchor.  The station is hailable
+# from the Comms console; hailing triggers a greeting with two response
+# branches.  Choosing "We are on a survey mission" adds an optional objective;
+# choosing "We require docking clearance" adds a mandatory docking objective.
+
+[[spawn]]
+name       = "starbase_alpha"
+entity_path = "assets/entities/station_outpost.toml"
+anchor     = "starbase_alpha"
+
+# ── Comms templates ────────────────────────────────────────────────────────
+
+[[comms]]
+from    = "starbase_alpha"
+trigger = "on_hailed"
+entity  = "starbase_alpha"
+message = "USS Phoenix, this is Starbase Alpha. Please state your business."
+
+  [[comms.response]]
+  text = "We are on a survey mission."
+    [[comms.response.action]]
+    kind = "add_objective"
+    id   = "obj-survey"
+    text = "Complete the survey in this sector."
+
+  [[comms.response]]
+  text = "We require docking clearance."
+    [[comms.response.action]]
+    kind      = "add_objective"
+    id        = "obj-dock"
+    text      = "Dock at Starbase Alpha."
+    mandatory = true

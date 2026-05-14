@@ -5,12 +5,49 @@ use crate::map_config::{StarConfig, PlanetConfig, AsteroidFieldConfig};
 use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectsConfig;
 
+/// Configuration for a single named AI state.
+///
+/// Each entry in a `[[behaviour.state]]` array defines the parameters
+/// for one state. The `name` field is used as a stable identifier for
+/// per-spawn `[spawn.overrides]` by-name replacement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StateConfig {
+    /// Stable name for this state (used in `initial_state` and overrides).
+    pub name: String,
+    /// State kind: `"idle"` or `"patrolling"`.
+    #[serde(default)]
+    pub kind: String,
+    /// Ordered waypoint anchor names (used by `patrolling`).
+    #[serde(default)]
+    pub waypoints: Vec<String>,
+    /// Whether to loop back to the first waypoint after the last (patrolling).
+    #[serde(default)]
+    pub loop_path: bool,
+    /// Desired forward speed fraction [0, 1], clamped at load time.
+    #[serde(default)]
+    pub target_speed: f32,
+}
+
+impl StateConfig {
+    /// Clamp mutable fields into valid ranges after deserialisation.
+    fn clamp(&mut self) {
+        self.target_speed = self.target_speed.clamp(0.0, 1.0);
+    }
+}
+
 /// Configuration for an AI behaviour controller attached to an entity.
 /// Re-exports the AI module's config type so callers only need `entity_config`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BehaviourConfig {
     /// Name of the initial AI state (e.g. `"idle"`).
     pub initial_state: String,
+    /// Typed state parameter blocks.  An empty vec is valid (only `initial_state`
+    /// is required; states with no extra params — like `idle` — need no entry).
+    #[serde(default)]
+    pub state: Vec<StateConfig>,
+    /// Transition rules (stored raw for future processing).
+    #[serde(default)]
+    pub transition: Vec<toml::Value>,
 }
 
 /// Visual/render shape for station entities.
@@ -247,6 +284,14 @@ impl EntityConfig {
             }
         }
 
+        // Clamp target_speed in every StateConfig entry.
+        let behaviour = raw.behaviour.map(|mut b| {
+            for s in &mut b.state {
+                s.clamp();
+            }
+            b
+        });
+
         Ok(EntityConfig {
             tags: raw.tags,
             hull: raw.hull,
@@ -265,7 +310,7 @@ impl EntityConfig {
             effects: raw.effects,
             station: raw.station,
             faction: raw.faction,
-            behaviour: raw.behaviour,
+            behaviour,
         })
     }
 
@@ -1092,5 +1137,102 @@ initial_state = "idle"
         assert!(config.hull.is_some());
         let behaviour = config.behaviour.expect("behaviour must be Some");
         assert_eq!(behaviour.initial_state, "idle");
+    }
+
+    // ── StateConfig tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn behaviour_with_patrolling_state_parses() {
+        let toml_str = r##"
+[behaviour]
+initial_state = "patrol_route"
+
+[[behaviour.state]]
+name = "patrol_route"
+kind = "patrolling"
+waypoints = ["alpha", "beta"]
+loop_path = true
+target_speed = 0.6
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        assert_eq!(behaviour.initial_state, "patrol_route");
+        assert_eq!(behaviour.state.len(), 1);
+        let state = &behaviour.state[0];
+        assert_eq!(state.name, "patrol_route");
+        assert_eq!(state.kind, "patrolling");
+        assert_eq!(state.waypoints, vec!["alpha", "beta"]);
+        assert!(state.loop_path);
+        assert!((state.target_speed - 0.6).abs() < 1e-5);
+    }
+
+    #[test]
+    fn target_speed_clamped_to_zero_when_negative() {
+        let toml_str = r##"
+[behaviour]
+initial_state = "p"
+
+[[behaviour.state]]
+name = "p"
+kind = "patrolling"
+waypoints = []
+target_speed = -0.5
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let state = &config.behaviour.unwrap().state[0];
+        assert_eq!(state.target_speed, 0.0, "negative target_speed must clamp to 0");
+    }
+
+    #[test]
+    fn target_speed_clamped_to_one_when_above_one() {
+        let toml_str = r##"
+[behaviour]
+initial_state = "p"
+
+[[behaviour.state]]
+name = "p"
+kind = "patrolling"
+waypoints = []
+target_speed = 1.5
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let state = &config.behaviour.unwrap().state[0];
+        assert_eq!(state.target_speed, 1.0, "target_speed > 1 must clamp to 1");
+    }
+
+    #[test]
+    fn behaviour_state_empty_by_default() {
+        let toml_str = r##"
+[behaviour]
+initial_state = "idle"
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        assert!(behaviour.state.is_empty(), "state array must default to empty");
+    }
+
+    #[test]
+    fn behaviour_multiple_states_parse() {
+        let toml_str = r##"
+[behaviour]
+initial_state = "idle"
+
+[[behaviour.state]]
+name = "idle"
+kind = "idle"
+target_speed = 0.0
+
+[[behaviour.state]]
+name = "patrol"
+kind = "patrolling"
+waypoints = ["wp1", "wp2"]
+loop_path = false
+target_speed = 0.5
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        assert_eq!(behaviour.state.len(), 2);
+        assert_eq!(behaviour.state[0].name, "idle");
+        assert_eq!(behaviour.state[1].name, "patrol");
     }
 }

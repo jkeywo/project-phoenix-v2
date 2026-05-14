@@ -26,7 +26,7 @@ pub fn resolve_entity(
             )
             .map_err(|e| format!("template re-parse error: {e}"))?;
 
-            let merged = crate::entity_override::merge_toml(&template_value, overrides);
+            let merged = crate::entity_override::merge_entity_config_toml(&template_value, overrides);
             let merged_str =
                 toml::to_string(&merged).map_err(|e| format!("merged serialise error: {e}"))?;
             EntityConfig::from_toml(&merged_str).map_err(|e| format!("merged parse error: {e:?}"))?

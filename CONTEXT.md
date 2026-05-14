@@ -81,3 +81,11 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 **ClientSimState** — the client-side mirror of the server's `SimSnapshot`. Maintained by applying `ServerMessage`s in `client_sim.rs`. Holds `red_alert`, `view_mode`, ship pose, `world` (asteroid layout), and repair state fields. Bevy `Resource`.
 
 **ActiveConsole** — a Bevy `Resource` on the client that tracks which console panel the local player is currently viewing (set by the JS tab bar via `wasm_client_set_active_console`). `None` means auto-select the sole held console.
+
+**Broadcaster** — the seam through which all `OutboundMessage`s are emitted. A per-domain plugin registers a payload-builder system together with a `Cadence` and an `Audience`; the broadcaster resolves the audience against the live `SessionManager` each tick/event and invokes the system only when the audience is non-empty. Replaces the hand-coded `if phase != InProgress { return; } if !timer.just_finished() { return; } for console ... write(OutboundMessage { ... })` preamble that previously appeared at every broadcast site.
+
+**LobbyBroadcaster / SimBroadcaster** — two `Broadcaster` instances, each phase-gated. `LobbyBroadcaster` runs only in `GamePhase::Lobby`; `SimBroadcaster` runs only in `GamePhase::InProgress`. The pure `lobby_handler.rs` keeps returning `Vec<(Target, ServerMessage)>`; the `lobby/server.rs` plugin funnels those outputs into `LobbyBroadcaster` as `Cadence::Once` registrations so all writes go through one path.
+
+**Audience** — a predicate over the live session set, resolved by the `Broadcaster` to a set of session tokens. Built-ins: `Audience::all()`, `Audience::holding(Console)`, `Audience::all_except(Token)`, `Audience::token(Token)`. Because each console has exactly one seat, `holding(_)` resolves to 0 or 1 tokens.
+
+**Cadence** — when a registered broadcast fires. `Cadence::hz(f32)` / `Cadence::period(Duration)` for periodic; `Cadence::on_event::<E>()` for event-driven; `Cadence::once()` for single-shot. The broadcaster owns timers internally; callers do not manage `Timer` resources.

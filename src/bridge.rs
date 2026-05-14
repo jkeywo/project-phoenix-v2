@@ -212,6 +212,13 @@ pub fn wasm_load_scenario(path: String, toml_str: String) -> Result<JsValue, JsV
     crate::config_cache::wasm_load_scenario(path, toml_str)
 }
 
+/// Return the `default_scenario` path from the loaded map config, or `undefined`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_default_scenario_path() -> Option<String> {
+    crate::config_cache::wasm_get_default_scenario_path()
+}
+
 // ── Bevy bridge systems ────────────────────────────────────────────────────
 
 /// Drains the inbound queue each frame and injects messages into Bevy.

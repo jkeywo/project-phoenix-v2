@@ -94,6 +94,39 @@ impl CommsInbox {
     pub fn mark_clean(&mut self) {
         self.dirty = false;
     }
+
+    /// Explicitly mark the inbox as dirty (pending broadcast).
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// Record that the player chose `response_index` for message `message_id`.
+    ///
+    /// Sets `selected_response` and marks the message as read. No-op if the
+    /// message is not found.
+    pub fn record_response(&mut self, message_id: &str, response_index: usize) {
+        if let Some(rec) = self.records.iter_mut().find(|r| r.message.id == message_id) {
+            rec.message.selected_response = Some(response_index);
+            rec.message.is_read = true;
+            self.dirty = true;
+        }
+    }
+
+    /// Return the `sender_uuid` of the message with `message_id`, or `None`.
+    pub fn sender_uuid_for(&self, message_id: &str) -> Option<String> {
+        self.records
+            .iter()
+            .find(|r| r.message.id == message_id)
+            .map(|r| r.message.sender_uuid.clone())
+    }
+
+    /// Return the `sender_name` of the message with `message_id`, or `None`.
+    pub fn sender_name_for(&self, message_id: &str) -> Option<String> {
+        self.records
+            .iter()
+            .find(|r| r.message.id == message_id)
+            .map(|r| r.message.sender_name.clone())
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,9 @@
 [global]
 seed = 42
+default_scenario = "assets/scenarios/default.toml"
+
+[anchors]
+starbase_alpha = [500.0, 0.0, 0.0]
 
 [[entity]]
 template_path = "assets/entities/star_sun.toml"

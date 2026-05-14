@@ -123,12 +123,14 @@ fn attach_controllers_on_spawn(
     query: Query<(Entity, &EntityUuid, &Transform, &BehaviourSection), Without<AiControllerComponent>>,
     time: Res<Time>,
 ) {
-    for (entity, uuid, transform, _behaviour) in &query {
+    for (entity, uuid, transform, behaviour) in &query {
         let pos = transform.translation;
-        let controller = AiController::new(
+        let initial_state = crate::ai::build_initial_state(&behaviour.0);
+        let mut controller = AiController::new(
             [pos.x, pos.y, pos.z],
             time.elapsed_secs_f64(),
         );
+        controller.current_state = initial_state;
         registry.register_with_entity(&uuid.0, entity);
         commands
             .entity(entity)
@@ -142,23 +144,76 @@ fn attach_controllers_on_spawn(
 /// Tick AI controllers, but only during `InProgress` phase.
 fn tick_ai_controllers(
     phase: Res<CurrentPhase>,
-    mut query: Query<&mut AiControllerComponent>,
+    mut query: Query<(&mut AiControllerComponent, &mut Transform)>,
     time: Res<Time>,
+    map_config: Option<Res<crate::map_config::MapConfig>>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
     }
 
-    let world_view = WorldView {
-        sim_time: time.elapsed_secs_f64(),
+    // Build anchor map once (shared across all controllers this tick)
+    let anchors: HashMap<String, [f32; 3]> = if let Some(ref mc) = map_config {
+        mc.anchors.iter().filter_map(|(name, pos)| {
+            if pos.len() >= 3 {
+                Some((name.clone(), [pos[0], pos[1], pos[2]]))
+            } else if pos.len() == 2 {
+                Some((name.clone(), [pos[0], 0.0, pos[1]]))
+            } else {
+                None
+            }
+        }).collect()
+    } else {
+        HashMap::new()
     };
 
-    for mut ctrl in &mut query {
+    let dt = time.delta_secs();
+    let sim_time = time.elapsed_secs_f64();
+
+    for (mut ctrl, mut transform) in &mut query {
+        let pos = transform.translation;
+        let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+
+        let world_view = WorldView {
+            sim_time,
+            entity_pos: [pos.x, pos.y, pos.z],
+            entity_yaw: yaw,
+            anchors: anchors.clone(),
+        };
+
         let output: AiTickOutput = crate::ai::tick(&ctrl.controller, &world_view);
+
+        // Apply blackboard update
+        if let Some(new_bb) = output.new_blackboard {
+            ctrl.controller.blackboard = new_bb;
+        }
         ctrl.controller.current_state = output.new_state;
-        // inputs are empty for idle — future slices will route them into the
-        // simulation's inbound message queue.
-        let _ = output.inputs;
+
+        // Apply the first Helm input to the entity's Transform.
+        for input in &output.inputs {
+            if let crate::ai::AiInput::Helm { thrust, steering } = input {
+                let physics_state = crate::ship_physics::ShipPhysicsState {
+                    x: pos.x,
+                    z: pos.z,
+                    yaw,
+                    forward_speed: 0.0,
+                };
+                let physics_input = crate::ship_physics::ShipPhysicsInput {
+                    thrust: *thrust,
+                    steering: *steering,
+                };
+                let result = crate::ship_physics::compute_physics(
+                    physics_state,
+                    physics_input,
+                    dt,
+                    &crate::ship_physics::ShipPhysicsConfig::new(),
+                );
+                transform.translation.x = result.x;
+                transform.translation.z = result.z;
+                transform.rotation = Quat::from_rotation_y(result.yaw);
+                break;
+            }
+        }
     }
 }
 
@@ -282,6 +337,8 @@ mod tests {
             EntityUuid(uuid.to_string()),
             BehaviourSection(BehaviourConfig {
                 initial_state: "idle".to_string(),
+                state: vec![],
+                transition: vec![],
             }),
         )).id();
         entity
@@ -325,6 +382,8 @@ mod tests {
             EntityUuid("ent-004".to_string()),
             BehaviourSection(BehaviourConfig {
                 initial_state: "idle".to_string(),
+                state: vec![],
+                transition: vec![],
             }),
         )).id();
         app.update();

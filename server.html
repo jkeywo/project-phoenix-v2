@@ -233,9 +233,28 @@ async function preloadAndStart() {
     window.wasm_load_map = wasmBindings.wasm_load_map;
     window.wasm_load_config = wasmBindings.wasm_load_config;
     window.wasm_is_preload_complete = wasmBindings.wasm_is_preload_complete;
+    window.wasm_load_scenario = wasmBindings.wasm_load_scenario;
+    window.wasm_get_default_scenario_path = wasmBindings.wasm_get_default_scenario_path;
     
     wasm_load_map(mapToml);
-    
+
+    // Step 3b: If the map declares a default scenario, fetch and load it.
+    // wasm_load_scenario queues any spawn entity paths into the preload pipeline.
+    const scenarioPath = wasm_get_default_scenario_path();
+    if (scenarioPath) {
+      try {
+        const scenarioResponse = await fetch(scenarioPath);
+        if (scenarioResponse.ok) {
+          const scenarioToml = await scenarioResponse.text();
+          wasm_load_scenario(scenarioPath, scenarioToml);
+        } else {
+          console.warn('Failed to fetch scenario:', scenarioPath, scenarioResponse.status);
+        }
+      } catch (e) {
+        console.warn('Scenario fetch error:', e);
+      }
+    }
+
   } catch (e) {
     console.error('Preload failed:', e);
     if (spinner) spinner.style.display = 'none';

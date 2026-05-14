@@ -8,7 +8,7 @@
 // anchor table, returning a flat list of `ResolvedSpawn` values ready for
 // the entity-spawn pipeline.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use uuid::Uuid;
 

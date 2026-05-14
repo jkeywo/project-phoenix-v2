@@ -214,11 +214,6 @@ fn forward_local_token(mut token: ResMut<LocalPlayerToken>) {
 /// is the source of truth and is managed entirely by the `handle_tab_button_press`
 /// system in `client_app.rs`. JS tab bar clicks are handled via the `TabBarRoot`
 /// visibility logic, not via this bridge.
-#[cfg(target_arch = "wasm32")]
-fn forward_active_console(_active: ResMut<ActiveConsole>) {
-    // Disabled: Bevy manages ActiveConsole internally via tab button presses.
-    // JS tab bar is a visual overlay that doesn't need to sync back to WASM.
-}
 
 /// Reads the thread-local complexity presets JSON (set by JS on page
 /// load) and applies them to the `ComplexityStore` resource exactly

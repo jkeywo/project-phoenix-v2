@@ -1155,9 +1155,9 @@ struct ReadyPillText;
 /// Update the crew count and ready pill in the header.
 fn refresh_crew_header(
     state: Res<LobbyState>,
-    mut current_q: Query<&mut Text, With<CrewCountCurrent>>,
-    mut max_q: Query<&mut Text, With<CrewCountMax>>,
-    mut pill_text_q: Query<&mut Text, With<ReadyPillText>>,
+    mut current_q: Query<&mut Text, (With<CrewCountCurrent>, Without<CrewCountMax>, Without<ReadyPillText>)>,
+    mut max_q: Query<&mut Text, (With<CrewCountMax>, Without<CrewCountCurrent>, Without<ReadyPillText>)>,
+    mut pill_text_q: Query<&mut Text, (With<ReadyPillText>, Without<CrewCountCurrent>, Without<CrewCountMax>)>,
     mut pill_bg_q: Query<&mut BackgroundColor, With<ReadyPill>>,
 ) {
     if !state.is_changed() {

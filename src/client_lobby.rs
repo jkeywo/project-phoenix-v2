@@ -119,7 +119,8 @@ impl LobbyState {
             | ServerMessage::FrequencyHint { .. }
             | ServerMessage::StationSpawned { .. }
             | ServerMessage::StationDestroyed { .. }
-            | ServerMessage::ObjectiveSummary { .. } => {
+            | ServerMessage::ObjectiveSummary { .. }
+            | ServerMessage::CommsState { .. } => {
                 // Not relevant to the lobby model.
             }
         }
@@ -128,7 +129,7 @@ impl LobbyState {
 
 /// All consoles the lobby UI knows how to render. Listed in the order
 /// they appear on screen.
-pub const ALL_CONSOLES: [Console; 6] = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power];
+pub const ALL_CONSOLES: [Console; 7] = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power, Console::Comms];
 
 /// One console row as the lobby UI should render it.
 #[derive(Clone, Debug, PartialEq)]
@@ -703,7 +704,7 @@ mod tests {
     }
 
     #[test]
-    fn all_consoles_filled_is_true_when_all_six_consoles_are_held() {
+    fn all_consoles_filled_is_true_when_all_seven_consoles_are_held() {
         let mut s = LobbyState::default();
         s.players = vec![
             p("a", "Alice", vec![Console::CaptainChair]),
@@ -712,6 +713,7 @@ mod tests {
             p("d", "Dave",  vec![Console::Repair]),
             p("e", "Eve",   vec![Console::Science]),
             p("f", "Frank", vec![Console::Power]),
+            p("g", "Grace", vec![Console::Comms]),
         ];
         assert!(LobbyView::new(&s, "a").all_consoles_filled());
     }

@@ -148,6 +148,7 @@ pub enum Console {
     Repair,
     Science,
     Power,
+    Comms,
 }
 
 impl Console {
@@ -160,8 +161,41 @@ impl Console {
             Console::Repair => "Repair",
             Console::Science => "Science",
             Console::Power => "Power",
+            Console::Comms => "Comms",
         }
     }
+}
+
+// ── Comms wire types ──────────────────────────────────────────────────────
+
+/// A single message in the Comms inbox.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CommsMessage {
+    /// Stable identifier for this message (server-assigned UUID).
+    pub id: String,
+    /// UUID of the entity that sent the message (e.g. a station).
+    pub sender_uuid: String,
+    /// Display name of the sender.
+    pub sender_name: String,
+    /// Short subject line shown in the message list.
+    pub subject: String,
+    /// Full message body shown in the expanded chat view.
+    pub body: String,
+    /// Available response options. Empty while awaiting a reply (loading).
+    pub responses: Vec<String>,
+    /// Index into `responses` for the reply the player chose, if any.
+    pub selected_response: Option<usize>,
+    /// True once the player has opened the message.
+    pub is_read: bool,
+}
+
+/// A contact the Comms operator can hail.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CommsContact {
+    /// World-entity UUID (matches `EntitySnapshot::uuid`).
+    pub uuid: String,
+    /// Display name shown in the contact list.
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -407,6 +441,16 @@ pub enum ClientMessage {
     /// complexity, the Science holder may also send this message
     /// (delegation allowlist in `delegation.rs`).
     SetPhaserFrequency { frequency: f32 },
+    /// Hail a target entity (e.g. a station). Server responds with a
+    /// `CommsState` update that adds the contact's message to the inbox.
+    /// Sender must hold `Console::Comms`.
+    Hail { target_uuid: String },
+    /// Select a message in the Comms inbox (opens the chat view).
+    SelectCommsMessage { message_id: String },
+    /// Choose a response to a received message.
+    RespondToMessage { message_id: String, response_index: usize },
+    /// Clear all read or orphaned messages from the inbox.
+    ClearComms,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -552,6 +596,14 @@ pub enum ServerMessage {
     /// optional, in insertion order within each group.
     ObjectiveSummary {
         objectives: Vec<ObjectiveSnapshot>,
+    },
+    /// Sent to the Comms console holder. Contains the current inbox, active
+    /// objectives visible to Comms, and the list of hailable contacts.
+    /// Broadcast on change (not polled), and replayed on reconnect.
+    CommsState {
+        messages: Vec<CommsMessage>,
+        objectives: Vec<ObjectiveSnapshot>,
+        contacts: Vec<CommsContact>,
     },
 }
 

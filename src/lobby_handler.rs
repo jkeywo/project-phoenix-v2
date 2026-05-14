@@ -269,7 +269,7 @@ pub fn process_message(
                 }));
             }
         }
-        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::SetPhaserFrequency { .. } | ClientMessage::Repair { .. } | ClientMessage::SetScienceTarget { .. } | ClientMessage::StartImpulseCharge | ClientMessage::CancelImpulse | ClientMessage::FireTorpedo { .. } | ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. } => {}
+        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::SetPhaserFrequency { .. } | ClientMessage::Repair { .. } | ClientMessage::SetScienceTarget { .. } | ClientMessage::StartImpulseCharge | ClientMessage::CancelImpulse | ClientMessage::FireTorpedo { .. } | ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. } | ClientMessage::Hail { .. } | ClientMessage::SelectCommsMessage { .. } | ClientMessage::RespondToMessage { .. } | ClientMessage::ClearComms => {}
     }
 
     LobbyHandlerResult { new_phase, outbound }
@@ -745,14 +745,14 @@ mod tests {
     // ── Spectator queue: push on join when max_players reached ───────────
 
     fn sessions_at_max(stations: &ShipStations) -> SessionManager {
-        // max_players = 5; fill all 5 slots via direct console assignment
+        // max_players = 6; fill all 6 slots via direct console assignment
         let mut sessions = SessionManager::new();
-        for (tok, name) in [("t1", "Alice"), ("t2", "Bob"), ("t3", "Carol"), ("t4", "Dave"), ("t5", "Eve")] {
+        for (tok, name) in [("t1", "Alice"), ("t2", "Bob"), ("t3", "Carol"), ("t4", "Dave"), ("t5", "Eve"), ("t6", "Frank")] {
             sessions.register(tok.into(), name.into()).unwrap();
         }
-        let player_count = 5u32;
-        // At 5P: "Captain" (CaptainChair), "Helm" (Helm), "Tactical" (Tactical), "Engineering" (Repair+Power), "Science" (Science)
-        for (tok, station_name) in [("t1", "Captain"), ("t2", "Helm"), ("t3", "Tactical"), ("t4", "Engineering"), ("t5", "Science")] {
+        let player_count = 6u32;
+        // At 6P: "Captain" (CaptainChair), "Helm" (Helm), "Tactical" (Tactical), "Engineering" (Repair+Power), "Comms" (Comms), "Science" (Science)
+        for (tok, station_name) in [("t1", "Captain"), ("t2", "Helm"), ("t3", "Tactical"), ("t4", "Engineering"), ("t5", "Comms"), ("t6", "Science")] {
             let station_def = crate::stations::get_station(stations, player_count, station_name).unwrap();
             for console in &station_def.consoles {
                 let _ = sessions.toggle_console(tok, console.clone());
@@ -765,17 +765,17 @@ mod tests {
     fn joining_when_max_players_filled_goes_to_spectator_queue() {
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        // 6th player identifies — max_players (5) already have stations
-        let msg = ClientMessage::Identify { token: "t6".into(), name: "Frank".into() };
-        let result = process_message("t6", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
+        // 7th player identifies — max_players (6) already have stations
+        let msg = ClientMessage::Identify { token: "t7".into(), name: "Grace".into() };
+        let result = process_message("t7", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
         assert!(
-            sessions.spectator_queue().contains(&"t6".to_string()),
-            "t6 should be in the spectator queue"
+            sessions.spectator_queue().contains(&"t7".to_string()),
+            "t7 should be in the spectator queue"
         );
         // Should receive StationAssigned with station=None
         let got_spectator_assigned = result.outbound.iter().any(|(target, m)| {
-            matches!(target, Target::Token(t) if t == "t6")
-                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles } if token == "t6" && consoles.is_empty())
+            matches!(target, Target::Token(t) if t == "t7")
+                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles } if token == "t7" && consoles.is_empty())
         });
         assert!(got_spectator_assigned, "spectator should receive StationAssigned {{ station: None }}");
     }
@@ -808,18 +808,18 @@ mod tests {
 
     #[test]
     fn disconnect_with_spectator_in_queue_cascade_fills_all_slots_spectator_stays() {
-        // At 5P (max), all stations filled, t6 is spectator. t1 disconnects.
-        // The 5P→4P cascade fills all 4P slots from remaining 4 players.
-        // No empty slot → spectator t6 stays queued.
+        // At 6P (max), all stations filled, t7 is spectator. t1 disconnects.
+        // The 6P→5P cascade fills all 5P slots from remaining 5 players.
+        // No empty slot → spectator t7 stays queued.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t6".into(), "Frank".into()).unwrap();
-        sessions.push_spectator("t6".into());
+        sessions.register("t7".into(), "Grace".into()).unwrap();
+        sessions.push_spectator("t7".into());
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
-        // t6 stays in spectator queue (cascade filled all slots)
+        // t7 stays in spectator queue (cascade filled all slots)
         assert!(
-            sessions.spectator_queue().contains(&"t6".to_string()),
-            "t6 should remain in queue when cascade fills all slots"
+            sessions.spectator_queue().contains(&"t7".to_string()),
+            "t7 should remain in queue when cascade fills all slots"
         );
     }
 
@@ -842,50 +842,50 @@ mod tests {
 
         // Simulate using a 1P→0P scenario where a spectator exists, but that would be blocked
         // by min_players=1. Instead, let's verify the queue is passed correctly by testing
-        // that after a disconnect from 5P, the spectator queue in sessions is updated
+        // that after a disconnect from 6P, the spectator queue in sessions is updated
         // (it may be unchanged, but the VecDeque reference was correctly threaded).
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t6".into(), "Frank".into()).unwrap();
-        sessions.push_spectator("t6".into());
+        sessions.register("t7".into(), "Grace".into()).unwrap();
+        sessions.push_spectator("t7".into());
         sessions.push_spectator("nonexistent-extra".into()); // second spectator
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
         // Spectator queue is preserved (both spectators still queued, since no empty slot)
-        assert!(sessions.spectator_queue().contains(&"t6".to_string()));
+        assert!(sessions.spectator_queue().contains(&"t7".to_string()));
     }
 
     #[test]
     fn spectator_can_claim_station_vacated_by_disconnect_at_max_players() {
         // Mirrors the smoke test reassignment.spec.ts "leave at max_players
-        // allows spectator to claim vacated station". 5 players hold all 5P
-        // stations, a 6th joins as spectator, one station-holder disconnects,
+        // allows spectator to claim vacated station". 6 players hold all 6P
+        // stations, a 7th joins as spectator, one station-holder disconnects,
         // then the spectator selects the vacated station.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        // Add t6 as spectator
-        sessions.register("t6".into(), "Frank".into()).unwrap();
-        sessions.push_spectator("t6".into());
+        // Add t7 as spectator
+        sessions.register("t7".into(), "Grace".into()).unwrap();
+        sessions.push_spectator("t7".into());
 
-        // t5 (Science) disconnects
-        let _ = process_disconnect_with_stations("t5", &mut sessions, &stations);
+        // t6 (Science) disconnects
+        let _ = process_disconnect_with_stations("t6", &mut sessions, &stations);
 
-        // t6 selects "Science"
+        // t7 selects "Science"
         let result = pm_stations(
-            "t6",
+            "t7",
             &ClientMessage::SelectStation { station: "Science".into() },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        // t6 must receive a StationAssigned with station = Some("Science")
+        // t7 must receive a StationAssigned with station = Some("Science")
         let assigned = result.outbound.iter().find_map(|(_, m)| match m {
             ServerMessage::StationAssigned { token, station: Some(name), consoles }
-                if token == "t6" => Some((name.clone(), consoles.clone())),
+                if token == "t7" => Some((name.clone(), consoles.clone())),
             _ => None,
         });
         assert!(
             assigned.is_some(),
-            "t6 should receive StationAssigned with station=Some(Science); got outbound: {:?}",
+            "t7 should receive StationAssigned with station=Some(Science); got outbound: {:?}",
             result.outbound
         );
         let (name, consoles) = assigned.unwrap();
@@ -903,8 +903,7 @@ mod tests {
         assert!(result.outbound.iter().any(|(_, m)| {
             matches!(m, ServerMessage::PlayerLeft { token } if token == "t1")
         }));
-        // Station cascade: t3 (no-prev=Repair) moves to fill t1's slot (Helm at 2P).
-        // At least one StationAssigned should be emitted for t3 getting a new station.
+        // Station cascade: at least one StationAssigned should be emitted.
         let any_station_assigned = result.outbound.iter().any(|(_, m)| {
             matches!(m, ServerMessage::StationAssigned { .. })
         });
@@ -917,13 +916,13 @@ mod tests {
         // StartGame does not clear the queue — spectators remain spectators mid-game.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t6".into(), "Frank".into()).unwrap();
-        sessions.push_spectator("t6".into());
+        sessions.register("t7".into(), "Grace".into()).unwrap();
+        sessions.push_spectator("t7".into());
         assert_eq!(sessions.spectator_queue().len(), 1, "queue must have one spectator before transition");
         // Simulate a phase transition by doing StartGame (which only changes new_phase).
         // The sessions object is unaffected — queue should still be there.
         let result = pm_stations("t1", &ClientMessage::StartGame, &mut sessions, GamePhase::Lobby, None);
-        // t1 holds CaptainChair (Captain station at 5P has CaptainChair consoles)
+        // t1 holds CaptainChair (Captain station at 6P has CaptainChair console)
         // Only the captain can start, and all stations must be filled.
         // Regardless of whether StartGame succeeds, the spectator queue must survive.
         let _ = result;
@@ -996,26 +995,26 @@ mod tests {
 
     #[test]
     fn disconnect_does_not_promote_spectator_in_lobby() {
-        // At 5P (max), all stations filled, t6 is spectator. t1 disconnects.
+        // At 6P (max), all stations filled, t7 is spectator. t1 disconnects.
         // In lobby, spectators should NOT be auto-promoted.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t6".into(), "Frank".into()).unwrap();
-        sessions.push_spectator("t6".into());
+        sessions.register("t7".into(), "Grace".into()).unwrap();
+        sessions.push_spectator("t7".into());
 
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
 
-        // t6 must still be in the spectator queue (not promoted).
+        // t7 must still be in the spectator queue (not promoted).
         assert!(
-            sessions.spectator_queue().contains(&"t6".to_string()),
+            sessions.spectator_queue().contains(&"t7".to_string()),
             "spectator must NOT be auto-promoted on disconnect in lobby"
         );
-        // t6 must still have no consoles.
-        let t6_consoles = sessions.players().iter()
-            .find(|p| p.token == "t6")
+        // t7 must still have no consoles.
+        let t7_consoles = sessions.players().iter()
+            .find(|p| p.token == "t7")
             .map(|p| p.consoles.clone())
             .unwrap_or_default();
-        assert!(t6_consoles.is_empty(), "spectator t6 must not receive consoles automatically");
+        assert!(t7_consoles.is_empty(), "spectator t7 must not receive consoles automatically");
     }
 
     // ── SelectStation broadcast hardening (Option C) ─────────────────────
@@ -1105,15 +1104,15 @@ tags = ["player"]
     fn set_complexity_last_write_wins() {
         let mut sessions = sessions_with("t1", "Alice");
         pm_stations("t1", &ClientMessage::SelectStation { station: "Captain".into() }, &mut sessions, GamePhase::Lobby, None);
-        // Send Low, then Full. The last ComplexityChanged should carry "Std".
+        // Send Low, then Full. The last ComplexityChanged should carry "Full".
         let _ = pm_stations("t1", &ClientMessage::SetComplexity { console: Console::Helm, preset_name: "Low".into() }, &mut sessions, GamePhase::Lobby, None);
-        let result = pm_stations("t1", &ClientMessage::SetComplexity { console: Console::Helm, preset_name: "Std".into() }, &mut sessions, GamePhase::Lobby, None);
-        // Should have exactly one ComplexityChanged with "Std"
+        let result = pm_stations("t1", &ClientMessage::SetComplexity { console: Console::Helm, preset_name: "Full".into() }, &mut sessions, GamePhase::Lobby, None);
+        // Should have exactly one ComplexityChanged with "Full"
         let changes: Vec<_> = result.outbound.iter().filter_map(|(_, m)| match m {
             ServerMessage::ComplexityChanged { console: Console::Helm, preset_name } => Some(preset_name.as_str()),
             _ => None,
         }).collect();
-        assert_eq!(changes, vec!["Std"], "last write must win — only 'Full' should be broadcast");
+        assert_eq!(changes, vec!["Full"], "last write must win — only 'Full' should be broadcast");
     }
 
     #[test]

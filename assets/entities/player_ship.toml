@@ -55,122 +55,166 @@ emergency_threshold = 25.0
 
 [stations]
 min_players = 1
-max_players = 5
+max_players = 6
 
+# 1P: solo crew — captain handles everything including comms.
 [[stations.1]]
 name = "Captain"
-description = "Solo crew: pilot, fight, and command the bridge."
-consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power", "Science"]
+description = "Solo crew: pilot, fight, command, and hail contacts."
+consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power", "Science", "Comms"]
 rank = "Cpt."
-short_code = "CAP"
 next = "Helm"
 
+# 2P: command bridge + tactical ops. Comms bundles with the bridge.
 [[stations.2]]
 name = "Helm"
-description = "Pilot the ship and command the bridge."
-consoles = ["CaptainChair", "Helm"]
+description = "Pilot the ship, command the bridge, and manage comms."
+consoles = ["CaptainChair", "Helm", "Comms"]
 rank = "Cpt."
-short_code = "HLM"
 next = "Helm"
 previous = "Captain"
 
 [[stations.2]]
 name = "Tactical"
-description = "Weapons, science, and damage control."
-consoles = ["Tactical", "Repair", "Science"]
+description = "Weapons, damage control, and power management."
+consoles = ["Tactical", "Repair", "Power", "Science"]
 rank = "Ltn."
-short_code = "TAC"
+next = "Tactical"
+
+# 3P: bridge, weapons, and engineering. Comms stays with the bridge.
+[[stations.3]]
+name = "Helm"
+description = "Pilot the ship, command the bridge, and manage comms."
+consoles = ["CaptainChair", "Helm", "Comms"]
+rank = "Cpt."
+previous = "Helm"
+next = "Helm"
+
+[[stations.3]]
+name = "Tactical"
+description = "Manage weapons systems and science."
+consoles = ["Tactical", "Science"]
+rank = "Ltn."
+previous = "Tactical"
 next = "Tactical"
 
 [[stations.3]]
-name = "Helm"
-description = "Pilot the ship and command the bridge."
-consoles = ["CaptainChair", "Helm"]
-rank = "Cpt."
-short_code = "HLM"
-previous = "Helm"
-
-[[stations.3]]
-name = "Tactical"
-description = "Manage weapons systems."
-consoles = ["Tactical"]
-rank = "Ltn."
-short_code = "TAC"
-previous = "Tactical"
-
-[[stations.3]]
 name = "Engineering"
-description = "Maintain, repair, and monitor ship systems."
-consoles = ["Repair", "Power", "Science"]
-rank = "Ltn."
-short_code = "ENG"
-
-[[stations.4]]
-name = "Helm"
-description = "Pilot the ship and command the bridge."
-consoles = ["CaptainChair", "Helm"]
-rank = "Cpt."
-short_code = "HLM"
-previous = "Helm"
-
-[[stations.4]]
-name = "Tactical"
-description = "Manage weapons systems."
-consoles = ["Tactical"]
-rank = "Ltn."
-short_code = "TAC"
-previous = "Tactical"
-
-[[stations.4]]
-name = "Engineering"
-description = "Maintain and repair ship systems."
+description = "Maintain and repair ship systems, manage power."
 consoles = ["Repair", "Power"]
 rank = "Ltn."
-short_code = "ENG"
-previous = "Engineering"
+next = "Engineering"
+
+# 4P: dedicated Comms station breaks off from the bridge.
+[[stations.4]]
+name = "Helm"
+description = "Pilot the ship and command the bridge."
+consoles = ["CaptainChair", "Helm"]
+rank = "Cpt."
+previous = "Helm"
+next = "Helm"
 
 [[stations.4]]
-name = "Science"
-description = "Monitor sensors and long-range radar."
-consoles = ["Science"]
+name = "Tactical"
+description = "Manage weapons systems."
+consoles = ["Tactical"]
 rank = "Ltn."
-short_code = "SCI"
+previous = "Tactical"
+next = "Tactical"
 
+[[stations.4]]
+name = "Engineering"
+description = "Maintain and repair ship systems, manage power."
+consoles = ["Repair", "Power"]
+rank = "Ltn."
+previous = "Engineering"
+next = "Engineering"
+
+[[stations.4]]
+name = "Comms"
+description = "Hail stations, relay intelligence, and monitor science."
+consoles = ["Comms", "Science"]
+rank = "Ens."
+next = "Comms"
+
+# 5P: Captain breaks off from Helm.
 [[stations.5]]
 name = "Captain"
 description = "Command the bridge."
 consoles = ["CaptainChair"]
 rank = "Cpt."
-short_code = "CAP"
+next = "Captain"
 
 [[stations.5]]
 name = "Helm"
 description = "Pilot the ship."
 consoles = ["Helm"]
 rank = "Ltn."
-short_code = "HLM"
 previous = "Helm"
+next = "Helm"
 
 [[stations.5]]
 name = "Tactical"
 description = "Manage weapons systems."
 consoles = ["Tactical"]
 rank = "Ltn."
-short_code = "TAC"
 previous = "Tactical"
+next = "Tactical"
 
 [[stations.5]]
 name = "Engineering"
-description = "Maintain and repair ship systems."
+description = "Maintain and repair ship systems, manage power."
 consoles = ["Repair", "Power"]
 rank = "Ltn."
-short_code = "ENG"
 previous = "Engineering"
+next = "Engineering"
 
 [[stations.5]]
+name = "Comms"
+description = "Hail stations, relay intelligence, and monitor science."
+consoles = ["Comms", "Science"]
+rank = "Ens."
+previous = "Comms"
+next = "Comms"
+
+# 6P: Science breaks off from Comms.
+[[stations.6]]
+name = "Captain"
+description = "Command the bridge."
+consoles = ["CaptainChair"]
+rank = "Cpt."
+previous = "Captain"
+
+[[stations.6]]
+name = "Helm"
+description = "Pilot the ship."
+consoles = ["Helm"]
+rank = "Ltn."
+previous = "Helm"
+
+[[stations.6]]
+name = "Tactical"
+description = "Manage weapons systems."
+consoles = ["Tactical"]
+rank = "Ltn."
+previous = "Tactical"
+
+[[stations.6]]
+name = "Engineering"
+description = "Maintain and repair ship systems, manage power."
+consoles = ["Repair", "Power"]
+rank = "Ltn."
+previous = "Engineering"
+
+[[stations.6]]
+name = "Comms"
+description = "Hail stations and relay intelligence."
+consoles = ["Comms"]
+rank = "Ens."
+previous = "Comms"
+
+[[stations.6]]
 name = "Science"
 description = "Monitor sensors and long-range radar."
 consoles = ["Science"]
-rank = "Ltn."
-short_code = "SCI"
-previous = "Science"
+rank = "Ens."

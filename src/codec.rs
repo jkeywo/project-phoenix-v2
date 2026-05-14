@@ -1236,4 +1236,68 @@ mod tests {
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
     }
+
+    // ── Comms wire round-trips ─────────────────────────────────────────────
+
+    #[test]
+    fn client_hail_round_trips() {
+        let msg = ClientMessage::Hail { target_uuid: "station-uuid-123".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_select_comms_message_round_trips() {
+        let msg = ClientMessage::SelectCommsMessage { message_id: "msg-1".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_respond_to_message_round_trips() {
+        let msg = ClientMessage::RespondToMessage { message_id: "msg-1".into(), response_index: 2 };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_clear_comms_round_trips() {
+        let msg = ClientMessage::ClearComms;
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_comms_state_empty_round_trips() {
+        let msg = ServerMessage::CommsState {
+            messages: vec![],
+            objectives: vec![],
+            contacts: vec![],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_comms_state_with_message_round_trips() {
+        let msg = ServerMessage::CommsState {
+            messages: vec![crate::messages::CommsMessage {
+                id: "m1".into(),
+                sender_uuid: "station-abc".into(),
+                sender_name: "Starbase 12".into(),
+                subject: "Greetings".into(),
+                body: "Welcome to the sector.".into(),
+                responses: vec!["Acknowledged".into(), "Request docking".into()],
+                selected_response: Some(0),
+                is_read: false,
+            }],
+            objectives: vec![],
+            contacts: vec![crate::messages::CommsContact {
+                uuid: "station-abc".into(),
+                name: "Starbase 12".into(),
+            }],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
 }

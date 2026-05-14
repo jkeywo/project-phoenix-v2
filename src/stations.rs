@@ -26,8 +26,8 @@ pub struct StationDef {
 /// Return the default available complexity presets for every console.
 fn default_complexity_presets() -> HashMap<Console, Vec<String>> {
     let mut m = HashMap::new();
-    for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power] {
-        m.insert(c.clone(), vec!["Low".into(), "Std".into()]);
+    for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power, Console::Comms] {
+        m.insert(c.clone(), vec!["Low".into(), "Full".into()]);
     }
     m
 }
@@ -133,6 +133,7 @@ fn parse_console(s: &str, count: u32, station: &str) -> Result<Console, StationC
         "Repair" => Ok(Console::Repair),
         "Science" => Ok(Console::Science),
         "Power" => Ok(Console::Power),
+        "Comms" => Ok(Console::Comms),
         other => Err(StationConfigError::UnknownConsole {
             count,
             station: station.to_string(),
@@ -656,20 +657,20 @@ consoles = ["Science"]
 "#
     }
 
-    // ── Full → Std rename ────────────────────────────────────────────────────
+    // ── Full preset name ─────────────────────────────────────────────────────
 
     #[test]
-    fn default_complexity_presets_uses_std_not_full() {
+    fn default_complexity_presets_uses_full_not_std() {
         let presets = default_complexity_presets();
         for (console, names) in &presets {
             assert!(
-                !names.iter().any(|n| n == "Full"),
-                "console {:?} still has 'Full' preset — should be 'Std'",
+                !names.iter().any(|n| n == "Std"),
+                "console {:?} still has 'Std' preset — should be 'Full'",
                 console
             );
             assert!(
-                names.iter().any(|n| n == "Std"),
-                "console {:?} missing 'Std' preset",
+                names.iter().any(|n| n == "Full"),
+                "console {:?} missing 'Full' preset",
                 console
             );
         }
@@ -1036,19 +1037,20 @@ consoles = ["CaptainChair", "Helm"]
 
     #[test]
     fn join_at_max_players_returns_current_unchanged_new_player_is_spectator() {
-        let stations = worked_example_stations(); // max_players = 5
-        // Full 5P crew
+        let stations = worked_example_stations(); // max_players = 6
+        // Full 6P crew
         let current: StationAssignments = [
-            ("alice".to_string(), "Helm".to_string()),
-            ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Engineering".to_string()),
-            ("dave".to_string(), "Science".to_string()),
-            ("eve".to_string(), "Helm".to_string()),
+            ("alice".to_string(), "Captain".to_string()),
+            ("bob".to_string(), "Helm".to_string()),
+            ("carol".to_string(), "Tactical".to_string()),
+            ("dave".to_string(), "Engineering".to_string()),
+            ("eve".to_string(), "Comms".to_string()),
+            ("frank".to_string(), "Science".to_string()),
         ].into();
-        let result = reassign_on_join(&stations, &current, "frank");
-        // Current unchanged; frank is not in the map (caller adds to spectator queue)
-        assert!(!result.contains_key("frank"), "frank should be a spectator");
-        assert_eq!(result.len(), 5);
+        let result = reassign_on_join(&stations, &current, "gary");
+        // Current unchanged; gary is not in the map (caller adds to spectator queue)
+        assert!(!result.contains_key("gary"), "gary should be a spectator");
+        assert_eq!(result.len(), 6);
     }
 
     // ── advance_on_join ──────────────────────────────────────────────────────

@@ -1,0 +1,92 @@
+// Pure module: resolve an EntityInstance into a concrete EntityConfig.
+// No Bevy dependency — fully unit-testable on native.
+
+use crate::entity_config::EntityConfig;
+use crate::map_config::EntityInstance;
+
+/// Resolve an `EntityInstance` to a concrete `EntityConfig` by:
+/// 1. Looking up `entity_inst.template_path` in the config cache.
+/// 2. Optionally merging `entity_inst.overrides` on top of the template TOML.
+///
+/// Returns `Err` if the template is not found in the cache.
+pub fn resolve_entity(
+    entity_inst: &EntityInstance,
+    config_cache: &crate::config_cache::ConfigCache,
+) -> Result<EntityConfig, String> {
+    let template = config_cache
+        .get(&entity_inst.template_path)
+        .ok_or_else(|| format!("entity template not found in cache: '{}'", entity_inst.template_path))?;
+
+    let config = match &entity_inst.overrides {
+        None => template.clone(),
+        Some(overrides) => {
+            // Re-serialise the template to a toml::Value, merge, then deserialise back.
+            let template_value: toml::Value = toml::from_str(
+                &toml::to_string(template).map_err(|e| format!("template serialise error: {e}"))?,
+            )
+            .map_err(|e| format!("template re-parse error: {e}"))?;
+
+            let merged = crate::entity_override::merge_toml(&template_value, overrides);
+            let merged_str =
+                toml::to_string(&merged).map_err(|e| format!("merged serialise error: {e}"))?;
+            EntityConfig::from_toml(&merged_str).map_err(|e| format!("merged parse error: {e:?}"))?
+        }
+    };
+
+    Ok(config)
+}
+
+/// Generate a new UUID string for a spawned entity.
+pub fn assign_uuid() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity_config::EntityConfig;
+    use std::collections::HashMap;
+
+    fn make_cache(path: &str, toml: &str) -> HashMap<String, EntityConfig> {
+        let mut m = HashMap::new();
+        m.insert(path.to_string(), EntityConfig::from_toml(toml).unwrap());
+        m
+    }
+
+    #[test]
+    fn resolve_missing_template_returns_err() {
+        let cache: HashMap<String, EntityConfig> = HashMap::new();
+        let inst = EntityInstance {
+            template_path: "assets/entities/missing.toml".to_string(),
+            ..Default::default()
+        };
+        let result = resolve_entity(&inst, &cache);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found in cache"));
+    }
+
+    #[test]
+    fn resolve_template_no_overrides_returns_clone() {
+        let cache = make_cache("assets/entities/rock.toml", r#"tags = ["asteroid"]"#);
+        let inst = EntityInstance {
+            template_path: "assets/entities/rock.toml".to_string(),
+            overrides: None,
+            ..Default::default()
+        };
+        let config = resolve_entity(&inst, &cache).unwrap();
+        assert_eq!(config.tags, vec!["asteroid"]);
+    }
+
+    #[test]
+    fn assign_uuid_returns_valid_uuid() {
+        let id = assign_uuid();
+        assert!(uuid::Uuid::parse_str(&id).is_ok(), "assign_uuid should return a valid UUID v4");
+    }
+
+    #[test]
+    fn assign_uuid_returns_unique_values() {
+        let a = assign_uuid();
+        let b = assign_uuid();
+        assert_ne!(a, b);
+    }
+}

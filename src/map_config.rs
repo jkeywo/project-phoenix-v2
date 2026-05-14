@@ -144,6 +144,42 @@ fn default_despawn_distance() -> f32 {
     250.0
 }
 
+/// When to spawn an entity instance.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityInstanceSpawnOn {
+    /// Spawn immediately when the world is loaded (lobby phase).
+    Immediate,
+    /// Spawn when the game starts (in-progress phase).
+    GameStart,
+}
+
+impl Default for EntityInstanceSpawnOn {
+    fn default() -> Self {
+        EntityInstanceSpawnOn::Immediate
+    }
+}
+
+/// A concrete entity instance declared in the map TOML.
+/// References a template TOML file and supplies instance-level overrides.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct EntityInstance {
+    /// Path to the entity template TOML (relative to assets/).
+    pub template_path: String,
+    /// Optional human-readable identifier for this instance.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// World-space position [x, y, z].
+    #[serde(default)]
+    pub position: Vec<f32>,
+    /// When this entity should be spawned.
+    #[serde(default)]
+    pub spawn_on: EntityInstanceSpawnOn,
+    /// Optional inline TOML overrides merged on top of the template.
+    #[serde(default)]
+    pub overrides: Option<toml::Value>,
+}
+
 /// Complete map configuration.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, bevy::prelude::Resource)]
 pub struct MapConfig {
@@ -162,6 +198,9 @@ pub struct MapConfig {
     /// Named anchors - predefined positions that can be referenced by name.
     #[serde(default)]
     pub anchors: HashMap<String, Vec<f32>>,
+    /// Generic entity instances declared in the map.
+    #[serde(default, rename = "entity")]
+    pub entities: Vec<EntityInstance>,
 }
 
 impl Default for MapConfig {
@@ -172,6 +211,7 @@ impl Default for MapConfig {
             planets: Vec::new(),
             asteroid_fields: Vec::new(),
             anchors: HashMap::new(),
+            entities: Vec::new(),
         }
     }
 }

@@ -28,7 +28,7 @@ struct RedAlertVignetteMaterial {
     _pad2: f32,
 };
 
-@group(1) @binding(0)
+@group(0) @binding(0)
 var<uniform> material: RedAlertVignetteMaterial;
 
 // Anti-aliased step from `edge0` to `edge1`. `value` outside the range

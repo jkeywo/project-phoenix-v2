@@ -96,14 +96,14 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-fc45d8d01271ed1d.js" crossorigin="anonymous" integrity="sha384-6aFXxqC4qxVinDsP8RJk9vS18TU5gMagTXG3PEdiVQdUWAeyrhjSuDIMkmB01hgI"><link rel="preload" href="./project-phoenix-fc45d8d01271ed1d_bg.wasm" crossorigin="anonymous" integrity="sha384-kOYpczObb33PMURRDmCeMT5cBaFF/yYkpBlD/Bit2a+vGsCwqminJUFcYlffIlM2" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-93d56d6af1c3fed0.js" crossorigin="anonymous" integrity="sha384-c0ksl30dAqLybWft6GMEtEHAmSA8PDmJb3Z4JWlJLEPrXqGOR0uf15PQiBiNoK3d"><link rel="preload" href="./project-phoenix-93d56d6af1c3fed0_bg.wasm" crossorigin="anonymous" integrity="sha384-OvashVlsP3/JVfttpFUL4SEGrehS9CEqYIm7vBBNLYzR1K8TUGsI5t8sWA292nJK" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-fc45d8d01271ed1d.js';
-const wasm = await init({ module_or_path: './project-phoenix-fc45d8d01271ed1d_bg.wasm' });
+import init, * as bindings from './project-phoenix-93d56d6af1c3fed0.js';
+const wasm = await init({ module_or_path: './project-phoenix-93d56d6af1c3fed0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -271,6 +271,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     let myName = localStorage.getItem('player-name') || randomName();
     localStorage.setItem('player-name', myName);
+
+    // ── Complexity preset persistence ──────────────────────────
+    // JSON map of console name → preset name, persisted from previous sessions.
+    let savedComplexity = {};
+    try { savedComplexity = JSON.parse(localStorage.getItem('complexity-presets')) || {}; } catch (_) {}
 
     // ── State ───────────────────────────────────────────────────
 
@@ -789,6 +794,19 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             consoles: consolesOf(p),
           }));
           setStatus('Connected');
+          // Sync complexity presets: send SetComplexity for any console the
+          // local player holds whose stored preference differs from the server.
+          if (msg.data.state.complexity) {
+            const serverComplexity = msg.data.state.complexity;
+            const mine = myConsoles(state);
+            for (const c of mine) {
+              const stored = savedComplexity[c];
+              const current = serverComplexity[c];
+              if (stored && stored !== current) {
+                send('SetComplexity', { console: c, preset_name: stored });
+              }
+            }
+          }
           break;
         case 'PlayerJoined':
           if (!state.players.find(p => p.token === msg.data.player.token)) {
@@ -919,6 +937,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           renderWeaponsRadar();
           return;
         }
+        case 'ComplexityChanged': {
+          const { console, preset_name } = msg.data;
+          savedComplexity[console] = preset_name;
+          localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
+          return;
+        }
         default:
           return; // unknown — skip re-render
       }
@@ -966,12 +990,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       window.wasm_client_set_name             = wasmBindings.wasm_client_set_name;
       window.wasm_client_set_token            = wasmBindings.wasm_client_set_token;
       window.wasm_client_set_active_console   = wasmBindings.wasm_client_set_active_console;
+      window.wasm_client_set_complexity_presets = wasmBindings.wasm_client_set_complexity_presets;
       window.set_client_send_callback         = wasmBindings.set_client_send_callback;
       set_client_send_callback(clientSendCallback);
       // The local player's session token is needed by the lobby UI to
       // highlight "my" console selection.
       wasm_client_set_token(myToken);
       if (pendingName !== null) wasm_client_set_name(pendingName);
+      // Inject stored complexity presets so WASM can decide pop-up/dropdown state.
+      wasm_client_set_complexity_presets(JSON.stringify(savedComplexity));
       // Flush queued inbound messages before wasm_client_init: in WASM
       // App::run() unwinds the JS stack via throw, so anything after it
       // never executes.

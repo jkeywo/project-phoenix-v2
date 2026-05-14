@@ -39,9 +39,9 @@ pub struct OutboundClientMessage(pub ClientMessage);
 // ── Marker components ──────────────────────────────────────────────
 
 /// Marks the root node of the lobby UI so it can be shown/hidden when
-/// the phase changes.
+/// the phase changes, and reparented into the bezel content area.
 #[derive(Component)]
-struct LobbyRoot;
+pub struct LobbyRoot;
 
 /// Marks the container of the per-console buttons so it can be cleared
 /// and rebuilt on every `LobbyState` change.

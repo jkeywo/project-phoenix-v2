@@ -238,11 +238,15 @@ fn reparent_panels_into_bezel(
     content_area: Query<Entity, (With<BezelContentArea>, Added<BezelContentArea>)>,
     captain: Query<Entity, With<crate::client_app::CaptainPanel>>,
     helm: Query<Entity, With<crate::client_app::HelmPanel>>,
+    lobby: Query<Entity, With<crate::client_app::LobbyRoot>>,
     science: Query<Entity, With<crate::client_app::SciencePanel>>,
     weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
     tab_bar: Query<Entity, With<crate::client_app::TabBarRoot>>,
 ) {
     let Ok(target) = content_area.single() else { return };
+    for entity in lobby.iter() {
+        commands.entity(entity).set_parent_in_place(target);
+    }
     for entity in captain.iter() {
         commands.entity(entity).set_parent_in_place(target);
     }

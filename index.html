@@ -42,7 +42,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-47f21a2da9049e6.js" crossorigin="anonymous" integrity="sha384-gLt/QIeF7P2tvuZ7QtRmRan/hdJPZ5asqQ6Ta+Zm6Zgs/V8Boh+WeUrJpZQB7eLM"><link rel="preload" href="./project-phoenix-47f21a2da9049e6_bg.wasm" crossorigin="anonymous" integrity="sha384-TVOB1ygocfDWjmTwCpHJZFCJ+ZfeZluDqY5XVEbbl4lqJBcm5rmsZPTf/cbTqTfg" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-5537e27f630d6a5c.js" crossorigin="anonymous" integrity="sha384-PGx6NIsBhhvQzUTr5bTMEOuQVd9+XS5e20iWMb8zm+WcYGe5Mp3IJ3hpl7u7wzPS"><link rel="preload" href="./project-phoenix-5537e27f630d6a5c_bg.wasm" crossorigin="anonymous" integrity="sha384-u4BKsHMR2sXRLc/oj21Jmxrw6uYdiKJLH+aHrniJgRDEthAZD7l/LzbiKRaqUHsL" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">
@@ -72,8 +72,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-47f21a2da9049e6.js';
-const wasm = await init({ module_or_path: './project-phoenix-47f21a2da9049e6_bg.wasm' });
+import init, * as bindings from './project-phoenix-5537e27f630d6a5c.js';
+const wasm = await init({ module_or_path: './project-phoenix-5537e27f630d6a5c_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -309,6 +309,8 @@ function finishInit() {
   window.wasm_receive_message = wasmBindings.wasm_receive_message;
   window.set_message_callback = wasmBindings.set_message_callback;
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
+  window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
+  window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
 
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.
@@ -346,6 +348,12 @@ function showFatalError(message) {
 function startServer() {
   const spinner = document.getElementById('wasm-spinner');
   if (spinner) spinner.style.display = 'none';
+
+  // Read ?debug_regions=1 URL parameter before WASM init
+  const urlParams = new URLSearchParams(location.search);
+  if (urlParams.get('debug_regions') === '1') {
+    wasm_set_debug_regions(true);
+  }
 
   set_message_callback(routeOutbound);
   

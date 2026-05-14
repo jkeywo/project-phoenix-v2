@@ -1,10 +1,12 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::entity_spawner::{RegionShapeSection, RegionEffectsSection};
+use crate::entity_spawner::{RegionShapeSection, RegionEffectsSection, EntityUuid};
 use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
 use crate::ship_state::ShipState;
 use crate::region_effects::RegionEffectKind;
+use crate::modifiers::{ShipModifiers, Modifier};
+use crate::messages::{ModifierSlot, ModifierSource};
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -32,12 +34,15 @@ pub struct RegionPlugin;
 impl Plugin for RegionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RegionMembership>()
+            .init_resource::<ShipModifiers>()
             .add_message::<RegionEntered>()
             .add_message::<RegionExited>()
             .add_systems(Update, (
                 update_region_membership,
                 apply_damage_zone_damage.after(update_region_membership),
                 handle_blocks_impulse_region_enter.after(update_region_membership),
+                handle_radar_dampening_enter.after(update_region_membership),
+                handle_radar_dampening_exit.after(update_region_membership),
             ));
     }
 }
@@ -164,6 +169,55 @@ fn handle_blocks_impulse_region_enter(
     }
 }
 
+/// Registers a `RadarRange` modifier when the ship enters a region with the
+/// `RadarDampening` effect. The modifier's bonus is the region's multiplier value.
+fn handle_radar_dampening_enter(
+    mut entered: MessageReader<RegionEntered>,
+    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
+    mut modifiers: ResMut<ShipModifiers>,
+) {
+    for ev in entered.read() {
+        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
+            continue;
+        };
+        for effect in &effects.0 {
+            if let RegionEffectKind::RadarDampening { multiplier } = effect {
+                let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
+                    Ok(u) => u,
+                    // If the UUID is somehow invalid, skip this region silently
+                    Err(_) => continue,
+                };
+                modifiers.add_or_update(Modifier {
+                    source: ModifierSource::RegionEffect { uuid },
+                    slot: ModifierSlot::RadarRange,
+                    bonus: *multiplier,
+                });
+            }
+        }
+    }
+}
+
+/// Removes all modifiers originating from a region when the ship exits it.
+/// Uses `clear_source` so that any future region effects that register
+/// modifiers under the same `ModifierSource::RegionEffect { uuid }` are
+/// also cleaned up on exit.
+fn handle_radar_dampening_exit(
+    mut exited: MessageReader<RegionExited>,
+    region_query: Query<&EntityUuid>,
+    mut modifiers: ResMut<ShipModifiers>,
+) {
+    for ev in exited.read() {
+        let Ok(uuid_comp) = region_query.get(ev.region_entity) else {
+            continue;
+        };
+        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        modifiers.clear_source(&ModifierSource::RegionEffect { uuid });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,7 +227,9 @@ mod tests {
     use crate::damage::HullIntegrity;
     use crate::simulation::{ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
     use crate::impulse::{ImpulseState, ImpulsePhase, IMPULSE_CHARGE_DURATION};
-    use crate::region_effects::BlocksImpulseEffect;
+    use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect};
+    use crate::modifiers::ShipModifiers;
+    use crate::messages::ModifierSlot;
 
     /// Build a minimal Bevy app with the region plugin.
     fn test_app() -> App {
@@ -646,5 +702,125 @@ mod tests {
         tick_with_dt(&mut app, 0.016);
 
         assert_impulse_phase(&app, ImpulsePhase::Charging);
+    }
+
+    // ── Radar Dampening tests ───────────────────────────────────────────
+
+    fn radar_dampening_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(RegionPlugin);
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(ShipState::new());
+        app.insert_resource(ShipModifiers::new());
+        app.world_mut().spawn((Ship, Transform::default()));
+        app
+    }
+
+    fn spawn_radar_dampening_region(app: &mut App, x: f32, z: f32, radius: f32, multiplier: f32) -> Entity {
+        let config = EntityConfig {
+            tags: vec!["region".to_string()],
+            shape: Some(RegionShape::Sphere { radius }),
+            effects: Some(EffectsCfg {
+                radar_dampening: Some(RadarDampeningEffect { multiplier }),
+                ..Default::default()
+            }),
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            science_console: None,
+            star: None,
+            planet: None,
+            asteroid_field: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let mut commands = app.world_mut().commands();
+        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+    }
+
+    #[test]
+    fn entering_radar_dampening_region_adds_modifier() {
+        let mut app = radar_dampening_test_app();
+        spawn_radar_dampening_region(&mut app, 0.0, 0.0, 50.0, -0.3);
+        set_ship_pos(&mut app, 0.0, 0.0); // inside region at origin
+        tick_with_dt(&mut app, 0.016);
+
+        let modifiers = app.world().resource::<ShipModifiers>();
+        let expected = 1.0 / (1.0 + 0.3); // PRD #117 negative-bonus formula
+        assert!(
+            (modifiers.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
+            "expected radar range multiplier ~{}, got {}",
+            expected,
+            modifiers.get(&ModifierSlot::RadarRange)
+        );
+    }
+
+    #[test]
+    fn exiting_radar_dampening_region_removes_modifier() {
+        let mut app = radar_dampening_test_app();
+        let _region = spawn_radar_dampening_region(&mut app, 0.0, 0.0, 50.0, -0.3);
+        set_ship_pos(&mut app, 0.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Verify modifier is present
+        let modifiers_before = app.world().resource::<ShipModifiers>();
+        assert!(
+            (modifiers_before.get(&ModifierSlot::RadarRange) - 1.0 / 1.3).abs() < 1e-6,
+            "modifier should be present while inside region"
+        );
+
+        // Move ship outside
+        set_ship_pos(&mut app, 200.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        let modifiers_after = app.world().resource::<ShipModifiers>();
+        assert!(
+            (modifiers_after.get(&ModifierSlot::RadarRange) - 1.0).abs() < 1e-6,
+            "modifier should be removed after exiting region, got {}",
+            modifiers_after.get(&ModifierSlot::RadarRange)
+        );
+    }
+
+    #[test]
+    fn overlapping_radar_dampening_regions_stack_additively() {
+        let mut app = radar_dampening_test_app();
+        // Region A at (0,0) radius 80, bonus -0.3
+        // Region B at (60,0) radius 80, bonus -0.5
+        // Ship at (0,0) is inside both
+        spawn_radar_dampening_region(&mut app, 0.0, 0.0, 80.0, -0.3);
+        spawn_radar_dampening_region(&mut app, 60.0, 0.0, 80.0, -0.5);
+        set_ship_pos(&mut app, 0.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        // Both bonuses sum to -0.8 → 1/(1+0.8) = 0.5556
+        let modifiers = app.world().resource::<ShipModifiers>();
+        let expected_both = 1.0 / (1.0 + 0.3 + 0.5);
+        assert!(
+            (modifiers.get(&ModifierSlot::RadarRange) - expected_both).abs() < 1e-6,
+            "expected stacked multiplier ~{}, got {}",
+            expected_both,
+            modifiers.get(&ModifierSlot::RadarRange)
+        );
+
+        // Move to (-40,0): still inside A (dist 40 < 80), outside B (dist 100 > 80)
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+        set_ship_pos(&mut app, -40.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        let modifiers = app.world().resource::<ShipModifiers>();
+        let expected_a = 1.0 / (1.0 + 0.3);
+        assert!(
+            (modifiers.get(&ModifierSlot::RadarRange) - expected_a).abs() < 1e-6,
+            "expected only region A multiplier ~{}, got {}",
+            expected_a,
+            modifiers.get(&ModifierSlot::RadarRange)
+        );
     }
 }

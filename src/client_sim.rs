@@ -561,7 +561,7 @@ pub fn is_power_locked(payload: &Option<(u8, u8, u8, f32, bool)>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{Console, EntitySnapshot, GamePhase, GameState, Player, SimSnapshot, WorldData};
+    use crate::messages::{Console, EntitySnapshot, GamePhase, GameState, Player, RadarStateSnapshot, SimSnapshot, WorldData};
 
     fn snap(red_alert: bool, view_mode: ViewMode) -> SimSnapshot {
         SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100.0, power_levels: (2, 2, 2), flags: vec![], entity_states: vec![], radar_state: RadarStateSnapshot::default() }

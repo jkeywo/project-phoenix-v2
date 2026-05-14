@@ -12,6 +12,8 @@ pub mod asteroid_window;
 pub mod breakdown;
 pub mod flag_kind;
 pub mod complexity;
+pub mod console_ai;
+pub mod console_ai_plugin;
 pub mod config_cache;
 pub mod damage;
 pub mod entity_config;

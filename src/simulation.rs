@@ -278,6 +278,7 @@ impl Plugin for SimulationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RapierPhysicsPlugin::<()>::default())
             .add_plugins(crate::region_plugin::RegionPlugin)
+            .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))

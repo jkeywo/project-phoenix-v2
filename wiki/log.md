@@ -254,3 +254,13 @@ Pages created:
 Open PRDs now: #116 (Save/Load), #119 (Stations + Scenarios + Comms), #142 (AI). #116 and #119 are blockers/shaping-influences for #142.
 
 Pages still not yet updated in this pass (deferred — facts mostly correct but file paths / line numbers may drift): `concepts/architecture`, `concepts/testing-strategy`, `concepts/console-plugin-pattern`, `concepts/view-model-pattern`, `entities/helm-console`, `entities/captain-console`, `entities/bridge-crew-stations-planned` (now superseded by `stations.rs` — candidate for retirement), `roadmap/combat-and-damage`, `roadmap/console-expansion`, `roadmap/data-driven-content`, `roadmap/open-architectural-questions`, `roadmap/overview` (the open-PRD list inside it still mentions #115/#117/#118/#120 as planned).
+
+## [2026-05-14] ingest | Issue #175 — auto-fire torpedo AI | console_ai + console_ai_plugin
+
+Implemented issue #175 via TDD (21 new tests, all passing).
+
+New modules:
+- `src/console_ai.rs` — pure (no Bevy) `auto_fire_torpedo` decision function. `TorpedoAiInput` / `TubeSummary` types. Conditions: target locked + shields ≤ 0 + tube loaded + tube in arc + magazine > 0. Returns tubes in deterministic priority order [ForePort, ForeStarboard, Aft].
+- `src/console_ai_plugin.rs` — Bevy orchestrator. `ConsoleComplexityState` resource tracks current preset per console (updated from outbound `ComplexityChanged` messages). `run_tactical_ai` synthesises `FireTorpedo` `InboundMessage` each tick when Tactical is occupied and at Low complexity. Continuous re-fire on reload: the system re-evaluates every frame so any newly-loaded tube fires immediately. Switching to Full stops AI immediately (checked every tick).
+- `ConsoleAiPlugin` wired into `SimulationPlugin`.
+- Pre-existing compile error in `src/client_sim.rs` (missing `RadarStateSnapshot` import in tests) fixed as a prerequisite.

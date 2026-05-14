@@ -2021,6 +2021,39 @@ entity = "raider"
         assert_eq!(fired2.len(), 0);
     }
 
+    // ── default.toml compile-time template tests ────────────────────────────
+
+    #[test]
+    fn default_scenario_toml_parses_without_error() {
+        let toml_str = include_str!("../assets/scenarios/default.toml");
+        parse_scenario(toml_str).expect("default.toml must parse");
+    }
+
+    #[test]
+    fn default_scenario_has_starbase_alpha_spawn() {
+        let toml_str = include_str!("../assets/scenarios/default.toml");
+        let config = parse_scenario(toml_str).expect("default.toml must parse");
+        let starbase = config.spawns.iter().find(|s| s.name == "starbase_alpha");
+        assert!(starbase.is_some(), "default scenario must have a spawn named 'starbase_alpha'");
+    }
+
+    #[test]
+    fn default_scenario_has_starbase_alpha_comms_with_responses_and_actions() {
+        let toml_str = include_str!("../assets/scenarios/default.toml");
+        let config = parse_scenario(toml_str).expect("default.toml must parse");
+        let tmpl = config.comms.iter().find(|c| c.from == "starbase_alpha");
+        assert!(tmpl.is_some(), "default scenario must have a comms template from 'starbase_alpha'");
+        let tmpl = tmpl.unwrap();
+        assert!(
+            !tmpl.node.responses.is_empty(),
+            "starbase_alpha comms must have at least one response"
+        );
+        let has_add_objective = tmpl.node.responses.iter().any(|r| {
+            r.actions.iter().any(|a| matches!(a, TriggerAction::AddObjective { .. }))
+        });
+        assert!(has_add_objective, "starbase_alpha comms response must have an add_objective action");
+    }
+
     // ── patrol.toml compile-time template tests ─────────────────────────────
 
     #[test]

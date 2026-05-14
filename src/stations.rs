@@ -233,16 +233,19 @@ pub fn parse_and_validate(toml_str: &str) -> Result<ShipStations, StationConfigE
         for def in &defs {
             // --- next ---
             if let Some(explicit_next) = &def.next {
-                // Explicit next must resolve at count+1.
-                let next_count = count + 1;
-                match configs.get(&next_count) {
-                    Some(next_defs) if next_defs.iter().any(|d| &d.name == explicit_next) => {}
-                    _ => {
-                        return Err(StationConfigError::DanglingNext {
-                            count,
-                            station: def.name.clone(),
-                            target: explicit_next.clone(),
-                        });
+                // Explicit next must resolve at count+1, unless we are already
+                // at max (no higher player-count exists — next is irrelevant).
+                if count < max {
+                    let next_count = count + 1;
+                    match configs.get(&next_count) {
+                        Some(next_defs) if next_defs.iter().any(|d| &d.name == explicit_next) => {}
+                        _ => {
+                            return Err(StationConfigError::DanglingNext {
+                                count,
+                                station: def.name.clone(),
+                                target: explicit_next.clone(),
+                            });
+                        }
                     }
                 }
             } else if count < max {
@@ -263,16 +266,19 @@ pub fn parse_and_validate(toml_str: &str) -> Result<ShipStations, StationConfigE
 
             // --- previous ---
             if let Some(explicit_prev) = &def.previous {
-                // Explicit previous must resolve at count-1.
-                let prev_count = count - 1;
-                match configs.get(&prev_count) {
-                    Some(prev_defs) if prev_defs.iter().any(|d| &d.name == explicit_prev) => {}
-                    _ => {
-                        return Err(StationConfigError::DanglingPrevious {
-                            count,
-                            station: def.name.clone(),
-                            target: explicit_prev.clone(),
-                        });
+                // Explicit previous must resolve at count-1, unless we are at
+                // min (no lower player-count exists — previous is irrelevant).
+                if count > min {
+                    let prev_count = count - 1;
+                    match configs.get(&prev_count) {
+                        Some(prev_defs) if prev_defs.iter().any(|d| &d.name == explicit_prev) => {}
+                        _ => {
+                            return Err(StationConfigError::DanglingPrevious {
+                                count,
+                                station: def.name.clone(),
+                                target: explicit_prev.clone(),
+                            });
+                        }
                     }
                 }
             }

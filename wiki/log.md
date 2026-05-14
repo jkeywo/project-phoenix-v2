@@ -306,3 +306,17 @@ Changes:
 - `assets/complexity/tactical.toml` â€” added `auto_match_delay_secs = 3.0` to `[preset.ai] frequency_match`.
 - `src/console_ai.rs` â€” new `tick_auto_match_frequency(state, input) -> FrequencyMatchOutput` pure decision function + `FrequencyMatchState`, `FrequencyMatchInput`, `FrequencyMatchOutput` types. Trigger activates when both Tactical and Science are Low, or Science is unmanned. Timer resets on target change or when trigger deactivates. Frequency persists on trigger end â€” no auto-revert.
 - `src/console_ai_plugin.rs` â€” new `run_auto_match_ai` Bevy system; `FrequencyMatchTimer` and `AutoMatchDelaySecs` resources; `load_auto_match_delay_secs()` reads from embedded `tactical.toml`. Synthesises `SetPhaserFrequency` as an `InboundMessage` from the Tactical holder token after delay elapses. Either console flipping to Full cancels the pending countdown. Registered in `ConsoleAiPlugin` alongside existing AI systems.
+
+## [2026-05-14] lint | Plan-shift: AI is no longer a stub; husk list mostly obsolete; folder reorg planned | touched: wiki/concepts/architecture.md, wiki/concepts/console-plugin-pattern.md, wiki/sources/prd-142-ai-and-behaviour.md
+
+During an architectural-improvement grilling session, the running plan called for deleting `ai.rs` + `ai_plugin.rs` as `husks awaiting PRD #142`. A check against the codebase confirmed the user's correction: those files now contain ~1650 lines of working code (issues #175/#176/#177/#179 landed during this session). The husk list collapses to just `comms_plugin.rs` (24 lines), which will fold naturally into a future `CommsConsolePlugin` once the per-console split lands. `delegation.rs` (142 LoC, well-tested pure allowlist) and `region_effects.rs` (217 LoC, pure TOML-config schema) were also flagged for inlining, but inspection shows both are clean focused modules whose deletion would *worsen* locality by folding them into 40+KB neighbours.
+
+Wiki updates:
+
+- `wiki/concepts/architecture.md` — replaced the entire `src/server/` / `src/client/` / `src/shared/` module map (none of those folders exist) with the actual flat ~56-module layout, grouped by naming convention. Noted the planned domain-grouped folder reorg.
+- `wiki/concepts/console-plugin-pattern.md` — flipped from `current plugins: CaptainConsolePlugin, HelmConsolePlugin` (neither file exists) to `partially realised`: documents the current god-module reality (`client_app.rs` ~2329 LoC, `client_sim.rs` ~2136 LoC) and the planned per-console split. Added locality-of-behaviour rationale.
+- `wiki/sources/prd-142-ai-and-behaviour.md` — status flipped from `open` to `in-flight`. Documented the landed pieces (`ai.rs`, `ai_plugin.rs`, `faction.rs`, console-AI siblings) and the still-open work (TOML state-machine schema, squad behaviours, scenario integration).
+
+Filed issue #218 — `Architecture: Merge Scenario into World` — capturing the rationale for the planned merger of `scenario_plugin.rs` into a unified `WorldPlugin` at `src/world/server.rs`. To be executed as part of the upcoming reorg.
+
+Not yet touched (deferred to the actual reorg PRs): `wiki/roadmap/open-architectural-questions.md` (will be amended once the reorg + 6 deepenings start landing); per-PRD source pages for the AI sub-issues (#175/#176/#177/#179).

@@ -2,8 +2,8 @@
 title: Architecture
 type: concept
 tags: [architecture, layers, server, client, wasm]
-sources: [AGENTS.md, src/lib.rs, src/server/, src/client/, src/shared/]
-updated: 2026-05-08
+sources: [AGENTS.md, src/lib.rs]
+updated: 2026-05-14
 ---
 
 # Architecture
@@ -26,30 +26,34 @@ Project Phoenix ships as **two HTML pages** built from **one Rust crate**, talki
 
 - **`server.html`** loads the WASM binary built with `cargo` features `["server"]`. Trunk drives the build (`Trunk.toml`).
 - **`client.html`** loads the *same* crate with feature `["client"]`. The client now also runs Bevy/WASM (post-PRD #66 prep), but its UI is much smaller and there's no Rapier.
-- `src/lib.rs` declares modules grouped under `server/`, `client/`, and `shared/`. Bridge modules are gated by feature flags.
+- `src/lib.rs` declares ~56 modules in a **flat layout** under `src/`. Audience and concern are encoded in module *names* (`client_*`, `*_plugin`) and `#[cfg(feature = "server" | "client")]` gates. A folder reorg into domain-grouped subdirectories (`ship/`, `weapons/`, `regions/`, `console/<name>/`, `lobby/`, `world/`, `core/`, `client/`, `server/`) is planned (see [Open Architectural Questions](../roadmap/open-architectural-questions.md)).
 
 ## Module map
 
-| Path | Role |
+The current flat layout groups modules by concern through naming:
+
+| Naming pattern | Role |
 |---|---|
-| `src/shared/messages.rs` | Pure data types — `ClientMessage`, `ServerMessage`, `Console`, `GamePhase`, `SimSnapshot`, `WorldData`. |
-| `src/shared/codec.rs` | The **only** place `serde_json` is used. Implements `MessageCodec` trait. See [Codec Seam](./codec-seam.md). |
-| `src/shared/radar.rs` | `radar_dots()` — pure iterator projecting asteroids onto the radar plane. Reused by server renderer and Helm console. |
-| `src/server/session.rs` | `SessionManager` — token → player record, console assignment, reconnect. |
-| `src/server/lobby.rs` | Bevy plugin: lobby-phase message routing. |
-| `src/server/lobby_handler.rs` | Pure handler functions producing `LobbyHandlerResult`. |
-| `src/server/simulation.rs` | Bevy plugin: helm input → physics → ship state, collisions. |
-| `src/server/ship_physics.rs` | Pure controller: `compute_physics(state, input, dt, config) -> result`. |
-| `src/server/ship_state.rs` | `ShipState` Bevy resource. |
-| `src/server/asteroid_spawner.rs` | Deterministic seeded asteroid placement. |
-| `src/server/renderer.rs` | Bevy plugin: 2D lobby UI + 3D game camera + Red Alert overlay. |
-| `src/server/bridge.rs` | `wasm-bindgen` exports — `wasm_init`, `wasm_receive_message`, `set_message_callback`, `wasm_player_disconnected`. |
-| `src/client/app.rs` | Client Bevy app entry (lobby + console plugins). |
-| `src/client/lobby_plugin.rs` · `lobby_state.rs` | Lobby UI + `LobbyView` view-model. |
-| `src/client/captain_plugin.rs` | Captain's Chair console UI. |
-| `src/client/helm_plugin.rs` · `helm_state.rs` | Helm UI + radar projection. |
-| `src/client/sim_state.rs` | Mirror of `SimSnapshot` for client rendering. |
-| `src/client/client_bridge.rs` | Client-side `wasm-bindgen` exports. |
+| `messages.rs` | Pure data types — `ClientMessage`, `ServerMessage`, `Console`, `GamePhase`, `SimSnapshot`. |
+| `codec.rs` | The **only** place `serde_json` is used. Implements `MessageCodec` trait. See [Codec Seam](./codec-seam.md). |
+| `radar.rs`, `radar_config.rs` | Pure radar projection, reused by server renderer and Helm/Weapons consoles. |
+| `session.rs`, `stations.rs` | Server identity + station assignment. |
+| `lobby.rs` (plugin) + `lobby_handler.rs` (pure) | Lobby-phase Bevy plugin + pure handler functions. |
+| `simulation.rs` | God-module Bevy plugin: helm input → physics → weapons → collision → breakdown → broadcast. Slated for split per the Plugin Pattern. |
+| `ship_physics.rs`, `ship_state.rs`, `impulse.rs` | Pure physics + Bevy resource. |
+| `phaser.rs`, `torpedo.rs`, `shield.rs` | Pure weapon/defence state machines. |
+| `damage.rs`, `breakdown.rs`, `repair_teams.rs` | Pure damage formula + breakdown queue + repair dispatch. |
+| `power_system.rs`, `modifiers.rs`, `flag_kind.rs` | Pure 6+2 power model + modifier cache + typed flags. |
+| `asteroid_spawner.rs`, `asteroid_window.rs`, `asteroid_lifecycle.rs` | Pure density + ring-buffer window + Bevy lifecycle systems. |
+| `region_*.rs`, `region_plugin.rs` | Region effects (damage zones, slow zones, jammers). |
+| `entity_config.rs`, `entity_loader.rs`, `entity_spawner.rs`, `entity_override.rs`, `entity_tags.rs`, `map_config.rs`, `config_cache.rs` | Data-driven entity pipeline (PRD #153). |
+| `scenario.rs`, `scenario_plugin.rs`, `objectives.rs`, `comms_inbox.rs` | Scenario engine (PRD #119, in flight). Planned to merge into a unified `world/` domain — see [#218](https://github.com/jkeywo/project-phoenix-v2/issues/218). |
+| `ai.rs`, `ai_plugin.rs`, `faction.rs` | NPC state machines (PRD #142, partially landed via issues #175/#176/#177/#179). |
+| `console_ai.rs`, `console_ai_plugin.rs`, `complexity.rs`, `delegation.rs` | Server-side AI that operates hidden console controls (PRD #154) + cross-console delegation allowlist. |
+| `renderer.rs`, `beam_render.rs`, `viewscreen_border.rs`, `debug_overlay.rs` | Server-side Bevy rendering. |
+| `client_app.rs`, `client_lobby.rs`, `client_sim.rs`, `client_helm.rs`, `client_comms.rs`, `client_complexity.rs`, `client_elements.rs` | Client-side Bevy app + per-console state. |
+| `comms_plugin.rs`, `phone_border/` | Client-side console plugin shells + phone bezel chrome (PRD #187). |
+| `bridge.rs` (server feature) · `client_bridge.rs` (client feature) | `wasm-bindgen` exports. |
 
 ## Where state lives
 

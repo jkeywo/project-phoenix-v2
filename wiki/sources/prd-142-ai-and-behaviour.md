@@ -1,10 +1,10 @@
 ---
 title: PRD #142 — AI and Behaviour System
 type: source
-tags: [prd, ai, npc, state-machine, planned]
+tags: [prd, ai, npc, state-machine, in-flight]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/142
-status: open
-updated: 2026-05-13
+status: in-flight
+updated: 2026-05-14
 ---
 
 # PRD #142 — AI and Behaviour System
@@ -13,7 +13,22 @@ A data-driven state-machine framework for NPC ships and stations. Behaviour tree
 
 ## Status
 
-Open. Depends on PRD #119 (Space Stations + Scenario Engine) for the scenario triggers that spawn and direct NPCs.
+In flight. The pure AI engine and Bevy plugin are landed and wired into `SimulationPlugin`:
+
+- `src/ai.rs` (1222 LoC) — pure (no Bevy) `AiController`, fixed five-slot `Blackboard`, `AiState` (`Idle` / `Patrolling` / `Pursuing`), `AiInput`, `AiTickOutput`, the pure `tick` function, and the `should_emit` edge-emission filter.
+- `src/ai_plugin.rs` (428 LoC) — Bevy orchestrator. `AiTokenRegistry` resource; per-entity controllers ticked each frame; emits synthetic `InboundMessage`s on the same channel as remote players.
+- `src/faction.rs` — faction enum + targeting filter, used by `Pursuing` state.
+- `src/entity_spawner.rs` — `[behaviour]` section in TOML entity files signals `ai_plugin` to attach an `AiController`.
+
+Console-AI work (PRD #154) shares the same action vocabulary — see issues #175, #176, #177, #179 (all landed):
+
+- `console_ai.rs` / `console_ai_plugin.rs` — `auto_fire_torpedo`, `tick_frequency_hint`, `tick_auto_match_frequency`. These synthesise `InboundMessage`s from the appropriate console holder when a console is at Low complexity.
+
+Still open:
+
+- TOML schema for arbitrary state-machine definitions (current states are hard-coded enum variants).
+- Squad behaviours, retreat conditions, and richer blackboard slots.
+- Integration with PRD #119 scenario triggers for spawn/direct/despawn.
 
 ## Problem
 

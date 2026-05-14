@@ -6,6 +6,7 @@
 ///
 /// The Bevy orchestrator lives in `console_ai_plugin`.
 
+use crate::shield::ShieldFacingSnapshot;
 use crate::torpedo::TorpedoTubeId;
 
 // ── Frequency hint state ───────────────────────────────────────────────────
@@ -407,6 +408,71 @@ pub fn tick_power_red_alert_rule(
         power_is_low: input.power_is_low,
     };
     tick_power_movement_rule(state, &movement_input)
+}
+
+// ── Shields AI ────────────────────────────────────────────────────────────
+
+/// Input for the shield focus AI decision function.
+#[derive(Clone, Debug)]
+pub struct ShieldFocusAiInput {
+    /// Current shield facing snapshots.
+    pub facings: Vec<ShieldFacingSnapshot>,
+    /// Whether the Shields console is at Low complexity.
+    /// When false, no AI action is taken.
+    pub shields_is_low: bool,
+}
+
+/// Outcome of a single `tick_shield_focus_ai` call.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ShieldFocusAiOutput {
+    /// No focus change this tick.
+    None,
+    /// Focus the given facing (by index).
+    Focus { facing_index: usize },
+    /// Clear the current focus.
+    ClearFocus,
+}
+
+/// Decide which shield facing to focus based on current shield state.
+///
+/// Rules:
+/// - If `shields_is_low` is false, return `None` (no AI involvement).
+/// - If no facings are present, return `None`.
+/// - If there is already a focused facing and its HP fraction is above 0.5,
+///   return `None` (keep current focus).
+/// - Focus the facing with the lowest HP fraction (it needs the bonus most).
+/// - If all facings are at full HP and no focus is set, return `ClearFocus`.
+/// - If the least-healthy facing is already focused, return `None`.
+pub fn tick_shield_focus_ai(
+    input: &ShieldFocusAiInput,
+) -> ShieldFocusAiOutput {
+    if !input.shields_is_low || input.facings.is_empty() {
+        return ShieldFocusAiOutput::None;
+    }
+
+    // Find the facing with the lowest HP fraction.
+    let worst = input.facings.iter().enumerate()
+        .min_by(|(_, a), (_, b)| {
+            let fa = if a.max_hp > 0 { a.hp as f32 / a.max_hp as f32 } else { 0.0 };
+            let fb = if b.max_hp > 0 { b.hp as f32 / b.max_hp as f32 } else { 0.0 };
+            fa.partial_cmp(&fb).unwrap()
+        });
+
+    match worst {
+        None => ShieldFocusAiOutput::None,
+        Some((idx, facing)) => {
+            if facing.is_focused {
+                return ShieldFocusAiOutput::None;
+            }
+            let fraction = if facing.max_hp > 0 { facing.hp as f32 / facing.max_hp as f32 } else { 0.0 };
+            // Only auto-focus if the facing is actually below full HP
+            if fraction < 1.0 {
+                ShieldFocusAiOutput::Focus { facing_index: idx }
+            } else {
+                ShieldFocusAiOutput::ClearFocus
+            }
+        }
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -950,5 +1016,80 @@ mod tests {
         // At 3s elapsed both should be Engaged now
         assert_eq!(helm_state, EngageState::Engaged, "movement rule should be Engaged");
         assert_eq!(weapons_state, EngageState::Engaged, "red alert rule should be Engaged");
+    }
+
+    // ── Shields AI ────────────────────────────────────────────────────────
+
+    use crate::shield::ShieldFacingSnapshot;
+
+    fn make_snap(label: &str, hp: i32, max_hp: i32, focused: bool) -> ShieldFacingSnapshot {
+        ShieldFacingSnapshot {
+            label: label.into(),
+            hp,
+            max_hp,
+            online: hp > 0,
+            offline_remaining: 0.0,
+            is_focused: focused,
+        }
+    }
+
+    #[test]
+    fn shield_ai_not_low_returns_none() {
+        let input = ShieldFocusAiInput {
+            facings: vec![make_snap("Fore", 50, 100, false)],
+            shields_is_low: false,
+        };
+        assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
+    }
+
+    #[test]
+    fn shield_ai_empty_facings_returns_none() {
+        let input = ShieldFocusAiInput {
+            facings: vec![],
+            shields_is_low: true,
+        };
+        assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
+    }
+
+    #[test]
+    fn shield_ai_focuses_most_damaged_facing() {
+        let input = ShieldFocusAiInput {
+            facings: vec![
+                make_snap("Fore", 100, 100, false),
+                make_snap("Port", 30, 100, false),
+                make_snap("Aft", 80, 100, false),
+                make_snap("Starboard", 100, 100, false),
+            ],
+            shields_is_low: true,
+        };
+        assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::Focus { facing_index: 1 });
+    }
+
+    #[test]
+    fn shield_ai_no_focus_if_least_healthy_already_focused() {
+        let input = ShieldFocusAiInput {
+            facings: vec![
+                make_snap("Fore", 100, 100, false),
+                make_snap("Port", 30, 100, true),
+                make_snap("Aft", 80, 100, false),
+                make_snap("Starboard", 100, 100, false),
+            ],
+            shields_is_low: true,
+        };
+        assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::None);
+    }
+
+    #[test]
+    fn shield_ai_all_full_clears_focus() {
+        let input = ShieldFocusAiInput {
+            facings: vec![
+                make_snap("Fore", 100, 100, false),
+                make_snap("Port", 100, 100, false),
+                make_snap("Aft", 100, 100, false),
+                make_snap("Starboard", 100, 100, false),
+            ],
+            shields_is_low: true,
+        };
+        assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::ClearFocus);
     }
 }

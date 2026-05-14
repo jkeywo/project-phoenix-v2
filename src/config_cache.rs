@@ -595,6 +595,7 @@ mod tests {
             power: None,
             science_console: None,
             sensors_console: None,
+            shields_console: None,
             star: None,
             planet: None,
             asteroid_field: None,

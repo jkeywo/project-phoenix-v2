@@ -1875,10 +1875,10 @@ mod tests {
             faction: None,
             yaw: Some(std::f32::consts::PI),
             shields: Some(vec![
-                ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: true, offline_remaining: 0.0 },
-                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
-                ShieldFacingStatus { label: "Port".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
-                ShieldFacingStatus { label: "Starboard".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Port".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Starboard".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
             ]),
             hull_fraction: Some(1.0),
         };
@@ -1904,10 +1904,10 @@ mod tests {
             faction: None,
             yaw: Some(0.0),
             shields: Some(vec![
-                ShieldFacingStatus { label: "Fore".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
-                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
-                ShieldFacingStatus { label: "Port".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
-                ShieldFacingStatus { label: "Starboard".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Fore".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Port".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Starboard".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
             ]),
             hull_fraction: Some(1.0),
         };
@@ -1933,7 +1933,7 @@ mod tests {
             faction: None,
             yaw: Some(0.0),
             shields: Some(vec![
-                ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
             ]),
             hull_fraction: Some(1.0),
         };

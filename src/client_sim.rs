@@ -1035,6 +1035,7 @@ mod tests {
             max_hp,
             online,
             offline_remaining: if online { 0.0 } else { 5.0 },
+            is_focused: false,
         }
     }
 

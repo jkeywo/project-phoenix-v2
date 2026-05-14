@@ -584,14 +584,36 @@ mod tests {
     fn server_shield_status_round_trips() {
         let msg = ServerMessage::ShieldStatus {
             facings: vec![
-                ShieldFacingStatus { label: "Fore".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0 },
-                ShieldFacingStatus { label: "Port".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 7.5 },
-                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
-                ShieldFacingStatus { label: "Starboard".into(), hp: 55, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Fore".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Port".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 7.5, is_focused: false },
+                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Starboard".into(), hp: 55, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
             ],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_shield_focus_some_round_trips() {
+        let msg = ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Fore) };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_shield_focus_none_round_trips() {
+        let msg = ClientMessage::SetShieldFocus { facing: None };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn shield_facing_status_with_focus_round_trips() {
+        let msg = ShieldFacingStatus { label: "Fore".into(), hp: 150, max_hp: 150, online: true, offline_remaining: 0.0, is_focused: true };
+        let encoded = serde_json::to_string(&msg).unwrap();
+        let decoded: ShieldFacingStatus = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(msg, decoded);
     }
 
     #[test]
@@ -1419,10 +1441,10 @@ mod tests {
                     hull_fraction: Some(0.75),
                     flags: vec![],
                     shields: Some(vec![
-                        ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 10.0 },
-                        ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
-                        ShieldFacingStatus { label: "Port".into(), hp: 50, max_hp: 100, online: true, offline_remaining: 0.0 },
-                        ShieldFacingStatus { label: "Starboard".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0 },
+                        ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 10.0, is_focused: false },
+                        ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                        ShieldFacingStatus { label: "Port".into(), hp: 50, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                        ShieldFacingStatus { label: "Starboard".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
                     ]),
                     warp_out_remaining_secs: None,
                 }],

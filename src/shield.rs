@@ -32,6 +32,8 @@ pub struct ShieldFacingSnapshot {
     pub online: bool,
     /// Remaining offline seconds (0.0 when online).
     pub offline_remaining: f32,
+    /// Whether this facing is the currently focused arc.
+    pub is_focused: bool,
 }
 
 /// Configuration for the entire shield system.
@@ -56,6 +58,39 @@ impl Default for ShieldConfig {
     }
 }
 
+/// Configuration for shield focus bonuses and penalties.
+///
+/// When the Shields console operator focuses one facing:
+/// - That facing gets `bonus_max_hp` extra capacity and `bonus_regen` regen.
+/// - The other three facings lose `penalty_max_hp` capacity and `penalty_regen` regen.
+/// - Non-focused facings decay HP at `decay_rate` per second when above their
+///   reduced maximum.
+#[derive(Clone, Debug)]
+pub struct ShieldFocusConfig {
+    /// Extra max HP applied to the focused facing.
+    pub bonus_max_hp: i32,
+    /// Extra regen per second applied to the focused facing.
+    pub bonus_regen: f32,
+    /// Max HP subtracted from each non-focused facing.
+    pub penalty_max_hp: i32,
+    /// Regen per second subtracted from each non-focused facing.
+    pub penalty_regen: f32,
+    /// HP per second decay applied to non-focused facings when above reduced max.
+    pub decay_rate: f32,
+}
+
+impl Default for ShieldFocusConfig {
+    fn default() -> Self {
+        Self {
+            bonus_max_hp: 50,
+            bonus_regen: 5.0,
+            penalty_max_hp: 25,
+            penalty_regen: 2.5,
+            decay_rate: 10.0,
+        }
+    }
+}
+
 /// A single shield facing arc.
 #[derive(Clone, Debug)]
 pub struct ShieldFacing {
@@ -66,6 +101,8 @@ pub struct ShieldFacing {
     pub offline_duration: f32,
     /// Remaining seconds of offline time. 0.0 means the facing is online.
     pub offline_remaining: f32,
+    /// Whether this facing is the currently focused arc.
+    pub is_focused: bool,
 }
 
 impl ShieldFacing {
@@ -77,6 +114,7 @@ impl ShieldFacing {
             regen_per_sec,
             offline_duration,
             offline_remaining: 0.0,
+            is_focused: false,
         }
     }
 
@@ -133,6 +171,7 @@ impl ShieldFacing {
             max_hp: self.max_hp,
             online: self.is_online(),
             offline_remaining: self.offline_remaining,
+            is_focused: self.is_focused,
         }
     }
 }
@@ -166,6 +205,15 @@ fn default_label(index: usize, num_facings: usize) -> String {
 /// The complete shield system, owning all facings.
 pub struct ShieldSystem {
     pub facings: Vec<ShieldFacing>,
+    /// Which facing (index) is currently focused by the Shields console.
+    /// `None` means no focus (all facings at base values).
+    pub focused_facing: Option<usize>,
+    /// Configuration for focus bonus/penalty/decay.
+    pub focus_config: ShieldFocusConfig,
+    /// Base max HP per facing before focus modifiers.
+    pub base_max_hp: i32,
+    /// Base regen per second before focus modifiers.
+    pub base_regen_per_sec: f32,
 }
 
 impl ShieldSystem {
@@ -182,7 +230,45 @@ impl ShieldSystem {
                 )
             })
             .collect();
-        Self { facings }
+        Self {
+            facings,
+            focused_facing: None,
+            focus_config: ShieldFocusConfig::default(),
+            base_max_hp: config.max_hp,
+            base_regen_per_sec: config.regen_per_sec,
+        }
+    }
+
+    /// Set the focused facing by index, or `None` to clear focus.
+    /// Recalculates each facing's effective max_hp, regen, and is_focused flag.
+    pub fn set_focused_facing(&mut self, facing: Option<usize>) {
+        self.focused_facing = facing;
+        self.recalculate_focus();
+    }
+
+    /// Recalculate effective max_hp, regen_per_sec, and is_focused for all facings
+    /// based on the current `focused_facing`.
+    fn recalculate_focus(&mut self) {
+        let fc = &self.focus_config;
+        for (i, facing) in self.facings.iter_mut().enumerate() {
+            if self.focused_facing == Some(i) {
+                // Focused arc: bonus
+                facing.max_hp = self.base_max_hp + fc.bonus_max_hp;
+                facing.regen_per_sec = self.base_regen_per_sec + fc.bonus_regen;
+                facing.is_focused = true;
+            } else if self.focused_facing.is_some() {
+                // Another arc is focused: penalty on this arc
+                facing.max_hp = (self.base_max_hp - fc.penalty_max_hp).max(0);
+                facing.regen_per_sec = (self.base_regen_per_sec - fc.penalty_regen).max(0.0);
+                facing.is_focused = false;
+            } else {
+                // No focus: restore base values
+                facing.max_hp = self.base_max_hp;
+                facing.regen_per_sec = self.base_regen_per_sec;
+                facing.is_focused = false;
+            }
+            // Clamp HP to effective max_hp (but we don't reduce it here — decay does that over time)
+        }
     }
 
     /// Determine the facing index hit by an attacker at `bearing_relative` radians
@@ -209,10 +295,31 @@ impl ShieldSystem {
         self.facings[idx].apply_damage(amount)
     }
 
-    /// Advance all facings by `dt` seconds (regen + offline timers).
+    /// Advance all facings by `dt` seconds (regen + offline timers + focus decay).
+    ///
+    /// Non-focused facings whose HP exceeds their (reduced) effective max_hp decay at
+    /// `focus_config.decay_rate` per second until they reach the cap.  While decaying
+    /// toward the reduced maximum, regen is suppressed so the transition is gradual
+    /// (rather than snapping to max_hp in a single tick).
     pub fn tick(&mut self, dt: f32) {
-        for facing in &mut self.facings {
-            facing.tick(dt);
+        for (i, facing) in self.facings.iter_mut().enumerate() {
+            let is_decaying = self.focused_facing.is_some()
+                && self.focused_facing != Some(i)
+                && facing.hp > facing.max_hp;
+
+            if is_decaying {
+                // Apply focus decay toward effective max_hp (no regen while decaying).
+                let hp_f = facing.hp as f32;
+                let target = facing.max_hp as f32;
+                let reduction = (self.focus_config.decay_rate * dt).min(hp_f - target);
+                facing.hp = (hp_f - reduction).round() as i32;
+                // Still tick offline timer if applicable.
+                if !facing.is_online() {
+                    facing.offline_remaining = (facing.offline_remaining - dt).max(0.0);
+                }
+            } else {
+                facing.tick(dt);
+            }
         }
     }
 
@@ -224,7 +331,9 @@ impl ShieldSystem {
 
 impl Default for ShieldSystem {
     fn default() -> Self {
-        Self::new(&ShieldConfig::default())
+        let mut sys = Self::new(&ShieldConfig::default());
+        sys.focus_config = ShieldFocusConfig::default();
+        sys
     }
 }
 
@@ -507,5 +616,136 @@ mod tests {
         // Attacker straight behind → Aft (index 2)
         let b = attacker_bearing_relative(0.0, 10.0, 0.0, 0.0, 0.0);
         assert_eq!(s.facing_index_for_bearing(b), 2);
+    }
+
+    // ── Focus mechanics ────────────────────────────────────────────────────
+
+    #[test]
+    fn default_focused_facing_is_none() {
+        let s = ShieldSystem::default();
+        assert!(s.focused_facing.is_none());
+        for f in &s.facings {
+            assert!(!f.is_focused);
+        }
+    }
+
+    #[test]
+    fn set_focused_facing_toggles_the_focused_flag() {
+        let mut s = ShieldSystem::default();
+        s.set_focused_facing(Some(0)); // Focus Fore
+        assert_eq!(s.focused_facing, Some(0));
+        assert!(s.facings[0].is_focused);
+        assert!(!s.facings[1].is_focused);
+        assert!(!s.facings[2].is_focused);
+        assert!(!s.facings[3].is_focused);
+    }
+
+    #[test]
+    fn set_focused_facing_none_clears_focus() {
+        let mut s = ShieldSystem::default();
+        s.set_focused_facing(Some(0));
+        assert!(s.facings[0].is_focused);
+        s.set_focused_facing(None);
+        assert!(s.focused_facing.is_none());
+        for f in &s.facings {
+            assert!(!f.is_focused);
+        }
+    }
+
+    #[test]
+    fn focused_facing_gets_bonus_max_hp_and_regen() {
+        let mut s = ShieldSystem::default();
+        assert_eq!(s.facings[0].max_hp, 100);
+        s.set_focused_facing(Some(0));
+        // Default focus config: bonus_max_hp=50, bonus_regen=5.0
+        assert_eq!(s.facings[0].max_hp, 150);
+        assert!((s.facings[0].regen_per_sec - 10.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn non_focused_facings_get_penalty_max_hp_and_regen() {
+        let mut s = ShieldSystem::default();
+        s.set_focused_facing(Some(0)); // Focus Fore
+        // Default: penalty_max_hp=25, penalty_regen=2.5
+        assert_eq!(s.facings[1].max_hp, 75);  // Port
+        assert_eq!(s.facings[2].max_hp, 75);  // Aft
+        assert_eq!(s.facings[3].max_hp, 75);  // Starboard
+        assert!((s.facings[1].regen_per_sec - 2.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn clearing_focus_restores_base_max_hp_and_regen_for_all() {
+        let mut s = ShieldSystem::default();
+        s.set_focused_facing(Some(0));
+        assert_eq!(s.facings[0].max_hp, 150);
+        assert_eq!(s.facings[1].max_hp, 75);
+        s.set_focused_facing(None);
+        for f in &s.facings {
+            assert_eq!(f.max_hp, 100);
+            assert!((f.regen_per_sec - 5.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn non_focused_facing_decays_when_above_reduced_max() {
+        let mut s = ShieldSystem::default();
+        // Damage fore (facing 0) so HP drops, then focus Port (facing 1).
+        // Port becomes focused at 150 max_hp. Fore becomes non-focused at 75 max_hp.
+        s.facings[1].hp = 130; // Port HP above base 100 (will become 75 effective max)
+        s.facings[3].hp = 120; // Starboard HP above base 100
+        s.set_focused_facing(Some(1)); // Focus Port
+
+        // After recalculate_focus, facings 0,2,3 have effective max=75 with HP above that.
+        // Port (focused) has effective max=150 with HP=130 (no decay).
+        s.tick(0.5); // decay_rate=10/s * 0.5s = 5 HP decay
+
+        assert!(!s.facings[0].is_focused);
+        assert!(s.facings[1].is_focused);
+        // Facing 0 (Fore): base was 100, but focus recalculate doesn't clamp HP.
+        // After recalculate max_hp=75, HP=100 (above max). Decays at 10/s for 0.5s = 5.
+        assert_eq!(s.facings[0].hp, 95);
+        // Facing 3 (Starboard): HP was 120, max becomes 75. Decays 10/s for 0.5s = 5.
+        assert_eq!(s.facings[3].hp, 115);
+        // Facing 1 (Port, focused): normal tick (bonus regen 10/s). 130 + 10*0.5 = 135.
+        assert_eq!(s.facings[1].hp, 135);
+    }
+
+    #[test]
+    fn non_focused_facing_stops_decaying_when_at_or_below_reduced_max() {
+        let mut s = ShieldSystem::default();
+        // Fore (facing 0) at 80 HP, gets reduced max=75 when another arc focused.
+        s.facings[0].hp = 80;
+        s.set_focused_facing(Some(1)); // Focus Port
+        // Fore max=75, HP=80 → 80 - 10*0.5 = 75 → should decay to exactly 75
+        s.tick(0.5);
+        assert_eq!(s.facings[0].hp, 75);
+        // Next tick: HP=75 ≤ max=75 → no more decay
+        s.tick(0.5);
+        assert_eq!(s.facings[0].hp, 75);
+    }
+
+    #[test]
+    fn snapshot_includes_is_focused() {
+        let mut s = ShieldSystem::default();
+        s.set_focused_facing(Some(0));
+        let snaps = s.snapshot();
+        assert!(snaps[0].is_focused);
+        assert!(!snaps[1].is_focused);
+        assert!(!snaps[2].is_focused);
+        assert!(!snaps[3].is_focused);
+    }
+
+    #[test]
+    fn focused_facing_not_subject_to_decay_rate() {
+        let mut s = ShieldSystem::default();
+        // Focus Fore so effective max becomes 150. HP above base can only
+        // be reduced by the normal regen cap, not by focus decay.
+        s.set_focused_facing(Some(0));
+        s.facings[0].hp = 200;
+        s.tick(0.5);
+        // Normal regen tick caps at max_hp=150: (200 + 10*0.5).min(150) = 150
+        assert_eq!(s.facings[0].hp, 150);
+        // The decay code (which only targets non-focused facings) did not run,
+        // confirming the focused arc does not get focus-decayed.
     }
 }

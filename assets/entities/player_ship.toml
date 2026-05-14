@@ -59,6 +59,13 @@ emergency_threshold = 25.0
 
 [helm_console]
 
+[shields_console]
+focus_bonus_max_hp = 50
+focus_bonus_regen = 5.0
+focus_penalty_max_hp = 25
+focus_penalty_regen = 2.5
+focus_decay_rate = 10.0
+
 [engineering_console]
 
 [stations]

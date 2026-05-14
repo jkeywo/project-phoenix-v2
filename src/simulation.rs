@@ -11,7 +11,7 @@ use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::messages::{
-    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewMode,
+    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewDirection, ViewMode,
 };
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
 use crate::messages::TorpedoTube as MsgTorpedoTube;
@@ -314,26 +314,31 @@ impl Plugin for SimulationPlugin {
                 render_spawned_entities.after(spawn_game_start_entities),
             ))
             .add_systems(Update, (
-                handle_toggle,
-                handle_set_view,
-                handle_set_target,
-                handle_set_science_target,
-                handle_set_sensors_target,
-                handle_fire_phaser,
-                handle_set_phaser_mode,
-                handle_set_phaser_frequency,
-                handle_fire_torpedo,
-                handle_repair,
-                handle_power_messages,
-                handle_impulse_messages,
-                tick_active_beam,
-                tick_repair_teams,
-                tick_torpedo_system,
-                tick_shields,
-                tick_power_system,
-                process_helm_inputs,
-                sync_ship_position,
-                handle_collisions,
+                (
+                    handle_toggle,
+                    handle_set_view,
+                    handle_set_target,
+                    handle_set_science_target,
+                    handle_set_sensors_target,
+                ),
+                (
+                    handle_fire_phaser,
+                    handle_set_phaser_mode,
+                    handle_set_phaser_frequency,
+                    handle_fire_torpedo,
+                    handle_repair,
+                    handle_power_messages,
+                    handle_impulse_messages,
+                    handle_set_shield_focus,
+                ),
+                (
+                    tick_active_beam,
+                    tick_repair_teams,
+                    tick_torpedo_system,
+                    tick_shields,
+                    tick_power_system,
+                ),
+                (process_helm_inputs, sync_ship_position, handle_collisions),
             ))
             .add_systems(Update, (
                 broadcast_sim_state.after(process_helm_inputs),
@@ -667,6 +672,39 @@ fn handle_collisions(
 /// Tick shield regen and offline timers each frame.
 fn tick_shields(time: Res<Time>, mut shields: ResMut<ShipShields>) {
     shields.0.tick(time.delta_secs());
+}
+
+/// Handle `SetShieldFocus` messages from the Shields console.
+///
+/// Validates: sender is Shields holder, game is in-progress.
+/// Maps `ViewDirection` to facing index: Fore=0, Port=1, Aft=2, Starboard=3.
+/// `None` clears the focus.
+fn handle_set_shield_focus(
+    mut reader: MessageReader<InboundMessage>,
+    mut shields: ResMut<ShipShields>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        let facing = match &ev.msg {
+            ClientMessage::SetShieldFocus { facing } => facing.clone(),
+            _ => continue,
+        };
+        // Only the Shields console holder may set focus.
+        if sessions.0.console_holder(Console::Shields) != Some(ev.token.as_str()) {
+            continue;
+        }
+        let idx = facing.and_then(|d| match d {
+            ViewDirection::Fore => Some(0),
+            ViewDirection::Port => Some(1),
+            ViewDirection::Aft => Some(2),
+            ViewDirection::Starboard => Some(3),
+        });
+        shields.0.set_focused_facing(idx);
+    }
 }
 
 /// Handle `FirePhaser` messages from the Weapons console.
@@ -1397,6 +1435,7 @@ fn broadcast_shield_status(
         max_hp: s.max_hp,
         online: s.online,
         offline_remaining: s.offline_remaining,
+        is_focused: s.is_focused,
     }).collect();
     writer.write(OutboundMessage {
         target: Target::All,
@@ -1823,6 +1862,19 @@ fn spawn_game_start_entities(
                 commands.insert_resource(ShipHullIntegrity(HullIntegrity::new()));
             }
 
+            // Apply shield focus config from TOML if present
+            if let Some(sc) = &config.shields_console {
+                let mut shields = ShipShields(ShieldSystem::default());
+                shields.0.focus_config = crate::shield::ShieldFocusConfig {
+                    bonus_max_hp: sc.focus_bonus_max_hp,
+                    bonus_regen: sc.focus_bonus_regen,
+                    penalty_max_hp: sc.focus_penalty_max_hp,
+                    penalty_regen: sc.focus_penalty_regen,
+                    decay_rate: sc.focus_decay_rate,
+                };
+                commands.insert_resource(shields);
+            }
+
             if let Some(wc) = &config.weapons_console {
                 let beam_color = crate::beam_render::resolve_beam_color(&wc.beam_color);
                 let beam_range = if wc.beam_range > 0.0 { wc.beam_range } else { 40.0 };
@@ -1965,6 +2017,7 @@ fn setup_world_hardcoded(
         power: None,
         science_console: None,
             sensors_console: None,
+        shields_console: None,
         star: None,
         planet: None,
         asteroid_field: None,
@@ -2033,7 +2086,16 @@ fn test_app() -> App {
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_set_sensors_target, handle_fire_phaser, handle_set_phaser_mode, handle_set_phaser_frequency, handle_fire_torpedo, handle_repair, handle_power_messages, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, tick_power_system))
+        .add_systems(Update, (
+            handle_set_view, handle_set_target,
+            handle_set_science_target, handle_set_sensors_target,
+            handle_fire_phaser, handle_set_phaser_mode,
+            handle_set_phaser_frequency, handle_fire_torpedo,
+            handle_repair, handle_power_messages,
+            handle_impulse_messages, handle_set_shield_focus,
+            tick_active_beam, tick_repair_teams,
+            tick_torpedo_system, tick_power_system,
+        ))
         .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_power_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state), reconcile_runtime_entities.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
@@ -3282,6 +3344,7 @@ fn test_app() -> App {
             captain_console: None,
             power: None,
             science_console: None,
+            shields_console: None,
             sensors_console: None,
             star: None,
             planet: None,
@@ -4451,5 +4514,93 @@ fn test_app() -> App {
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
         assert!((freq - 0.0).abs() < 1e-5, "frequency below 0.0 should clamp to 0.0, got {freq}");
+    }
+
+    // ── Shield focus tests ──────────────────────────────────────────────────
+
+    fn start_game_with_shields(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        tick(app);
+        push(app, "shields", ClientMessage::Identify { token: "shields".into(), name: "Sully".into() });
+        tick(app);
+        push(app, "shields", ClientMessage::SelectStation { station: "Shields".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        let _ = tick(app);
+    }
+
+    #[test]
+    fn shields_holder_can_focus_a_facing() {
+        let mut app = test_app();
+        start_game_with_shields(&mut app);
+
+        push(&mut app, "shields", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Fore) });
+        tick(&mut app);
+
+        assert_eq!(app.world().resource::<ShipShields>().0.focused_facing, Some(0));
+        assert!(app.world().resource::<ShipShields>().0.facings[0].is_focused);
+    }
+
+    #[test]
+    fn non_shields_sender_cannot_set_focus() {
+        let mut app = test_app();
+        start_game_with_shields(&mut app);
+
+        // Captain (not Shields holder) tries to set focus.
+        push(&mut app, "captain", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Port) });
+        tick(&mut app);
+
+        assert!(app.world().resource::<ShipShields>().0.focused_facing.is_none());
+    }
+
+    #[test]
+    fn shields_holder_can_clear_focus() {
+        let mut app = test_app();
+        start_game_with_shields(&mut app);
+
+        push(&mut app, "shields", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Fore) });
+        tick(&mut app);
+        assert_eq!(app.world().resource::<ShipShields>().0.focused_facing, Some(0));
+
+        push(&mut app, "shields", ClientMessage::SetShieldFocus { facing: None });
+        tick(&mut app);
+        assert!(app.world().resource::<ShipShields>().0.focused_facing.is_none());
+    }
+
+    #[test]
+    fn shield_focus_is_ignored_during_lobby() {
+        let mut app = test_app();
+        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        tick(&mut app);
+
+        // Still in Lobby — SetShieldFocus should be ignored.
+        push(&mut app, "captain", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Aft) });
+        tick(&mut app);
+
+        assert!(app.world().resource::<ShipShields>().0.focused_facing.is_none());
+    }
+
+    #[test]
+    fn shield_focus_updates_broadcast_status() {
+        let mut app = test_app();
+        start_game_with_shields(&mut app);
+
+        push(&mut app, "shields", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Fore) });
+        let _ = tick(&mut app);
+        let out = tick(&mut app);
+
+        let shield_status = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::ShieldStatus { facings } => Some(facings.clone()),
+            _ => None,
+        }).expect("expected a ShieldStatus broadcast after focus change");
+
+        assert!(shield_status[0].is_focused, "Fore should be focused");
+        assert!(!shield_status[1].is_focused, "Port should not be focused");
+        assert!(!shield_status[2].is_focused, "Aft should not be focused");
+        assert!(!shield_status[3].is_focused, "Starboard should not be focused");
     }
 }

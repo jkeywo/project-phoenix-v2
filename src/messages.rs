@@ -54,6 +54,9 @@ pub struct ShieldFacingStatus {
     pub online: bool,
     /// Remaining offline seconds (0.0 when online).
     pub offline_remaining: f32,
+    /// Whether this facing is the currently focused arc.
+    #[serde(default)]
+    pub is_focused: bool,
 }
 
 /// Which phaser bank to address. Used in `SetPhaserMode` and `PhaserFired`.
@@ -481,6 +484,9 @@ pub enum ClientMessage {
     RespondToMessage { message_id: String, response_index: usize },
     /// Clear all read or orphaned messages from the inbox.
     ClearComms,
+    /// Focus one shield arc (Fore/Port/Aft/Starboard), or `None` to clear focus.
+    /// Sender must hold `Console::Shields`.
+    SetShieldFocus { facing: Option<ViewDirection> },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

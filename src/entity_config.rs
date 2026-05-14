@@ -193,6 +193,50 @@ pub struct ScienceConsoleConfig {
     pub complexity_toml: Option<String>,
 }
 
+/// Config block for the Shields console focus bonuses/penalties.
+///
+/// Loaded from `[shields_console]` in `player_ship.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShieldsConsoleConfig {
+    /// Extra max HP applied to the focused facing.
+    #[serde(default = "default_focus_bonus_max_hp")]
+    pub focus_bonus_max_hp: i32,
+    /// Extra regen per second applied to the focused facing.
+    #[serde(default = "default_focus_bonus_regen")]
+    pub focus_bonus_regen: f32,
+    /// Max HP subtracted from each non-focused facing.
+    #[serde(default = "default_focus_penalty_max_hp")]
+    pub focus_penalty_max_hp: i32,
+    /// Regen per second subtracted from each non-focused facing.
+    #[serde(default = "default_focus_penalty_regen")]
+    pub focus_penalty_regen: f32,
+    /// HP per second decay applied to non-focused facings when above reduced max.
+    #[serde(default = "default_focus_decay_rate")]
+    pub focus_decay_rate: f32,
+    /// Path to a complexity TOML file for this console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
+}
+
+fn default_focus_bonus_max_hp() -> i32 { 50 }
+fn default_focus_bonus_regen() -> f32 { 5.0 }
+fn default_focus_penalty_max_hp() -> i32 { 25 }
+fn default_focus_penalty_regen() -> f32 { 2.5 }
+fn default_focus_decay_rate() -> f32 { 10.0 }
+
+impl Default for ShieldsConsoleConfig {
+    fn default() -> Self {
+        Self {
+            focus_bonus_max_hp: 50,
+            focus_bonus_regen: 5.0,
+            focus_penalty_max_hp: 25,
+            focus_penalty_regen: 2.5,
+            focus_decay_rate: 10.0,
+            complexity_toml: None,
+        }
+    }
+}
+
 /// Config block for the Sensors console in a ship TOML.
 ///
 /// Loaded from `[sensors_console]` in `player_ship.toml`.
@@ -221,6 +265,8 @@ pub struct EntityConfig {
     pub power: Option<PowerConfigSection>,
     pub science_console: Option<ScienceConsoleConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
+    /// Shields console focus config.
+    pub shields_console: Option<ShieldsConsoleConfig>,
     /// Star section from entity template (name, radius, colour, etc.)
     pub star: Option<StarConfig>,
     /// Planet section from entity template (name, radius, colour, etc.)
@@ -255,6 +301,7 @@ struct TomlConfig {
     power: Option<PowerConfigSection>,
     science_console: Option<ScienceConsoleConfig>,
     sensors_console: Option<SensorsConsoleConfig>,
+    shields_console: Option<ShieldsConsoleConfig>,
     star: Option<StarConfig>,
     planet: Option<PlanetConfig>,
     asteroid_field: Option<AsteroidFieldConfig>,
@@ -299,6 +346,11 @@ impl EntityConfig {
                 paths.push(p.clone());
             }
         }
+        if let Some(ref c) = self.shields_console {
+            if let Some(ref p) = c.complexity_toml {
+                paths.push(p.clone());
+            }
+        }
         paths
     }
 
@@ -333,6 +385,7 @@ impl EntityConfig {
             captain_console: raw.captain_console,
             power: raw.power,
             science_console: raw.science_console,
+            shields_console: raw.shields_console,
             sensors_console: raw.sensors_console,
             star: raw.star,
             planet: raw.planet,

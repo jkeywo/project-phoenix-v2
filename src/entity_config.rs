@@ -193,6 +193,21 @@ pub struct ScienceConsoleConfig {
     pub complexity_toml: Option<String>,
 }
 
+/// Config block for the Sensors console in a ship TOML.
+///
+/// Loaded from `[sensors_console]` in `player_ship.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SensorsConsoleConfig {
+    #[serde(default)]
+    pub power_multipliers: Option<[f32; 4]>,
+    /// Long-range radar config for the Sensors console.
+    #[serde(default)]
+    pub long_range_radar: crate::radar_config::RadarConfig,
+    /// Path to a complexity TOML file for this console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EntityConfig {
     pub tags: Vec<String>,
@@ -205,6 +220,7 @@ pub struct EntityConfig {
     pub captain_console: Option<CaptainConsoleConfig>,
     pub power: Option<PowerConfigSection>,
     pub science_console: Option<ScienceConsoleConfig>,
+    pub sensors_console: Option<SensorsConsoleConfig>,
     /// Star section from entity template (name, radius, colour, etc.)
     pub star: Option<StarConfig>,
     /// Planet section from entity template (name, radius, colour, etc.)
@@ -238,6 +254,7 @@ struct TomlConfig {
     captain_console: Option<CaptainConsoleConfig>,
     power: Option<PowerConfigSection>,
     science_console: Option<ScienceConsoleConfig>,
+    sensors_console: Option<SensorsConsoleConfig>,
     star: Option<StarConfig>,
     planet: Option<PlanetConfig>,
     asteroid_field: Option<AsteroidFieldConfig>,
@@ -277,6 +294,11 @@ impl EntityConfig {
                 paths.push(p.clone());
             }
         }
+        if let Some(ref c) = self.sensors_console {
+            if let Some(ref p) = c.complexity_toml {
+                paths.push(p.clone());
+            }
+        }
         paths
     }
 
@@ -311,6 +333,7 @@ impl EntityConfig {
             captain_console: raw.captain_console,
             power: raw.power,
             science_console: raw.science_console,
+            sensors_console: raw.sensors_console,
             star: raw.star,
             planet: raw.planet,
             asteroid_field: raw.asteroid_field,
@@ -603,6 +626,33 @@ shows = ["region", "asteroid_field", "star", "planet"]
         assert_eq!(science.system_map.range, 500.0);
         assert!(science.system_map.shows.contains(&EntityTag::Region));
         assert!(science.system_map.shows.contains(&EntityTag::AsteroidField));
+    }
+
+    #[test]
+    fn sensors_console_parses_with_long_range_radar() {
+        let toml_str = r##"
+tags = ["player", "ship"]
+
+[sensors_console]
+power_multipliers = [-0.5, 0.0, 0.25, 0.5]
+
+[sensors_console.long_range_radar]
+range = 200.0
+shows = ["region", "asteroid_field", "asteroid", "ship"]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let sensors = config.sensors_console.expect("sensors_console must be Some");
+        assert_eq!(sensors.power_multipliers, Some([-0.5, 0.0, 0.25, 0.5]));
+        assert_eq!(sensors.long_range_radar.range, 200.0);
+        assert!(sensors.long_range_radar.shows.contains(&EntityTag::Region));
+        assert!(sensors.long_range_radar.shows.contains(&EntityTag::AsteroidField));
+        assert!(sensors.long_range_radar.shows.contains(&EntityTag::Asteroid));
+    }
+
+    #[test]
+    fn sensors_console_omitted_when_not_in_toml() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.sensors_console.is_none());
     }
 
     #[test]

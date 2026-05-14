@@ -318,6 +318,7 @@ impl Plugin for SimulationPlugin {
                 handle_set_view,
                 handle_set_target,
                 handle_set_science_target,
+                handle_set_sensors_target,
                 handle_fire_phaser,
                 handle_set_phaser_mode,
                 handle_set_phaser_frequency,
@@ -407,7 +408,7 @@ fn handle_set_view(
             let required = match &mode {
                 ViewMode::Camera(_) => Console::CaptainChair,
                 ViewMode::Radar => Console::Helm,
-                ViewMode::ScienceRadar => Console::Sensors,
+                ViewMode::ScienceRadar | ViewMode::SensorsRadar => Console::Sensors,
                 ViewMode::SystemChart => Console::Navigation,
                 ViewMode::Comms => Console::Comms,
             };
@@ -491,6 +492,35 @@ fn handle_set_science_target(
         writer.write(OutboundMessage {
             target: Target::Token(weapons_token.to_string()),
             msg: ServerMessage::ScienceTargetSuggestion { uuid: uuid.clone() },
+        });
+    }
+}
+
+fn handle_set_sensors_target(
+    mut reader: MessageReader<InboundMessage>,
+    mut writer: MessageWriter<OutboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for ev in reader.read() {
+        let ClientMessage::SetSensorsTarget { uuid } = &ev.msg else { continue };
+
+        // Only the Sensors console holder may broadcast a target suggestion.
+        if sessions.0.console_holder(Console::Sensors) != Some(ev.token.as_str()) {
+            continue;
+        }
+
+        // Only broadcast if there is a Tactical console player to receive it.
+        let Some(tactical_token) = sessions.0.console_holder(Console::Tactical) else {
+            continue;
+        };
+
+        writer.write(OutboundMessage {
+            target: Target::Token(tactical_token.to_string()),
+            msg: ServerMessage::SensorsTargetSuggestion { uuid: uuid.clone() },
         });
     }
 }
@@ -1934,6 +1964,7 @@ fn setup_world_hardcoded(
         captain_console: None,
         power: None,
         science_console: None,
+            sensors_console: None,
         star: None,
         planet: None,
         asteroid_field: None,
@@ -2002,7 +2033,7 @@ fn test_app() -> App {
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_set_phaser_frequency, handle_fire_torpedo, handle_repair, handle_power_messages, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, tick_power_system))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_set_sensors_target, handle_fire_phaser, handle_set_phaser_mode, handle_set_phaser_frequency, handle_fire_torpedo, handle_repair, handle_power_messages, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, tick_power_system))
         .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_power_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state), reconcile_runtime_entities.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
@@ -2122,6 +2153,30 @@ fn test_app() -> App {
             ViewMode::ScienceRadar
         );
     }
+    #[test]
+    fn sensors_can_switch_view_to_sensors_radar() {
+        let mut app = test_app();
+        start_game_with_sensors(&mut app);
+        push(&mut app, "sensors", ClientMessage::SetView { mode: ViewMode::SensorsRadar });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::SensorsRadar
+        );
+    }
+
+    #[test]
+    fn non_sensors_cannot_switch_view_to_sensors_radar() {
+        let mut app = test_app();
+        start_game_with_sensors(&mut app);
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::SensorsRadar });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
+    }
+
 
     #[test]
     fn navigation_can_switch_view_to_system_chart() {
@@ -3227,6 +3282,7 @@ fn test_app() -> App {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -3341,6 +3397,63 @@ fn test_app() -> App {
             "SetScienceTarget should be ignored during Lobby phase"
         );
     }
+    // -- SetSensorsTarget / SensorsTargetSuggestion tests --
+
+    #[test]
+    fn sensors_set_sensors_target_broadcasts_sensors_target_suggestion_to_tactical() {
+        let mut app = test_app();
+        start_game_with_sensors_and_weapons(&mut app);
+
+        push(&mut app, "sensors", ClientMessage::SetSensorsTarget { uuid: "asteroid-99".into() });
+        let out = tick(&mut app);
+
+        let suggestion = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::SensorsTargetSuggestion { uuid } => Some(uuid.clone()),
+            _ => None,
+        }).expect("expected a SensorsTargetSuggestion message");
+        assert_eq!(suggestion, "asteroid-99");
+
+        // Must be targeted to Tactical console player only.
+        let suggestion_msg = out.iter()
+            .find(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. }))
+            .unwrap();
+        assert!(
+            matches!(&suggestion_msg.target, Target::Token(t) if t == "weapons"),
+            "SensorsTargetSuggestion should be sent only to Tactical console"
+        );
+    }
+
+    #[test]
+    fn non_sensors_player_cannot_send_sensors_target() {
+        let mut app = test_app();
+        start_game_with_sensors_and_weapons(&mut app);
+
+        push(&mut app, "captain", ClientMessage::SetSensorsTarget { uuid: "asteroid-99".into() });
+        let out = tick(&mut app);
+
+        assert!(
+            !out.iter().any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
+            "non-Sensors player should not be able to send SensorsTargetSuggestion"
+        );
+    }
+
+    #[test]
+    fn set_sensors_target_ignored_in_lobby() {
+        let mut app = test_app();
+        push(&mut app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
+        tick(&mut app);
+        push(&mut app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
+        tick(&mut app);
+
+        push(&mut app, "sensors", ClientMessage::SetSensorsTarget { uuid: "asteroid-99".into() });
+        let out = tick(&mut app);
+
+        assert!(
+            !out.iter().any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
+            "SetSensorsTarget should be ignored during Lobby phase"
+        );
+    }
+
 
     // â”€â”€ FireTorpedo tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 

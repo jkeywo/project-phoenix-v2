@@ -103,6 +103,7 @@ impl LobbyState {
             | ServerMessage::BeamEnded { .. }
             | ServerMessage::AsteroidDestroyed { .. }
             | ServerMessage::ScienceTargetSuggestion { .. }
+            | ServerMessage::SensorsTargetSuggestion { .. }
             | ServerMessage::PhaserFired { .. }
             | ServerMessage::RepairState { .. }
             | ServerMessage::ShieldStatus { .. }

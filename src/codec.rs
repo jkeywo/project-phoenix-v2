@@ -553,10 +553,31 @@ mod tests {
     }
 
     #[test]
+    fn client_set_sensors_target_round_trips() {
+        let msg = ClientMessage::SetSensorsTarget { uuid: "entity-uuid-sensors-123".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn server_science_target_suggestion_round_trips() {
         let msg = ServerMessage::ScienceTargetSuggestion { uuid: "entity-uuid-456".into() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_sensors_target_suggestion_round_trips() {
+        let msg = ServerMessage::SensorsTargetSuggestion { uuid: "entity-uuid-sensors-456".into() };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_view_sensors_radar() {
+        let msg = ClientMessage::SetView { mode: ViewMode::SensorsRadar };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]

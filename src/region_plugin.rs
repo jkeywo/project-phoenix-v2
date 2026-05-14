@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+﻿use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::entity_spawner::{RegionShapeSection, RegionEffectsSection, EntityUuid};
@@ -419,6 +419,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -661,6 +662,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -690,6 +692,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -900,6 +903,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -1024,6 +1028,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -1222,6 +1227,7 @@ mod tests {
             hull: None, collider: None, appearance: None,
             helm_console: None, weapons_console: None, engineering_console: None,
             captain_console: None, power: None, science_console: None,
+            sensors_console: None,
             star: None, planet: None, asteroid_field: None,
             station: None,
             faction: None,
@@ -1244,6 +1250,7 @@ mod tests {
             hull: None, collider: None, appearance: None,
             helm_console: None, weapons_console: None, engineering_console: None,
             captain_console: None, power: None, science_console: None,
+            sensors_console: None,
             star: None, planet: None, asteroid_field: None,
             station: None,
             faction: None,

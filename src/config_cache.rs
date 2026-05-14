@@ -1,4 +1,4 @@
-// WASM/JS bridge for config preloading — all public functions are #[wasm_bindgen] exports.
+﻿// WASM/JS bridge for config preloading — all public functions are #[wasm_bindgen] exports.
 //
 // This module implements the preload sequence for map, entity, and complexity TOML files.
 // It uses thread-local storage to cache configs before the Bevy app is initialized.
@@ -594,6 +594,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,

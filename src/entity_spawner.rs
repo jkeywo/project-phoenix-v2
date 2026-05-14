@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+﻿use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::entity_config::EntityConfig;
@@ -248,6 +248,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             planet: None,
             asteroid_field: None,
             shape: None,
@@ -284,6 +285,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -324,6 +326,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             asteroid_field: None,
             shape: None,
@@ -368,6 +371,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             shape: None,
@@ -403,6 +407,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -466,6 +471,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -505,6 +511,7 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            sensors_console: None,
             star: None,
             planet: None,
             asteroid_field: None,

@@ -167,6 +167,9 @@ pub struct ClientSimState {
     /// The most recent science target suggestion received from the server
     /// (None until a Science officer designates a target).
     pub science_target_suggestion: Option<String>,
+    /// The most recent sensors target suggestion received from the server
+    /// (None until a Sensors operator designates a target).
+    pub sensors_target_suggestion: Option<String>,
     /// Latest shield facing snapshots received from the server.
     /// Empty until the first `ShieldStatus` message is received.
     pub shield_facings: Vec<ShieldFacingStatus>,
@@ -234,6 +237,7 @@ impl Default for ClientSimState {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            sensors_target_suggestion: None,
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
@@ -309,6 +313,9 @@ impl ClientSimState {
             }
             ServerMessage::ScienceTargetSuggestion { uuid } => {
                 self.science_target_suggestion = Some(uuid.clone());
+            }
+            ServerMessage::SensorsTargetSuggestion { uuid } => {
+                self.sensors_target_suggestion = Some(uuid.clone());
             }
             ServerMessage::ShieldStatus { facings } => {
                 self.shield_facings = facings.clone();
@@ -428,6 +435,12 @@ pub fn phaser_mode_label(mode: PhaserMode) -> &'static str {
 /// long-range radar to suggest it as a target to the Weapons console.
 pub fn set_science_target_message(uuid: String) -> ClientMessage {
     ClientMessage::SetScienceTarget { uuid }
+}
+
+/// `ClientMessage` to send when the Sensors operator taps an entity on their
+/// long-range radar to suggest it as a target to Tactical.
+pub fn set_sensors_target_message(uuid: String) -> ClientMessage {
+    ClientMessage::SetSensorsTarget { uuid }
 }
 
 /// Returns `true` when the Science Console's "Cancel Impulse" button should
@@ -670,6 +683,7 @@ mod tests {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            sensors_target_suggestion: None,
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
@@ -726,6 +740,7 @@ mod tests {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            sensors_target_suggestion: None,
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
@@ -773,6 +788,7 @@ mod tests {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            sensors_target_suggestion: None,
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,
@@ -869,6 +885,41 @@ mod tests {
     fn set_science_target_message_builder_produces_correct_message() {
         let msg = set_science_target_message("entity-uuid-42".into());
         assert_eq!(msg, ClientMessage::SetScienceTarget { uuid: "entity-uuid-42".into() });
+    }
+
+    // ── SensorsTargetSuggestion ───────────────────────────────────────────
+
+    #[test]
+    fn sensors_target_suggestion_updates_state() {
+        let mut s = ClientSimState::default();
+        assert!(s.sensors_target_suggestion.is_none());
+        s.apply(&ServerMessage::SensorsTargetSuggestion { uuid: "entity-sensors-abc".into() });
+        assert_eq!(s.sensors_target_suggestion, Some("entity-sensors-abc".into()));
+    }
+
+    #[test]
+    fn sensors_target_suggestion_is_overwritten_by_newer_message() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::SensorsTargetSuggestion { uuid: "sensors-first".into() });
+        s.apply(&ServerMessage::SensorsTargetSuggestion { uuid: "sensors-second".into() });
+        assert_eq!(s.sensors_target_suggestion, Some("sensors-second".into()));
+    }
+
+    #[test]
+    fn welcome_clears_sensors_target_suggestion() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::SensorsTargetSuggestion { uuid: "sensors-entity".into() });
+        s.apply(&ServerMessage::Welcome {
+            state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
+            ship_stations: crate::stations::ShipStations::default(),
+        });
+        assert!(s.sensors_target_suggestion.is_none());
+    }
+
+    #[test]
+    fn set_sensors_target_message_builder_produces_correct_message() {
+        let msg = set_sensors_target_message("sensors-uuid-42".into());
+        assert_eq!(msg, ClientMessage::SetSensorsTarget { uuid: "sensors-uuid-42".into() });
     }
 
     // ── system_chart_config ──────────────────────────────────────────────
@@ -1755,6 +1806,7 @@ mod tests {
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
+            sensors_target_suggestion: None,
             shield_facings: Vec::new(),
             fire_ready: false,
             on_cooldown: false,

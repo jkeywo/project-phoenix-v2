@@ -121,6 +121,8 @@ pub enum ViewMode {
     Camera(ViewDirection),
     Radar,
     ScienceRadar,
+    /// The Sensors operator has pushed their long-range radar to the viewscreen.
+    SensorsRadar,
     SystemChart,
     /// The Comms officer has pushed a message to the viewscreen.
     Comms,
@@ -445,6 +447,9 @@ pub enum ClientMessage {
     /// Science officer taps an entity on their radar to suggest it as a target
     /// to the Weapons console. Advisory only — does not affect lock state.
     SetScienceTarget { uuid: String },
+    /// Sensors operator taps an entity on their long-range radar to suggest it
+    /// as a target to Tactical. Advisory only — does not affect lock state.
+    SetSensorsTarget { uuid: String },
     FirePhaser,
     SetPhaserMode { mode: PhaserMode },
     Repair { shape: Shape },
@@ -525,6 +530,10 @@ pub enum ServerMessage {
     /// to designate it as a suggested target. Advisory only — does not lock
     /// the Tactical console.
     ScienceTargetSuggestion { uuid: String },
+    /// Broadcast to all players when the Sensors operator taps an entity on
+    /// their long-range radar to designate it as a suggested target for
+    /// Tactical. Advisory only — does not lock the Tactical console.
+    SensorsTargetSuggestion { uuid: String },
     /// Sent when a phaser bank fires a shot at a target.
     PhaserFired { bank: PhaserBank, target_uuid: String },
     /// Sent at 10 Hz to each console player.  Carries the remaining cooldown

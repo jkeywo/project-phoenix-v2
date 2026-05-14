@@ -259,7 +259,7 @@ pub fn radar_rings<'a>(
     })
 }
 
-// ── Science radar tab view model ──────────────────────────────────────────────
+// ── Sensors / Science radar tab view model ───────────────────────────────────
 
 /// A single entity dot on the Science long-range radar.
 #[derive(Clone, Debug, PartialEq)]
@@ -374,6 +374,25 @@ pub fn compute_science_radar_view(
         .collect();
 
     ScienceRadarView { dots, rings }
+}
+
+/// Compute the Sensors console long-range radar view.
+///
+/// Identical semantics to `compute_science_radar_view` — delegates to it
+/// directly.  A dedicated entry point is provided so the call site reads as
+/// "Sensors" rather than "Science", matching the renamed console.
+///
+/// - `entities`: all entities from `WorldData`.
+/// - `ship_x`, `ship_z`, `ship_yaw`: current ship pose.
+/// - `config`: Sensors radar configuration (range + tag filter).
+pub fn compute_sensors_radar_view(
+    entities: &[EntitySnapshot],
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    config: &RadarConfig,
+) -> ScienceRadarView {
+    compute_science_radar_view(entities, ship_x, ship_z, ship_yaw, config)
 }
 
 #[cfg(test)]
@@ -836,6 +855,43 @@ mod tests {
         assert_eq!(view.dots[0].uuid, "ast-1");
         assert_eq!(view.rings.len(), 1, "field should be a ring");
         assert_eq!(view.rings[0].uuid, "fld-1");
+    }
+
+    // ── compute_sensors_radar_view ────────────────────────────────────────
+
+    #[test]
+    fn sensors_radar_view_produces_same_output_as_science_radar_view() {
+        // compute_sensors_radar_view is a thin wrapper; verify parity.
+        let entities = vec![
+            ast_entity("ast-sensors-1", 0.0, -30.0),
+            fld_entity("fld-sensors-1", 0.0, -30.0),
+        ];
+        let cfg = science_config();
+        let science_view = compute_science_radar_view(&entities, 0.0, 0.0, 0.0, &cfg);
+        let sensors_view = compute_sensors_radar_view(&entities, 0.0, 0.0, 0.0, &cfg);
+        assert_eq!(science_view, sensors_view);
+    }
+
+    #[test]
+    fn sensors_radar_view_empty_world_produces_empty_view() {
+        let view = compute_sensors_radar_view(&[], 0.0, 0.0, 0.0, &science_config());
+        assert!(view.dots.is_empty());
+        assert!(view.rings.is_empty());
+    }
+
+    #[test]
+    fn sensors_radar_view_includes_asteroid_within_config_range() {
+        let a = ast_entity("sensors-ast", 0.0, -50.0);
+        let view = compute_sensors_radar_view(&[a], 0.0, 0.0, 0.0, &science_config());
+        assert_eq!(view.dots.len(), 1);
+        assert_eq!(view.dots[0].uuid, "sensors-ast");
+    }
+
+    #[test]
+    fn sensors_radar_view_excludes_entity_beyond_config_range() {
+        let a = ast_entity("sensors-far", 0.0, -200.0);
+        let view = compute_sensors_radar_view(&[a], 0.0, 0.0, 0.0, &science_config());
+        assert!(view.dots.is_empty());
     }
 }
 

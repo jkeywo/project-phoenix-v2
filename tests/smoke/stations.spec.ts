@@ -2,7 +2,7 @@
 // SelectStation / ReleaseStation behaviors).
 
 import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient } from './fixtures';
+import { readHostPeerId, createTestClient, createServerPage } from './fixtures';
 
 test('Welcome includes ship_stations', async ({ context }) => {
   const serverPage = await context.newPage();
@@ -128,10 +128,7 @@ test('ReleaseStation returns player to spectator', async ({ context }) => {
 });
 
 test('first connector when full becomes spectator', async ({ context }) => {
-  const serverPage = await context.newPage();
-  await serverPage.goto('/');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
-
+  const serverPage = await createServerPage(context, { maxPlayers: 3 });
   const hostId = await readHostPeerId(serverPage);
 
   // At 3P max, fill all 3 stations

@@ -142,6 +142,35 @@ export async function createTestClient(
   };
 }
 
+// Patches a player_ship.toml string so that max_players equals the given value
+// and any station-count sections beyond that limit are stripped (they would
+// otherwise fail the out-of-range validation check in Rust).
+function patchMaxPlayers(toml: string, maxPlayers: number): string {
+  let patched = toml.replace(/^max_players\s*=\s*\d+/m, `max_players = ${maxPlayers}`);
+  const pattern = new RegExp(`\n\\[\\[stations\\.${maxPlayers + 1}\\]\\][\\s\\S]*$`);
+  return patched.replace(pattern, '');
+}
+
+// Boots a fresh server page, optionally patching the player_ship.toml fetch to
+// override max_players before the WASM validates and loads it.
+export async function createServerPage(
+  ctx: BrowserContext,
+  opts: { maxPlayers?: number } = {},
+): Promise<Page> {
+  const page = await ctx.newPage();
+  if (opts.maxPlayers !== undefined) {
+    const mp = opts.maxPlayers;
+    await page.route('**/assets/entities/player_ship.toml', async route => {
+      const response = await route.fetch();
+      const text = await response.text();
+      await route.fulfill({ contentType: 'text/plain', body: patchMaxPlayers(text, mp) });
+    });
+  }
+  await page.goto('/');
+  await page.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  return page;
+}
+
 // Reads the host peer ID from the server page's QR-link href, which is set
 // after the PeerJS peer opens.
 export async function readHostPeerId(serverPage: Page): Promise<string> {

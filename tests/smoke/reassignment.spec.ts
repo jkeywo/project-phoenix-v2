@@ -2,15 +2,13 @@
 // Covers: leave cascade, spectator promotion on max-players leave.
 
 import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient } from './fixtures';
+import { readHostPeerId, createTestClient, createServerPage } from './fixtures';
 import type { TestClient } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
 
 /** Boot a fresh server page and return the host peer ID. */
-async function bootServer(context: BrowserContext): Promise<string> {
-  const serverPage = await context.newPage();
-  await serverPage.goto('/');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+async function bootServer(context: BrowserContext, opts: { maxPlayers?: number } = {}): Promise<string> {
+  const serverPage = await createServerPage(context, opts);
   return readHostPeerId(serverPage);
 }
 
@@ -106,7 +104,7 @@ test('3→2 player leave: remaining players keep their stations', async ({ conte
 });
 
 test('leave at max_players allows spectator to claim vacated station', async ({ context }) => {
-  const hostId = await bootServer(context);
+  const hostId = await bootServer(context, { maxPlayers: 3 });
 
   // Fill all 3 stations (max_players = 3)
   const c1 = await createTestClient(context, hostId, { name: 'P1' });

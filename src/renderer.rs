@@ -60,13 +60,6 @@ struct GameCamera;
 #[derive(Component)]
 struct RadarCamera;
 
-/// Marks entities that belong to the lobby scene (panel root).
-#[derive(Component)]
-struct LobbyItem;
-
-/// Marks the text node whose content is the live player list.
-#[derive(Component)]
-struct PlayerListText;
 
 /// FPS counter text — rendered in the Bevy UI overlay.
 #[derive(Component)]
@@ -92,8 +85,6 @@ impl Plugin for RendererPlugin {
                 update_fps_counter,
                 update_camera_aspect,
                 toggle_cameras,
-                toggle_lobby_items,
-                update_player_list,
                 update_view_screen_text,
                 update_view_direction_label,
                 hull_camera,
@@ -151,44 +142,6 @@ fn setup(
         brightness: 80.0,
         ..default()
     });
-
-    // Lobby: panel anchored top-left via node UI.
-    // Padding accounts for the viewscreen border corners and edges so that
-    // text doesn't overlap the border frame (which uses CORNER_W=240px and
-    // CORNER_H=140px for each corner; EDGE_THICKNESS=44px).
-    const CORNER_W: f32 = 240.0;
-    const CORNER_H: f32 = 140.0;
-    commands
-        .spawn((
-            LobbyItem,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::FlexStart,
-                align_items: AlignItems::FlexStart,
-                padding: UiRect {
-                    left: Val::Px(CORNER_W),
-                    top: Val::Px(CORNER_H),
-                    right: Val::Px(CORNER_W),
-                    bottom: Val::Px(CORNER_H + 8.0),
-                },
-                ..default()
-            },
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                Text::new("Bridge Crew"),
-                TextFont { font_size: 22.0, ..default() },
-                TextColor(Color::srgb(0.53, 0.67, 1.0)),
-            ));
-            parent.spawn((
-                PlayerListText,
-                Text::new("Players:\n—"),
-                TextFont { font_size: 15.0, ..default() },
-                TextColor(Color::srgb(0.6, 0.7, 0.73)),
-            ));
-        });
 
     // View-screen crew roster — visible only during InProgress phase.
     commands.spawn((
@@ -303,53 +256,9 @@ fn toggle_cameras(
 
     // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
     // in all phases so that UI nodes without an explicit UiTargetCamera
-    // (e.g. the FPS counter) continue to render during InProgress. Lobby UI
-    // nodes are hidden via Visibility by toggle_lobby_items instead.
+    // (e.g. the FPS counter) continue to render during InProgress.
     if let Ok(mut cam) = game.single_mut()     { cam.is_active = game_active; }
     if let Ok(mut cam) = radar_cam.single_mut(){ cam.is_active = radar_active; }
-}
-
-fn toggle_lobby_items(
-    phase: Res<CurrentPhase>,
-    mut query: Query<&mut Visibility, With<LobbyItem>>,
-) {
-    if !phase.is_changed() {
-        return;
-    }
-    let hidden = phase.0 == GamePhase::InProgress;
-    for mut vis in query.iter_mut() {
-        *vis = if hidden { Visibility::Hidden } else { Visibility::Visible };
-    }
-}
-
-fn update_player_list(
-    cache: Res<GameStateCache>,
-    ship_stations: Option<Res<crate::stations::ShipStations>>,
-    mut query: Query<&mut Text, With<PlayerListText>>,
-) {
-    if !cache.is_changed() {
-        return;
-    }
-    let Ok(mut text) = query.single_mut() else { return };
-    let mut content = "Players:\n".to_string();
-
-    // Determine player count (non-spectators) for station lookup.
-    let player_count = cache.0.players.iter().filter(|p| !p.consoles.is_empty()).count() as u32;
-
-    for p in &cache.0.players {
-        if p.consoles.is_empty() {
-            content.push_str(&format!("• {} — (spectating)\n", p.name));
-        } else {
-            // Find the station name whose consoles intersect this player's consoles.
-            let station_name = ship_stations.as_ref().and_then(|ss| {
-                ss.configs.get(&player_count).and_then(|defs| {
-                    defs.iter().find(|d| d.consoles.iter().any(|c| p.consoles.contains(c))).map(|d| d.name.as_str())
-                })
-            }).unwrap_or("(unknown)");
-            content.push_str(&format!("• {} — {}\n", p.name, station_name));
-        }
-    }
-    **text = content;
 }
 
 fn update_view_screen_text(

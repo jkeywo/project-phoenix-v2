@@ -345,6 +345,7 @@ impl Plugin for ClientAppPlugin {
                             apply_inbound_messages,
                             detect_orientation_change,
                             rebuild_lobby_ui_on_change,
+                            refresh_engage_button,
                             refresh_crew_header,
                             refresh_footer_status,
                             refresh_station_detail,
@@ -742,7 +743,6 @@ fn rebuild_lobby_ui_on_change(
     landscape: Res<LandscapeMode>,
     console_root: Query<Entity, With<ConsoleListRoot>>,
     children_q: Query<&Children>,
-    mut engage: Query<&mut Visibility, With<EngageButton>>,
     asset_server: Res<AssetServer>,
 ) {
     if !state.is_changed() && !token.is_changed() && !landscape.is_changed() {
@@ -794,8 +794,17 @@ fn rebuild_lobby_ui_on_change(
             spawn_detail_column(body, my_mine_slot, &state, &token.0, &chakra, &mono);
         }
     });
+}
 
-    // Engage visibility — only show when captain, in lobby, and all stations filled.
+fn refresh_engage_button(
+    state: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    mut engage: Query<&mut Visibility, With<EngageButton>>,
+) {
+    if !state.is_changed() && !token.is_changed() {
+        return;
+    }
+    let view = LobbyView::new(&state, &token.0);
     if let Ok(mut vis) = engage.single_mut() {
         *vis = if view.is_captain() && state.phase == GamePhase::Lobby && view.all_stations_filled() {
             Visibility::Visible

@@ -7,6 +7,7 @@ use crate::ship_state::ShipState;
 use crate::region_effects::RegionEffectKind;
 use crate::modifiers::{ShipModifiers, Modifier};
 use crate::messages::{ModifierSlot, ModifierSource};
+use crate::flag_kind::FlagKind;
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -43,10 +44,13 @@ impl Plugin for RegionPlugin {
                 update_region_membership,
                 apply_damage_zone_damage.after(update_region_membership),
                 handle_blocks_impulse_region_enter.after(update_region_membership),
+                handle_comms_jam_enter.after(update_region_membership),
+                handle_sensor_blind_enter.after(update_region_membership),
                 handle_radar_dampening_enter.after(update_region_membership),
                 handle_radar_dampening_exit.after(update_region_membership),
                 handle_slow_zone_enter.after(update_region_membership),
                 handle_slow_zone_exit.after(update_region_membership),
+                handle_flag_region_exit.after(update_region_membership),
             ));
     }
 }
@@ -181,6 +185,50 @@ fn handle_blocks_impulse_region_enter(
     }
 }
 
+/// Sets the `CommsJammed` flag on the ship when entering a region with the
+/// `CommsJam` effect. Multiple jammer regions OR-aggregate via the flag API.
+fn handle_comms_jam_enter(
+    mut entered: MessageReader<RegionEntered>,
+    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
+    mut modifiers: ResMut<ShipModifiers>,
+) {
+    for ev in entered.read() {
+        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
+            continue;
+        };
+        if !effects.0.iter().any(|e| *e == RegionEffectKind::CommsJam) {
+            continue;
+        }
+        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        modifiers.add_flag(ModifierSource::RegionEffect { uuid }, FlagKind::CommsJammed);
+    }
+}
+
+/// Sets the `SensorBlind` flag on the ship when entering a region with the
+/// `SensorBlind` effect. Multiple blind regions OR-aggregate via the flag API.
+fn handle_sensor_blind_enter(
+    mut entered: MessageReader<RegionEntered>,
+    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
+    mut modifiers: ResMut<ShipModifiers>,
+) {
+    for ev in entered.read() {
+        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
+            continue;
+        };
+        if !effects.0.iter().any(|e| *e == RegionEffectKind::SensorBlind) {
+            continue;
+        }
+        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        modifiers.add_flag(ModifierSource::RegionEffect { uuid }, FlagKind::SensorBlind);
+    }
+}
+
 /// Registers a `RadarRange` modifier when the ship enters a region with the
 /// `RadarDampening` effect. The modifier's bonus is the region's multiplier value.
 fn handle_radar_dampening_enter(
@@ -282,6 +330,28 @@ fn handle_radar_dampening_exit(
             Err(_) => continue,
         };
         modifiers.clear_source(&ModifierSource::RegionEffect { uuid });
+    }
+}
+
+/// Removes flag effects (`CommsJammed`, `SensorBlind`) when the ship exits any
+/// region. Uses `remove_flag` so that OR-aggregation is preserved: the flag
+/// clears only when the last source exits.
+fn handle_flag_region_exit(
+    mut exited: MessageReader<RegionExited>,
+    membership: Res<RegionMembership>,
+    mut modifiers: ResMut<ShipModifiers>,
+) {
+    for ev in exited.read() {
+        let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
+            Some(s) => s,
+            None => continue,
+        };
+        let uuid = match uuid::Uuid::parse_str(uuid_str) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        modifiers.remove_flag(ModifierSource::RegionEffect { uuid }, FlagKind::CommsJammed);
+        modifiers.remove_flag(ModifierSource::RegionEffect { uuid }, FlagKind::SensorBlind);
     }
 }
 
@@ -1108,6 +1178,156 @@ mod tests {
             "speed should remain clamped after exit (not restored), got {}",
             ship.forward_speed
         );
+    }
+
+    // ── Flag effect tests (CommsJam / SensorBlind) ─────────────────────────
+
+    use crate::flag_kind::FlagKind;
+    use crate::region_effects::{CommsJamEffect, SensorBlindEffect};
+
+    fn flag_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(RegionPlugin);
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(ShipState::new());
+        app.insert_resource(ShipModifiers::new());
+        app.world_mut().spawn((Ship, Transform::default()));
+        app
+    }
+
+    /// Spawn a region with the CommsJam effect at the given position.
+    fn spawn_comms_jam_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
+        let config = EntityConfig {
+            tags: vec!["region".to_string()],
+            shape: Some(RegionShape::Sphere { radius }),
+            effects: Some(EffectsCfg {
+                comms_jam: Some(CommsJamEffect {}),
+                ..Default::default()
+            }),
+            hull: None, collider: None, appearance: None,
+            helm_console: None, weapons_console: None, engineering_console: None,
+            captain_console: None, power: None, science_console: None,
+            star: None, planet: None, asteroid_field: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let mut commands = app.world_mut().commands();
+        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+    }
+
+    /// Spawn a region with the SensorBlind effect at the given position.
+    fn spawn_sensor_blind_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
+        let config = EntityConfig {
+            tags: vec!["region".to_string()],
+            shape: Some(RegionShape::Sphere { radius }),
+            effects: Some(EffectsCfg {
+                sensor_blind: Some(SensorBlindEffect {}),
+                ..Default::default()
+            }),
+            hull: None, collider: None, appearance: None,
+            helm_console: None, weapons_console: None, engineering_console: None,
+            captain_console: None, power: None, science_console: None,
+            star: None, planet: None, asteroid_field: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let mut commands = app.world_mut().commands();
+        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+    }
+
+    fn assert_flag(app: &App, flag: FlagKind, expected: bool) {
+        let modifiers = app.world().resource::<ShipModifiers>();
+        assert_eq!(modifiers.has_flag(&flag), expected,
+            "expected flag {:?} to be {}, but got {}",
+            flag, expected, !expected);
+    }
+
+    /// RED 1: entering a comms_jam region sets the CommsJammed flag
+    #[test]
+    fn entering_comms_jam_region_sets_flag() {
+        let mut app = flag_test_app();
+        spawn_comms_jam_region(&mut app, 0.0, 0.0, 50.0);
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+        assert_flag(&app, FlagKind::CommsJammed, true);
+    }
+
+    /// RED 2: entering a sensor_blind region sets the SensorBlind flag
+    #[test]
+    fn entering_sensor_blind_region_sets_flag() {
+        let mut app = flag_test_app();
+        spawn_sensor_blind_region(&mut app, 0.0, 0.0, 50.0);
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+        assert_flag(&app, FlagKind::SensorBlind, true);
+    }
+
+    /// RED 3: exiting a comms_jam region clears the flag
+    #[test]
+    fn exiting_comms_jam_region_clears_flag() {
+        let mut app = flag_test_app();
+        let _region = spawn_comms_jam_region(&mut app, 0.0, 0.0, 50.0);
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+        assert_flag(&app, FlagKind::CommsJammed, true);
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Exit the region
+        set_ship_pos(&mut app, 200.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        assert_flag(&app, FlagKind::CommsJammed, false);
+    }
+
+    /// RED 4: two overlapping comms_jam regions OR-aggregate; flag clears only
+    /// when the last source exits.
+    #[test]
+    fn overlapping_comms_jam_regions_or_aggregate() {
+        let mut app = flag_test_app();
+        // Region A at (0,0) radius 80
+        // Region B at (60,0) radius 80
+        // Ship at (0,0) is inside both
+        spawn_comms_jam_region(&mut app, 0.0, 0.0, 80.0);
+        spawn_comms_jam_region(&mut app, 60.0, 0.0, 80.0);
+        set_ship_pos(&mut app, 0.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        assert_flag(&app, FlagKind::CommsJammed, true);
+
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Exit B: move to (-40,0) — still inside A (dist 40 < 80), outside B (dist 100 > 80)
+        set_ship_pos(&mut app, -40.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        assert_flag(&app, FlagKind::CommsJammed, true);
+
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Exit A: move far away — outside both
+        set_ship_pos(&mut app, -200.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        assert_flag(&app, FlagKind::CommsJammed, false);
+    }
+
+    /// RED 5: region despawn while inside clears the flag
+    #[test]
+    fn region_despawn_while_inside_clears_flag() {
+        let mut app = flag_test_app();
+        let region = spawn_comms_jam_region(&mut app, 0.0, 0.0, 50.0);
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+        assert_flag(&app, FlagKind::CommsJammed, true);
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Despawn the region entity
+        app.world_mut().despawn(region);
+        tick_with_dt(&mut app, 0.016);
+
+        assert_flag(&app, FlagKind::CommsJammed, false);
     }
 
     /// RED 9: region despawn while inside removes modifiers

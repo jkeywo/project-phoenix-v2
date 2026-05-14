@@ -129,7 +129,7 @@ impl LobbyState {
 
 /// All consoles the lobby UI knows how to render. Listed in the order
 /// they appear on screen.
-pub const ALL_CONSOLES: [Console; 7] = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power, Console::Comms];
+pub const ALL_CONSOLES: [Console; 9] = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Sensors, Console::Shields, Console::Navigation, Console::Power, Console::Comms];
 
 /// One console row as the lobby UI should render it.
 #[derive(Clone, Debug, PartialEq)]
@@ -179,9 +179,19 @@ impl<'a> LobbyView<'a> {
         self.my_consoles().contains(&Console::Helm)
     }
 
-    /// True if the local player currently holds the science console.
-    pub fn is_science(&self) -> bool {
-        self.my_consoles().contains(&Console::Science)
+    /// True if the local player currently holds the Sensors console.
+    pub fn is_sensors(&self) -> bool {
+        self.my_consoles().contains(&Console::Sensors)
+    }
+
+    /// True if the local player currently holds the Shields console.
+    pub fn is_shields(&self) -> bool {
+        self.my_consoles().contains(&Console::Shields)
+    }
+
+    /// True if the local player currently holds the Navigation console.
+    pub fn is_navigation(&self) -> bool {
+        self.my_consoles().contains(&Console::Navigation)
     }
 
     /// True if the local player currently holds the repair console.
@@ -680,15 +690,37 @@ mod tests {
     }
 
     #[test]
-    fn is_science_is_true_only_when_i_hold_the_science_console() {
+    fn is_sensors_is_true_only_when_i_hold_the_sensors_console() {
         let mut s = LobbyState::default();
         s.players = vec![
             p("a", "Alice", vec![Console::Helm]),
-            p("b", "Bob",   vec![Console::Science]),
+            p("b", "Bob",   vec![Console::Sensors]),
         ];
-        assert!(!LobbyView::new(&s, "a").is_science());
-        assert!( LobbyView::new(&s, "b").is_science());
-        assert!(!LobbyView::new(&s, "ghost").is_science());
+        assert!(!LobbyView::new(&s, "a").is_sensors());
+        assert!( LobbyView::new(&s, "b").is_sensors());
+        assert!(!LobbyView::new(&s, "ghost").is_sensors());
+    }
+
+    #[test]
+    fn is_shields_is_true_only_when_i_hold_the_shields_console() {
+        let mut s = LobbyState::default();
+        s.players = vec![
+            p("a", "Alice", vec![Console::Helm]),
+            p("b", "Bob",   vec![Console::Shields]),
+        ];
+        assert!(!LobbyView::new(&s, "a").is_shields());
+        assert!( LobbyView::new(&s, "b").is_shields());
+    }
+
+    #[test]
+    fn is_navigation_is_true_only_when_i_hold_the_navigation_console() {
+        let mut s = LobbyState::default();
+        s.players = vec![
+            p("a", "Alice", vec![Console::Helm]),
+            p("b", "Bob",   vec![Console::Navigation]),
+        ];
+        assert!(!LobbyView::new(&s, "a").is_navigation());
+        assert!( LobbyView::new(&s, "b").is_navigation());
     }
 
     #[test]
@@ -704,16 +736,18 @@ mod tests {
     }
 
     #[test]
-    fn all_consoles_filled_is_true_when_all_seven_consoles_are_held() {
+    fn all_consoles_filled_is_true_when_all_nine_consoles_are_held() {
         let mut s = LobbyState::default();
         s.players = vec![
             p("a", "Alice", vec![Console::CaptainChair]),
             p("b", "Bob",   vec![Console::Helm]),
             p("c", "Carol", vec![Console::Tactical]),
             p("d", "Dave",  vec![Console::Repair]),
-            p("e", "Eve",   vec![Console::Science]),
+            p("e", "Eve",   vec![Console::Sensors]),
             p("f", "Frank", vec![Console::Power]),
             p("g", "Grace", vec![Console::Comms]),
+            p("h", "Heidi", vec![Console::Shields]),
+            p("i", "Ivan",  vec![Console::Navigation]),
         ];
         assert!(LobbyView::new(&s, "a").all_consoles_filled());
     }
@@ -994,7 +1028,7 @@ short_code = "BRG"
     #[test]
     fn reconcile_jumps_to_first_when_current_not_in_bundle() {
         let result = reconcile_active_console(
-            Some(Console::Science),
+            Some(Console::Sensors),
             &[Console::CaptainChair, Console::Helm],
         );
         assert_eq!(result, Console::CaptainChair);

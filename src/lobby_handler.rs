@@ -117,7 +117,7 @@ pub fn process_message(
             if ship_stations.configs.is_empty() {
                 // No station config loaded (e.g. in integration tests): fall back to
                 // display-name-based console toggle for backward compatibility.
-                let console = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power, Console::Comms]
+                let console = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Sensors, Console::Shields, Console::Navigation, Console::Power, Console::Comms]
                     .into_iter()
                     .find(|c| c.display_name() == station.as_str());
                 if let Some(c) = console {
@@ -751,8 +751,8 @@ mod tests {
             sessions.register(tok.into(), name.into()).unwrap();
         }
         let player_count = 6u32;
-        // At 6P: "Captain" (CaptainChair), "Helm" (Helm), "Tactical" (Tactical), "Engineering" (Repair+Power), "Comms" (Comms), "Science" (Science)
-        for (tok, station_name) in [("t1", "Captain"), ("t2", "Helm"), ("t3", "Tactical"), ("t4", "Engineering"), ("t5", "Comms"), ("t6", "Science")] {
+        // At 6P: "Captain" (CaptainChair), "Helm" (Helm), "Tactical" (Tactical), "Engineering" (Repair+Power), "Comms" (Comms), "Sensors" (Sensors+Shields+Navigation)
+        for (tok, station_name) in [("t1", "Captain"), ("t2", "Helm"), ("t3", "Tactical"), ("t4", "Engineering"), ("t5", "Comms"), ("t6", "Sensors")] {
             let station_def = crate::stations::get_station(stations, player_count, station_name).unwrap();
             for console in &station_def.consoles {
                 let _ = sessions.toggle_console(tok, console.clone());
@@ -866,18 +866,18 @@ mod tests {
         sessions.register("t7".into(), "Grace".into()).unwrap();
         sessions.push_spectator("t7".into());
 
-        // t6 (Science) disconnects
+        // t6 (Sensors) disconnects
         let _ = process_disconnect_with_stations("t6", &mut sessions, &stations);
 
-        // t7 selects "Science"
+        // t7 selects "Sensors"
         let result = pm_stations(
             "t7",
-            &ClientMessage::SelectStation { station: "Science".into() },
+            &ClientMessage::SelectStation { station: "Sensors".into() },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        // t7 must receive a StationAssigned with station = Some("Science")
+        // t7 must receive a StationAssigned with station = Some("Sensors")
         let assigned = result.outbound.iter().find_map(|(_, m)| match m {
             ServerMessage::StationAssigned { token, station: Some(name), consoles }
                 if token == "t7" => Some((name.clone(), consoles.clone())),
@@ -885,11 +885,11 @@ mod tests {
         });
         assert!(
             assigned.is_some(),
-            "t7 should receive StationAssigned with station=Some(Science); got outbound: {:?}",
+            "t7 should receive StationAssigned with station=Some(Sensors); got outbound: {:?}",
             result.outbound
         );
         let (name, consoles) = assigned.unwrap();
-        assert_eq!(name, "Science");
+        assert_eq!(name, "Sensors");
         assert!(!consoles.is_empty(), "consoles should not be empty");
     }
 

@@ -26,7 +26,7 @@ pub struct StationDef {
 /// Return the default available complexity presets for every console.
 fn default_complexity_presets() -> HashMap<Console, Vec<String>> {
     let mut m = HashMap::new();
-    for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power, Console::Comms] {
+    for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Sensors, Console::Shields, Console::Navigation, Console::Power, Console::Comms] {
         m.insert(c.clone(), vec!["Low".into(), "Full".into()]);
     }
     m
@@ -131,7 +131,9 @@ fn parse_console(s: &str, count: u32, station: &str) -> Result<Console, StationC
         "Helm" => Ok(Console::Helm),
         "Tactical" => Ok(Console::Tactical),
         "Repair" => Ok(Console::Repair),
-        "Science" => Ok(Console::Science),
+        "Sensors" => Ok(Console::Sensors),
+        "Shields" => Ok(Console::Shields),
+        "Navigation" => Ok(Console::Navigation),
         "Power" => Ok(Console::Power),
         "Comms" => Ok(Console::Comms),
         other => Err(StationConfigError::UnknownConsole {
@@ -658,8 +660,8 @@ name = "Ops"
 consoles = ["Repair"]
 
 [[stations.4]]
-name = "Science"
-consoles = ["Science"]
+name = "Sensors"
+consoles = ["Sensors"]
 "#
     }
 
@@ -1051,7 +1053,7 @@ consoles = ["CaptainChair", "Helm"]
             ("carol".to_string(), "Tactical".to_string()),
             ("dave".to_string(), "Engineering".to_string()),
             ("eve".to_string(), "Comms".to_string()),
-            ("frank".to_string(), "Science".to_string()),
+            ("frank".to_string(), "Sensors".to_string()),
         ].into();
         let result = reassign_on_join(&stations, &current, "gary");
         // Current unchanged; gary is not in the map (caller adds to spectator queue)

@@ -658,7 +658,7 @@ mod tests {
     #[test]
     fn server_modifier_added_console_source_round_trips() {
         let msg = ServerMessage::ModifierAdded {
-            source: crate::messages::ModifierSource::Console(crate::messages::Console::Science),
+            source: crate::messages::ModifierSource::Console(crate::messages::Console::Sensors),
             slot: crate::messages::ModifierSlot::RadarRange,
             bonus: 1.0,
         };
@@ -776,7 +776,28 @@ mod tests {
 
     #[test]
     fn client_decrease_power_round_trips() {
-        let msg = ClientMessage::DecreasePower { console: Console::Science };
+        let msg = ClientMessage::DecreasePower { console: Console::Sensors };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_sensors_console_round_trips() {
+        let msg = ClientMessage::SetComplexity { console: Console::Sensors, preset_name: "Low".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_shields_console_round_trips() {
+        let msg = ClientMessage::SetComplexity { console: Console::Shields, preset_name: "Std".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_navigation_console_round_trips() {
+        let msg = ClientMessage::SetComplexity { console: Console::Navigation, preset_name: "Std".into() };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -786,7 +807,7 @@ mod tests {
         let msg = ServerMessage::PowerState {
             helm: 3,
             weapons: 2,
-            science: 4,
+            sensors: 4,
             battery_charge: 65.5,
             locked: false,
         };
@@ -799,7 +820,7 @@ mod tests {
         let msg = ServerMessage::PowerState {
             helm: 1,
             weapons: 1,
-            science: 1,
+            sensors: 1,
             battery_charge: 0.0,
             locked: true,
         };

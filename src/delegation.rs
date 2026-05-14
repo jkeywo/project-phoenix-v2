@@ -32,7 +32,7 @@ pub struct ComplexityContext {
 /// | control              | sender             | condition           |
 /// |----------------------|--------------------|---------------------|
 /// | SetPhaserFrequency   | Tactical           | always              |
-/// | SetPhaserFrequency   | Science            | tactical_is_low     |
+/// | SetPhaserFrequency   | Sensors            | tactical_is_low     |
 pub fn is_sender_authorized(
     control: DelegatedControl,
     sender: &Console,
@@ -42,7 +42,7 @@ pub fn is_sender_authorized(
         // Tactical may always set phaser frequency.
         (DelegatedControl::SetPhaserFrequency, Console::Tactical) => true,
         // Science may set phaser frequency only when Tactical is Low.
-        (DelegatedControl::SetPhaserFrequency, Console::Science) => ctx.tactical_is_low,
+        (DelegatedControl::SetPhaserFrequency, Console::Sensors) => ctx.tactical_is_low,
         // All other combinations are denied.
         _ => false,
     }
@@ -82,22 +82,22 @@ mod tests {
         ));
     }
 
-    // ── SetPhaserFrequency × Science ──────────────────────────────────────
+    // ── SetPhaserFrequency × Sensors ──────────────────────────────────────
 
     #[test]
-    fn science_authorized_for_set_phaser_frequency_when_tactical_is_low() {
+    fn sensors_authorized_for_set_phaser_frequency_when_tactical_is_low() {
         assert!(is_sender_authorized(
             DelegatedControl::SetPhaserFrequency,
-            &Console::Science,
+            &Console::Sensors,
             &low_ctx(),
         ));
     }
 
     #[test]
-    fn science_not_authorized_for_set_phaser_frequency_when_tactical_is_full() {
+    fn sensors_not_authorized_for_set_phaser_frequency_when_tactical_is_full() {
         assert!(!is_sender_authorized(
             DelegatedControl::SetPhaserFrequency,
-            &Console::Science,
+            &Console::Sensors,
             &full_ctx(),
         ));
     }

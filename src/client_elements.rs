@@ -94,7 +94,7 @@ pub struct PlannedChanges {
 pub fn hideable_element_names(console: &Console, preset_name: &str) -> Vec<String> {
     let toml_str = match console {
         Console::Tactical => include_str!("../assets/complexity/tactical.toml"),
-        Console::Science => include_str!("../assets/complexity/science.toml"),
+        Console::Sensors => include_str!("../assets/complexity/sensors.toml"),
         Console::Power => include_str!("../assets/complexity/power.toml"),
         _ => return vec![],
     };
@@ -224,27 +224,27 @@ mod tests {
         assert!(!r.is_hidden("a"));
     }
 
-    // ── Science Low ───────────────────────────────────────────────
+    // ── Sensors Low ───────────────────────────────────────────────
 
     #[test]
-    fn science_low_hides_shield_frequency_readout() {
-        let names = hideable_element_names(&Console::Science, "Low");
+    fn sensors_low_hides_shield_frequency_readout() {
+        let names = hideable_element_names(&Console::Sensors, "Low");
         assert!(
             names.contains(&"shield_frequency_readout".to_string()),
-            "Science Low must hide shield_frequency_readout"
+            "Sensors Low must hide shield_frequency_readout"
         );
     }
 
     #[test]
-    fn science_full_hides_nothing() {
-        let names = hideable_element_names(&Console::Science, "Std");
-        assert!(names.is_empty(), "Science Full should hide nothing");
+    fn sensors_full_hides_nothing() {
+        let names = hideable_element_names(&Console::Sensors, "Std");
+        assert!(names.is_empty(), "Sensors Full should hide nothing");
     }
 
-    // ── Non-Tactical/Science consoles ─────────────────────────────
+    // ── Non-Tactical/Sensors/Power consoles ──────────────────────────
 
     #[test]
-    fn non_tactical_science_power_consoles_without_config_return_empty() {
+    fn non_tactical_sensors_power_consoles_without_config_return_empty() {
         for console in &[Console::Helm, Console::CaptainChair, Console::Repair] {
             let names = hideable_element_names(console, "Low");
             assert!(names.is_empty(), "{:?} should have no hidden elements", console);

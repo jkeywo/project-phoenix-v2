@@ -148,7 +148,12 @@ pub enum Console {
     Helm,
     Tactical,
     Repair,
-    Science,
+    /// Long-range radar and advisory target suggestion (was part of Science).
+    Sensors,
+    /// Four-quadrant shield status and focus mechanic (was part of Science).
+    Shields,
+    /// System chart and impulse-cancel control (was part of Science).
+    Navigation,
     Power,
     Comms,
 }
@@ -161,7 +166,9 @@ impl Console {
             Console::Helm => "Helm",
             Console::Tactical => "Tactical",
             Console::Repair => "Repair",
-            Console::Science => "Science",
+            Console::Sensors => "Sensors",
+            Console::Shields => "Shields",
+            Console::Navigation => "Navigation",
             Console::Power => "Power",
             Console::Comms => "Comms",
         }
@@ -565,7 +572,7 @@ pub enum ServerMessage {
     PowerState {
         helm: u8,
         weapons: u8,
-        science: u8,
+        sensors: u8,
         battery_charge: f32,
         locked: bool,
     },

@@ -331,8 +331,8 @@ impl ClientSimState {
             ServerMessage::ClearRepairIcon => {
                 self.repair_icon = None;
             }
-            ServerMessage::PowerState { helm, weapons, science, battery_charge, locked } => {
-                self.power_state_payload = Some((*helm, *weapons, *science, *battery_charge, *locked));
+            ServerMessage::PowerState { helm, weapons, sensors, battery_charge, locked } => {
+                self.power_state_payload = Some((*helm, *weapons, *sensors, *battery_charge, *locked));
             }
             ServerMessage::EntitySpawned { snapshot } => {
                 if !self.world.entities.iter().any(|e| e.uuid == snapshot.uuid) {
@@ -530,7 +530,7 @@ pub fn can_increase_power(levels: &(u8, u8, u8), console: &Console, locked: bool
     match console {
         Console::Helm => levels.0 < 4,
         Console::Tactical => levels.1 < 4,
-        Console::Science => levels.2 < 4,
+        Console::Sensors => levels.2 < 4,
         _ => false,
     }
 }
@@ -544,7 +544,7 @@ pub fn can_decrease_power(levels: &(u8, u8, u8), console: &Console, locked: bool
     match console {
         Console::Helm => levels.0 > 1,
         Console::Tactical => levels.1 > 1,
-        Console::Science => levels.2 > 1,
+        Console::Sensors => levels.2 > 1,
         _ => false,
     }
 }
@@ -1721,7 +1721,7 @@ mod tests {
         s.apply(&ServerMessage::PowerState {
             helm: 3,
             weapons: 2,
-            science: 4,
+            sensors: 4,
             battery_charge: 75.0,
             locked: false,
         });
@@ -1732,11 +1732,11 @@ mod tests {
     fn second_power_state_message_overwrites_previous() {
         let mut s = ClientSimState::default();
         s.apply(&ServerMessage::PowerState {
-            helm: 1, weapons: 1, science: 1,
+            helm: 1, weapons: 1, sensors: 1,
             battery_charge: 10.0, locked: true,
         });
         s.apply(&ServerMessage::PowerState {
-            helm: 4, weapons: 2, science: 2,
+            helm: 4, weapons: 2, sensors: 2,
             battery_charge: 100.0, locked: false,
         });
         assert_eq!(s.power_state_payload, Some((4, 2, 2, 100.0, false)));
@@ -1849,26 +1849,26 @@ mod tests {
     fn can_increase_power_returns_true_when_allowed() {
         assert!(can_increase_power(&(2, 2, 2), &Console::Helm, false));
         assert!(can_increase_power(&(2, 2, 2), &Console::Tactical, false));
-        assert!(can_increase_power(&(2, 2, 2), &Console::Science, false));
+        assert!(can_increase_power(&(2, 2, 2), &Console::Sensors, false));
     }
 
     #[test]
     fn can_increase_power_false_when_locked() {
         assert!(!can_increase_power(&(2, 2, 2), &Console::Helm, true));
         assert!(!can_increase_power(&(2, 2, 2), &Console::Tactical, true));
-        assert!(!can_increase_power(&(2, 2, 2), &Console::Science, true));
+        assert!(!can_increase_power(&(2, 2, 2), &Console::Sensors, true));
     }
 
     #[test]
     fn can_increase_power_false_when_console_at_four() {
         assert!(!can_increase_power(&(4, 1, 1), &Console::Helm, false));
         assert!(!can_increase_power(&(1, 4, 1), &Console::Tactical, false));
-        assert!(!can_increase_power(&(1, 1, 4), &Console::Science, false));
+        assert!(!can_increase_power(&(1, 1, 4), &Console::Sensors, false));
     }
 
     #[test]
     fn can_increase_power_false_when_total_at_cap() {
-        assert!(!can_increase_power(&(3, 3, 2), &Console::Science, false));
+        assert!(!can_increase_power(&(3, 3, 2), &Console::Sensors, false));
         assert!(!can_increase_power(&(4, 2, 2), &Console::Helm, false));
     }
 
@@ -1882,7 +1882,7 @@ mod tests {
     fn can_decrease_power_returns_true_when_allowed() {
         assert!(can_decrease_power(&(4, 3, 2), &Console::Helm, false));
         assert!(can_decrease_power(&(2, 3, 2), &Console::Tactical, false));
-        assert!(can_decrease_power(&(2, 2, 3), &Console::Science, false));
+        assert!(can_decrease_power(&(2, 2, 3), &Console::Sensors, false));
     }
 
     #[test]
@@ -1894,7 +1894,7 @@ mod tests {
     fn can_decrease_power_false_when_console_at_one() {
         assert!(!can_decrease_power(&(1, 2, 2), &Console::Helm, false));
         assert!(!can_decrease_power(&(2, 1, 2), &Console::Tactical, false));
-        assert!(!can_decrease_power(&(2, 2, 1), &Console::Science, false));
+        assert!(!can_decrease_power(&(2, 2, 1), &Console::Sensors, false));
     }
 
     #[test]
@@ -1910,8 +1910,8 @@ mod tests {
             ClientMessage::IncreasePower { console: Console::Helm },
         );
         assert_eq!(
-            decrease_power_message(Console::Science),
-            ClientMessage::DecreasePower { console: Console::Science },
+            decrease_power_message(Console::Sensors),
+            ClientMessage::DecreasePower { console: Console::Sensors },
         );
     }
 
@@ -2068,9 +2068,9 @@ mod tests {
     }
 
     #[test]
-    fn science_phaser_panel_not_visible_when_only_science_is_low() {
+    fn science_phaser_panel_not_visible_when_only_sensors_is_low() {
         let mut complexity = HashMap::new();
-        complexity.insert(Console::Science, "Low".into());
+        complexity.insert(Console::Sensors, "Low".into());
         assert!(!is_science_phaser_panel_visible(&complexity));
     }
 

@@ -4,7 +4,8 @@ use crate::messages::Console;
 pub struct PowerSystem {
     pub helm: u8,
     pub weapons: u8,
-    pub science: u8,
+    /// Power allocation for the Sensors console (drives radar range multiplier).
+    pub sensors: u8,
     pub battery_charge: f32,
     pub locked: bool,
 }
@@ -31,7 +32,7 @@ impl Default for PowerSystem {
         Self {
             helm: 2,
             weapons: 2,
-            science: 2,
+            sensors: 2,
             battery_charge: 100.0,
             locked: false,
         }
@@ -43,14 +44,14 @@ impl PowerSystem {
         Self {
             helm: 2,
             weapons: 2,
-            science: 2,
+            sensors: 2,
             battery_charge: config.capacity,
             locked: false,
         }
     }
 
     pub fn total(&self) -> u8 {
-        self.helm + self.weapons + self.science
+        self.helm + self.weapons + self.sensors
     }
 
     pub fn increase(&mut self, console: Console) {
@@ -60,7 +61,7 @@ impl PowerSystem {
         match console {
             Console::Helm if self.helm < 4 => self.helm += 1,
             Console::Tactical if self.weapons < 4 => self.weapons += 1,
-            Console::Science if self.science < 4 => self.science += 1,
+            Console::Sensors if self.sensors < 4 => self.sensors += 1,
             _ => {}
         }
     }
@@ -72,7 +73,7 @@ impl PowerSystem {
         match console {
             Console::Helm if self.helm > 1 => self.helm -= 1,
             Console::Tactical if self.weapons > 1 => self.weapons -= 1,
-            Console::Science if self.science > 1 => self.science -= 1,
+            Console::Sensors if self.sensors > 1 => self.sensors -= 1,
             _ => {}
         }
     }
@@ -91,7 +92,7 @@ impl PowerSystem {
         if self.battery_charge <= 0.0 {
             self.helm = 1;
             self.weapons = 1;
-            self.science = 1;
+            self.sensors = 1;
             self.locked = true;
         } else if self.locked && self.battery_charge >= config.emergency_threshold {
             self.locked = false;
@@ -110,7 +111,7 @@ mod tests {
         let ps = PowerSystem::default();
         assert_eq!(ps.helm, 2);
         assert_eq!(ps.weapons, 2);
-        assert_eq!(ps.science, 2);
+        assert_eq!(ps.sensors, 2);
         assert_eq!(ps.battery_charge, 100.0);
         assert!(!ps.locked);
     }
@@ -130,10 +131,10 @@ mod tests {
     }
 
     #[test]
-    fn increase_science() {
+    fn increase_sensors() {
         let mut ps = PowerSystem::default();
-        ps.increase(Console::Science);
-        assert_eq!(ps.science, 3);
+        ps.increase(Console::Sensors);
+        assert_eq!(ps.sensors, 3);
     }
 
     #[test]
@@ -149,10 +150,10 @@ mod tests {
         let mut ps = PowerSystem::default();
         ps.helm = 3;
         ps.weapons = 3;
-        ps.science = 2;
-        // total is 8, science can't go to 3
-        ps.increase(Console::Science);
-        assert_eq!(ps.science, 2);
+        ps.sensors = 2;
+        // total is 8, sensors can't go to 3
+        ps.increase(Console::Sensors);
+        assert_eq!(ps.sensors, 2);
     }
 
     #[test]
@@ -179,10 +180,10 @@ mod tests {
     }
 
     #[test]
-    fn decrease_science() {
+    fn decrease_sensors() {
         let mut ps = PowerSystem::default();
-        ps.decrease(Console::Science);
-        assert_eq!(ps.science, 1);
+        ps.decrease(Console::Sensors);
+        assert_eq!(ps.sensors, 1);
     }
 
     #[test]
@@ -209,7 +210,7 @@ mod tests {
         let mut ps = PowerSystem::default();
         ps.helm = 4;
         ps.weapons = 2;
-        ps.science = 2;
+        ps.sensors = 2;
         // total = 8 → rate = -6.0/s
         ps.battery_charge = 100.0;
         ps.tick(1.0, &config);
@@ -233,7 +234,7 @@ mod tests {
         // total = 3 → rate = 6.0/s
         ps.helm = 1;
         ps.weapons = 1;
-        ps.science = 1;
+        ps.sensors = 1;
         ps.battery_charge = 99.0;
         ps.tick(1.0, &config);
         assert!((ps.battery_charge - 100.0).abs() < 0.001);
@@ -246,12 +247,12 @@ mod tests {
         // total = 8 → rate = -6.0/s; drain battery completely
         ps.helm = 4;
         ps.weapons = 2;
-        ps.science = 2;
+        ps.sensors = 2;
         ps.battery_charge = 5.0;
         ps.tick(1.0, &config);
         assert_eq!(ps.helm, 1);
         assert_eq!(ps.weapons, 1);
-        assert_eq!(ps.science, 1);
+        assert_eq!(ps.sensors, 1);
         assert!(ps.locked);
     }
 
@@ -261,7 +262,7 @@ mod tests {
         let mut ps = PowerSystem::default();
         ps.helm = 1;
         ps.weapons = 1;
-        ps.science = 1;
+        ps.sensors = 1;
         ps.locked = true;
         ps.battery_charge = 10.0;
         // total = 3 → rate = 6.0/s; charge from 10 to 16 (still below 25)
@@ -282,7 +283,7 @@ mod tests {
         // drain battery to force lock
         ps.helm = 4;
         ps.weapons = 2;
-        ps.science = 2;
+        ps.sensors = 2;
         ps.battery_charge = 5.0;
         ps.tick(1.0, &config);
         assert!(ps.locked);
@@ -300,7 +301,7 @@ mod tests {
         let mut ps = PowerSystem::default();
         ps.helm = 4;
         ps.weapons = 2;
-        ps.science = 2;
+        ps.sensors = 2;
         ps.battery_charge = 5.0;
         // tick that exhausts the battery → locked changes from false to true
         assert!(ps.tick(1.0, &config));
@@ -320,8 +321,35 @@ mod tests {
         let ps = PowerSystem::new(&config);
         assert_eq!(ps.helm, 2);
         assert_eq!(ps.weapons, 2);
-        assert_eq!(ps.science, 2);
+        assert_eq!(ps.sensors, 2);
         assert!((ps.battery_charge - 50.0).abs() < 0.001);
         assert!(!ps.locked);
+    }
+
+    #[test]
+    fn increase_sensors_increases_radar_power_slot() {
+        let mut ps = PowerSystem::default();
+        ps.increase(Console::Sensors);
+        assert_eq!(ps.sensors, 3, "Sensors console should drive radar power");
+    }
+
+    #[test]
+    fn increase_shields_is_noop_on_power_system() {
+        let mut ps = PowerSystem::default();
+        ps.increase(Console::Shields);
+        // Shields has no power slot in the system — should be a no-op
+        assert_eq!(ps.helm, 2);
+        assert_eq!(ps.weapons, 2);
+        assert_eq!(ps.sensors, 2);
+    }
+
+    #[test]
+    fn increase_navigation_is_noop_on_power_system() {
+        let mut ps = PowerSystem::default();
+        ps.increase(Console::Navigation);
+        // Navigation has no power slot in the system — should be a no-op
+        assert_eq!(ps.helm, 2);
+        assert_eq!(ps.weapons, 2);
+        assert_eq!(ps.sensors, 2);
     }
 }

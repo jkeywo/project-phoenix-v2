@@ -49,8 +49,10 @@ impl SessionManager {
         if config.engineering_console.is_some() {
             available.push(Console::Repair);
         }
-        // Science has no dedicated TOML config section; always available when a ship entity is loaded.
-        available.push(Console::Science);
+        // Sensors, Shields, Navigation have no dedicated TOML config section; always available when a ship entity is loaded.
+        available.push(Console::Sensors);
+        available.push(Console::Shields);
+        available.push(Console::Navigation);
         // Power has no dedicated TOML config section; always available when a ship entity is loaded.
         // Required for stations that include the Power console (e.g. Repair at 3P).
         available.push(Console::Power);
@@ -160,7 +162,9 @@ impl SessionManager {
             Console::Helm,
             Console::Tactical,
             Console::Repair,
-            Console::Science,
+            Console::Sensors,
+            Console::Shields,
+            Console::Navigation,
             Console::Power,
         ]);
         
@@ -537,29 +541,33 @@ mod tests {
         assert!(available.contains(&Console::Helm));
         assert!(available.contains(&Console::Tactical));
         assert!(available.contains(&Console::Repair));
-        assert!(available.contains(&Console::Science));
+        assert!(available.contains(&Console::Sensors));
+        assert!(available.contains(&Console::Shields));
+        assert!(available.contains(&Console::Navigation));
         assert!(available.contains(&Console::Power));
     }
 
     #[test]
-    fn new_with_config_includes_science_console() {
+    fn new_with_config_includes_sensors_shields_navigation_consoles() {
         use crate::entity_config::EntityConfig;
         let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
         let config = EntityConfig::from_toml(toml_str).unwrap();
         let sm = SessionManager::new_with_config(&config);
         let available = sm.available_consoles();
-        assert!(available.contains(&Console::Science), "Science must be in available_consoles after new_with_config");
+        assert!(available.contains(&Console::Sensors), "Sensors must be in available_consoles after new_with_config");
+        assert!(available.contains(&Console::Shields), "Shields must be in available_consoles after new_with_config");
+        assert!(available.contains(&Console::Navigation), "Navigation must be in available_consoles after new_with_config");
     }
 
     #[test]
-    fn science_console_selectable_after_new_with_config() {
+    fn sensors_console_selectable_after_new_with_config() {
         use crate::entity_config::EntityConfig;
         let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
         let config = EntityConfig::from_toml(toml_str).unwrap();
         let mut sm = SessionManager::new_with_config(&config);
         sm.register("t1".into(), "Alice".into()).unwrap();
-        let result = sm.toggle_console("t1", Console::Science);
-        assert!(result.is_ok(), "Science console toggle must succeed, got: {:?}", result);
+        let result = sm.toggle_console("t1", Console::Sensors);
+        assert!(result.is_ok(), "Sensors console toggle must succeed, got: {:?}", result);
     }
 
     #[test]

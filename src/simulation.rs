@@ -189,7 +189,7 @@ impl Default for PowerMultiplierResource {
             multipliers: std::collections::HashMap::from([
                 (Console::Helm, defaults),
                 (Console::Tactical, defaults),
-                (Console::Science, defaults),
+                (Console::Sensors, defaults),
             ]),
         }
     }
@@ -407,7 +407,8 @@ fn handle_set_view(
             let required = match &mode {
                 ViewMode::Camera(_) => Console::CaptainChair,
                 ViewMode::Radar => Console::Helm,
-                ViewMode::ScienceRadar | ViewMode::SystemChart => Console::Science,
+                ViewMode::ScienceRadar => Console::Sensors,
+                ViewMode::SystemChart => Console::Navigation,
                 ViewMode::Comms => Console::Comms,
             };
             if sessions.0.console_holder(required) == Some(ev.token.as_str()) {
@@ -477,8 +478,8 @@ fn handle_set_science_target(
     for ev in reader.read() {
         let ClientMessage::SetScienceTarget { uuid } = &ev.msg else { continue };
 
-        // Only the Science console holder may broadcast a target suggestion.
-        if sessions.0.console_holder(Console::Science) != Some(ev.token.as_str()) {
+        // Only the Sensors console holder may broadcast a target suggestion.
+        if sessions.0.console_holder(Console::Sensors) != Some(ev.token.as_str()) {
             continue;
         }
 
@@ -735,7 +736,7 @@ fn handle_set_phaser_mode(
 ///
 /// Authorization is checked via the delegation allowlist:
 /// - Tactical holder may always set phaser frequency.
-/// - Science holder may set phaser frequency only when Tactical is at Low
+/// - Sensors holder may set phaser frequency only when Tactical is at Low
 ///   complexity (delegated control, per PRD #176).
 /// All other senders are silently rejected.
 fn handle_set_phaser_frequency(
@@ -759,8 +760,8 @@ fn handle_set_phaser_frequency(
         // Determine which console the sender holds (if any).
         let sender_console = if sessions.0.console_holder(Console::Tactical) == Some(ev.token.as_str()) {
             Console::Tactical
-        } else if sessions.0.console_holder(Console::Science) == Some(ev.token.as_str()) {
-            Console::Science
+        } else if sessions.0.console_holder(Console::Sensors) == Some(ev.token.as_str()) {
+            Console::Sensors
         } else {
             continue;
         };
@@ -979,7 +980,7 @@ fn broadcast_power_state(
         msg: ServerMessage::PowerState {
             helm: power.0.helm,
             weapons: power.0.weapons,
-            science: power.0.science,
+            sensors: power.0.sensors,
             battery_charge: power.0.battery_charge,
             locked: power.0.locked,
         },
@@ -1022,17 +1023,17 @@ fn sync_power_modifiers(
         bonus: weapons_bonus,
     });
 
-    // Science → RadarRange
-    let science_level = (power.science as usize).saturating_sub(1).min(3);
-    let science_bonus = mult_cfg.multipliers.get(&Console::Science).unwrap_or(&default_mult)[science_level];
+    // Sensors → RadarRange
+    let sensors_level = (power.sensors as usize).saturating_sub(1).min(3);
+    let sensors_bonus = mult_cfg.multipliers.get(&Console::Sensors).unwrap_or(&default_mult)[sensors_level];
     modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Science),
+        source: ModifierSource::Console(Console::Sensors),
         slot: ModifierSlot::RadarRange,
-        bonus: science_bonus,
+        bonus: sensors_bonus,
     });
 }
 
-/// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/science.
+/// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/navigation.
 /// Also cancels impulse whenever the hull takes damage this frame.
 /// `StartImpulseCharge` is ignored when the ship is inside a `BlocksImpulse` region.
 fn handle_impulse_messages(
@@ -1158,7 +1159,7 @@ fn broadcast_repair_state(
 
     let current_breakdown = breakdowns.queue.front().map(|entry| (entry.console.clone(), entry.shape));
 
-    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power];
+    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Sensors, Console::Shields, Console::Navigation, Console::Power];
     for console in &all_consoles {
         let Some(token) = sessions.0.console_holder(console.clone()) else { continue };
         writer.write(OutboundMessage {
@@ -1309,7 +1310,7 @@ fn broadcast_sim_state(
     }
     if timer.0.tick(time.delta()).just_finished() {
         let power_levels = power.as_ref()
-            .map(|p| (p.0.helm, p.0.weapons, p.0.science))
+            .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
             .unwrap_or((2, 2, 2));
         let flags = modifiers.flags();
 
@@ -1813,7 +1814,7 @@ fn spawn_game_start_entities(
             let mut multipliers: std::collections::HashMap<Console, [f32; 4]> = std::collections::HashMap::from([
                 (Console::Helm, defaults),
                 (Console::Tactical, defaults),
-                (Console::Science, defaults),
+                (Console::Sensors, defaults),
             ]);
             if let Some(hc) = &config.helm_console {
                 if let Some(pm) = hc.power_multipliers {
@@ -1827,7 +1828,8 @@ fn spawn_game_start_entities(
             }
             if let Some(sc) = &config.science_console {
                 if let Some(pm) = sc.power_multipliers {
-                    multipliers.insert(Console::Science, pm);
+                    // science_console power drives the Sensors radar range multiplier
+                    multipliers.insert(Console::Sensors, pm);
                 }
             }
             commands.insert_resource(PowerMultiplierResource { multipliers });
@@ -2083,24 +2085,37 @@ fn test_app() -> App {
         tick(app);
     }
 
-    fn start_game_with_science(app: &mut App) {
+    fn start_game_with_sensors(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
         push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
-        push(app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
+        push(app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
         tick(app);
-        push(app, "science", ClientMessage::SelectStation { station: "Science".into() });
+        push(app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    fn start_game_with_navigation(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        tick(app);
+        push(app, "navigation", ClientMessage::Identify { token: "navigation".into(), name: "Decker".into() });
+        tick(app);
+        push(app, "navigation", ClientMessage::SelectStation { station: "Navigation".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
 
     #[test]
-    fn science_can_switch_view_to_science_radar() {
+    fn sensors_can_switch_view_to_science_radar() {
         let mut app = test_app();
-        start_game_with_science(&mut app);
-        push(&mut app, "science", ClientMessage::SetView { mode: ViewMode::ScienceRadar });
+        start_game_with_sensors(&mut app);
+        push(&mut app, "sensors", ClientMessage::SetView { mode: ViewMode::ScienceRadar });
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -2109,10 +2124,10 @@ fn test_app() -> App {
     }
 
     #[test]
-    fn science_can_switch_view_to_system_chart() {
+    fn navigation_can_switch_view_to_system_chart() {
         let mut app = test_app();
-        start_game_with_science(&mut app);
-        push(&mut app, "science", ClientMessage::SetView { mode: ViewMode::SystemChart });
+        start_game_with_navigation(&mut app);
+        push(&mut app, "navigation", ClientMessage::SetView { mode: ViewMode::SystemChart });
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -2121,10 +2136,22 @@ fn test_app() -> App {
     }
 
     #[test]
-    fn non_science_cannot_switch_view_to_science_radar() {
+    fn non_sensors_cannot_switch_view_to_science_radar() {
         let mut app = test_app();
-        start_game_with_science(&mut app);
+        start_game_with_sensors(&mut app);
         push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::ScienceRadar });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
+    }
+
+    #[test]
+    fn non_navigation_cannot_switch_view_to_system_chart() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::SystemChart });
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -3036,14 +3063,14 @@ fn test_app() -> App {
 
     // â”€â”€ SetScienceTarget / ScienceTargetSuggestion tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    fn start_game_with_science_and_weapons(app: &mut App) {
+    fn start_game_with_sensors_and_weapons(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
         push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
-        push(app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
+        push(app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
         tick(app);
-        push(app, "science", ClientMessage::SelectStation { station: "Science".into() });
+        push(app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
         tick(app);
         push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
         tick(app);
@@ -3262,11 +3289,11 @@ fn test_app() -> App {
     }
 
     #[test]
-    fn science_set_science_target_broadcasts_suggestion_to_weapons() {
+    fn sensors_set_science_target_broadcasts_suggestion_to_weapons() {
         let mut app = test_app();
-        start_game_with_science_and_weapons(&mut app);
+        start_game_with_sensors_and_weapons(&mut app);
 
-        push(&mut app, "science", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
+        push(&mut app, "sensors", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
         let out = tick(&mut app);
 
         let suggestion = out.iter().find_map(|m| match &m.msg {
@@ -3285,28 +3312,28 @@ fn test_app() -> App {
     }
 
     #[test]
-    fn non_science_player_cannot_send_science_target() {
+    fn non_sensors_player_cannot_send_science_target() {
         let mut app = test_app();
-        start_game_with_science_and_weapons(&mut app);
+        start_game_with_sensors_and_weapons(&mut app);
 
         push(&mut app, "captain", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
         let out = tick(&mut app);
 
         assert!(
             !out.iter().any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
-            "non-Science player should not be able to send ScienceTargetSuggestion"
+            "non-Sensors player should not be able to send ScienceTargetSuggestion"
         );
     }
 
     #[test]
     fn set_science_target_ignored_in_lobby() {
         let mut app = test_app();
-        push(&mut app, "science", ClientMessage::Identify { token: "science".into(), name: "Spock".into() });
+        push(&mut app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
         tick(&mut app);
-        push(&mut app, "science", ClientMessage::SelectStation { station: "Science".into() });
+        push(&mut app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
         tick(&mut app);
 
-        push(&mut app, "science", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
+        push(&mut app, "sensors", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
         let out = tick(&mut app);
 
         assert!(
@@ -3865,12 +3892,12 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Captain (not Power holder) tries to decrease Science.
-        push(&mut app, "captain", ClientMessage::DecreasePower { console: Console::Science });
+        // Captain (not Power holder) tries to decrease Sensors.
+        push(&mut app, "captain", ClientMessage::DecreasePower { console: Console::Sensors });
         let _ = tick(&mut app);
 
         assert_eq!(
-            app.world().resource::<ShipPowerSystem>().0.science,
+            app.world().resource::<ShipPowerSystem>().0.sensors,
             2,
             "non-Power sender should not be able to decrease power"
         );
@@ -3945,8 +3972,8 @@ fn test_app() -> App {
 
         // Increase Helm power via Power console.
         push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
-        // Increase Science power via Power console.
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Science });
+        // Increase Sensors power via Power console.
+        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Sensors });
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
@@ -3954,7 +3981,7 @@ fn test_app() -> App {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
             _ => None,
         }).expect("expected a SimState broadcast");
-        // Default (2,2,2) → increase helm → (3,2,2) → increase science → (3,2,3)
+        // Default (2,2,2) → increase helm → (3,2,2) → increase sensors → (3,2,3)
         assert_eq!(snap.power_levels, (3, 2, 3), "SimState.power_levels should reflect power system state");
     }
 
@@ -4032,7 +4059,7 @@ fn test_app() -> App {
         app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
             Console::Tactical, defaults);
         app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
-            Console::Science, defaults);
+            Console::Sensors, defaults);
 
         // Set state that will trigger exhaustion on the next tick:
         // total=8 (negative rate), battery already at 0 → tick keeps it at 0
@@ -4041,7 +4068,7 @@ fn test_app() -> App {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
             ps.0.helm = 4;
             ps.0.weapons = 2;
-            ps.0.science = 2;
+            ps.0.sensors = 2;
             ps.0.battery_charge = 0.0;
             ps.0.locked = false;
         }
@@ -4066,19 +4093,19 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Set total to 8: helm=4, weapons=2, science=2.
+        // Set total to 8: helm=4, weapons=2, sensors=2.
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
 
-        // Try to increase science — total is 8 (the cap), should be blocked.
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Science });
+        // Try to increase sensors — total is 8 (the cap), should be blocked.
+        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Sensors });
         let _ = tick(&mut app);
 
         let out = tick(&mut app);
         let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { science, .. } => Some(*science),
+            ServerMessage::PowerState { sensors, .. } => Some(*sensors),
             _ => None,
         }).expect("expected a PowerState message");
-        assert_eq!(power_state, 2, "science should stay at 2 when total is already at the cap of 8");
+        assert_eq!(power_state, 2, "sensors should stay at 2 when total is already at the cap of 8");
         assert_eq!(app.world().resource::<ShipPowerSystem>().0.total(), 8,
             "total should remain 8");
     }
@@ -4259,31 +4286,31 @@ fn test_app() -> App {
         assert!((freq - 0.8).abs() < 1e-5, "Tactical holder should set phaser frequency to 0.8, got {freq}");
     }
 
-    /// Science holder may set phaser frequency when Tactical is Low.
+    /// Sensors holder may set phaser frequency when Tactical is Low.
     #[test]
-    fn science_holder_can_set_phaser_frequency_when_tactical_is_low() {
+    fn sensors_holder_can_set_phaser_frequency_when_tactical_is_low() {
         let mut app = test_app();
-        start_game_with_science_and_weapons(&mut app);
+        start_game_with_sensors_and_weapons(&mut app);
         // Set Tactical to Low complexity.
         app.world_mut()
             .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
-        push(&mut app, "science", ClientMessage::SetPhaserFrequency { frequency: 0.3 });
+        push(&mut app, "sensors", ClientMessage::SetPhaserFrequency { frequency: 0.3 });
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.3).abs() < 1e-5, "Science holder should set phaser frequency when Tactical is Low, got {freq}");
+        assert!((freq - 0.3).abs() < 1e-5, "Sensors holder should set phaser frequency when Tactical is Low, got {freq}");
     }
 
-    /// Science holder is rejected when Tactical is Full.
+    /// Sensors holder is rejected when Tactical is Full.
     #[test]
-    fn science_holder_cannot_set_phaser_frequency_when_tactical_is_full() {
+    fn sensors_holder_cannot_set_phaser_frequency_when_tactical_is_full() {
         let mut app = test_app();
-        start_game_with_science_and_weapons(&mut app);
+        start_game_with_sensors_and_weapons(&mut app);
         // Default complexity is Full (unset = no override → not Low).
-        push(&mut app, "science", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
+        push(&mut app, "sensors", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.5).abs() < 1e-5, "Science holder must NOT change phaser frequency when Tactical is Full, got {freq}");
+        assert!((freq - 0.5).abs() < 1e-5, "Sensors holder must NOT change phaser frequency when Tactical is Full, got {freq}");
     }
 
     /// An unrelated console (e.g. captain) cannot set phaser frequency.

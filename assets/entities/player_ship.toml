@@ -62,11 +62,11 @@ max_players = 6
 [[stations.1]]
 name = "Captain"
 description = "Solo crew: pilot, fight, command, and hail contacts."
-consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power", "Science", "Comms"]
+consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power", "Sensors", "Shields", "Navigation", "Comms"]
 rank = "Cpt."
 next = "Helm"
 
-# 2P: command bridge + tactical ops. Comms bundles with the bridge.
+# 2P: command bridge + tactical ops.
 [[stations.2]]
 name = "Helm"
 description = "Pilot the ship, command the bridge, and manage comms."
@@ -77,12 +77,12 @@ previous = "Captain"
 
 [[stations.2]]
 name = "Tactical"
-description = "Weapons, damage control, and power management."
-consoles = ["Tactical", "Repair", "Power", "Science"]
+description = "Weapons, damage control, power, and science operations."
+consoles = ["Tactical", "Repair", "Power", "Sensors", "Shields", "Navigation"]
 rank = "Ltn."
 next = "Tactical"
 
-# 3P: bridge, weapons, and engineering. Comms stays with the bridge.
+# 3P: bridge, weapons, and engineering. Science ops bundle with Tactical.
 [[stations.3]]
 name = "Helm"
 description = "Pilot the ship, command the bridge, and manage comms."
@@ -93,8 +93,8 @@ next = "Helm"
 
 [[stations.3]]
 name = "Tactical"
-description = "Manage weapons systems and science."
-consoles = ["Tactical", "Science"]
+description = "Manage weapons, sensors, shields, and navigation."
+consoles = ["Tactical", "Sensors", "Shields", "Navigation"]
 rank = "Ltn."
 previous = "Tactical"
 next = "Tactical"
@@ -132,11 +132,11 @@ previous = "Engineering"
 next = "Engineering"
 
 [[stations.4]]
-name = "Comms"
-description = "Hail stations, relay intelligence, and monitor science."
-consoles = ["Comms", "Science"]
+name = "Science"
+description = "Hail stations, monitor sensors, shields, and navigation."
+consoles = ["Comms", "Sensors", "Shields", "Navigation"]
 rank = "Ens."
-next = "Comms"
+next = "Science"
 
 # 5P: Captain breaks off from Helm.
 [[stations.5]]
@@ -171,14 +171,14 @@ previous = "Engineering"
 next = "Engineering"
 
 [[stations.5]]
-name = "Comms"
-description = "Hail stations, relay intelligence, and monitor science."
-consoles = ["Comms", "Science"]
+name = "Science"
+description = "Hail stations, monitor sensors, shields, and navigation."
+consoles = ["Comms", "Sensors", "Shields", "Navigation"]
 rank = "Ens."
-previous = "Comms"
-next = "Comms"
+previous = "Science"
+next = "Sensors"
 
-# 6P: Science breaks off from Comms.
+# 6P: Science splits into dedicated Sensors and dedicated Shields/Navigation stations.
 [[stations.6]]
 name = "Captain"
 description = "Command the bridge."
@@ -212,10 +212,11 @@ name = "Comms"
 description = "Hail stations and relay intelligence."
 consoles = ["Comms"]
 rank = "Ens."
-previous = "Comms"
+previous = "Science"
 
 [[stations.6]]
-name = "Science"
-description = "Monitor sensors and long-range radar."
-consoles = ["Science"]
+name = "Sensors"
+description = "Monitor long-range sensors, shields, and navigation."
+consoles = ["Sensors", "Shields", "Navigation"]
 rank = "Ens."
+previous = "Science"

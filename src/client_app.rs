@@ -198,10 +198,20 @@ struct RepairTeamFill(usize);
 #[derive(Component)]
 struct RepairTeamStatusText(usize);
 
-/// Marks the root of the science console UI; shown only when the local
-/// player holds Science and the phase is InProgress.
+/// Marks the root of the Sensors console UI; shown only when the local
+/// player holds Sensors and the phase is InProgress.
 #[derive(Component)]
-pub struct SciencePanel;
+pub struct SensorsPanel;
+
+/// Marks the root of the Shields console UI; shown only when the local
+/// player holds Shields and the phase is InProgress.
+#[derive(Component)]
+pub struct ShieldsPanel;
+
+/// Marks the root of the Navigation console UI; shown only when the local
+/// player holds Navigation and the phase is InProgress.
+#[derive(Component)]
+pub struct NavigationPanel;
 
 /// Marks the root of the weapons console UI; shown only when the local
 /// player holds Tactical and the phase is InProgress.
@@ -337,7 +347,7 @@ impl Plugin for ClientAppPlugin {
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
-            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_captain_ui, setup_helm_ui, setup_science_ui, setup_weapons_ui, setup_repair_ui, setup_power_ui, setup_tab_bar_ui))
+            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_captain_ui, setup_helm_ui, setup_sensors_ui, setup_shields_ui, setup_navigation_ui, setup_weapons_ui, setup_repair_ui, setup_power_ui, setup_tab_bar_ui))
                 .add_systems(
                     Update,
                     (
@@ -375,7 +385,9 @@ impl Plugin for ClientAppPlugin {
                             draw_helm_radar,
                         ),
                         (
-                            toggle_science_panel_visibility,
+                            toggle_sensors_panel_visibility,
+                            toggle_shields_panel_visibility,
+                            toggle_navigation_panel_visibility,
                             toggle_weapons_panel_visibility,
                             toggle_repair_panel_visibility,
                             toggle_power_panel_visibility,
@@ -1417,9 +1429,9 @@ fn setup_helm_ui(_commands: Commands) {
     // plugin takes over all helm panel rendering.
 }
 
-fn setup_science_ui(mut commands: Commands) {
+fn setup_sensors_ui(mut commands: Commands) {
     commands.spawn((
-        SciencePanel,
+        SensorsPanel,
         Node {
             position_type: PositionType::Absolute,
             left:   Val::Px(0.0),
@@ -1436,7 +1448,7 @@ fn setup_science_ui(mut commands: Commands) {
     ))
     .with_children(|panel| {
         panel.spawn((
-            Text::new("Science Console"),
+            Text::new("Sensors"),
             TextFont { font_size: 32.0, ..default() },
             TextColor(Color::srgb(0.8, 0.8, 1.0)),
         ));
@@ -1447,6 +1459,58 @@ fn setup_science_ui(mut commands: Commands) {
             Text::new(""),
             TextFont { font_size: 14.0, ..default() },
             TextColor(Color::srgb(0.8, 0.5, 0.2)),
+        ));
+    });
+}
+
+fn setup_shields_ui(mut commands: Commands) {
+    commands.spawn((
+        ShieldsPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            left:   Val::Px(0.0),
+            top:    Val::Px(0.0),
+            right:  Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(8.0),
+            ..default()
+        },
+        Visibility::Hidden,
+    ))
+    .with_children(|panel| {
+        panel.spawn((
+            Text::new("Shields"),
+            TextFont { font_size: 32.0, ..default() },
+            TextColor(Color::srgb(0.4, 0.8, 1.0)),
+        ));
+    });
+}
+
+fn setup_navigation_ui(mut commands: Commands) {
+    commands.spawn((
+        NavigationPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            left:   Val::Px(0.0),
+            top:    Val::Px(0.0),
+            right:  Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(8.0),
+            ..default()
+        },
+        Visibility::Hidden,
+    ))
+    .with_children(|panel| {
+        panel.spawn((
+            Text::new("Navigation"),
+            TextFont { font_size: 32.0, ..default() },
+            TextColor(Color::srgb(0.5, 1.0, 0.8)),
         ));
     });
 }
@@ -1677,24 +1741,70 @@ fn handle_repair_shape_button_press(
     }
 }
 
-fn toggle_science_panel_visibility(
+fn toggle_sensors_panel_visibility(
     lobby: Res<LobbyState>,
     token: Res<LocalPlayerToken>,
     active: Res<ActiveConsole>,
-    mut panel: Query<&mut Visibility, With<SciencePanel>>,
+    mut panel: Query<&mut Visibility, With<SensorsPanel>>,
 ) {
     if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
         return;
     }
     let view = LobbyView::new(&lobby, &token.0);
-    let holds_science = lobby.phase == GamePhase::InProgress
-        && view.my_consoles().contains(&Console::Science);
+    let holds = lobby.phase == GamePhase::InProgress
+        && view.my_consoles().contains(&Console::Sensors);
     let my_consoles_count = view.my_consoles().len();
     let tab_active = match &active.0 {
-        Some(c) => *c == Console::Science,
+        Some(c) => *c == Console::Sensors,
         None => my_consoles_count == 1,
     };
-    let visible = holds_science && tab_active;
+    let visible = holds && tab_active;
+    for mut vis in panel.iter_mut() {
+        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
+fn toggle_shields_panel_visibility(
+    lobby: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    active: Res<ActiveConsole>,
+    mut panel: Query<&mut Visibility, With<ShieldsPanel>>,
+) {
+    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
+        return;
+    }
+    let view = LobbyView::new(&lobby, &token.0);
+    let holds = lobby.phase == GamePhase::InProgress
+        && view.my_consoles().contains(&Console::Shields);
+    let my_consoles_count = view.my_consoles().len();
+    let tab_active = match &active.0 {
+        Some(c) => *c == Console::Shields,
+        None => my_consoles_count == 1,
+    };
+    let visible = holds && tab_active;
+    for mut vis in panel.iter_mut() {
+        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
+fn toggle_navigation_panel_visibility(
+    lobby: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    active: Res<ActiveConsole>,
+    mut panel: Query<&mut Visibility, With<NavigationPanel>>,
+) {
+    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
+        return;
+    }
+    let view = LobbyView::new(&lobby, &token.0);
+    let holds = lobby.phase == GamePhase::InProgress
+        && view.my_consoles().contains(&Console::Navigation);
+    let my_consoles_count = view.my_consoles().len();
+    let tab_active = match &active.0 {
+        Some(c) => *c == Console::Navigation,
+        None => my_consoles_count == 1,
+    };
+    let visible = holds && tab_active;
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
     }
@@ -2575,11 +2685,11 @@ fn setup_power_ui(mut commands: Commands) {
                 TextColor(Color::srgb(0.3, 1.0, 0.8)),
             ));
 
-            // Three power rows: Helm, Weapons, Science
+            // Three power rows: Helm, Weapons, Sensors
             for (console, label) in [
                 (Console::Helm, "Helm"),
                 (Console::Tactical, "Weapons"),
-                (Console::Science, "Science"),
+                (Console::Sensors, "Sensors"),
             ] {
                 panel.spawn((
                     PowerRow(console.clone()),
@@ -2768,7 +2878,7 @@ fn refresh_power_panel(
         let lvl = match level_component.0 {
             Console::Helm => sim.power_levels.0,
             Console::Tactical => sim.power_levels.1,
-            Console::Science => sim.power_levels.2,
+            Console::Sensors => sim.power_levels.2,
             _ => 0,
         };
         **text = format!("{}", lvl);

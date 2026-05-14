@@ -368,8 +368,8 @@ fn run_science_hint_ai(
     }
 
     // Hint is only relevant when Tactical is Full (player manages frequency)
-    // and Science is Low (readout is hidden).
-    if !complexity.is_low(&Console::Science) || complexity.is_low(&Console::Tactical) {
+    // and Sensors is Low (readout is hidden).
+    if !complexity.is_low(&Console::Sensors) || complexity.is_low(&Console::Tactical) {
         // Reset timer when conditions aren't met so it doesn't carry over.
         hint_timer.0 = FrequencyHintState::default();
         return;
@@ -440,10 +440,10 @@ fn run_auto_match_ai(
         return;
     }
 
-    // Trigger: Science is Low OR Science is unmanned (no holder).
-    let science_is_low = complexity.is_low(&Console::Science);
-    let science_unmanned = sessions.0.console_holder(Console::Science).is_none();
-    let trigger_active = science_is_low || science_unmanned;
+    // Trigger: Sensors is Low OR Sensors is unmanned (no holder).
+    let sensors_is_low = complexity.is_low(&Console::Sensors);
+    let sensors_unmanned = sessions.0.console_holder(Console::Sensors).is_none();
+    let trigger_active = sensors_is_low || sensors_unmanned;
 
     // Need a Tactical holder to synthesise the message on behalf of.
     let Some(tactical_token) = sessions.0.console_holder(Console::Tactical) else {
@@ -914,7 +914,7 @@ mod tests {
         app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
         // Tactical is Full (default), Science is Low.
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Science, "Low".into());
+            .set(Console::Sensors, "Low".into());
         // Tactical complexity left at default (not Low) → Full by omission.
         // Lock a target.
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("hint-target".into());
@@ -983,7 +983,7 @@ mod tests {
         setup_science_hint_conditions(&mut app);
         // Science Full → player sees the readout, no hint needed.
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Science, "Std".into());
+            .set(Console::Sensors, "Std".into());
         app.insert_resource(AutoHintDelaySecs(0.0));
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("hint-target".into()),
@@ -1018,7 +1018,7 @@ mod tests {
         // Science Low, no Tactical holder.
         app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Science, "Low".into());
+            .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("hint-target".into());
         app.insert_resource(AutoHintDelaySecs(0.0));
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
@@ -1077,7 +1077,7 @@ mod tests {
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Science, "Low".into());
+            .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
         // Set a known phaser frequency to match against.
         app.world_mut().resource_mut::<ShipState>().phaser_frequency = 0.65;
@@ -1215,7 +1215,7 @@ mod tests {
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Science, "Low".into());
+            .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
         app.insert_resource(AutoMatchDelaySecs(0.0));
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
@@ -1278,7 +1278,7 @@ mod tests {
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
         app.world_mut().resource_mut::<ConsoleComplexityState>()
-            .set(Console::Science, "Std".into());
+            .set(Console::Sensors, "Std".into());
 
         // Second tick — no revert message
         let (inbound2, _) = tick(&mut app);

@@ -238,7 +238,9 @@ fn forward_complexity_presets(mut store: ResMut<ComplexityStore>) {
                     "Helm" => Some(Console::Helm),
                     "Tactical" => Some(Console::Tactical),
                     "Repair" => Some(Console::Repair),
-                    "Science" => Some(Console::Science),
+                    "Sensors" => Some(Console::Sensors),
+                    "Shields" => Some(Console::Shields),
+                    "Navigation" => Some(Console::Navigation),
                     "Power" => Some(Console::Power),
                     _ => None,
                 };

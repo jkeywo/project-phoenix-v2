@@ -333,7 +333,7 @@ mod tests {
     fn console_source_uses_console_variant() {
         let mut mods = ShipModifiers::new();
         mods.add_or_update(ms(
-            ModifierSource::Console(Console::Science),
+            ModifierSource::Console(Console::Sensors),
             ModifierSlot::RadarRange,
             1.0,
         ));

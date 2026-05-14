@@ -244,7 +244,9 @@ fn reparent_panels_into_bezel(
     captain: Query<Entity, With<crate::client_app::CaptainPanel>>,
     helm: Query<Entity, With<crate::client_app::HelmPanel>>,
     lobby: Query<Entity, With<crate::client_app::LobbyRoot>>,
-    science: Query<Entity, With<crate::client_app::SciencePanel>>,
+    sensors: Query<Entity, With<crate::client_app::SensorsPanel>>,
+    shields: Query<Entity, With<crate::client_app::ShieldsPanel>>,
+    navigation: Query<Entity, With<crate::client_app::NavigationPanel>>,
     weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
     tab_bar: Query<Entity, With<crate::client_app::TabBarRoot>>,
     mut done: Local<bool>,
@@ -262,7 +264,13 @@ fn reparent_panels_into_bezel(
     for entity in helm.iter() {
         commands.entity(entity).set_parent_in_place(target);
     }
-    for entity in science.iter() {
+    for entity in sensors.iter() {
+        commands.entity(entity).set_parent_in_place(target);
+    }
+    for entity in shields.iter() {
+        commands.entity(entity).set_parent_in_place(target);
+    }
+    for entity in navigation.iter() {
         commands.entity(entity).set_parent_in_place(target);
     }
     for entity in weapons.iter() {

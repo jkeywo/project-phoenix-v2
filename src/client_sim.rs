@@ -64,7 +64,7 @@ pub fn weapons_radar_config() -> RadarConfig {
 pub fn science_radar_config() -> RadarConfig {
     RadarConfig {
         range: SCIENCE_RADAR_RANGE,
-        shows: vec![EntityTag::Asteroid, EntityTag::Ship, EntityTag::AsteroidField],
+        shows: vec![EntityTag::Asteroid, EntityTag::Ship, EntityTag::AsteroidField, EntityTag::Region],
     }
 }
 
@@ -120,7 +120,7 @@ pub fn compute_weapons_radar_view(state: &ClientSimState) -> ScienceRadarView {
 pub fn system_chart_config() -> RadarConfig {
     RadarConfig {
         range: SYSTEM_CHART_RANGE,
-        shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField],
+        shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField, EntityTag::Region],
     }
 }
 
@@ -855,6 +855,13 @@ mod tests {
         assert!(!cfg.shows.contains(&EntityTag::Asteroid), "individual asteroids are not navigational");
     }
 
+    #[test]
+    fn system_chart_config_shows_region() {
+        use crate::entity_tags::EntityTag;
+        let cfg = system_chart_config();
+        assert!(cfg.shows.contains(&EntityTag::Region), "system chart must show regions");
+    }
+
     // ── compute_system_chart_view ────────────────────────────────────────
 
     fn state_with_field(x: f32, z: f32) -> ClientSimState {
@@ -902,6 +909,17 @@ mod tests {
         };
         let view = compute_system_chart_view(&s);
         assert!(view.dots.is_empty(), "individual asteroids must not appear on system chart");
+    }
+
+    #[test]
+    fn system_chart_view_includes_region_dot_within_range() {
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            entities: vec![EntitySnapshot::simple("region-1", 0.0, -(SYSTEM_CHART_RANGE * 0.5), vec!["region".into()])],
+        };
+        let view = compute_system_chart_view(&s);
+        assert_eq!(view.dots.len(), 1, "system chart must show region entity as a dot");
+        assert_eq!(view.dots[0].uuid, "region-1");
     }
 
     #[test]
@@ -1135,6 +1153,13 @@ mod tests {
         assert!(cfg.shows.contains(&EntityTag::Asteroid), "helm radar must show asteroids");
     }
 
+    #[test]
+    fn helm_radar_config_does_not_show_regions() {
+        use crate::entity_tags::EntityTag;
+        let cfg = helm_radar_config();
+        assert!(!cfg.shows.contains(&EntityTag::Region), "helm radar must NOT show regions");
+    }
+
     // ── weapons_radar_config ─────────────────────────────────────────────
 
     #[test]
@@ -1160,6 +1185,13 @@ mod tests {
         assert!(cfg.shows.contains(&EntityTag::Asteroid), "weapons radar must show asteroids");
     }
 
+    #[test]
+    fn weapons_radar_config_does_not_show_regions() {
+        use crate::entity_tags::EntityTag;
+        let cfg = weapons_radar_config();
+        assert!(!cfg.shows.contains(&EntityTag::Region), "weapons radar must NOT show regions");
+    }
+
     // ── compute_helm_radar_view ──────────────────────────────────────────
 
     #[test]
@@ -1179,6 +1211,16 @@ mod tests {
         let view = compute_helm_radar_view(&s);
         assert_eq!(view.dots.len(), 1);
         assert_eq!(view.dots[0].uuid, "a1");
+    }
+
+    #[test]
+    fn helm_radar_view_excludes_region_entity() {
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            entities: vec![EntitySnapshot::simple("region-1", 0.0, -(HELM_RADAR_RANGE * 0.5), vec!["region".into()])],
+        };
+        let view = compute_helm_radar_view(&s);
+        assert!(view.dots.is_empty(), "helm radar must NOT show region entities");
     }
 
     #[test]
@@ -1227,6 +1269,16 @@ mod tests {
         let view = compute_weapons_radar_view(&s);
         assert_eq!(view.dots.len(), 1, "weapons radar should see asteroid between the two ranges");
         assert_eq!(view.dots[0].uuid, "mid");
+    }
+
+    #[test]
+    fn weapons_radar_view_excludes_region_entity() {
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            entities: vec![EntitySnapshot::simple("region-1", 0.0, -(WEAPONS_RADAR_RANGE * 0.5), vec!["region".into()])],
+        };
+        let view = compute_weapons_radar_view(&s);
+        assert!(view.dots.is_empty(), "weapons radar must NOT show region entities");
     }
 
     #[test]
@@ -1292,6 +1344,14 @@ mod tests {
         assert!(cfg.shows.contains(&EntityTag::Ship), "science radar must show ships");
     }
 
+    #[test]
+    fn science_radar_config_shows_region_and_asteroid_field() {
+        use crate::entity_tags::EntityTag;
+        let cfg = science_radar_config();
+        assert!(cfg.shows.contains(&EntityTag::Region), "science radar must show regions");
+        assert!(cfg.shows.contains(&EntityTag::AsteroidField), "science radar must show asteroid fields");
+    }
+
     // ── compute_science_long_range_radar_view ────────────────────────────
 
     #[test]
@@ -1310,6 +1370,17 @@ mod tests {
         };
         let view = compute_science_long_range_radar_view(&s);
         assert_eq!(view.dots.len(), 1, "science radar must show asteroid within range");
+    }
+
+    #[test]
+    fn science_long_range_radar_view_includes_region_dot_within_range() {
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            entities: vec![EntitySnapshot::simple("region-1", 0.0, -(SCIENCE_RADAR_RANGE * 0.5), vec!["region".into()])],
+        };
+        let view = compute_science_long_range_radar_view(&s);
+        assert_eq!(view.dots.len(), 1, "science radar must show region entity as a dot");
+        assert_eq!(view.dots[0].uuid, "region-1");
     }
 
     // ── weapons_update ───────────────────────────────────────────────────

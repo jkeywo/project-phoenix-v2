@@ -99,6 +99,10 @@ pub struct PowerConfigSection {
 pub struct ScienceConsoleConfig {
     #[serde(default)]
     pub power_multipliers: Option<[f32; 4]>,
+    #[serde(default)]
+    pub long_range_radar: crate::radar_config::RadarConfig,
+    #[serde(default)]
+    pub system_map: crate::radar_config::RadarConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -187,6 +191,7 @@ impl EntityConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entity_tags::EntityTag;
 
     #[test]
     fn all_sections_present_deserializes_to_some() {
@@ -434,6 +439,34 @@ power_multipliers = [-1.0, 0.0, 1.0, 2.0]
     fn science_console_omitted_when_not_in_toml() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.science_console.is_none());
+    }
+
+    #[test]
+    fn science_console_with_radar_configs_parses_long_range_and_system_map() {
+        let toml_str = r##"
+tags = ["player", "ship"]
+
+[science_console]
+power_multipliers = [-0.5, 0.0, 0.25, 0.5]
+
+[science_console.long_range_radar]
+range = 200.0
+shows = ["region", "asteroid_field", "asteroid", "ship"]
+
+[science_console.system_map]
+range = 500.0
+shows = ["region", "asteroid_field", "star", "planet"]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let science = config.science_console.expect("science_console must be Some");
+        assert_eq!(science.power_multipliers, Some([-0.5, 0.0, 0.25, 0.5]));
+        assert_eq!(science.long_range_radar.range, 200.0);
+        assert!(science.long_range_radar.shows.contains(&EntityTag::Region));
+        assert!(science.long_range_radar.shows.contains(&EntityTag::AsteroidField));
+        assert!(science.long_range_radar.shows.contains(&EntityTag::Asteroid));
+        assert_eq!(science.system_map.range, 500.0);
+        assert!(science.system_map.shows.contains(&EntityTag::Region));
+        assert!(science.system_map.shows.contains(&EntityTag::AsteroidField));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //
 // This module has no Bevy dependency — it is fully unit-testable on native.
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use crate::entity_tags::EntityTag;
 
 /// Configuration for a single radar instance.
@@ -22,7 +22,7 @@ use crate::entity_tags::EntityTag;
 /// range = 60.0
 /// shows = ["asteroid", "ship"]
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RadarConfig {
     /// Maximum detection range in world units.
     pub range: f32,
@@ -73,6 +73,24 @@ impl RadarConfig {
     /// Returns a `String` error description if the TOML is malformed.
     pub fn from_toml(toml_str: &str) -> Result<Self, String> {
         let raw: RawRadarConfig = toml::from_str(toml_str).map_err(|e| e.to_string())?;
+        let shows = raw
+            .shows
+            .iter()
+            .filter_map(|s| EntityTag::from_str(s))
+            .collect();
+        Ok(RadarConfig {
+            range: raw.range,
+            shows,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for RadarConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RawRadarConfig::deserialize(deserializer)?;
         let shows = raw
             .shows
             .iter()

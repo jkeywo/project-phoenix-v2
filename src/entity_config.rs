@@ -45,9 +45,9 @@ pub struct BehaviourConfig {
     /// is required; states with no extra params — like `idle` — need no entry).
     #[serde(default)]
     pub state: Vec<StateConfig>,
-    /// Transition rules (stored raw for future processing).
+    /// Transition rules evaluated in declaration order.
     #[serde(default)]
-    pub transition: Vec<toml::Value>,
+    pub transition: Vec<crate::ai::TransitionConfig>,
 }
 
 /// Visual/render shape for station entities.

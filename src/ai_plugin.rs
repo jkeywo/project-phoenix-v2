@@ -7,10 +7,12 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::ai::{AiController, AiTickOutput, WorldView};
+use crate::ai::{AiController, AiTickOutput, WorldView, WorldEntity};
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
 use crate::lobby::CurrentPhase;
 use crate::messages::GamePhase;
+#[cfg(target_arch = "wasm32")]
+use crate::config_cache::FactionRegistryResource;
 
 // ── AiTokenRegistry ───────────────────────────────────────────────────────────
 
@@ -126,11 +128,13 @@ fn attach_controllers_on_spawn(
     for (entity, uuid, transform, behaviour) in &query {
         let pos = transform.translation;
         let initial_state = crate::ai::build_initial_state(&behaviour.0);
+        let initial_state_name = behaviour.0.initial_state.clone();
         let mut controller = AiController::new(
             [pos.x, pos.y, pos.z],
             time.elapsed_secs_f64(),
         );
         controller.current_state = initial_state;
+        controller.current_state_name = initial_state_name;
         registry.register_with_entity(&uuid.0, entity);
         commands
             .entity(entity)
@@ -144,9 +148,12 @@ fn attach_controllers_on_spawn(
 /// Tick AI controllers, but only during `InProgress` phase.
 fn tick_ai_controllers(
     phase: Res<CurrentPhase>,
-    mut query: Query<(&mut AiControllerComponent, &mut Transform)>,
+    mut query: Query<(&mut AiControllerComponent, &mut Transform, &BehaviourSection)>,
     time: Res<Time>,
     map_config: Option<Res<crate::map_config::MapConfig>>,
+    #[cfg(target_arch = "wasm32")]
+    faction_registry: Option<Res<FactionRegistryResource>>,
+    entity_query: Query<(&EntityUuid, &Transform), Without<AiControllerComponent>>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -167,10 +174,26 @@ fn tick_ai_controllers(
         HashMap::new()
     };
 
+    // Collect world entities from all non-AI entities (approximate: no faction yet)
+    let world_entities: Vec<WorldEntity> = entity_query.iter().map(|(uid, t)| {
+        WorldEntity {
+            uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
+            position: [t.translation.x, t.translation.y, t.translation.z],
+            faction: None,
+        }
+    }).collect();
+
+    let empty_registry = crate::faction::FactionRegistry::new();
+    #[cfg(target_arch = "wasm32")]
+    let actual_registry: Option<&crate::faction::FactionRegistry> =
+        faction_registry.as_ref().map(|r| &r.0);
+    #[cfg(not(target_arch = "wasm32"))]
+    let actual_registry: Option<&crate::faction::FactionRegistry> = None;
+
     let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
 
-    for (mut ctrl, mut transform) in &mut query {
+    for (mut ctrl, mut transform, behaviour) in &mut query {
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
 
@@ -179,13 +202,25 @@ fn tick_ai_controllers(
             entity_pos: [pos.x, pos.y, pos.z],
             entity_yaw: yaw,
             anchors: anchors.clone(),
+            entities: world_entities.clone(),
+            attacker_this_tick: None, // populated externally when damage events arrive
+            self_faction: None,       // TODO: populate from entity config faction field
         };
 
-        let output: AiTickOutput = crate::ai::tick(&ctrl.controller, &world_view);
+        let registry = actual_registry.unwrap_or(&empty_registry);
+        let output: AiTickOutput = crate::ai::tick(&ctrl.controller, &world_view, &behaviour.0, registry);
 
         // Apply blackboard update
         if let Some(new_bb) = output.new_blackboard {
             ctrl.controller.blackboard = new_bb;
+        }
+        // Update state name when state changes
+        if output.new_state != ctrl.controller.current_state {
+            // Find the config entry matching the new state kind to get its name
+            ctrl.controller.current_state_name = behaviour.0.transition.iter()
+                .find(|t| build_state_by_name_matches(&output.new_state, &behaviour.0, &t.to))
+                .map(|t| t.to.clone())
+                .unwrap_or_else(|| output.new_state.kind_name().to_string());
         }
         ctrl.controller.current_state = output.new_state;
 
@@ -215,6 +250,20 @@ fn tick_ai_controllers(
             }
         }
     }
+}
+
+/// Helper: check if a state built from `name` in `behaviour` matches `new_state`.
+fn build_state_by_name_matches(
+    new_state: &crate::ai::AiState,
+    behaviour: &crate::entity_config::BehaviourConfig,
+    name: &str,
+) -> bool {
+    let built = crate::ai::build_initial_state(&crate::entity_config::BehaviourConfig {
+        initial_state: name.to_string(),
+        state: behaviour.state.clone(),
+        transition: vec![],
+    });
+    &built == new_state
 }
 
 /// Unregister synthetic tokens when AI-controlled entities are despawned.

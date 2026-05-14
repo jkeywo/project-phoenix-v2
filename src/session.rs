@@ -54,6 +54,9 @@ impl SessionManager {
         // Power has no dedicated TOML config section; always available when a ship entity is loaded.
         // Required for stations that include the Power console (e.g. Repair at 3P).
         available.push(Console::Power);
+        // Comms has no dedicated TOML config section; always available when a ship entity is loaded.
+        // Required for stations that include the Comms console (e.g. Helm at 2P+, Comms at 4P).
+        available.push(Console::Comms);
         
         Self { 
             players: Vec::new(), 

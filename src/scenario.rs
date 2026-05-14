@@ -2020,4 +2020,40 @@ entity = "raider"
         let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired2.len(), 0);
     }
+
+    // ── patrol.toml compile-time template tests ─────────────────────────────
+
+    #[test]
+    fn patrol_scenario_toml_parses_without_error() {
+        let toml_str = include_str!("../assets/scenarios/patrol.toml");
+        parse_scenario(toml_str).expect("patrol.toml must parse");
+    }
+
+    #[test]
+    fn patrol_scenario_has_one_named_raider_spawn() {
+        let toml_str = include_str!("../assets/scenarios/patrol.toml");
+        let config = parse_scenario(toml_str).expect("patrol.toml must parse");
+        let raider = config.spawns.iter().find(|s| s.name == "raider");
+        assert!(raider.is_some(), "patrol scenario must have a spawn named 'raider'");
+        let raider = raider.unwrap();
+        assert!(
+            raider.entity_path.contains("pirate_raider"),
+            "raider spawn must reference pirate_raider template, got: {}",
+            raider.entity_path
+        );
+    }
+
+    #[test]
+    fn patrol_scenario_has_on_entity_destroyed_trigger_with_add_objective() {
+        let toml_str = include_str!("../assets/scenarios/patrol.toml");
+        let config = parse_scenario(toml_str).expect("patrol.toml must parse");
+        let has_destroyed_trigger = config.triggers.iter().any(|t| {
+            matches!(&t.condition, TriggerCondition::OnDestroyed { .. })
+                && t.actions.iter().any(|a| matches!(a, TriggerAction::AddObjective { .. }))
+        });
+        assert!(
+            has_destroyed_trigger,
+            "patrol scenario must have an on_entity_destroyed trigger with add_objective action"
+        );
+    }
 }

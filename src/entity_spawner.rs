@@ -49,6 +49,11 @@ pub struct RegionEffectsSection(pub Vec<RegionEffectKind>);
 #[derive(Component, Clone, Debug)]
 pub struct BehaviourSection(pub crate::entity_config::BehaviourConfig);
 
+/// Present when the EntityConfig has a non-empty `tags` list.
+/// Mirrors the TOML tags onto the ECS entity so snapshot builders can include them.
+#[derive(Component, Clone, Debug)]
+pub struct EntityTagsSection(pub Vec<String>);
+
 // ── Spawner ────────────────────────────────────────────────────────
 
 /// Spawn an entity from a resolved EntityConfig.
@@ -129,6 +134,11 @@ pub fn spawn_entity(
     // Behaviour section — signals to ai_plugin to attach an AiController
     if let Some(behaviour) = &config.behaviour {
         entity_commands.insert(BehaviourSection(behaviour.clone()));
+    }
+
+    // Tags — mirror TOML tags onto the entity for snapshot builders.
+    if !config.tags.is_empty() {
+        entity_commands.insert(EntityTagsSection(config.tags.clone()));
     }
 
     entity_commands.id()

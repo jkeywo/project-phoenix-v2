@@ -204,6 +204,11 @@ pub struct MapConfig {
     /// Path to the default scenario TOML to load at startup (relative to assets/).
     #[serde(default)]
     pub default_scenario: Option<String>,
+    /// Additional scenario TOML paths available in this map (relative to assets/).
+    /// These are not auto-loaded; they are available for scenario selection UI or
+    /// explicit loading by name.
+    #[serde(default)]
+    pub extra_scenarios: Vec<String>,
 }
 
 impl Default for MapConfig {
@@ -216,6 +221,7 @@ impl Default for MapConfig {
             anchors: HashMap::new(),
             entities: Vec::new(),
             default_scenario: None,
+            extra_scenarios: Vec::new(),
         }
     }
 }
@@ -725,5 +731,31 @@ default_scenario = "scenarios/default.toml"
     fn default_scenario_is_none_when_omitted() {
         let config = parse_map_config("").unwrap();
         assert!(config.default_scenario.is_none());
+    }
+
+    #[test]
+    fn extra_scenarios_parses_list_of_paths() {
+        let toml = r#"
+default_scenario = "assets/scenarios/default.toml"
+extra_scenarios = ["assets/scenarios/patrol.toml"]
+"#;
+        let config = parse_map_config(toml).unwrap();
+        assert_eq!(config.extra_scenarios, vec!["assets/scenarios/patrol.toml"]);
+    }
+
+    #[test]
+    fn extra_scenarios_defaults_to_empty_when_omitted() {
+        let config = parse_map_config("").unwrap();
+        assert!(config.extra_scenarios.is_empty());
+    }
+
+    #[test]
+    fn default_map_toml_references_patrol_scenario() {
+        let toml_str = include_str!("../assets/maps/default.toml");
+        let config = parse_map_config(toml_str).unwrap();
+        assert!(
+            config.extra_scenarios.iter().any(|s| s.contains("patrol")),
+            "default.toml must reference patrol.toml in extra_scenarios"
+        );
     }
 }

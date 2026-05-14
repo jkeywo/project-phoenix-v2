@@ -20,7 +20,7 @@ use crate::ship_state::ShipState;
 use crate::impulse::ImpulseState;
 use crate::modifiers::{ShipModifiers, Modifier};
 use crate::messages::{ModifierSlot, ModifierSource};
-use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, RegionEffectsSection};
+use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, RegionEffectsSection, EntityTagsSection};
 use crate::region_plugin::RegionMembership;
 use crate::region_effects::RegionEffectKind;
 use std::collections::HashMap;
@@ -1549,7 +1549,7 @@ fn reconcile_runtime_entities(
     mut registry: ResMut<TrackedEntities>,
     mut world: ResMut<WorldResource>,
     mut writer: MessageWriter<OutboundMessage>,
-    query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform, Option<&RegionShapeSection>), Without<Asteroid>>,
+    query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform, Option<&RegionShapeSection>, Option<&EntityTagsSection>), Without<Asteroid>>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -1559,7 +1559,7 @@ fn reconcile_runtime_entities(
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _, _)| (u.0.clone(), e))
         .collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
@@ -1578,7 +1578,7 @@ fn reconcile_runtime_entities(
     if !registry.seeded {
         for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-            if let Ok((_, _, id, transform, region_shape)) = query.get(*entity) {
+            if let Ok((_, _, id, transform, region_shape, entity_tags)) = query.get(*entity) {
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
@@ -1587,6 +1587,7 @@ fn reconcile_runtime_entities(
                         transform.translation.y,
                         transform.translation.z,
                     ]),
+                    tags: entity_tags.map(|t| t.0.clone()).unwrap_or_default(),
                     ..EntitySnapshot::default()
                 };
                 if let Some(shape) = region_shape {
@@ -1602,7 +1603,7 @@ fn reconcile_runtime_entities(
     // Emit EntitySpawned for new entities.
     for (uuid, entity) in &current {
         if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, transform, region_shape)) = query.get(*entity) {
+            if let Ok((_, _, id, transform, region_shape, entity_tags)) = query.get(*entity) {
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
@@ -1611,6 +1612,7 @@ fn reconcile_runtime_entities(
                         transform.translation.y,
                         transform.translation.z,
                     ]),
+                    tags: entity_tags.map(|t| t.0.clone()).unwrap_or_default(),
                     ..EntitySnapshot::default()
                 };
                 if let Some(shape) = region_shape {

@@ -1243,4 +1243,63 @@ target_speed = 0.5
         assert_eq!(behaviour.state[0].name, "idle");
         assert_eq!(behaviour.state[1].name, "patrol");
     }
+
+    // ── pirate_raider.toml compile-time template tests ─────────────────────
+
+    #[test]
+    fn pirate_raider_template_parses_with_pirate_faction() {
+        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        // Must have pirate faction UUID
+        let faction = config.faction.expect("pirate_raider must declare a faction");
+        assert_eq!(
+            faction.to_string(),
+            "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
+            "pirate_raider faction must be Pirate"
+        );
+    }
+
+    #[test]
+    fn pirate_raider_template_has_hull() {
+        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        assert!(config.hull.is_some(), "pirate_raider must have a [hull] section");
+        let hull = config.hull.as_ref().unwrap();
+        assert!(hull.hull_integrity > 0.0, "hull_integrity must be positive");
+    }
+
+    #[test]
+    fn pirate_raider_template_has_helm_and_weapons_console() {
+        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        assert!(config.helm_console.is_some(), "pirate_raider must have a [helm_console]");
+        assert!(config.weapons_console.is_some(), "pirate_raider must have a [weapons_console]");
+    }
+
+    #[test]
+    fn pirate_raider_template_has_behaviour_with_all_six_states() {
+        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        let behaviour = config.behaviour.expect("pirate_raider must have a [behaviour] block");
+        let state_kinds: Vec<&str> = behaviour.state.iter().map(|s| s.kind.as_str()).collect();
+        assert!(state_kinds.contains(&"patrolling"), "must have patrolling state");
+        assert!(state_kinds.contains(&"pursuing"), "must have pursuing state");
+        assert!(state_kinds.contains(&"attacking"), "must have attacking state");
+        assert!(state_kinds.contains(&"fleeing"), "must have fleeing state");
+        assert!(state_kinds.contains(&"warping_out"), "must have warping_out state");
+    }
+
+    #[test]
+    fn pirate_raider_template_transitions_include_enemy_in_range_and_on_attacked() {
+        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        let conditions: Vec<&str> = behaviour.transition.iter().map(|t| t.condition.as_str()).collect();
+        assert!(conditions.contains(&"enemy_in_range"), "must have enemy_in_range transition");
+        assert!(conditions.contains(&"on_attacked"), "must have on_attacked transition");
+        assert!(conditions.contains(&"in_weapons_range"), "must have in_weapons_range transition");
+        assert!(conditions.contains(&"hull_below"), "must have hull_below transition");
+        assert!(conditions.contains(&"on_timer"), "must have on_timer transition");
+        assert!(conditions.contains(&"on_scenario_unloaded"), "must have on_scenario_unloaded transition");
+    }
 }

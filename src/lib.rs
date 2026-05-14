@@ -1,3 +1,5 @@
+pub mod ai;
+pub mod ai_plugin;
 pub mod faction;
 pub mod beam_render;
 pub mod delegation;

@@ -424,6 +424,7 @@ mod tests {
             asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -665,6 +666,7 @@ mod tests {
             asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -693,6 +695,7 @@ mod tests {
             asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -902,6 +905,7 @@ mod tests {
             asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1025,6 +1029,7 @@ mod tests {
             asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1220,6 +1225,7 @@ mod tests {
             star: None, planet: None, asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1241,6 +1247,7 @@ mod tests {
             star: None, planet: None, asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();

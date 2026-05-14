@@ -282,6 +282,7 @@ impl Plugin for SimulationPlugin {
         app.add_plugins(RapierPhysicsPlugin::<()>::default())
             .add_plugins(crate::region_plugin::RegionPlugin)
             .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
+            .add_plugins(crate::ai_plugin::AiPlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
@@ -347,7 +348,30 @@ impl Plugin for SimulationPlugin {
     }
 }
 
-// â”€â”€ Systems â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Helper: token validation with AI fallback ────────────────────────────────
+
+/// Returns `true` when `token` is the holder of `console` in the session
+/// manager, OR when `token` is a registered AI token (so AI-generated
+/// messages for that console are not silently discarded once future slices
+/// start injecting `HelmInput` etc.).
+///
+/// Currently used as documentation of the fallback contract; future AI-input
+/// slices will thread this through the individual message handlers.
+#[allow(dead_code)]
+fn is_valid_console_holder(
+    token: &str,
+    console: Console,
+    sessions: &Sessions,
+    ai_registry: &crate::ai_plugin::AiTokenRegistry,
+) -> bool {
+    if sessions.0.console_holder(console) == Some(token) {
+        return true;
+    }
+    // Fallback: token belongs to an AI-controlled entity
+    ai_registry.entity_uuid_for_token(token).is_some()
+}
+
+// ── Systems ───────────────────────────────────────────────────────────────────
 fn handle_toggle(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
@@ -1911,6 +1935,7 @@ fn setup_world_hardcoded(
         effects: None,
         station: None,
         faction: None,
+        behaviour: None,
     };
     let ship_uuid = crate::entity_loader::assign_uuid();
     let ship_entity = crate::entity_spawner::spawn_entity(
@@ -3176,6 +3201,7 @@ fn test_app() -> App {
             asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();

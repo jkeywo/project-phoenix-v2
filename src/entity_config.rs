@@ -5,6 +5,14 @@ use crate::map_config::{StarConfig, PlanetConfig, AsteroidFieldConfig};
 use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectsConfig;
 
+/// Configuration for an AI behaviour controller attached to an entity.
+/// Re-exports the AI module's config type so callers only need `entity_config`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BehaviourConfig {
+    /// Name of the initial AI state (e.g. `"idle"`).
+    pub initial_state: String,
+}
+
 /// Visual/render shape for station entities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -167,6 +175,9 @@ pub struct EntityConfig {
     /// Optional faction UUID this entity belongs to.
     #[serde(default)]
     pub faction: Option<Uuid>,
+    /// Optional AI behaviour controller config.
+    #[serde(default)]
+    pub behaviour: Option<BehaviourConfig>,
 }
 
 #[derive(Deserialize)]
@@ -189,6 +200,7 @@ struct TomlConfig {
     effects: Option<RegionEffectsConfig>,
     station: Option<StationConfig>,
     faction: Option<Uuid>,
+    behaviour: Option<BehaviourConfig>,
 }
 
 impl EntityConfig {
@@ -253,6 +265,7 @@ impl EntityConfig {
             effects: raw.effects,
             station: raw.station,
             faction: raw.faction,
+            behaviour: raw.behaviour,
         })
     }
 
@@ -1041,5 +1054,43 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
         let fed_toml = include_str!("../assets/factions/federation.toml");
         let fed = crate::faction::parse_faction_config(fed_toml).unwrap();
         assert_eq!(faction, fed.uuid, "player ship faction must be Federation");
+    }
+
+    // ── Behaviour block tests ─────────────────────────────────────────────
+
+    #[test]
+    fn behaviour_block_parses_initial_state() {
+        let toml_str = r##"
+tags = ["npc", "patrol"]
+
+[behaviour]
+initial_state = "idle"
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        assert_eq!(behaviour.initial_state, "idle");
+    }
+
+    #[test]
+    fn behaviour_block_absent_when_not_in_toml() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.behaviour.is_none());
+    }
+
+    #[test]
+    fn entity_with_hull_and_behaviour_has_both_sections() {
+        let toml_str = r##"
+tags = ["npc"]
+
+[hull]
+hull_integrity = 50.0
+
+[behaviour]
+initial_state = "idle"
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        assert!(config.hull.is_some());
+        let behaviour = config.behaviour.expect("behaviour must be Some");
+        assert_eq!(behaviour.initial_state, "idle");
     }
 }

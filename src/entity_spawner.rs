@@ -44,6 +44,11 @@ pub struct RegionShapeSection(pub RegionShape);
 #[derive(Component, Clone, Debug)]
 pub struct RegionEffectsSection(pub Vec<RegionEffectKind>);
 
+/// Present when the EntityConfig had a [behaviour] section.
+/// Carries the initial AI state name so `ai_plugin` can attach an `AiController`.
+#[derive(Component, Clone, Debug)]
+pub struct BehaviourSection(pub crate::entity_config::BehaviourConfig);
+
 // ── Spawner ────────────────────────────────────────────────────────
 
 /// Spawn an entity from a resolved EntityConfig.
@@ -119,6 +124,11 @@ pub fn spawn_entity(
         if !effects.is_empty() {
             entity_commands.insert(RegionEffectsSection(effects.to_kinds()));
         }
+    }
+
+    // Behaviour section — signals to ai_plugin to attach an AiController
+    if let Some(behaviour) = &config.behaviour {
+        entity_commands.insert(BehaviourSection(behaviour.clone()));
     }
 
     entity_commands.id()
@@ -234,6 +244,7 @@ mod tests {
             effects: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -270,6 +281,7 @@ mod tests {
             effects: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -308,6 +320,7 @@ mod tests {
             effects: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -351,6 +364,7 @@ mod tests {
             effects: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -386,6 +400,7 @@ mod tests {
             effects: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -446,6 +461,7 @@ mod tests {
             asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -484,6 +500,7 @@ mod tests {
             asteroid_field: None,
             station: None,
             faction: None,
+            behaviour: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();

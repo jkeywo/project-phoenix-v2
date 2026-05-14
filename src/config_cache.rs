@@ -601,6 +601,7 @@ mod tests {
             effects: None,
             station: None,
             faction: None,
+            behaviour: None,
         }
     }
     

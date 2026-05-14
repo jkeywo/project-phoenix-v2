@@ -25,6 +25,162 @@ pub enum PositionSpec {
     RelativeTo { entity_name: String, offset: [f32; 3] },
 }
 
+// ── Trigger types ─────────────────────────────────────────────────────────
+
+/// A world event that triggers can react to.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WorldEvent {
+    /// An entity (by UUID) was destroyed.
+    Destroyed { uuid: String },
+    /// An entity (by UUID) was attacked; `attacker_uuid` is the attacker.
+    Attacked { uuid: String, attacker_uuid: String },
+    /// Simulation time has advanced. `elapsed_secs` is total elapsed time.
+    TimerElapsed { elapsed_secs: f32 },
+}
+
+/// A condition that a trigger can check against incoming world events.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TriggerCondition {
+    /// Fires when the named entity (by spawn name, resolved to UUID at runtime) is destroyed.
+    OnDestroyed { entity_name: String },
+    /// Fires when the named entity is attacked.
+    OnAttacked { entity_name: String },
+    /// Fires once when `elapsed_secs` crosses `after_secs`.
+    OnTimer { after_secs: f32 },
+}
+
+/// An action to execute when a trigger fires.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TriggerAction {
+    /// Load and activate a new scenario from `path`. Parameters (`$name`) are
+    /// substituted before dispatch.
+    LoadScenario { path: String },
+}
+
+/// A single trigger: a condition plus an ordered list of actions.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Trigger {
+    pub condition: TriggerCondition,
+    pub actions: Vec<TriggerAction>,
+}
+
+/// Runtime state for one trigger within an active scenario.
+#[derive(Clone, Debug)]
+pub struct TriggerState {
+    pub trigger: Trigger,
+    /// Whether this trigger has already fired (single-shot semantics).
+    pub fired: bool,
+}
+
+/// Result of evaluating triggers against a batch of world events.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FiredTrigger {
+    pub actions: Vec<TriggerAction>,
+}
+
+/// Evaluate all triggers in `states` against the given `events`.
+///
+/// Each trigger fires at most once (single-shot). When a trigger fires its
+/// `fired` flag is set to `true` and its actions (with `$name` parameters
+/// substituted using `name_to_uuid`) are collected into a `FiredTrigger`.
+///
+/// Returns the list of `FiredTrigger` values produced in this call.
+pub fn evaluate_triggers(
+    states: &mut Vec<TriggerState>,
+    events: &[WorldEvent],
+    name_to_uuid: &HashMap<String, String>,
+) -> Vec<FiredTrigger> {
+    let mut results = Vec::new();
+
+    for state in states.iter_mut() {
+        if state.fired {
+            continue;
+        }
+
+        let fires = events.iter().any(|event| {
+            condition_matches(&state.trigger.condition, event, name_to_uuid)
+        });
+
+        if fires {
+            state.fired = true;
+            let actions = state
+                .trigger
+                .actions
+                .iter()
+                .map(|a| substitute_action(a, name_to_uuid))
+                .collect();
+            results.push(FiredTrigger { actions });
+        }
+    }
+
+    results
+}
+
+/// Returns true if `condition` matches `event`.
+fn condition_matches(
+    condition: &TriggerCondition,
+    event: &WorldEvent,
+    name_to_uuid: &HashMap<String, String>,
+) -> bool {
+    match (condition, event) {
+        (TriggerCondition::OnDestroyed { entity_name }, WorldEvent::Destroyed { uuid }) => {
+            name_to_uuid.get(entity_name).map(|u| u == uuid).unwrap_or(false)
+        }
+        (TriggerCondition::OnAttacked { entity_name }, WorldEvent::Attacked { uuid, .. }) => {
+            name_to_uuid.get(entity_name).map(|u| u == uuid).unwrap_or(false)
+        }
+        (TriggerCondition::OnTimer { after_secs }, WorldEvent::TimerElapsed { elapsed_secs }) => {
+            elapsed_secs >= after_secs
+        }
+        _ => false,
+    }
+}
+
+/// Substitute `$name` parameters in an action using `name_to_uuid`.
+fn substitute_action(
+    action: &TriggerAction,
+    name_to_uuid: &HashMap<String, String>,
+) -> TriggerAction {
+    match action {
+        TriggerAction::LoadScenario { path } => {
+            let resolved = substitute_params(path, name_to_uuid);
+            TriggerAction::LoadScenario { path: resolved }
+        }
+    }
+}
+
+/// Replace `$name` tokens in a string with their UUID values from `name_to_uuid`.
+/// Tokens that have no matching entry are left unchanged.
+fn substitute_params(s: &str, name_to_uuid: &HashMap<String, String>) -> String {
+    let mut result = s.to_string();
+    for (name, uuid) in name_to_uuid {
+        let token = format!("${}", name);
+        result = result.replace(&token, uuid);
+    }
+    result
+}
+
+// ── TOML-facing deserialization for triggers ──────────────────────────────
+
+#[derive(Deserialize)]
+struct RawTriggerEntry {
+    condition: String,
+    #[serde(default)]
+    entity: Option<String>,
+    #[serde(default)]
+    after_secs: Option<f32>,
+    #[serde(default, rename = "action")]
+    actions: Vec<RawActionEntry>,
+}
+
+#[derive(Deserialize)]
+struct RawActionEntry {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    path: Option<String>,
+}
+
 // ── TOML-facing deserialization ────────────────────────────────────────────
 
 /// Raw TOML representation of a single `[[spawn]]` block.
@@ -52,6 +208,8 @@ struct RawSpawnEntry {
 struct RawScenario {
     #[serde(default, rename = "spawn")]
     spawns: Vec<RawSpawnEntry>,
+    #[serde(default, rename = "trigger")]
+    triggers: Vec<RawTriggerEntry>,
 }
 
 // ── Public types ───────────────────────────────────────────────────────────
@@ -77,6 +235,8 @@ pub struct ScenarioConfig {
     pub spawns: Vec<SpawnEntry>,
     /// Map from spawn `name` to its assigned runtime UUID.
     pub name_to_uuid: HashMap<String, String>,
+    /// Ordered list of triggers declared in the scenario.
+    pub triggers: Vec<Trigger>,
 }
 
 /// A spawn entry with its world-space position fully resolved.
@@ -144,7 +304,53 @@ pub fn parse_scenario(toml_str: &str) -> Result<ScenarioConfig, String> {
         });
     }
 
-    Ok(ScenarioConfig { spawns, name_to_uuid })
+    // Parse triggers.
+    let mut triggers = Vec::new();
+    for raw_trigger in raw.triggers {
+        let condition = match raw_trigger.condition.as_str() {
+            "on_destroyed" => {
+                let entity_name = raw_trigger.entity.ok_or_else(|| {
+                    "Trigger 'on_destroyed' requires an 'entity' field".to_string()
+                })?;
+                TriggerCondition::OnDestroyed { entity_name }
+            }
+            "on_attacked" => {
+                let entity_name = raw_trigger.entity.ok_or_else(|| {
+                    "Trigger 'on_attacked' requires an 'entity' field".to_string()
+                })?;
+                TriggerCondition::OnAttacked { entity_name }
+            }
+            "on_timer" => {
+                let after_secs = raw_trigger.after_secs.ok_or_else(|| {
+                    "Trigger 'on_timer' requires an 'after_secs' field".to_string()
+                })?;
+                TriggerCondition::OnTimer { after_secs }
+            }
+            other => {
+                return Err(format!("Unknown trigger condition '{}'", other));
+            }
+        };
+
+        let mut actions = Vec::new();
+        for raw_action in raw_trigger.actions {
+            let action = match raw_action.kind.as_str() {
+                "load_scenario" => {
+                    let path = raw_action.path.ok_or_else(|| {
+                        "Action 'load_scenario' requires a 'path' field".to_string()
+                    })?;
+                    TriggerAction::LoadScenario { path }
+                }
+                other => {
+                    return Err(format!("Unknown trigger action '{}'", other));
+                }
+            };
+            actions.push(action);
+        }
+
+        triggers.push(Trigger { condition, actions });
+    }
+
+    Ok(ScenarioConfig { spawns, name_to_uuid, triggers })
 }
 
 // ── Position resolution ────────────────────────────────────────────────────
@@ -203,6 +409,16 @@ pub fn resolve_positions(
     }
 
     Ok(result)
+}
+
+/// Create a `Vec<TriggerState>` from a parsed `ScenarioConfig`, with all triggers unfired.
+/// Call this when a scenario is first activated to get its mutable runtime state.
+pub fn trigger_states_from_config(config: &ScenarioConfig) -> Vec<TriggerState> {
+    config
+        .triggers
+        .iter()
+        .map(|t| TriggerState { trigger: t.clone(), fired: false })
+        .collect()
 }
 
 // ── Unit Tests ─────────────────────────────────────────────────────────────
@@ -499,5 +715,295 @@ anchor = "some_anchor"
         let toml = "[[spawn\nbroken";
         let result = parse_scenario(toml);
         assert!(result.is_err());
+    }
+
+    // ── Trigger parsing ────────────────────────────────────────────────────
+
+    // Cycle 8: parse on_destroyed trigger
+    #[test]
+    fn parse_on_destroyed_trigger() {
+        let toml = r#"
+[[spawn]]
+name = "station_alpha"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "station_alpha"
+
+[[trigger.action]]
+type = "load_scenario"
+path = "scenarios/phase2.toml"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.triggers.len(), 1);
+        assert_eq!(
+            config.triggers[0].condition,
+            TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() }
+        );
+        assert_eq!(config.triggers[0].actions.len(), 1);
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }
+        );
+    }
+
+    // Cycle 9: parse on_timer trigger
+    #[test]
+    fn parse_on_timer_trigger() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 30.0
+
+[[trigger.action]]
+type = "load_scenario"
+path = "scenarios/timeout.toml"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.triggers.len(), 1);
+        assert_eq!(
+            config.triggers[0].condition,
+            TriggerCondition::OnTimer { after_secs: 30.0 }
+        );
+    }
+
+    // Cycle 10: parse on_attacked trigger
+    #[test]
+    fn parse_on_attacked_trigger() {
+        let toml = r#"
+[[spawn]]
+name = "convoy"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_attacked"
+entity = "convoy"
+
+[[trigger.action]]
+type = "load_scenario"
+path = "scenarios/reinforcements.toml"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].condition,
+            TriggerCondition::OnAttacked { entity_name: "convoy".to_string() }
+        );
+    }
+
+    // Cycle 11: on_destroyed fires when matching entity destroyed
+    #[test]
+    fn on_destroyed_fires_when_entity_destroyed() {
+        let station_uuid = "uuid-station-1".to_string();
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("station_alpha".to_string(), station_uuid.clone());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Destroyed { uuid: station_uuid.clone() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 1);
+        assert_eq!(
+            fired[0].actions[0],
+            TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }
+        );
+    }
+
+    // Cycle 12: on_destroyed does NOT fire for a different UUID
+    #[test]
+    fn on_destroyed_does_not_fire_for_different_entity() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("station_alpha".to_string(), "uuid-alpha".to_string());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Destroyed { uuid: "uuid-beta".to_string() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 0);
+    }
+
+    // Cycle 13: single-shot — trigger fires only once even given repeated events
+    #[test]
+    fn trigger_fires_only_once_single_shot() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("station_alpha".to_string(), "uuid-alpha".to_string());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Destroyed { uuid: "uuid-alpha".to_string() }];
+
+        // First evaluation fires.
+        let fired1 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired1.len(), 1);
+
+        // Second evaluation with same events: must not fire again.
+        let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired2.len(), 0);
+    }
+
+    // Cycle 14: on_timer fires when elapsed time exceeds threshold
+    #[test]
+    fn on_timer_fires_when_elapsed_exceeds_threshold() {
+        let name_to_uuid = HashMap::new();
+        let trigger = Trigger {
+            condition: TriggerCondition::OnTimer { after_secs: 10.0 },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/late.toml".to_string() }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        // Below threshold — no fire.
+        let events_before = vec![WorldEvent::TimerElapsed { elapsed_secs: 9.99 }];
+        let fired = evaluate_triggers(&mut states, &events_before, &name_to_uuid);
+        assert_eq!(fired.len(), 0);
+
+        // At/above threshold — fires.
+        let events_after = vec![WorldEvent::TimerElapsed { elapsed_secs: 10.0 }];
+        let fired = evaluate_triggers(&mut states, &events_after, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+    }
+
+    // Cycle 15: on_attacked fires when entity is attacked
+    #[test]
+    fn on_attacked_fires_when_entity_attacked() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("convoy".to_string(), "uuid-convoy".to_string());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnAttacked { entity_name: "convoy".to_string() },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/reinforcements.toml".to_string() }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Attacked {
+            uuid: "uuid-convoy".to_string(),
+            attacker_uuid: "uuid-player".to_string(),
+        }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+    }
+
+    // Cycle 16: parameter substitution in load_scenario path
+    #[test]
+    fn load_scenario_path_substitutes_entity_name_params() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("station_alpha".to_string(), "uuid-abc-123".to_string());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/$station_alpha.toml".to_string() }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Destroyed { uuid: "uuid-abc-123".to_string() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 1);
+        assert_eq!(
+            fired[0].actions[0],
+            TriggerAction::LoadScenario { path: "scenarios/uuid-abc-123.toml".to_string() }
+        );
+    }
+
+    // Cycle 17: scenario with mixed spawns and triggers parses correctly
+    #[test]
+    fn scenario_with_spawns_and_triggers_parses_correctly() {
+        let toml = r#"
+[[spawn]]
+name = "station_bravo"
+entity_path = "entities/station.toml"
+position = [50.0, 0.0, 50.0]
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "station_bravo"
+
+[[trigger.action]]
+type = "load_scenario"
+path = "scenarios/follow_on.toml"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.spawns.len(), 1);
+        assert_eq!(config.triggers.len(), 1);
+    }
+
+    // Cycle 18: multiple triggers, only matching one fires
+    #[test]
+    fn only_matching_trigger_fires() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("station_a".to_string(), "uuid-a".to_string());
+        name_to_uuid.insert("station_b".to_string(), "uuid-b".to_string());
+
+        let trigger_a = Trigger {
+            condition: TriggerCondition::OnDestroyed { entity_name: "station_a".to_string() },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/a.toml".to_string() }],
+        };
+        let trigger_b = Trigger {
+            condition: TriggerCondition::OnDestroyed { entity_name: "station_b".to_string() },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/b.toml".to_string() }],
+        };
+        let mut states = vec![
+            TriggerState { trigger: trigger_a, fired: false },
+            TriggerState { trigger: trigger_b, fired: false },
+        ];
+
+        let events = vec![WorldEvent::Destroyed { uuid: "uuid-a".to_string() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 1);
+        assert_eq!(
+            fired[0].actions[0],
+            TriggerAction::LoadScenario { path: "scenarios/a.toml".to_string() }
+        );
+    }
+
+    // Cycle 19: unknown entity in on_destroyed condition doesn't fire (name not in map)
+    #[test]
+    fn on_destroyed_does_not_fire_if_entity_name_unknown() {
+        let name_to_uuid = HashMap::new(); // empty — name not registered
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnDestroyed { entity_name: "ghost".to_string() },
+            actions: vec![TriggerAction::LoadScenario { path: "scenarios/ghost.toml".to_string() }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Destroyed { uuid: "some-uuid".to_string() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 0);
+    }
+
+    // Cycle 20: trigger_states_from_config helper creates unfired states
+    #[test]
+    fn trigger_states_from_config_creates_unfired_states() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 5.0
+
+[[trigger.action]]
+type = "load_scenario"
+path = "scenarios/next.toml"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        let states = trigger_states_from_config(&config);
+        assert_eq!(states.len(), 1);
+        assert!(!states[0].fired);
     }
 }

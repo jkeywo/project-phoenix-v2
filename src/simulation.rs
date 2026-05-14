@@ -227,10 +227,13 @@ impl Default for BreakdownQueueResource {
 
 /// Remembers the most recent helm input so the 10 Hz physics tick can
 /// keep applying it even when no new client message has arrived that tick.
+///
+/// Made `pub` so the `ConsoleAiPlugin` can read the current thrust value for
+/// the Power-Low movement-rule AI without duplicating state.
 #[derive(Resource, Default)]
-struct LastHelmInput {
-    thrust: f32,
-    steering: f32,
+pub struct LastHelmInput {
+    pub thrust: f32,
+    pub steering: f32,
 }
 
 /// Prevents `handle_collisions` from applying damage every frame while the

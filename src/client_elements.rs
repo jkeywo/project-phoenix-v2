@@ -95,6 +95,7 @@ pub fn hideable_element_names(console: &Console, preset_name: &str) -> Vec<Strin
     let toml_str = match console {
         Console::Tactical => include_str!("../assets/complexity/tactical.toml"),
         Console::Science => include_str!("../assets/complexity/science.toml"),
+        Console::Power => include_str!("../assets/complexity/power.toml"),
         _ => return vec![],
     };
     let Ok(config) = parse_complexity_config(toml_str) else {
@@ -243,11 +244,28 @@ mod tests {
     // ── Non-Tactical/Science consoles ─────────────────────────────
 
     #[test]
-    fn non_tactical_console_returns_empty_for_any_preset() {
-        for console in &[Console::Helm, Console::CaptainChair, Console::Repair, Console::Power] {
+    fn non_tactical_science_power_consoles_without_config_return_empty() {
+        for console in &[Console::Helm, Console::CaptainChair, Console::Repair] {
             let names = hideable_element_names(console, "Low");
             assert!(names.is_empty(), "{:?} should have no hidden elements", console);
         }
+    }
+
+    // ── Power Low ─────────────────────────────────────────────────
+
+    #[test]
+    fn power_low_hides_overflow_controls() {
+        let names = hideable_element_names(&Console::Power, "Low");
+        assert!(
+            names.contains(&"power_overflow_controls".to_string()),
+            "Power Low must hide power_overflow_controls"
+        );
+    }
+
+    #[test]
+    fn power_full_hides_nothing() {
+        let names = hideable_element_names(&Console::Power, "Full");
+        assert!(names.is_empty(), "Power Full should hide nothing");
     }
 
     #[test]

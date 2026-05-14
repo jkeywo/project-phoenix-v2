@@ -1889,6 +1889,24 @@ fn setup_power_ui(mut commands: Commands) {
                 });
             }
 
+            // Overflow allocation controls (hidden in Low complexity — AI manages points 7 & 8).
+            panel.spawn((
+                HideableElement("power_overflow_controls".into()),
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    padding: UiRect::axes(Val::Px(16.0), Val::Px(4.0)),
+                    ..default()
+                },
+            )).with_children(|overflow_row| {
+                overflow_row.spawn((
+                    Text::new("Overflow (pts 7-8): Manual"),
+                    TextFont { font_size: 13.0, ..default() },
+                    TextColor(Color::srgb(0.6, 0.7, 0.5)),
+                ));
+            });
+
             // Battery bar section
             panel.spawn((
                 Node {

@@ -147,6 +147,167 @@ pub fn auto_fire_torpedo(input: &TorpedoAiInput) -> Vec<TorpedoTubeId> {
         .collect()
 }
 
+// ── Power AI ───────────────────────────────────────────────────────────────
+
+/// Engage state machine used by both Power Low AI rules.
+///
+/// Each rule independently tracks whether a battery overflow point is
+/// currently engaged. Engagement is gated by a sustained-condition timer;
+/// disengagement is immediate on battery/condition drop.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum EngageState {
+    /// No engagement active.
+    #[default]
+    Idle,
+    /// Condition has been sustained for `elapsed_secs` so far.
+    Counting { elapsed_secs: f32 },
+    /// Overflow point is currently engaged.
+    Engaged,
+    /// Just disengaged; waiting for battery to reach `battery_recharge_pct`
+    /// before counting can restart.
+    WaitingForRecharge,
+}
+
+/// All inputs required by `tick_power_movement_rule`.
+#[derive(Clone, Debug)]
+pub struct PowerMovementInput {
+    /// Current forward thrust input (0.0–1.0). Comes from latest `HelmInput`.
+    pub thrust: f32,
+    /// Minimum thrust to count as "driving" (from TOML `thrust_threshold`).
+    pub thrust_threshold: f32,
+    /// Seconds sustained thrust must persist before engaging (from TOML).
+    pub engage_delay_secs: f32,
+    /// Battery % must be ≥ this to allow engaging (from TOML).
+    pub battery_engage_min_pct: f32,
+    /// Battery % must reach this to allow re-engaging after a disengage (from TOML).
+    pub battery_recharge_pct: f32,
+    /// Current battery percentage (0.0–100.0).
+    pub battery_pct: f32,
+    /// Seconds elapsed this frame.
+    pub dt: f32,
+    /// Whether the Power console is currently at "Low" complexity. When
+    /// `false`, any pending engage is cancelled and `Idle` is returned.
+    pub power_is_low: bool,
+}
+
+/// Outcome of a single `tick_power_movement_rule` call.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PowerEngageOutput {
+    /// No change — +1 overflow was NOT engaged this tick.
+    NoChange,
+    /// Engage the overflow point: add +1 to the target console.
+    Engage,
+    /// Disengage the overflow point: remove +1 from the target console.
+    Disengage,
+}
+
+/// Advance the movement-rule AI state by one tick.
+///
+/// Rules:
+/// - If `power_is_low` is false, reset state to `Idle` and return `NoChange`.
+/// - While `Idle`: if thrust ≥ threshold AND battery ≥ engage_min_pct, start
+///   counting; otherwise stay `Idle`.
+/// - While `Counting`: if condition drops, reset to `Idle`; otherwise
+///   accumulate `dt`. When `elapsed >= engage_delay_secs`, transition to
+///   `Engaged` and return `Engage`.
+/// - While `Engaged`: if battery < engage_min_pct, transition to
+///   `WaitingForRecharge` and return `Disengage`. Otherwise `NoChange`.
+/// - While `WaitingForRecharge`: if battery ≥ battery_recharge_pct, reset to
+///   `Idle`. Still `NoChange` (re-engagement starts from `Idle` next tick).
+pub fn tick_power_movement_rule(
+    state: &mut EngageState,
+    input: &PowerMovementInput,
+) -> PowerEngageOutput {
+    if !input.power_is_low {
+        *state = EngageState::Idle;
+        return PowerEngageOutput::NoChange;
+    }
+
+    let condition_met = input.thrust >= input.thrust_threshold
+        && input.battery_pct >= input.battery_engage_min_pct;
+
+    match state {
+        EngageState::Idle => {
+            if condition_met {
+                *state = EngageState::Counting { elapsed_secs: input.dt };
+                // Check if we already crossed the threshold in this tick.
+                if input.dt >= input.engage_delay_secs {
+                    *state = EngageState::Engaged;
+                    return PowerEngageOutput::Engage;
+                }
+            }
+            PowerEngageOutput::NoChange
+        }
+        EngageState::Counting { elapsed_secs } => {
+            if !condition_met {
+                *state = EngageState::Idle;
+                return PowerEngageOutput::NoChange;
+            }
+            *elapsed_secs += input.dt;
+            if *elapsed_secs >= input.engage_delay_secs {
+                *state = EngageState::Engaged;
+                PowerEngageOutput::Engage
+            } else {
+                PowerEngageOutput::NoChange
+            }
+        }
+        EngageState::Engaged => {
+            if input.battery_pct < input.battery_engage_min_pct {
+                *state = EngageState::WaitingForRecharge;
+                PowerEngageOutput::Disengage
+            } else {
+                PowerEngageOutput::NoChange
+            }
+        }
+        EngageState::WaitingForRecharge => {
+            if input.battery_pct >= input.battery_recharge_pct {
+                *state = EngageState::Idle;
+            }
+            PowerEngageOutput::NoChange
+        }
+    }
+}
+
+/// All inputs required by `tick_power_red_alert_rule`.
+#[derive(Clone, Debug)]
+pub struct PowerRedAlertInput {
+    /// Whether red alert is currently active.
+    pub red_alert: bool,
+    /// Seconds red alert must persist before engaging (from TOML).
+    pub engage_delay_secs: f32,
+    /// Battery % must be ≥ this to allow engaging.
+    pub battery_engage_min_pct: f32,
+    /// Battery % must reach this to allow re-engaging after a disengage.
+    pub battery_recharge_pct: f32,
+    /// Current battery percentage (0.0–100.0).
+    pub battery_pct: f32,
+    /// Seconds elapsed this frame.
+    pub dt: f32,
+    /// Whether the Power console is currently at "Low" complexity.
+    pub power_is_low: bool,
+}
+
+/// Advance the red-alert-rule AI state by one tick.
+///
+/// Symmetric to `tick_power_movement_rule`, but the condition is
+/// `red_alert == true AND battery ≥ engage_min_pct`.
+pub fn tick_power_red_alert_rule(
+    state: &mut EngageState,
+    input: &PowerRedAlertInput,
+) -> PowerEngageOutput {
+    let movement_input = PowerMovementInput {
+        thrust: if input.red_alert { 1.0 } else { 0.0 },
+        thrust_threshold: 0.5,
+        engage_delay_secs: input.engage_delay_secs,
+        battery_engage_min_pct: input.battery_engage_min_pct,
+        battery_recharge_pct: input.battery_recharge_pct,
+        battery_pct: input.battery_pct,
+        dt: input.dt,
+        power_is_low: input.power_is_low,
+    };
+    tick_power_movement_rule(state, &movement_input)
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -388,5 +549,188 @@ mod tests {
         input.tubes[1].loaded = false; // ForeStarboard unloaded
         let result = auto_fire_torpedo(&input);
         assert_eq!(result, vec![TorpedoTubeId::ForePort, TorpedoTubeId::Aft]);
+    }
+
+    // ── Power movement rule helpers ───────────────────────────────────────
+
+    fn movement_input(thrust: f32, battery_pct: f32, dt: f32) -> PowerMovementInput {
+        PowerMovementInput {
+            thrust,
+            thrust_threshold: 0.7,
+            engage_delay_secs: 3.0,
+            battery_engage_min_pct: 50.0,
+            battery_recharge_pct: 100.0,
+            battery_pct,
+            dt,
+            power_is_low: true,
+        }
+    }
+
+    // ── tick_power_movement_rule ──────────────────────────────────────────
+
+    #[test]
+    fn thrust_below_threshold_no_engage() {
+        let mut state = EngageState::Idle;
+        let out = tick_power_movement_rule(&mut state, &movement_input(0.5, 80.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle);
+    }
+
+    #[test]
+    fn thrust_at_threshold_with_battery_starts_counting() {
+        let mut state = EngageState::Idle;
+        let out = tick_power_movement_rule(&mut state, &movement_input(0.7, 80.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert!(matches!(state, EngageState::Counting { .. }));
+    }
+
+    #[test]
+    fn sustained_thrust_and_battery_engages_after_delay() {
+        let mut state = EngageState::Idle;
+        // 2 ticks of 1.5s = 3.0s total ≥ engage_delay_secs(3.0)
+        tick_power_movement_rule(&mut state, &movement_input(0.8, 80.0, 1.5));
+        let out = tick_power_movement_rule(&mut state, &movement_input(0.8, 80.0, 1.5));
+        assert_eq!(out, PowerEngageOutput::Engage, "should engage after delay elapsed");
+        assert_eq!(state, EngageState::Engaged);
+    }
+
+    #[test]
+    fn thrust_drop_before_engage_resets_timer() {
+        let mut state = EngageState::Idle;
+        // Start counting
+        tick_power_movement_rule(&mut state, &movement_input(0.8, 80.0, 1.0));
+        assert!(matches!(state, EngageState::Counting { .. }));
+        // Thrust drops below threshold
+        let out = tick_power_movement_rule(&mut state, &movement_input(0.3, 80.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle, "timer should reset when thrust drops");
+    }
+
+    #[test]
+    fn battery_dip_below_min_during_engage_disengages() {
+        let mut state = EngageState::Engaged;
+        // Battery drops below 50%
+        let out = tick_power_movement_rule(&mut state, &movement_input(0.8, 40.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::Disengage);
+        assert_eq!(state, EngageState::WaitingForRecharge);
+    }
+
+    #[test]
+    fn waiting_for_recharge_no_re_engage_until_full() {
+        let mut state = EngageState::WaitingForRecharge;
+        // Battery at 80% — below recharge_pct (100%)
+        let out = tick_power_movement_rule(&mut state, &movement_input(0.8, 80.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::WaitingForRecharge);
+    }
+
+    #[test]
+    fn recharge_to_full_transitions_to_idle_allowing_re_engage() {
+        let mut state = EngageState::WaitingForRecharge;
+        // Battery reaches 100% (recharge_pct)
+        let out = tick_power_movement_rule(&mut state, &movement_input(0.8, 100.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle, "should return to Idle when battery recharged");
+    }
+
+    #[test]
+    fn switching_to_full_complexity_cancels_pending_engage() {
+        let mut state = EngageState::Counting { elapsed_secs: 2.9 };
+        let mut input = movement_input(0.8, 80.0, 0.5);
+        input.power_is_low = false; // switched to Full
+        let out = tick_power_movement_rule(&mut state, &input);
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle, "pending engage cancelled when switching to Full");
+    }
+
+    #[test]
+    fn switching_to_full_while_engaged_disengages_immediately() {
+        // The plugin must disengage before cancelling. This tests that
+        // the state machine goes to Idle when power_is_low is false,
+        // and the plugin is responsible for synthesising the Disengage action
+        // when the console goes Full while engaged.
+        let mut state = EngageState::Engaged;
+        let mut input = movement_input(0.8, 80.0, 1.0);
+        input.power_is_low = false;
+        let out = tick_power_movement_rule(&mut state, &input);
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle, "state resets to Idle on Full");
+    }
+
+    #[test]
+    fn low_battery_prevents_counting() {
+        let mut state = EngageState::Idle;
+        // Thrust high but battery below minimum (50%)
+        let out = tick_power_movement_rule(&mut state, &movement_input(0.9, 40.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle, "should not count when battery too low");
+    }
+
+    // ── tick_power_red_alert_rule ─────────────────────────────────────────
+
+    fn red_alert_input(red_alert: bool, battery_pct: f32, dt: f32) -> PowerRedAlertInput {
+        PowerRedAlertInput {
+            red_alert,
+            engage_delay_secs: 3.0,
+            battery_engage_min_pct: 10.0,
+            battery_recharge_pct: 100.0,
+            battery_pct,
+            dt,
+            power_is_low: true,
+        }
+    }
+
+    #[test]
+    fn no_red_alert_no_weapons_engage() {
+        let mut state = EngageState::Idle;
+        let out = tick_power_red_alert_rule(&mut state, &red_alert_input(false, 80.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::NoChange);
+        assert_eq!(state, EngageState::Idle);
+    }
+
+    #[test]
+    fn sustained_red_alert_and_battery_engages_weapons() {
+        let mut state = EngageState::Idle;
+        tick_power_red_alert_rule(&mut state, &red_alert_input(true, 50.0, 1.5));
+        let out = tick_power_red_alert_rule(&mut state, &red_alert_input(true, 50.0, 1.5));
+        assert_eq!(out, PowerEngageOutput::Engage, "should engage after delay under red alert");
+    }
+
+    #[test]
+    fn red_alert_battery_dip_disengages_weapons() {
+        let mut state = EngageState::Engaged;
+        // Battery drops below 10% (min for red alert rule)
+        let out = tick_power_red_alert_rule(&mut state, &red_alert_input(true, 5.0, 1.0));
+        assert_eq!(out, PowerEngageOutput::Disengage);
+        assert_eq!(state, EngageState::WaitingForRecharge);
+    }
+
+    #[test]
+    fn red_alert_re_engage_gated_on_recharge_pct() {
+        let mut state = EngageState::WaitingForRecharge;
+        // At 80%, recharge_pct=100% → still waiting
+        tick_power_red_alert_rule(&mut state, &red_alert_input(true, 80.0, 1.0));
+        assert_eq!(state, EngageState::WaitingForRecharge);
+        // At 100%, transitions to Idle
+        tick_power_red_alert_rule(&mut state, &red_alert_input(true, 100.0, 1.0));
+        assert_eq!(state, EngageState::Idle);
+    }
+
+    // ── Both rules stacking ───────────────────────────────────────────────
+
+    #[test]
+    fn both_rules_can_engage_simultaneously() {
+        let mut helm_state = EngageState::Idle;
+        let mut weapons_state = EngageState::Idle;
+
+        // Sustained thrust + red alert + full battery → both engage after delay
+        for _ in 0..3 {
+            tick_power_movement_rule(&mut helm_state, &movement_input(0.9, 80.0, 1.0));
+            tick_power_red_alert_rule(&mut weapons_state, &red_alert_input(true, 80.0, 1.0));
+        }
+
+        // At 3s elapsed both should be Engaged now
+        assert_eq!(helm_state, EngageState::Engaged, "movement rule should be Engaged");
+        assert_eq!(weapons_state, EngageState::Engaged, "red alert rule should be Engaged");
     }
 }

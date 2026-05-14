@@ -654,6 +654,7 @@ fn setup_lobby_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 Button,
                 Node {
                     padding: UiRect::axes(Val::Px(18.0), Val::Px(12.0)),
+                    margin: UiRect { bottom: Val::Px(10.0), ..default() },
                     ..default()
                 },
                 BackgroundColor(COL_GRAPHITE_DARK),

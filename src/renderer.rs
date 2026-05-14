@@ -7,6 +7,7 @@ use crate::radar;
 use crate::ship_state::ShipState;
 use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource};
 use crate::beam_render;
+use crate::ai_plugin::WarpOutMarker;
 
 // ── VFX Components ────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ impl Plugin for RendererPlugin {
                 spawn_ripples,
                 tick_ripples,
                 sync_torpedo_entities,
+                draw_warp_exit_markers,
             ));
     }
 }
@@ -629,5 +631,43 @@ mod tests {
         let (to_spawn, to_despawn) = diff_torpedo_sets(&in_flight, &tracked);
         assert_eq!(to_spawn, vec!["c".to_string()]);
         assert_eq!(to_despawn, vec!["a".to_string()]);
+    }
+}
+
+// ── Warp-exit marker renderer ─────────────────────────────────────────────────
+
+/// Draws a vertical (XZ-plane) ring at the world position of each NPC entity
+/// that is currently in the `WarpingOut` AI state.
+///
+/// The ring glows cyan and pulses in opacity with the remaining time so crews
+/// can anticipate where the entity will disappear.
+fn draw_warp_exit_markers(
+    phase: Res<CurrentPhase>,
+    query: Query<(&WarpOutMarker, &Transform)>,
+    mut gizmos: Gizmos,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    for (marker, transform) in query.iter() {
+        let center = transform.translation;
+        // Pulse: brightest at full time remaining, dims as time runs out.
+        let pulse = (marker.remaining_secs * 2.0).sin().abs().max(0.2);
+        let color = Color::srgba(0.2, 0.9, 1.0, pulse * 0.8);
+
+        // Vertical ring: identity rotation → XY plane (normal = Z).
+        // Radius scales with target speed so faster entities show a larger ring.
+        let radius = (marker.target_speed * 0.4).clamp(5.0, 40.0);
+        gizmos.circle(
+            Isometry3d::new(center, Quat::IDENTITY),
+            radius,
+            color,
+        );
+        // Second inner ring for visual depth.
+        gizmos.circle(
+            Isometry3d::new(center, Quat::IDENTITY),
+            radius * 0.6,
+            Color::srgba(0.5, 1.0, 1.0, pulse * 0.4),
+        );
     }
 }

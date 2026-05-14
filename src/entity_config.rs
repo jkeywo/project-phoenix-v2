@@ -31,6 +31,9 @@ pub struct StateConfig {
     /// (thrust = 0) when closer.
     #[serde(default)]
     pub maintain_range: f32,
+    /// Duration in seconds for the `warping_out` state before the entity self-despawns.
+    #[serde(default)]
+    pub duration_secs: f32,
 }
 
 impl StateConfig {

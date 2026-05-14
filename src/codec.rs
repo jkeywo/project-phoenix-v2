@@ -330,7 +330,7 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
-                    inner_radius: None,
+                    inner_radius: None, warp_out_remaining_secs: None,
                 }],
             },
         };
@@ -353,7 +353,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: None,
+                        inner_radius: None, warp_out_remaining_secs: None,
                     },
                     EntitySnapshot {
                         uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(),
@@ -365,7 +365,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: None,
+                        inner_radius: None, warp_out_remaining_secs: None,
                     },
                 ],
             },
@@ -401,7 +401,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: None,
+                        inner_radius: None, warp_out_remaining_secs: None,
                     }],
                 }),
             },
@@ -863,7 +863,7 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
-                    inner_radius: None,
+                    inner_radius: None, warp_out_remaining_secs: None,
                 }],
             },
         };
@@ -885,7 +885,30 @@ mod tests {
                     colour: Some([0.2, 0.5, 0.8]),
                     yaw: Some(1.57),
                     hull_fraction: Some(0.85),
-                    inner_radius: Some(2.0),
+                    inner_radius: Some(2.0), warp_out_remaining_secs: None,
+                }],
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_snapshot_warp_out_remaining_secs_round_trips() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![EntitySnapshot {
+                    uuid: "npc-1".into(),
+                    id: None,
+                    position: Some([5.0, 0.0, 10.0]),
+                    tags: vec![],
+                    shape: None,
+                    radius: None,
+                    colour: None,
+                    yaw: None,
+                    hull_fraction: None,
+                    inner_radius: None,
+                    warp_out_remaining_secs: Some(3.5),
                 }],
             },
         };
@@ -908,7 +931,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: None,
+                        inner_radius: None, warp_out_remaining_secs: None,
                     },
                     EntitySnapshot {
                         uuid: "field-1".into(),
@@ -920,7 +943,7 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: Some(10.0),
+                        inner_radius: Some(10.0), warp_out_remaining_secs: None,
                     },
                 ],
             },
@@ -945,7 +968,7 @@ mod tests {
                     yaw: Some(0.5),
                     hull_fraction: Some(1.0),
                     flags: vec![],
-                    shields: None,
+                    shields: None, warp_out_remaining_secs: None,
                 }],
                 radar_state: RadarStateSnapshot::default(),
             },
@@ -970,7 +993,7 @@ mod tests {
                     yaw: None,
                     hull_fraction: None,
                     flags: vec![],
-                    shields: None,
+                    shields: None, warp_out_remaining_secs: None,
                 }],
                 radar_state: RadarStateSnapshot::default(),
             },
@@ -1019,7 +1042,7 @@ mod tests {
                         yaw: Some(0.0),
                         hull_fraction: Some(1.0),
                         flags: vec![],
-                        shields: None,
+                        shields: None, warp_out_remaining_secs: None,
                     },
                     EntityStateSnapshot {
                         uuid: "e2".into(),
@@ -1027,7 +1050,7 @@ mod tests {
                         yaw: None,
                         hull_fraction: Some(0.5),
                         flags: vec![crate::flag_kind::FlagKind::CommsJammed],
-                        shields: None,
+                        shields: None, warp_out_remaining_secs: None,
                     },
                 ],
                 radar_state: RadarStateSnapshot {
@@ -1089,7 +1112,7 @@ mod tests {
                 colour: Some([0.2, 0.5, 0.8]),
                 yaw: Some(1.57),
                 hull_fraction: Some(0.85),
-                inner_radius: Some(2.0),
+                inner_radius: Some(2.0), warp_out_remaining_secs: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1109,7 +1132,7 @@ mod tests {
                 colour: None,
                 yaw: None,
                 hull_fraction: None,
-                inner_radius: None,
+                inner_radius: None, warp_out_remaining_secs: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1359,6 +1382,7 @@ mod tests {
                         ShieldFacingStatus { label: "Port".into(), hp: 50, max_hp: 100, online: true, offline_remaining: 0.0 },
                         ShieldFacingStatus { label: "Starboard".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0 },
                     ]),
+                    warp_out_remaining_secs: None,
                 }],
                 radar_state: crate::messages::RadarStateSnapshot::default(),
             },

@@ -471,7 +471,7 @@ mod tests {
             colour: None,
             yaw: None,
             hull_fraction: None,
-            inner_radius: None,
+            inner_radius: None, warp_out_remaining_secs: None,
         }
     }
 
@@ -695,7 +695,7 @@ mod tests {
             colour: None,
             yaw: None,
             hull_fraction: None,
-            inner_radius: Some(inner),
+            inner_radius: Some(inner), warp_out_remaining_secs: None,
         }
     }
 

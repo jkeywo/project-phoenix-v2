@@ -37,6 +37,19 @@ pub enum AiState {
         /// Desired thrust fraction [0, 1] when outside `maintain_range`.
         target_speed: f32,
     },
+    /// Flee from `last_attacker` at `target_speed`, steering 180° away.
+    /// Falls back to hold-heading when `last_attacker` is absent.
+    Fleeing {
+        /// Desired thrust fraction [0, 1].
+        target_speed: f32,
+    },
+    /// Hold current heading at `target_speed` for `duration_secs`, then self-despawn.
+    WarpingOut {
+        /// Seconds to maintain heading before despawning.
+        duration_secs: f32,
+        /// Desired thrust fraction [0, 1].
+        target_speed: f32,
+    },
 }
 
 impl Default for AiState {
@@ -54,6 +67,8 @@ impl AiState {
             AiState::Patrolling { .. } => "patrolling",
             AiState::Pursuing { .. } => "pursuing",
             AiState::Attacking { .. } => "attacking",
+            AiState::Fleeing { .. } => "fleeing",
+            AiState::WarpingOut { .. } => "warping_out",
         }
     }
 }
@@ -94,11 +109,18 @@ pub struct TransitionConfig {
     pub from: StringOrVec,
     /// Name of the state to transition to.
     pub to: String,
-    /// Condition kind: `"enemy_in_range"`, `"on_attacked"`, or `"target_destroyed"`.
+    /// Condition kind: `"enemy_in_range"`, `"on_attacked"`, `"target_destroyed"`,
+    /// `"in_weapons_range"`, `"hull_below"`, `"on_timer"`, or `"on_scenario_unloaded"`.
     pub condition: String,
     /// Radius parameter for `enemy_in_range` (ignored by other conditions).
     #[serde(default)]
     pub radius: Option<f32>,
+    /// Hull fraction threshold for `hull_below` (fires when `self_hull_fraction < threshold`).
+    #[serde(default)]
+    pub threshold: Option<f32>,
+    /// Elapsed seconds for `on_timer` (fires when `sim_time - state_entered_at >= seconds`).
+    #[serde(default)]
+    pub seconds: Option<f32>,
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -229,6 +251,11 @@ pub struct WorldView {
     pub entity_phaser_ready: bool,
     /// Name of the first ready torpedo tube, if any. `None` = no tubes loaded.
     pub torpedo_tube_ready: Option<String>,
+    /// Hull integrity fraction [0, 1] of the AI entity itself (for `hull_below` condition).
+    pub self_hull_fraction: Option<f32>,
+    /// Set to `true` when the current scenario is being unloaded.
+    /// Causes `on_scenario_unloaded` transitions to fire.
+    pub scenario_unloaded: bool,
 }
 
 // ── AiTickOutput ─────────────────────────────────────────────────────────────
@@ -246,11 +273,19 @@ pub struct AiTickOutput {
     pub inputs: Vec<AiInput>,
     /// Updated blackboard to write back to the controller. `None` = unchanged.
     pub new_blackboard: Option<Blackboard>,
+    /// When `true`, the entity should be despawned this tick (end of `warping_out`).
+    pub despawn: bool,
 }
 
 impl AiTickOutput {
     fn idle() -> Self {
-        Self { new_state: AiState::Idle, new_state_name: None, inputs: vec![], new_blackboard: None }
+        Self {
+            new_state: AiState::Idle,
+            new_state_name: None,
+            inputs: vec![],
+            new_blackboard: None,
+            despawn: false,
+        }
     }
 }
 
@@ -316,6 +351,12 @@ pub fn tick(
         AiState::Attacking { maintain_range, target_speed } => {
             tick_attacking(controller, world_view, *maintain_range, *target_speed)
         }
+        AiState::Fleeing { target_speed } => {
+            tick_fleeing(controller, world_view, *target_speed)
+        }
+        AiState::WarpingOut { duration_secs, target_speed } => {
+            tick_warping_out(controller, world_view, *duration_secs, *target_speed)
+        }
     }
 }
 
@@ -333,6 +374,7 @@ fn tick_pursuing(
             new_state_name: None,
             inputs: vec![],
             new_blackboard: None,
+            despawn: false,
         },
     };
 
@@ -344,6 +386,7 @@ fn tick_pursuing(
             new_state_name: None,
             inputs: vec![],
             new_blackboard: None,
+            despawn: false,
         },
     };
 
@@ -358,6 +401,7 @@ fn tick_pursuing(
             new_state_name: None,
             inputs: vec![AiInput::Helm { thrust: 0.0, steering: 0.0 }],
             new_blackboard: None,
+            despawn: false,
         };
     }
 
@@ -370,6 +414,7 @@ fn tick_pursuing(
         new_state_name: None,
         inputs: vec![AiInput::Helm { thrust: target_speed, steering }],
         new_blackboard: None,
+        despawn: false,
     }
 }
 
@@ -452,6 +497,7 @@ fn tick_attacking(
             new_state_name: None,
             inputs: vec![],
             new_blackboard: None,
+            despawn: false,
         },
     };
 
@@ -462,6 +508,7 @@ fn tick_attacking(
             new_state_name: None,
             inputs: vec![],
             new_blackboard: None,
+            despawn: false,
         },
     };
 
@@ -502,6 +549,63 @@ fn tick_attacking(
         new_state_name: None,
         inputs,
         new_blackboard: None,
+        despawn: false,
+    }
+}
+
+/// Flee at `target_speed`, steering 180° away from `last_attacker`.
+/// Falls back to hold-heading (steering = 0) when `last_attacker` is absent
+/// or not found in the world view.
+fn tick_fleeing(
+    controller: &AiController,
+    world_view: &WorldView,
+    target_speed: f32,
+) -> AiTickOutput {
+    let steering = if let Some(attacker_uuid) = controller.blackboard.last_attacker {
+        if let Some(attacker) = world_view.entities.iter().find(|e| e.uuid == attacker_uuid) {
+            let pos = world_view.entity_pos;
+            let dx = pos[0] - attacker.position[0]; // direction AWAY from attacker
+            let dz = pos[2] - attacker.position[2];
+            let dist = (dx * dx + dz * dz).sqrt();
+            if dist > 1.0 {
+                let inv_dist = 1.0 / dist;
+                let away_dir = [dx * inv_dist, dz * inv_dist];
+                steer_toward(world_view.entity_yaw, away_dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD)
+            } else {
+                0.0 // effectively on top of attacker, hold heading
+            }
+        } else {
+            0.0 // attacker not in world view, hold heading
+        }
+    } else {
+        0.0 // no last_attacker, hold heading
+    };
+
+    AiTickOutput {
+        new_state: controller.current_state.clone(),
+        new_state_name: None,
+        inputs: vec![AiInput::Helm { thrust: target_speed, steering }],
+        new_blackboard: None,
+        despawn: false,
+    }
+}
+
+/// Hold current heading at `target_speed` for `duration_secs`, then self-despawn.
+fn tick_warping_out(
+    controller: &AiController,
+    world_view: &WorldView,
+    duration_secs: f32,
+    target_speed: f32,
+) -> AiTickOutput {
+    let elapsed = (world_view.sim_time - controller.blackboard.state_entered_at) as f32;
+    let should_despawn = elapsed >= duration_secs;
+
+    AiTickOutput {
+        new_state: controller.current_state.clone(),
+        new_state_name: None,
+        inputs: vec![AiInput::Helm { thrust: target_speed, steering: 0.0 }],
+        new_blackboard: None,
+        despawn: should_despawn,
     }
 }
 
@@ -593,6 +697,34 @@ fn evaluate_transitions(
                     false
                 }
             }
+            "hull_below" => {
+                let threshold = transition.threshold.unwrap_or(0.5);
+                match world_view.self_hull_fraction {
+                    Some(frac) if frac < threshold => {
+                        new_bb.on_attacked_armed = true;
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            "on_timer" => {
+                let seconds = transition.seconds.unwrap_or(f32::MAX) as f64;
+                let elapsed = world_view.sim_time - controller.blackboard.state_entered_at;
+                if elapsed >= seconds {
+                    new_bb.on_attacked_armed = true;
+                    true
+                } else {
+                    false
+                }
+            }
+            "on_scenario_unloaded" => {
+                if world_view.scenario_unloaded {
+                    new_bb.on_attacked_armed = true;
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         };
 
@@ -603,6 +735,7 @@ fn evaluate_transitions(
                 new_state_name: Some(transition.to.clone()),
                 inputs: vec![],
                 new_blackboard: Some(new_bb),
+                despawn: false,
             });
         }
     }
@@ -627,6 +760,13 @@ fn build_state_by_name(behaviour: &crate::entity_config::BehaviourConfig, name: 
             },
             "attacking" => AiState::Attacking {
                 maintain_range: sc.maintain_range,
+                target_speed: sc.target_speed,
+            },
+            "fleeing" => AiState::Fleeing {
+                target_speed: sc.target_speed,
+            },
+            "warping_out" => AiState::WarpingOut {
+                duration_secs: sc.duration_secs,
                 target_speed: sc.target_speed,
             },
             _ => AiState::Idle,
@@ -657,6 +797,7 @@ fn tick_patrolling(
             new_state_name: None,
             inputs: vec![AiInput::Helm { thrust: 0.0, steering: 0.0 }],
             new_blackboard: None,
+            despawn: false,
         };
     }
 
@@ -670,6 +811,7 @@ fn tick_patrolling(
                 new_state_name: None,
                 inputs: vec![AiInput::Helm { thrust: 0.0, steering: 0.0 }],
                 new_blackboard: None,
+                despawn: false,
             };
         }
     };
@@ -701,6 +843,7 @@ fn tick_patrolling(
                 new_state_name: None,
                 inputs: vec![AiInput::Helm { thrust: 0.0, steering: 0.0 }],
                 new_blackboard: Some(new_bb),
+                despawn: false,
             };
         }
 
@@ -709,6 +852,7 @@ fn tick_patrolling(
             new_state_name: None,
             inputs: vec![AiInput::Helm { thrust: target_speed, steering: 0.0 }],
             new_blackboard: Some(new_bb),
+            despawn: false,
         };
     }
 
@@ -722,6 +866,7 @@ fn tick_patrolling(
         new_state_name: None,
         inputs: vec![AiInput::Helm { thrust: target_speed, steering }],
         new_blackboard: None,
+        despawn: false,
     }
 }
 
@@ -1049,7 +1194,7 @@ mod tests {
                 waypoints: vec!["wp1".into(), "wp2".into()],
                 loop_path: true,
                 target_speed: 0.6,
-                maintain_range: 0.0,
+                maintain_range: 0.0, duration_secs: 0.0,
             }],
             transition: vec![],
         };
@@ -1081,7 +1226,7 @@ mod tests {
                 waypoints: vec![],
                 loop_path: false,
                 target_speed: 0.9,
-                maintain_range: 0.0,
+                maintain_range: 0.0, duration_secs: 0.0,
             }],
             transition: vec![],
         };
@@ -1177,14 +1322,14 @@ mod tests {
         BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
                 to: "chase".into(),
                 condition: "on_attacked".into(),
-                radius: None,
+                radius: None, threshold: None, seconds: None,
             }],
         }
     }
@@ -1257,14 +1402,14 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
                 to: "chase".into(),
                 condition: "enemy_in_range".into(),
-                radius: Some(500.0),
+                radius: Some(500.0), threshold: None, seconds: None,
             }],
         };
 
@@ -1289,14 +1434,14 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
                 to: "chase".into(),
                 condition: "enemy_in_range".into(),
-                radius: Some(200.0),
+                radius: Some(200.0), threshold: None, seconds: None,
             }],
         };
         let registry = mutual_hostile_registry();
@@ -1319,14 +1464,14 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
                 to: "chase".into(),
                 condition: "enemy_in_range".into(),
-                radius: Some(200.0),
+                radius: Some(200.0), threshold: None, seconds: None,
             }],
         };
         let registry = mutual_hostile_registry();
@@ -1348,14 +1493,15 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
                 to: "chase".into(),
                 condition: "enemy_in_range".into(),
                 radius: Some(50.0), // small radius
+                threshold: None, seconds: None,
             }],
         };
         let registry = mutual_hostile_registry();
@@ -1375,14 +1521,14 @@ mod tests {
         BehaviourConfig {
             initial_state: "chase".into(),
             state: vec![
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("chase".into()),
                 to: "patrol".into(),
                 condition: "target_destroyed".into(),
-                radius: None,
+                radius: None, threshold: None, seconds: None,
             }],
         }
     }
@@ -1440,22 +1586,22 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "stateA".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.6, maintain_range: 0.0 },
-                StateConfig { name: "stateB".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.9, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "stateA".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.6, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "stateB".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.9, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![
                 TransitionConfig {
                     from: StringOrVec::Single("patrol".into()),
                     to: "stateA".into(),
                     condition: "enemy_in_range".into(),
-                    radius: Some(500.0),
+                    radius: Some(500.0), threshold: None, seconds: None,
                 },
                 TransitionConfig {
                     from: StringOrVec::Single("patrol".into()),
                     to: "stateB".into(),
                     condition: "on_attacked".into(),
-                    radius: None,
+                    radius: None, threshold: None, seconds: None,
                 },
             ],
         };
@@ -1481,14 +1627,14 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()), // single string
                 to: "chase".into(),
                 condition: "on_attacked".into(),
-                radius: None,
+                radius: None, threshold: None, seconds: None,
             }],
         };
         let world = WorldView { attacker_this_tick: Some(attacker_id), ..Default::default() };
@@ -1504,15 +1650,15 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "idle_wait".into(), kind: "idle".into(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "idle_wait".into(), kind: "idle".into(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Multi(vec!["patrol".into(), "idle_wait".into()]), // list
                 to: "chase".into(),
                 condition: "on_attacked".into(),
-                radius: None,
+                radius: None, threshold: None, seconds: None,
             }],
         };
         let world = WorldView { attacker_this_tick: Some(attacker_id), ..Default::default() };
@@ -1530,15 +1676,15 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
-                StateConfig { name: "idle_wait".into(), kind: "idle".into(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "idle_wait".into(), kind: "idle".into(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Multi(vec!["patrol".into(), "idle_wait".into()]),
                 to: "chase".into(),
                 condition: "on_attacked".into(),
-                radius: None,
+                radius: None, threshold: None, seconds: None,
             }],
         };
         let world = WorldView { attacker_this_tick: Some(attacker_id), ..Default::default() };
@@ -1574,7 +1720,7 @@ mod tests {
                 waypoints: vec![],
                 loop_path: false,
                 target_speed: 0.8,
-                maintain_range: 30.0,
+                maintain_range: 30.0, duration_secs: 0.0,
             }],
             transition: vec![],
         };
@@ -1814,14 +1960,14 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "chase".into(),
             state: vec![
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
-                StateConfig { name: "attack".into(), kind: "attacking".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 30.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "attack".into(), kind: "attacking".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 30.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("chase".into()),
                 to: "attack".into(),
                 condition: "in_weapons_range".into(),
-                radius: None,
+                radius: None, threshold: None, seconds: None,
             }],
         };
         // entity_weapons_range=40, target at 20 — should be in range
@@ -1847,14 +1993,14 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "chase".into(),
             state: vec![
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
-                StateConfig { name: "attack".into(), kind: "attacking".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 30.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "attack".into(), kind: "attacking".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 30.0, duration_secs: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("chase".into()),
                 to: "attack".into(),
                 condition: "in_weapons_range".into(),
-                radius: None,
+                radius: None, threshold: None, seconds: None,
             }],
         };
         // entity_weapons_range=40, target at 100 — out of range
@@ -1866,5 +2012,275 @@ mod tests {
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
         assert!(output.new_state_name.is_none(), "in_weapons_range must not fire when target is out of range");
+    }
+
+    // ── Fleeing state ─────────────────────────────────────────────────────
+
+    fn fleeing_controller(last_attacker: Option<Uuid>, target_speed: f32) -> AiController {
+        let mut c = AiController::new([0.0, 0.0, 0.0], 0.0);
+        c.current_state = AiState::Fleeing { target_speed };
+        c.current_state_name = "fleeing".to_string();
+        c.blackboard.last_attacker = last_attacker;
+        c
+    }
+
+    #[test]
+    fn fleeing_steers_away_from_last_attacker() {
+        // Entity at origin facing forward (yaw=0, forward=[0,-1]).
+        // Attacker is behind at [0,0,10] (+Z direction).
+        // Away direction is [0,0,-1] (−Z), which is straight ahead → steering ≈ 0.
+        // Let's put attacker to the left at [-50,0,0]. Away is [1,0,0] (right) → positive steering.
+        let attacker_id = Uuid::new_v4();
+        let ctrl = fleeing_controller(Some(attacker_id), 0.6);
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![make_world_entity(attacker_id, [-50.0, 0.0, 0.0], None)],
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        match output.inputs.first() {
+            Some(AiInput::Helm { steering, thrust }) => {
+                assert!(*steering > 0.0, "fleeing with attacker to left must steer right, got {steering}");
+                assert!((*thrust - 0.6).abs() < 1e-5, "thrust must equal target_speed, got {thrust}");
+            }
+            _ => panic!("expected Helm input, got {:?}", output.inputs),
+        }
+    }
+
+    #[test]
+    fn fleeing_holds_heading_when_no_last_attacker() {
+        let ctrl = fleeing_controller(None, 0.7);
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.5,
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        match output.inputs.first() {
+            Some(AiInput::Helm { steering, thrust }) => {
+                assert_eq!(*steering, 0.0, "fleeing with no attacker must not steer, got {steering}");
+                assert!((*thrust - 0.7).abs() < 1e-5, "thrust must equal target_speed, got {thrust}");
+            }
+            _ => panic!("expected Helm input, got {:?}", output.inputs),
+        }
+    }
+
+    #[test]
+    fn fleeing_holds_heading_when_attacker_not_in_world() {
+        let attacker_id = Uuid::new_v4();
+        let ctrl = fleeing_controller(Some(attacker_id), 0.5);
+        let world = WorldView::default(); // attacker not present
+        let output = do_tick(&ctrl, &world);
+        match output.inputs.first() {
+            Some(AiInput::Helm { steering, .. }) => {
+                assert_eq!(*steering, 0.0, "fleeing with absent attacker must hold heading, got {steering}");
+            }
+            _ => panic!("expected Helm input, got {:?}", output.inputs),
+        }
+    }
+
+    // ── WarpingOut state ──────────────────────────────────────────────────
+
+    fn warping_out_controller(state_entered_at: f64, duration_secs: f32) -> AiController {
+        let mut c = AiController::new([0.0, 0.0, 0.0], state_entered_at);
+        c.current_state = AiState::WarpingOut { duration_secs, target_speed: 0.8 };
+        c.current_state_name = "warping_out".to_string();
+        c.blackboard.state_entered_at = state_entered_at;
+        c
+    }
+
+    #[test]
+    fn warping_out_holds_heading_zero_steering() {
+        let ctrl = warping_out_controller(0.0, 5.0);
+        let world = WorldView { sim_time: 1.0, entity_yaw: 1.2, ..Default::default() };
+        let output = do_tick(&ctrl, &world);
+        match output.inputs.first() {
+            Some(AiInput::Helm { steering, thrust }) => {
+                assert_eq!(*steering, 0.0, "warping_out must not steer");
+                assert!((*thrust - 0.8).abs() < 1e-5, "thrust must equal target_speed");
+            }
+            _ => panic!("expected Helm input"),
+        }
+    }
+
+    #[test]
+    fn warping_out_does_not_despawn_before_duration() {
+        let ctrl = warping_out_controller(0.0, 5.0);
+        let world = WorldView { sim_time: 3.0, ..Default::default() };
+        let output = do_tick(&ctrl, &world);
+        assert!(!output.despawn, "must not despawn before duration expires");
+    }
+
+    #[test]
+    fn warping_out_despawns_when_duration_elapsed() {
+        let ctrl = warping_out_controller(0.0, 5.0);
+        let world = WorldView { sim_time: 5.0, ..Default::default() };
+        let output = do_tick(&ctrl, &world);
+        assert!(output.despawn, "must despawn when duration has elapsed");
+    }
+
+    #[test]
+    fn warping_out_despawns_when_duration_exceeded() {
+        let ctrl = warping_out_controller(10.0, 3.0);
+        let world = WorldView { sim_time: 14.0, ..Default::default() }; // 4s > 3s
+        let output = do_tick(&ctrl, &world);
+        assert!(output.despawn, "must despawn when duration is exceeded");
+    }
+
+    // ── Condition: hull_below ─────────────────────────────────────────────
+
+    fn make_hull_below_behaviour(threshold: f32) -> BehaviourConfig {
+        BehaviourConfig {
+            initial_state: "attack".into(),
+            state: vec![
+                StateConfig { name: "attack".into(), kind: "attacking".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 30.0, duration_secs: 0.0 },
+                StateConfig { name: "flee".into(), kind: "fleeing".into(), waypoints: vec![], loop_path: false, target_speed: 0.9, maintain_range: 0.0, duration_secs: 0.0 },
+            ],
+            transition: vec![TransitionConfig {
+                from: StringOrVec::Single("attack".into()),
+                to: "flee".into(),
+                condition: "hull_below".into(),
+                radius: None,
+                threshold: Some(threshold),
+                seconds: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn hull_below_fires_when_hull_fraction_below_threshold() {
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        ctrl.current_state_name = "attack".into();
+        let behaviour = make_hull_below_behaviour(0.3);
+        let world = WorldView { self_hull_fraction: Some(0.25), ..Default::default() };
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert_eq!(output.new_state, AiState::Fleeing { target_speed: 0.9 },
+            "hull_below must fire when hull < threshold");
+    }
+
+    #[test]
+    fn hull_below_does_not_fire_when_hull_at_threshold() {
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        ctrl.current_state_name = "attack".into();
+        let behaviour = make_hull_below_behaviour(0.3);
+        let world = WorldView { self_hull_fraction: Some(0.3), ..Default::default() };
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert_ne!(output.new_state, AiState::Fleeing { target_speed: 0.9 },
+            "hull_below must not fire when hull == threshold");
+    }
+
+    #[test]
+    fn hull_below_does_not_fire_when_hull_above_threshold() {
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        ctrl.current_state_name = "attack".into();
+        let behaviour = make_hull_below_behaviour(0.3);
+        let world = WorldView { self_hull_fraction: Some(0.8), ..Default::default() };
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert_ne!(output.new_state, AiState::Fleeing { target_speed: 0.9 },
+            "hull_below must not fire when hull > threshold");
+    }
+
+    // ── Condition: on_timer ───────────────────────────────────────────────
+
+    fn make_on_timer_behaviour(seconds: f32) -> BehaviourConfig {
+        BehaviourConfig {
+            initial_state: "flee".into(),
+            state: vec![
+                StateConfig { name: "flee".into(), kind: "fleeing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "warp".into(), kind: "warping_out".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 4.0 },
+            ],
+            transition: vec![TransitionConfig {
+                from: StringOrVec::Single("flee".into()),
+                to: "warp".into(),
+                condition: "on_timer".into(),
+                radius: None,
+                threshold: None,
+                seconds: Some(seconds),
+            }],
+        }
+    }
+
+    #[test]
+    fn on_timer_fires_after_elapsed_seconds() {
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 10.0);
+        ctrl.current_state = AiState::Fleeing { target_speed: 0.8 };
+        ctrl.current_state_name = "flee".into();
+        ctrl.blackboard.state_entered_at = 10.0;
+        let behaviour = make_on_timer_behaviour(5.0);
+        let world = WorldView { sim_time: 15.5, ..Default::default() }; // 5.5s elapsed > 5.0s
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert_eq!(output.new_state, AiState::WarpingOut { duration_secs: 4.0, target_speed: 0.5 },
+            "on_timer must fire after elapsed >= seconds");
+    }
+
+    #[test]
+    fn on_timer_does_not_fire_before_elapsed_seconds() {
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 10.0);
+        ctrl.current_state = AiState::Fleeing { target_speed: 0.8 };
+        ctrl.current_state_name = "flee".into();
+        ctrl.blackboard.state_entered_at = 10.0;
+        let behaviour = make_on_timer_behaviour(5.0);
+        let world = WorldView { sim_time: 14.0, ..Default::default() }; // 4.0s < 5.0s
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert_ne!(output.new_state, AiState::WarpingOut { duration_secs: 4.0, target_speed: 0.5 },
+            "on_timer must not fire before elapsed < seconds");
+    }
+
+    // ── Condition: on_scenario_unloaded ───────────────────────────────────
+
+    fn make_on_scenario_unloaded_behaviour() -> BehaviourConfig {
+        BehaviourConfig {
+            initial_state: "attack".into(),
+            state: vec![
+                StateConfig { name: "attack".into(), kind: "attacking".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 30.0, duration_secs: 0.0 },
+                StateConfig { name: "warp".into(), kind: "warping_out".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 3.0 },
+            ],
+            transition: vec![TransitionConfig {
+                from: StringOrVec::Single("attack".into()),
+                to: "warp".into(),
+                condition: "on_scenario_unloaded".into(),
+                radius: None,
+                threshold: None,
+                seconds: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn on_scenario_unloaded_fires_when_signal_set() {
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        ctrl.current_state_name = "attack".into();
+        let behaviour = make_on_scenario_unloaded_behaviour();
+        let world = WorldView { scenario_unloaded: true, ..Default::default() };
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert_eq!(output.new_state, AiState::WarpingOut { duration_secs: 3.0, target_speed: 0.5 },
+            "on_scenario_unloaded must fire when scenario_unloaded=true");
+    }
+
+    #[test]
+    fn on_scenario_unloaded_does_not_fire_normally() {
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        ctrl.current_state_name = "attack".into();
+        let behaviour = make_on_scenario_unloaded_behaviour();
+        let world = WorldView { scenario_unloaded: false, ..Default::default() };
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert_ne!(output.new_state, AiState::WarpingOut { duration_secs: 3.0, target_speed: 0.5 },
+            "on_scenario_unloaded must not fire when scenario_unloaded=false");
+    }
+
+    // ── despawn flag ──────────────────────────────────────────────────────
+
+    #[test]
+    fn idle_tick_does_not_set_despawn() {
+        let ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        let world = WorldView::default();
+        let output = do_tick(&ctrl, &world);
+        assert!(!output.despawn, "idle tick must not set despawn");
     }
 }

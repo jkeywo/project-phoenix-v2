@@ -1325,6 +1325,7 @@ fn broadcast_sim_state(
                     hull_fraction,
                     flags: vec![],
                     shields: None,
+                    warp_out_remaining_secs: None,
                 }
             })
             .collect();

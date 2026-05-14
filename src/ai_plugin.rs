@@ -97,6 +97,15 @@ pub struct AiControllerComponent {
     pub entity_uuid: String,
 }
 
+/// Marker component set on NPC entities currently in the `WarpingOut` AI state.
+/// Carries the data needed to draw the warp-exit visual and to populate
+/// `EntitySnapshot::warp_out_remaining_secs` in the broadcast.
+#[derive(Component)]
+pub struct WarpOutMarker {
+    pub remaining_secs: f32,
+    pub target_speed: f32,
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 pub struct AiPlugin;
@@ -148,7 +157,8 @@ fn attach_controllers_on_spawn(
 /// Tick AI controllers, but only during `InProgress` phase.
 fn tick_ai_controllers(
     phase: Res<CurrentPhase>,
-    mut query: Query<(&mut AiControllerComponent, &mut Transform, &BehaviourSection)>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut AiControllerComponent, &mut Transform, &BehaviourSection)>,
     time: Res<Time>,
     map_config: Option<Res<crate::map_config::MapConfig>>,
     #[cfg(target_arch = "wasm32")]
@@ -196,7 +206,7 @@ fn tick_ai_controllers(
     let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
 
-    for (mut ctrl, mut transform, behaviour) in &mut query {
+    for (entity, mut ctrl, mut transform, behaviour) in &mut query {
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
 
@@ -211,6 +221,8 @@ fn tick_ai_controllers(
             entity_phaser_ready: false,
             entity_weapons_range: None,
             torpedo_tube_ready: None,
+            self_hull_fraction: None,     // TODO: populate from NPC hull component when added
+            scenario_unloaded: false,     // TODO: set when owning scenario begins unloading
         };
 
         let registry = actual_registry.unwrap_or(&empty_registry);
@@ -253,6 +265,27 @@ fn tick_ai_controllers(
                 transform.translation.z = result.z;
                 transform.rotation = Quat::from_rotation_y(result.yaw);
                 break;
+            }
+        }
+
+        // Handle self-despawn (e.g. WarpingOut timer expired).
+        if output.despawn {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        // Update WarpOutMarker: insert/update when warping out, remove otherwise.
+        match &ctrl.controller.current_state {
+            crate::ai::AiState::WarpingOut { duration_secs, target_speed } => {
+                let elapsed = sim_time as f32 - ctrl.controller.blackboard.state_entered_at as f32;
+                let remaining = (duration_secs - elapsed).max(0.0);
+                commands.entity(entity).insert(WarpOutMarker {
+                    remaining_secs: remaining,
+                    target_speed: *target_speed,
+                });
+            }
+            _ => {
+                commands.entity(entity).remove::<WarpOutMarker>();
             }
         }
     }

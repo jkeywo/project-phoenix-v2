@@ -286,6 +286,9 @@ pub struct EntitySnapshot {
     /// Inner radius for ring-shaped entities (e.g. asteroid fields).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inner_radius: Option<f32>,
+    /// Seconds remaining until the entity completes warp-out (set while in `warping_out` state).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warp_out_remaining_secs: Option<f32>,
 }
 
 impl EntitySnapshot {
@@ -322,6 +325,7 @@ impl EntitySnapshot {
             yaw: None,
             hull_fraction: None,
             inner_radius: None,
+            warp_out_remaining_secs: None,
         }
     }
 
@@ -338,6 +342,7 @@ impl EntitySnapshot {
             yaw: None,
             hull_fraction: None,
             inner_radius: Some(inner_radius),
+            warp_out_remaining_secs: None,
         }
     }
 
@@ -354,6 +359,7 @@ impl EntitySnapshot {
             yaw: None,
             hull_fraction: None,
             inner_radius: None,
+            warp_out_remaining_secs: None,
         }
     }
 }
@@ -374,6 +380,9 @@ pub struct EntityStateSnapshot {
     /// Four-quadrant shield state, present only for ship-like entities.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shields: Option<Vec<ShieldFacingStatus>>,
+    /// Seconds remaining until the entity warps out (present only while in `WarpingOut` AI state).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warp_out_remaining_secs: Option<f32>,
 }
 
 /// Per-tick radar configuration snapshot.  Mirrors the effective ranges

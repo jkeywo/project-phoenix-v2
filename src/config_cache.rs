@@ -526,6 +526,7 @@ mod tests {
             asteroid_field: None,
             shape: None,
             effects: None,
+            station: None,
         }
     }
     

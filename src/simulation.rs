@@ -1908,6 +1908,7 @@ fn setup_world_hardcoded(
         asteroid_field: None,
         shape: None,
         effects: None,
+        station: None,
     };
     let ship_uuid = crate::entity_loader::assign_uuid();
     let ship_entity = crate::entity_spawner::spawn_entity(
@@ -3119,6 +3120,7 @@ fn test_app() -> App {
             star: None,
             planet: None,
             asteroid_field: None,
+            station: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();

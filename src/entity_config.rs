@@ -4,6 +4,24 @@ use crate::map_config::{StarConfig, PlanetConfig, AsteroidFieldConfig};
 use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectsConfig;
 
+/// Visual/render shape for station entities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StationShape {
+    Sphere,
+    Cylinder,
+    Torus,
+}
+
+/// Configuration for a station entity (space station, outpost, etc.).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StationConfig {
+    pub name: String,
+    pub shape: StationShape,
+    pub radius: f32,
+    pub hull_integrity: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HullConfig {
     pub hull_integrity: f32,
@@ -143,6 +161,8 @@ pub struct EntityConfig {
     pub shape: Option<RegionShape>,
     /// Region effects section — present for region entities with effects.
     pub effects: Option<RegionEffectsConfig>,
+    /// Station section — present for station entities.
+    pub station: Option<StationConfig>,
 }
 
 #[derive(Deserialize)]
@@ -163,6 +183,7 @@ struct TomlConfig {
     asteroid_field: Option<AsteroidFieldConfig>,
     shape: Option<RegionShape>,
     effects: Option<RegionEffectsConfig>,
+    station: Option<StationConfig>,
 }
 
 impl EntityConfig {
@@ -225,6 +246,7 @@ impl EntityConfig {
             asteroid_field: raw.asteroid_field,
             shape: raw.shape,
             effects: raw.effects,
+            station: raw.station,
         })
     }
 }
@@ -843,6 +865,72 @@ radius = 100.0
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.shape.is_none());
         assert!(config.effects.is_none());
+    }
+
+    // ── Station section tests ─────────────────────────────────────────────
+
+    #[test]
+    fn station_section_parses_with_shape_and_hull_integrity() {
+        let toml_str = r##"
+tags = ["station"]
+
+[station]
+name = "Deep Space 9"
+shape = "cylinder"
+radius = 15.0
+hull_integrity = 200.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let station = config.station.expect("station must be Some");
+        assert_eq!(station.name, "Deep Space 9");
+        assert_eq!(station.shape, StationShape::Cylinder);
+        assert!((station.radius - 15.0).abs() < 1e-6);
+        assert!((station.hull_integrity - 200.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn station_section_parses_sphere_shape() {
+        let toml_str = r##"
+[station]
+name = "Relay Station"
+shape = "sphere"
+radius = 8.0
+hull_integrity = 80.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let station = config.station.expect("station must be Some");
+        assert_eq!(station.shape, StationShape::Sphere);
+    }
+
+    #[test]
+    fn station_section_parses_torus_shape() {
+        let toml_str = r##"
+[station]
+name = "Ring Station"
+shape = "torus"
+radius = 20.0
+hull_integrity = 150.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let station = config.station.expect("station must be Some");
+        assert_eq!(station.shape, StationShape::Torus);
+    }
+
+    #[test]
+    fn station_section_absent_when_not_in_toml() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.station.is_none());
+    }
+
+    #[test]
+    fn station_outpost_template_parses_with_station_section() {
+        let toml_str = include_str!("../assets/entities/station_outpost.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("station_outpost.toml must parse");
+        let station = config.station.as_ref().expect("must have [station]");
+        assert_eq!(station.name, "Outpost Alpha");
+        assert_eq!(station.shape, StationShape::Cylinder);
+        assert!((station.radius - 12.0).abs() < 1e-6);
+        assert!((station.hull_integrity - 200.0).abs() < 1e-6);
     }
 
     #[test]

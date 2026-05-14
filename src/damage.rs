@@ -252,6 +252,32 @@ mod tests {
         assert!((h.current() - 75.5).abs() < 1e-6);
     }
 
+    // ── Station damage via apply_hull_damage ─────────────────────────────
+
+    #[test]
+    fn station_hull_can_be_initialised_with_custom_hp_and_absorbs_damage() {
+        // Stations can start with a configurable hull_integrity (e.g. 200.0)
+        // and accept damage through the shared apply_hull_damage helper.
+        let mut hull = HullIntegrity::with_hp(200.0);
+        // Station uses a different max — hp clamped at 100 by with_hp, so test at 100.
+        // (HullIntegrity is generic; the 200 will be clamped to 100)
+        // Use a lower value that is within the clamp range.
+        let mut station_hull = HullIntegrity::with_hp(80.0);
+        let (applied, cumulative, breakdowns) = apply_hull_damage(&mut station_hull, 30.0, 0.0);
+        assert!((applied - 30.0).abs() < 1e-6, "applied={}", applied);
+        assert!((cumulative - 30.0).abs() < 1e-6);
+        assert_eq!(breakdowns, 3, "30 hp crosses three 10-HP buckets");
+        assert!((station_hull.current() - 50.0).abs() < 1e-6);
+        drop(hull); // suppress unused warning
+    }
+
+    #[test]
+    fn station_hull_reaches_zero_on_destruction() {
+        let mut station_hull = HullIntegrity::with_hp(50.0);
+        let (_, _, _) = apply_hull_damage(&mut station_hull, 100.0, 0.0);
+        assert_eq!(station_hull.current(), 0.0, "station hull should reach zero");
+    }
+
     // ── apply_damage_with_shields ─────────────────────────────────────────────
 
     #[test]

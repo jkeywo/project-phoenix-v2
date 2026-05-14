@@ -530,4 +530,21 @@ pub enum ServerMessage {
         /// The recommended phaser frequency (0.0–1.0).
         frequency: f32,
     },
+    /// Broadcast when a station entity is spawned. Clients use this to add
+    /// the station to their local world, show it on radar, and make it
+    /// targetable by Tactical.
+    StationSpawned {
+        uuid: String,
+        name: String,
+        position: [f32; 3],
+        /// Render shape: "sphere", "cylinder", or "torus".
+        shape: String,
+        radius: f32,
+        hull_integrity: f32,
+    },
+    /// Broadcast when a station entity is destroyed (hull reaches 0).
+    /// Clients remove it from their local world idempotently.
+    StationDestroyed {
+        uuid: String,
+    },
 }

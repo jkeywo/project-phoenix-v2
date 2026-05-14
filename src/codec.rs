@@ -1153,4 +1153,42 @@ mod tests {
             assert_server_roundtrip(&PrettyJsonCodec, msg);
         }
     }
+
+    // ── StationSpawned / StationDestroyed round-trips ─────────────────────
+
+    #[test]
+    fn server_station_spawned_round_trips() {
+        let msg = ServerMessage::StationSpawned {
+            uuid: "station-1".into(),
+            name: "Deep Space 9".into(),
+            position: [100.0, 0.0, -50.0],
+            shape: "cylinder".into(),
+            radius: 15.0,
+            hull_integrity: 200.0,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_station_destroyed_round_trips() {
+        let msg = ServerMessage::StationDestroyed { uuid: "station-1".into() };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_station_spawned_sphere_and_torus_shapes_round_trip() {
+        for shape in ["sphere", "torus"] {
+            let msg = ServerMessage::StationSpawned {
+                uuid: "s".into(),
+                name: "Test".into(),
+                position: [0.0, 0.0, 0.0],
+                shape: shape.into(),
+                radius: 10.0,
+                hull_integrity: 100.0,
+            };
+            assert_server_roundtrip(&JsonCodec, msg.clone());
+        }
+    }
 }

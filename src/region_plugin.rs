@@ -422,6 +422,7 @@ mod tests {
             star: None,
             planet: None,
             asteroid_field: None,
+            station: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -661,6 +662,7 @@ mod tests {
             star: None,
             planet: None,
             asteroid_field: None,
+            station: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -687,6 +689,7 @@ mod tests {
             star: None,
             planet: None,
             asteroid_field: None,
+            station: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -894,6 +897,7 @@ mod tests {
             star: None,
             planet: None,
             asteroid_field: None,
+            station: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1015,6 +1019,7 @@ mod tests {
             star: None,
             planet: None,
             asteroid_field: None,
+            station: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1208,6 +1213,7 @@ mod tests {
             helm_console: None, weapons_console: None, engineering_console: None,
             captain_console: None, power: None, science_console: None,
             star: None, planet: None, asteroid_field: None,
+            station: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();
@@ -1227,6 +1233,7 @@ mod tests {
             helm_console: None, weapons_console: None, engineering_console: None,
             captain_console: None, power: None, science_console: None,
             star: None, planet: None, asteroid_field: None,
+            station: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();

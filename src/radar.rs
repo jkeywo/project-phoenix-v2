@@ -376,6 +376,41 @@ pub fn compute_science_radar_view(
     ScienceRadarView { dots, rings }
 }
 
+/// Range used by the Navigation console system chart — large enough to show the
+/// full solar system layout. Matches the old Science system map range.
+pub const NAVIGATION_CHART_RANGE: f32 = 500.0;
+
+/// Returns the `RadarConfig` for the Navigation console system chart tab.
+///
+/// Shows navigational entities: stars, planets, asteroid field rings, and
+/// regions. Individual asteroids are excluded (they are not navigational
+/// features).
+pub fn navigation_chart_config() -> RadarConfig {
+    RadarConfig {
+        range: NAVIGATION_CHART_RANGE,
+        shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField, EntityTag::Region],
+    }
+}
+
+/// Compute the Navigation console system chart view.
+///
+/// - `entities`: all entities from `WorldData`.
+/// - `ship_x`, `ship_z`, `ship_yaw`: current ship pose.
+/// - `config`: Navigation chart configuration (range + tag filter).
+///
+/// Returns dots and rings for navigational entities (stars, planets, asteroid
+/// fields, regions) within `config.range` of the ship. Individual asteroids
+/// are excluded.
+pub fn compute_navigation_system_chart(
+    entities: &[EntitySnapshot],
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    config: &RadarConfig,
+) -> ScienceRadarView {
+    compute_science_radar_view(entities, ship_x, ship_z, ship_yaw, config)
+}
+
 /// Compute the Sensors console long-range radar view.
 ///
 /// Identical semantics to `compute_science_radar_view` — delegates to it
@@ -892,6 +927,82 @@ mod tests {
         let a = ast_entity("sensors-far", 0.0, -200.0);
         let view = compute_sensors_radar_view(&[a], 0.0, 0.0, 0.0, &science_config());
         assert!(view.dots.is_empty());
+    }
+
+    // ── compute_navigation_system_chart ─────────────────────────────────
+
+    fn nav_config() -> RadarConfig {
+        RadarConfig {
+            range: NAVIGATION_CHART_RANGE,
+            shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField, EntityTag::Region],
+        }
+    }
+
+    fn star_entity(uuid: &str, x: f32, z: f32) -> EntitySnapshot {
+        EntitySnapshot::simple(uuid, x, z, vec!["star".into()])
+    }
+
+    fn planet_entity(uuid: &str, x: f32, z: f32) -> EntitySnapshot {
+        EntitySnapshot::simple(uuid, x, z, vec!["planet".into()])
+    }
+
+    #[test]
+    fn navigation_chart_empty_world_produces_empty_view() {
+        let view = compute_navigation_system_chart(&[], 0.0, 0.0, 0.0, &nav_config());
+        assert!(view.dots.is_empty());
+        assert!(view.rings.is_empty());
+    }
+
+    #[test]
+    fn navigation_chart_includes_star_within_range() {
+        let s = star_entity("sun", 0.0, -100.0);
+        let view = compute_navigation_system_chart(&[s], 0.0, 0.0, 0.0, &nav_config());
+        assert_eq!(view.dots.len(), 1);
+        assert_eq!(view.dots[0].uuid, "sun");
+    }
+
+    #[test]
+    fn navigation_chart_includes_planet_within_range() {
+        let p = planet_entity("mars", 0.0, -250.0);
+        let view = compute_navigation_system_chart(&[p], 0.0, 0.0, 0.0, &nav_config());
+        assert_eq!(view.dots.len(), 1);
+        assert_eq!(view.dots[0].uuid, "mars");
+    }
+
+    #[test]
+    fn navigation_chart_includes_field_ring_within_range() {
+        let f = fld_entity("belt", 0.0, -100.0);
+        let view = compute_navigation_system_chart(&[f], 0.0, 0.0, 0.0, &nav_config());
+        assert_eq!(view.rings.len(), 1);
+        assert_eq!(view.rings[0].uuid, "belt");
+    }
+
+    #[test]
+    fn navigation_chart_excludes_individual_asteroid() {
+        let a = ast_entity("ast-1", 0.0, -50.0);
+        let view = compute_navigation_system_chart(&[a], 0.0, 0.0, 0.0, &nav_config());
+        assert!(view.dots.is_empty(), "individual asteroids must not appear on navigation chart");
+    }
+
+    #[test]
+    fn navigation_chart_excludes_entity_beyond_range() {
+        let s = star_entity("far-star", 0.0, -(NAVIGATION_CHART_RANGE + 100.0));
+        let view = compute_navigation_system_chart(&[s], 0.0, 0.0, 0.0, &nav_config());
+        assert!(view.dots.is_empty());
+    }
+
+    #[test]
+    fn navigation_chart_config_range_is_five_hundred() {
+        assert_eq!(NAVIGATION_CHART_RANGE, 500.0);
+    }
+
+    #[test]
+    fn navigation_chart_config_shows_star_planet_field_region() {
+        let cfg = nav_config();
+        assert!(cfg.shows.contains(&EntityTag::Star));
+        assert!(cfg.shows.contains(&EntityTag::Planet));
+        assert!(cfg.shows.contains(&EntityTag::AsteroidField));
+        assert!(cfg.shows.contains(&EntityTag::Region));
     }
 }
 

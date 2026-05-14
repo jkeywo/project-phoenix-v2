@@ -230,6 +230,23 @@ struct ShieldFacingLabel;
 #[derive(Component)]
 pub struct NavigationPanel;
 
+/// Marks the On Screen button on the Navigation console; pressing it sends
+/// `SetView { mode: ViewMode::NavigationChart }`.
+#[derive(Component)]
+pub struct NavOnScreenButton;
+
+/// Marks the Cancel Impulse button on the Navigation console.
+#[derive(Component)]
+pub struct NavCancelImpulseButton;
+
+/// Marks the impulse status text on the Navigation console.
+#[derive(Component)]
+pub struct NavImpulseStatusText;
+
+/// Marks the navigation chart radar panel container (gizmo-drawn).
+#[derive(Component)]
+pub struct NavChartPanel;
+
 /// Marks the root of the weapons console UI; shown only when the local
 /// player holds Tactical and the phase is InProgress.
 #[derive(Component)]
@@ -408,7 +425,13 @@ impl Plugin for ClientAppPlugin {
                                 refresh_shields_panel,
                                 handle_shield_focus_button_press,
                             ),
-                            toggle_navigation_panel_visibility,
+                            (
+                                toggle_navigation_panel_visibility,
+                                refresh_navigation_panel,
+                                handle_nav_on_screen_button_press,
+                                handle_nav_cancel_impulse_button_press,
+                                draw_nav_chart,
+                            ),
                             toggle_weapons_panel_visibility,
                             toggle_repair_panel_visibility,
                             toggle_power_panel_visibility,
@@ -1529,7 +1552,7 @@ fn setup_shields_ui(mut commands: Commands) {
             .with_children(|row| {
                 // Label
                 row.spawn((
-                    ShieldFacingLabel(label.to_string()),
+                    ShieldFacingLabel,
                     Text::new(*label),
                     TextFont { font_size: 12.0, ..default() },
                     TextColor(Color::srgb(0.6, 0.8, 1.0)),
@@ -1615,6 +1638,69 @@ fn setup_navigation_ui(mut commands: Commands) {
             TextFont { font_size: 32.0, ..default() },
             TextColor(Color::srgb(0.5, 1.0, 0.8)),
         ));
+
+        // System chart display (gizmo-drawn via NavChartPanel bounds)
+        panel.spawn((
+            NavChartPanel,
+            Node {
+                width:  Val::Px(240.0),
+                height: Val::Px(240.0),
+                border: UiRect::all(Val::Px(1.0)),
+                ..default()
+            },
+            BorderColor::all(Color::srgb(0.3, 1.0, 0.5)),
+            BackgroundColor(Color::srgb(0.04, 0.06, 0.10)),
+        ));
+
+        // Impulse status row
+        panel.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(12.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                NavImpulseStatusText,
+                Text::new("Impulse: Idle"),
+                TextFont { font_size: 16.0, ..default() },
+                TextColor(Color::srgb(0.5, 1.0, 0.8)),
+            ));
+            row.spawn((
+                NavCancelImpulseButton,
+                Button,
+                Node {
+                    padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.40, 0.05, 0.05)),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("CANCEL IMPULSE"),
+                    TextFont { font_size: 14.0, ..default() },
+                    TextColor(Color::srgb(1.0, 0.4, 0.4)),
+                ));
+            });
+        });
+
+        // On Screen button
+        panel.spawn((
+            NavOnScreenButton,
+            Button,
+            Node {
+                padding: UiRect::axes(Val::Px(18.0), Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.10, 0.30, 0.15)),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("ON SCREEN"),
+                TextFont { font_size: 14.0, ..default() },
+                TextColor(Color::srgb(0.5, 1.0, 0.5)),
+            ));
+        });
     });
 }
 
@@ -1973,6 +2059,61 @@ fn handle_shield_focus_button_press(
     }
 }
 
+/// `ClientMessage` for the Navigation "On Screen" button: switches the server
+/// viewscreen to navigation chart mode.
+pub fn nav_on_screen_message() -> ClientMessage {
+    ClientMessage::SetView { mode: ViewMode::NavigationChart }
+}
+
+fn handle_nav_on_screen_button_press(
+    mut interactions: Query<
+        &Interaction,
+        (Changed<Interaction>, With<Button>, With<NavOnScreenButton>),
+    >,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(nav_on_screen_message()));
+        }
+    }
+}
+
+fn handle_nav_cancel_impulse_button_press(
+    mut interactions: Query<
+        &Interaction,
+        (Changed<Interaction>, With<Button>, With<NavCancelImpulseButton>),
+    >,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
+        }
+    }
+}
+
+/// Refresh the Navigation panel impulse status from ClientSimState.
+fn refresh_navigation_panel(
+    sim: Res<ClientSimState>,
+    mut status_text: Query<&mut Text, With<NavImpulseStatusText>>,
+) {
+    if !sim.is_changed() {
+        return;
+    }
+    for mut text in status_text.iter_mut() {
+        let charge = sim.impulse_charge_progress;
+        let label = if charge >= 1.0 {
+            "Impulse: ACTIVE"
+        } else if charge > 0.0 {
+            "Impulse: Charging"
+        } else {
+            "Impulse: Idle"
+        };
+        **text = label.to_string();
+    }
+}
+
 fn toggle_navigation_panel_visibility(
     lobby: Res<LobbyState>,
     token: Res<LocalPlayerToken>,
@@ -2185,6 +2326,72 @@ fn draw_helm_radar(
     gizmos.line_2d(nose, left,  RADAR_SHIP_COLOR);
     gizmos.line_2d(left, right, RADAR_SHIP_COLOR);
     gizmos.line_2d(right, nose, RADAR_SHIP_COLOR);
+}
+
+/// Draw the Navigation system chart on the NavChartPanel using gizmos.
+fn draw_nav_chart(
+    mut gizmos: Gizmos,
+    panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<NavChartPanel>>,
+    nav_panel: Query<&Visibility, With<NavigationPanel>>,
+    sim: Res<ClientSimState>,
+    windows: Query<&Window>,
+) {
+    if !nav_panel
+        .iter()
+        .any(|v| matches!(v, Visibility::Visible | Visibility::Inherited))
+    {
+        return;
+    }
+    let Ok((node, gt, view_vis)) = panel.single() else { return };
+    if !view_vis.get() {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let viewport_w = window.width();
+    let viewport_h = window.height();
+
+    let node_size = node.size();
+    let node_centre_screen = gt.translation().truncate();
+    let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
+    let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
+    let centre = Vec2::new(centre_world_x, centre_world_y);
+
+    let radius = node_size.x.min(node_size.y) * 0.5;
+    if radius <= 0.0 {
+        return;
+    }
+
+    // Draw system chart entities using the navigation chart view.
+    let chart_view = crate::client_sim::compute_system_chart_view(&sim);
+    const ZOOM: f32 = 1.0;
+
+    // Draw rings (asteroid fields, regions)
+    for ring in &chart_view.rings {
+        let pos = centre + Vec2::new(ring.centre_x * radius / ZOOM, ring.centre_y * radius / ZOOM);
+        let outer_r = ring.outer_r * radius / ZOOM;
+        gizmos.circle_2d(pos, outer_r, Color::srgb(0.3, 0.7, 0.4));
+        let inner_r = ring.inner_r * radius / ZOOM;
+        if inner_r > 0.0 {
+            gizmos.circle_2d(pos, inner_r, Color::srgb(0.2, 0.5, 0.3));
+        }
+    }
+
+    // Draw dots (stars, planets, regions)
+    for dot in &chart_view.dots {
+        let pos = centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
+        let pix_radius = (dot.scaled_radius * radius / ZOOM).max(3.0);
+        gizmos.circle_2d(pos, pix_radius, Color::srgb(0.8, 0.8, 0.4));
+    }
+
+    // Ship triangle at centre
+    let nose_len  = radius * 0.10;
+    let half_base = radius * 0.06;
+    let nose  = centre + Vec2::new(0.0,  nose_len);
+    let left  = centre + Vec2::new(-half_base, -nose_len * 0.6);
+    let right = centre + Vec2::new( half_base, -nose_len * 0.6);
+    gizmos.line_2d(nose, left,  Color::srgb(0.5, 1.0, 0.8));
+    gizmos.line_2d(left, right, Color::srgb(0.5, 1.0, 0.8));
+    gizmos.line_2d(right, nose, Color::srgb(0.5, 1.0, 0.8));
 }
 
 fn draw_weapons_radar(

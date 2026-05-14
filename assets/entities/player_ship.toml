@@ -59,6 +59,12 @@ emergency_threshold = 25.0
 
 [helm_console]
 
+[navigation_console]
+
+[navigation_console.system_chart]
+range = 500.0
+shows = ["region", "asteroid_field", "star", "planet"]
+
 [shields_console]
 focus_bonus_max_hp = 50
 focus_bonus_regen = 5.0

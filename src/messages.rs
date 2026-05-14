@@ -127,6 +127,9 @@ pub enum ViewMode {
     /// The Sensors operator has pushed their long-range radar to the viewscreen.
     SensorsRadar,
     SystemChart,
+    /// The Navigation officer has pushed the navigation system chart to the
+    /// viewscreen. Shows star, planets, asteroid fields, and ship position.
+    NavigationChart,
     /// The Comms officer has pushed a message to the viewscreen.
     Comms,
 }
@@ -255,6 +258,10 @@ pub struct SimSnapshot {
     /// Added to SimSnapshot so all clients see the current configuration.
     #[serde(default = "default_power_levels")]
     pub power_levels: (u8, u8, u8),
+    /// Impulse drive charge progress (0.0 = idle, 0.1–1.0 = charging, 1.0 = active).
+    /// Broadcast so console panels can show the current impulse drive status.
+    #[serde(default)]
+    pub impulse_charge_progress: f32,
     /// Boolean flags that are currently active on the ship.
     /// Populated from `ShipModifiers::flags()` each tick.
     #[serde(default)]

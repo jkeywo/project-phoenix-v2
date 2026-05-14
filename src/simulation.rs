@@ -414,7 +414,7 @@ fn handle_set_view(
                 ViewMode::Camera(_) => Console::CaptainChair,
                 ViewMode::Radar => Console::Helm,
                 ViewMode::ScienceRadar | ViewMode::SensorsRadar => Console::Sensors,
-                ViewMode::SystemChart => Console::Navigation,
+                ViewMode::SystemChart | ViewMode::NavigationChart => Console::Navigation,
                 ViewMode::Comms => Console::Comms,
             };
             if sessions.0.console_holder(required) == Some(ev.token.as_str()) {
@@ -1370,6 +1370,7 @@ fn broadcast_sim_state(
     hull: Res<ShipHullIntegrity>,
     phase: Res<CurrentPhase>,
     power: Option<Res<ShipPowerSystem>>,
+    impulse: Res<ShipImpulse>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     asteroid_query: Query<(&Transform, &AsteroidUuid, Option<&AsteroidDamage>)>,
 ) {
@@ -1410,7 +1411,7 @@ fn broadcast_sim_state(
         writer.write(OutboundMessage {
             target: Target::All,
             msg: ServerMessage::SimState {
-                snapshot: ship.snapshot(hull.0.current(), power_levels, flags, entity_states, radar_state),
+                snapshot: ship.snapshot(hull.0.current(), power_levels, flags, entity_states, radar_state, impulse.0.charge_progress),
             },
         });
     }
@@ -2269,6 +2270,30 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_navigation(&mut app);
         push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::SystemChart });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
+    }
+
+    #[test]
+    fn navigation_can_switch_view_to_navigation_chart() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        push(&mut app, "navigation", ClientMessage::SetView { mode: ViewMode::NavigationChart });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::NavigationChart
+        );
+    }
+
+    #[test]
+    fn non_navigation_cannot_switch_view_to_navigation_chart() {
+        let mut app = test_app();
+        start_game_with_navigation(&mut app);
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::NavigationChart });
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,

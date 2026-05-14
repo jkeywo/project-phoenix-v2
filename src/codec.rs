@@ -152,6 +152,13 @@ mod tests {
     }
 
     #[test]
+    fn client_set_view_navigation_chart() {
+        let msg = ClientMessage::SetView { mode: ViewMode::NavigationChart };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_set_view_comms() {
         let msg = ClientMessage::SetView { mode: ViewMode::Comms };
         assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -230,6 +237,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -250,6 +258,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -270,6 +279,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -290,6 +300,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -310,6 +321,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -885,6 +897,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -903,6 +916,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         // Encoding then decoding should preserve (2, 2, 2) for power_levels.
@@ -1035,6 +1049,7 @@ mod tests {
                     shields: None, warp_out_remaining_secs: None,
                 }],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1060,6 +1075,7 @@ mod tests {
                     shields: None, warp_out_remaining_secs: None,
                 }],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1083,6 +1099,7 @@ mod tests {
                     science_long_range: 180.0,
                     science_system_map: 600.0,
                 },
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1123,6 +1140,7 @@ mod tests {
                     science_long_range: 200.0,
                     science_system_map: 500.0,
                 },
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1449,6 +1467,7 @@ mod tests {
                     warp_out_remaining_secs: None,
                 }],
                 radar_state: crate::messages::RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

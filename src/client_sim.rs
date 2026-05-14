@@ -220,6 +220,9 @@ pub struct ClientSimState {
     /// `FrequencyHint` arrives; reset to `None` on `Welcome`.
     /// The Tactical console uses this to highlight the correct frequency button.
     pub frequency_hint: Option<f32>,
+    /// Current impulse drive charge progress (0.0 = idle, 0.1–1.0 = charging,
+    /// 1.0 = active). Updated from `SimSnapshot` broadcasts.
+    pub impulse_charge_progress: f32,
 }
 
 impl Default for ClientSimState {
@@ -257,6 +260,7 @@ impl Default for ClientSimState {
             current_breakdown: None,
             phaser_frequency: 0.5,
             frequency_hint: None,
+            impulse_charge_progress: 0.0,
         }
     }
 }
@@ -274,6 +278,7 @@ impl ClientSimState {
                 self.ship_z   = snapshot.ship_z;
                 self.ship_yaw = snapshot.ship_yaw;
                 self.power_levels = snapshot.power_levels;
+                self.impulse_charge_progress = snapshot.impulse_charge_progress;
             }
             ServerMessage::WorldSetup { world } => {
                 self.world = world.clone();
@@ -609,7 +614,7 @@ mod tests {
     use crate::messages::{Console, EntitySnapshot, GamePhase, GameState, Player, RadarStateSnapshot, SimSnapshot, WorldData};
 
     fn snap(red_alert: bool, view_mode: ViewMode) -> SimSnapshot {
-        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100.0, power_levels: (2, 2, 2), flags: vec![], entity_states: vec![], radar_state: RadarStateSnapshot::default() }
+        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100.0, power_levels: (2, 2, 2), flags: vec![], entity_states: vec![], radar_state: RadarStateSnapshot::default(), impulse_charge_progress: 0.0 }
     }
 
     fn snap_pose(x: f32, z: f32, yaw: f32) -> SimSnapshot {
@@ -624,6 +629,7 @@ mod tests {
             flags: vec![],
             entity_states: vec![],
             radar_state: RadarStateSnapshot::default(),
+            impulse_charge_progress: 0.0,
         }
     }
 
@@ -703,6 +709,7 @@ mod tests {
             current_breakdown: None,
             phaser_frequency: 0.5,
             frequency_hint: None,
+            impulse_charge_progress: 0.0,
         };
         let world = WorldData {
             entities: vec![EntitySnapshot::asteroid("c", 1.0, 2.0, 0.5)],
@@ -760,6 +767,7 @@ mod tests {
             current_breakdown: None,
             phaser_frequency: 0.5,
             frequency_hint: None,
+            impulse_charge_progress: 0.0,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -808,6 +816,7 @@ mod tests {
             current_breakdown: None,
             phaser_frequency: 0.5,
             frequency_hint: None,
+            impulse_charge_progress: 0.0,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -1761,6 +1770,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         });
         assert_eq!(s.power_levels, (4, 1, 3));
@@ -1827,6 +1837,7 @@ mod tests {
             current_breakdown: None,
             phaser_frequency: 0.5,
             frequency_hint: None,
+            impulse_charge_progress: 0.0,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },

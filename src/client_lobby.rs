@@ -565,6 +565,7 @@ mod tests {
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: crate::messages::RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
             },
         });
         assert_eq!(s, before);

@@ -48,6 +48,7 @@ impl ShipState {
         flags: Vec<FlagKind>,
         entity_states: Vec<EntityStateSnapshot>,
         radar_state: RadarStateSnapshot,
+        impulse_charge_progress: f32,
     ) -> SimSnapshot {
         SimSnapshot {
             red_alert: self.red_alert,
@@ -60,6 +61,7 @@ impl ShipState {
             flags,
             entity_states,
             radar_state,
+            impulse_charge_progress,
         }
     }
 }
@@ -91,12 +93,16 @@ mod tests {
     fn empty_entity_states() -> Vec<EntityStateSnapshot> { vec![] }
     fn default_radar() -> RadarStateSnapshot { RadarStateSnapshot::default() }
 
+    fn snap(s: &ShipState, hull: f32, levels: (u8, u8, u8)) -> SimSnapshot {
+        s.snapshot(hull, levels, vec![], empty_entity_states(), default_radar(), 0.0)
+    }
+
     #[test]
     fn snapshot_reflects_current_state() {
         let mut s = ShipState::new();
-        assert!(!s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar()).red_alert);
+        assert!(!snap(&s, 100.0, (2, 2, 2)).red_alert);
         s.toggle_red_alert();
-        assert!(s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar()).red_alert);
+        assert!(snap(&s, 100.0, (2, 2, 2)).red_alert);
     }
 
     #[test]
@@ -109,7 +115,7 @@ mod tests {
     fn snapshot_includes_view_mode() {
         let mut s = ShipState::new();
         s.view_mode = ViewMode::Camera(ViewDirection::Port);
-        assert_eq!(s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar()).view_mode, ViewMode::Camera(ViewDirection::Port));
+        assert_eq!(snap(&s, 100.0, (2, 2, 2)).view_mode, ViewMode::Camera(ViewDirection::Port));
     }
 
     #[test]
@@ -118,7 +124,7 @@ mod tests {
         s.x = 3.0;
         s.z = -7.5;
         s.yaw = 1.25;
-        let snap = s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar());
+        let snap = s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.0);
         assert_eq!(snap.ship_x, 3.0);
         assert_eq!(snap.ship_z, -7.5);
         assert_eq!(snap.ship_yaw, 1.25);
@@ -128,18 +134,25 @@ mod tests {
     fn snapshot_view_mode_radar_round_trips_through_state() {
         let mut s = ShipState::new();
         s.view_mode = ViewMode::Radar;
-        assert_eq!(s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar()).view_mode, ViewMode::Radar);
+        assert_eq!(snap(&s, 100.0, (2, 2, 2)).view_mode, ViewMode::Radar);
     }
 
     #[test]
     fn snapshot_includes_hull_integrity() {
         let s = ShipState::new();
-        assert!(near(s.snapshot(75.0, (2, 2, 2), vec![], empty_entity_states(), default_radar()).hull_integrity, 75.0));
+        assert!(near(snap(&s, 75.0, (2, 2, 2)).hull_integrity, 75.0));
     }
 
     #[test]
     fn snapshot_includes_power_levels() {
         let s = ShipState::new();
-        assert_eq!(s.snapshot(100.0, (3, 4, 1), vec![], empty_entity_states(), default_radar()).power_levels, (3, 4, 1));
+        assert_eq!(snap(&s, 100.0, (3, 4, 1)).power_levels, (3, 4, 1));
+    }
+
+    #[test]
+    fn snapshot_includes_impulse_charge_progress() {
+        let s = ShipState::new();
+        let snap = s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.5);
+        assert!((snap.impulse_charge_progress - 0.5).abs() < 1e-6);
     }
 }

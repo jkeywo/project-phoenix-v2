@@ -23,7 +23,7 @@ use crate::client_sim::{
 };
 use crate::client_complexity::{self, ComplexityStore};
 use crate::client_elements::HideableElementRegistry;
-use crate::messages::{ClientMessage, Console, GamePhase, PhaserMode, ServerMessage, Shape, ViewDirection};
+use crate::messages::{ClientMessage, Console, GamePhase, PhaserMode, ServerMessage, Shape, ViewDirection, ViewMode};
 
 // ── Events ─────────────────────────────────────────────────────────
 
@@ -158,6 +158,11 @@ pub struct SciencePanel;
 /// player holds Tactical and the phase is InProgress.
 #[derive(Component)]
 pub struct WeaponsPanel;
+
+/// Marks the radar display node inside the weapons console (used by
+/// `draw_weapons_radar` to locate where to draw gizmo blips).
+#[derive(Component)]
+pub struct WeaponsRadarPanel;
 
 /// Marks the complexity preset pop-up overlay root.
 #[derive(Component)]
@@ -306,6 +311,7 @@ impl Plugin for ClientAppPlugin {
                             refresh_helm_knob_position,
                             refresh_helm_readout,
                             handle_on_screen_button_press,
+                            refresh_on_screen_button_style,
                             handle_repair_button_press,
                             refresh_repair_button,
                             refresh_repair_icon,
@@ -326,6 +332,7 @@ impl Plugin for ClientAppPlugin {
                         (
                             refresh_weapons_panel,
                             refresh_torpedo_ui,
+                            draw_weapons_radar,
                         ),
                         (
                             refresh_repair_panel,
@@ -1129,6 +1136,26 @@ fn handle_on_screen_button_press(
     }
 }
 
+const ON_SCREEN_BG_IDLE:   Color = Color::srgb(0.13, 0.13, 0.27);
+const ON_SCREEN_BG_ACTIVE: Color = Color::srgb(0.10, 0.40, 0.15);
+
+fn refresh_on_screen_button_style(
+    sim: Res<ClientSimState>,
+    mut buttons: Query<&mut BackgroundColor, With<OnScreenButton>>,
+) {
+    if !sim.is_changed() {
+        return;
+    }
+    let color = if matches!(sim.view_mode, ViewMode::Radar) {
+        ON_SCREEN_BG_ACTIVE
+    } else {
+        ON_SCREEN_BG_IDLE
+    };
+    for mut bg in buttons.iter_mut() {
+        bg.0 = color;
+    }
+}
+
 // ── Helm radar drawing ─────────────────────────────────────────────
 
 /// Outer ring colour for the helm radar.
@@ -1197,6 +1224,61 @@ fn draw_helm_radar(
     }
 
     // Ship triangle, always pointing "up" (radar is ship-aligned).
+    let nose_len  = radius * 0.10;
+    let half_base = radius * 0.06;
+    let nose  = centre + Vec2::new(0.0,  nose_len);
+    let left  = centre + Vec2::new(-half_base, -nose_len * 0.6);
+    let right = centre + Vec2::new( half_base, -nose_len * 0.6);
+    gizmos.line_2d(nose, left,  RADAR_SHIP_COLOR);
+    gizmos.line_2d(left, right, RADAR_SHIP_COLOR);
+    gizmos.line_2d(right, nose, RADAR_SHIP_COLOR);
+}
+
+fn draw_weapons_radar(
+    mut gizmos: Gizmos,
+    panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<WeaponsRadarPanel>>,
+    weapons_panel: Query<&Visibility, With<WeaponsPanel>>,
+    sim: Res<ClientSimState>,
+    windows: Query<&Window>,
+) {
+    if !weapons_panel
+        .iter()
+        .any(|v| matches!(v, Visibility::Visible | Visibility::Inherited))
+    {
+        return;
+    }
+    let Ok((node, gt, view_vis)) = panel.single() else { return };
+    if !view_vis.get() {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let viewport_w = window.width();
+    let viewport_h = window.height();
+
+    let node_size = node.size();
+    let node_centre_screen = gt.translation().truncate();
+    let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
+    let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
+    let centre = Vec2::new(centre_world_x, centre_world_y);
+
+    let radius = node_size.x.min(node_size.y) * 0.5;
+    if radius <= 0.0 {
+        return;
+    }
+
+    gizmos.circle_2d(centre, radius, RADAR_OUTER_RING_COLOR);
+    let weapons_range = crate::client_sim::weapons_radar_config().range;
+    let mid_ratio = crate::radar::RADAR_MID_RING / weapons_range;
+    gizmos.circle_2d(centre, radius * mid_ratio, RADAR_MID_RING_COLOR);
+
+    let weapons_view = crate::client_sim::compute_weapons_radar_view(&sim);
+    for dot in &weapons_view.dots {
+        let pos = centre + Vec2::new(dot.radar_x * radius, dot.radar_y * radius);
+        let pix_radius = (dot.scaled_radius * radius).max(2.0);
+        gizmos.circle_2d(pos, pix_radius, RADAR_ASTEROID_COLOR);
+    }
+
+    // Ship triangle at centre
     let nose_len  = radius * 0.10;
     let half_base = radius * 0.06;
     let nose  = centre + Vec2::new(0.0,  nose_len);
@@ -1307,6 +1389,19 @@ fn setup_weapons_ui(mut commands: Commands) {
             Visibility::Hidden,
         ))
         .with_children(|panel| {
+            // Tactical radar display (drawn via gizmos using WeaponsRadarPanel bounds)
+            panel.spawn((
+                WeaponsRadarPanel,
+                Node {
+                    width:  Val::Px(240.0),
+                    height: Val::Px(240.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(Color::srgb(0.55, 0.70, 1.0)),
+                BackgroundColor(Color::srgb(0.06, 0.08, 0.14)),
+            ));
+
             panel.spawn((
                 Text::new("Weapons Console"),
                 TextFont { font_size: 24.0, ..default() },

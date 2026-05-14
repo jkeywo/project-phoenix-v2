@@ -1,4 +1,4 @@
-//! Phone helm panel — compass-ring radar + polished thumbstick.
+﻿//! Phone helm panel — compass-ring radar + polished thumbstick.
 //!
 //! Replaces the simple gizmo-based helm radar with a full compass-ring
 //! display and a polished thumbstick with concentric rings, cross-hairs,
@@ -17,7 +17,7 @@ use crate::client_app::{
 };
 use crate::client_helm::{HelmJoystickState, drag, release};
 use crate::client_sim::ClientSimState;
-use crate::phone_border::framing::PhoneAssets;
+use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -188,8 +188,10 @@ fn spawn_phone_helm_ui(
     mut commands: Commands,
     assets: Option<Res<PhoneAssets>>,
     old_panel: Query<Entity, With<HelmPanel>>,
+    orientation: Option<Res<DeviceOrientation>>,
 ) {
     let Some(assets) = assets else { return };
+    let is_landscape = matches!(orientation.as_deref(), Some(DeviceOrientation::Landscape));
 
     // Despawn any stale helm panel from a previous setup.
     for entity in old_panel.iter() {
@@ -218,477 +220,33 @@ fn spawn_phone_helm_ui(
             Visibility::Hidden,
         ))
         .with_children(|root| {
-            // ── Left column: polished thumbstick ───────────────────
-            root
-                .spawn(Node {
+            let spawn_joystick = |root: &mut ChildSpawnerCommands, pad_entity: &mut Option<Entity>| {
+                root.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
                     row_gap: Val::Px(4.0),
                     ..default()
                 })
                 .with_children(|col| {
-                    // Up arrow (FWD)
-                    col.spawn((
-                        Text::new("▲"),
-                        TextFont {
-                            font: assets.font_mono.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.55, 0.70, 1.0)),
-                        Node { ..default() },
-                    ));
-
-                    // Row: ◄ arrow + pad + ► arrow
-                    col
-                        .spawn(Node {
-                            flex_direction: FlexDirection::Row,
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            row.spawn((
-                                Text::new("◄"),
-                                TextFont {
-                                    font: assets.font_mono.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.55, 0.70, 1.0)),
-                                Node { ..default() },
-                            ));
-
-                            let pad = row
-                                .spawn((
-                                    PhoneHelmPad,
-                                    Button,
-                                    Node {
-                                        width:  Val::Px(HELM_PAD_SIZE),
-                                        height: Val::Px(HELM_PAD_SIZE),
-                                        position_type: PositionType::Relative,
-                                        ..default()
-                                    },
-                                    BackgroundColor(HELM_PAD_BG),
-                                ))
-                                .with_children(|pad| {
-                                    // Outer ring
-                                    pad.spawn((
-                                        PhoneThumbRing,
-                                        Node {
-                                            position_type: PositionType::Absolute,
-                                            left: Val::Px(1.0),
-                                            top: Val::Px(1.0),
-                                            width:  Val::Px(HELM_PAD_SIZE - 2.0),
-                                            height: Val::Px(HELM_PAD_SIZE - 2.0),
-                                            border: UiRect::all(Val::Px(2.0)),
-                                            ..default()
-                                        },
-                                        BorderColor::all(Color::srgba(0.55, 0.70, 1.0, 0.4)),
-                                    ));
-
-                                    // Mid ring
-                                    pad.spawn((
-                                        Node {
-                                            position_type: PositionType::Absolute,
-                                            left: Val::Px(28.0),
-                                            top: Val::Px(28.0),
-                                            width:  Val::Px(HELM_PAD_SIZE - 56.0),
-                                            height: Val::Px(HELM_PAD_SIZE - 56.0),
-                                            border: UiRect::all(Val::Px(1.0)),
-                                            ..default()
-                                        },
-                                        BorderColor::all(Color::srgba(0.30, 0.45, 0.70, 0.3)),
-                                    ));
-
-                                    // Horizontal cross-hair
-                                    pad.spawn((
-                                        Node {
-                                            position_type: PositionType::Absolute,
-                                            left: Val::Px(8.0),
-                                            top:  Val::Px(HELM_PAD_SIZE / 2.0 - 0.5),
-                                            width:  Val::Px(HELM_PAD_SIZE - 16.0),
-                                            height: Val::Px(1.0),
-                                            ..default()
-                                        },
-                                        BackgroundColor(Color::srgba(0.30, 0.45, 0.70, 0.4)),
-                                    ));
-                                    // Vertical cross-hair
-                                    pad.spawn((
-                                        Node {
-                                            position_type: PositionType::Absolute,
-                                            left: Val::Px(HELM_PAD_SIZE / 2.0 - 0.5),
-                                            top:  Val::Px(8.0),
-                                            width:  Val::Px(1.0),
-                                            height: Val::Px(HELM_PAD_SIZE - 16.0),
-                                            ..default()
-                                        },
-                                        BackgroundColor(Color::srgba(0.30, 0.45, 0.70, 0.4)),
-                                    ));
-
-                                    // Knob
-                                    pad.spawn((
-                                        PhoneHelmKnob,
-                                        Node {
-                                            width:  Val::Px(HELM_KNOB_RADIUS * 2.0),
-                                            height: Val::Px(HELM_KNOB_RADIUS * 2.0),
-                                            position_type: PositionType::Absolute,
-                                            left: Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
-                                            top:  Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
-                                            ..default()
-                                        },
-                                        BackgroundColor(HELM_KNOB_BG_IDLE),
-                                    ));
-                                })
-                                .id();
-                            pad_entity = Some(pad);
-
-                            row.spawn((
-                                Text::new("►"),
-                                TextFont {
-                                    font: assets.font_mono.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.55, 0.70, 1.0)),
-                                Node { ..default() },
-                            ));
-                        });
-
-                    // Down arrow (REV)
-                    col.spawn((
-                        Text::new("▼"),
-                        TextFont {
-                            font: assets.font_mono.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.55, 0.70, 1.0)),
-                        Node { ..default() },
-                    ));
-
-                    // FWD / REV axis labels
-                    col.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        column_gap: Val::Px(24.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        row.spawn((
-                            Text::new("FWD"),
-                            TextFont {
-                                font: assets.font_mono.clone(),
-                                font_size: 9.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.6, 0.7, 0.73)),
-                        ));
-                        row.spawn((
-                            Text::new("REV"),
-                            TextFont {
-                                font: assets.font_mono.clone(),
-                                font_size: 9.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.6, 0.7, 0.73)),
-                        ));
-                    });
-
-                    // PORT / STBD axis labels
-                    col.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        column_gap: Val::Px(32.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        row.spawn((
-                            Text::new("PORT"),
-                            TextFont {
-                                font: assets.font_mono.clone(),
-                                font_size: 9.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.6, 0.7, 0.73)),
-                        ));
-                        row.spawn((
-                            Text::new("STBD"),
-                            TextFont {
-                                font: assets.font_mono.clone(),
-                                font_size: 9.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.6, 0.7, 0.73)),
-                        ));
-                    });
-
-                    // Thrust/steering readout
-                    col.spawn((
-                        PhoneHelmReadout,
-                        Text::new("Thrust 0% / Steering 0%"),
-                        TextFont {
-                            font: assets.font_mono.clone(),
-                            font_size: 11.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.6, 0.7, 0.73)),
-                    ));
+                    *pad_entity = Some(spawn_helm_joystick_children(col, &assets));
                 });
-
-            // ── Right column: compass-ring radar + buttons ────────
-            root
-                .spawn(Node {
+            };
+            let spawn_radar = |root: &mut ChildSpawnerCommands| {
+                root.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
                     row_gap: Val::Px(6.0),
                     ..default()
                 })
-                .with_children(|col| {
-                    // Radar frame
-                    col
-                        .spawn((
-                            PhoneCompassRadar,
-                            Node {
-                                width:  Val::Px(COMPASS_RADAR_DIAMETER),
-                                height: Val::Px(COMPASS_RADAR_DIAMETER),
-                                position_type: PositionType::Relative,
-                                ..default()
-                            },
-                        ))
-                        .with_children(|radar| {
-                            // ── Corner readouts ────────────────────
-                            radar.spawn((
-                                PhoneHdgReadout,
-                                Text::new("HDG 000°"),
-                                TextFont {
-                                    font: assets.font_mono.clone(),
-                                    font_size: 10.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.55, 0.70, 1.0)),
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left: Val::Px(4.0),
-                                    top:  Val::Px(4.0),
-                                    ..default()
-                                },
-                            ));
-                            radar.spawn((
-                                PhoneSpdReadout,
-                                Text::new("SPD --"),
-                                TextFont {
-                                    font: assets.font_mono.clone(),
-                                    font_size: 10.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.55, 0.70, 1.0)),
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    right: Val::Px(4.0),
-                                    top:   Val::Px(4.0),
-                                    ..default()
-                                },
-                            ));
-                            radar.spawn((
-                                PhoneXReadout,
-                                Text::new("X 0"),
-                                TextFont {
-                                    font: assets.font_mono.clone(),
-                                    font_size: 10.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.55, 0.70, 1.0)),
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left:  Val::Px(4.0),
-                                    bottom: Val::Px(4.0),
-                                    ..default()
-                                },
-                            ));
-                            radar.spawn((
-                                PhoneZReadout,
-                                Text::new("Z 0"),
-                                TextFont {
-                                    font: assets.font_mono.clone(),
-                                    font_size: 10.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.55, 0.70, 1.0)),
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    right:  Val::Px(4.0),
-                                    bottom: Val::Px(4.0),
-                                    ..default()
-                                },
-                            ));
-
-                            // ── Range rings (non-rotating) ──────────
-                            let radar_radius = COMPASS_RADAR_DIAMETER / 2.0;
-                            let radii = range_ring_radii(radar_radius);
-                            for &r in &radii {
-                                let d = r * 2.0;
-                                let off = radar_radius - r;
-                                radar.spawn((
-                                    PhoneRangeRing,
-                                    Node {
-                                        position_type: PositionType::Absolute,
-                                        left:   Val::Px(off),
-                                        top:    Val::Px(off),
-                                        width:  Val::Px(d),
-                                        height: Val::Px(d),
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        ..default()
-                                    },
-                                    BorderColor::all(Color::srgba(0.30, 0.45, 0.70, 0.4)),
-                                ));
-                            }
-
-                            // ── Cross-hair lines ───────────────────
-                            radar.spawn((
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left:  Val::Px(0.0),
-                                    top:   Val::Px(radar_radius - 0.5),
-                                    width:  Val::Px(COMPASS_RADAR_DIAMETER),
-                                    height: Val::Px(1.0),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgba(0.20, 0.30, 0.50, 0.3)),
-                            ));
-                            radar.spawn((
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left:  Val::Px(radar_radius - 0.5),
-                                    top:   Val::Px(0.0),
-                                    width:  Val::Px(1.0),
-                                    height: Val::Px(COMPASS_RADAR_DIAMETER),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgba(0.20, 0.30, 0.50, 0.3)),
-                            ));
-
-                            // ── Compass ring (rotating container) ──
-                            radar
-                                .spawn((
-                                    PhoneCompassRing,
-                                    Node {
-                                        position_type: PositionType::Absolute,
-                                        left: Val::Px(-10.0),
-                                        top:  Val::Px(-10.0),
-                                        width:  Val::Px(COMPASS_RADAR_DIAMETER + 20.0),
-                                        height: Val::Px(COMPASS_RADAR_DIAMETER + 20.0),
-                                        ..default()
-                                    },
-                                ))
-                                .with_children(|ring| {
-                                    // Ring image
-                                    ring.spawn((
-                                        ImageNode::new(assets.compass_ring.clone()),
-                                        Node {
-                                            width:  Val::Px(COMPASS_RADAR_DIAMETER + 20.0),
-                                            height: Val::Px(COMPASS_RADAR_DIAMETER + 20.0),
-                                            ..default()
-                                        },
-                                    ));
-
-                                    // Bearing ticks
-                                    let centre = (COMPASS_RADAR_DIAMETER + 20.0) / 2.0;
-                                    let tick_outer_r = centre - 4.0;
-                                    for tick in bearing_ticks() {
-                                        let tx = centre + tick_outer_r * tick.angle_rad.sin();
-                                        let ty = centre - tick_outer_r * tick.angle_rad.cos();
-                                        let (tw, th) = if tick.is_major {
-                                            (2.0, 7.0)
-                                        } else {
-                                            (1.0, 4.0)
-                                        };
-                                        ring.spawn((
-                                            PhoneCompassTick,
-                                            Node {
-                                                position_type: PositionType::Absolute,
-                                                left:   Val::Px(tx - tw / 2.0),
-                                                top:    Val::Px(ty - th / 2.0),
-                                                width:  Val::Px(tw),
-                                                height: Val::Px(th),
-                                                ..default()
-                                            },
-                                            BackgroundColor(Color::srgba(0.55, 0.70, 1.0, 0.7)),
-                                        ));
-                                        if tick.is_major {
-                                            let lr = tick_outer_r - 14.0;
-                                            let lx = centre + lr * tick.angle_rad.sin();
-                                            let ly = centre - lr * tick.angle_rad.cos();
-                                            ring.spawn((
-                                                Text::new(tick.label.clone()),
-                                                TextFont {
-                                                    font: assets.font_mono.clone(),
-                                                    font_size: 8.0,
-                                                    ..default()
-                                                },
-                                                TextColor(Color::srgba(0.55, 0.70, 1.0, 0.8)),
-                                                Node {
-                                                    position_type: PositionType::Absolute,
-                                                    left:   Val::Px(lx),
-                                                    top:    Val::Px(ly),
-                                                    ..default()
-                                                },
-                                            ));
-                                        }
-                                    }
-                                });
-
-                            // ── Ship triangle at centre ────────────
-                            radar.spawn((
-                                Text::new("▲"),
-                                TextFont {
-                                    font: assets.font_mono.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.95, 0.95, 1.0)),
-                                Node {
-                                    position_type: PositionType::Absolute,
-                                    left:   Val::Px(radar_radius - 7.0),
-                                    top:    Val::Px(radar_radius - 7.0),
-                                    ..default()
-                                },
-                            ));
-                        });
-
-                    // ── On Screen + Repair buttons ────────────────
-                    col.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        row.spawn((
-                            OnScreenButton,
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.13, 0.13, 0.27)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("ON SCREEN"),
-                                TextFont {
-                                    font: assets.font_display.clone(),
-                                    font_size: 12.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.93, 0.93, 1.0)),
-                            ));
-                        });
-                    });
-                });
+                .with_children(|col| spawn_helm_radar_children(col, &assets));
+            };
+            if is_landscape {
+                spawn_radar(root);
+                spawn_joystick(root, &mut pad_entity);
+            } else {
+                spawn_joystick(root, &mut pad_entity);
+                spawn_radar(root);
+            }
         });
 
     // Register pointer-event observers on the thumbstick pad.
@@ -697,6 +255,453 @@ fn spawn_phone_helm_ui(
         commands.entity(pad).observe(on_phone_helm_drag);
         commands.entity(pad).observe(on_phone_helm_drag_end);
     }
+}
+
+fn spawn_helm_joystick_children(col: &mut ChildSpawnerCommands, assets: &PhoneAssets) -> Entity {
+    // Up arrow (FWD)
+    col.spawn((
+        Text::new("▲"),
+        TextFont {
+            font: assets.font_mono.clone(),
+            font_size: 16.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.55, 0.70, 1.0)),
+        Node { ..default() },
+    ));
+
+    let mut pad_entity: Option<Entity> = None;
+
+    // Row: ◄ arrow + pad + ► arrow
+    col.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        ..default()
+    })
+    .with_children(|row| {
+        row.spawn((
+            Text::new("◄"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.55, 0.70, 1.0)),
+            Node { ..default() },
+        ));
+
+        let pad = row
+            .spawn((
+                PhoneHelmPad,
+                Button,
+                Node {
+                    width:  Val::Px(HELM_PAD_SIZE),
+                    height: Val::Px(HELM_PAD_SIZE),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },
+                BackgroundColor(HELM_PAD_BG),
+            ))
+            .with_children(|pad| {
+                // Outer ring
+                pad.spawn((
+                    PhoneThumbRing,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(1.0),
+                        top: Val::Px(1.0),
+                        width:  Val::Px(HELM_PAD_SIZE - 2.0),
+                        height: Val::Px(HELM_PAD_SIZE - 2.0),
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BorderColor::all(Color::srgba(0.55, 0.70, 1.0, 0.4)),
+                ));
+                // Mid ring
+                pad.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(28.0),
+                        top: Val::Px(28.0),
+                        width:  Val::Px(HELM_PAD_SIZE - 56.0),
+                        height: Val::Px(HELM_PAD_SIZE - 56.0),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BorderColor::all(Color::srgba(0.30, 0.45, 0.70, 0.3)),
+                ));
+                // Horizontal cross-hair
+                pad.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(8.0),
+                        top:  Val::Px(HELM_PAD_SIZE / 2.0 - 0.5),
+                        width:  Val::Px(HELM_PAD_SIZE - 16.0),
+                        height: Val::Px(1.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.30, 0.45, 0.70, 0.4)),
+                ));
+                // Vertical cross-hair
+                pad.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(HELM_PAD_SIZE / 2.0 - 0.5),
+                        top:  Val::Px(8.0),
+                        width:  Val::Px(1.0),
+                        height: Val::Px(HELM_PAD_SIZE - 16.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.30, 0.45, 0.70, 0.4)),
+                ));
+                // Knob
+                pad.spawn((
+                    PhoneHelmKnob,
+                    Node {
+                        width:  Val::Px(HELM_KNOB_RADIUS * 2.0),
+                        height: Val::Px(HELM_KNOB_RADIUS * 2.0),
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
+                        top:  Val::Px(HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS),
+                        ..default()
+                    },
+                    BackgroundColor(HELM_KNOB_BG_IDLE),
+                ));
+            })
+            .id();
+        pad_entity = Some(pad);
+
+        row.spawn((
+            Text::new("►"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.55, 0.70, 1.0)),
+            Node { ..default() },
+        ));
+    });
+
+    // Down arrow (REV)
+    col.spawn((
+        Text::new("▼"),
+        TextFont {
+            font: assets.font_mono.clone(),
+            font_size: 16.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.55, 0.70, 1.0)),
+        Node { ..default() },
+    ));
+
+    // FWD / REV axis labels
+    col.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        column_gap: Val::Px(24.0),
+        ..default()
+    })
+    .with_children(|row| {
+        row.spawn((
+            Text::new("FWD"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 9.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.6, 0.7, 0.73)),
+        ));
+        row.spawn((
+            Text::new("REV"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 9.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.6, 0.7, 0.73)),
+        ));
+    });
+
+    // PORT / STBD axis labels
+    col.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        column_gap: Val::Px(32.0),
+        ..default()
+    })
+    .with_children(|row| {
+        row.spawn((
+            Text::new("PORT"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 9.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.6, 0.7, 0.73)),
+        ));
+        row.spawn((
+            Text::new("STBD"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 9.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.6, 0.7, 0.73)),
+        ));
+    });
+
+    // Thrust/steering readout
+    col.spawn((
+        PhoneHelmReadout,
+        Text::new("Thrust 0% / Steering 0%"),
+        TextFont {
+            font: assets.font_mono.clone(),
+            font_size: 11.0,
+            ..default()
+        },
+        TextColor(Color::srgb(0.6, 0.7, 0.73)),
+    ));
+
+    pad_entity.unwrap()
+}
+
+fn spawn_helm_radar_children(col: &mut ChildSpawnerCommands, assets: &PhoneAssets) {
+    // Radar frame
+    col.spawn((
+        PhoneCompassRadar,
+        Node {
+            width:  Val::Px(COMPASS_RADAR_DIAMETER),
+            height: Val::Px(COMPASS_RADAR_DIAMETER),
+            position_type: PositionType::Relative,
+            ..default()
+        },
+    ))
+    .with_children(|radar| {
+        // ── Corner readouts ────────────────────
+        radar.spawn((
+            PhoneHdgReadout,
+            Text::new("HDG 000°"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 10.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.55, 0.70, 1.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(4.0),
+                top:  Val::Px(4.0),
+                ..default()
+            },
+        ));
+        radar.spawn((
+            PhoneSpdReadout,
+            Text::new("SPD --"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 10.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.55, 0.70, 1.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(4.0),
+                top:   Val::Px(4.0),
+                ..default()
+            },
+        ));
+        radar.spawn((
+            PhoneXReadout,
+            Text::new("X 0"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 10.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.55, 0.70, 1.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                left:   Val::Px(4.0),
+                bottom: Val::Px(4.0),
+                ..default()
+            },
+        ));
+        radar.spawn((
+            PhoneZReadout,
+            Text::new("Z 0"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 10.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.55, 0.70, 1.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                right:  Val::Px(4.0),
+                bottom: Val::Px(4.0),
+                ..default()
+            },
+        ));
+
+        // ── Range rings (non-rotating) ──────────
+        let radar_radius = COMPASS_RADAR_DIAMETER / 2.0;
+        let radii = range_ring_radii(radar_radius);
+        for &r in &radii {
+            let d = r * 2.0;
+            let off = radar_radius - r;
+            radar.spawn((
+                PhoneRangeRing,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left:   Val::Px(off),
+                    top:    Val::Px(off),
+                    width:  Val::Px(d),
+                    height: Val::Px(d),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(Color::srgba(0.30, 0.45, 0.70, 0.4)),
+            ));
+        }
+
+        // ── Cross-hair lines ───────────────────
+        radar.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left:   Val::Px(0.0),
+                top:    Val::Px(radar_radius - 0.5),
+                width:  Val::Px(COMPASS_RADAR_DIAMETER),
+                height: Val::Px(1.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.20, 0.30, 0.50, 0.3)),
+        ));
+        radar.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left:   Val::Px(radar_radius - 0.5),
+                top:    Val::Px(0.0),
+                width:  Val::Px(1.0),
+                height: Val::Px(COMPASS_RADAR_DIAMETER),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.20, 0.30, 0.50, 0.3)),
+        ));
+
+        // ── Compass ring (rotating container) ──
+        radar.spawn((
+            PhoneCompassRing,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(-10.0),
+                top:  Val::Px(-10.0),
+                width:  Val::Px(COMPASS_RADAR_DIAMETER + 20.0),
+                height: Val::Px(COMPASS_RADAR_DIAMETER + 20.0),
+                ..default()
+            },
+        ))
+        .with_children(|ring| {
+            ring.spawn((
+                ImageNode::new(assets.compass_ring.clone()),
+                Node {
+                    width:  Val::Px(COMPASS_RADAR_DIAMETER + 20.0),
+                    height: Val::Px(COMPASS_RADAR_DIAMETER + 20.0),
+                    ..default()
+                },
+            ));
+            let centre = (COMPASS_RADAR_DIAMETER + 20.0) / 2.0;
+            let tick_outer_r = centre - 4.0;
+            for tick in bearing_ticks() {
+                let tx = centre + tick_outer_r * tick.angle_rad.sin();
+                let ty = centre - tick_outer_r * tick.angle_rad.cos();
+                let (tw, th) = if tick.is_major { (2.0, 7.0) } else { (1.0, 4.0) };
+                ring.spawn((
+                    PhoneCompassTick,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left:   Val::Px(tx - tw / 2.0),
+                        top:    Val::Px(ty - th / 2.0),
+                        width:  Val::Px(tw),
+                        height: Val::Px(th),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.55, 0.70, 1.0, 0.7)),
+                ));
+                if tick.is_major {
+                    let lr = tick_outer_r - 14.0;
+                    let lx = centre + lr * tick.angle_rad.sin();
+                    let ly = centre - lr * tick.angle_rad.cos();
+                    ring.spawn((
+                        Text::new(tick.label.clone()),
+                        TextFont {
+                            font: assets.font_mono.clone(),
+                            font_size: 8.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgba(0.55, 0.70, 1.0, 0.8)),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(lx),
+                            top:  Val::Px(ly),
+                            ..default()
+                        },
+                    ));
+                }
+            }
+        });
+
+        // ── Ship triangle at centre ────────────
+        radar.spawn((
+            Text::new("▲"),
+            TextFont {
+                font: assets.font_mono.clone(),
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.95, 0.95, 1.0)),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(radar_radius - 7.0),
+                top:  Val::Px(radar_radius - 7.0),
+                ..default()
+            },
+        ));
+    });
+
+    // ── ON SCREEN button ───────────────────────
+    col.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        column_gap: Val::Px(8.0),
+        ..default()
+    })
+    .with_children(|row| {
+        row.spawn((
+            OnScreenButton,
+            Button,
+            Node {
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.13, 0.13, 0.27)),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("ON SCREEN"),
+                TextFont {
+                    font: assets.font_display.clone(),
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.93, 0.93, 1.0)),
+            ));
+        });
+    });
 }
 
 // ── Pointer observers ────────────────────────────────────────────────

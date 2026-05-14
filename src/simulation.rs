@@ -11,7 +11,7 @@ use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::messages::{
-    ClientMessage, Console, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewMode,
+    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewMode,
 };
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
 use crate::messages::TorpedoTube as MsgTorpedoTube;
@@ -20,6 +20,8 @@ use crate::ship_state::ShipState;
 use crate::impulse::ImpulseState;
 use crate::modifiers::{ShipModifiers, Modifier};
 use crate::messages::{ModifierSlot, ModifierSource};
+use crate::entity_spawner::{EntityUuid, EntityId};
+use std::collections::HashMap;
 
 // â”€â”€ Beam constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const BEAM_DURATION_SECS: f32 = 6.0;
@@ -237,6 +239,22 @@ struct CollisionCooldown {
     remaining_secs: f32,
 }
 
+/// Tracks non-asteroid entities that have been reported to clients via
+/// `EntitySpawned` / `EntityDespawned`.  Seeded from `WorldResource` on
+/// the first `InProgress` frame so initial world entities are not re-reported.
+///
+/// Maintained by the `reconcile_runtime_entities` system.
+#[derive(Resource, Default)]
+pub struct TrackedEntities {
+    /// UUIDs of non-asteroid entities already reported to clients.
+    /// Populated from `WorldResource` at game start, then updated
+    /// incrementally as runtime entities are spawned/despawned.
+    pub reported: std::collections::HashSet<String>,
+    /// Whether the registry has been seeded from initial WorldResource
+    /// on the first InProgress frame.
+    pub seeded: bool,
+}
+
 impl PhaserCooldown {
     pub fn is_active(&self) -> bool {
         self.remaining_secs > 0.0
@@ -279,6 +297,7 @@ impl Plugin for SimulationPlugin {
             .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
+            .init_resource::<TrackedEntities>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -315,6 +334,7 @@ impl Plugin for SimulationPlugin {
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
                 broadcast_modifier_events,
                 broadcast_repair_icons.after(broadcast_repair_state),
+                reconcile_runtime_entities.after(crate::lobby::process_lobby),
             ));
     }
 }
@@ -1404,6 +1424,82 @@ fn broadcast_repair_icons(
     icon_state.last_icons = current;
 }
 
+/// Reconciles the live ECS entities with the `TrackedEntities` registry each tick.
+///
+/// For non-asteroid entities carrying `EntityUuid`:
+/// - New entities (present in ECS, absent from `reported`) emit `EntitySpawned`
+///   and are added to `WorldResource.entities` so they appear on reconnect `Welcome`.
+/// - Missing entities (absent from ECS, present in `reported`) emit
+///   `EntityDespawned` and are removed from `WorldResource.entities`.
+///
+/// Asteroids are excluded (they use `AsteroidSpawned` / `AsteroidDestroyed`).
+///
+/// On the very first `InProgress` tick, seeds `reported` from the initial
+/// `WorldResource` entities so those are not re-broadcast.
+fn reconcile_runtime_entities(
+    mut registry: ResMut<TrackedEntities>,
+    mut world: ResMut<WorldResource>,
+    mut writer: MessageWriter<OutboundMessage>,
+    query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform), Without<Asteroid>>,
+    phase: Res<CurrentPhase>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+
+    // Build the current set of ECS entity UUIDs.
+    let current: HashMap<String, Entity> = query
+        .iter()
+        .map(|(e, u, _, _)| (u.0.clone(), e))
+        .collect();
+
+    // Seed reported set from ECS on first in-progress frame so that initial
+    // world entities (stars, planets, ships, fields) are not re-reported.
+    if !registry.seeded {
+        for (uuid, _) in &current {
+            registry.reported.insert(uuid.clone());
+        }
+        registry.seeded = true;
+        return;
+    }
+
+    // Emit EntitySpawned for new entities.
+    for (uuid, entity) in &current {
+        if registry.reported.insert(uuid.clone()) {
+            if let Ok((_, _, id, transform)) = query.get(*entity) {
+                let snapshot = EntitySnapshot {
+                    uuid: uuid.clone(),
+                    id: id.as_ref().map(|i| i.0.clone()),
+                    position: Some([
+                        transform.translation.x,
+                        transform.translation.y,
+                        transform.translation.z,
+                    ]),
+                    ..EntitySnapshot::default()
+                };
+                world.0.entities.push(snapshot.clone());
+                writer.write(OutboundMessage {
+                    target: Target::All,
+                    msg: ServerMessage::EntitySpawned { snapshot },
+                });
+            }
+        }
+    }
+
+    // Emit EntityDespawned for entities no longer in the ECS.
+    let reported_snapshot: Vec<String> = registry.reported.iter().cloned().collect();
+    for uuid in &reported_snapshot {
+        if !current.contains_key(uuid) {
+            registry.reported.remove(uuid);
+            world.0.entities.retain(|e| e.uuid != *uuid);
+            writer.write(OutboundMessage {
+                target: Target::All,
+                msg: ServerMessage::EntityDespawned { uuid: uuid.clone() },
+            });
+        }
+    }
+}
+
 // â”€â”€ World Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 fn setup_world(
     commands: Commands,
@@ -1783,11 +1879,12 @@ fn test_app() -> App {
         .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
         .init_resource::<PowerConfigResource>()
         .init_resource::<PowerMultiplierResource>()
+        .init_resource::<TrackedEntities>()
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<Outbox>()
         .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_power_messages, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, tick_power_system))
-        .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_power_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state)))
+        .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_power_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state), reconcile_runtime_entities.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
 }
@@ -3727,5 +3824,168 @@ fn test_app() -> App {
         assert_eq!(power_state, 2, "science should stay at 2 when total is already at the cap of 8");
         assert_eq!(app.world().resource::<ShipPowerSystem>().0.total(), 8,
             "total should remain 8");
+    }
+
+    // ── Runtime entity lifecycle (EntitySpawned / EntityDespawned) ─────
+
+    #[test]
+    fn reconcile_system_seeds_on_first_inprogress_frame() {
+        let mut app = test_app();
+        start_game(&mut app);
+        // After start_game, the system should have seeded (even if empty).
+        let registry = app.world().resource::<TrackedEntities>();
+        assert!(registry.seeded, "system should be seeded after first InProgress frame");
+    }
+
+    #[test]
+    fn spawn_non_asteroid_entity_emits_entity_spawned() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("runtime-entity-1".into()),
+            Transform::from_xyz(100.0, 0.0, -200.0),
+        ));
+
+        let out = tick(&mut app);
+
+        let spawned = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::EntitySpawned { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        });
+        assert!(spawned.is_some(), "expected EntitySpawned after spawning a non-asteroid entity");
+        assert_eq!(spawned.unwrap().uuid, "runtime-entity-1");
+    }
+
+    #[test]
+    fn entity_spawned_broadcast_contains_position_and_id() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("pos-entity".into()),
+            crate::entity_spawner::EntityId("station-alpha".into()),
+            Transform::from_xyz(50.0, 0.0, -75.0),
+        ));
+
+        let out = tick(&mut app);
+
+        let spawned = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::EntitySpawned { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        }).expect("expected EntitySpawned");
+
+        assert_eq!(spawned.uuid, "pos-entity");
+        assert_eq!(spawned.id, Some("station-alpha".into()));
+        assert_eq!(spawned.position, Some([50.0, 0.0, -75.0]));
+    }
+
+    #[test]
+    fn despawn_non_asteroid_entity_emits_entity_despawned() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Spawn a non-asteroid entity.
+        let entity = app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("to-despawn".into()),
+            Transform::default(),
+        )).id();
+
+        // Tick once so the spawn system picks it up.
+        let _ = tick(&mut app);
+
+        // Now despawn it.
+        app.world_mut().despawn(entity);
+        let out = tick(&mut app);
+
+        let despawned = out.iter().find_map(|m| match &m.msg {
+            ServerMessage::EntityDespawned { uuid } => Some(uuid.clone()),
+            _ => None,
+        });
+        assert!(despawned.is_some(), "expected EntityDespawned after despawning a non-asteroid entity");
+        assert_eq!(despawned.unwrap(), "to-despawn");
+    }
+
+    #[test]
+    fn asteroid_spawn_does_not_emit_entity_spawned() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Spawn an asteroid entity (has Asteroid component + EntityUuid).
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("asteroid-1".into()),
+            Asteroid,
+            AsteroidUuid("asteroid-1".into()),
+            AsteroidDamage { max_hp: 30, current_hp: 30 },
+            Transform::default(),
+        ));
+
+        let out = tick(&mut app);
+
+        let spawned = out.iter().any(|m| matches!(&m.msg, ServerMessage::EntitySpawned { .. }));
+        assert!(!spawned, "asteroid spawn must not emit EntitySpawned (uses AsteroidSpawned instead)");
+    }
+
+    #[test]
+    fn runtime_entity_appears_in_world_data_for_reconnect() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Spawn a non-asteroid entity.
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("reconnect-entity".into()),
+            Transform::from_xyz(25.0, 0.0, -50.0),
+        ));
+
+        let _ = tick(&mut app);
+
+        // The entity should now be in world.entities so Welcome includes it.
+        let world = app.world().resource::<WorldResource>();
+        let found = world.0.entities.iter().any(|e| e.uuid == "reconnect-entity");
+        assert!(found, "runtime entity must appear in WorldResource for Welcome reconnects");
+    }
+
+    #[test]
+    fn entity_spawned_is_broadcast_to_all() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("all-broadcast".into()),
+            Transform::default(),
+        ));
+
+        let out = tick(&mut app);
+
+        let spawn_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::EntitySpawned { .. }))
+            .expect("expected EntitySpawned message");
+        assert!(
+            matches!(&spawn_msg.target, crate::lobby::Target::All),
+            "EntitySpawned must broadcast to All, got {:?}",
+            spawn_msg.target
+        );
+    }
+
+    #[test]
+    fn entity_despawned_is_broadcast_to_all() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        let entity = app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("broadcast-despawn".into()),
+            Transform::default(),
+        )).id();
+        let _ = tick(&mut app);
+
+        app.world_mut().despawn(entity);
+        let out = tick(&mut app);
+
+        let despawn_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::EntityDespawned { .. }))
+            .expect("expected EntityDespawned message");
+        assert!(
+            matches!(&despawn_msg.target, crate::lobby::Target::All),
+            "EntityDespawned must broadcast to All, got {:?}",
+            despawn_msg.target
+        );
     }
 }

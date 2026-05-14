@@ -102,7 +102,9 @@ impl LobbyState {
             | ServerMessage::AsteroidSpawned { .. }
             | ServerMessage::ShowRepairIcon { .. }
             | ServerMessage::ClearRepairIcon
-            | ServerMessage::PowerState { .. } => {
+            | ServerMessage::PowerState { .. }
+            | ServerMessage::EntitySpawned { .. }
+            | ServerMessage::EntityDespawned { .. } => {
                 // Not relevant to the lobby model.
             }
         }

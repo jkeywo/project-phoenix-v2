@@ -323,6 +323,14 @@ impl ClientSimState {
             ServerMessage::PowerState { helm, weapons, science, battery_charge, locked } => {
                 self.power_state_payload = Some((*helm, *weapons, *science, *battery_charge, *locked));
             }
+            ServerMessage::EntitySpawned { snapshot } => {
+                if !self.world.entities.iter().any(|e| e.uuid == snapshot.uuid) {
+                    self.world.entities.push(snapshot.clone());
+                }
+            }
+            ServerMessage::EntityDespawned { uuid } => {
+                self.world.entities.retain(|e| e.uuid != *uuid);
+            }
             _ => {}
         }
     }
@@ -1812,5 +1820,113 @@ mod tests {
     fn is_power_locked_matches_payload_field() {
         assert!(is_power_locked(&Some((1, 1, 1, 5.0, true))));
         assert!(!is_power_locked(&Some((2, 2, 2, 80.0, false))));
+    }
+
+    // ── EntitySpawned / EntityDespawned idempotency ─────────────────────
+
+    #[test]
+    fn entity_spawned_adds_to_world_entities() {
+        let mut s = ClientSimState::default();
+        assert!(s.world.entities.is_empty());
+
+        let snapshot = EntitySnapshot::simple("runtime-1", 10.0, -20.0, vec!["station".into()]);
+        s.apply(&ServerMessage::EntitySpawned { snapshot: snapshot.clone() });
+
+        assert_eq!(s.world.entities.len(), 1);
+        assert_eq!(s.world.entities[0].uuid, "runtime-1");
+        assert_eq!(s.world.entities[0].x(), 10.0);
+        assert_eq!(s.world.entities[0].z(), -20.0);
+    }
+
+    #[test]
+    fn entity_spawned_idempotent_ignores_duplicate() {
+        let mut s = ClientSimState::default();
+        let snapshot = EntitySnapshot::simple("dup-uuid", 5.0, 0.0, vec![]);
+
+        s.apply(&ServerMessage::EntitySpawned { snapshot: snapshot.clone() });
+        assert_eq!(s.world.entities.len(), 1);
+
+        s.apply(&ServerMessage::EntitySpawned { snapshot: snapshot.clone() });
+        assert_eq!(s.world.entities.len(), 1, "duplicate EntitySpawned must not add a second entry");
+    }
+
+    #[test]
+    fn entity_despawned_removes_from_world_entities() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::EntitySpawned {
+            snapshot: EntitySnapshot::simple("to-remove", 1.0, 2.0, vec![]),
+        });
+        assert_eq!(s.world.entities.len(), 1);
+
+        s.apply(&ServerMessage::EntityDespawned { uuid: "to-remove".into() });
+        assert!(s.world.entities.is_empty(), "entity should be removed after EntityDespawned");
+    }
+
+    #[test]
+    fn entity_despawned_idempotent_ignores_unknown() {
+        let mut s = ClientSimState::default();
+        // Despawning a UUID that was never spawned must not panic or corrupt state.
+        s.apply(&ServerMessage::EntityDespawned { uuid: "never-spawned".into() });
+        assert!(s.world.entities.is_empty(), "despawning unknown UUID must leave state unchanged");
+    }
+
+    #[test]
+    fn entity_spawned_does_not_duplicate_on_welcome_replay() {
+        let mut s = ClientSimState::default();
+        // Simulate: server spawns a runtime entity, then client reconnects and
+        // receives Welcome with world containing that entity already.
+        s.apply(&ServerMessage::EntitySpawned {
+            snapshot: EntitySnapshot::simple("runtime-1", 0.0, 0.0, vec![]),
+        });
+        assert_eq!(s.world.entities.len(), 1);
+
+        // Welcome should replace the entire world, including the runtime entity.
+        let world_with_runtime = WorldData {
+            entities: vec![EntitySnapshot::simple("runtime-1", 0.0, 0.0, vec![])],
+        };
+        s.apply(&ServerMessage::Welcome {
+            state: GameState {
+                phase: GamePhase::InProgress,
+                players: vec![],
+                world: Some(world_with_runtime.clone()),
+            },
+            ship_stations: crate::stations::ShipStations::default(),
+        });
+        // After Welcome, if the same entity is spawned again via EntitySpawned,
+        // it must not duplicate.
+        s.apply(&ServerMessage::EntitySpawned {
+            snapshot: EntitySnapshot::simple("runtime-1", 0.0, 0.0, vec![]),
+        });
+        assert_eq!(
+            s.world.entities.iter().filter(|e| e.uuid == "runtime-1").count(),
+            1,
+            "EntitySpawned after Welcome must not duplicate an already-present entity"
+        );
+    }
+
+    #[test]
+    fn entity_despawned_after_welcome_preserves_idempotency() {
+        let mut s = ClientSimState::default();
+        // Entity is in the Welcome world data.
+        let world_with_runtime = WorldData {
+            entities: vec![EntitySnapshot::simple("persistent", 1.0, 2.0, vec![])],
+        };
+        s.apply(&ServerMessage::Welcome {
+            state: GameState {
+                phase: GamePhase::InProgress,
+                players: vec![],
+                world: Some(world_with_runtime),
+            },
+            ship_stations: crate::stations::ShipStations::default(),
+        });
+        assert_eq!(s.world.entities.len(), 1);
+
+        // Despawn it.
+        s.apply(&ServerMessage::EntityDespawned { uuid: "persistent".into() });
+        assert!(s.world.entities.is_empty(), "EntityDespawned must remove entity from world data");
+
+        // Despawn again (should be harmless).
+        s.apply(&ServerMessage::EntityDespawned { uuid: "persistent".into() });
+        assert!(s.world.entities.is_empty(), "second EntityDespawned must remain no-op");
     }
 }

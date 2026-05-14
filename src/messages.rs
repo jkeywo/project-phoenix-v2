@@ -220,7 +220,7 @@ fn default_power_levels() -> (u8, u8, u8) {
 /// Carries the minimum identifying fields plus optional aspect fields for
 /// visualisation.  Every entity has a `uuid` and `tags`; all other fields
 /// are `Option` and only present when relevant to the entity type.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct EntitySnapshot {
     pub uuid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -492,5 +492,16 @@ pub enum ServerMessage {
         science: u8,
         battery_charge: f32,
         locked: bool,
+    },
+    /// Broadcast when a non-asteroid entity is spawned at runtime (e.g. by a
+    /// scenario trigger). Carries a full `EntitySnapshot` so the client can
+    /// incorporate it immediately.
+    EntitySpawned {
+        snapshot: EntitySnapshot,
+    },
+    /// Broadcast when a non-asteroid entity is despawned at runtime.
+    /// The client removes it from its local world data idempotently.
+    EntityDespawned {
+        uuid: String,
     },
 }

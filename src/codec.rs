@@ -1036,4 +1036,55 @@ mod tests {
             assert_eq!(*tag, decoded);
         }
     }
+
+    // ── EntitySpawned / EntityDespawned round-trips ──────────────────────
+
+    #[test]
+    fn server_entity_spawned_round_trips() {
+        let msg = ServerMessage::EntitySpawned {
+            snapshot: EntitySnapshot {
+                uuid: "run-entity-001".into(),
+                id: Some("station-alpha".into()),
+                position: Some([100.0, 0.0, -200.0]),
+                tags: vec!["station".into(), "ship".into()],
+                shape: Some("sphere".into()),
+                radius: Some(5.0),
+                colour: Some([0.2, 0.5, 0.8]),
+                yaw: Some(1.57),
+                hull_fraction: Some(0.85),
+                inner_radius: Some(2.0),
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_entity_spawned_minimal_round_trips() {
+        let msg = ServerMessage::EntitySpawned {
+            snapshot: EntitySnapshot {
+                uuid: "run-minimal".into(),
+                id: None,
+                position: Some([10.0, 0.0, 20.0]),
+                tags: vec![],
+                shape: None,
+                radius: None,
+                colour: None,
+                yaw: None,
+                hull_fraction: None,
+                inner_radius: None,
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_entity_despawned_round_trips() {
+        let msg = ServerMessage::EntityDespawned {
+            uuid: "run-entity-001".into(),
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
 }

@@ -36,6 +36,8 @@ pub enum WorldEvent {
     Attacked { uuid: String, attacker_uuid: String },
     /// Simulation time has advanced. `elapsed_secs` is total elapsed time.
     TimerElapsed { elapsed_secs: f32 },
+    /// A `Hail` message arrived for `target_uuid`.
+    Hailed { target_uuid: String },
 }
 
 /// A condition that a trigger can check against incoming world events.
@@ -47,6 +49,8 @@ pub enum TriggerCondition {
     OnAttacked { entity_name: String },
     /// Fires once when `elapsed_secs` crosses `after_secs`.
     OnTimer { after_secs: f32 },
+    /// Fires when a `Hail` message arrives for the named entity.
+    OnHailed { entity_name: String },
 }
 
 /// An action to execute when a trigger fires.
@@ -138,6 +142,9 @@ fn condition_matches(
         (TriggerCondition::OnTimer { after_secs }, WorldEvent::TimerElapsed { elapsed_secs }) => {
             elapsed_secs >= after_secs
         }
+        (TriggerCondition::OnHailed { entity_name }, WorldEvent::Hailed { target_uuid }) => {
+            name_to_uuid.get(entity_name).map(|u| u == target_uuid).unwrap_or(false)
+        }
         _ => false,
     }
 }
@@ -197,6 +204,35 @@ struct RawActionEntry {
     mandatory: Option<bool>,
 }
 
+// ── TOML-facing deserialization for comms blocks ──────────────────────────
+
+#[derive(Deserialize)]
+struct RawCommsFollowUp {
+    message: String,
+    #[serde(default, rename = "response")]
+    responses: Vec<RawCommsResponse>,
+}
+
+#[derive(Deserialize)]
+struct RawCommsResponse {
+    text: String,
+    #[serde(default, rename = "action")]
+    actions: Vec<RawActionEntry>,
+    #[serde(default)]
+    follow_up: Option<RawCommsFollowUp>,
+}
+
+#[derive(Deserialize)]
+struct RawCommsEntry {
+    from: String,
+    message: String,
+    trigger: String,
+    #[serde(default)]
+    entity: Option<String>,
+    #[serde(default, rename = "response")]
+    responses: Vec<RawCommsResponse>,
+}
+
 // ── TOML-facing deserialization ────────────────────────────────────────────
 
 /// Raw TOML representation of a single `[[spawn]]` block.
@@ -226,6 +262,8 @@ struct RawScenario {
     spawns: Vec<RawSpawnEntry>,
     #[serde(default, rename = "trigger")]
     triggers: Vec<RawTriggerEntry>,
+    #[serde(default, rename = "comms")]
+    comms: Vec<RawCommsEntry>,
 }
 
 // ── Public types ───────────────────────────────────────────────────────────
@@ -253,6 +291,8 @@ pub struct ScenarioConfig {
     pub name_to_uuid: HashMap<String, String>,
     /// Ordered list of triggers declared in the scenario.
     pub triggers: Vec<Trigger>,
+    /// Ordered list of comms dialogue templates declared in the scenario.
+    pub comms: Vec<CommsTemplate>,
 }
 
 /// A spawn entry with its world-space position fully resolved.
@@ -269,6 +309,64 @@ pub struct ResolvedSpawn {
 }
 
 // ── Parsing ────────────────────────────────────────────────────────────────
+
+// ── Internal helpers ───────────────────────────────────────────────────────
+
+fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction>, String> {
+    let mut actions = Vec::new();
+    for raw_action in raw_actions {
+        let action = match raw_action.kind.as_str() {
+            "load_scenario" => {
+                let path = raw_action.path.clone().ok_or_else(|| {
+                    "Action 'load_scenario' requires a 'path' field".to_string()
+                })?;
+                TriggerAction::LoadScenario { path }
+            }
+            "add_objective" => {
+                let id = raw_action.id.clone().ok_or_else(|| {
+                    "Action 'add_objective' requires an 'id' field".to_string()
+                })?;
+                let text = raw_action.text.clone().ok_or_else(|| {
+                    "Action 'add_objective' requires a 'text' field".to_string()
+                })?;
+                let mandatory = raw_action.mandatory.unwrap_or(false);
+                TriggerAction::AddObjective { id, text, mandatory }
+            }
+            "complete_objective" => {
+                let id = raw_action.id.clone().ok_or_else(|| {
+                    "Action 'complete_objective' requires an 'id' field".to_string()
+                })?;
+                TriggerAction::CompleteObjective { id }
+            }
+            "fail_objective" => {
+                let id = raw_action.id.clone().ok_or_else(|| {
+                    "Action 'fail_objective' requires an 'id' field".to_string()
+                })?;
+                TriggerAction::FailObjective { id }
+            }
+            other => {
+                return Err(format!("Unknown trigger action '{}'", other));
+            }
+        };
+        actions.push(action);
+    }
+    Ok(actions)
+}
+
+fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<CommsResponse>, String> {
+    let mut responses = Vec::new();
+    for raw_resp in raw_responses {
+        let actions = parse_raw_actions(&raw_resp.actions)?;
+        let follow_up = if let Some(ref raw_fu) = raw_resp.follow_up {
+            let fu_responses = parse_comms_responses(&raw_fu.responses)?;
+            Some(CommsDialogueNode { body: raw_fu.message.clone(), responses: fu_responses })
+        } else {
+            None
+        };
+        responses.push(CommsResponse { text: raw_resp.text.clone(), actions, follow_up });
+    }
+    Ok(responses)
+}
 
 /// Parse a scenario TOML string into a `ScenarioConfig`.
 ///
@@ -342,56 +440,56 @@ pub fn parse_scenario(toml_str: &str) -> Result<ScenarioConfig, String> {
                 })?;
                 TriggerCondition::OnTimer { after_secs }
             }
+            "on_hailed" => {
+                let entity_name = raw_trigger.entity.ok_or_else(|| {
+                    "Trigger 'on_hailed' requires an 'entity' field".to_string()
+                })?;
+                TriggerCondition::OnHailed { entity_name }
+            }
             other => {
                 return Err(format!("Unknown trigger condition '{}'", other));
             }
         };
 
-        let mut actions = Vec::new();
-        for raw_action in raw_trigger.actions {
-            let action = match raw_action.kind.as_str() {
-                "load_scenario" => {
-                    let path = raw_action.path.ok_or_else(|| {
-                        "Action 'load_scenario' requires a 'path' field".to_string()
-                    })?;
-                    TriggerAction::LoadScenario { path }
-                }
-                "add_objective" => {
-                    let id = raw_action.id.ok_or_else(|| {
-                        "Action 'add_objective' requires an 'id' field".to_string()
-                    })?;
-                    let text = raw_action.text.ok_or_else(|| {
-                        "Action 'add_objective' requires a 'text' field".to_string()
-                    })?;
-                    let mandatory = raw_action.mandatory.unwrap_or(false);
-                    TriggerAction::AddObjective { id, text, mandatory }
-                }
-                "complete_objective" => {
-                    let id = raw_action.id.ok_or_else(|| {
-                        "Action 'complete_objective' requires an 'id' field".to_string()
-                    })?;
-                    TriggerAction::CompleteObjective { id }
-                }
-                "fail_objective" => {
-                    let id = raw_action.id.ok_or_else(|| {
-                        "Action 'fail_objective' requires an 'id' field".to_string()
-                    })?;
-                    TriggerAction::FailObjective { id }
-                }
-                other => {
-                    return Err(format!("Unknown trigger action '{}'", other));
-                }
-            };
-            actions.push(action);
-        }
+        let actions = parse_raw_actions(&raw_trigger.actions)?;
 
         triggers.push(Trigger { condition, actions });
     }
 
-    Ok(ScenarioConfig { spawns, name_to_uuid, triggers })
-}
+    // Parse comms blocks.
+    let mut comms = Vec::new();
+    for raw_comms in raw.comms {
+        let trigger = match raw_comms.trigger.as_str() {
+            "on_hailed" => {
+                let entity_name = raw_comms.entity.ok_or_else(|| {
+                    "Comms block 'on_hailed' requires an 'entity' field".to_string()
+                })?;
+                TriggerCondition::OnHailed { entity_name }
+            }
+            "on_destroyed" => {
+                let entity_name = raw_comms.entity.ok_or_else(|| {
+                    "Comms block 'on_destroyed' requires an 'entity' field".to_string()
+                })?;
+                TriggerCondition::OnDestroyed { entity_name }
+            }
+            "on_attacked" => {
+                let entity_name = raw_comms.entity.ok_or_else(|| {
+                    "Comms block 'on_attacked' requires an 'entity' field".to_string()
+                })?;
+                TriggerCondition::OnAttacked { entity_name }
+            }
+            other => {
+                return Err(format!("Unknown comms trigger '{}'", other));
+            }
+        };
 
-// ── Position resolution ────────────────────────────────────────────────────
+        let responses = parse_comms_responses(&raw_comms.responses)?;
+        let node = CommsDialogueNode { body: raw_comms.message, responses };
+        comms.push(CommsTemplate { from: raw_comms.from, trigger, node });
+    }
+
+    Ok(ScenarioConfig { spawns, name_to_uuid, triggers, comms })
+}
 
 /// Resolve all spawn positions against the given anchor table.
 ///
@@ -457,6 +555,76 @@ pub fn trigger_states_from_config(config: &ScenarioConfig) -> Vec<TriggerState> 
         .iter()
         .map(|t| TriggerState { trigger: t.clone(), fired: false })
         .collect()
+}
+
+// ── Comms dialogue types ───────────────────────────────────────────────────
+
+/// A single response option within a comms dialogue node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommsResponse {
+    /// Display text shown on the response button.
+    pub text: String,
+    /// Actions executed when this response is chosen.
+    pub actions: Vec<TriggerAction>,
+    /// Optional inline follow-up message displayed after this response is chosen.
+    pub follow_up: Option<CommsDialogueNode>,
+}
+
+/// A single node in an inline dialogue tree: a message body with response options.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommsDialogueNode {
+    /// The message body text.
+    pub body: String,
+    /// Available response options. Empty if no response is expected.
+    pub responses: Vec<CommsResponse>,
+}
+
+/// A comms template: a root dialogue node associated with a trigger condition.
+/// Parsed from a `[[comms]]` block in the scenario TOML.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommsTemplate {
+    /// Spawn entity name whose UUID is the sender of the comms message.
+    pub from: String,
+    /// The trigger condition that fires this template.
+    pub trigger: TriggerCondition,
+    /// The root dialogue node.
+    pub node: CommsDialogueNode,
+}
+
+/// Runtime state for one active dialogue conversation.
+#[derive(Clone, Debug)]
+pub struct ActiveDialogue {
+    /// ID of the `CommsMessage` that was sent to the Comms inbox for this dialogue.
+    pub message_id: String,
+    /// The current dialogue node being presented.
+    pub current_node: CommsDialogueNode,
+}
+
+/// Result returned by `process_response`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProcessResponseResult {
+    /// Actions from the chosen response to execute.
+    pub actions: Vec<TriggerAction>,
+    /// Follow-up dialogue node to present next, if any.
+    pub follow_up: Option<CommsDialogueNode>,
+}
+
+/// Process a player's response to an active dialogue.
+///
+/// Looks up `message_id` in `dialogues`. If found and `response_index` is
+/// valid, returns the response's actions and optional follow-up node.
+/// Returns `None` if the message is not found or the index is out of range.
+pub fn process_response(
+    dialogues: &[ActiveDialogue],
+    message_id: &str,
+    response_index: usize,
+) -> Option<ProcessResponseResult> {
+    let dialogue = dialogues.iter().find(|d| d.message_id == message_id)?;
+    let response = dialogue.current_node.responses.get(response_index)?;
+    Some(ProcessResponseResult {
+        actions: response.actions.clone(),
+        follow_up: response.follow_up.clone(),
+    })
 }
 
 // ── Unit Tests ─────────────────────────────────────────────────────────────
@@ -1188,5 +1356,343 @@ id = "obj-2"
         mgr.unload_scenario("scenario-a");
         assert_eq!(mgr.sorted_snapshots().len(), 1, "completed objective should be retained");
         assert_eq!(mgr.sorted_snapshots()[0].status, ObjectiveStatus::Completed);
+    }
+
+    // ── Cycles 26-28: on_hailed trigger condition ─────────────────────────
+
+    // Cycle 26: on_hailed fires when entity is hailed
+    #[test]
+    fn on_hailed_fires_when_entity_hailed() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("station_alpha".to_string(), "uuid-alpha".to_string());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnHailed { entity_name: "station_alpha".to_string() },
+            actions: vec![TriggerAction::AddObjective {
+                id: "greet".to_string(),
+                text: "Respond to hail".to_string(),
+                mandatory: false,
+            }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Hailed { target_uuid: "uuid-alpha".to_string() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 1);
+    }
+
+    // Cycle 27: on_hailed does not fire for a different entity
+    #[test]
+    fn on_hailed_does_not_fire_for_different_entity() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("station_alpha".to_string(), "uuid-alpha".to_string());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnHailed { entity_name: "station_alpha".to_string() },
+            actions: vec![],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Hailed { target_uuid: "uuid-other".to_string() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 0);
+    }
+
+    // Cycle 28: on_hailed parses from TOML
+    #[test]
+    fn parse_on_hailed_trigger() {
+        let toml = r#"
+[[spawn]]
+name = "starbase_one"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_hailed"
+entity = "starbase_one"
+
+[[trigger.action]]
+type = "add_objective"
+id = "hailed-obj"
+text = "Respond to starbase"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.triggers.len(), 1);
+        assert_eq!(
+            config.triggers[0].condition,
+            TriggerCondition::OnHailed { entity_name: "starbase_one".to_string() }
+        );
+    }
+
+    // ── Cycles 29-35: [[comms]] block parsing ─────────────────────────────
+
+    // Cycle 29: parse basic [[comms]] block
+    #[test]
+    fn parse_comms_block_with_from_and_message() {
+        let toml = r#"
+[[spawn]]
+name = "starbase_one"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[comms]]
+from = "starbase_one"
+message = "Greetings, Captain."
+trigger = "on_hailed"
+entity = "starbase_one"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.comms.len(), 1);
+        let tmpl = &config.comms[0];
+        assert_eq!(tmpl.from, "starbase_one");
+        assert_eq!(tmpl.node.body, "Greetings, Captain.");
+        assert_eq!(
+            tmpl.trigger,
+            TriggerCondition::OnHailed { entity_name: "starbase_one".to_string() }
+        );
+    }
+
+    // Cycle 30: empty scenario has no comms blocks
+    #[test]
+    fn empty_scenario_has_no_comms_blocks() {
+        let config = parse_scenario("").unwrap();
+        assert!(config.comms.is_empty());
+    }
+
+    // Cycle 31: parse [[comms]] with responses
+    #[test]
+    fn parse_comms_block_with_responses() {
+        let toml = r#"
+[[spawn]]
+name = "starbase_one"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[comms]]
+from = "starbase_one"
+message = "Greetings, Captain. How can we help?"
+trigger = "on_hailed"
+entity = "starbase_one"
+
+[[comms.response]]
+text = "We need supplies"
+
+[[comms.response]]
+text = "Just checking in"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        let tmpl = &config.comms[0];
+        assert_eq!(tmpl.node.responses.len(), 2);
+        assert_eq!(tmpl.node.responses[0].text, "We need supplies");
+        assert_eq!(tmpl.node.responses[1].text, "Just checking in");
+    }
+
+    // Cycle 32: parse response actions
+    #[test]
+    fn parse_comms_response_with_actions() {
+        let toml = r#"
+[[spawn]]
+name = "starbase_one"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[comms]]
+from = "starbase_one"
+message = "Greetings, Captain."
+trigger = "on_hailed"
+entity = "starbase_one"
+
+[[comms.response]]
+text = "We need supplies"
+
+[[comms.response.action]]
+type = "add_objective"
+id = "supplies"
+text = "Get supplies from starbase"
+mandatory = true
+"#;
+        let config = parse_scenario(toml).unwrap();
+        let resp = &config.comms[0].node.responses[0];
+        assert_eq!(resp.actions.len(), 1);
+        assert_eq!(
+            resp.actions[0],
+            TriggerAction::AddObjective {
+                id: "supplies".to_string(),
+                text: "Get supplies from starbase".to_string(),
+                mandatory: true,
+            }
+        );
+    }
+
+    // Cycle 33: parse inline follow_up branching
+    #[test]
+    fn parse_comms_response_with_follow_up() {
+        let toml = r#"
+[[spawn]]
+name = "starbase_one"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[comms]]
+from = "starbase_one"
+message = "Greetings, Captain."
+trigger = "on_hailed"
+entity = "starbase_one"
+
+[[comms.response]]
+text = "We need supplies"
+
+[comms.response.follow_up]
+message = "We'll have them ready in 5 minutes."
+"#;
+        let config = parse_scenario(toml).unwrap();
+        let resp = &config.comms[0].node.responses[0];
+        assert!(resp.follow_up.is_some());
+        let follow_up = resp.follow_up.as_ref().unwrap();
+        assert_eq!(follow_up.body, "We'll have them ready in 5 minutes.");
+        assert!(follow_up.responses.is_empty());
+    }
+
+    // Cycle 34: follow_up can itself have responses (deep branching)
+    #[test]
+    fn parse_follow_up_with_nested_responses() {
+        let toml = r#"
+[[spawn]]
+name = "starbase_one"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[comms]]
+from = "starbase_one"
+message = "Greetings, Captain."
+trigger = "on_hailed"
+entity = "starbase_one"
+
+[[comms.response]]
+text = "We need supplies"
+
+[comms.response.follow_up]
+message = "What kind of supplies?"
+
+[[comms.response.follow_up.response]]
+text = "Food and water"
+
+[[comms.response.follow_up.response]]
+text = "Fuel cells"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        let follow_up = config.comms[0].node.responses[0].follow_up.as_ref().unwrap();
+        assert_eq!(follow_up.responses.len(), 2);
+        assert_eq!(follow_up.responses[0].text, "Food and water");
+        assert_eq!(follow_up.responses[1].text, "Fuel cells");
+    }
+
+    // ── Cycles 35-39: process_response dialogue state machine ─────────────
+
+    // Cycle 35: process_response returns actions for valid message and index
+    #[test]
+    fn process_response_executes_response_actions() {
+        let node = CommsDialogueNode {
+            body: "How can we help?".to_string(),
+            responses: vec![
+                CommsResponse {
+                    text: "Supplies".to_string(),
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "supplies".to_string(),
+                        text: "Get supplies".to_string(),
+                        mandatory: false,
+                    }],
+                    follow_up: None,
+                },
+            ],
+        };
+        let dialogues = vec![ActiveDialogue {
+            message_id: "msg-1".to_string(),
+            current_node: node,
+        }];
+
+        let result = process_response(&dialogues, "msg-1", 0).unwrap();
+        assert_eq!(result.actions.len(), 1);
+        assert_eq!(
+            result.actions[0],
+            TriggerAction::AddObjective {
+                id: "supplies".to_string(),
+                text: "Get supplies".to_string(),
+                mandatory: false,
+            }
+        );
+        assert!(result.follow_up.is_none());
+    }
+
+    // Cycle 36: process_response returns follow_up node when present
+    #[test]
+    fn process_response_returns_follow_up_when_present() {
+        let follow_up_node = CommsDialogueNode {
+            body: "We'll have them ready.".to_string(),
+            responses: vec![],
+        };
+        let node = CommsDialogueNode {
+            body: "How can we help?".to_string(),
+            responses: vec![
+                CommsResponse {
+                    text: "Supplies".to_string(),
+                    actions: vec![],
+                    follow_up: Some(follow_up_node.clone()),
+                },
+            ],
+        };
+        let dialogues = vec![ActiveDialogue {
+            message_id: "msg-1".to_string(),
+            current_node: node,
+        }];
+
+        let result = process_response(&dialogues, "msg-1", 0).unwrap();
+        assert_eq!(result.follow_up, Some(follow_up_node));
+    }
+
+    // Cycle 37: process_response returns None for unknown message_id
+    #[test]
+    fn process_response_returns_none_for_unknown_message_id() {
+        let dialogues: Vec<ActiveDialogue> = vec![];
+        let result = process_response(&dialogues, "ghost-id", 0);
+        assert!(result.is_none());
+    }
+
+    // Cycle 38: process_response returns None for out-of-bounds response index
+    #[test]
+    fn process_response_returns_none_for_out_of_bounds_index() {
+        let node = CommsDialogueNode {
+            body: "Hello".to_string(),
+            responses: vec![
+                CommsResponse { text: "Hi".to_string(), actions: vec![], follow_up: None },
+            ],
+        };
+        let dialogues = vec![ActiveDialogue {
+            message_id: "msg-1".to_string(),
+            current_node: node,
+        }];
+
+        let result = process_response(&dialogues, "msg-1", 99);
+        assert!(result.is_none());
+    }
+
+    // Cycle 39: process_response with no follow_up returns None follow_up
+    #[test]
+    fn process_response_no_follow_up_returns_none() {
+        let node = CommsDialogueNode {
+            body: "Hello".to_string(),
+            responses: vec![
+                CommsResponse { text: "Ack".to_string(), actions: vec![], follow_up: None },
+            ],
+        };
+        let dialogues = vec![ActiveDialogue {
+            message_id: "msg-1".to_string(),
+            current_node: node,
+        }];
+
+        let result = process_response(&dialogues, "msg-1", 0).unwrap();
+        assert!(result.follow_up.is_none());
     }
 }

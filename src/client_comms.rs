@@ -51,6 +51,25 @@ impl ClientCommsState {
             .as_ref()
             .and_then(|id| self.messages.iter().find(|m| &m.id == id))
     }
+
+    /// Returns the available response texts for `msg`, or an empty slice if
+    /// the operator has already responded (i.e. `selected_response` is set).
+    pub fn available_responses<'a>(&self, msg: &'a CommsMessage) -> &'a [String] {
+        if msg.selected_response.is_some() {
+            &[]
+        } else {
+            &msg.responses
+        }
+    }
+
+    /// Returns `true` if response buttons should be enabled for the currently
+    /// selected message: the message exists and has not yet been responded to.
+    pub fn response_buttons_enabled(&self) -> bool {
+        match self.selected_message() {
+            Some(msg) => msg.selected_response.is_none() && !msg.responses.is_empty(),
+            None => false,
+        }
+    }
 }
 
 // ── Outbound message builders ──────────────────────────────────────────────
@@ -243,5 +262,66 @@ mod tests {
     #[test]
     fn clear_comms_builder() {
         assert_eq!(clear_comms_message(), ClientMessage::ClearComms);
+    }
+
+    // ── response_buttons_enabled / available_responses ────────────────────
+
+    // Cycle 40: buttons enabled when selected message has no response yet
+    #[test]
+    fn response_buttons_enabled_when_no_selected_response() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![msg("m1")], vec![]));
+        s.select_message("m1");
+        assert!(s.response_buttons_enabled());
+    }
+
+    // Cycle 41: buttons disabled after response is chosen (selected_response set)
+    #[test]
+    fn response_buttons_disabled_after_response() {
+        let mut m = msg("m1");
+        m.selected_response = Some(0);
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![m], vec![]));
+        s.select_message("m1");
+        assert!(!s.response_buttons_enabled());
+    }
+
+    // Cycle 42: buttons disabled when no message is selected
+    #[test]
+    fn response_buttons_disabled_when_no_message_selected() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![msg("m1")], vec![]));
+        // Don't select any message
+        assert!(!s.response_buttons_enabled());
+    }
+
+    // Cycle 43: available_responses returns empty slice when already responded
+    #[test]
+    fn available_responses_returns_empty_when_already_responded() {
+        let mut m = msg("m1");
+        m.selected_response = Some(0);
+        let s = ClientCommsState::default();
+        let responses = s.available_responses(&m);
+        assert!(responses.is_empty());
+    }
+
+    // Cycle 44: available_responses returns full slice when not yet responded
+    #[test]
+    fn available_responses_returns_responses_when_not_responded() {
+        let m = msg("m1");
+        let s = ClientCommsState::default();
+        let responses = s.available_responses(&m);
+        assert_eq!(responses, &["Ack".to_string()]);
+    }
+
+    // Cycle 45: buttons disabled when message has no responses (empty list)
+    #[test]
+    fn response_buttons_disabled_when_message_has_no_responses() {
+        let mut m = msg("m1");
+        m.responses = vec![];
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![m], vec![]));
+        s.select_message("m1");
+        assert!(!s.response_buttons_enabled());
     }
 }

@@ -117,7 +117,7 @@ pub fn process_message(
             if ship_stations.configs.is_empty() {
                 // No station config loaded (e.g. in integration tests): fall back to
                 // display-name-based console toggle for backward compatibility.
-                let console = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power]
+                let console = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power, Console::Comms]
                     .into_iter()
                     .find(|c| c.display_name() == station.as_str());
                 if let Some(c) = console {

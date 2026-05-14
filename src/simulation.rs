@@ -384,6 +384,7 @@ fn handle_set_view(
                 ViewMode::Camera(_) => Console::CaptainChair,
                 ViewMode::Radar => Console::Helm,
                 ViewMode::ScienceRadar | ViewMode::SystemChart => Console::Science,
+                ViewMode::Comms => Console::Comms,
             };
             if sessions.0.console_holder(required) == Some(ev.token.as_str()) {
                 ship.view_mode = mode;
@@ -2094,6 +2095,58 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_science(&mut app);
         push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::ScienceRadar });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
+    }
+
+    fn start_game_with_comms(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        tick(app);
+        push(app, "comms", ClientMessage::Identify { token: "comms".into(), name: "Uhura".into() });
+        tick(app);
+        push(app, "comms", ClientMessage::SelectStation { station: "Comms".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    #[test]
+    fn comms_can_push_view_to_comms() {
+        let mut app = test_app();
+        start_game_with_comms(&mut app);
+        push(&mut app, "comms", ClientMessage::SetView { mode: ViewMode::Comms });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Comms
+        );
+    }
+
+    #[test]
+    fn captain_override_from_comms_view_works() {
+        let mut app = test_app();
+        start_game_with_comms(&mut app);
+        push(&mut app, "comms", ClientMessage::SetView { mode: ViewMode::Comms });
+        tick(&mut app);
+        // Captain overrides back to a camera view.
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Aft)
+        );
+    }
+
+    #[test]
+    fn non_comms_cannot_push_comms_view() {
+        let mut app = test_app();
+        start_game_with_comms(&mut app);
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Comms });
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,

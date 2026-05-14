@@ -293,7 +293,7 @@ fn hull_camera(
     // remains coherent; the radar overlay is drawn separately (#45).
     let direction = match &ship.view_mode {
         ViewMode::Camera(d) => d.clone(),
-        ViewMode::Radar | ViewMode::ScienceRadar | ViewMode::SystemChart => ViewDirection::Fore,
+        ViewMode::Radar | ViewMode::ScienceRadar | ViewMode::SystemChart | ViewMode::Comms => ViewDirection::Fore,
     };
     let offset_dir = match direction {
         ViewDirection::Fore      => Vec3::new( ship.yaw.sin(), 0.0, -ship.yaw.cos()),
@@ -342,6 +342,7 @@ fn update_view_direction_label(
         ViewMode::Radar                            => "RADAR",
         ViewMode::ScienceRadar                     => "SCIENCE RADAR",
         ViewMode::SystemChart                      => "SYSTEM CHART",
+        ViewMode::Comms                            => "COMMS",
     };
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {

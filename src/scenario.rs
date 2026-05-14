@@ -600,6 +600,65 @@ pub struct ActiveDialogue {
     pub current_node: CommsDialogueNode,
 }
 
+/// Runtime state for one comms template — tracks whether it has already fired.
+#[derive(Clone, Debug)]
+pub struct CommsTemplateState {
+    pub template: CommsTemplate,
+    pub fired: bool,
+}
+
+/// A comms template that fired in response to world events.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FiredCommsTemplate {
+    /// The sender entity name from the template.
+    pub from: String,
+    /// The root dialogue node to inject into the inbox.
+    pub node: CommsDialogueNode,
+}
+
+/// Create a `Vec<CommsTemplateState>` from a parsed `ScenarioConfig`.
+pub fn comms_template_states_from_config(config: &ScenarioConfig) -> Vec<CommsTemplateState> {
+    config
+        .comms
+        .iter()
+        .map(|t| CommsTemplateState { template: t.clone(), fired: false })
+        .collect()
+}
+
+/// Evaluate all comms templates in `states` against the given `events`.
+///
+/// Each template fires at most once (single-shot). When a template fires its
+/// `fired` flag is set to `true` and a `FiredCommsTemplate` is collected.
+///
+/// Returns the list of `FiredCommsTemplate` values produced in this call.
+pub fn evaluate_comms_templates(
+    states: &mut Vec<CommsTemplateState>,
+    events: &[WorldEvent],
+    name_to_uuid: &HashMap<String, String>,
+) -> Vec<FiredCommsTemplate> {
+    let mut results = Vec::new();
+
+    for state in states.iter_mut() {
+        if state.fired {
+            continue;
+        }
+
+        let fires = events.iter().any(|event| {
+            condition_matches(&state.template.trigger, event, name_to_uuid)
+        });
+
+        if fires {
+            state.fired = true;
+            results.push(FiredCommsTemplate {
+                from: state.template.from.clone(),
+                node: state.template.node.clone(),
+            });
+        }
+    }
+
+    results
+}
+
 /// Result returned by `process_response`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessResponseResult {
@@ -1694,5 +1753,75 @@ text = "Fuel cells"
 
         let result = process_response(&dialogues, "msg-1", 0).unwrap();
         assert!(result.follow_up.is_none());
+    }
+
+    // ── Cycle 40: evaluate_comms_templates fires on on_attacked ──────────
+    #[test]
+    fn evaluate_comms_templates_fires_on_attacked() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("convoy".to_string(), "uuid-convoy".to_string());
+
+        let template = CommsTemplate {
+            from: "convoy".to_string(),
+            trigger: TriggerCondition::OnAttacked { entity_name: "convoy".to_string() },
+            node: CommsDialogueNode {
+                body: "We are under attack! Please help!".to_string(),
+                responses: vec![],
+            },
+        };
+        let mut states = vec![CommsTemplateState { template, fired: false }];
+
+        let events = vec![WorldEvent::Attacked {
+            uuid: "uuid-convoy".to_string(),
+            attacker_uuid: "uuid-player".to_string(),
+        }];
+        let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].from, "convoy");
+        assert_eq!(fired[0].node.body, "We are under attack! Please help!");
+    }
+
+    // Cycle 41: comms template fires at most once (single-shot)
+    #[test]
+    fn evaluate_comms_templates_fires_at_most_once() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("convoy".to_string(), "uuid-convoy".to_string());
+
+        let template = CommsTemplate {
+            from: "convoy".to_string(),
+            trigger: TriggerCondition::OnAttacked { entity_name: "convoy".to_string() },
+            node: CommsDialogueNode { body: "Help!".to_string(), responses: vec![] },
+        };
+        let mut states = vec![CommsTemplateState { template, fired: false }];
+
+        let events = vec![WorldEvent::Attacked {
+            uuid: "uuid-convoy".to_string(),
+            attacker_uuid: "uuid-player".to_string(),
+        }];
+        let first = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
+        let second = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 0);
+    }
+
+    // Cycle 42: non-matching event does not fire comms template
+    #[test]
+    fn evaluate_comms_templates_does_not_fire_for_unrelated_entity() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("convoy".to_string(), "uuid-convoy".to_string());
+
+        let template = CommsTemplate {
+            from: "convoy".to_string(),
+            trigger: TriggerCondition::OnAttacked { entity_name: "convoy".to_string() },
+            node: CommsDialogueNode { body: "Help!".to_string(), responses: vec![] },
+        };
+        let mut states = vec![CommsTemplateState { template, fired: false }];
+
+        let events = vec![WorldEvent::Attacked {
+            uuid: "uuid-other".to_string(),
+            attacker_uuid: "uuid-player".to_string(),
+        }];
+        let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 0);
     }
 }

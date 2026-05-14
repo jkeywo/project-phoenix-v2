@@ -25,6 +25,7 @@ pub mod map_config;
 pub mod scenario;
 pub mod scenario_plugin;
 pub mod objectives;
+pub mod comms_inbox;
 pub mod messages;
 pub mod stations;
 pub mod modifiers;

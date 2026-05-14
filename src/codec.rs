@@ -152,6 +152,13 @@ mod tests {
     }
 
     #[test]
+    fn client_set_view_comms() {
+        let msg = ClientMessage::SetView { mode: ViewMode::Comms };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn client_helm_input() {
         let msg = ClientMessage::HelmInput { thrust: 0.75, steering: -0.5 };
         assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -1290,12 +1297,34 @@ mod tests {
                 responses: vec!["Acknowledged".into(), "Request docking".into()],
                 selected_response: Some(0),
                 is_read: false,
+                is_orphaned: false,
             }],
             objectives: vec![],
             contacts: vec![crate::messages::CommsContact {
                 uuid: "station-abc".into(),
                 name: "Starbase 12".into(),
             }],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_comms_state_with_orphaned_message_round_trips() {
+        let msg = ServerMessage::CommsState {
+            messages: vec![crate::messages::CommsMessage {
+                id: "m2".into(),
+                sender_uuid: "convoy-uuid".into(),
+                sender_name: "Convoy".into(),
+                subject: "Distress".into(),
+                body: "We are under attack!".into(),
+                responses: vec![],
+                selected_response: None,
+                is_read: false,
+                is_orphaned: true,
+            }],
+            objectives: vec![],
+            contacts: vec![],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

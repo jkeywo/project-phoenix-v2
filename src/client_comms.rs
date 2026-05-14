@@ -63,10 +63,11 @@ impl ClientCommsState {
     }
 
     /// Returns `true` if response buttons should be enabled for the currently
-    /// selected message: the message exists and has not yet been responded to.
+    /// selected message: the message exists, has not yet been responded to, and
+    /// is not orphaned.
     pub fn response_buttons_enabled(&self) -> bool {
         match self.selected_message() {
-            Some(msg) => msg.selected_response.is_none() && !msg.responses.is_empty(),
+            Some(msg) => msg.selected_response.is_none() && !msg.responses.is_empty() && !msg.is_orphaned,
             None => false,
         }
     }
@@ -116,6 +117,7 @@ mod tests {
             responses: vec!["Ack".into()],
             selected_response: None,
             is_read: false,
+            is_orphaned: false,
         }
     }
 
@@ -319,6 +321,18 @@ mod tests {
     fn response_buttons_disabled_when_message_has_no_responses() {
         let mut m = msg("m1");
         m.responses = vec![];
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![m], vec![]));
+        s.select_message("m1");
+        assert!(!s.response_buttons_enabled());
+    }
+
+    // Cycle 46: buttons disabled when message is orphaned
+    #[test]
+    fn response_buttons_disabled_when_message_is_orphaned() {
+        let mut m = msg("m1");
+        m.is_orphaned = true;
+        m.responses = vec![]; // orphaned messages have responses cleared
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![m], vec![]));
         s.select_message("m1");

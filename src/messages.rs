@@ -122,6 +122,8 @@ pub enum ViewMode {
     Radar,
     ScienceRadar,
     SystemChart,
+    /// The Comms officer has pushed a message to the viewscreen.
+    Comms,
 }
 
 impl Default for ViewMode {
@@ -187,6 +189,10 @@ pub struct CommsMessage {
     pub selected_response: Option<usize>,
     /// True once the player has opened the message.
     pub is_read: bool,
+    /// True when the owning scenario has unloaded; responses are disabled and
+    /// a "transmission ended" marker should be shown.
+    #[serde(default)]
+    pub is_orphaned: bool,
 }
 
 /// A contact the Comms operator can hail.

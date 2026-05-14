@@ -663,6 +663,7 @@ mod tests {
             state: GameState {
                 phase: GamePhase::InProgress,
                 players: vec![],
+                complexity: HashMap::new(),
                 world: Some(world.clone()),
             },
             ship_stations: crate::stations::ShipStations::default(),
@@ -713,6 +714,7 @@ mod tests {
             state: GameState {
                 phase: GamePhase::Lobby,
                 players: vec![],
+                complexity: HashMap::new(),
                 world: None,
             },
             ship_stations: crate::stations::ShipStations::default(),
@@ -819,7 +821,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.apply(&ServerMessage::ScienceTargetSuggestion { uuid: "some-entity".into() });
         s.apply(&ServerMessage::Welcome {
-            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations::ShipStations::default(),
         });
         assert!(s.science_target_suggestion.is_none());
@@ -986,7 +988,7 @@ mod tests {
             facings: vec![make_facing("Fore", 80, 100, true)],
         });
         s.apply(&ServerMessage::Welcome {
-            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations::ShipStations::default(),
         });
         assert!(s.shield_facings.is_empty());
@@ -1645,7 +1647,7 @@ mod tests {
             bonus: 1.0,
         });
         s.apply(&ServerMessage::Welcome {
-            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations::ShipStations::default(),
         });
         assert!(
@@ -1734,7 +1736,7 @@ mod tests {
             current_breakdown: None,
         };
         s.apply(&ServerMessage::Welcome {
-            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations::ShipStations::default(),
         });
         assert_eq!(s.power_levels, (2, 2, 2), "power_levels reset to default on Welcome");
@@ -1787,7 +1789,7 @@ mod tests {
             current_breakdown: Some((Console::Tactical, Shape::Circle)),
         });
         s.apply(&ServerMessage::Welcome {
-            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations::ShipStations::default(),
         });
         assert_eq!(s.repair_teams, [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle]);
@@ -1959,6 +1961,7 @@ mod tests {
             state: GameState {
                 phase: GamePhase::InProgress,
                 players: vec![],
+                complexity: HashMap::new(),
                 world: Some(world_with_runtime.clone()),
             },
             ship_stations: crate::stations::ShipStations::default(),
@@ -1986,6 +1989,7 @@ mod tests {
             state: GameState {
                 phase: GamePhase::InProgress,
                 players: vec![],
+                complexity: HashMap::new(),
                 world: Some(world_with_runtime),
             },
             ship_stations: crate::stations::ShipStations::default(),

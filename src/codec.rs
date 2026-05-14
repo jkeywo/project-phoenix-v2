@@ -34,6 +34,7 @@ impl MessageCodec for JsonCodec {
 mod tests {
     use super::*;
     use crate::messages::*;
+    use std::collections::HashMap;
 
     struct PrettyJsonCodec;
 
@@ -64,7 +65,7 @@ mod tests {
     }
 
     fn state() -> GameState {
-        GameState { phase: GamePhase::Lobby, players: vec![player()], world: None }
+        GameState { phase: GamePhase::Lobby, players: vec![player()], complexity: HashMap::new(), world: None }
     }
 
     fn empty_ship_stations() -> crate::stations::ShipStations {
@@ -381,6 +382,7 @@ mod tests {
             state: GameState {
                 phase: GamePhase::InProgress,
                 players: vec![player()],
+                complexity: HashMap::new(),
                 world: Some(WorldData {
                     entities: vec![EntitySnapshot {
                         uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(),
@@ -740,7 +742,7 @@ mod tests {
                 previous: None,
             },
         ]);
-        let ship_stations = ShipStations { configs, min_players: 1, max_players: 1 };
+        let ship_stations = ShipStations { configs, min_players: 1, max_players: 1, complexity_presets: std::collections::HashMap::new() };
         let msg = ServerMessage::Welcome { state: state(), ship_stations };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -1035,6 +1037,29 @@ mod tests {
             let decoded: EntityTag = serde_json::from_str(&json).unwrap();
             assert_eq!(*tag, decoded);
         }
+    }
+
+    // ── SetComplexity / ComplexityChanged round-trips ──────────────────
+
+    #[test]
+    fn client_set_complexity_round_trips() {
+        let msg = ClientMessage::SetComplexity { console: Console::Helm, preset_name: "Low".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_complexity_changed_round_trips() {
+        let msg = ServerMessage::ComplexityChanged { console: Console::Tactical, preset_name: "Full".into() };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn set_complexity_with_captain_chair_console_round_trips() {
+        let msg = ClientMessage::SetComplexity { console: Console::CaptainChair, preset_name: "Full".into() };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     // ── EntitySpawned / EntityDespawned round-trips ──────────────────────

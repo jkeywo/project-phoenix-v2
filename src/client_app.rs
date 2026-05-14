@@ -471,8 +471,13 @@ fn rebuild_lobby_ui_on_change(
                 let consoles = if p.consoles.is_empty() {
                     String::new()
                 } else {
-                    let names: Vec<&str> =
-                        p.consoles.iter().map(|c| c.display_name()).collect();
+                    let names: Vec<String> =
+                        p.consoles.iter().map(|c| {
+                            let preset = state.complexity.get(c)
+                                .map(|s| format!(" ({})", s))
+                                .unwrap_or_default();
+                            format!("{}{preset}", c.display_name())
+                        }).collect();
                     format!(" — {}", names.join(", "))
                 };
                 parent.spawn((
@@ -496,24 +501,33 @@ fn rebuild_lobby_ui_on_change(
 
 fn spawn_station_row(parent: &mut ChildSpawnerCommands, slot: &StationSlot) {
     let (label, station_for_click, bg, fg) = match slot {
-        StationSlot::Available { station, description } => (
-            format!("{}: available — {}", station, description),
+        StationSlot::Available { station, description, preset_names } => {
+            let presets = if preset_names.is_empty() { String::new() } else {
+                format!(" [{}]", preset_names.join(", "))
+            };
+            (format!("{}: available — {}{}", station, description, presets),
             Some(station.clone()),
             Color::srgb(0.13, 0.13, 0.27),
-            Color::srgb(0.93, 0.93, 1.0),
-        ),
-        StationSlot::Occupied { station, description, holder_name } => (
-            format!("{}: {} — {}", station, holder_name, description),
+            Color::srgb(0.93, 0.93, 1.0))
+        }
+        StationSlot::Occupied { station, description, holder_name, preset_names } => {
+            let presets = if preset_names.is_empty() { String::new() } else {
+                format!(" [{}]", preset_names.join(", "))
+            };
+            (format!("{}: {} — {}{}", station, holder_name, description, presets),
             None,
             Color::srgb(0.07, 0.07, 0.10),
-            Color::srgb(0.42, 0.49, 0.55),
-        ),
-        StationSlot::Mine { station, description } => (
-            format!("{}: Mine — {} (leave)", station, description),
+            Color::srgb(0.42, 0.49, 0.55))
+        }
+        StationSlot::Mine { station, description, preset_names } => {
+            let presets = if preset_names.is_empty() { String::new() } else {
+                format!(" [{}]", preset_names.join(", "))
+            };
+            (format!("{}: Mine — {} (leave){}", station, description, presets),
             None,
             Color::srgb(0.20, 0.24, 0.40),
-            Color::srgb(0.55, 0.70, 1.0),
-        ),
+            Color::srgb(0.55, 0.70, 1.0))
+        }
         StationSlot::Spectator { player_name } => (
             format!("{} — (spectating)", player_name),
             None,
@@ -552,7 +566,7 @@ fn handle_station_button_press(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        let slot = StationSlot::Available { station: s.clone(), description: String::new() };
+        let slot = StationSlot::Available { station: s.clone(), description: String::new(), preset_names: vec![] };
         if let Some(msg) = message_for_station_slot_click(&slot) {
             outbound.write(OutboundClientMessage(msg));
         }

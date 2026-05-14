@@ -9,6 +9,7 @@
 use crate::messages::{ClientMessage, Console, GamePhase, GameState, Player, ServerMessage};
 use crate::stations::ShipStations;
 use bevy::prelude::Resource;
+use std::collections::HashMap;
 
 /// The client's authoritative model of the shared lobby state.
 ///
@@ -21,6 +22,8 @@ pub struct LobbyState {
     pub players: Vec<Player>,
     /// Station configuration received from the server on `Welcome`.
     pub ship_stations: ShipStations,
+    /// Current per-console complexity preset selection.
+    pub complexity: HashMap<Console, String>,
 }
 
 impl Default for LobbyState {
@@ -29,6 +32,7 @@ impl Default for LobbyState {
             phase: GamePhase::Lobby,
             players: Vec::new(),
             ship_stations: ShipStations::default(),
+            complexity: HashMap::new(),
         }
     }
 }
@@ -40,6 +44,7 @@ impl LobbyState {
         self.phase = state.phase;
         self.players = state.players;
         self.ship_stations = ship_stations;
+        self.complexity = state.complexity;
     }
 
     /// Apply a single inbound `ServerMessage`. Variants that don't affect
@@ -83,6 +88,12 @@ impl LobbyState {
             }
             ServerMessage::GameStarted => {
                 self.phase = GamePhase::InProgress;
+            }
+            ServerMessage::ComplexityChanged { console, preset_name } => {
+                // Update the per-console preset in ship_stations or local state.
+                // The ship_stations carries complexity_presets (available presets),
+                // while we track the current selection in the clientside cache.
+                self.complexity.insert(console.clone(), preset_name.clone());
             }
             ServerMessage::SimState { .. }
             | ServerMessage::WorldSetup { .. }
@@ -131,11 +142,11 @@ pub enum ConsoleSlot {
 #[derive(Clone, Debug, PartialEq)]
 pub enum StationSlot {
     /// Station is unclaimed; clicking sends `SelectStation { station }`.
-    Available { station: String, description: String },
+    Available { station: String, description: String, preset_names: Vec<String> },
     /// Station is held by another player; row is disabled.
-    Occupied { station: String, description: String, holder_name: String },
+    Occupied { station: String, description: String, holder_name: String, preset_names: Vec<String> },
     /// Station is held by the local player; a "Leave" affordance should appear.
-    Mine { station: String, description: String },
+    Mine { station: String, description: String, preset_names: Vec<String> },
     /// A spectator (player with no station assignment), shown in arrival order.
     Spectator { player_name: String },
 }
@@ -245,19 +256,25 @@ impl<'a> LobbyView<'a> {
                 let holder = self.state.players.iter().find(|p| {
                     p.consoles.iter().any(|c| def.consoles.contains(c))
                 });
+                let preset_names: Vec<String> = def.consoles.iter()
+                    .map(|c| self.complexity_preset_for(c).unwrap_or("Full").to_string())
+                    .collect();
                 let slot = match holder {
                     Some(p) if p.token == self.my_token => StationSlot::Mine {
                         station: def.name.clone(),
                         description: def.description.clone(),
+                        preset_names: preset_names.clone(),
                     },
                     Some(p) => StationSlot::Occupied {
                         station: def.name.clone(),
                         description: def.description.clone(),
                         holder_name: p.name.clone(),
+                        preset_names: preset_names.clone(),
                     },
                     None => StationSlot::Available {
                         station: def.name.clone(),
                         description: def.description.clone(),
+                        preset_names,
                     },
                 };
                 slots.push(slot);
@@ -293,6 +310,11 @@ impl<'a> LobbyView<'a> {
     /// the lobby panel.  Only shown to spectators watching an active game.
     pub fn game_in_progress_banner(&self) -> bool {
         self.state.phase == GamePhase::InProgress && self.is_spectator()
+    }
+
+    /// Get the current complexity preset for a given console, if any.
+    pub fn complexity_preset_for(&self, console: &Console) -> Option<&str> {
+        self.state.complexity.get(console).map(|s| s.as_str())
     }
 
     /// True if every station at the current player count is filled,
@@ -411,6 +433,7 @@ mod tests {
             state: GameState {
                 phase: GamePhase::Lobby,
                 players: vec![p("a", "Alice", vec![Console::CaptainChair])],
+                complexity: HashMap::new(),
                 world: None,
             },
             ship_stations: crate::stations::ShipStations::default(),
@@ -715,7 +738,7 @@ consoles = ["Tactical"]
         let mut s = LobbyState::default();
         let stations = two_station_ship();
         s.apply(&ServerMessage::Welcome {
-            state: GameState { phase: GamePhase::Lobby, players: vec![], world: None },
+            state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: stations.clone(),
         });
         assert_eq!(s.ship_stations, stations);
@@ -850,6 +873,7 @@ consoles = ["Tactical"]
         let msg = message_for_station_slot_click(&StationSlot::Available {
             station: "Helm".into(),
             description: "Pilot".into(),
+            preset_names: vec!["Full".into()],
         });
         assert_eq!(msg, Some(ClientMessage::SelectStation { station: "Helm".into() }));
     }
@@ -860,6 +884,7 @@ consoles = ["Tactical"]
             station: "Helm".into(),
             description: "Pilot".into(),
             holder_name: "Alice".into(),
+            preset_names: vec!["Full".into()],
         });
         assert!(msg.is_none());
     }
@@ -869,6 +894,7 @@ consoles = ["Tactical"]
         let msg = message_for_station_slot_click(&StationSlot::Mine {
             station: "Helm".into(),
             description: "Pilot".into(),
+            preset_names: vec!["Full".into()],
         });
         assert!(msg.is_none());
     }
@@ -973,5 +999,45 @@ consoles = ["Tactical"]
         s.phase = GamePhase::InProgress;
         s.players = vec![p("me", "Me", vec![Console::Helm])];
         assert!(!LobbyView::new(&s, "me").game_in_progress_banner());
+    }
+
+    // ── ComplexityChanged ─────────────────────────────────────────────
+
+    #[test]
+    fn complexity_changed_updates_local_state() {
+        let mut s = LobbyState::default();
+        s.apply(&ServerMessage::ComplexityChanged { console: Console::Helm, preset_name: "Low".into() });
+        assert_eq!(s.complexity.get(&Console::Helm).map(|s| s.as_str()), Some("Low"));
+    }
+
+    #[test]
+    fn complexity_changed_overwrites_previous_value() {
+        let mut s = LobbyState::default();
+        s.complexity.insert(Console::Helm, "Full".into());
+        s.apply(&ServerMessage::ComplexityChanged { console: Console::Helm, preset_name: "Low".into() });
+        assert_eq!(s.complexity.get(&Console::Helm).map(|s| s.as_str()), Some("Low"));
+    }
+
+    #[test]
+    fn complexity_changed_for_unrelated_console_does_not_overwrite_others() {
+        let mut s = LobbyState::default();
+        s.complexity.insert(Console::Helm, "Full".into());
+        s.apply(&ServerMessage::ComplexityChanged { console: Console::Tactical, preset_name: "Low".into() });
+        assert_eq!(s.complexity.get(&Console::Helm).map(|s| s.as_str()), Some("Full"));
+    }
+
+    #[test]
+    fn complexity_preset_for_returns_preset_when_set() {
+        let mut s = LobbyState::default();
+        s.complexity.insert(Console::Helm, "Low".into());
+        let view = LobbyView::new(&s, "x");
+        assert_eq!(view.complexity_preset_for(&Console::Helm), Some("Low"));
+    }
+
+    #[test]
+    fn complexity_preset_for_returns_none_when_not_set() {
+        let s = LobbyState::default();
+        let view = LobbyView::new(&s, "x");
+        assert!(view.complexity_preset_for(&Console::Helm).is_none());
     }
 }

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 pub use crate::entity_tags::EntityTag;
 use crate::flag_kind::FlagKind;
@@ -181,6 +182,9 @@ pub struct Player {
 pub struct GameState {
     pub phase: GamePhase,
     pub players: Vec<Player>,
+    /// Current per-console complexity preset selection.
+    #[serde(default)]
+    pub complexity: HashMap<Console, String>,
     /// Static world data — `Some` only after `StartGame` has populated the
     /// world; `None` while in Lobby or before world initialisation.
     #[serde(default)]
@@ -393,6 +397,10 @@ pub enum ClientMessage {
     /// Decrease power allocation for a console. Validated server-side:
     /// sender must hold `Console::Power`.
     DecreasePower { console: Console },
+    /// Change the complexity preset for a console the sender holds.
+    /// Validated server-side: sender must hold the console and the preset
+    /// name must exist in the ship's complexity config.
+    SetComplexity { console: Console, preset_name: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -503,5 +511,10 @@ pub enum ServerMessage {
     /// The client removes it from its local world data idempotently.
     EntityDespawned {
         uuid: String,
+    },
+    /// Broadcast when a console's complexity preset changes.
+    ComplexityChanged {
+        console: Console,
+        preset_name: String,
     },
 }

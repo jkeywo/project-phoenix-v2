@@ -20,6 +20,15 @@ pub struct StationDef {
     pub previous: Option<String>,
 }
 
+/// Return the default available complexity presets for every console.
+fn default_complexity_presets() -> HashMap<Console, Vec<String>> {
+    let mut m = HashMap::new();
+    for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Science, Console::Power] {
+        m.insert(c.clone(), vec!["Low".into(), "Full".into()]);
+    }
+    m
+}
+
 /// The fully-parsed, validated station configuration.
 #[derive(Resource, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ShipStations {
@@ -27,6 +36,9 @@ pub struct ShipStations {
     pub configs: HashMap<u32, Vec<StationDef>>,
     pub min_players: u32,
     pub max_players: u32,
+    /// Per-console available complexity preset names.
+    #[serde(default = "default_complexity_presets")]
+    pub complexity_presets: HashMap<Console, Vec<String>>,
 }
 
 impl Default for ShipStations {
@@ -35,6 +47,7 @@ impl Default for ShipStations {
             configs: HashMap::new(),
             min_players: 0,
             max_players: 0,
+            complexity_presets: default_complexity_presets(),
         }
     }
 }
@@ -260,7 +273,7 @@ pub fn parse_and_validate(toml_str: &str) -> Result<ShipStations, StationConfigE
         }
     }
 
-    Ok(ShipStations { configs, min_players: min, max_players: max })
+    Ok(ShipStations { configs, min_players: min, max_players: max, complexity_presets: default_complexity_presets() })
 }
 
 /// Look up a station by player count and name. Returns `None` if the count

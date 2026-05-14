@@ -261,6 +261,11 @@
     let myName = localStorage.getItem('player-name') || randomName();
     localStorage.setItem('player-name', myName);
 
+    // ── Complexity preset persistence ──────────────────────────
+    // JSON map of console name → preset name, persisted from previous sessions.
+    let savedComplexity = {};
+    try { savedComplexity = JSON.parse(localStorage.getItem('complexity-presets')) || {}; } catch (_) {}
+
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
@@ -778,6 +783,19 @@
             consoles: consolesOf(p),
           }));
           setStatus('Connected');
+          // Sync complexity presets: send SetComplexity for any console the
+          // local player holds whose stored preference differs from the server.
+          if (msg.data.state.complexity) {
+            const serverComplexity = msg.data.state.complexity;
+            const mine = myConsoles(state);
+            for (const c of mine) {
+              const stored = savedComplexity[c];
+              const current = serverComplexity[c];
+              if (stored && stored !== current) {
+                send('SetComplexity', { console: c, preset_name: stored });
+              }
+            }
+          }
           break;
         case 'PlayerJoined':
           if (!state.players.find(p => p.token === msg.data.player.token)) {
@@ -906,6 +924,12 @@
             if (el) { el.textContent = 'Target destroyed'; el.style.color = '#aaa'; }
           }
           renderWeaponsRadar();
+          return;
+        }
+        case 'ComplexityChanged': {
+          const { console, preset_name } = msg.data;
+          savedComplexity[console] = preset_name;
+          localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
           return;
         }
         default:

@@ -58,6 +58,7 @@ impl Plugin for LobbyPlugin {
         let initial_cache = GameStateCache(GameState {
             phase: GamePhase::Lobby,
             players: vec![],
+            complexity: std::collections::HashMap::new(),
             world: None,
         });
         app.insert_resource(Sessions(SessionManager::new()))

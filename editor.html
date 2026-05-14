@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scenario Editor</title>
+  <link rel="stylesheet" href="editor/style.css">
+  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <script type="module">
+    import { parse, stringify } from 'https://esm.sh/smol-toml@1.3.1';
+    window.tomlParse = parse;
+    window.tomlStringify = stringify;
+  </script>
+</head>
+<body>
+  <div id="app">
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <div class="toolbar-group">
+        <div class="dropdown">
+          <button id="openFileBtn">Open File ▾</button>
+          <div class="dropdown-menu" id="openFileMenu">
+            <a href="#" id="openMapScenario">Open map/scenario…</a>
+            <a href="#" id="openEntitiesFolder">Open entities folder…</a>
+          </div>
+        </div>
+        <button id="saveAllBtn">Save All</button>
+        <button id="saveLayerBtn">Save Layer</button>
+      </div>
+      <div class="toolbar-group">
+        <span id="unsavedIndicator"></span>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main">
+      <!-- Left Panel -->
+      <div id="leftPanel">
+        <!-- Layers Section -->
+        <div id="layersSection">
+          <h3>LAYERS</h3>
+          <div id="layersList"></div>
+          <button id="addLayerBtn">+ Add Layer</button>
+        </div>
+
+        <!-- Entities Palette -->
+        <div id="entitiesSection">
+          <h3>ENTITIES</h3>
+          <div id="entitiesList"></div>
+          <button id="newEntityBtn">+ New</button>
+        </div>
+      </div>
+
+      <!-- Canvas -->
+      <div id="canvasContainer">
+        <div id="canvas"></div>
+        <div id="canvasControls">
+          <span id="zoomLevel">100%</span>
+        </div>
+      </div>
+
+      <!-- Right Panel (Properties) -->
+      <div id="rightPanel">
+        <h3>PROPERTIES</h3>
+        <div id="propertiesPanel">
+          <p class="placeholder">Select a spawn to edit properties</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Entity Modal -->
+  <div id="newEntityModal" class="modal hidden">
+    <div class="modal-content">
+      <h2>New Entity</h2>
+      <div class="template-picker">
+        <button class="template-btn" data-template="ship">
+          <span class="color-dot ship"></span>
+          Ship
+        </button>
+        <button class="template-btn" data-template="station">
+          <span class="color-dot station"></span>
+          Station
+        </button>
+        <button class="template-btn" data-template="asteroid">
+          <span class="color-dot asteroid"></span>
+          Asteroid
+        </button>
+        <button class="template-btn" data-template="region">
+          <span class="color-dot region"></span>
+          Region
+        </button>
+        <button class="template-btn" data-template="custom">
+          <span class="color-dot custom"></span>
+          Custom
+        </button>
+      </div>
+      <form id="newEntityForm">
+        <div class="form-section">
+          <label>
+            Name:
+            <input type="text" id="entityName" required>
+          </label>
+          <label>
+            Tags:
+            <input type="text" id="entityTags" placeholder="ship, faction">
+          </label>
+        </div>
+
+        <!-- Physics fields (ship/station/asteroid) -->
+        <div class="form-section physics-fields hidden">
+          <label>
+            Collider Shape:
+            <select id="colliderShape">
+              <option value="Ball">Ball</option>
+              <option value="Cylinder">Cylinder</option>
+              <option value="Capsule">Capsule</option>
+            </select>
+          </label>
+          <label>
+            Radius:
+            <input type="number" id="colliderRadius" step="0.1" value="8.0">
+          </label>
+          <label>
+            Hull Integrity:
+            <input type="number" id="hullIntegrity" step="1" value="100">
+          </label>
+        </div>
+
+        <!-- Region fields -->
+        <div class="form-section region-fields hidden">
+          <label>
+            Shape Type:
+            <select id="regionShape">
+              <option value="sphere">Sphere</option>
+              <option value="cylinder">Cylinder</option>
+              <option value="box">Box</option>
+            </select>
+          </label>
+          <label>
+            Radius:
+            <input type="number" id="regionRadius" step="1" value="100">
+          </label>
+          <div class="checkbox-group">
+            <label><input type="checkbox" id="effectCommsJam"> Comms Jam</label>
+            <label><input type="checkbox" id="effectSensorBlind"> Sensor Blind</label>
+            <label><input type="checkbox" id="effectDamageZone"> Damage Zone</label>
+            <label><input type="checkbox" id="effectSlowZone"> Slow Zone</label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <label>
+            Raw TOML:
+            <textarea id="rawToml" rows="10"></textarea>
+          </label>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" id="cancelNewEntity">Cancel</button>
+          <button type="submit">Save to assets/entities/</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script type="module" src="editor/app.js"></script>
+</body>
+</html>

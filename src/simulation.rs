@@ -209,7 +209,7 @@ pub struct BreakdownQueueResource {
     pub queue: BreakdownQueue,
     /// Cumulative damage taken since game start (tracks 10-HP bucket crossings).
     pub cumulative_damage: f32,
-    rng: rand::rngs::SmallRng,
+    pub(crate) rng: rand::rngs::SmallRng,
 }
 
 impl Default for BreakdownQueueResource {

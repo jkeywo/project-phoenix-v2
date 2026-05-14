@@ -298,6 +298,8 @@ function finishInit() {
   window.wasm_receive_message = wasmBindings.wasm_receive_message;
   window.set_message_callback = wasmBindings.set_message_callback;
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
+  window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
+  window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
 
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.
@@ -335,6 +337,12 @@ function showFatalError(message) {
 function startServer() {
   const spinner = document.getElementById('wasm-spinner');
   if (spinner) spinner.style.display = 'none';
+
+  // Read ?debug_regions=1 URL parameter before WASM init
+  const urlParams = new URLSearchParams(location.search);
+  if (urlParams.get('debug_regions') === '1') {
+    wasm_set_debug_regions(true);
+  }
 
   set_message_callback(routeOutbound);
   

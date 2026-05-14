@@ -45,6 +45,9 @@ pub mod bridge;
 #[cfg(feature = "server")]
 pub mod viewscreen_border;
 
+#[cfg(feature = "server")]
+pub mod debug_overlay;
+
 #[cfg(feature = "client")]
 pub mod client_bridge;
 

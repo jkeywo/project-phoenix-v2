@@ -39,6 +39,10 @@ thread_local! {
     /// Validated ShipStations config, stored by wasm_validate_stations() so
     /// wasm_init() can insert it as a Bevy resource.
     static SHIP_STATIONS: RefCell<Option<ShipStations>> = const { RefCell::new(None) };
+
+    /// Whether `?debug_regions=1` was specified in the URL. Set by JS via
+    /// `wasm_set_debug_regions()` before `wasm_init()`.
+    static DEBUG_REGIONS_ENABLED: RefCell<bool> = const { RefCell::new(false) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -88,8 +92,16 @@ pub fn wasm_init() {
     .add_plugins(LobbyPlugin)
     .add_plugins(SimulationPlugin)
     .add_plugins(RendererPlugin)
-    .add_plugins(ViewscreenBorderPlugin)
-    .add_systems(PreUpdate, (drain_inbound, drain_disconnects))
+    .add_plugins(ViewscreenBorderPlugin);
+
+    // Conditionally add the debug overlay when ?debug_regions=1 is present.
+    DEBUG_REGIONS_ENABLED.with(|v| {
+        if *v.borrow() {
+            app.add_plugins(crate::debug_overlay::DebugOverlayPlugin { enabled: true });
+        }
+    });
+
+    app.add_systems(PreUpdate, (drain_inbound, drain_disconnects))
     .add_systems(PostUpdate, flush_outbound);
 
     // Insert the validated ShipStations resource if it was pre-validated.
@@ -141,6 +153,21 @@ pub fn set_message_callback(callback: Function) {
     OUTBOUND_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
     });
+}
+
+/// Called by JS to set the debug_regions flag from the URL parameter.
+/// Must be called before `wasm_init()` to take effect.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_debug_regions(enabled: bool) {
+    DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = enabled);
+}
+
+/// Called by JS (or smoke tests) to query whether debug regions are enabled.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_is_debug_regions_enabled() -> bool {
+    DEBUG_REGIONS_ENABLED.with(|v| *v.borrow())
 }
 
 // ── Config Preload Exports ──────────────────────────────────────────────────

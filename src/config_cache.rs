@@ -64,8 +64,8 @@ thread_local! {
     static IN_FLIGHT: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
     
     /// Cache of loaded complexity configs by path.
-    static COMPLEXITY_CACHE: RefCell<HashMap<String, crate::complexity::ComplexityConfig>> =
-        const { RefCell::new(HashMap::new()) };
+    static COMPLEXITY_CACHE: RefCell<Option<HashMap<String, crate::complexity::ComplexityConfig>>> =
+        const { RefCell::new(None) };
 
     /// JS callback for requesting config fetches. Set by set_config_request_callback.
     static CONFIG_REQUEST_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
@@ -225,7 +225,7 @@ pub fn wasm_load_complexity(path: String, toml_str: String) -> Result<JsValue, J
     match crate::complexity::parse_complexity_config(&toml_str) {
         Ok(config) => {
             COMPLEXITY_CACHE.with(|cache| {
-                cache.borrow_mut().insert(path.clone(), config);
+                cache.borrow_mut().get_or_insert_with(HashMap::new).insert(path.clone(), config);
             });
 
             IN_FLIGHT.with(|in_flight| {
@@ -278,7 +278,7 @@ fn queue_complexity_refs(config: &EntityConfig) {
     let paths = config.complexity_toml_paths();
     for p in paths {
         COMPLEXITY_CACHE.with(|cache| {
-            if !cache.borrow().contains_key(&p) {
+            if cache.borrow().as_ref().map_or(true, |m| !m.contains_key(&p)) {
                 queue_and_fire(p);
             }
         });
@@ -288,7 +288,7 @@ fn queue_complexity_refs(config: &EntityConfig) {
 /// Get complexity resources.
 #[cfg(target_arch = "wasm32")]
 pub fn get_complexity_resources() -> ComplexityResources {
-    ComplexityResources(COMPLEXITY_CACHE.with(|cache| cache.borrow().clone()))
+    ComplexityResources(COMPLEXITY_CACHE.with(|cache| cache.borrow().clone().unwrap_or_default()))
 }
 
 /// Check if the preload sequence is complete (all configs loaded).

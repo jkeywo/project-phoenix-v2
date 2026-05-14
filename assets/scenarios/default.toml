@@ -6,16 +6,16 @@
 # choosing "We require docking clearance" adds a mandatory docking objective.
 
 [[spawn]]
-name       = "starbase_alpha"
+name       = "Starbase Alpha"
 entity_path = "assets/entities/station_outpost.toml"
 anchor     = "starbase_alpha"
 
 # ── Comms templates ────────────────────────────────────────────────────────
 
 [[comms]]
-from    = "starbase_alpha"
+from    = "Starbase Alpha"
 trigger = "on_hailed"
-entity  = "starbase_alpha"
+entity  = "Starbase Alpha"
 message = "USS Phoenix, this is Starbase Alpha. Please state your business."
 
   [[comms.response]]

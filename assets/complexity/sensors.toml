@@ -1,0 +1,10 @@
+[[preset]]
+name = "Low"
+hidden_elements = ["shield_frequency_readout"]
+
+[preset.ai]
+auto_hint = { auto_hint_delay_secs = 3.0 }
+
+[[preset]]
+name = "Std"
+hidden_elements = []

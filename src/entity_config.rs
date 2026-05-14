@@ -10,11 +10,11 @@ use crate::region_effects::RegionEffectsConfig;
 /// Each entry in a `[[behaviour.state]]` array defines the parameters
 /// for one state. The `name` field is used as a stable identifier for
 /// per-spawn `[spawn.overrides]` by-name replacement.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StateConfig {
     /// Stable name for this state (used in `initial_state` and overrides).
     pub name: String,
-    /// State kind: `"idle"` or `"patrolling"`.
+    /// State kind: `"idle"`, `"patrolling"`, `"pursuing"`, or `"attacking"`.
     #[serde(default)]
     pub kind: String,
     /// Ordered waypoint anchor names (used by `patrolling`).
@@ -26,6 +26,11 @@ pub struct StateConfig {
     /// Desired forward speed fraction [0, 1], clamped at load time.
     #[serde(default)]
     pub target_speed: f32,
+    /// Distance to maintain from target (world units) for the `attacking` state.
+    /// The AI thrusts at `target_speed` when further than this, and holds station
+    /// (thrust = 0) when closer.
+    #[serde(default)]
+    pub maintain_range: f32,
 }
 
 impl StateConfig {

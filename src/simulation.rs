@@ -1324,6 +1324,7 @@ fn broadcast_sim_state(
                     yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
                     hull_fraction,
                     flags: vec![],
+                    shields: None,
                 }
             })
             .collect();

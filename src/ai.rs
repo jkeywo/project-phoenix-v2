@@ -6,6 +6,7 @@
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
+use crate::messages::ShieldFacingStatus;
 
 // ── AiState ───────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,14 @@ pub enum AiState {
         /// Desired thrust fraction [0, 1].
         target_speed: f32,
     },
+    /// Close to within `maintain_range` of the target and hold station there,
+    /// stripping shields with phasers and landing torpedoes on depleted facings.
+    Attacking {
+        /// Distance to maintain from target (world units). Thrust = 0 when inside.
+        maintain_range: f32,
+        /// Desired thrust fraction [0, 1] when outside `maintain_range`.
+        target_speed: f32,
+    },
 }
 
 impl Default for AiState {
@@ -44,6 +53,7 @@ impl AiState {
             AiState::Idle => "idle",
             AiState::Patrolling { .. } => "patrolling",
             AiState::Pursuing { .. } => "pursuing",
+            AiState::Attacking { .. } => "attacking",
         }
     }
 }
@@ -187,6 +197,12 @@ pub struct WorldEntity {
     pub position: [f32; 3],
     /// Faction UUID, if any.
     pub faction: Option<Uuid>,
+    /// Four-quadrant shield state (from the entity broadcast), if the entity has shields.
+    pub shields: Option<Vec<ShieldFacingStatus>>,
+    /// Hull integrity fraction [0, 1], if known.
+    pub hull_fraction: Option<f32>,
+    /// Yaw in radians (Y-up, forward = -Z at yaw 0), if known.
+    pub yaw: Option<f32>,
 }
 
 /// A read-only snapshot of world state visible to the AI.
@@ -206,6 +222,13 @@ pub struct WorldView {
     pub attacker_this_tick: Option<Uuid>,
     /// Faction of this AI entity itself (used by `enemy_in_range`).
     pub self_faction: Option<Uuid>,
+    /// Effective beam/weapons range of this AI entity (world units), if it has weapons.
+    /// Used by the `in_weapons_range` transition condition and `Attacking` state.
+    pub entity_weapons_range: Option<f32>,
+    /// `true` when the AI entity's phasers are ready to fire this tick.
+    pub entity_phaser_ready: bool,
+    /// Name of the first ready torpedo tube, if any. `None` = no tubes loaded.
+    pub torpedo_tube_ready: Option<String>,
 }
 
 // ── AiTickOutput ─────────────────────────────────────────────────────────────
@@ -290,9 +313,13 @@ pub fn tick(
         AiState::Pursuing { target_speed } => {
             tick_pursuing(controller, world_view, *target_speed)
         }
+        AiState::Attacking { maintain_range, target_speed } => {
+            tick_attacking(controller, world_view, *maintain_range, *target_speed)
+        }
     }
 }
 
+/// Evaluate all transitions in declaration order; return the first that fires.
 fn tick_pursuing(
     controller: &AiController,
     world_view: &WorldView,
@@ -342,6 +369,138 @@ fn tick_pursuing(
         new_state: controller.current_state.clone(),
         new_state_name: None,
         inputs: vec![AiInput::Helm { thrust: target_speed, steering }],
+        new_blackboard: None,
+    }
+}
+
+// ── facing_quadrant_depleted ──────────────────────────────────────────────────
+
+/// Returns the shield label for the quadrant of `target` facing the AI's position.
+///
+/// Quadrant is determined by projecting `(ai_pos - target_pos)` into the
+/// target's local frame:
+/// - `atan2(dot_right, dot_fwd)` in `[-π/4, π/4]` → "Fore"
+/// - in `[3π/4, π] ∪ [-π, -3π/4]` → "Aft"
+/// - in `[π/4, 3π/4]` → "Starboard"
+/// - in `[-3π/4, -π/4]` → "Port"
+fn facing_quadrant_label(ai_pos: [f32; 3], target_pos: [f32; 3], target_yaw: f32) -> &'static str {
+    let dx = ai_pos[0] - target_pos[0];
+    let dz = ai_pos[2] - target_pos[2];
+    // Target's local forward (XZ): (-sin(yaw), -cos(yaw))
+    let fwd_x = -target_yaw.sin();
+    let fwd_z = -target_yaw.cos();
+    // Target's local right (starboard), CCW-perpendicular of forward in XZ: (cos(yaw), -sin(yaw))
+    let right_x = target_yaw.cos();
+    let right_z = -target_yaw.sin();
+    let dot_fwd = dx * fwd_x + dz * fwd_z;
+    let dot_right = dx * right_x + dz * right_z;
+    let angle = dot_right.atan2(dot_fwd); // in (-π, π]
+    let quarter = PI / 4.0;
+    let three_quarter = 3.0 * PI / 4.0;
+    if angle >= -quarter && angle < quarter {
+        "Fore"
+    } else if angle >= three_quarter || angle < -three_quarter {
+        "Aft"
+    } else if angle >= quarter {
+        "Starboard"
+    } else {
+        "Port"
+    }
+}
+
+/// Returns `true` if the given shield facing is depleted (offline or HP ≤ 0).
+fn shield_facing_depleted(f: &ShieldFacingStatus) -> bool {
+    !f.online || f.hp <= 0
+}
+
+/// Returns `true` when the AI should fire a torpedo at the target.
+///
+/// Torpedoes fire when:
+/// - A tube is ready (`torpedo_tube_ready` is `Some`), AND
+/// - The target has no shield data (treat as always-down), OR
+///   the facing quadrant's shield is depleted.
+fn should_fire_torpedo(
+    world_view: &WorldView,
+    target: &WorldEntity,
+) -> bool {
+    if world_view.torpedo_tube_ready.is_none() {
+        return false;
+    }
+    match &target.shields {
+        None => true, // no shield data → treat as always-down
+        Some(facings) if facings.is_empty() => true,
+        Some(facings) => {
+            let target_yaw = target.yaw.unwrap_or(0.0);
+            let label = facing_quadrant_label(world_view.entity_pos, target.position, target_yaw);
+            facings.iter().find(|f| f.label == label)
+                .map(|f| shield_facing_depleted(f))
+                .unwrap_or(true) // quadrant not found → treat as down
+        }
+    }
+}
+
+fn tick_attacking(
+    controller: &AiController,
+    world_view: &WorldView,
+    maintain_range: f32,
+    target_speed: f32,
+) -> AiTickOutput {
+    let target_uuid = match controller.blackboard.target {
+        Some(uuid) => uuid,
+        None => return AiTickOutput {
+            new_state: controller.current_state.clone(),
+            new_state_name: None,
+            inputs: vec![],
+            new_blackboard: None,
+        },
+    };
+
+    let target_entity = match world_view.entities.iter().find(|e| e.uuid == target_uuid) {
+        Some(e) => e,
+        None => return AiTickOutput {
+            new_state: controller.current_state.clone(),
+            new_state_name: None,
+            inputs: vec![],
+            new_blackboard: None,
+        },
+    };
+
+    let pos = world_view.entity_pos;
+    let dx = target_entity.position[0] - pos[0];
+    let dz = target_entity.position[2] - pos[2];
+    let dist = (dx * dx + dz * dz).sqrt();
+
+    // Steer toward target always.
+    let (steering, thrust) = if dist < 1.0 {
+        (0.0_f32, 0.0_f32)
+    } else {
+        let inv_dist = 1.0 / dist;
+        let dir = [dx * inv_dist, dz * inv_dist];
+        let s = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+        // Thrust: 0 inside maintain_range, target_speed outside; never reverses.
+        let t = if dist <= maintain_range { 0.0 } else { target_speed };
+        (s, t)
+    };
+
+    let mut inputs = vec![AiInput::Helm { thrust, steering }];
+
+    // Fire phasers when in beam range and ready.
+    let beam_range = world_view.entity_weapons_range.unwrap_or(40.0);
+    if dist <= beam_range && world_view.entity_phaser_ready {
+        inputs.push(AiInput::SetTarget { uuid: target_uuid });
+        inputs.push(AiInput::FirePhaser);
+    }
+
+    // Fire torpedo when facing quadrant is depleted (or target has no shields).
+    if should_fire_torpedo(world_view, target_entity) {
+        let tube = world_view.torpedo_tube_ready.clone().unwrap(); // safe: checked in should_fire_torpedo
+        inputs.push(AiInput::FireTorpedo { tube });
+    }
+
+    AiTickOutput {
+        new_state: controller.current_state.clone(),
+        new_state_name: None,
+        inputs,
         new_blackboard: None,
     }
 }
@@ -413,6 +572,27 @@ fn evaluate_transitions(
                     false
                 }
             }
+            "in_weapons_range" => {
+                // Fires when the blackboard target is within the entity's weapons range.
+                let weapons_range = world_view.entity_weapons_range.unwrap_or(40.0);
+                if let Some(target_uuid) = controller.blackboard.target {
+                    let pos = world_view.entity_pos;
+                    let in_range = world_view.entities.iter().any(|e| {
+                        if e.uuid != target_uuid { return false; }
+                        let dx = e.position[0] - pos[0];
+                        let dz = e.position[2] - pos[2];
+                        dx * dx + dz * dz <= weapons_range * weapons_range
+                    });
+                    if in_range {
+                        new_bb.on_attacked_armed = true;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
             _ => false,
         };
 
@@ -443,6 +623,10 @@ fn build_state_by_name(behaviour: &crate::entity_config::BehaviourConfig, name: 
                 target_speed: sc.target_speed,
             },
             "pursuing" => AiState::Pursuing {
+                target_speed: sc.target_speed,
+            },
+            "attacking" => AiState::Attacking {
+                maintain_range: sc.maintain_range,
                 target_speed: sc.target_speed,
             },
             _ => AiState::Idle,
@@ -594,6 +778,10 @@ mod tests {
         tick(controller, world, behaviour, registry)
     }
 
+    /// Construct a minimal `WorldEntity` with only required fields, rest defaulted.
+    fn make_world_entity(uuid: Uuid, position: [f32; 3], faction: Option<Uuid>) -> WorldEntity {
+        WorldEntity { uuid, position, faction, shields: None, hull_fraction: None, yaw: None }
+    }
     fn fed_uuid() -> Uuid { Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap() }
     fn pirate_uuid() -> Uuid { Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap() }
 
@@ -861,6 +1049,7 @@ mod tests {
                 waypoints: vec!["wp1".into(), "wp2".into()],
                 loop_path: true,
                 target_speed: 0.6,
+                maintain_range: 0.0,
             }],
             transition: vec![],
         };
@@ -892,6 +1081,7 @@ mod tests {
                 waypoints: vec![],
                 loop_path: false,
                 target_speed: 0.9,
+                maintain_range: 0.0,
             }],
             transition: vec![],
         };
@@ -913,7 +1103,7 @@ mod tests {
         WorldView {
             entity_pos: [0.0, 0.0, 0.0],
             entity_yaw: 0.0,
-            entities: vec![WorldEntity { uuid: entity_uuid, position: entity_pos, faction: entity_faction }],
+            entities: vec![make_world_entity(entity_uuid, entity_pos, entity_faction)],
             ..Default::default()
         }
     }
@@ -987,8 +1177,8 @@ mod tests {
         BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
@@ -1067,8 +1257,8 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
@@ -1082,7 +1272,7 @@ mod tests {
         // Add a hostile entity within range
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![WorldEntity { uuid: enemy_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) }],
+            entities: vec![WorldEntity { uuid: enemy_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1099,8 +1289,8 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
@@ -1112,7 +1302,7 @@ mod tests {
         let registry = mutual_hostile_registry();
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![WorldEntity { uuid: pirate_id, position: [50.0, 0.0, 0.0], faction: Some(pirate_uuid()) }],
+            entities: vec![WorldEntity { uuid: pirate_id, position: [50.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1129,8 +1319,8 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
@@ -1143,7 +1333,7 @@ mod tests {
         // Friendly = same faction as self
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![WorldEntity { uuid: friendly_id, position: [50.0, 0.0, 0.0], faction: Some(fed_uuid()) }],
+            entities: vec![WorldEntity { uuid: friendly_id, position: [50.0, 0.0, 0.0], faction: Some(fed_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1158,8 +1348,8 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()),
@@ -1171,7 +1361,7 @@ mod tests {
         let registry = mutual_hostile_registry();
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![WorldEntity { uuid: pirate_id, position: [200.0, 0.0, 0.0], faction: Some(pirate_uuid()) }],
+            entities: vec![WorldEntity { uuid: pirate_id, position: [200.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1185,8 +1375,8 @@ mod tests {
         BehaviourConfig {
             initial_state: "chase".into(),
             state: vec![
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("chase".into()),
@@ -1217,7 +1407,7 @@ mod tests {
         let mut ctrl = pursuing_controller(Some(target_id), 0.8);
         ctrl.current_state_name = "chase".to_string();
         let world = WorldView {
-            entities: vec![WorldEntity { uuid: target_id, position: [100.0, 0.0, 0.0], faction: None }],
+            entities: vec![WorldEntity { uuid: target_id, position: [100.0, 0.0, 0.0], faction: None, shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let behaviour = chase_behaviour_with_target_destroyed_to_patrol();
@@ -1250,9 +1440,9 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "stateA".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.6 },
-                StateConfig { name: "stateB".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.9 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "stateA".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.6, maintain_range: 0.0 },
+                StateConfig { name: "stateB".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.9, maintain_range: 0.0 },
             ],
             transition: vec![
                 TransitionConfig {
@@ -1273,7 +1463,7 @@ mod tests {
         let world = WorldView {
             self_faction: Some(fed_uuid()),
             attacker_this_tick: Some(attacker_id),
-            entities: vec![WorldEntity { uuid: attacker_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) }],
+            entities: vec![WorldEntity { uuid: attacker_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1291,8 +1481,8 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Single("patrol".into()), // single string
@@ -1314,9 +1504,9 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "idle_wait".into(), kind: "idle".into(), waypoints: vec![], loop_path: false, target_speed: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "idle_wait".into(), kind: "idle".into(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Multi(vec!["patrol".into(), "idle_wait".into()]), // list
@@ -1340,9 +1530,9 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "patrol".into(),
             state: vec![
-                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5 },
-                StateConfig { name: "idle_wait".into(), kind: "idle".into(), waypoints: vec![], loop_path: false, target_speed: 0.0 },
-                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8 },
+                StateConfig { name: "patrol".into(), kind: "patrolling".into(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0 },
+                StateConfig { name: "idle_wait".into(), kind: "idle".into(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0 },
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
             ],
             transition: vec![TransitionConfig {
                 from: StringOrVec::Multi(vec!["patrol".into(), "idle_wait".into()]),
@@ -1356,5 +1546,325 @@ mod tests {
         // "chase" is not in the from list → no transition should have fired
         assert!(output.new_state_name.is_none(),
             "transition must not fire when current state is not in from list");
+    }
+
+    // ── Attacking state ────────────────────────────────────────────────────
+
+    fn make_attacking_controller(pos: [f32; 3], _yaw: f32, target: Uuid) -> AiController {
+        let mut ctrl = AiController::new(pos, 0.0);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        ctrl.current_state_name = "attack".into();
+        ctrl.blackboard.target = Some(target);
+        ctrl
+    }
+
+    #[test]
+    fn attacking_kind_name_is_attacking() {
+        let state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        assert_eq!(state.kind_name(), "attacking");
+    }
+
+    #[test]
+    fn build_state_by_name_attacking_builds_attacking_variant() {
+        let config = BehaviourConfig {
+            initial_state: "attack".into(),
+            state: vec![StateConfig {
+                name: "attack".into(),
+                kind: "attacking".into(),
+                waypoints: vec![],
+                loop_path: false,
+                target_speed: 0.8,
+                maintain_range: 30.0,
+            }],
+            transition: vec![],
+        };
+        let state = build_initial_state(&config);
+        assert_eq!(state, AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 });
+    }
+
+    #[test]
+    fn tick_attacking_no_target_emits_no_inputs() {
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        // No target in blackboard
+        let world = WorldView::default();
+        let output = do_tick(&ctrl, &world);
+        assert!(output.inputs.is_empty(), "no target → no inputs");
+    }
+
+    #[test]
+    fn tick_attacking_target_not_in_world_emits_no_inputs() {
+        let target_id = Uuid::new_v4();
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        ctrl.blackboard.target = Some(target_id);
+        // Target not in world entities
+        let world = WorldView::default();
+        let output = do_tick(&ctrl, &world);
+        assert!(output.inputs.is_empty(), "absent target → no inputs");
+    }
+
+    #[test]
+    fn tick_attacking_outside_maintain_range_thrusts() {
+        let target_id = Uuid::new_v4();
+        // AI at origin, target 50 units away — outside maintain_range=30
+        let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![make_world_entity(target_id, [0.0, 0.0, -50.0], None)],
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let helm = output.inputs.iter().find(|i| matches!(i, AiInput::Helm { .. }));
+        if let Some(AiInput::Helm { thrust, .. }) = helm {
+            assert!(*thrust > 0.0, "should thrust when outside maintain_range, got {thrust}");
+        } else {
+            panic!("no Helm input emitted");
+        }
+    }
+
+    #[test]
+    fn tick_attacking_inside_maintain_range_zero_thrust() {
+        let target_id = Uuid::new_v4();
+        // AI at origin, target 10 units away — inside maintain_range=30
+        let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![make_world_entity(target_id, [0.0, 0.0, -10.0], None)],
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let helm = output.inputs.iter().find(|i| matches!(i, AiInput::Helm { .. }));
+        if let Some(AiInput::Helm { thrust, .. }) = helm {
+            assert_eq!(*thrust, 0.0, "should not thrust when inside maintain_range");
+        } else {
+            panic!("no Helm input emitted");
+        }
+    }
+
+    #[test]
+    fn tick_attacking_steers_toward_target() {
+        let target_id = Uuid::new_v4();
+        // AI facing +Z (yaw = π), target is to the right (+X). Expect positive steering.
+        let ctrl = make_attacking_controller([0.0, 0.0, 0.0], std::f32::consts::PI, target_id);
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: std::f32::consts::PI,
+            entities: vec![make_world_entity(target_id, [50.0, 0.0, 0.0], None)],
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let helm = output.inputs.iter().find(|i| matches!(i, AiInput::Helm { .. }));
+        if let Some(AiInput::Helm { steering, .. }) = helm {
+            assert!(*steering != 0.0, "should steer toward off-axis target");
+        } else {
+            panic!("no Helm input emitted");
+        }
+    }
+
+    #[test]
+    fn tick_attacking_fires_phaser_when_in_range_and_ready() {
+        let target_id = Uuid::new_v4();
+        let mut ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
+        ctrl.current_state = AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 };
+        // Target within weapons range
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![make_world_entity(target_id, [0.0, 0.0, -20.0], None)],
+            entity_weapons_range: Some(40.0),
+            entity_phaser_ready: true,
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let fires_phaser = output.inputs.iter().any(|i| matches!(i, AiInput::FirePhaser));
+        assert!(fires_phaser, "should fire phaser when in range and ready");
+    }
+
+    #[test]
+    fn tick_attacking_does_not_fire_phaser_when_not_ready() {
+        let target_id = Uuid::new_v4();
+        let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![make_world_entity(target_id, [0.0, 0.0, -20.0], None)],
+            entity_weapons_range: Some(40.0),
+            entity_phaser_ready: false,
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let fires_phaser = output.inputs.iter().any(|i| matches!(i, AiInput::FirePhaser));
+        assert!(!fires_phaser, "should not fire phaser when not ready");
+    }
+
+    #[test]
+    fn tick_attacking_does_not_fire_phaser_when_out_of_range() {
+        let target_id = Uuid::new_v4();
+        let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![make_world_entity(target_id, [0.0, 0.0, -60.0], None)],
+            entity_weapons_range: Some(40.0),
+            entity_phaser_ready: true,
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let fires_phaser = output.inputs.iter().any(|i| matches!(i, AiInput::FirePhaser));
+        assert!(!fires_phaser, "should not fire phaser when out of range");
+    }
+
+    #[test]
+    fn tick_attacking_fires_torpedo_when_facing_shield_depleted_and_tube_ready() {
+        let target_id = Uuid::new_v4();
+        let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
+        // AI at origin. Target at [0,0,-20] with yaw=PI (facing +Z).
+        // AI is at +Z relative to target → AI is in the "Fore" quadrant → "Fore" shield depleted.
+        let target = WorldEntity {
+            uuid: target_id,
+            position: [0.0, 0.0, -20.0],
+            faction: None,
+            yaw: Some(std::f32::consts::PI),
+            shields: Some(vec![
+                ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Port".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Starboard".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+            ]),
+            hull_fraction: Some(1.0),
+        };
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![target],
+            torpedo_tube_ready: Some("tube_1".into()),
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let fires_torp = output.inputs.iter().any(|i| matches!(i, AiInput::FireTorpedo { .. }));
+        assert!(fires_torp, "should fire torpedo when facing shield is depleted and tube ready");
+    }
+
+    #[test]
+    fn tick_attacking_does_not_fire_torpedo_when_facing_shield_intact() {
+        let target_id = Uuid::new_v4();
+        let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
+        let target = WorldEntity {
+            uuid: target_id,
+            position: [0.0, 0.0, -20.0],
+            faction: None,
+            yaw: Some(0.0),
+            shields: Some(vec![
+                ShieldFacingStatus { label: "Fore".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Port".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                ShieldFacingStatus { label: "Starboard".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+            ]),
+            hull_fraction: Some(1.0),
+        };
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![target],
+            torpedo_tube_ready: Some("tube_1".into()),
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let fires_torp = output.inputs.iter().any(|i| matches!(i, AiInput::FireTorpedo { .. }));
+        assert!(!fires_torp, "should not fire torpedo when facing shield is intact");
+    }
+
+    #[test]
+    fn tick_attacking_does_not_fire_torpedo_when_no_tube_ready() {
+        let target_id = Uuid::new_v4();
+        let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
+        let target = WorldEntity {
+            uuid: target_id,
+            position: [0.0, 0.0, -20.0],
+            faction: None,
+            yaw: Some(0.0),
+            shields: Some(vec![
+                ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: true, offline_remaining: 0.0 },
+            ]),
+            hull_fraction: Some(1.0),
+        };
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_yaw: 0.0,
+            entities: vec![target],
+            torpedo_tube_ready: None,
+            ..Default::default()
+        };
+        let output = do_tick(&ctrl, &world);
+        let fires_torp = output.inputs.iter().any(|i| matches!(i, AiInput::FireTorpedo { .. }));
+        assert!(!fires_torp, "should not fire torpedo when no tube is ready");
+    }
+
+    #[test]
+    fn in_weapons_range_transition_fires_when_target_in_range() {
+        let target_id = Uuid::new_v4();
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Pursuing { target_speed: 0.8 };
+        ctrl.current_state_name = "chase".into();
+        ctrl.blackboard.target = Some(target_id);
+
+        let behaviour = BehaviourConfig {
+            initial_state: "chase".into(),
+            state: vec![
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "attack".into(), kind: "attacking".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 30.0 },
+            ],
+            transition: vec![TransitionConfig {
+                from: StringOrVec::Single("chase".into()),
+                to: "attack".into(),
+                condition: "in_weapons_range".into(),
+                radius: None,
+            }],
+        };
+        // entity_weapons_range=40, target at 20 — should be in range
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_weapons_range: Some(40.0),
+            entities: vec![make_world_entity(target_id, [0.0, 0.0, -20.0], None)],
+            ..Default::default()
+        };
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert_eq!(output.new_state, AiState::Attacking { maintain_range: 30.0, target_speed: 0.8 },
+            "in_weapons_range should transition to attacking");
+    }
+
+    #[test]
+    fn in_weapons_range_transition_does_not_fire_when_target_out_of_range() {
+        let target_id = Uuid::new_v4();
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.current_state = AiState::Pursuing { target_speed: 0.8 };
+        ctrl.current_state_name = "chase".into();
+        ctrl.blackboard.target = Some(target_id);
+
+        let behaviour = BehaviourConfig {
+            initial_state: "chase".into(),
+            state: vec![
+                StateConfig { name: "chase".into(), kind: "pursuing".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0 },
+                StateConfig { name: "attack".into(), kind: "attacking".into(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 30.0 },
+            ],
+            transition: vec![TransitionConfig {
+                from: StringOrVec::Single("chase".into()),
+                to: "attack".into(),
+                condition: "in_weapons_range".into(),
+                radius: None,
+            }],
+        };
+        // entity_weapons_range=40, target at 100 — out of range
+        let world = WorldView {
+            entity_pos: [0.0, 0.0, 0.0],
+            entity_weapons_range: Some(40.0),
+            entities: vec![make_world_entity(target_id, [0.0, 0.0, -100.0], None)],
+            ..Default::default()
+        };
+        let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
+        assert!(output.new_state_name.is_none(), "in_weapons_range must not fire when target is out of range");
     }
 }

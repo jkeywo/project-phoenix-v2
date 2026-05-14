@@ -180,6 +180,9 @@ fn tick_ai_controllers(
             uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
             position: [t.translation.x, t.translation.y, t.translation.z],
             faction: None,
+            shields: None,
+            hull_fraction: None,
+            yaw: None,
         }
     }).collect();
 
@@ -205,6 +208,9 @@ fn tick_ai_controllers(
             entities: world_entities.clone(),
             attacker_this_tick: None, // populated externally when damage events arrive
             self_faction: None,       // TODO: populate from entity config faction field
+            entity_phaser_ready: false,
+            entity_weapons_range: None,
+            torpedo_tube_ready: None,
         };
 
         let registry = actual_registry.unwrap_or(&empty_registry);

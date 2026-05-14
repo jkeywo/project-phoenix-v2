@@ -371,6 +371,9 @@ pub struct EntityStateSnapshot {
     pub hull_fraction: Option<f32>,
     #[serde(default)]
     pub flags: Vec<FlagKind>,
+    /// Four-quadrant shield state, present only for ship-like entities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shields: Option<Vec<ShieldFacingStatus>>,
 }
 
 /// Per-tick radar configuration snapshot.  Mirrors the effective ranges

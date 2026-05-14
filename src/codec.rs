@@ -945,6 +945,7 @@ mod tests {
                     yaw: Some(0.5),
                     hull_fraction: Some(1.0),
                     flags: vec![],
+                    shields: None,
                 }],
                 radar_state: RadarStateSnapshot::default(),
             },
@@ -969,6 +970,7 @@ mod tests {
                     yaw: None,
                     hull_fraction: None,
                     flags: vec![],
+                    shields: None,
                 }],
                 radar_state: RadarStateSnapshot::default(),
             },
@@ -1017,6 +1019,7 @@ mod tests {
                         yaw: Some(0.0),
                         hull_fraction: Some(1.0),
                         flags: vec![],
+                        shields: None,
                     },
                     EntityStateSnapshot {
                         uuid: "e2".into(),
@@ -1024,6 +1027,7 @@ mod tests {
                         yaw: None,
                         hull_fraction: Some(0.5),
                         flags: vec![crate::flag_kind::FlagKind::CommsJammed],
+                        shields: None,
                     },
                 ],
                 radar_state: RadarStateSnapshot {
@@ -1328,5 +1332,51 @@ mod tests {
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    // ── EntityStateSnapshot with shields wire extension ───────────────────
+
+    #[test]
+    fn entity_state_snapshot_with_shields_round_trips() {
+        use crate::messages::ShieldFacingStatus;
+        let msg = ServerMessage::SimState {
+            snapshot: crate::messages::SimSnapshot {
+                red_alert: false,
+                view_mode: crate::messages::ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 1.0,
+                power_levels: (2, 2, 2),
+                flags: vec![],
+                entity_states: vec![crate::messages::EntityStateSnapshot {
+                    uuid: "ship-1".into(),
+                    position: Some([50.0, 0.0, 0.0]),
+                    yaw: Some(0.0),
+                    hull_fraction: Some(0.75),
+                    flags: vec![],
+                    shields: Some(vec![
+                        ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 10.0 },
+                        ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0 },
+                        ShieldFacingStatus { label: "Port".into(), hp: 50, max_hp: 100, online: true, offline_remaining: 0.0 },
+                        ShieldFacingStatus { label: "Starboard".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0 },
+                    ]),
+                }],
+                radar_state: crate::messages::RadarStateSnapshot::default(),
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_state_snapshot_without_shields_field_defaults_to_none() {
+        // Shields field omitted from JSON → deserializes to None
+        let json = r#"{"type":"SimState","data":{"snapshot":{"red_alert":false,"view_mode":{"kind":"Camera","data":"Fore"},"ship_x":0.0,"ship_z":0.0,"ship_yaw":0.0,"hull_integrity":1.0,"power_levels":[2,2,2],"flags":[],"entity_states":[{"uuid":"e1","flags":[]}],"radar_state":{"helm_range":50.0,"tactical_range":60.0,"science_long_range":200.0,"science_system_map":500.0}}}}"#;
+        let decoded: ServerMessage = JsonCodec.decode_server(json).unwrap();
+        if let ServerMessage::SimState { snapshot } = decoded {
+            assert_eq!(snapshot.entity_states.len(), 1);
+            assert!(snapshot.entity_states[0].shields.is_none(), "shields must default to None when absent");
+        } else {
+            panic!("expected SimState");
+        }
     }
 }

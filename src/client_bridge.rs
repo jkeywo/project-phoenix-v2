@@ -21,6 +21,7 @@
 #[cfg(target_arch = "wasm32")]
 use {
     crate::client_app::{ClientAppPlugin, InboundServerMessage, OutboundClientMessage},
+    crate::client_complexity::ComplexityStore,
     crate::client_lobby::{ActiveConsole, LocalPlayerToken},
     crate::messages::Console,
     crate::codec::{JsonCodec, MessageCodec},
@@ -58,6 +59,12 @@ thread_local! {
     /// `ClientMessage` JSON back to the server peer over PeerJS.
     /// Signature: `callback(payload: string)`.
     static OUTBOUND_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// Stored complexity presets from `localStorage`, passed as a JSON
+    /// string of `{ "ConsoleName": "preset_name" }`. Set by JS before
+    /// `wasm_client_init` so the Bevy UI can evaluate pop-up/dropdown
+    /// state on first frame.
+    static COMPLEXITY_PRESETS: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 // ── Placeholder plugin ─────────────────────────────────────────────────────
@@ -114,6 +121,7 @@ pub fn wasm_client_init() {
         .add_systems(Update, (
             forward_local_token,
             forward_active_console,
+            forward_complexity_presets,
             forward_inbound_messages,
             flush_outbound_messages,
         ))
@@ -172,6 +180,19 @@ pub fn set_client_send_callback(callback: Function) {
     });
 }
 
+/// Called by JS on page load to tell WASM about previously-stored
+/// complexity presets from `localStorage`.
+///
+/// `json` is a JSON object string like `{"Tactical":"Low","Helm":"Full"}`.
+/// Empty object `{}` means no stored presets.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_client_set_complexity_presets(json: &str) {
+    COMPLEXITY_PRESETS.with(|s| {
+        *s.borrow_mut() = json.to_string();
+    });
+}
+
 // ── Bevy bridge systems ────────────────────────────────────────────────────
 
 /// Pulls the latest token from the thread-local slot into Bevy's
@@ -204,6 +225,43 @@ fn forward_active_console(mut active: ResMut<ActiveConsole>) {
         if active.0 != parsed {
             active.0 = parsed;
         }
+    });
+}
+
+/// Reads the thread-local complexity presets JSON (set by JS on page
+/// load) and applies them to the `ComplexityStore` resource exactly
+/// once. Clears the thread-local after first application so subsequent
+/// frames are no-ops.
+#[cfg(target_arch = "wasm32")]
+fn forward_complexity_presets(mut store: ResMut<ComplexityStore>) {
+    let json: String = COMPLEXITY_PRESETS.with(|s| {
+        let val = s.borrow().clone();
+        val
+    });
+    if json.is_empty() {
+        return;
+    }
+    use std::collections::HashMap;
+    if let Ok(raw) = serde_json::from_str::<HashMap<String, String>>(&json) {
+        let mapped: HashMap<Console, String> = raw
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let console = match k.as_str() {
+                    "CaptainChair" => Some(Console::CaptainChair),
+                    "Helm" => Some(Console::Helm),
+                    "Tactical" => Some(Console::Tactical),
+                    "Repair" => Some(Console::Repair),
+                    "Science" => Some(Console::Science),
+                    "Power" => Some(Console::Power),
+                    _ => None,
+                };
+                console.map(|c| (c, v))
+            })
+            .collect();
+        store.apply_stored(&mapped);
+    }
+    COMPLEXITY_PRESETS.with(|s| {
+        *s.borrow_mut() = String::new();
     });
 }
 

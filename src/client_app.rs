@@ -21,6 +21,7 @@ use crate::client_sim::{
     message_for_direction_press, on_screen_message, red_alert_toggle_message,
     fire_phaser_message, set_phaser_mode_message, fire_torpedo_message, ClientSimState,
 };
+use crate::client_complexity::{self, ComplexityStore};
 use crate::messages::{ClientMessage, Console, GamePhase, PhaserMode, ServerMessage, Shape, ViewDirection};
 
 // ── Events ─────────────────────────────────────────────────────────
@@ -157,6 +158,23 @@ pub struct SciencePanel;
 #[derive(Component)]
 pub struct WeaponsPanel;
 
+/// Marks the complexity preset pop-up overlay root.
+#[derive(Component)]
+struct ComplexityPopupRoot;
+
+/// Marks a preset option button inside the pop-up or dropdown.
+/// Carries the preset name as payload (e.g. "Low", "Full").
+#[derive(Component)]
+struct ComplexityPresetButton(String);
+
+/// Marks the confirm button on the pop-up.
+#[derive(Component)]
+struct ComplexityPopupConfirm;
+
+/// Marks the complexity dropdown row root.
+#[derive(Component)]
+struct ComplexityDropdownRoot;
+
 /// Marks the root of the power console UI; shown only when the local
 /// player holds Power and the phase is InProgress.
 #[derive(Component)]
@@ -252,70 +270,76 @@ impl Plugin for ClientAppPlugin {
             .init_resource::<LocalPlayerToken>()
             .init_resource::<ActiveConsole>()
             .init_resource::<SelectedTube>()
+            .init_resource::<ComplexityStore>()
             .insert_resource(HelmJoystickState::default())
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
             .add_systems(Startup, (setup_lobby_ui, setup_captain_ui, setup_helm_ui, setup_science_ui, setup_weapons_ui, setup_repair_ui, setup_power_ui, setup_tab_bar_ui))
-            .add_systems(
-                Update,
-                (
+                .add_systems(
+                    Update,
                     (
-                        apply_inbound_messages,
-                        rebuild_lobby_ui_on_change,
-                        toggle_lobby_visibility_on_phase,
-                        toggle_captain_panel_visibility,
-                        refresh_view_dir_highlights,
-                        refresh_red_alert_button,
+                        (
+                            apply_inbound_messages,
+                            rebuild_lobby_ui_on_change,
+                            toggle_lobby_visibility_on_phase,
+                            toggle_captain_panel_visibility,
+                            refresh_view_dir_highlights,
+                            refresh_red_alert_button,
+                        ),
+                        (
+                            handle_station_button_press,
+                            handle_engage_button_press,
+                            handle_view_dir_button_press,
+                            handle_red_alert_button_press,
+                        ),
+                        (
+                            toggle_helm_panel_visibility,
+                            helm_resend_tick,
+                            refresh_helm_knob_position,
+                            refresh_helm_readout,
+                            handle_on_screen_button_press,
+                            handle_repair_button_press,
+                            refresh_repair_button,
+                            refresh_repair_icon,
+                            draw_helm_radar,
+                        ),
+                        (
+                            toggle_science_panel_visibility,
+                            toggle_weapons_panel_visibility,
+                            toggle_repair_panel_visibility,
+                            toggle_power_panel_visibility,
+                        ),
+                        (
+                            handle_fire_phaser_button_press,
+                            handle_phaser_mode_toggle_press,
+                            handle_torpedo_tube_button_press,
+                            handle_fire_torpedo_button_press,
+                        ),
+                        (
+                            refresh_weapons_panel,
+                            refresh_torpedo_ui,
+                        ),
+                        (
+                            refresh_repair_panel,
+                            handle_repair_shape_button_press,
+                        ),
+                        (
+                            refresh_power_panel,
+                            handle_increase_power,
+                            handle_decrease_power,
+                        ),
+                        (
+                            rebuild_tab_bar,
+                            handle_tab_button_press,
+                        ),
+                        (
+                            refresh_complexity_ui,
+                            handle_complexity_preset_press,
+                            handle_complexity_popup_confirm,
+                        ),
                     ),
-                    (
-                        handle_station_button_press,
-                        handle_engage_button_press,
-                        handle_view_dir_button_press,
-                        handle_red_alert_button_press,
-                    ),
-                    (
-                        toggle_helm_panel_visibility,
-                        helm_resend_tick,
-                        refresh_helm_knob_position,
-                        refresh_helm_readout,
-                        handle_on_screen_button_press,
-                        handle_repair_button_press,
-                        refresh_repair_button,
-                        refresh_repair_icon,
-                        draw_helm_radar,
-                    ),
-                    (
-                        toggle_science_panel_visibility,
-                        toggle_weapons_panel_visibility,
-                        toggle_repair_panel_visibility,
-                        toggle_power_panel_visibility,
-                    ),
-                    (
-                        handle_fire_phaser_button_press,
-                        handle_phaser_mode_toggle_press,
-                        handle_torpedo_tube_button_press,
-                        handle_fire_torpedo_button_press,
-                    ),
-                    (
-                        refresh_weapons_panel,
-                        refresh_torpedo_ui,
-                    ),
-                    (
-                        refresh_repair_panel,
-                        handle_repair_shape_button_press,
-                    ),
-                    (
-                        refresh_power_panel,
-                        handle_increase_power,
-                        handle_decrease_power,
-                    ),
-                    (
-                        rebuild_tab_bar,
-                        handle_tab_button_press,
-                    ),
-                ),
-            );
+                );
     }
 }
 
@@ -398,6 +422,7 @@ fn apply_inbound_messages(
     mut reader: MessageReader<InboundServerMessage>,
     mut lobby: ResMut<LobbyState>,
     mut sim: ResMut<ClientSimState>,
+    mut complexity: ResMut<ComplexityStore>,
     token: Res<LocalPlayerToken>,
     mut active: ResMut<ActiveConsole>,
 ) {
@@ -410,6 +435,12 @@ fn apply_inbound_messages(
             } else if t == &token.0 && consoles.is_empty() {
                 // Spectator — clear active console.
                 active.0 = None;
+            }
+        }
+        // Sync ComplexityStore when server confirms a preset change.
+        if let ServerMessage::ComplexityChanged { console, preset_name } = &ev.0 {
+            if let Some(choice) = complexity.choices.get_mut(console) {
+                let _ = choice.select(preset_name);
             }
         }
         lobby.apply(&ev.0);
@@ -1400,6 +1431,106 @@ fn setup_weapons_ui(mut commands: Commands) {
                 TextFont { font_size: 14.0, ..default() },
                 TextColor(Color::srgb(0.8, 0.5, 0.2)),
             ));
+
+            // ── Complexity dropdown row ──────────────────────────────
+            panel.spawn((
+                ComplexityDropdownRoot,
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                    ..default()
+                },
+                Visibility::Hidden,
+                BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
+            )).with_children(|row| {
+                row.spawn((
+                    Text::new("Complexity:"),
+                    TextFont { font_size: 13.0, ..default() },
+                    TextColor(Color::srgb(0.6, 0.7, 0.8)),
+                ));
+                for (preset, label) in [("Low", "Low"), ("Full", "Full")] {
+                    row.spawn((
+                        ComplexityPresetButton(preset.to_string()),
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.15, 0.20, 0.35)),
+                    )).with_children(|btn| {
+                        btn.spawn((
+                            Text::new(label),
+                            TextFont { font_size: 13.0, ..default() },
+                            TextColor(Color::srgb(0.7, 0.8, 1.0)),
+                        ));
+                    });
+                }
+            });
+
+            // ── Complexity pop-up overlay ────────────────────────────
+            panel.spawn((
+                ComplexityPopupRoot,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(12.0),
+                    ..default()
+                },
+                Visibility::Hidden,
+                BackgroundColor(Color::srgba(0.05, 0.05, 0.15, 0.95)),
+            )).with_children(|popup| {
+                popup.spawn((
+                    Text::new("Choose Complexity Preset"),
+                    TextFont { font_size: 20.0, ..default() },
+                    TextColor(Color::srgb(0.8, 0.8, 1.0)),
+                ));
+                popup.spawn((
+                    Text::new("Select a complexity level for this console."),
+                    TextFont { font_size: 13.0, ..default() },
+                    TextColor(Color::srgb(0.6, 0.6, 0.8)),
+                ));
+                for (preset, label) in [("Low", "Low"), ("Full", "Full")] {
+                    popup.spawn((
+                        ComplexityPresetButton(preset.to_string()),
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(32.0), Val::Px(12.0)),
+                            min_width: Val::Px(180.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.15, 0.25, 0.40)),
+                    )).with_children(|btn| {
+                        btn.spawn((
+                            Text::new(label),
+                            TextFont { font_size: 18.0, ..default() },
+                            TextColor(Color::srgb(0.7, 0.8, 1.0)),
+                        ));
+                    });
+                }
+                popup.spawn((
+                    ComplexityPopupConfirm,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(48.0), Val::Px(12.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.10, 0.40, 0.20)),
+                )).with_children(|btn| {
+                    btn.spawn((
+                        Text::new("Confirm"),
+                        TextFont { font_size: 18.0, ..default() },
+                        TextColor(Color::srgb(0.5, 1.0, 0.5)),
+                    ));
+                });
+            });
         });
 }
 
@@ -1898,6 +2029,84 @@ fn handle_decrease_power(
         outbound.write(OutboundClientMessage(
             crate::client_sim::decrease_power_message(dec.0.clone()),
         ));
+    }
+}
+
+// ── Complexity dropdown / pop-up ───────────────────────────────────
+
+/// Refresh complexity pop-up and dropdown visibility based on the store.
+fn refresh_complexity_ui(
+    store: Res<ComplexityStore>,
+    mut popup: Query<&mut Visibility, (With<ComplexityPopupRoot>, Without<ComplexityDropdownRoot>)>,
+    mut dropdown: Query<&mut Visibility, (With<ComplexityDropdownRoot>, Without<ComplexityPopupRoot>)>,
+) {
+    let choice = store.choices.get(&Console::Tactical);
+    let Some(choice) = choice else { return };
+
+    for mut vis in popup.iter_mut() {
+        *vis = if choice.show_popup() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    for mut vis in dropdown.iter_mut() {
+        *vis = if choice.show_dropdown() && !choice.show_popup() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+/// Handle presses on complexity preset buttons (both pop-up and dropdown).
+fn handle_complexity_preset_press(
+    interactions: Query<(&Interaction, &ComplexityPresetButton), Changed<Interaction>>,
+    mut store: ResMut<ComplexityStore>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for (interaction, btn) in interactions.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // Update local store selection.
+        if let Some(choice) = store.choices.get_mut(&Console::Tactical) {
+            let _ = choice.select(&btn.0);
+        }
+        // Send SetComplexity immediately so the server knows.
+        outbound.write(OutboundClientMessage(
+            client_complexity::set_complexity_message(Console::Tactical, &btn.0),
+        ));
+    }
+}
+
+/// Handle the confirm button on the complexity pop-up.
+///
+/// The preset was already selected (and `SetComplexity` sent) by
+/// `handle_complexity_preset_press` when the user tapped a pop-up
+/// preset button. Confirm merely closes the pop-up (the store was
+/// already updated by `select()`, which sets `popup_shown = true`,
+/// causing `refresh_complexity_ui` to hide it).
+fn handle_complexity_popup_confirm(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<ComplexityPopupConfirm>)>,
+    mut store: ResMut<ComplexityStore>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // Ensure a preset is selected (default to Low if none was tapped).
+        let need_send = {
+            let choice = store.choices.get(&Console::Tactical);
+            choice.map(|c| c.chosen.is_none()).unwrap_or(true)
+        };
+        if need_send {
+            let _ = store.for_console(&Console::Tactical).select("Low");
+            outbound.write(OutboundClientMessage(
+                client_complexity::set_complexity_message(Console::Tactical, "Low"),
+            ));
+        }
     }
 }
 

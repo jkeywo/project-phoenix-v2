@@ -1481,4 +1481,22 @@ consoles = ["Tactical"]
             "1P station should be filled when player holds all expected consoles"
         );
     }
+
+    // ── Console split: no "Science" station names ───────────────────────────
+
+    #[test]
+    fn no_station_named_science_in_player_ship() {
+        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let stations = parse_and_validate(toml_str).unwrap();
+        for (count, defs) in &stations.configs {
+            for def in defs {
+                assert!(
+                    !def.name.contains("Science"),
+                    "station '{}' at {}P still references 'Science' — should be renamed",
+                    def.name,
+                    count,
+                );
+            }
+        }
+    }
 }

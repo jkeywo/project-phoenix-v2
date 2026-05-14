@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RegionEffectKind {
     DamageZone { dps: f32 },
-    SlowZone { multiplier: f32 },
+    SlowZone { thrust_modifier: Option<f32>, yaw_rate_modifier: Option<f32> },
     BlocksImpulse,
     RadarDampening { multiplier: f32 },
     CommsJam,
@@ -19,7 +19,8 @@ pub struct DamageZoneEffect {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SlowZoneEffect {
-    pub multiplier: f32,
+    pub thrust_modifier: Option<f32>,
+    pub yaw_rate_modifier: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -73,7 +74,10 @@ impl RegionEffectsConfig {
             kinds.push(RegionEffectKind::DamageZone { dps: z.dps });
         }
         if let Some(z) = &self.slow_zone {
-            kinds.push(RegionEffectKind::SlowZone { multiplier: z.multiplier });
+            kinds.push(RegionEffectKind::SlowZone {
+                thrust_modifier: z.thrust_modifier,
+                yaw_rate_modifier: z.yaw_rate_modifier,
+            });
         }
         if self.blocks_impulse.is_some() {
             kinds.push(RegionEffectKind::BlocksImpulse);
@@ -108,7 +112,10 @@ mod tests {
 
     #[test]
     fn serde_round_trip_slow_zone() {
-        round_trip(RegionEffectKind::SlowZone { multiplier: 0.5 });
+        round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(0.5), yaw_rate_modifier: Some(-0.3) });
+        round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(0.5), yaw_rate_modifier: None });
+        round_trip(RegionEffectKind::SlowZone { thrust_modifier: None, yaw_rate_modifier: Some(-0.3) });
+        round_trip(RegionEffectKind::SlowZone { thrust_modifier: None, yaw_rate_modifier: None });
     }
 
     #[test]
@@ -134,7 +141,7 @@ mod tests {
     #[test]
     fn serde_round_trip_negative_values() {
         round_trip(RegionEffectKind::DamageZone { dps: -5.0 });
-        round_trip(RegionEffectKind::SlowZone { multiplier: -1.0 });
+        round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(-1.0), yaw_rate_modifier: None });
     }
 
     #[test]
@@ -168,7 +175,7 @@ mod tests {
     fn effects_config_to_kinds_aggregates_all() {
         let cfg = RegionEffectsConfig {
             damage_zone: Some(DamageZoneEffect { dps: 10.0 }),
-            slow_zone: Some(SlowZoneEffect { multiplier: 0.5 }),
+            slow_zone: Some(SlowZoneEffect { thrust_modifier: Some(0.5), yaw_rate_modifier: Some(-0.3) }),
             blocks_impulse: Some(BlocksImpulseEffect {}),
             radar_dampening: Some(RadarDampeningEffect { multiplier: 0.3 }),
             comms_jam: Some(CommsJamEffect {}),

@@ -13,6 +13,8 @@ use crate::messages::{ModifierSlot, ModifierSource};
 pub struct RegionMembership {
     /// Maps ship entity → set of region entities the ship is currently inside.
     pub inside: HashMap<Entity, HashSet<Entity>>,
+    /// Cached UUIDs for region entities (persists after entity despawn).
+    pub region_uuids: HashMap<Entity, String>,
 }
 
 /// Fired when a subject entity enters a region.
@@ -43,6 +45,8 @@ impl Plugin for RegionPlugin {
                 handle_blocks_impulse_region_enter.after(update_region_membership),
                 handle_radar_dampening_enter.after(update_region_membership),
                 handle_radar_dampening_exit.after(update_region_membership),
+                handle_slow_zone_enter.after(update_region_membership),
+                handle_slow_zone_exit.after(update_region_membership),
             ));
     }
 }
@@ -57,6 +61,7 @@ fn update_region_membership(
     mut entered: MessageWriter<RegionEntered>,
     mut exited: MessageWriter<RegionExited>,
     region_query: Query<(Entity, &Transform, &RegionShapeSection)>,
+    uuid_query: Query<&EntityUuid>,
     ship_state: Res<ShipState>,
     ship_query: Query<Entity, With<Ship>>,
 ) {
@@ -65,6 +70,13 @@ fn update_region_membership(
     };
 
     let ship_pos = glam::Vec3::new(ship_state.x, 0.0, ship_state.z);
+
+    // Cache UUIDs for all current region entities (survives despawn)
+    for (entity, _, _) in region_query.iter() {
+        if let Ok(uuid) = uuid_query.get(entity) {
+            membership.region_uuids.insert(entity, uuid.0.clone());
+        }
+    }
 
     // Determine current region occupancy
     let current_inside: HashSet<Entity> = region_query
@@ -197,20 +209,95 @@ fn handle_radar_dampening_enter(
     }
 }
 
+/// Registers `SlowZone` modifiers on `MaxSpeed` and/or `MaxYawRate` when
+/// the ship enters a region with the `SlowZone` effect, then immediately
+/// clamps the ship's forward speed to the new effective maximum.
+fn handle_slow_zone_enter(
+    mut entered: MessageReader<RegionEntered>,
+    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
+    mut modifiers: ResMut<ShipModifiers>,
+    mut ship: ResMut<ShipState>,
+) {
+    for ev in entered.read() {
+        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
+            continue;
+        };
+        let has_slow = effects.0.iter().any(|e| matches!(e, RegionEffectKind::SlowZone { .. }));
+        if !has_slow {
+            continue;
+        }
+        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        let source = ModifierSource::RegionEffect { uuid };
+
+        // Find the SlowZone effect to extract modifier values
+        for effect in &effects.0 {
+            if let RegionEffectKind::SlowZone { thrust_modifier, yaw_rate_modifier } = effect {
+                // Register thrust modifier on MaxSpeed
+                if let Some(bonus) = thrust_modifier {
+                    modifiers.add_or_update(Modifier {
+                        source: source.clone(),
+                        slot: ModifierSlot::MaxSpeed,
+                        bonus: *bonus,
+                    });
+                }
+                // Register yaw rate modifier on MaxYawRate
+                if let Some(bonus) = yaw_rate_modifier {
+                    modifiers.add_or_update(Modifier {
+                        source: source.clone(),
+                        slot: ModifierSlot::MaxYawRate,
+                        bonus: *bonus,
+                    });
+                }
+            }
+        }
+
+        // Immediately clamp forward speed to the new effective max
+        let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
+        let effective_max = base_max * modifiers.get(&ModifierSlot::MaxSpeed);
+        if ship.forward_speed.abs() > effective_max {
+            ship.forward_speed = ship.forward_speed.signum() * effective_max;
+        }
+    }
+}
+
 /// Removes all modifiers originating from a region when the ship exits it.
 /// Uses `clear_source` so that any future region effects that register
 /// modifiers under the same `ModifierSource::RegionEffect { uuid }` are
 /// also cleaned up on exit.
 fn handle_radar_dampening_exit(
     mut exited: MessageReader<RegionExited>,
-    region_query: Query<&EntityUuid>,
+    membership: Res<RegionMembership>,
     mut modifiers: ResMut<ShipModifiers>,
 ) {
     for ev in exited.read() {
-        let Ok(uuid_comp) = region_query.get(ev.region_entity) else {
-            continue;
+        let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
+            Some(s) => s,
+            None => continue,
         };
-        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
+        let uuid = match uuid::Uuid::parse_str(uuid_str) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        modifiers.clear_source(&ModifierSource::RegionEffect { uuid });
+    }
+}
+
+/// Removes `SlowZone` modifiers when the ship exits a slow zone region.
+/// Does NOT restore previously-clamped velocity.
+fn handle_slow_zone_exit(
+    mut exited: MessageReader<RegionExited>,
+    membership: Res<RegionMembership>,
+    mut modifiers: ResMut<ShipModifiers>,
+) {
+    for ev in exited.read() {
+        let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
+            Some(s) => s,
+            None => continue,
+        };
+        let uuid = match uuid::Uuid::parse_str(uuid_str) {
             Ok(u) => u,
             Err(_) => continue,
         };
@@ -227,7 +314,8 @@ mod tests {
     use crate::damage::HullIntegrity;
     use crate::simulation::{ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
     use crate::impulse::{ImpulseState, ImpulsePhase, IMPULSE_CHARGE_DURATION};
-    use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect};
+    use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
+    use crate::ship_physics::ShipPhysicsConfig;
     use crate::modifiers::ShipModifiers;
     use crate::messages::ModifierSlot;
 
@@ -822,5 +910,222 @@ mod tests {
             expected_a,
             modifiers.get(&ModifierSlot::RadarRange)
         );
+    }
+
+    // ── Slow Zone tests ─────────────────────────────────────────────────
+
+    fn slow_zone_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(RegionPlugin);
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(ShipState::new());
+        app.insert_resource(ShipModifiers::new());
+        app.world_mut().spawn((Ship, Transform::default()));
+        app
+    }
+
+    fn spawn_slow_zone(app: &mut App, x: f32, z: f32, radius: f32, thrust_modifier: Option<f32>, yaw_rate_modifier: Option<f32>) -> Entity {
+        use crate::region_effects::RegionEffectsConfig as EffectsCfg;
+        let config = EntityConfig {
+            tags: vec!["region".to_string()],
+            shape: Some(RegionShape::Sphere { radius }),
+            effects: Some(EffectsCfg {
+                slow_zone: Some(SlowZoneEffect { thrust_modifier, yaw_rate_modifier }),
+                ..Default::default()
+            }),
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            science_console: None,
+            star: None,
+            planet: None,
+            asteroid_field: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let mut commands = app.world_mut().commands();
+        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+    }
+
+    fn check_modifier(app: &App, slot: ModifierSlot, expected: f32) {
+        let modifiers = app.world().resource::<ShipModifiers>();
+        assert!(
+            (modifiers.get(&slot) - expected).abs() < 1e-6,
+            "expected modifier multiplier {} for {:?}, got {}",
+            expected, slot, modifiers.get(&slot)
+        );
+    }
+
+    /// RED 1: entering slow zone with thrust_modifier registers MaxSpeed modifier
+    #[test]
+    fn entering_slow_zone_with_thrust_modifier_registers_maxspeed_modifier() {
+        let mut app = slow_zone_test_app();
+        spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+
+        // -0.5 bonus → 1/(1+0.5) = 0.6667
+        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
+    }
+
+    /// RED 2: entering slow zone with yaw_rate_modifier registers MaxYawRate modifier
+    #[test]
+    fn entering_slow_zone_with_yaw_rate_modifier_registers_maxyawrate_modifier() {
+        let mut app = slow_zone_test_app();
+        spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, None, Some(-0.3));
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+
+        // -0.3 bonus → 1/(1+0.3) = 0.7692
+        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0 / 1.3);
+    }
+
+    /// RED 3: entering slow zone with both fields registers both slots
+    #[test]
+    fn entering_slow_zone_with_both_fields_registers_both_slots() {
+        let mut app = slow_zone_test_app();
+        spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), Some(-0.3));
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+
+        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
+        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0 / 1.3);
+    }
+
+    /// RED 4: entering slow zone with both fields omitted registers nothing
+    #[test]
+    fn entering_slow_zone_with_both_fields_omitted_registers_nothing() {
+        let mut app = slow_zone_test_app();
+        spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, None, None);
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+
+        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0);
+        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0);
+    }
+
+    /// RED 5: entry clamps forward_speed to new effective max
+    #[test]
+    fn entering_slow_zone_clamps_forward_speed() {
+        let mut app = slow_zone_test_app();
+        spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
+
+        // Set ship speed above the clamped limit
+        let mut ship = app.world_mut().resource_mut::<ShipState>();
+        ship.forward_speed = 50.0;
+        ship.x = 10.0; // inside region
+        drop(ship);
+
+        tick_with_dt(&mut app, 0.016);
+
+        // After clamping: base max speed = 25.0, modifier = 0.6667, effective max = 16.667
+        let ship = app.world().resource::<ShipState>();
+        let expected_clamped = ShipPhysicsConfig::new().max_speed * (1.0 / 1.5);
+        assert!(
+            (ship.forward_speed - expected_clamped).abs() < 0.001,
+            "expected forward_speed clamped to ~{}, got {}",
+            expected_clamped, ship.forward_speed
+        );
+    }
+
+    /// RED 6: entering slow zone does not clamp speed when already below limit
+    #[test]
+    fn entering_slow_zone_does_not_clamp_when_already_below_limit() {
+        let mut app = slow_zone_test_app();
+        spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
+
+        let mut ship = app.world_mut().resource_mut::<ShipState>();
+        ship.forward_speed = 5.0;
+        ship.x = 10.0; // inside region
+        drop(ship);
+
+        tick_with_dt(&mut app, 0.016);
+
+        // 5.0 is already below effective max (16.667), should remain 5.0
+        let ship = app.world().resource::<ShipState>();
+        assert!(
+            (ship.forward_speed - 5.0).abs() < 0.001,
+            "forward_speed should remain 5.0, got {}",
+            ship.forward_speed
+        );
+    }
+
+    /// RED 7: exit removes MaxSpeed modifier, does NOT restore velocity
+    #[test]
+    fn exiting_slow_zone_removes_maxspeed_modifier() {
+        let mut app = slow_zone_test_app();
+        let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), Some(-0.3));
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Exit the region
+        set_ship_pos(&mut app, 200.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0);
+        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0);
+    }
+
+    /// RED 8: exit does NOT restore previously-clamped velocity
+    #[test]
+    fn exiting_slow_zone_does_not_restore_velocity() {
+        let mut app = slow_zone_test_app();
+        let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
+
+        // Start with 50 speed, enter → clamped to ~16.667
+        let mut ship = app.world_mut().resource_mut::<ShipState>();
+        ship.forward_speed = 50.0;
+        ship.x = 10.0; // inside region
+        drop(ship);
+
+        tick_with_dt(&mut app, 0.016);
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Confirm speed was clamped
+        let ship = app.world().resource::<ShipState>();
+        assert!(
+            (ship.forward_speed - 16.667).abs() < 0.001,
+            "speed should be clamped to ~16.667, got {}",
+            ship.forward_speed
+        );
+
+        // Exit the region
+        set_ship_pos(&mut app, 200.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+
+        // Speed should REMAIN clamped (not restored to 50)
+        let ship = app.world().resource::<ShipState>();
+        assert!(
+            (ship.forward_speed - 16.667).abs() < 0.001,
+            "speed should remain clamped after exit (not restored), got {}",
+            ship.forward_speed
+        );
+    }
+
+    /// RED 9: region despawn while inside removes modifiers
+    #[test]
+    fn region_despawn_while_inside_removes_slow_zone_modifiers() {
+        let mut app = slow_zone_test_app();
+        let region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), Some(-0.3));
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        tick_with_dt(&mut app, 0.016);
+        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Despawn the region (implicit exit)
+        app.world_mut().despawn(region);
+        tick_with_dt(&mut app, 0.016);
+
+        check_modifier(&app, ModifierSlot::MaxSpeed, 1.0);
+        check_modifier(&app, ModifierSlot::MaxYawRate, 1.0);
     }
 }

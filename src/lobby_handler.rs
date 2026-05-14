@@ -743,14 +743,14 @@ mod tests {
     // ── Spectator queue: push on join when max_players reached ───────────
 
     fn sessions_at_max(stations: &ShipStations) -> SessionManager {
-        // max_players = 3; fill all 3 slots via direct console assignment
+        // max_players = 5; fill all 5 slots via direct console assignment
         let mut sessions = SessionManager::new();
-        for (tok, name) in [("t1", "Alice"), ("t2", "Bob"), ("t3", "Carol")] {
+        for (tok, name) in [("t1", "Alice"), ("t2", "Bob"), ("t3", "Carol"), ("t4", "Dave"), ("t5", "Eve")] {
             sessions.register(tok.into(), name.into()).unwrap();
         }
-        let player_count = 3u32;
-        // At 3P: "Helm" (CaptainChair+Helm), "Tactical", "Repair"
-        for (tok, station_name) in [("t1", "Helm"), ("t2", "Tactical"), ("t3", "Repair")] {
+        let player_count = 5u32;
+        // At 5P: "Captain" (CaptainChair), "Helm" (Helm), "Tactical" (Tactical), "Engineering" (Repair+Power), "Science" (Science)
+        for (tok, station_name) in [("t1", "Captain"), ("t2", "Helm"), ("t3", "Tactical"), ("t4", "Engineering"), ("t5", "Science")] {
             let station_def = crate::stations::get_station(stations, player_count, station_name).unwrap();
             for console in &station_def.consoles {
                 let _ = sessions.toggle_console(tok, console.clone());
@@ -763,17 +763,17 @@ mod tests {
     fn joining_when_max_players_filled_goes_to_spectator_queue() {
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        // 4th player identifies — max_players (3) already have stations
-        let msg = ClientMessage::Identify { token: "t4".into(), name: "Dave".into() };
-        let result = process_message("t4", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
+        // 6th player identifies — max_players (5) already have stations
+        let msg = ClientMessage::Identify { token: "t6".into(), name: "Frank".into() };
+        let result = process_message("t6", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
         assert!(
-            sessions.spectator_queue().contains(&"t4".to_string()),
-            "t4 should be in the spectator queue"
+            sessions.spectator_queue().contains(&"t6".to_string()),
+            "t6 should be in the spectator queue"
         );
         // Should receive StationAssigned with station=None
         let got_spectator_assigned = result.outbound.iter().any(|(target, m)| {
-            matches!(target, Target::Token(t) if t == "t4")
-                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles } if token == "t4" && consoles.is_empty())
+            matches!(target, Target::Token(t) if t == "t6")
+                && matches!(m, ServerMessage::StationAssigned { token, station: None, consoles } if token == "t6" && consoles.is_empty())
         });
         assert!(got_spectator_assigned, "spectator should receive StationAssigned {{ station: None }}");
     }
@@ -806,18 +806,18 @@ mod tests {
 
     #[test]
     fn disconnect_with_spectator_in_queue_cascade_fills_all_slots_spectator_stays() {
-        // At 3P (max), all stations filled, t4 is spectator. t1 disconnects.
-        // The 3P→2P cascade fills both 2P slots from remaining 2 players.
-        // No empty slot → spectator t4 stays queued.
+        // At 5P (max), all stations filled, t6 is spectator. t1 disconnects.
+        // The 5P→4P cascade fills all 4P slots from remaining 4 players.
+        // No empty slot → spectator t6 stays queued.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t4".into(), "Dave".into()).unwrap();
-        sessions.push_spectator("t4".into());
+        sessions.register("t6".into(), "Frank".into()).unwrap();
+        sessions.push_spectator("t6".into());
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
-        // t4 stays in spectator queue (cascade filled all slots)
+        // t6 stays in spectator queue (cascade filled all slots)
         assert!(
-            sessions.spectator_queue().contains(&"t4".to_string()),
-            "t4 should remain in queue when cascade fills all slots"
+            sessions.spectator_queue().contains(&"t6".to_string()),
+            "t6 should remain in queue when cascade fills all slots"
         );
     }
 
@@ -840,54 +840,54 @@ mod tests {
 
         // Simulate using a 1P→0P scenario where a spectator exists, but that would be blocked
         // by min_players=1. Instead, let's verify the queue is passed correctly by testing
-        // that after a disconnect from 3P, the spectator queue in sessions is updated
+        // that after a disconnect from 5P, the spectator queue in sessions is updated
         // (it may be unchanged, but the VecDeque reference was correctly threaded).
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t4".into(), "Dave".into()).unwrap();
-        sessions.push_spectator("t4".into());
+        sessions.register("t6".into(), "Frank".into()).unwrap();
+        sessions.push_spectator("t6".into());
         sessions.push_spectator("nonexistent-extra".into()); // second spectator
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
         // Spectator queue is preserved (both spectators still queued, since no empty slot)
-        assert!(sessions.spectator_queue().contains(&"t4".to_string()));
+        assert!(sessions.spectator_queue().contains(&"t6".to_string()));
     }
 
     #[test]
     fn spectator_can_claim_station_vacated_by_disconnect_at_max_players() {
         // Mirrors the smoke test reassignment.spec.ts "leave at max_players
-        // allows spectator to claim vacated station". 3 players hold all 3P
-        // stations, a 4th joins as spectator, one station-holder disconnects,
+        // allows spectator to claim vacated station". 5 players hold all 5P
+        // stations, a 6th joins as spectator, one station-holder disconnects,
         // then the spectator selects the vacated station.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        // Add t4 as spectator
-        sessions.register("t4".into(), "Dave".into()).unwrap();
-        sessions.push_spectator("t4".into());
+        // Add t6 as spectator
+        sessions.register("t6".into(), "Frank".into()).unwrap();
+        sessions.push_spectator("t6".into());
 
-        // t3 (Repair) disconnects
-        let _ = process_disconnect_with_stations("t3", &mut sessions, &stations);
+        // t5 (Science) disconnects
+        let _ = process_disconnect_with_stations("t5", &mut sessions, &stations);
 
-        // t4 selects "Repair"
+        // t6 selects "Science"
         let result = pm_stations(
-            "t4",
-            &ClientMessage::SelectStation { station: "Repair".into() },
+            "t6",
+            &ClientMessage::SelectStation { station: "Science".into() },
             &mut sessions,
             GamePhase::Lobby,
             None,
         );
-        // t4 must receive a StationAssigned with station = Some("Repair")
+        // t6 must receive a StationAssigned with station = Some("Science")
         let assigned = result.outbound.iter().find_map(|(_, m)| match m {
             ServerMessage::StationAssigned { token, station: Some(name), consoles }
-                if token == "t4" => Some((name.clone(), consoles.clone())),
+                if token == "t6" => Some((name.clone(), consoles.clone())),
             _ => None,
         });
         assert!(
             assigned.is_some(),
-            "t4 should receive StationAssigned with station=Some(Repair); got outbound: {:?}",
+            "t6 should receive StationAssigned with station=Some(Science); got outbound: {:?}",
             result.outbound
         );
         let (name, consoles) = assigned.unwrap();
-        assert_eq!(name, "Repair");
+        assert_eq!(name, "Science");
         assert!(!consoles.is_empty(), "consoles should not be empty");
     }
 
@@ -915,13 +915,13 @@ mod tests {
         // StartGame does not clear the queue — spectators remain spectators mid-game.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t4".into(), "Dave".into()).unwrap();
-        sessions.push_spectator("t4".into());
+        sessions.register("t6".into(), "Frank".into()).unwrap();
+        sessions.push_spectator("t6".into());
         assert_eq!(sessions.spectator_queue().len(), 1, "queue must have one spectator before transition");
         // Simulate a phase transition by doing StartGame (which only changes new_phase).
         // The sessions object is unaffected — queue should still be there.
         let result = pm_stations("t1", &ClientMessage::StartGame, &mut sessions, GamePhase::Lobby, None);
-        // t1 holds CaptainChair (Helm station at 3P has CaptainChair+Helm consoles)
+        // t1 holds CaptainChair (Captain station at 5P has CaptainChair consoles)
         // Only the captain can start, and all stations must be filled.
         // Regardless of whether StartGame succeeds, the spectator queue must survive.
         let _ = result;
@@ -994,26 +994,26 @@ mod tests {
 
     #[test]
     fn disconnect_does_not_promote_spectator_in_lobby() {
-        // At 3P (max), all stations filled, t4 is spectator. t1 disconnects.
+        // At 5P (max), all stations filled, t6 is spectator. t1 disconnects.
         // In lobby, spectators should NOT be auto-promoted.
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        sessions.register("t4".into(), "Dave".into()).unwrap();
-        sessions.push_spectator("t4".into());
+        sessions.register("t6".into(), "Frank".into()).unwrap();
+        sessions.push_spectator("t6".into());
 
         let _result = process_disconnect_with_stations("t1", &mut sessions, &stations);
 
-        // t4 must still be in the spectator queue (not promoted).
+        // t6 must still be in the spectator queue (not promoted).
         assert!(
-            sessions.spectator_queue().contains(&"t4".to_string()),
+            sessions.spectator_queue().contains(&"t6".to_string()),
             "spectator must NOT be auto-promoted on disconnect in lobby"
         );
-        // t4 must still have no consoles.
-        let t4_consoles = sessions.players().iter()
-            .find(|p| p.token == "t4")
+        // t6 must still have no consoles.
+        let t6_consoles = sessions.players().iter()
+            .find(|p| p.token == "t6")
             .map(|p| p.consoles.clone())
             .unwrap_or_default();
-        assert!(t4_consoles.is_empty(), "spectator t4 must not receive consoles automatically");
+        assert!(t6_consoles.is_empty(), "spectator t6 must not receive consoles automatically");
     }
 
     // ── SelectStation broadcast hardening (Option C) ─────────────────────

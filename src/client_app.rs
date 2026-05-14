@@ -658,11 +658,12 @@ fn toggle_captain_panel_visibility(
     }
     let view = LobbyView::new(&lobby, &token.0);
     let holds_captain = lobby.phase == GamePhase::InProgress && view.is_captain();
+    let my_consoles_count = view.my_consoles().len();
     // When the player holds multiple consoles, only show this panel when
-    // the tab is explicitly set to CaptainChair (or unset with only 1 console).
+    // the tab is explicitly set to CaptainChair. When holding 1 console, show it automatically.
     let tab_active = match &active.0 {
         Some(c) => *c == Console::CaptainChair,
-        None => true,
+        None => my_consoles_count == 1,
     };
     let visible = holds_captain && tab_active;
     for mut vis in panel.iter_mut() {
@@ -912,9 +913,10 @@ fn toggle_repair_panel_visibility(
     let view = LobbyView::new(&lobby, &token.0);
     let holds_repair = lobby.phase == GamePhase::InProgress
         && view.my_consoles().contains(&Console::Repair);
+    let my_consoles_count = view.my_consoles().len();
     let tab_active = match &active.0 {
         Some(c) => *c == Console::Repair,
-        None => true,
+        None => my_consoles_count == 1,
     };
     let visible = holds_repair && tab_active;
     for mut vis in panel.iter_mut() {
@@ -1023,9 +1025,10 @@ fn toggle_science_panel_visibility(
     let view = LobbyView::new(&lobby, &token.0);
     let holds_science = lobby.phase == GamePhase::InProgress
         && view.my_consoles().contains(&Console::Science);
+    let my_consoles_count = view.my_consoles().len();
     let tab_active = match &active.0 {
         Some(c) => *c == Console::Science,
-        None => true,
+        None => my_consoles_count == 1,
     };
     let visible = holds_science && tab_active;
     for mut vis in panel.iter_mut() {
@@ -1046,11 +1049,12 @@ fn toggle_helm_panel_visibility(
     }
     let view = LobbyView::new(&lobby, &token.0);
     let holds_helm = lobby.phase == GamePhase::InProgress && view.is_helm();
+    let my_consoles_count = view.my_consoles().len();
     // When the player holds multiple consoles, only show this panel when
-    // the tab is explicitly set to Helm (or unset with only 1 console).
+    // the tab is explicitly set to Helm. When holding 1 console, show it automatically.
     let tab_active = match &active.0 {
         Some(c) => *c == Console::Helm,
-        None => true,
+        None => my_consoles_count == 1,
     };
     let visible = holds_helm && tab_active;
     for mut vis in panel.iter_mut() {
@@ -1569,9 +1573,10 @@ fn toggle_weapons_panel_visibility(
     let view = LobbyView::new(&lobby, &token.0);
     let holds_tactical = lobby.phase == GamePhase::InProgress
         && view.my_consoles().contains(&Console::Tactical);
+    let my_consoles_count = view.my_consoles().len();
     let tab_active = match &active.0 {
         Some(c) => *c == Console::Tactical,
-        None => true,
+        None => my_consoles_count == 1,
     };
     let visible = holds_tactical && tab_active;
     for mut vis in panel.iter_mut() {
@@ -1964,9 +1969,10 @@ fn toggle_power_panel_visibility(
     let view = LobbyView::new(&lobby, &token.0);
     let holds_power = lobby.phase == GamePhase::InProgress
         && view.my_consoles().contains(&Console::Power);
+    let my_consoles_count = view.my_consoles().len();
     let tab_active = match &active.0 {
         Some(c) => *c == Console::Power,
-        None => true,
+        None => my_consoles_count == 1,
     };
     let visible = holds_power && tab_active;
     for mut vis in panel.iter_mut() {

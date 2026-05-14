@@ -229,20 +229,29 @@ fn spawn_bezel_on_startup(
     spawn_bezel_frame(&mut commands, &assets, vignette);
 }
 
+/// Marker resource set once the reparenting has been done.
+#[derive(Resource, Default)]
+#[allow(dead_code)]
+struct PanelsReparented;
+
 /// Reparent existing console panel root entities into the bezel content
 /// area so they render inside the bezel frame. Runs once when the bezel
 /// is first spawned (detected by the presence of both `BezelContentArea`
 /// and panel roots that are not yet its children).
 fn reparent_panels_into_bezel(
     mut commands: Commands,
-    content_area: Query<Entity, (With<BezelContentArea>, Added<BezelContentArea>)>,
+    content_area: Query<Entity, With<BezelContentArea>>,
     captain: Query<Entity, With<crate::client_app::CaptainPanel>>,
     helm: Query<Entity, With<crate::client_app::HelmPanel>>,
     lobby: Query<Entity, With<crate::client_app::LobbyRoot>>,
     science: Query<Entity, With<crate::client_app::SciencePanel>>,
     weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
     tab_bar: Query<Entity, With<crate::client_app::TabBarRoot>>,
+    mut done: Local<bool>,
 ) {
+    if *done {
+        return;
+    }
     let Ok(target) = content_area.single() else { return };
     for entity in lobby.iter() {
         commands.entity(entity).set_parent_in_place(target);
@@ -262,6 +271,7 @@ fn reparent_panels_into_bezel(
     for entity in tab_bar.iter() {
         commands.entity(entity).set_parent_in_place(target);
     }
+    *done = true;
 }
 
 /// Rewrites each bezel `ImageNode`'s image handle to the alert or normal

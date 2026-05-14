@@ -978,24 +978,26 @@ consoles = ["CaptainChair", "Helm"]
         let result = reassign_on_join(&stations, &current, "carol");
         assert_eq!(result.get("alice").map(String::as_str), Some("Helm"));
         assert_eq!(result.get("bob").map(String::as_str), Some("Tactical"));
-        assert_eq!(result.get("carol").map(String::as_str), Some("Repair"),
-            "carol gets Repair which has no previous at 3P");
+        assert_eq!(result.get("carol").map(String::as_str), Some("Engineering"),
+            "carol gets Engineering which has no previous at 3P");
         assert_eq!(result.len(), 3);
     }
 
     #[test]
     fn join_at_max_players_returns_current_unchanged_new_player_is_spectator() {
-        let stations = worked_example_stations(); // max_players = 3
-        // Full 3P crew
+        let stations = worked_example_stations(); // max_players = 5
+        // Full 5P crew
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Repair".to_string()),
+            ("carol".to_string(), "Engineering".to_string()),
+            ("dave".to_string(), "Science".to_string()),
+            ("eve".to_string(), "Helm".to_string()),
         ].into();
-        let result = reassign_on_join(&stations, &current, "dave");
-        // Current unchanged; dave is not in the map (caller adds to spectator queue)
-        assert!(!result.contains_key("dave"), "dave should be a spectator");
-        assert_eq!(result.len(), 3);
+        let result = reassign_on_join(&stations, &current, "frank");
+        // Current unchanged; frank is not in the map (caller adds to spectator queue)
+        assert!(!result.contains_key("frank"), "frank should be a spectator");
+        assert_eq!(result.len(), 5);
     }
 
     // ── advance_on_join ──────────────────────────────────────────────────────
@@ -1075,13 +1077,13 @@ consoles = ["CaptainChair", "Helm"]
     #[test]
     fn leave_3p_when_non_no_prev_player_leaves_no_prev_holder_fills_vacated_slot() {
         let stations = worked_example_stations();
-        // Alice=Helm, Bob=Tactical, Carol=Repair (no-prev)
+        // Alice=Helm, Bob=Tactical, Carol=Engineering (no-prev)
         // Bob leaves (Tactical) → Carol (no-prev holder) claims Tactical's prev = Tactical
         // Alice follows her own prev = Helm
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-            ("carol".to_string(), "Repair".to_string()),
+            ("carol".to_string(), "Engineering".to_string()),
         ].into();
         let (result, _) = reassign_on_leave(
             &stations, &current, "bob", &VecDeque::new()

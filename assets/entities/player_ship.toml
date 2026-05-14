@@ -55,12 +55,12 @@ emergency_threshold = 25.0
 
 [stations]
 min_players = 1
-max_players = 3
+max_players = 5
 
 [[stations.1]]
 name = "Captain"
 description = "Solo crew: pilot, fight, and command the bridge."
-consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power"]
+consoles = ["CaptainChair", "Helm", "Tactical", "Repair", "Power", "Science"]
 rank = "Cpt."
 next = "Helm"
 
@@ -74,8 +74,8 @@ previous = "Captain"
 
 [[stations.2]]
 name = "Tactical"
-description = "Weapons and damage control."
-consoles = ["Tactical", "Repair"]
+description = "Weapons, science, and damage control."
+consoles = ["Tactical", "Repair", "Science"]
 rank = "Ltn."
 next = "Tactical"
 
@@ -94,7 +94,68 @@ rank = "Ltn."
 previous = "Tactical"
 
 [[stations.3]]
-name = "Repair"
+name = "Engineering"
+description = "Maintain, repair, and monitor ship systems."
+consoles = ["Repair", "Power", "Science"]
+rank = "Ltn."
+
+[[stations.4]]
+name = "Helm"
+description = "Pilot the ship and command the bridge."
+consoles = ["CaptainChair", "Helm"]
+rank = "Cpt."
+previous = "Helm"
+
+[[stations.4]]
+name = "Tactical"
+description = "Manage weapons systems."
+consoles = ["Tactical"]
+rank = "Ltn."
+previous = "Tactical"
+
+[[stations.4]]
+name = "Engineering"
 description = "Maintain and repair ship systems."
 consoles = ["Repair", "Power"]
 rank = "Ltn."
+previous = "Engineering"
+
+[[stations.4]]
+name = "Science"
+description = "Monitor sensors and long-range radar."
+consoles = ["Science"]
+rank = "Ltn."
+
+[[stations.5]]
+name = "Captain"
+description = "Command the bridge."
+consoles = ["CaptainChair"]
+rank = "Cpt."
+
+[[stations.5]]
+name = "Helm"
+description = "Pilot the ship."
+consoles = ["Helm"]
+rank = "Ltn."
+previous = "Helm"
+
+[[stations.5]]
+name = "Tactical"
+description = "Manage weapons systems."
+consoles = ["Tactical"]
+rank = "Ltn."
+previous = "Tactical"
+
+[[stations.5]]
+name = "Engineering"
+description = "Maintain and repair ship systems."
+consoles = ["Repair", "Power"]
+rank = "Ltn."
+previous = "Engineering"
+
+[[stations.5]]
+name = "Science"
+description = "Monitor sensors and long-range radar."
+consoles = ["Science"]
+rank = "Ltn."
+previous = "Science"

@@ -181,14 +181,35 @@ pub fn process_message(
                 }));
             }
 
-            // Claim new station — assign the station's consoles
+            // Claim new station — assign the station's consoles.
+            // Track toggle results so the broadcast reflects real session state
+            // (defends against silent divergence when a console is unavailable
+            // because the ship config does not declare it).
+            let mut toggle_failed = false;
             for console in &station_def.consoles {
-                let _ = sessions.toggle_console(token, console.clone());
+                if sessions.toggle_console(token, console.clone()).is_err() {
+                    toggle_failed = true;
+                }
+            }
+            let actual_consoles: Vec<Console> = sessions.players()
+                .iter()
+                .find(|p| p.token == token)
+                .map(|p| p.consoles.clone())
+                .unwrap_or_default();
+            if toggle_failed || actual_consoles != station_def.consoles {
+                // Partial assignment — roll back so wire == truth.
+                sessions.clear_consoles(token);
+                outbound.push((Target::All, ServerMessage::StationAssigned {
+                    token: token.to_string(),
+                    station: None,
+                    consoles: vec![],
+                }));
+                return LobbyHandlerResult { new_phase, outbound };
             }
             outbound.push((Target::All, ServerMessage::StationAssigned {
                 token: token.to_string(),
                 station: Some(station.clone()),
-                consoles: station_def.consoles.clone(),
+                consoles: actual_consoles,
             }));
         }
         ClientMessage::ReleaseStation => {
@@ -283,14 +304,32 @@ fn apply_station_assignments(
 
         if name_changed || consoles_changed {
             sessions.clear_consoles(token);
+            let mut toggle_failed = false;
             for console in &station_def.consoles {
-                let _ = sessions.toggle_console(token, console.clone());
+                if sessions.toggle_console(token, console.clone()).is_err() {
+                    toggle_failed = true;
+                }
             }
-            outbound.push((Target::All, ServerMessage::StationAssigned {
-                token: token.clone(),
-                station: Some(station_name.clone()),
-                consoles: station_def.consoles.clone(),
-            }));
+            let actual_consoles: Vec<Console> = sessions.players()
+                .iter()
+                .find(|p| p.token == *token)
+                .map(|p| p.consoles.clone())
+                .unwrap_or_default();
+            if toggle_failed || actual_consoles != station_def.consoles {
+                // Partial cascade assignment — wire reflects truth: empty.
+                sessions.clear_consoles(token);
+                outbound.push((Target::All, ServerMessage::StationAssigned {
+                    token: token.clone(),
+                    station: None,
+                    consoles: vec![],
+                }));
+            } else {
+                outbound.push((Target::All, ServerMessage::StationAssigned {
+                    token: token.clone(),
+                    station: Some(station_name.clone()),
+                    consoles: actual_consoles,
+                }));
+            }
         }
     }
 
@@ -957,6 +996,55 @@ mod tests {
             .map(|p| p.consoles.clone())
             .unwrap_or_default();
         assert!(t4_consoles.is_empty(), "spectator t4 must not receive consoles automatically");
+    }
+
+    // ── SelectStation broadcast hardening (Option C) ─────────────────────
+
+    #[test]
+    fn select_station_rolls_back_when_console_unavailable() {
+        // If the ship config does not declare one of the station's consoles as
+        // available, toggle_console will fail. The handler must roll back the
+        // partial assignment and broadcast station=None — never lie on the wire
+        // by claiming consoles the session does not actually hold.
+        use crate::entity_config::EntityConfig;
+        // Build an EntityConfig that omits CaptainChair (no [captain_console]).
+        let toml_str = r#"
+tags = ["player"]
+[helm_console]
+[weapons_console]
+[engineering_console]
+"#;
+        let cfg = EntityConfig::from_toml(toml_str).unwrap();
+        let mut sessions = SessionManager::new_with_config(&cfg);
+        sessions.register("t1".into(), "Alice".into()).unwrap();
+
+        let stations = ship_stations();
+        // 1P "Captain" station requires CaptainChair, which is not available.
+        let result = process_message(
+            "t1",
+            &ClientMessage::SelectStation { station: "Captain".into() },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+            &stations,
+        );
+
+        // Session state: t1 must have no consoles (rollback).
+        let consoles = sessions.players().iter()
+            .find(|p| p.token == "t1")
+            .map(|p| p.consoles.clone())
+            .unwrap_or_default();
+        assert!(consoles.is_empty(), "session must roll back partial assignment, got {:?}", consoles);
+
+        // Wire: must broadcast StationAssigned { station: None, consoles: [] }.
+        let lied = result.outbound.iter().any(|(_, m)| matches!(m,
+            ServerMessage::StationAssigned { token, station: Some(_), .. } if token == "t1"
+        ));
+        assert!(!lied, "handler must not broadcast a station the session does not hold");
+        let rolled_back = result.outbound.iter().any(|(_, m)| matches!(m,
+            ServerMessage::StationAssigned { token, station: None, consoles } if token == "t1" && consoles.is_empty()
+        ));
+        assert!(rolled_back, "handler must broadcast rollback StationAssigned with station=None");
     }
 }
 

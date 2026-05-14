@@ -65,6 +65,20 @@ pub enum TriggerAction {
     CompleteObjective { id: String },
     /// Mark an active objective as failed.
     FailObjective { id: String },
+    /// Force a named AI entity into a specific state.
+    ///
+    /// - `entity`: spawn name (resolved to UUID via `name_to_uuid`).
+    /// - `state`: state name as declared in the entity's `[behaviour]` config.
+    /// - `target`: optional spawn name to write into the blackboard `target`.
+    ///
+    /// Blackboard semantics:
+    /// - `state_entered_at` is reset to the current sim time.
+    /// - `target` is overwritten only when `target` is `Some`.
+    /// - `last_attacker` and `waypoint_index` are preserved.
+    ///
+    /// Load-time validation should confirm the state name is known in the
+    /// entity's `BehaviourConfig`; runtime errors are logged and ignored.
+    SetAiState { entity: String, state: String, target: Option<String> },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -162,7 +176,8 @@ fn substitute_action(
         // Objective actions carry no path parameters — pass through unchanged.
         TriggerAction::AddObjective { .. }
         | TriggerAction::CompleteObjective { .. }
-        | TriggerAction::FailObjective { .. } => action.clone(),
+        | TriggerAction::FailObjective { .. }
+        | TriggerAction::SetAiState { .. } => action.clone(),
     }
 }
 
@@ -202,6 +217,15 @@ struct RawActionEntry {
     text: Option<String>,
     #[serde(default)]
     mandatory: Option<bool>,
+    /// Used by `set_ai_state`: the spawn entity name to force into a new state.
+    #[serde(default)]
+    entity: Option<String>,
+    /// Used by `set_ai_state`: the state name to transition into.
+    #[serde(default)]
+    state: Option<String>,
+    /// Used by `set_ai_state`: optional spawn entity name to write into blackboard `target`.
+    #[serde(default)]
+    target: Option<String>,
 }
 
 // ── TOML-facing deserialization for comms blocks ──────────────────────────
@@ -343,6 +367,16 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                     "Action 'fail_objective' requires an 'id' field".to_string()
                 })?;
                 TriggerAction::FailObjective { id }
+            }
+            "set_ai_state" => {
+                let entity = raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'set_ai_state' requires an 'entity' field".to_string()
+                })?;
+                let state = raw_action.state.clone().ok_or_else(|| {
+                    "Action 'set_ai_state' requires a 'state' field".to_string()
+                })?;
+                let target = raw_action.target.clone();
+                TriggerAction::SetAiState { entity, state, target }
             }
             other => {
                 return Err(format!("Unknown trigger action '{}'", other));
@@ -1823,5 +1857,167 @@ text = "Fuel cells"
         }];
         let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 0);
+    }
+
+    // ── Cycles 43-48: SetAiState action ───────────────────────────────────
+
+    // Cycle 43: parse set_ai_state action from TOML
+    #[test]
+    fn parse_set_ai_state_action_from_toml() {
+        let toml = r#"
+[[spawn]]
+name = "raider_x"
+entity_path = "entities/raider.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "raider_x"
+
+[[trigger.action]]
+type = "set_ai_state"
+entity = "raider_x"
+state = "pursuing"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.triggers[0].actions.len(), 1);
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::SetAiState {
+                entity: "raider_x".to_string(),
+                state: "pursuing".to_string(),
+                target: None,
+            }
+        );
+    }
+
+    // Cycle 44: parse set_ai_state action with optional target
+    #[test]
+    fn parse_set_ai_state_action_with_target() {
+        let toml = r#"
+[[spawn]]
+name = "ambusher"
+entity_path = "entities/raider.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 5.0
+
+[[trigger.action]]
+type = "set_ai_state"
+entity = "ambusher"
+state = "pursuing"
+target = "player_ship"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::SetAiState {
+                entity: "ambusher".to_string(),
+                state: "pursuing".to_string(),
+                target: Some("player_ship".to_string()),
+            }
+        );
+    }
+
+    // Cycle 45: parse set_ai_state without entity field → error
+    #[test]
+    fn parse_set_ai_state_without_entity_returns_error() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "set_ai_state"
+state = "pursuing"
+"#;
+        let result = parse_scenario(toml);
+        assert!(result.is_err(), "missing entity should return error");
+        let err = result.unwrap_err();
+        assert!(err.contains("entity"), "error should mention 'entity': {err}");
+    }
+
+    // Cycle 46: parse set_ai_state without state field → error
+    #[test]
+    fn parse_set_ai_state_without_state_returns_error() {
+        let toml = r#"
+[[spawn]]
+name = "raider"
+entity_path = "entities/raider.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "set_ai_state"
+entity = "raider"
+"#;
+        let result = parse_scenario(toml);
+        assert!(result.is_err(), "missing state should return error");
+        let err = result.unwrap_err();
+        assert!(err.contains("state"), "error should mention 'state': {err}");
+    }
+
+    // Cycle 47: evaluate_triggers returns SetAiState action
+    #[test]
+    fn evaluate_triggers_returns_set_ai_state_action() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("ambusher".to_string(), "uuid-ambusher".to_string());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnTimer { after_secs: 5.0 },
+            actions: vec![TriggerAction::SetAiState {
+                entity: "ambusher".to_string(),
+                state: "pursuing".to_string(),
+                target: Some("player_ship".to_string()),
+            }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+        let events = vec![WorldEvent::TimerElapsed { elapsed_secs: 5.0 }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 1);
+        assert_eq!(
+            fired[0].actions[0],
+            TriggerAction::SetAiState {
+                entity: "ambusher".to_string(),
+                state: "pursuing".to_string(),
+                target: Some("player_ship".to_string()),
+            }
+        );
+    }
+
+    // Cycle 48: on_entity_attacked trigger fires once (single-shot semantics)
+    #[test]
+    fn on_attacked_trigger_fires_only_once_single_shot() {
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("raider".to_string(), "uuid-raider".to_string());
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnAttacked { entity_name: "raider".to_string() },
+            actions: vec![TriggerAction::SetAiState {
+                entity: "raider".to_string(),
+                state: "attacking".to_string(),
+                target: None,
+            }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+
+        let events = vec![WorldEvent::Attacked {
+            uuid: "uuid-raider".to_string(),
+            attacker_uuid: "uuid-player".to_string(),
+        }];
+
+        // First evaluation fires.
+        let fired1 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired1.len(), 1);
+
+        // Second evaluation with same events: must not fire again.
+        let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired2.len(), 0);
     }
 }

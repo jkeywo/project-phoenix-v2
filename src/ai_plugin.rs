@@ -88,7 +88,7 @@ impl AiTokenRegistry {
 
 // ── AiControllerComponent ────────────────────────────────────────────────────
 
-/// Bevy component wrapping an `AiController` (the pure state machine).
+/// Marker component wrapping an `AiController` (the pure state machine).
 /// Also carries the entity UUID so the despawn handler can unregister
 /// the synthetic token without querying a potentially-absent UUID component.
 #[derive(Component)]
@@ -106,6 +106,47 @@ pub struct WarpOutMarker {
     pub target_speed: f32,
 }
 
+/// Component: carries the UUID of an entity that attacked this NPC during the
+/// current tick. Written by the simulation (or tests) to signal an incoming
+/// hit. Consumed by `tick_ai_controllers` to populate `attacker_this_tick` in
+/// the WorldView and emit an `AiEntityAttacked` event.
+#[derive(Component, Clone, Debug)]
+pub struct AttackerThisTick(pub uuid::Uuid);
+
+/// Component: tracks the hull integrity fraction [0.0, 1.0] of an NPC entity.
+/// Default 1.0 (full health). When it reaches ≤ 0.0 the `detect_npc_hull_zero`
+/// system emits an `AiEntityDestroyed` event and despawns the entity.
+#[derive(Component, Clone, Debug)]
+pub struct NpcHullFraction(pub f32);
+
+impl Default for NpcHullFraction {
+    fn default() -> Self {
+        NpcHullFraction(1.0)
+    }
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+
+/// Emitted by the AI plugin when an NPC entity's `on_attacked` condition fires
+/// (first hit per state-entry, i.e. while `on_attacked_armed` is true).
+///
+/// The scenario plugin observes this event to evaluate `on_entity_attacked`
+/// trigger conditions without a direct dependency on the AI module.
+#[derive(Message, Clone, Debug)]
+pub struct AiEntityAttacked {
+    pub entity_uuid: String,
+    pub attacker_uuid: uuid::Uuid,
+}
+
+/// Emitted by the AI plugin when an NPC entity's hull reaches ≤ 0.0.
+///
+/// The scenario plugin observes this event to evaluate `on_entity_destroyed`
+/// trigger conditions without a direct dependency on the AI module.
+#[derive(Message, Clone, Debug)]
+pub struct AiEntityDestroyed {
+    pub entity_uuid: String,
+}
+
 // ── Plugin ───────────────────────────────────────────────────────────────────
 
 pub struct AiPlugin;
@@ -113,11 +154,14 @@ pub struct AiPlugin;
 impl Plugin for AiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AiTokenRegistry>();
+        app.add_message::<AiEntityAttacked>();
+        app.add_message::<AiEntityDestroyed>();
         app.add_systems(
             Update,
             (
                 attach_controllers_on_spawn,
                 tick_ai_controllers,
+                detect_npc_hull_zero,
                 unregister_on_despawn,
             ),
         );
@@ -158,12 +202,13 @@ fn attach_controllers_on_spawn(
 fn tick_ai_controllers(
     phase: Res<CurrentPhase>,
     mut commands: Commands,
-    mut query: Query<(Entity, &mut AiControllerComponent, &mut Transform, &BehaviourSection)>,
+    mut query: Query<(Entity, &mut AiControllerComponent, &mut Transform, &BehaviourSection, Option<&AttackerThisTick>)>,
     time: Res<Time>,
     map_config: Option<Res<crate::map_config::MapConfig>>,
     #[cfg(target_arch = "wasm32")]
     faction_registry: Option<Res<FactionRegistryResource>>,
     entity_query: Query<(&EntityUuid, &Transform), Without<AiControllerComponent>>,
+    mut attacked_events: MessageWriter<AiEntityAttacked>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -206,9 +251,12 @@ fn tick_ai_controllers(
     let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
 
-    for (entity, mut ctrl, mut transform, behaviour) in &mut query {
+    for (entity, mut ctrl, mut transform, behaviour, attacker_comp) in &mut query {
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+
+        // Read attacker from component (set externally by simulation / tests).
+        let attacker_this_tick = attacker_comp.map(|a| a.0);
 
         let world_view = WorldView {
             sim_time,
@@ -216,7 +264,7 @@ fn tick_ai_controllers(
             entity_yaw: yaw,
             anchors: anchors.clone(),
             entities: world_entities.clone(),
-            attacker_this_tick: None, // populated externally when damage events arrive
+            attacker_this_tick,
             self_faction: None,       // TODO: populate from entity config faction field
             entity_phaser_ready: false,
             entity_weapons_range: None,
@@ -227,6 +275,22 @@ fn tick_ai_controllers(
 
         let registry = actual_registry.unwrap_or(&empty_registry);
         let output: AiTickOutput = crate::ai::tick(&ctrl.controller, &world_view, &behaviour.0, registry);
+
+        // Emit AiEntityAttacked when the on_attacked condition just fired.
+        // We detect this by checking: attacker present AND on_attacked_armed was true
+        // before the tick (i.e. the new blackboard has on_attacked_armed == false).
+        if let Some(attacker_uuid) = attacker_this_tick {
+            let was_armed = ctrl.controller.blackboard.on_attacked_armed;
+            let now_disarmed = output.new_blackboard.as_ref()
+                .map(|bb| !bb.on_attacked_armed)
+                .unwrap_or(false);
+            if was_armed && now_disarmed {
+                attacked_events.write(AiEntityAttacked {
+                    entity_uuid: ctrl.entity_uuid.clone(),
+                    attacker_uuid,
+                });
+            }
+        }
 
         // Apply blackboard update
         if let Some(new_bb) = output.new_blackboard {
@@ -287,6 +351,23 @@ fn tick_ai_controllers(
             _ => {
                 commands.entity(entity).remove::<WarpOutMarker>();
             }
+        }
+    }
+}
+
+/// Emit `AiEntityDestroyed` and despawn any NPC entity whose `NpcHullFraction`
+/// has dropped to ≤ 0.0.
+fn detect_npc_hull_zero(
+    mut commands: Commands,
+    query: Query<(Entity, &EntityUuid, &NpcHullFraction), Changed<NpcHullFraction>>,
+    mut destroyed_events: MessageWriter<AiEntityDestroyed>,
+) {
+    for (entity, uuid, hull) in &query {
+        if hull.0 <= 0.0 {
+            destroyed_events.write(AiEntityDestroyed {
+                entity_uuid: uuid.0.clone(),
+            });
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -406,16 +487,31 @@ mod tests {
 
     // ── Bevy integration tests ────────────────────────────────────────────
 
-    use crate::entity_config::BehaviourConfig;
+    use crate::entity_config::{BehaviourConfig, StateConfig};
     use crate::entity_spawner::EntityUuid;
     use crate::lobby::{CurrentPhase, LobbyPlugin};
     use crate::messages::GamePhase;
+
+    #[derive(Resource, Default)]
+    struct AttackedBox(Vec<AiEntityAttacked>);
+    #[derive(Resource, Default)]
+    struct DestroyedBox(Vec<AiEntityDestroyed>);
+
+    fn collect_attacked(mut r: MessageReader<AiEntityAttacked>, mut b: ResMut<AttackedBox>) {
+        for e in r.read() { b.0.push(e.clone()); }
+    }
+    fn collect_destroyed(mut r: MessageReader<AiEntityDestroyed>, mut b: ResMut<DestroyedBox>) {
+        for e in r.read() { b.0.push(e.clone()); }
+    }
 
     fn build_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
-            .add_plugins(AiPlugin);
+            .add_plugins(AiPlugin)
+            .init_resource::<AttackedBox>()
+            .init_resource::<DestroyedBox>()
+            .add_systems(PostUpdate, (collect_attacked, collect_destroyed));
         app
     }
 
@@ -516,6 +612,110 @@ mod tests {
         assert!(
             !app.world().resource::<AiTokenRegistry>().contains_entity("ent-007"),
             "token must be unregistered after despawn"
+        );
+    }
+
+    // ── AiEntityAttacked event ────────────────────────────────────────────
+
+    fn build_on_attacked_behaviour() -> BehaviourConfig {
+        BehaviourConfig {
+            initial_state: "idle".into(),
+            state: vec![StateConfig {
+                name: "chase".into(),
+                kind: "pursuing".into(),
+                waypoints: vec![],
+                loop_path: false,
+                target_speed: 0.8,
+                maintain_range: 0.0,
+                duration_secs: 0.0,
+            }],
+            transition: vec![crate::ai::TransitionConfig {
+                from: crate::ai::StringOrVec::Single("idle".into()),
+                to: "chase".into(),
+                condition: "on_attacked".into(),
+                radius: None,
+                threshold: None,
+                seconds: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn ai_entity_attacked_event_emitted_when_attacker_set_and_on_attacked_fires() {
+        let mut app = build_test_app();
+        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+
+        // Spawn entity with on_attacked transition and an attacker component.
+        let attacker_id = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000099").unwrap();
+        let entity = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            EntityUuid("ent-attacked-001".to_string()),
+            BehaviourSection(build_on_attacked_behaviour()),
+            AttackerThisTick(attacker_id),
+        )).id();
+
+        app.update(); // attach controller + first tick
+        app.update(); // tick fires transition
+
+        let events = app.world().resource::<AttackedBox>().0.clone();
+
+        assert!(
+            events.iter().any(|e| e.entity_uuid == "ent-attacked-001"),
+            "AiEntityAttacked must be emitted when on_attacked fires"
+        );
+    }
+
+    // ── AiEntityDestroyed event ───────────────────────────────────────────
+
+    #[test]
+    fn ai_entity_destroyed_event_emitted_when_hull_reaches_zero() {
+        let mut app = build_test_app();
+        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+
+        let entity = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            EntityUuid("ent-hull-001".to_string()),
+            NpcHullFraction(1.0),
+        )).id();
+        app.update();
+
+        // Reduce hull to zero
+        app.world_mut()
+            .entity_mut(entity)
+            .get_mut::<NpcHullFraction>()
+            .unwrap()
+            .0 = 0.0;
+        app.update();
+
+        let events = app.world().resource::<DestroyedBox>().0.clone();
+
+        assert!(
+            events.iter().any(|e| e.entity_uuid == "ent-hull-001"),
+            "AiEntityDestroyed must be emitted when hull reaches 0"
+        );
+    }
+
+    #[test]
+    fn entity_despawned_when_hull_reaches_zero() {
+        let mut app = build_test_app();
+
+        let entity = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            EntityUuid("ent-hull-002".to_string()),
+            NpcHullFraction(0.5),
+        )).id();
+        app.update();
+
+        app.world_mut()
+            .entity_mut(entity)
+            .get_mut::<NpcHullFraction>()
+            .unwrap()
+            .0 = 0.0;
+        app.update();
+
+        assert!(
+            app.world().get_entity(entity).is_err(),
+            "entity must be despawned when hull reaches 0"
         );
     }
 }

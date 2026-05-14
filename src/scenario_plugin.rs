@@ -16,7 +16,8 @@ use crate::messages::{
 use crate::objectives::ObjectiveManager;
 use crate::scenario::{
     ActiveDialogue, CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerAction,
-    WorldEvent, evaluate_comms_templates,
+    TriggerState, WorldEvent, evaluate_comms_templates, evaluate_triggers,
+    trigger_states_from_config,
 };
 
 // ── Resources ──────────────────────────────────────────────────────────────
@@ -31,6 +32,8 @@ use crate::scenario::{
 pub struct ScenarioRuntime {
     /// Stable scenario ID string (used to scope inbox messages and objectives).
     pub scenario_id: String,
+    /// Mutable per-trigger runtime state (fired flag).
+    pub trigger_states: Vec<TriggerState>,
     /// Mutable per-template runtime state (fired flag).
     pub comms_template_states: Vec<CommsTemplateState>,
     /// Active in-flight dialogues keyed by CommsMessage id.
@@ -80,7 +83,8 @@ impl Plugin for ScenarioPlugin {
                     broadcast_comms_state,
                     broadcast_objective_summary,
                 ).chain(),
-            );
+            )
+            .add_systems(Update, handle_ai_events);
     }
 }
 
@@ -160,6 +164,7 @@ fn init_scenario_runtime(
     runtime.name_to_uuid = scenario_config.name_to_uuid.clone();
     runtime.comms_template_states =
         crate::scenario::comms_template_states_from_config(&scenario_config);
+    runtime.trigger_states = trigger_states_from_config(&scenario_config);
 
     // Build contacts list from comms templates: any entity referenced as
     // `from` in a comms template is a hailable contact (provided we have
@@ -324,6 +329,10 @@ fn handle_respond_to_message(
                     // Scenario loading is handled by the scenario manager; not yet
                     // wired into this system. No-op for now.
                 }
+                TriggerAction::SetAiState { .. } => {
+                    // SetAiState is handled by the AI-event trigger system, not
+                    // the comms response path. No-op here.
+                }
             }
         }
 
@@ -468,7 +477,98 @@ fn broadcast_objective_summary(
     objectives.0.mark_clean();
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
+// ── AI-event trigger system ─────────────────────────────────────────────────
+
+/// Read `AiEntityAttacked` and `AiEntityDestroyed` messages, translate them
+/// into `WorldEvent`s, evaluate the scenario trigger table, and execute the
+/// resulting actions (including `SetAiState`).
+fn handle_ai_events(
+    phase: Res<CurrentPhase>,
+    mut runtime: ResMut<ScenarioRuntime>,
+    mut objectives: ResMut<ObjectiveManagerRes>,
+    mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
+    mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
+    mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+
+    let mut world_events: Vec<WorldEvent> = Vec::new();
+    for ev in attacked_reader.read() {
+        world_events.push(WorldEvent::Attacked {
+            uuid: ev.entity_uuid.clone(),
+            attacker_uuid: ev.attacker_uuid.to_string(),
+        });
+    }
+    for ev in destroyed_reader.read() {
+        world_events.push(WorldEvent::Destroyed { uuid: ev.entity_uuid.clone() });
+    }
+    if world_events.is_empty() {
+        return;
+    }
+
+    let name_to_uuid = runtime.name_to_uuid.clone();
+    let fired = evaluate_triggers(&mut runtime.trigger_states, &world_events, &name_to_uuid);
+
+    for ft in fired {
+        for action in &ft.actions {
+            match action {
+                TriggerAction::AddObjective { id, text, mandatory } => {
+                    objectives.0.add(id.clone(), text.clone(), *mandatory, runtime.scenario_id.clone());
+                }
+                TriggerAction::CompleteObjective { id } => {
+                    objectives.0.complete(id);
+                }
+                TriggerAction::FailObjective { id } => {
+                    objectives.0.fail(id);
+                }
+                TriggerAction::SetAiState { entity, state, target } => {
+                    // Resolve spawn name → UUID
+                    let target_uuid = match name_to_uuid.get(entity) {
+                        Some(u) => u.clone(),
+                        None => {
+                            bevy::log::warn!(
+                                "handle_ai_events: SetAiState: unknown entity name '{entity}'"
+                            );
+                            continue;
+                        }
+                    };
+                    // Find the Bevy entity with that UUID and mutate its controller.
+                    for (uuid_comp, mut ctrl, behaviour) in ai_query.iter_mut() {
+                        if uuid_comp.0 != target_uuid {
+                            continue;
+                        }
+                        // Build the new AiState from the behaviour config.
+                        let new_ai_state = crate::ai::build_initial_state(
+                            &crate::entity_config::BehaviourConfig {
+                                initial_state: state.clone(),
+                                state: behaviour.0.state.clone(),
+                                transition: behaviour.0.transition.clone(),
+                            },
+                        );
+                        ctrl.controller.current_state = new_ai_state;
+                        ctrl.controller.current_state_name = state.clone();
+                        if let Some(target_name) = target {
+                            if let Some(target_uuid) = name_to_uuid.get(target_name) {
+                                if let Ok(uuid) = uuid::Uuid::parse_str(target_uuid) {
+                                    ctrl.controller.blackboard.target = Some(uuid);
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                TriggerAction::LoadScenario { .. } => {
+                    // Not yet implemented at the plugin layer.
+                }
+            }
+        }
+    }
+}
+
+use crate::ai_plugin::{AiControllerComponent, AiEntityAttacked, AiEntityDestroyed};
+use crate::entity_spawner::{BehaviourSection, EntityUuid};
 
 #[cfg(test)]
 mod tests {
@@ -808,6 +908,167 @@ mod tests {
         assert!(
             contacts.iter().any(|c| c.uuid == station_uuid),
             "station must appear as a contact"
+        );
+    }
+
+    // ── AI-event trigger tests ───────────────────────────────────────────────
+
+    /// Build a minimal test app that includes just what handle_ai_events needs.
+    fn ai_trigger_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .add_plugins(crate::ai_plugin::AiPlugin)
+            .init_resource::<ScenarioRuntime>()
+            .init_resource::<CommsInboxRes>()
+            .init_resource::<ObjectiveManagerRes>()
+            .add_systems(Update, handle_ai_events);
+        // Set phase to InProgress
+        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app
+    }
+
+    #[test]
+    fn on_entity_destroyed_trigger_fires_add_objective_action() {
+        let mut app = ai_trigger_test_app();
+
+        let npc_uuid = "dead-npc-uuid-001";
+        let mut runtime = app.world_mut().resource_mut::<ScenarioRuntime>();
+        runtime.scenario_id = "test".to_string();
+        runtime.name_to_uuid.insert("station_alpha".to_string(), npc_uuid.to_string());
+        runtime.trigger_states = vec![TriggerState {
+            trigger: crate::scenario::Trigger {
+                condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
+                actions: vec![TriggerAction::AddObjective {
+                    id: "obj-001".to_string(),
+                    text: "Station destroyed".to_string(),
+                    mandatory: false,
+                }],
+            },
+            fired: false,
+        }];
+
+        // Emit the AiEntityDestroyed message.
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed { entity_uuid: npc_uuid.to_string() });
+
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objectives.sorted_snapshots().iter().any(|o| o.id == "obj-001"),
+            "AddObjective action must have fired"
+        );
+    }
+
+    #[test]
+    fn on_entity_attacked_trigger_fires_add_objective_action() {
+        let mut app = ai_trigger_test_app();
+
+        let npc_uuid = "attacked-npc-uuid-002";
+        let attacker_uuid = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
+        {
+            let mut runtime = app.world_mut().resource_mut::<ScenarioRuntime>();
+            runtime.scenario_id = "test".to_string();
+            runtime.name_to_uuid.insert("enemy_ship".to_string(), npc_uuid.to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::scenario::Trigger {
+                    condition: TriggerCondition::OnAttacked { entity_name: "enemy_ship".to_string() },
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "obj-002".to_string(),
+                        text: "Enemy attacked".to_string(),
+                        mandatory: false,
+                    }],
+                },
+                fired: false,
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityAttacked>>()
+            .write(AiEntityAttacked {
+                entity_uuid: npc_uuid.to_string(),
+                attacker_uuid,
+            });
+
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objectives.sorted_snapshots().iter().any(|o| o.id == "obj-002"),
+            "AddObjective action from on_entity_attacked must have fired"
+        );
+    }
+
+    #[test]
+    fn set_ai_state_action_mutates_controller_state() {
+        use crate::ai::AiState;
+        use crate::entity_config::{BehaviourConfig, StateConfig};
+
+        let mut app = ai_trigger_test_app();
+
+        let npc_uuid = "npc-state-change-uuid-003";
+        let attacker_uuid = uuid::Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap();
+
+        // Spawn an NPC entity with a behaviour that has an "idle" and "chase" state.
+        let behaviour = BehaviourConfig {
+            initial_state: "idle".to_string(),
+            state: vec![
+                StateConfig { name: "idle".to_string(), kind: "idle".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "chase".to_string(), kind: "pursuing".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
+            ],
+            transition: vec![],
+        };
+
+        let entity = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            EntityUuid(npc_uuid.to_string()),
+            BehaviourSection(behaviour),
+        )).id();
+        // First update: attach controller
+        app.update();
+
+        // Verify controller starts in Idle
+        let ctrl_state_name = app.world().get::<AiControllerComponent>(entity)
+            .expect("controller must be attached")
+            .controller.current_state_name.clone();
+        assert_eq!(ctrl_state_name, "idle");
+
+        // Set up trigger: on attacked → SetAiState to "chase"
+        {
+            let mut runtime = app.world_mut().resource_mut::<ScenarioRuntime>();
+            runtime.scenario_id = "test".to_string();
+            runtime.name_to_uuid.insert("npc_alpha".to_string(), npc_uuid.to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::scenario::Trigger {
+                    condition: TriggerCondition::OnAttacked { entity_name: "npc_alpha".to_string() },
+                    actions: vec![TriggerAction::SetAiState {
+                        entity: "npc_alpha".to_string(),
+                        state: "chase".to_string(),
+                        target: None,
+                    }],
+                },
+                fired: false,
+            }];
+        }
+
+        // Fire the attacked event
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityAttacked>>()
+            .write(AiEntityAttacked {
+                entity_uuid: npc_uuid.to_string(),
+                attacker_uuid,
+            });
+
+        app.update();
+
+        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
+        assert_eq!(ctrl.controller.current_state_name, "chase",
+            "SetAiState must update current_state_name to 'chase'");
+        assert!(
+            matches!(ctrl.controller.current_state, AiState::Pursuing { .. }),
+            "current_state must be Pursuing after SetAiState to 'chase'"
         );
     }
 }

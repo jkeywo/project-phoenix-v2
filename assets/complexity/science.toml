@@ -1,0 +1,7 @@
+[[preset]]
+name = "Low"
+hidden_elements = []
+
+[[preset]]
+name = "Full"
+hidden_elements = []

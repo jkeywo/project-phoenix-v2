@@ -255,6 +255,24 @@ Open PRDs now: #116 (Save/Load), #119 (Stations + Scenarios + Comms), #142 (AI).
 
 Pages still not yet updated in this pass (deferred — facts mostly correct but file paths / line numbers may drift): `concepts/architecture`, `concepts/testing-strategy`, `concepts/console-plugin-pattern`, `concepts/view-model-pattern`, `entities/helm-console`, `entities/captain-console`, `entities/bridge-crew-stations-planned` (now superseded by `stations.rs` — candidate for retirement), `roadmap/combat-and-damage`, `roadmap/console-expansion`, `roadmap/data-driven-content`, `roadmap/open-architectural-questions`, `roadmap/overview` (the open-PRD list inside it still mentions #115/#117/#118/#120 as planned).
 
+## [2026-05-14] ingest | Issue #176 — delegation allowlist + Science phaser-frequency control | delegation.rs + SetPhaserFrequency
+
+Implemented issue #176 via TDD (12 new tests added, all passing). 1087 total tests.
+
+New module:
+- `src/delegation.rs` — pure (no Bevy) allowlist. `DelegatedControl` enum (currently `SetPhaserFrequency` only), `ComplexityContext` struct (carrying `tactical_is_low: bool`), and `is_sender_authorized(control, sender, ctx)` function. Allowlist table: Tactical may always set phaser frequency; Science may set it only when Tactical is Low.
+
+Changes:
+- `src/messages.rs` — new `ClientMessage::SetPhaserFrequency { frequency: f32 }` variant.
+- `src/ship_state.rs` — new `phaser_frequency: f32` field (default 0.5) on `ShipState`.
+- `src/simulation.rs` — new `handle_set_phaser_frequency` system. Consults `ConsoleComplexityState` + `delegation::is_sender_authorized`; clamps value to `[0.0, 1.0]`. Registered in both `SimulationPlugin` and the test app.
+- `src/lobby_handler.rs` — `SetPhaserFrequency` added to the pass-through arm of the inbound match (lobby ignores it).
+- `src/client_sim.rs` — `phaser_frequency: f32` field on `ClientSimState`; `is_science_phaser_panel_visible(complexity)` pure helper; `set_phaser_frequency_message(frequency)` message builder.
+- `src/client_elements.rs` — no new TOML asset needed; Science panel visibility is driven by Tactical's complexity state, not a hidden-elements list.
+- `src/codec.rs` — three round-trip tests for `SetPhaserFrequency`.
+- `assets/complexity/science.toml` — created (two empty presets) for future use.
+- `src/lib.rs` — registered `pub mod delegation`.
+
 ## [2026-05-14] ingest | Issue #175 — auto-fire torpedo AI | console_ai + console_ai_plugin
 
 Implemented issue #175 via TDD (21 new tests, all passing).

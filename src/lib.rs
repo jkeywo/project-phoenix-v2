@@ -1,4 +1,5 @@
 pub mod beam_render;
+pub mod delegation;
 pub mod impulse;
 pub mod shield;
 pub mod entity_tags;

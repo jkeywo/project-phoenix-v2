@@ -13,6 +13,8 @@ pub struct ShipState {
     pub yaw: f32,
     /// Current forward speed
     pub forward_speed: f32,
+    /// Current phaser emitter frequency (0.0–1.0). Changed by `SetPhaserFrequency`.
+    pub phaser_frequency: f32,
 }
 
 impl ShipState {
@@ -24,6 +26,7 @@ impl ShipState {
             z: 0.0,
             yaw: 0.0,
             forward_speed: 0.0,
+            phaser_frequency: 0.5,
         }
     }
 

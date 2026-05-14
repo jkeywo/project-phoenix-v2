@@ -209,6 +209,10 @@ pub struct ClientSimState {
     pub repair_teams: [TeamSlot; 3],
     /// The current breakdown (console + shape) or `None` when queue is empty.
     pub current_breakdown: Option<(Console, Shape)>,
+    /// Current phaser emitter frequency as last set (0.0–1.0).
+    /// Initialised to 0.5. Updated by `ComplexityChanged` indirectly via
+    /// the Science phaser-frequency sub-panel.
+    pub phaser_frequency: f32,
 }
 
 impl Default for ClientSimState {
@@ -243,6 +247,7 @@ impl Default for ClientSimState {
             power_state_payload: None,
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
+            phaser_frequency: 0.5,
         }
     }
 }
@@ -558,6 +563,24 @@ pub fn is_power_locked(payload: &Option<(u8, u8, u8, f32, bool)>) -> bool {
     payload.map_or(false, |p| p.4)
 }
 
+/// Returns `true` when the Science console phaser-frequency sub-panel should
+/// be visible.
+///
+/// The sub-panel is shown when Tactical is currently at Low complexity
+/// (i.e. Tactical has delegated phaser-frequency control to Science).
+/// It disappears when Tactical returns to Full.
+///
+/// `complexity` is the per-console preset map from `LobbyState`.
+pub fn is_science_phaser_panel_visible(complexity: &std::collections::HashMap<Console, String>) -> bool {
+    complexity.get(&Console::Tactical).map(|p| p == "Low").unwrap_or(false)
+}
+
+/// Build a `SetPhaserFrequency` `ClientMessage` for the given frequency value.
+/// The value is clamped to `[0.0, 1.0]` before being wrapped.
+pub fn set_phaser_frequency_message(frequency: f32) -> ClientMessage {
+    ClientMessage::SetPhaserFrequency { frequency: frequency.clamp(0.0, 1.0) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -655,6 +678,7 @@ mod tests {
             power_state_payload: None,
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
+            phaser_frequency: 0.5,
         };
         let world = WorldData {
             entities: vec![EntitySnapshot::asteroid("c", 1.0, 2.0, 0.5)],
@@ -709,6 +733,7 @@ mod tests {
             power_state_payload: None,
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
+            phaser_frequency: 0.5,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -754,6 +779,7 @@ mod tests {
             power_state_payload: None,
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
+            phaser_frequency: 0.5,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -1734,6 +1760,7 @@ mod tests {
             power_state_payload: Some((4, 2, 2, 100.0, false)),
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
+            phaser_frequency: 0.5,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
@@ -2003,5 +2030,54 @@ mod tests {
         // Despawn again (should be harmless).
         s.apply(&ServerMessage::EntityDespawned { uuid: "persistent".into() });
         assert!(s.world.entities.is_empty(), "second EntityDespawned must remain no-op");
+    }
+
+    // ── Science phaser panel visibility ────────────────────────────────
+
+    #[test]
+    fn science_phaser_panel_visible_when_tactical_is_low() {
+        let mut complexity = HashMap::new();
+        complexity.insert(Console::Tactical, "Low".into());
+        assert!(is_science_phaser_panel_visible(&complexity));
+    }
+
+    #[test]
+    fn science_phaser_panel_not_visible_when_tactical_is_full() {
+        let mut complexity = HashMap::new();
+        complexity.insert(Console::Tactical, "Full".into());
+        assert!(!is_science_phaser_panel_visible(&complexity));
+    }
+
+    #[test]
+    fn science_phaser_panel_not_visible_when_no_tactical_entry() {
+        let complexity = HashMap::new();
+        assert!(!is_science_phaser_panel_visible(&complexity));
+    }
+
+    #[test]
+    fn science_phaser_panel_not_visible_when_only_science_is_low() {
+        let mut complexity = HashMap::new();
+        complexity.insert(Console::Science, "Low".into());
+        assert!(!is_science_phaser_panel_visible(&complexity));
+    }
+
+    // ── SetPhaserFrequency message builder ─────────────────────────────
+
+    #[test]
+    fn set_phaser_frequency_message_wraps_value() {
+        let msg = set_phaser_frequency_message(0.75);
+        assert_eq!(msg, ClientMessage::SetPhaserFrequency { frequency: 0.75 });
+    }
+
+    #[test]
+    fn set_phaser_frequency_message_clamps_above_one() {
+        let msg = set_phaser_frequency_message(1.5);
+        assert_eq!(msg, ClientMessage::SetPhaserFrequency { frequency: 1.0 });
+    }
+
+    #[test]
+    fn set_phaser_frequency_message_clamps_below_zero() {
+        let msg = set_phaser_frequency_message(-0.5);
+        assert_eq!(msg, ClientMessage::SetPhaserFrequency { frequency: 0.0 });
     }
 }

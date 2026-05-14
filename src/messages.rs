@@ -401,6 +401,12 @@ pub enum ClientMessage {
     /// Validated server-side: sender must hold the console and the preset
     /// name must exist in the ship's complexity config.
     SetComplexity { console: Console, preset_name: String },
+    /// Set the phaser emitter frequency (0.0–1.0).
+    ///
+    /// Normally sent by the Tactical holder. When Tactical is at Low
+    /// complexity, the Science holder may also send this message
+    /// (delegation allowlist in `delegation.rs`).
+    SetPhaserFrequency { frequency: f32 },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

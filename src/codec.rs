@@ -1112,4 +1112,27 @@ mod tests {
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
+
+    // ── SetPhaserFrequency round-trip ────────────────────────────────────
+
+    #[test]
+    fn client_set_phaser_frequency_round_trips() {
+        let msg = ClientMessage::SetPhaserFrequency { frequency: 0.75 };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_phaser_frequency_zero_round_trips() {
+        let msg = ClientMessage::SetPhaserFrequency { frequency: 0.0 };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_set_phaser_frequency_one_round_trips() {
+        let msg = ClientMessage::SetPhaserFrequency { frequency: 1.0 };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
 }

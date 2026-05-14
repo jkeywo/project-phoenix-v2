@@ -316,6 +316,7 @@ impl Plugin for SimulationPlugin {
                 handle_set_science_target,
                 handle_fire_phaser,
                 handle_set_phaser_mode,
+                handle_set_phaser_frequency,
                 handle_fire_torpedo,
                 handle_repair,
                 handle_power_messages,
@@ -699,6 +700,48 @@ fn handle_set_phaser_mode(
             continue;
         }
         phaser_mode.0 = *mode;
+    }
+}
+
+/// Handle `SetPhaserFrequency` messages.
+///
+/// Authorization is checked via the delegation allowlist:
+/// - Tactical holder may always set phaser frequency.
+/// - Science holder may set phaser frequency only when Tactical is at Low
+///   complexity (delegated control, per PRD #176).
+/// All other senders are silently rejected.
+fn handle_set_phaser_frequency(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    phase: Res<CurrentPhase>,
+    complexity: Res<crate::console_ai_plugin::ConsoleComplexityState>,
+    mut ship: ResMut<ShipState>,
+) {
+    use crate::delegation::{is_sender_authorized, ComplexityContext, DelegatedControl};
+
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    let ctx = ComplexityContext {
+        tactical_is_low: complexity.is_low(&Console::Tactical),
+    };
+    for ev in reader.read() {
+        let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else { continue };
+
+        // Determine which console the sender holds (if any).
+        let sender_console = if sessions.0.console_holder(Console::Tactical) == Some(ev.token.as_str()) {
+            Console::Tactical
+        } else if sessions.0.console_holder(Console::Science) == Some(ev.token.as_str()) {
+            Console::Science
+        } else {
+            continue;
+        };
+
+        if !is_sender_authorized(DelegatedControl::SetPhaserFrequency, &sender_console, &ctx) {
+            continue;
+        }
+
+        ship.phaser_frequency = frequency.clamp(0.0, 1.0);
     }
 }
 
@@ -1920,8 +1963,9 @@ fn test_app() -> App {
         .init_resource::<TrackedEntities>()
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
+        .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
         .init_resource::<Outbox>()
-        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_fire_torpedo, handle_repair, handle_power_messages, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, tick_power_system))
+        .add_systems(Update, (handle_set_view, handle_set_target, handle_set_science_target, handle_fire_phaser, handle_set_phaser_mode, handle_set_phaser_frequency, handle_fire_torpedo, handle_repair, handle_power_messages, handle_impulse_messages, tick_active_beam, tick_repair_teams, tick_torpedo_system, tick_power_system))
         .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_power_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state), reconcile_runtime_entities.after(crate::lobby::process_lobby)))
         .add_systems(PostUpdate, collect);
     app
@@ -4110,5 +4154,72 @@ fn test_app() -> App {
             "EntityDespawned must broadcast to All, got {:?}",
             despawn_msg.target
         );
+    }
+
+    // ── SetPhaserFrequency delegation tests ────────────────────────────
+
+    /// Tactical holder may always set phaser frequency.
+    #[test]
+    fn tactical_holder_can_set_phaser_frequency() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: 0.8 });
+        tick(&mut app);
+        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        assert!((freq - 0.8).abs() < 1e-5, "Tactical holder should set phaser frequency to 0.8, got {freq}");
+    }
+
+    /// Science holder may set phaser frequency when Tactical is Low.
+    #[test]
+    fn science_holder_can_set_phaser_frequency_when_tactical_is_low() {
+        let mut app = test_app();
+        start_game_with_science_and_weapons(&mut app);
+        // Set Tactical to Low complexity.
+        app.world_mut()
+            .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
+            .set(Console::Tactical, "Low".into());
+        push(&mut app, "science", ClientMessage::SetPhaserFrequency { frequency: 0.3 });
+        tick(&mut app);
+        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        assert!((freq - 0.3).abs() < 1e-5, "Science holder should set phaser frequency when Tactical is Low, got {freq}");
+    }
+
+    /// Science holder is rejected when Tactical is Full.
+    #[test]
+    fn science_holder_cannot_set_phaser_frequency_when_tactical_is_full() {
+        let mut app = test_app();
+        start_game_with_science_and_weapons(&mut app);
+        // Default complexity is Full (unset = no override → not Low).
+        push(&mut app, "science", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
+        tick(&mut app);
+        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        assert!((freq - 0.5).abs() < 1e-5, "Science holder must NOT change phaser frequency when Tactical is Full, got {freq}");
+    }
+
+    /// An unrelated console (e.g. captain) cannot set phaser frequency.
+    #[test]
+    fn unrelated_console_cannot_set_phaser_frequency() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(&mut app, "captain", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
+        tick(&mut app);
+        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        assert!((freq - 0.5).abs() < 1e-5, "Captain must NOT change phaser frequency, got {freq}");
+    }
+
+    /// Frequency value is clamped to [0.0, 1.0] by the handler.
+    #[test]
+    fn set_phaser_frequency_clamps_value() {
+        let mut app = test_app();
+        start_game_with_weapons(&mut app);
+        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: 1.5 });
+        tick(&mut app);
+        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        assert!((freq - 1.0).abs() < 1e-5, "frequency above 1.0 should clamp to 1.0, got {freq}");
+
+        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: -0.5 });
+        tick(&mut app);
+        let freq = app.world().resource::<ShipState>().phaser_frequency;
+        assert!((freq - 0.0).abs() < 1e-5, "frequency below 0.0 should clamp to 0.0, got {freq}");
     }
 }

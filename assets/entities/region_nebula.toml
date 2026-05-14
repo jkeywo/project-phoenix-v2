@@ -1,0 +1,9 @@
+tags = ["region", "nebula"]
+
+[shape]
+type = "sphere"
+radius = 150.0
+
+[effects]
+[effects.comms_jam]
+[effects.sensor_blind]

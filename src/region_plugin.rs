@@ -1,0 +1,316 @@
+use bevy::prelude::*;
+use std::collections::{HashMap, HashSet};
+
+use crate::entity_spawner::RegionShapeSection;
+use crate::simulation::Ship;
+use crate::ship_state::ShipState;
+
+/// Resource tracking which entities are inside which regions.
+#[derive(Resource, Default)]
+pub struct RegionMembership {
+    /// Maps ship entity → set of region entities the ship is currently inside.
+    pub inside: HashMap<Entity, HashSet<Entity>>,
+}
+
+/// Fired when a subject entity enters a region.
+#[derive(Message, Clone, Debug)]
+pub struct RegionEntered {
+    pub subject: Entity,
+    pub region_entity: Entity,
+}
+
+/// Fired when a subject entity exits a region (or the region is despawned).
+#[derive(Message, Clone, Debug)]
+pub struct RegionExited {
+    pub subject: Entity,
+    pub region_entity: Entity,
+}
+
+pub struct RegionPlugin;
+
+impl Plugin for RegionPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<RegionMembership>()
+            .add_message::<RegionEntered>()
+            .add_message::<RegionExited>()
+            .add_systems(Update, update_region_membership);
+    }
+}
+
+/// Per-tick system: checks ship position against every region shape and
+/// emits `RegionEntered` / `RegionExited` on boundary crossings.
+///
+/// Automatically handles region despawn: if a region was previously occupied
+/// and is no longer in the ECS, an implicit `RegionExited` is emitted.
+fn update_region_membership(
+    mut membership: ResMut<RegionMembership>,
+    mut entered: MessageWriter<RegionEntered>,
+    mut exited: MessageWriter<RegionExited>,
+    region_query: Query<(Entity, &Transform, &RegionShapeSection)>,
+    ship_state: Res<ShipState>,
+    ship_query: Query<Entity, With<Ship>>,
+) {
+    let Ok(ship_entity) = ship_query.single() else {
+        return;
+    };
+
+    let ship_pos = glam::Vec3::new(ship_state.x, 0.0, ship_state.z);
+
+    // Determine current region occupancy
+    let current_inside: HashSet<Entity> = region_query
+        .iter()
+        .filter(|(_, transform, shape)| {
+            let region_origin = transform.translation;
+            shape.0.contains(ship_pos, region_origin)
+        })
+        .map(|(entity, _, _)| entity)
+        .collect();
+
+    // Get previous frame's inside set for this ship
+    let prev_inside = membership.inside.get(&ship_entity).cloned().unwrap_or_default();
+
+    // Detect exits: were in prev_inside but not in current_inside
+    // (also catches despawned regions — despawned entities don't appear in region_query)
+    for entity in prev_inside.difference(&current_inside) {
+        exited.write(RegionExited {
+            subject: ship_entity,
+            region_entity: *entity,
+        });
+    }
+
+    // Detect enters: in current_inside but not in prev_inside
+    for entity in current_inside.difference(&prev_inside) {
+        entered.write(RegionEntered {
+            subject: ship_entity,
+            region_entity: *entity,
+        });
+    }
+
+    membership.inside.insert(ship_entity, current_inside);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity_spawner::spawn_entity;
+    use crate::entity_config::EntityConfig;
+    use crate::region_shape::RegionShape;
+
+    /// Build a minimal Bevy app with the region plugin.
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_plugins(RegionPlugin)
+            .insert_resource(ShipState::new());
+        // Spawn the ship entity
+        app.world_mut().spawn((
+            Ship,
+            Transform::default(),
+        ));
+        app
+    }
+
+    /// Spawn a region entity at the given position with the given shape.
+    /// Does NOT call app.update() internally — caller must flush afterwards.
+    fn spawn_region(app: &mut App, x: f32, z: f32, shape: RegionShape) -> Entity {
+        let config = EntityConfig {
+            tags: vec!["region".to_string()],
+            shape: Some(shape),
+            effects: None,
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            science_console: None,
+            star: None,
+            planet: None,
+            asteroid_field: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let mut commands = app.world_mut().commands();
+        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+    }
+
+    /// Drain all pending `RegionEntered` messages (discard).
+    fn drain_entered(app: &mut App) {
+        app.world_mut().resource_mut::<Messages<RegionEntered>>().drain();
+    }
+
+    /// Drain all pending `RegionExited` messages (discard).
+    fn drain_exited(app: &mut App) {
+        app.world_mut().resource_mut::<Messages<RegionExited>>().drain();
+    }
+
+    fn set_ship_pos(app: &mut App, x: f32, z: f32) {
+        let mut ship = app.world_mut().resource_mut::<ShipState>();
+        ship.x = x;
+        ship.z = z;
+    }
+
+    fn has_entered(out: &[RegionEntered], region: Entity) -> bool {
+        out.iter().any(|e| e.region_entity == region)
+    }
+
+    fn has_exited(out: &[RegionExited], region: Entity) -> bool {
+        out.iter().any(|e| e.region_entity == region)
+    }
+
+    // ── Entry tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn ship_enters_region_when_moving_inside() {
+        let mut app = test_app();
+        let region = spawn_region(&mut app, 100.0, 0.0, RegionShape::Sphere { radius: 50.0 });
+        // Flush so region entity is queryable + system runs once
+        app.update();
+        // Ship at (0,0) is outside region at (100,0) with radius 50 → no entry
+        drain_entered(&mut app);
+
+        // Move ship inside the region
+        set_ship_pos(&mut app, 120.0, 0.0); // 20 units from centre, well inside radius 50
+        app.update();
+
+        let entered_events: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionEntered>>()
+            .drain()
+            .collect();
+        assert!(has_entered(&entered_events, region),
+            "ship should enter region when moving inside");
+    }
+
+    // ── Exit tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn ship_exits_region_when_moving_outside() {
+        let mut app = test_app();
+        let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
+        set_ship_pos(&mut app, 20.0, 0.0); // inside
+        app.update(); // flush + system run → enters
+        drain_entered(&mut app);
+
+        // Move ship outside
+        set_ship_pos(&mut app, 100.0, 0.0); // far outside radius 50
+        app.update();
+
+        let exited_events: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionExited>>()
+            .drain()
+            .collect();
+        assert!(has_exited(&exited_events, region),
+            "ship should exit region when moving outside");
+    }
+
+    // ── No-duplicate-while-inside test ────────────────────────────────
+
+    #[test]
+    fn no_duplicate_entered_while_staying_inside() {
+        let mut app = test_app();
+        let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        app.update(); // flush + system run → enters
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Stay inside — tick again
+        app.update();
+        let entered_events: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionEntered>>()
+            .drain()
+            .collect();
+        assert!(!has_entered(&entered_events, region),
+            "should NOT emit RegionEntered again while ship stays inside");
+
+        let exited_events: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionExited>>()
+            .drain()
+            .collect();
+        assert!(!has_exited(&exited_events, region),
+            "should NOT emit RegionExited while ship stays inside");
+    }
+
+    // ── Despawn-implicit-exit test ────────────────────────────────────
+
+    #[test]
+    fn region_despawn_while_inside_emits_implicit_exit() {
+        let mut app = test_app();
+        let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
+        set_ship_pos(&mut app, 10.0, 0.0); // inside
+        app.update(); // flush + system run → enters
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Despawn the region entity
+        app.world_mut().despawn(region);
+        app.update();
+
+        let exited_events: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionExited>>()
+            .drain()
+            .collect();
+        assert!(has_exited(&exited_events, region),
+            "ship should receive RegionExited when region is despawned while ship is inside");
+    }
+
+    // ── Edge: ship outside from start ─────────────────────────────────
+
+    #[test]
+    fn ship_outside_from_start_does_not_enter() {
+        let mut app = test_app();
+        let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
+        set_ship_pos(&mut app, 200.0, 0.0); // far outside
+        app.update();
+
+        let entered_events: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionEntered>>()
+            .drain()
+            .collect();
+        assert!(!has_entered(&entered_events, region),
+            "ship outside region should not enter");
+    }
+
+    // ── Enter and exit across multiple regions ────────────────────────
+
+    #[test]
+    fn ship_enters_and_exits_two_regions_independently() {
+        let mut app = test_app();
+        let r1 = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 30.0 });
+        let r2 = spawn_region(&mut app, 100.0, 0.0, RegionShape::Sphere { radius: 30.0 });
+
+        // Start ship outside both regions
+        set_ship_pos(&mut app, 200.0, 0.0);
+        // Flush so both region entities are queryable + first system run
+        app.update();
+        drain_entered(&mut app);
+        drain_exited(&mut app);
+
+        // Ship inside r1, outside r2
+        set_ship_pos(&mut app, 10.0, 0.0);
+        app.update();
+
+        let entered: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionEntered>>()
+            .drain()
+            .collect();
+        assert!(has_entered(&entered, r1), "should enter r1");
+        assert!(!has_entered(&entered, r2), "should NOT enter r2");
+
+        // Move to r2 — should exit r1, enter r2
+        set_ship_pos(&mut app, 110.0, 0.0);
+        app.update();
+
+        let entered2: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionEntered>>()
+            .drain()
+            .collect();
+        let exited2: Vec<_> = app.world_mut()
+            .resource_mut::<Messages<RegionExited>>()
+            .drain()
+            .collect();
+        assert!(has_entered(&entered2, r2), "should enter r2");
+        assert!(has_exited(&exited2, r1), "should exit r1");
+    }
+}

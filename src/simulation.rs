@@ -20,7 +20,7 @@ use crate::ship_state::ShipState;
 use crate::impulse::ImpulseState;
 use crate::modifiers::{ShipModifiers, Modifier};
 use crate::messages::{ModifierSlot, ModifierSource};
-use crate::entity_spawner::{EntityUuid, EntityId};
+use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection};
 use std::collections::HashMap;
 
 // â”€â”€ Beam constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -275,6 +275,7 @@ pub struct SimulationPlugin;
 impl Plugin for SimulationPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RapierPhysicsPlugin::<()>::default())
+            .add_plugins(crate::region_plugin::RegionPlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
@@ -1440,7 +1441,7 @@ fn reconcile_runtime_entities(
     mut registry: ResMut<TrackedEntities>,
     mut world: ResMut<WorldResource>,
     mut writer: MessageWriter<OutboundMessage>,
-    query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform), Without<Asteroid>>,
+    query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform, Option<&RegionShapeSection>), Without<Asteroid>>,
     phase: Res<CurrentPhase>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -1450,24 +1451,27 @@ fn reconcile_runtime_entities(
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _)| (u.0.clone(), e))
         .collect();
+
+    /// Serialise a `RegionShape` to the wire string (snake_case variant name).
+    fn shape_to_wire(shape: &RegionShapeSection) -> String {
+        use crate::region_shape::RegionShape;
+        match &shape.0 {
+            RegionShape::Sphere { .. } => "sphere",
+            RegionShape::Box { .. } => "box",
+            RegionShape::Cylinder { .. } => "cylinder",
+        }.to_string()
+    }
 
     // Seed reported set from ECS on first in-progress frame so that initial
     // world entities (stars, planets, ships, fields) are not re-reported.
+    // Also populate WorldData.entities so the reconnect Welcome includes them.
     if !registry.seeded {
-        for (uuid, _) in &current {
+        for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-        }
-        registry.seeded = true;
-        return;
-    }
-
-    // Emit EntitySpawned for new entities.
-    for (uuid, entity) in &current {
-        if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, transform)) = query.get(*entity) {
-                let snapshot = EntitySnapshot {
+            if let Ok((_, _, id, transform, region_shape)) = query.get(*entity) {
+                let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
                     position: Some([
@@ -1477,6 +1481,33 @@ fn reconcile_runtime_entities(
                     ]),
                     ..EntitySnapshot::default()
                 };
+                if let Some(shape) = region_shape {
+                    snapshot.shape = Some(shape_to_wire(shape));
+                }
+                world.0.entities.push(snapshot);
+            }
+        }
+        registry.seeded = true;
+        return;
+    }
+
+    // Emit EntitySpawned for new entities.
+    for (uuid, entity) in &current {
+        if registry.reported.insert(uuid.clone()) {
+            if let Ok((_, _, id, transform, region_shape)) = query.get(*entity) {
+                let mut snapshot = EntitySnapshot {
+                    uuid: uuid.clone(),
+                    id: id.as_ref().map(|i| i.0.clone()),
+                    position: Some([
+                        transform.translation.x,
+                        transform.translation.y,
+                        transform.translation.z,
+                    ]),
+                    ..EntitySnapshot::default()
+                };
+                if let Some(shape) = region_shape {
+                    snapshot.shape = Some(shape_to_wire(shape));
+                }
                 world.0.entities.push(snapshot.clone());
                 writer.write(OutboundMessage {
                     target: Target::All,

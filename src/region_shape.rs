@@ -1,23 +1,24 @@
-use glam::Vec3;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum RegionShape {
     Sphere { radius: f32 },
-    Box { half_extents: Vec3 },
+    Box { half_extents: [f32; 3] },
     Cylinder { radius: f32, half_height: f32 },
 }
 
 impl RegionShape {
-    pub fn contains(&self, point: Vec3, origin: Vec3) -> bool {
+    pub fn contains(&self, point: glam::Vec3, origin: glam::Vec3) -> bool {
         let delta = point - origin;
         match self {
             RegionShape::Sphere { radius } => {
                 delta.length_squared() <= radius * radius
             }
             RegionShape::Box { half_extents } => {
-                delta.x.abs() <= half_extents.x
-                    && delta.y.abs() <= half_extents.y
-                    && delta.z.abs() <= half_extents.z
+                delta.x.abs() <= half_extents[0]
+                    && delta.y.abs() <= half_extents[1]
+                    && delta.z.abs() <= half_extents[2]
             }
             RegionShape::Cylinder { radius, half_height } => {
                 let horiz_sq = delta.x * delta.x + delta.z * delta.z;
@@ -30,6 +31,7 @@ impl RegionShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec3;
 
     // ── Sphere containment ─────────────────────────────────────────────────
 
@@ -76,38 +78,38 @@ mod tests {
 
     #[test]
     fn box_contains_point_at_centre() {
-        let b = RegionShape::Box { half_extents: Vec3::new(5.0, 3.0, 4.0) };
-        assert!(b.contains(Vec3::ZERO, Vec3::ZERO));
+        let b = RegionShape::Box { half_extents: [5.0, 3.0, 4.0] };
+        assert!(b.contains(glam::Vec3::ZERO, glam::Vec3::ZERO));
     }
 
     #[test]
     fn box_contains_point_at_edge() {
-        let b = RegionShape::Box { half_extents: Vec3::new(5.0, 3.0, 4.0) };
-        assert!(b.contains(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO));
-        assert!(b.contains(Vec3::new(0.0, 3.0, 0.0), Vec3::ZERO));
-        assert!(b.contains(Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO));
+        let b = RegionShape::Box { half_extents: [5.0, 3.0, 4.0] };
+        assert!(b.contains(glam::Vec3::new(5.0, 0.0, 0.0), glam::Vec3::ZERO));
+        assert!(b.contains(glam::Vec3::new(0.0, 3.0, 0.0), glam::Vec3::ZERO));
+        assert!(b.contains(glam::Vec3::new(0.0, 0.0, 4.0), glam::Vec3::ZERO));
     }
 
     #[test]
     fn box_rejects_point_just_outside() {
-        let b = RegionShape::Box { half_extents: Vec3::new(5.0, 3.0, 4.0) };
-        assert!(!b.contains(Vec3::new(5.001, 0.0, 0.0), Vec3::ZERO));
-        assert!(!b.contains(Vec3::new(0.0, 3.001, 0.0), Vec3::ZERO));
-        assert!(!b.contains(Vec3::new(0.0, 0.0, 4.001), Vec3::ZERO));
+        let b = RegionShape::Box { half_extents: [5.0, 3.0, 4.0] };
+        assert!(!b.contains(glam::Vec3::new(5.001, 0.0, 0.0), glam::Vec3::ZERO));
+        assert!(!b.contains(glam::Vec3::new(0.0, 3.001, 0.0), glam::Vec3::ZERO));
+        assert!(!b.contains(glam::Vec3::new(0.0, 0.0, 4.001), glam::Vec3::ZERO));
     }
 
     #[test]
     fn box_rejects_point_far_outside() {
-        let b = RegionShape::Box { half_extents: Vec3::new(5.0, 3.0, 4.0) };
-        assert!(!b.contains(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO));
+        let b = RegionShape::Box { half_extents: [5.0, 3.0, 4.0] };
+        assert!(!b.contains(glam::Vec3::new(100.0, 0.0, 0.0), glam::Vec3::ZERO));
     }
 
     #[test]
     fn box_works_with_non_zero_origin() {
-        let b = RegionShape::Box { half_extents: Vec3::new(5.0, 5.0, 5.0) };
-        let origin = Vec3::new(10.0, 10.0, 10.0);
-        assert!(b.contains(Vec3::new(12.0, 10.0, 10.0), origin));
-        assert!(!b.contains(Vec3::new(16.0, 10.0, 10.0), origin));
+        let b = RegionShape::Box { half_extents: [5.0, 5.0, 5.0] };
+        let origin = glam::Vec3::new(10.0, 10.0, 10.0);
+        assert!(b.contains(glam::Vec3::new(12.0, 10.0, 10.0), origin));
+        assert!(!b.contains(glam::Vec3::new(16.0, 10.0, 10.0), origin));
     }
 
     // ── Cylinder containment ───────────────────────────────────────────────

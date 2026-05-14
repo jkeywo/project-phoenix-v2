@@ -75,7 +75,11 @@ pub fn wasm_load_map(toml_str: String) -> Result<JsValue, JsValue> {
             });
             
             // Collect all unique entity paths from asteroid fields
+            // AND from entity instance templates (which may themselves reference
+            // asteroid type paths in their asteroid_field sections).
             let mut entity_paths = HashSet::new();
+            
+            // 1. Collect from typed asteroid fields (legacy)
             for field in &map_config.asteroid_fields {
                 for path in &field.asteroid_type_paths {
                     entity_paths.insert(path.clone());
@@ -83,6 +87,11 @@ pub fn wasm_load_map(toml_str: String) -> Result<JsValue, JsValue> {
                 for path in &field.cosmetic_type_paths {
                     entity_paths.insert(path.clone());
                 }
+            }
+            
+            // 2. Collect template paths from entity instances
+            for entity_inst in &map_config.entities {
+                entity_paths.insert(entity_inst.template_path.clone());
             }
             
             // Queue all entity paths and fire callbacks
@@ -307,6 +316,11 @@ mod tests {
             captain_console: None,
             power: None,
             science_console: None,
+            star: None,
+            planet: None,
+            asteroid_field: None,
+            shape: None,
+            effects: None,
         }
     }
     

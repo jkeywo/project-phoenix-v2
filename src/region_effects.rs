@@ -10,6 +10,87 @@ pub enum RegionEffectKind {
     SensorBlind,
 }
 
+// ── Effect config types for TOML entity templates ─────────────────────
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DamageZoneEffect {
+    pub dps: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlowZoneEffect {
+    pub multiplier: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BlocksImpulseEffect {}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RadarDampeningEffect {
+    pub multiplier: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CommsJamEffect {}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SensorBlindEffect {}
+
+/// TOML-deserializable effects block.
+///
+/// Each field corresponds to an optional `[effects.*]` sub-table.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct RegionEffectsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub damage_zone: Option<DamageZoneEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slow_zone: Option<SlowZoneEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks_impulse: Option<BlocksImpulseEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radar_dampening: Option<RadarDampeningEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comms_jam: Option<CommsJamEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensor_blind: Option<SensorBlindEffect>,
+}
+
+impl RegionEffectsConfig {
+    /// Returns `true` when no effect sub-tables are present.
+    pub fn is_empty(&self) -> bool {
+        self.damage_zone.is_none()
+            && self.slow_zone.is_none()
+            && self.blocks_impulse.is_none()
+            && self.radar_dampening.is_none()
+            && self.comms_jam.is_none()
+            && self.sensor_blind.is_none()
+    }
+
+    /// Convert to a `Vec<RegionEffectKind>` for runtime use.
+    pub fn to_kinds(&self) -> Vec<RegionEffectKind> {
+        let mut kinds = Vec::new();
+        if let Some(z) = &self.damage_zone {
+            kinds.push(RegionEffectKind::DamageZone { dps: z.dps });
+        }
+        if let Some(z) = &self.slow_zone {
+            kinds.push(RegionEffectKind::SlowZone { multiplier: z.multiplier });
+        }
+        if self.blocks_impulse.is_some() {
+            kinds.push(RegionEffectKind::BlocksImpulse);
+        }
+        if let Some(r) = &self.radar_dampening {
+            kinds.push(RegionEffectKind::RadarDampening { multiplier: r.multiplier });
+        }
+        if self.comms_jam.is_some() {
+            kinds.push(RegionEffectKind::CommsJam);
+        }
+        if self.sensor_blind.is_some() {
+            kinds.push(RegionEffectKind::SensorBlind);
+        }
+        kinds
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,5 +141,70 @@ mod tests {
     fn serde_round_trip_zero_values() {
         round_trip(RegionEffectKind::DamageZone { dps: 0.0 });
         round_trip(RegionEffectKind::RadarDampening { multiplier: 0.0 });
+    }
+
+    // ── RegionEffectsConfig tests ─────────────────────────────────
+
+    #[test]
+    fn effects_config_default_is_empty() {
+        let cfg = RegionEffectsConfig::default();
+        assert!(cfg.is_empty());
+        assert!(cfg.to_kinds().is_empty());
+    }
+
+    #[test]
+    fn effects_config_damage_zone() {
+        let cfg = RegionEffectsConfig {
+            damage_zone: Some(DamageZoneEffect { dps: 15.0 }),
+            ..Default::default()
+        };
+        assert!(!cfg.is_empty());
+        let kinds = cfg.to_kinds();
+        assert_eq!(kinds.len(), 1);
+        assert_eq!(kinds[0], RegionEffectKind::DamageZone { dps: 15.0 });
+    }
+
+    #[test]
+    fn effects_config_to_kinds_aggregates_all() {
+        let cfg = RegionEffectsConfig {
+            damage_zone: Some(DamageZoneEffect { dps: 10.0 }),
+            slow_zone: Some(SlowZoneEffect { multiplier: 0.5 }),
+            blocks_impulse: Some(BlocksImpulseEffect {}),
+            radar_dampening: Some(RadarDampeningEffect { multiplier: 0.3 }),
+            comms_jam: Some(CommsJamEffect {}),
+            sensor_blind: Some(SensorBlindEffect {}),
+        };
+        let kinds = cfg.to_kinds();
+        assert_eq!(kinds.len(), 6);
+    }
+
+    #[test]
+    fn effects_config_toml_round_trip_damage_zone() {
+        let toml_str = r#"
+[effects]
+[effects.damage_zone]
+dps = 15.0
+"#;
+        #[derive(Deserialize)]
+        struct Wrap {
+            effects: RegionEffectsConfig,
+        }
+        let wrap: Wrap = toml::from_str(toml_str).unwrap();
+        assert!(!wrap.effects.is_empty());
+        assert_eq!(wrap.effects.damage_zone.unwrap().dps, 15.0);
+    }
+
+    #[test]
+    fn effects_config_toml_round_trip_comms_jam() {
+        let toml_str = r#"
+[effects]
+[effects.comms_jam]
+"#;
+        #[derive(Deserialize)]
+        struct Wrap {
+            effects: RegionEffectsConfig,
+        }
+        let wrap: Wrap = toml::from_str(toml_str).unwrap();
+        assert!(wrap.effects.comms_jam.is_some());
     }
 }

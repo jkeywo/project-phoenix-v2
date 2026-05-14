@@ -23,6 +23,28 @@ use {
     wasm_bindgen::prelude::*,
 };
 
+// ── Pure helpers (native + wasm) ─────────────────────────────────────────────
+
+/// Collect template paths nested inside an `EntityConfig` that the preload
+/// pipeline must also fetch.
+///
+/// When an entity template carries an `[asteroid_field]` section, its
+/// `asteroid_type_paths` and `cosmetic_type_paths` reference further entity
+/// templates (the asteroid variants). Those need to be enqueued for fetch
+/// alongside the top-level instance template paths.
+pub fn nested_template_paths(config: &crate::entity_config::EntityConfig) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(field) = &config.asteroid_field {
+        for p in &field.asteroid_type_paths {
+            out.push(p.clone());
+        }
+        for p in &field.cosmetic_type_paths {
+            out.push(p.clone());
+        }
+    }
+    out
+}
+
 // ── Thread-local preload state ────────────────────────────────────────────────
 
 #[cfg(target_arch = "wasm32")]
@@ -120,10 +142,15 @@ pub fn wasm_load_map(toml_str: String) -> Result<JsValue, JsValue> {
 pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsValue> {
     match EntityConfig::from_toml(&toml_str) {
         Ok(config) => {
+            // Discover any nested template paths this config references
+            // (e.g. an [asteroid_field] section's asteroid_type_paths) and
+            // enqueue them for fetch before recording the config.
+            let nested = nested_template_paths(&config);
+
             CONFIG_CACHE.with(|cache| {
                 cache.borrow_mut().insert(path.clone(), config);
             });
-            
+
             IN_FLIGHT.with(|in_flight| {
                 in_flight.borrow_mut().remove(&path);
             });
@@ -133,6 +160,10 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
             PENDING_QUEUE.with(|q| {
                 q.borrow_mut().retain(|p| p != &path);
             });
+
+            for nested_path in nested {
+                queue_and_fire(nested_path);
+            }
             
             // Check if preload is complete
             let has_pending = PENDING_QUEUE.with(|q| !q.borrow().is_empty());
@@ -493,5 +524,65 @@ length = 0.0
         // Still has pending
         assert!(cache.has_pending());
         assert_eq!(cache.all_pending(), vec!["path2"]);
+    }
+
+    // ── nested_template_paths ─────────────────────────────────────────────────
+
+    #[test]
+    fn nested_template_paths_empty_for_bare_config() {
+        let config = default_entity_config();
+        assert!(super::nested_template_paths(&config).is_empty());
+    }
+
+    #[test]
+    fn nested_template_paths_returns_asteroid_field_type_paths() {
+        let toml_str = r#"
+tags = ["field"]
+
+[asteroid_field]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+asteroid_type_paths = ["a.toml", "b.toml"]
+cosmetic_type_paths = ["c.toml"]
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let mut paths = super::nested_template_paths(&config);
+        paths.sort();
+        assert_eq!(paths, vec!["a.toml", "b.toml", "c.toml"]);
+    }
+
+    /// Simulate the preload pipeline: top-level instance template references
+    /// an asteroid_field template, which itself references asteroid variants.
+    /// The variant paths must be queued when the field template parses.
+    #[test]
+    fn loading_field_template_enqueues_nested_asteroid_paths() {
+        let mut cache = TestConfigCache::new();
+        // 1. Top-level: queue the field template.
+        cache.queue_fetch("asteroid_field_main.toml".to_string());
+
+        // 2. Parse the field template; insert it.
+        let field_toml = r#"
+tags = ["field"]
+
+[asteroid_field]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+asteroid_type_paths = ["asteroid_small.toml"]
+cosmetic_type_paths = ["asteroid_cosmetic.toml"]
+"#;
+        let field_config = EntityConfig::from_toml(field_toml).unwrap();
+
+        // 3. Enqueue nested paths discovered in the parsed config.
+        for nested in super::nested_template_paths(&field_config) {
+            cache.queue_fetch(nested);
+        }
+        cache.insert("asteroid_field_main.toml".to_string(), field_config);
+
+        // The variant paths must now be pending.
+        let mut pending = cache.all_pending();
+        pending.sort();
+        assert_eq!(pending, vec!["asteroid_cosmetic.toml", "asteroid_small.toml"]);
     }
 }

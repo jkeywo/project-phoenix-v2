@@ -12,8 +12,8 @@ use std::collections::HashMap;
 
 use crate::asteroid_spawner::eval_cell;
 use crate::asteroid_window::{compute_player_grid_cell, compute_slot_for_world_cell, eval_on_player_move};
+use crate::entity_spawner::AsteroidFieldSection;
 use crate::lobby::{OutboundMessage, Target};
-use crate::map_config::MapConfig;
 use crate::messages::ServerMessage;
 use crate::ship_state::ShipState;
 
@@ -122,22 +122,20 @@ pub fn check_destroyed_asteroids(
 
 /// Update the ring-buffer window when the player moves to a new grid cell.
 /// Runs every frame; no-ops if the player has not crossed a cell boundary.
+///
+/// Sources its field configuration from a spawned entity carrying an
+/// `AsteroidFieldSection` component (the first one found whose `grid` is set).
 pub fn update_asteroid_window(
     mut commands: Commands,
     ship: Res<ShipState>,
-    map_config: Option<Res<MapConfig>>,
+    fields: Query<&AsteroidFieldSection>,
     mut window: ResMut<AsteroidWindow>,
     mut player_grid: ResMut<PlayerGridPosition>,
     mut entity_map: ResMut<AsteroidEntityMap>,
     mut writer: MessageWriter<OutboundMessage>,
 ) {
-    let mc = match map_config.as_deref() {
-        Some(mc) => mc,
-        None => return,
-    };
-
-    let (field_idx, field) = match mc.asteroid_fields.iter().enumerate().find(|(_, f)| f.grid.is_some()) {
-        Some(pair) => pair,
+    let (field_idx, field) = match fields.iter().enumerate().find(|(_, f)| f.0.grid.is_some()) {
+        Some((idx, f)) => (idx, f.0.clone()),
         None => return,
     };
     let grid = match &field.grid {
@@ -339,5 +337,82 @@ impl Plugin for AsteroidLifecyclePlugin {
                 check_destroyed_asteroids,
                 update_asteroid_window,
             ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity_spawner::AsteroidFieldSection;
+    use crate::lobby::OutboundMessage;
+    use crate::map_config::{AsteroidFieldConfig, GridConfig};
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.add_message::<OutboundMessage>();
+        app.init_resource::<AsteroidWindow>();
+        app.init_resource::<PlayerGridPosition>();
+        app.init_resource::<AsteroidEntityMap>();
+        app.insert_resource(ShipState::new());
+        app.add_systems(Update, update_asteroid_window);
+        app
+    }
+
+    fn grid(resolution: f32) -> GridConfig {
+        GridConfig {
+            resolution,
+            fill_gameplay: 0.0,
+            fill_cosmetic: 0.0,
+            uniformity: 0.0,
+            noise_freq: 0.02,
+            noise_octaves: 3,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 2,
+            jitter: 0.0,
+            cosmetic_y_offset: 0.0,
+            spawn_cells: 2,
+            despawn_cells: 3,
+        }
+    }
+
+    fn field(grid_resolution: f32) -> AsteroidFieldConfig {
+        AsteroidFieldConfig {
+            inner_radius: 100.0,
+            outer_radius: 200.0,
+            density: 0.0,
+            spawn_distance: 150.0,
+            despawn_distance: 250.0,
+            asteroid_type_paths: vec!["asteroid_small.toml".to_string()],
+            cosmetic_type_paths: vec![],
+            tags: vec![],
+            grid: Some(grid(grid_resolution)),
+        }
+    }
+
+    #[test]
+    fn window_initialises_from_spawned_asteroid_field_section() {
+        let mut app = test_app();
+        // No MapConfig resource. The system should still find the field.
+        app.world_mut().spawn((
+            AsteroidFieldSection(field(15.0)),
+            Transform::default(),
+        ));
+        app.update();
+
+        let window = app.world().resource::<AsteroidWindow>();
+        assert_eq!(window.resolution, 15.0,
+            "window.resolution should be sourced from the spawned AsteroidFieldSection");
+        assert_eq!(window.inner_radius, 100.0);
+        assert_eq!(window.outer_radius, 200.0);
+    }
+
+    #[test]
+    fn window_does_nothing_with_no_field_entity() {
+        let mut app = test_app();
+        app.update();
+        let window = app.world().resource::<AsteroidWindow>();
+        // Default resolution from AsteroidWindow::default() is 10.0.
+        assert_eq!(window.resolution, 10.0);
     }
 }

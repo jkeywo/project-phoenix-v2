@@ -1,0 +1,8 @@
+tags = ["star", "center"]
+
+[star]
+name = "Sun"
+radius = 50.0
+colour = [1.0, 0.8, 0.0]
+position = [0.0, 0.0, 0.0]
+tags = ["star", "center"]

@@ -715,4 +715,41 @@ hull_integrity = 100
         assert!(config.hull.is_some(), "hull should be Some");
         assert_eq!(config.tags, vec!["full"]);
     }
+
+    // ── Shipped template TOML files referenced by assets/maps/default.toml ──
+    //
+    // These tests embed each template at compile time via include_str! so
+    // the build fails if a referenced template is missing or malformed.
+
+    #[test]
+    fn star_sun_template_parses_with_star_section() {
+        let toml_str = include_str!("../assets/entities/star_sun.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("star_sun.toml must parse");
+        let star = config.star.as_ref().expect("star_sun.toml must have [star]");
+        assert_eq!(star.name, "Sun");
+        assert!((star.radius - 50.0).abs() < 1e-6);
+        assert_eq!(star.colour, vec![1.0, 0.8, 0.0]);
+    }
+
+    #[test]
+    fn planet_earth_template_parses_with_planet_section() {
+        let toml_str = include_str!("../assets/entities/planet_earth.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("planet_earth.toml must parse");
+        let planet = config.planet.as_ref().expect("planet_earth.toml must have [planet]");
+        assert_eq!(planet.name, "Earth");
+        assert!((planet.radius - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn asteroid_field_main_template_parses_with_field_and_grid() {
+        let toml_str = include_str!("../assets/entities/asteroid_field_main.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("asteroid_field_main.toml must parse");
+        let field = config.asteroid_field.as_ref().expect("must have [asteroid_field]");
+        assert!((field.inner_radius - 100.0).abs() < 1e-6);
+        assert!((field.outer_radius - 200.0).abs() < 1e-6);
+        let grid = field.grid.as_ref().expect("must have [asteroid_field.grid]");
+        assert!((grid.resolution - 15.0).abs() < 1e-6);
+        assert_eq!(field.asteroid_type_paths.len(), 2);
+        assert_eq!(field.cosmetic_type_paths.len(), 1);
+    }
 }

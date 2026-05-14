@@ -1598,10 +1598,6 @@ fn setup_world_from_config(
         spawn_entity_instance(&mut commands, &map_config, &config_cache, entity_inst);
     }
 
-    // Also handle legacy typed sections for backward compatibility
-    // (stars, planets, asteroid_fields from old-format maps)
-    spawn_legacy_sections(&mut commands, &mut meshes, &mut materials, &map_config, &config_cache);
-    
     // ── Starfield skybox ──────────────────────────────────────────
     spawn_starfield(&mut commands, &mut meshes, &mut materials);
 }
@@ -1629,56 +1625,6 @@ fn spawn_entity_instance(
     };
 
     crate::entity_spawner::spawn_entity(commands, &config, pos, uuid, entity_inst.id.clone());
-}
-
-/// Spawn entities from legacy typed sections ([[star]], [[planet]], [[asteroid_field]])
-/// for backward compatibility with old-format maps.
-fn spawn_legacy_sections(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    map_config: &MapConfig,
-    _config_cache: &crate::config_cache::ConfigCache,
-) {
-    // Spawn stars as unlit emissive sphere meshes
-    for star in &map_config.stars {
-        let star_mesh = meshes.add(Sphere { radius: star.radius });
-        let star_color = Color::srgb(star.colour[0], star.colour[1], star.colour[2]);
-        let star_mat = materials.add(StandardMaterial {
-            base_color: star_color,
-            emissive: LinearRgba::from(star_color) * 2.0,
-            ..default()
-        });
-        commands.spawn((
-            crate::entity_spawner::StarSection(star.clone()),
-            Mesh3d(star_mesh),
-            MeshMaterial3d(star_mat),
-            Transform::from_xyz(star.position[0], star.position[1], star.position[2]),
-        ));
-    }
-
-    // Spawn planets as standard lit sphere meshes
-    for planet in &map_config.planets {
-        let planet_mesh = meshes.add(Sphere { radius: planet.radius });
-        let planet_mat = materials.add(StandardMaterial {
-            base_color: Color::srgb(planet.colour[0], planet.colour[1], planet.colour[2]),
-            ..default()
-        });
-        commands.spawn((
-            crate::entity_spawner::PlanetSection(planet.clone()),
-            Mesh3d(planet_mesh),
-            MeshMaterial3d(planet_mat),
-            Transform::from_xyz(planet.position[0], planet.position[1], planet.position[2]),
-        ));
-    }
-
-    // Spawn asteroid field sections as AsteroidFieldSection markers
-    for field in &map_config.asteroid_fields {
-        commands.spawn((
-            crate::entity_spawner::AsteroidFieldSection(field.clone()),
-            Transform::default(),
-        ));
-    }
 }
 
 /// Spawn the procedural starfield skybox.
@@ -1891,15 +1837,37 @@ fn setup_world_hardcoded(
         ));
     }
 
-    // Spawn ship â€” kinematic so we drive position directly from ShipState;
-    // collision events fire so handle_collisions can zero velocity on impact.
-    commands.spawn((
-        Ship,
-        Transform::default(),
-        RigidBody::KinematicPositionBased,
-        Collider::capsule_y(3.0, 6.0),
-        ActiveCollisionTypes::KINEMATIC_STATIC,
-    ));
+    // Spawn ship via the generic entity spawner using a hardcoded EntityConfig
+    // (mirrors assets/entities/player_ship.toml's collider). This is the
+    // no-MapConfig fallback path; the [[entity]]/spawn_game_start path is
+    // preferred and runs whenever MapConfig is loaded.
+    let ship_config = crate::entity_config::EntityConfig {
+        tags: vec!["player".to_string(), "ship".to_string()],
+        collider: Some(crate::entity_config::ColliderConfig {
+            shape: crate::entity_config::ColliderShape::Capsule,
+            radius: 6.0,
+            length: 6.0,
+        }),
+        hull: Some(crate::entity_config::HullConfig { hull_integrity: 100.0 }),
+        appearance: None,
+        helm_console: None,
+        weapons_console: None,
+        engineering_console: None,
+        captain_console: None,
+        power: None,
+        science_console: None,
+        star: None,
+        planet: None,
+        asteroid_field: None,
+        shape: None,
+        effects: None,
+    };
+    let ship_uuid = crate::entity_loader::assign_uuid();
+    let ship_entity = crate::entity_spawner::spawn_entity(
+        &mut commands, &ship_config, Vec3::ZERO, ship_uuid, Some("player-ship".to_string()),
+    );
+    commands.entity(ship_entity).insert(Ship);
+    commands.insert_resource(ShipHullIntegrity(HullIntegrity::with_hp(100.0)));
 }
 
 // â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

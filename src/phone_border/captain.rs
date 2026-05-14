@@ -353,6 +353,9 @@ fn rotate_needle_by_direction(
     sim: Res<ClientSimState>,
     mut needles: Query<&mut Transform, With<CompassNeedle>>,
 ) {
+    if !sim.is_changed() {
+        return;
+    }
     let dir = match &sim.view_mode {
         ViewMode::Camera(d) => d,
         _ => return,

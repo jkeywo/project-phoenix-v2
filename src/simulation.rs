@@ -20,7 +20,9 @@ use crate::ship_state::ShipState;
 use crate::impulse::ImpulseState;
 use crate::modifiers::{ShipModifiers, Modifier};
 use crate::messages::{ModifierSlot, ModifierSource};
-use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection};
+use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, RegionEffectsSection};
+use crate::region_plugin::RegionMembership;
+use crate::region_effects::RegionEffectKind;
 use std::collections::HashMap;
 
 // â”€â”€ Beam constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -960,12 +962,16 @@ fn sync_power_modifiers(
 
 /// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/science.
 /// Also cancels impulse whenever the hull takes damage this frame.
+/// `StartImpulseCharge` is ignored when the ship is inside a `BlocksImpulse` region.
 fn handle_impulse_messages(
     mut reader: MessageReader<InboundMessage>,
     mut impulse: ResMut<ShipImpulse>,
     phase: Res<CurrentPhase>,
     hull: Res<ShipHullIntegrity>,
     mut last_hull_hp: Local<f32>,
+    membership: Option<Res<RegionMembership>>,
+    region_query: Query<&RegionEffectsSection>,
+    ship_query: Query<Entity, With<Ship>>,
 ) {
     // Initialise on first call.
     if *last_hull_hp == 0.0 && (hull.0.current() - 100.0).abs() < 1e-6 {
@@ -986,7 +992,10 @@ fn handle_impulse_messages(
     for msg in reader.read() {
         match &msg.msg {
             ClientMessage::StartImpulseCharge => {
-                impulse.0.start_charge();
+                // Gate: ignore if ship is inside any BlocksImpulse region
+                if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) {
+                    impulse.0.start_charge();
+                }
             }
             ClientMessage::CancelImpulse => {
                 impulse.0.cancel_charge();
@@ -994,6 +1003,31 @@ fn handle_impulse_messages(
             _ => {}
         }
     }
+}
+
+/// Returns true if the ship is currently inside any region with `BlocksImpulse` effect.
+fn is_inside_blocks_impulse(
+    membership: &Option<Res<RegionMembership>>,
+    region_query: &Query<&RegionEffectsSection>,
+    ship_query: &Query<Entity, With<Ship>>,
+) -> bool {
+    let Some(membership) = membership else {
+        return false;
+    };
+    let Ok(ship_entity) = ship_query.single() else {
+        return false;
+    };
+    let Some(inside) = membership.inside.get(&ship_entity) else {
+        return false;
+    };
+    for &region_entity in inside {
+        if let Ok(effects) = region_query.get(region_entity) {
+            if effects.0.iter().any(|e| *e == RegionEffectKind::BlocksImpulse) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Tick repair teams each frame: advance progress, apply HP for completed
@@ -1874,6 +1908,10 @@ mod tests {
     use super::*;
     use crate::lobby::{LobbyPlugin, InboundMessage, OutboundMessage};
     use crate::messages::*;
+    use crate::entity_spawner::spawn_entity;
+    use crate::entity_config::EntityConfig;
+    use crate::region_shape::RegionShape;
+    use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -3032,6 +3070,91 @@ fn test_app() -> App {
         assert_eq!(
             app.world().resource::<ShipImpulse>().0.phase,
             crate::impulse::ImpulsePhase::Idle,
+        );
+    }
+
+    // ── BlocksImpulse region gating tests ────────────────────────────
+
+    fn blocks_impulse_test_app() -> App {
+        let mut app = test_app();
+        app.add_plugins(crate::region_plugin::RegionPlugin);
+        // Spawn a Ship entity (needed for region membership tracking)
+        app.world_mut().spawn((Ship, Transform::default()));
+        app
+    }
+
+    fn spawn_blocks_impulse_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
+        let config = EntityConfig {
+            tags: vec!["region".to_string()],
+            shape: Some(RegionShape::Sphere { radius }),
+            effects: Some(RegionEffectsConfig {
+                blocks_impulse: Some(BlocksImpulseEffect {}),
+                ..Default::default()
+            }),
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            science_console: None,
+            star: None,
+            planet: None,
+            asteroid_field: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let mut commands = app.world_mut().commands();
+        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
+    }
+
+    #[test]
+    fn start_impulse_charge_ignored_inside_blocks_impulse_region() {
+        let mut app = blocks_impulse_test_app();
+
+        // Spawn a blocks_impulse region at the ship's position
+        let _region = spawn_blocks_impulse_region(&mut app, 0.0, 0.0, 50.0);
+
+        // Start a game with a helm player (this ticks multiple times, allowing
+        // update_region_membership to populate RegionMembership)
+        start_game_with_helm_and_science(&mut app);
+
+        // Impulse should start idle
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Idle,
+            "impulse should be idle before StartImpulseCharge"
+        );
+
+        // Try to start impulse charge while inside the blocks_impulse region
+        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
+        tick(&mut app);
+
+        // Impulse should remain idle (blocked by region)
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Idle,
+            "StartImpulseCharge should be ignored inside BlocksImpulse region"
+        );
+    }
+
+    #[test]
+    fn start_impulse_charge_works_outside_blocks_impulse_region() {
+        let mut app = blocks_impulse_test_app();
+
+        // Spawn region far from ship
+        let _region = spawn_blocks_impulse_region(&mut app, 500.0, 0.0, 50.0);
+
+        start_game_with_helm_and_science(&mut app);
+
+        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
+        tick(&mut app);
+
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            crate::impulse::ImpulsePhase::Charging,
+            "StartImpulseCharge should work when outside BlocksImpulse region"
         );
     }
 

@@ -2,8 +2,9 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::entity_spawner::{RegionShapeSection, RegionEffectsSection};
-use crate::simulation::{Ship, ShipHullIntegrity, BreakdownQueueResource};
+use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
 use crate::ship_state::ShipState;
+use crate::region_effects::RegionEffectKind;
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -36,6 +37,7 @@ impl Plugin for RegionPlugin {
             .add_systems(Update, (
                 update_region_membership,
                 apply_damage_zone_damage.after(update_region_membership),
+                handle_blocks_impulse_region_enter.after(update_region_membership),
             ));
     }
 }
@@ -142,6 +144,26 @@ fn apply_damage_zone_damage(
     }
 }
 
+/// Cancels the ship's impulse drive (charging or active) when the ship enters
+/// a region with the `BlocksImpulse` effect.
+fn handle_blocks_impulse_region_enter(
+    mut entered: MessageReader<RegionEntered>,
+    region_query: Query<&RegionEffectsSection>,
+    impulse: Option<ResMut<ShipImpulse>>,
+) {
+    let Some(mut impulse) = impulse else {
+        return;
+    };
+    for ev in entered.read() {
+        let Ok(effects) = region_query.get(ev.region_entity) else {
+            continue;
+        };
+        if effects.0.iter().any(|e| *e == RegionEffectKind::BlocksImpulse) {
+            impulse.0.cancel_charge();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,7 +171,9 @@ mod tests {
     use crate::entity_config::EntityConfig;
     use crate::region_shape::RegionShape;
     use crate::damage::HullIntegrity;
-    use crate::simulation::{ShipHullIntegrity, BreakdownQueueResource};
+    use crate::simulation::{ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
+    use crate::impulse::{ImpulseState, ImpulsePhase, IMPULSE_CHARGE_DURATION};
+    use crate::region_effects::BlocksImpulseEffect;
 
     /// Build a minimal Bevy app with the region plugin.
     fn test_app() -> App {
@@ -387,10 +411,46 @@ mod tests {
         app
     }
 
+    fn blocks_impulse_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(RegionPlugin);
+        app.insert_resource(Time::<()>::default());
+        app.insert_resource(ShipState::new());
+        app.insert_resource(ShipImpulse(ImpulseState::new()));
+        app.world_mut().spawn((Ship, Transform::default()));
+        app
+    }
+
     fn tick_with_dt(app: &mut App, dt_secs: f32) {
         let mut time = app.world_mut().resource_mut::<Time>();
         time.advance_by(Duration::from_secs_f32(dt_secs));
         app.update();
+    }
+
+    fn spawn_blocks_impulse_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
+        let config = EntityConfig {
+            tags: vec!["region".to_string()],
+            shape: Some(RegionShape::Sphere { radius }),
+            effects: Some(EffectsCfg {
+                blocks_impulse: Some(BlocksImpulseEffect {}),
+                ..Default::default()
+            }),
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            science_console: None,
+            star: None,
+            planet: None,
+            asteroid_field: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let mut commands = app.world_mut().commands();
+        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
     }
 
     fn spawn_damage_zone(app: &mut App, x: f32, z: f32, radius: f32, dps: f32) -> Entity {
@@ -517,5 +577,74 @@ mod tests {
         tick_with_dt(&mut app, 0.15);
         let bd2 = app.world().resource::<BreakdownQueueResource>();
         assert_eq!(bd2.queue.len(), 3, "should have 3 breakdowns after 30 damage");
+    }
+
+    // ── BlocksImpulse tests ─────────────────────────────────────────────
+
+    fn set_impulse_charging(app: &mut App) {
+        let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
+        imp.0.start_charge();
+    }
+
+    fn set_impulse_active(app: &mut App) {
+        let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
+        imp.0.start_charge();
+        imp.0.tick(IMPULSE_CHARGE_DURATION);
+    }
+
+    fn assert_impulse_phase(app: &App, expected: ImpulsePhase) {
+        let phase = app.world().resource::<ShipImpulse>().0.phase;
+        assert_eq!(phase, expected, "expected impulse {:?}, got {:?}", expected, phase);
+    }
+
+    #[test]
+    fn entering_blocks_impulse_region_cancels_charging_impulse() {
+        let mut app = blocks_impulse_test_app();
+        let _region = spawn_blocks_impulse_region(&mut app, 100.0, 0.0, 50.0);
+        set_ship_pos(&mut app, 0.0, 0.0); // outside region at (100,0) radius 50
+        tick_with_dt(&mut app, 0.016); // initialise membership
+        drain_entered(&mut app);
+
+        // Move ship inside the region
+        set_ship_pos(&mut app, 80.0, 0.0);
+        set_impulse_charging(&mut app);
+        assert_impulse_phase(&app, ImpulsePhase::Charging);
+
+        // Tick — should trigger RegionEntered and cancel impulse
+        tick_with_dt(&mut app, 0.016);
+
+        assert_impulse_phase(&app, ImpulsePhase::Idle);
+    }
+
+    #[test]
+    fn entering_blocks_impulse_region_cancels_active_impulse() {
+        let mut app = blocks_impulse_test_app();
+        let _region = spawn_blocks_impulse_region(&mut app, 100.0, 0.0, 50.0);
+        set_ship_pos(&mut app, 0.0, 0.0);
+        tick_with_dt(&mut app, 0.016);
+        drain_entered(&mut app);
+
+        // Move ship inside
+        set_ship_pos(&mut app, 80.0, 0.0);
+        set_impulse_active(&mut app);
+        assert_impulse_phase(&app, ImpulsePhase::Active);
+
+        tick_with_dt(&mut app, 0.016);
+
+        assert_impulse_phase(&app, ImpulsePhase::Idle);
+    }
+
+    #[test]
+    fn staying_outside_blocks_impulse_region_leaves_impulse_unchanged() {
+        let mut app = blocks_impulse_test_app();
+        let _region = spawn_blocks_impulse_region(&mut app, 200.0, 0.0, 50.0);
+        set_ship_pos(&mut app, 0.0, 0.0); // far outside
+        tick_with_dt(&mut app, 0.016);
+        drain_entered(&mut app);
+
+        set_impulse_charging(&mut app);
+        tick_with_dt(&mut app, 0.016);
+
+        assert_impulse_phase(&app, ImpulsePhase::Charging);
     }
 }

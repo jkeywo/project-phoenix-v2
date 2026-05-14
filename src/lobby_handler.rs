@@ -238,12 +238,14 @@ pub fn process_message(
                     true
                 } else {
                     let player_count = sessions.players().iter().filter(|p| p.connected).count() as u32;
+                    let max = ship_stations.max_players;
+                    let check_count = if max > 0 && player_count > max { max } else { player_count };
                     let current_consoles: Vec<Console> = sessions.players()
                         .iter()
                         .filter(|p| p.connected)
                         .flat_map(|p| p.consoles.clone())
                         .collect();
-                    all_stations_filled(ship_stations, player_count, &current_consoles)
+                    all_stations_filled(ship_stations, check_count, &current_consoles)
                 };
                 if can_start {
                     new_phase = Some(GamePhase::InProgress);

@@ -331,13 +331,14 @@ impl<'a> LobbyView<'a> {
         self.state.complexity.get(console).map(|s| s.as_str())
     }
 
-    /// True if every station at the current player count is filled,
-    /// using `ShipStations` as the source of truth.
+    /// True if every station slot at the display player count is filled.
     ///
-    /// Player count is the number of connected players (all entries in
-    /// `state.players`), matching the server-side gate in `process_message`.
+    /// When connected players exceed `max_players`, the surplus become spectators
+    /// and only the `max_players` slots need to be filled.
     pub fn all_stations_filled(&self) -> bool {
         let player_count = self.state.players.len() as u32;
+        let max = self.state.ship_stations.max_players;
+        let check_count = if max > 0 && player_count > max { max } else { player_count };
 
         let all_held: Vec<Console> = self
             .state
@@ -346,7 +347,7 @@ impl<'a> LobbyView<'a> {
             .flat_map(|p| p.consoles.iter().cloned())
             .collect();
 
-        crate::stations::all_stations_filled(&self.state.ship_stations, player_count, &all_held)
+        crate::stations::all_stations_filled(&self.state.ship_stations, check_count, &all_held)
     }
 }
 
@@ -909,6 +910,20 @@ short_code = "BRG"
             p("b", "Bob",   vec![]),
         ];
         assert!(!LobbyView::new(&s, "a").all_stations_filled());
+    }
+
+    #[test]
+    fn all_stations_filled_true_when_overflow_spectator_present() {
+        // Three players connected but max_players = 2. Alice and Bob have filled
+        // both 2P slots; Carol is a spectator. Engage should still show.
+        let mut s = LobbyState::default();
+        s.ship_stations = two_station_ship();
+        s.players = vec![
+            p("a", "Alice", vec![Console::CaptainChair, Console::Helm]),
+            p("b", "Bob",   vec![Console::Tactical]),
+            p("c", "Carol", vec![]),
+        ];
+        assert!(LobbyView::new(&s, "a").all_stations_filled());
     }
 
     #[test]

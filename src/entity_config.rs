@@ -47,6 +47,9 @@ pub struct HelmConsoleConfig {
     pub radar_shows: bool,
     #[serde(default)]
     pub power_multipliers: Option<[f32; 4]>,
+    /// Path to a complexity TOML file for this console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,6 +74,9 @@ pub struct WeaponsConsoleConfig {
     pub beam_color: Vec<f32>,
     #[serde(default)]
     pub power_multipliers: Option<[f32; 4]>,
+    /// Path to a complexity TOML file for this console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,10 +89,17 @@ pub struct EngineeringConsoleConfig {
     pub repair_cooldown_secs: f32,
     #[serde(default)]
     pub cooldown_secs: f32,
+    /// Path to a complexity TOML file for this console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct CaptainConsoleConfig {}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CaptainConsoleConfig {
+    /// Path to a complexity TOML file for this console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PowerConfigSection {
@@ -103,6 +116,9 @@ pub struct ScienceConsoleConfig {
     pub long_range_radar: crate::radar_config::RadarConfig,
     #[serde(default)]
     pub system_map: crate::radar_config::RadarConfig,
+    /// Path to a complexity TOML file for this console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -139,8 +155,7 @@ struct TomlConfig {
     helm_console: Option<HelmConsoleConfig>,
     weapons_console: Option<WeaponsConsoleConfig>,
     engineering_console: Option<EngineeringConsoleConfig>,
-    #[serde(default)]
-    captain_console: Option<serde::de::IgnoredAny>,
+    captain_console: Option<CaptainConsoleConfig>,
     power: Option<PowerConfigSection>,
     science_console: Option<ScienceConsoleConfig>,
     star: Option<StarConfig>,
@@ -151,9 +166,39 @@ struct TomlConfig {
 }
 
 impl EntityConfig {
+    /// Collect all `complexity_toml` paths referenced by any console config.
+    pub fn complexity_toml_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        if let Some(ref c) = self.helm_console {
+            if let Some(ref p) = c.complexity_toml {
+                paths.push(p.clone());
+            }
+        }
+        if let Some(ref c) = self.weapons_console {
+            if let Some(ref p) = c.complexity_toml {
+                paths.push(p.clone());
+            }
+        }
+        if let Some(ref c) = self.engineering_console {
+            if let Some(ref p) = c.complexity_toml {
+                paths.push(p.clone());
+            }
+        }
+        if let Some(ref c) = self.captain_console {
+            if let Some(ref p) = c.complexity_toml {
+                paths.push(p.clone());
+            }
+        }
+        if let Some(ref c) = self.science_console {
+            if let Some(ref p) = c.complexity_toml {
+                paths.push(p.clone());
+            }
+        }
+        paths
+    }
+
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
         let raw: TomlConfig = toml::from_str(s)?;
-        let has_captain = raw.captain_console.is_some();
 
         // Validation: region entity with effects but no shape is an error.
         if let Some(ref effects) = raw.effects {
@@ -172,11 +217,7 @@ impl EntityConfig {
             helm_console: raw.helm_console,
             weapons_console: raw.weapons_console,
             engineering_console: raw.engineering_console,
-            captain_console: if has_captain {
-                Some(CaptainConsoleConfig {})
-            } else {
-                None
-            },
+            captain_console: raw.captain_console,
             power: raw.power,
             science_console: raw.science_console,
             star: raw.star,
@@ -307,7 +348,7 @@ hull_integrity = 80
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         assert!(config.captain_console.is_some());
         let c = config.captain_console.as_ref().unwrap();
-        assert_eq!(c, &CaptainConsoleConfig {});
+        assert_eq!(c, &CaptainConsoleConfig { complexity_toml: None });
     }
 
     #[test]
@@ -502,6 +543,127 @@ max_speed = 30.0
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let h = config.helm_console.expect("helm_console must be Some");
         assert!(h.power_multipliers.is_none());
+    }
+
+    // ── Complexity TOML reference tests ────────────────────────────────────
+
+    #[test]
+    fn weapons_console_complexity_toml_parses() {
+        let toml_str = r##"
+[weapons_console]
+complexity_toml = "assets/complexity/tactical.toml"
+beam_range = 40.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let w = config.weapons_console.expect("weapons_console must be Some");
+        assert_eq!(
+            w.complexity_toml.as_deref(),
+            Some("assets/complexity/tactical.toml")
+        );
+    }
+
+    #[test]
+    fn helm_console_complexity_toml_parses() {
+        let toml_str = r##"
+[helm_console]
+complexity_toml = "assets/complexity/helm.toml"
+max_speed = 50.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        assert_eq!(
+            h.complexity_toml.as_deref(),
+            Some("assets/complexity/helm.toml")
+        );
+    }
+
+    #[test]
+    fn engineering_console_complexity_toml_parses() {
+        let toml_str = r##"
+[engineering_console]
+complexity_toml = "assets/complexity/repair.toml"
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let e = config.engineering_console.expect("engineering_console must be Some");
+        assert_eq!(
+            e.complexity_toml.as_deref(),
+            Some("assets/complexity/repair.toml")
+        );
+    }
+
+    #[test]
+    fn captain_console_complexity_toml_parses() {
+        let toml_str = r##"
+[captain_console]
+complexity_toml = "assets/complexity/captain.toml"
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let c = config.captain_console.expect("captain_console must be Some");
+        assert_eq!(
+            c.complexity_toml.as_deref(),
+            Some("assets/complexity/captain.toml")
+        );
+    }
+
+    #[test]
+    fn science_console_complexity_toml_parses() {
+        let toml_str = r##"
+[science_console]
+complexity_toml = "assets/complexity/science.toml"
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let s = config.science_console.expect("science_console must be Some");
+        assert_eq!(
+            s.complexity_toml.as_deref(),
+            Some("assets/complexity/science.toml")
+        );
+    }
+
+    #[test]
+    fn complexity_toml_defaults_to_none_when_omitted() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.weapons_console.is_none());
+    }
+
+    #[test]
+    fn weapons_console_without_complexity_toml_defaults_to_none() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 40.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let w = config.weapons_console.expect("weapons_console must be Some");
+        assert!(w.complexity_toml.is_none());
+    }
+
+    #[test]
+    fn complexity_toml_paths_returns_multiple_when_several_consoles_referenced() {
+        let toml_str = r##"
+[helm_console]
+complexity_toml = "assets/complexity/helm.toml"
+[weapons_console]
+complexity_toml = "assets/complexity/tactical.toml"
+[engineering_console]
+complexity_toml = "assets/complexity/repair.toml"
+[captain_console]
+complexity_toml = "assets/complexity/captain.toml"
+[science_console]
+complexity_toml = "assets/complexity/science.toml"
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let paths = config.complexity_toml_paths();
+        assert_eq!(paths.len(), 5);
+        assert!(paths.contains(&"assets/complexity/helm.toml".to_string()));
+        assert!(paths.contains(&"assets/complexity/tactical.toml".to_string()));
+        assert!(paths.contains(&"assets/complexity/repair.toml".to_string()));
+        assert!(paths.contains(&"assets/complexity/captain.toml".to_string()));
+        assert!(paths.contains(&"assets/complexity/science.toml".to_string()));
+    }
+
+    #[test]
+    fn complexity_toml_paths_returns_empty_when_no_complexity_refs() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.complexity_toml_paths().is_empty());
     }
 
     // ── Star / Planet / AsteroidField section tests ────────────────────────

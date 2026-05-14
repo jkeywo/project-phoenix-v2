@@ -1,0 +1,14 @@
+[[preset]]
+name = "Low"
+hidden_elements = ["phaser_mode_selector", "torpedo_tube_selector", "target_lock_button"]
+
+[preset.delegated]
+Tactical = { controls = ["auto_fire_torpedoes", "auto_frequency_match"] }
+
+[preset.ai]
+torpedo_auto_fire = { lead_prediction = true, min_accuracy = 0.7 }
+frequency_match = { sweep_interval_secs = 2.0 }
+
+[[preset]]
+name = "Full"
+hidden_elements = []

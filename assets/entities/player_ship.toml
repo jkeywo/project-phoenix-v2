@@ -47,11 +47,11 @@ capacity = 100.0
 rates = [6.0, 5.0, 4.0, 2.0, -2.0, -6.0]
 emergency_threshold = 25.0
 
-[console]
-captain_console = { enabled = true }
-helm_console = { enabled = true }
-weapons_console = { enabled = true }
-engineering_console = { enabled = true }
+[captain_console]
+
+[helm_console]
+
+[engineering_console]
 
 [stations]
 min_players = 1

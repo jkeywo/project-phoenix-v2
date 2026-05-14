@@ -320,17 +320,11 @@ impl<'a> LobbyView<'a> {
 
     /// True if every station at the current player count is filled,
     /// using `ShipStations` as the source of truth.
+    ///
+    /// Player count is the number of connected players (all entries in
+    /// `state.players`), matching the server-side gate in `process_message`.
     pub fn all_stations_filled(&self) -> bool {
-        let occupied_count = self
-            .state
-            .players
-            .iter()
-            .filter(|p| !p.consoles.is_empty())
-            .count() as u32;
-
-        if occupied_count == 0 {
-            return false;
-        }
+        let player_count = self.state.players.len() as u32;
 
         let all_held: Vec<Console> = self
             .state
@@ -339,7 +333,7 @@ impl<'a> LobbyView<'a> {
             .flat_map(|p| p.consoles.iter().cloned())
             .collect();
 
-        crate::stations::all_stations_filled(&self.state.ship_stations, occupied_count, &all_held)
+        crate::stations::all_stations_filled(&self.state.ship_stations, player_count, &all_held)
     }
 }
 
@@ -846,21 +840,24 @@ consoles = ["Tactical"]
     fn all_stations_filled_false_when_station_empty() {
         let mut s = LobbyState::default();
         s.ship_stations = two_station_ship();
-        // 2P config needs 2 stationed players; use 2 players but Tactical is empty.
-        // We simulate this by having one player hold the Helm station consoles
-        // and nobody holding Tactical.
+        // 2P: Alice has Helm, Bob has wrong consoles (Repair ≠ Tactical).
         s.players = vec![
             p("a", "Alice", vec![Console::CaptainChair, Console::Helm]),
-            p("b", "Bob",   vec![]),  // spectator → not counted for display_count
+            p("b", "Bob",   vec![Console::Repair]),
         ];
-        // occupied_count = 1 (only Alice has consoles); 1P has 1 station → filled!
-        // To truly test "2P, one station empty" we need 2 non-spectator players:
+        assert!(!LobbyView::new(&s, "a").all_stations_filled());
+    }
+
+    #[test]
+    fn all_stations_filled_false_when_second_player_is_spectator() {
+        // Two connected players but Bob hasn't taken a station. Player count is
+        // 2, so the 2P config applies — Tactical is unfilled → Engage must not show.
+        let mut s = LobbyState::default();
+        s.ship_stations = two_station_ship();
         s.players = vec![
             p("a", "Alice", vec![Console::CaptainChair, Console::Helm]),
-            p("b", "Bob",   vec![Console::Repair]),  // Repair not in Tactical station
+            p("b", "Bob",   vec![]),
         ];
-        // 2P config: Helm (needs Helm|CaptainChair) + Tactical (needs Tactical).
-        // Alice covers Helm, Bob holds Engineering which doesn't cover Tactical → not filled.
         assert!(!LobbyView::new(&s, "a").all_stations_filled());
     }
 

@@ -547,4 +547,32 @@ pub enum ServerMessage {
     StationDestroyed {
         uuid: String,
     },
+    /// Pushed to the captain only when the objective list changes (event-driven,
+    /// not polled). The list is pre-sorted: mandatory objectives first, then
+    /// optional, in insertion order within each group.
+    ObjectiveSummary {
+        objectives: Vec<ObjectiveSnapshot>,
+    },
+}
+
+// ── Objective wire types ───────────────────────────────────────────────────
+
+/// Status of a mission objective.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ObjectiveStatus {
+    Active,
+    Completed,
+    Failed,
+}
+
+/// A single objective as sent to the captain panel.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ObjectiveSnapshot {
+    /// Stable identifier for this objective (scoped to the scenario that created it).
+    pub id: String,
+    /// Human-readable description shown on the captain panel.
+    pub text: String,
+    /// Mandatory objectives must be completed; optional are bonus.
+    pub mandatory: bool,
+    pub status: ObjectiveStatus,
 }

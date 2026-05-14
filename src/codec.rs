@@ -1192,4 +1192,48 @@ mod tests {
             assert_server_roundtrip(&JsonCodec, msg.clone());
         }
     }
+
+    // ── ObjectiveSummary round-trip ────────────────────────────────────────
+
+    #[test]
+    fn server_objective_summary_round_trips() {
+        let msg = ServerMessage::ObjectiveSummary {
+            objectives: vec![
+                crate::messages::ObjectiveSnapshot {
+                    id: "obj-1".into(),
+                    text: "Destroy the convoy".into(),
+                    mandatory: true,
+                    status: crate::messages::ObjectiveStatus::Active,
+                },
+                crate::messages::ObjectiveSnapshot {
+                    id: "obj-2".into(),
+                    text: "Scan the debris".into(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Completed,
+                },
+            ],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_objective_summary_empty_objectives_round_trips() {
+        let msg = ServerMessage::ObjectiveSummary { objectives: vec![] };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_objective_summary_failed_status_round_trips() {
+        let msg = ServerMessage::ObjectiveSummary {
+            objectives: vec![crate::messages::ObjectiveSnapshot {
+                id: "obj-fail".into(),
+                text: "Save the station".into(),
+                mandatory: true,
+                status: crate::messages::ObjectiveStatus::Failed,
+            }],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+    }
 }

@@ -118,7 +118,8 @@ impl LobbyState {
             | ServerMessage::EntityDespawned { .. }
             | ServerMessage::FrequencyHint { .. }
             | ServerMessage::StationSpawned { .. }
-            | ServerMessage::StationDestroyed { .. } => {
+            | ServerMessage::StationDestroyed { .. }
+            | ServerMessage::ObjectiveSummary { .. } => {
                 // Not relevant to the lobby model.
             }
         }

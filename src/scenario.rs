@@ -55,6 +55,12 @@ pub enum TriggerAction {
     /// Load and activate a new scenario from `path`. Parameters (`$name`) are
     /// substituted before dispatch.
     LoadScenario { path: String },
+    /// Add a new mission objective owned by the current scenario.
+    AddObjective { id: String, text: String, mandatory: bool },
+    /// Mark an active objective as completed.
+    CompleteObjective { id: String },
+    /// Mark an active objective as failed.
+    FailObjective { id: String },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -146,6 +152,10 @@ fn substitute_action(
             let resolved = substitute_params(path, name_to_uuid);
             TriggerAction::LoadScenario { path: resolved }
         }
+        // Objective actions carry no path parameters — pass through unchanged.
+        TriggerAction::AddObjective { .. }
+        | TriggerAction::CompleteObjective { .. }
+        | TriggerAction::FailObjective { .. } => action.clone(),
     }
 }
 
@@ -179,6 +189,12 @@ struct RawActionEntry {
     kind: String,
     #[serde(default)]
     path: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    mandatory: Option<bool>,
 }
 
 // ── TOML-facing deserialization ────────────────────────────────────────────
@@ -339,6 +355,28 @@ pub fn parse_scenario(toml_str: &str) -> Result<ScenarioConfig, String> {
                         "Action 'load_scenario' requires a 'path' field".to_string()
                     })?;
                     TriggerAction::LoadScenario { path }
+                }
+                "add_objective" => {
+                    let id = raw_action.id.ok_or_else(|| {
+                        "Action 'add_objective' requires an 'id' field".to_string()
+                    })?;
+                    let text = raw_action.text.ok_or_else(|| {
+                        "Action 'add_objective' requires a 'text' field".to_string()
+                    })?;
+                    let mandatory = raw_action.mandatory.unwrap_or(false);
+                    TriggerAction::AddObjective { id, text, mandatory }
+                }
+                "complete_objective" => {
+                    let id = raw_action.id.ok_or_else(|| {
+                        "Action 'complete_objective' requires an 'id' field".to_string()
+                    })?;
+                    TriggerAction::CompleteObjective { id }
+                }
+                "fail_objective" => {
+                    let id = raw_action.id.ok_or_else(|| {
+                        "Action 'fail_objective' requires an 'id' field".to_string()
+                    })?;
+                    TriggerAction::FailObjective { id }
                 }
                 other => {
                     return Err(format!("Unknown trigger action '{}'", other));
@@ -1005,5 +1043,150 @@ path = "scenarios/next.toml"
         let states = trigger_states_from_config(&config);
         assert_eq!(states.len(), 1);
         assert!(!states[0].fired);
+    }
+
+    // ── Cycles 21-23: objective actions parsed from TOML ──────────────────
+
+    // Cycle 21: parse add_objective action
+    #[test]
+    fn parse_add_objective_action() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 5.0
+
+[[trigger.action]]
+type = "add_objective"
+id = "obj-1"
+text = "Destroy the convoy"
+mandatory = true
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.triggers[0].actions.len(), 1);
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::AddObjective {
+                id: "obj-1".to_string(),
+                text: "Destroy the convoy".to_string(),
+                mandatory: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_add_objective_defaults_mandatory_to_false() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "add_objective"
+id = "opt-1"
+text = "Scan the debris"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::AddObjective {
+                id: "opt-1".to_string(),
+                text: "Scan the debris".to_string(),
+                mandatory: false,
+            }
+        );
+    }
+
+    // Cycle 22: parse complete_objective action
+    #[test]
+    fn parse_complete_objective_action() {
+        let toml = r#"
+[[spawn]]
+name = "convoy"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "convoy"
+
+[[trigger.action]]
+type = "complete_objective"
+id = "obj-1"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::CompleteObjective { id: "obj-1".to_string() }
+        );
+    }
+
+    // Cycle 23: parse fail_objective action
+    #[test]
+    fn parse_fail_objective_action() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 60.0
+
+[[trigger.action]]
+type = "fail_objective"
+id = "obj-2"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::FailObjective { id: "obj-2".to_string() }
+        );
+    }
+
+    // Cycle 24: evaluate_triggers returns AddObjective action
+    #[test]
+    fn evaluate_triggers_returns_add_objective_action() {
+        let name_to_uuid = HashMap::new();
+        let trigger = Trigger {
+            condition: TriggerCondition::OnTimer { after_secs: 5.0 },
+            actions: vec![TriggerAction::AddObjective {
+                id: "obj-1".to_string(),
+                text: "Destroy convoy".to_string(),
+                mandatory: true,
+            }],
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+        let events = vec![WorldEvent::TimerElapsed { elapsed_secs: 5.0 }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 1);
+        assert_eq!(
+            fired[0].actions[0],
+            TriggerAction::AddObjective {
+                id: "obj-1".to_string(),
+                text: "Destroy convoy".to_string(),
+                mandatory: true,
+            }
+        );
+    }
+
+    // Cycle 25: tracer end-to-end — add, complete, unload cleans active
+    // This test exercises the full objective lifecycle across module boundaries.
+    #[test]
+    fn full_objective_lifecycle_add_complete_unload() {
+        use crate::objectives::ObjectiveManager;
+        use crate::messages::ObjectiveStatus;
+
+        let mut mgr = ObjectiveManager::new();
+
+        // Trigger fires: add_objective
+        mgr.add("obj-1", "Destroy the convoy", true, "scenario-a");
+        assert_eq!(mgr.sorted_snapshots().len(), 1);
+        assert_eq!(mgr.sorted_snapshots()[0].status, ObjectiveStatus::Active);
+
+        // Second trigger fires: complete_objective
+        mgr.complete("obj-1");
+        assert_eq!(mgr.sorted_snapshots()[0].status, ObjectiveStatus::Completed);
+
+        // Scenario unloads: active objectives removed, completed retained
+        mgr.unload_scenario("scenario-a");
+        assert_eq!(mgr.sorted_snapshots().len(), 1, "completed objective should be retained");
+        assert_eq!(mgr.sorted_snapshots()[0].status, ObjectiveStatus::Completed);
     }
 }

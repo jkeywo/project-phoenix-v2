@@ -10,5 +10,5 @@ torpedo_auto_fire = { lead_prediction = true, min_accuracy = 0.7 }
 frequency_match = { sweep_interval_secs = 2.0, auto_match_delay_secs = 3.0 }
 
 [[preset]]
-name = "Full"
+name = "Std"
 hidden_elements = []

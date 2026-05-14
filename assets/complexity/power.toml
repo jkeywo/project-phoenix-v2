@@ -7,5 +7,5 @@ movement_rule = { thrust_threshold = 0.7, engage_delay_secs = 3.0, battery_engag
 red_alert_rule = { engage_delay_secs = 3.0, battery_engage_min_pct = 10.0, battery_recharge_pct = 100.0 }
 
 [[preset]]
-name = "Full"
+name = "Std"
 hidden_elements = []

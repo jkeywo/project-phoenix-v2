@@ -6,5 +6,5 @@ hidden_elements = ["shield_frequency_readout"]
 auto_hint = { auto_hint_delay_secs = 3.0 }
 
 [[preset]]
-name = "Full"
+name = "Std"
 hidden_elements = []

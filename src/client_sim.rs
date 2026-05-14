@@ -213,6 +213,10 @@ pub struct ClientSimState {
     /// Initialised to 0.5. Updated by `ComplexityChanged` indirectly via
     /// the Science phaser-frequency sub-panel.
     pub phaser_frequency: f32,
+    /// Frequency hint from the Science AI (0.0–1.0). `None` until a
+    /// `FrequencyHint` arrives; reset to `None` on `Welcome`.
+    /// The Tactical console uses this to highlight the correct frequency button.
+    pub frequency_hint: Option<f32>,
 }
 
 impl Default for ClientSimState {
@@ -248,6 +252,7 @@ impl Default for ClientSimState {
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
             phaser_frequency: 0.5,
+            frequency_hint: None,
         }
     }
 }
@@ -273,6 +278,7 @@ impl ClientSimState {
                 let preserved_world = state.world.clone().unwrap_or_default();
                 *self = Self::default();
                 self.world = preserved_world;
+                // frequency_hint is reset to None by Default.
             }            ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty, teams, current_breakdown } => {
                 self.repair_cooldown_secs = *remaining_cooldown_secs;
                 self.repair_in_progress = *in_progress;
@@ -335,6 +341,9 @@ impl ClientSimState {
             }
             ServerMessage::EntityDespawned { uuid } => {
                 self.world.entities.retain(|e| e.uuid != *uuid);
+            }
+            ServerMessage::FrequencyHint { frequency } => {
+                self.frequency_hint = Some(*frequency);
             }
             _ => {}
         }
@@ -679,6 +688,7 @@ mod tests {
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
             phaser_frequency: 0.5,
+            frequency_hint: None,
         };
         let world = WorldData {
             entities: vec![EntitySnapshot::asteroid("c", 1.0, 2.0, 0.5)],
@@ -734,6 +744,7 @@ mod tests {
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
             phaser_frequency: 0.5,
+            frequency_hint: None,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -780,6 +791,7 @@ mod tests {
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
             phaser_frequency: 0.5,
+            frequency_hint: None,
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
@@ -1761,6 +1773,7 @@ mod tests {
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
             phaser_frequency: 0.5,
+            frequency_hint: None,
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
@@ -2079,5 +2092,45 @@ mod tests {
     fn set_phaser_frequency_message_clamps_below_zero() {
         let msg = set_phaser_frequency_message(-0.5);
         assert_eq!(msg, ClientMessage::SetPhaserFrequency { frequency: 0.0 });
+    }
+
+    // ── FrequencyHint ──────────────────────────────────────────────────────
+
+    #[test]
+    fn frequency_hint_default_is_none() {
+        let s = ClientSimState::default();
+        assert_eq!(s.frequency_hint, None, "frequency_hint must default to None");
+    }
+
+    #[test]
+    fn frequency_hint_updated_by_frequency_hint_message() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::FrequencyHint { frequency: 0.75 });
+        assert_eq!(s.frequency_hint, Some(0.75));
+    }
+
+    #[test]
+    fn frequency_hint_overwritten_by_new_frequency_hint() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::FrequencyHint { frequency: 0.25 });
+        s.apply(&ServerMessage::FrequencyHint { frequency: 0.9 });
+        assert_eq!(s.frequency_hint, Some(0.9));
+    }
+
+    #[test]
+    fn frequency_hint_reset_to_none_on_welcome() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::FrequencyHint { frequency: 0.6 });
+        assert_eq!(s.frequency_hint, Some(0.6));
+        s.apply(&ServerMessage::Welcome {
+            state: GameState {
+                phase: GamePhase::Lobby,
+                players: vec![],
+                complexity: HashMap::new(),
+                world: None,
+            },
+            ship_stations: crate::stations::ShipStations::default(),
+        });
+        assert_eq!(s.frequency_hint, None, "frequency_hint must be cleared on Welcome");
     }
 }

@@ -273,6 +273,21 @@ Changes:
 - `assets/complexity/science.toml` — created (two empty presets) for future use.
 - `src/lib.rs` — registered `pub mod delegation`.
 
+## [2026-05-14] ingest | Issue #177 — Science Low hides frequency readout + auto-hint AI | console_ai, console_ai_plugin, client_sim, client_elements, messages, codec, complexity
+
+Implemented issue #177 via TDD (12 new unit tests + 9 plugin integration tests, 1111 total).
+
+Changes:
+- `assets/complexity/science.toml` — Science Low now hides `shield_frequency_readout`; added `[preset.ai] auto_hint = { auto_hint_delay_secs = 3.0 }`.
+- `src/messages.rs` — new `ServerMessage::FrequencyHint { frequency: f32 }` variant. Sent to the Tactical holder by the Science Low AI after a configurable delay.
+- `src/console_ai.rs` — new `tick_frequency_hint(state, input) -> FrequencyHintOutput` pure decision function + `FrequencyHintState`, `FrequencyHintInput`, `FrequencyHintOutput` types. Timer resets on target change or when target is cleared.
+- `src/console_ai_plugin.rs` — new `run_science_hint_ai` Bevy system; `FrequencyHintTimer` and `AutoHintDelaySecs` resources; `load_auto_hint_delay_secs()` reads from embedded TOML. Hint fires only when Tactical=Full + Science=Low + Tactical occupied + target locked.
+- `src/client_elements.rs` — `hideable_element_names` now handles `Console::Science` (reads `science.toml`). New tests for Science Low/Full.
+- `src/client_complexity.rs` — `ComplexityStore::for_console` now creates ["Low","Full"] presets for both Tactical and Science.
+- `src/client_sim.rs` — `frequency_hint: Option<f32>` field added to `ClientSimState`; `apply` handles `FrequencyHint`; reset on `Welcome`.
+- `src/codec.rs` — `server_frequency_hint_round_trips` + boundary test.
+- `src/client_lobby.rs` — `FrequencyHint` added to the pass-through arm.
+
 ## [2026-05-14] ingest | Issue #175 — auto-fire torpedo AI | console_ai + console_ai_plugin
 
 Implemented issue #175 via TDD (21 new tests, all passing).

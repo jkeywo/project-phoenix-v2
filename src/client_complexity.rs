@@ -116,10 +116,10 @@ impl ComplexityStore {
     }
 
     /// Get the choice state for a console, creating a default one (single
-    /// "Full" preset, or ["Low","Full"] for Tactical) if none exists.
+    /// "Full" preset, or ["Low","Full"] for Tactical/Science) if none exists.
     pub fn for_console(&mut self, console: &Console) -> &mut ComplexityChoice {
-        let presets = if *console == Console::Tactical {
-            tactical_available_presets()
+        let presets = if *console == Console::Tactical || *console == Console::Science {
+            vec!["Low".to_string(), "Full".to_string()]
         } else {
             vec!["Full".to_string()]
         };
@@ -252,6 +252,14 @@ mod tests {
         let choice = store.for_console(&Console::Tactical);
         assert_eq!(choice.available_presets, vec!["Low", "Full"]);
         assert!(choice.show_dropdown());
+    }
+
+    #[test]
+    fn store_for_console_creates_science_with_low_full() {
+        let mut store = ComplexityStore::new();
+        let choice = store.for_console(&Console::Science);
+        assert_eq!(choice.available_presets, vec!["Low", "Full"]);
+        assert!(choice.show_dropdown(), "Science should show complexity dropdown");
     }
 
     #[test]

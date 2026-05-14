@@ -94,6 +94,7 @@ pub struct PlannedChanges {
 pub fn hideable_element_names(console: &Console, preset_name: &str) -> Vec<String> {
     let toml_str = match console {
         Console::Tactical => include_str!("../assets/complexity/tactical.toml"),
+        Console::Science => include_str!("../assets/complexity/science.toml"),
         _ => return vec![],
     };
     let Ok(config) = parse_complexity_config(toml_str) else {
@@ -222,11 +223,28 @@ mod tests {
         assert!(!r.is_hidden("a"));
     }
 
-    // ── Non-Tactical consoles ─────────────────────────────────────
+    // ── Science Low ───────────────────────────────────────────────
+
+    #[test]
+    fn science_low_hides_shield_frequency_readout() {
+        let names = hideable_element_names(&Console::Science, "Low");
+        assert!(
+            names.contains(&"shield_frequency_readout".to_string()),
+            "Science Low must hide shield_frequency_readout"
+        );
+    }
+
+    #[test]
+    fn science_full_hides_nothing() {
+        let names = hideable_element_names(&Console::Science, "Full");
+        assert!(names.is_empty(), "Science Full should hide nothing");
+    }
+
+    // ── Non-Tactical/Science consoles ─────────────────────────────
 
     #[test]
     fn non_tactical_console_returns_empty_for_any_preset() {
-        for console in &[Console::Helm, Console::CaptainChair, Console::Repair, Console::Science, Console::Power] {
+        for console in &[Console::Helm, Console::CaptainChair, Console::Repair, Console::Power] {
             let names = hideable_element_names(console, "Low");
             assert!(names.is_empty(), "{:?} should have no hidden elements", console);
         }

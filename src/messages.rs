@@ -523,4 +523,11 @@ pub enum ServerMessage {
         console: Console,
         preset_name: String,
     },
+    /// Sent to the Tactical console holder to hint the correct phaser-frequency
+    /// button to press. Emitted by the Science Low AI after `auto_hint_delay_secs`
+    /// of a shared locked target.
+    FrequencyHint {
+        /// The recommended phaser frequency (0.0–1.0).
+        frequency: f32,
+    },
 }

@@ -8,6 +8,94 @@
 
 use crate::torpedo::TorpedoTubeId;
 
+// ── Frequency hint state ───────────────────────────────────────────────────
+
+/// Persistent timer state for the frequency-hint AI.
+///
+/// The hint fires once per target lock after `delay_secs` seconds.
+/// Reset whenever the locked target changes.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FrequencyHintState {
+    /// UUID of the target for which the timer is currently running.
+    /// `None` means no timer is running.
+    pub current_target: Option<String>,
+    /// Accumulated elapsed time while the current target has been locked, in
+    /// seconds. Resets to 0.0 on target change.
+    pub elapsed_secs: f32,
+    /// Set to `true` once the hint has fired for the current target. Prevents
+    /// repeated hints on the same lock.
+    pub hint_sent: bool,
+}
+
+/// All inputs required by `tick_frequency_hint`.
+#[derive(Clone, Debug)]
+pub struct FrequencyHintInput {
+    /// UUID of the currently locked target. `None` = no lock.
+    pub locked_target: Option<String>,
+    /// The recommended phaser frequency to hint (0.0–1.0).
+    pub correct_frequency: f32,
+    /// Seconds elapsed this frame (delta time).
+    pub dt: f32,
+    /// Configured delay before the hint fires (from TOML / server config).
+    pub delay_secs: f32,
+}
+
+/// Outcome of a single `tick_frequency_hint` call.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FrequencyHintOutput {
+    /// No action this tick.
+    None,
+    /// Emit a `FrequencyHint` with this frequency to the Tactical console.
+    Hint { frequency: f32 },
+}
+
+/// Advance the frequency-hint timer by one tick.
+///
+/// Rules:
+/// - If there is no locked target, reset the timer and return `None`.
+/// - If the locked target changes, reset the timer to 0 and return `None`.
+/// - If the timer has not yet reached `delay_secs`, accumulate `dt` and
+///   return `None`.
+/// - At the first tick where `elapsed_secs >= delay_secs` (and the hint has
+///   not already been sent for this target), emit `Hint { frequency }` and
+///   mark the hint as sent.
+/// - On subsequent ticks with the same target (hint already sent), return
+///   `None`.
+pub fn tick_frequency_hint(
+    state: &mut FrequencyHintState,
+    input: &FrequencyHintInput,
+) -> FrequencyHintOutput {
+    match &input.locked_target {
+        None => {
+            // No target — clear state.
+            *state = FrequencyHintState::default();
+            FrequencyHintOutput::None
+        }
+        Some(uuid) => {
+            // Target changed → reset timer.
+            if state.current_target.as_deref() != Some(uuid.as_str()) {
+                *state = FrequencyHintState {
+                    current_target: Some(uuid.clone()),
+                    elapsed_secs: 0.0,
+                    hint_sent: false,
+                };
+            }
+
+            if state.hint_sent {
+                return FrequencyHintOutput::None;
+            }
+
+            state.elapsed_secs += input.dt;
+            if state.elapsed_secs >= input.delay_secs {
+                state.hint_sent = true;
+                FrequencyHintOutput::Hint { frequency: input.correct_frequency }
+            } else {
+                FrequencyHintOutput::None
+            }
+        }
+    }
+}
+
 // ── Input types ────────────────────────────────────────────────────────────
 
 /// State of a single torpedo tube as seen by the AI.
@@ -64,6 +152,103 @@ pub fn auto_fire_torpedo(input: &TorpedoAiInput) -> Vec<TorpedoTubeId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── FrequencyHintState helpers ────────────────────────────────────────
+
+    fn hint_input(target: Option<&str>, frequency: f32, dt: f32, delay: f32) -> FrequencyHintInput {
+        FrequencyHintInput {
+            locked_target: target.map(str::to_owned),
+            correct_frequency: frequency,
+            dt,
+            delay_secs: delay,
+        }
+    }
+
+    // ── tick_frequency_hint ───────────────────────────────────────────────
+
+    #[test]
+    fn no_target_returns_none_and_resets_state() {
+        let mut state = FrequencyHintState::default();
+        let out = tick_frequency_hint(&mut state, &hint_input(None, 0.5, 1.0, 3.0));
+        assert_eq!(out, FrequencyHintOutput::None);
+        assert!(state.current_target.is_none());
+    }
+
+    #[test]
+    fn under_delay_returns_none() {
+        let mut state = FrequencyHintState::default();
+        // 1s tick with 3s delay → no hint
+        let out = tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.5, 1.0, 3.0));
+        assert_eq!(out, FrequencyHintOutput::None);
+        assert!(!state.hint_sent);
+    }
+
+    #[test]
+    fn at_delay_fires_hint_with_correct_frequency() {
+        let mut state = FrequencyHintState::default();
+        // 3s tick with 3s delay → fires
+        let out = tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.75, 3.0, 3.0));
+        assert_eq!(out, FrequencyHintOutput::Hint { frequency: 0.75 });
+        assert!(state.hint_sent);
+    }
+
+    #[test]
+    fn above_delay_fires_hint() {
+        let mut state = FrequencyHintState::default();
+        // Two ticks: 2s + 2s > 3s → fires on second tick
+        tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.5, 2.0, 3.0));
+        let out = tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.5, 2.0, 3.0));
+        assert_eq!(out, FrequencyHintOutput::Hint { frequency: 0.5 });
+    }
+
+    #[test]
+    fn hint_fires_only_once_per_target_lock() {
+        let mut state = FrequencyHintState::default();
+        // Fire hint
+        tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.5, 5.0, 3.0));
+        // Second tick same target → no additional hint
+        let out = tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.5, 5.0, 3.0));
+        assert_eq!(out, FrequencyHintOutput::None);
+    }
+
+    #[test]
+    fn target_change_resets_timer() {
+        let mut state = FrequencyHintState::default();
+        // Almost at delay with t1
+        tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.5, 2.9, 3.0));
+        assert!(!state.hint_sent);
+        // Switch to t2 → timer resets
+        let out = tick_frequency_hint(&mut state, &hint_input(Some("t2"), 0.5, 2.9, 3.0));
+        assert_eq!(out, FrequencyHintOutput::None);
+        assert_eq!(state.current_target.as_deref(), Some("t2"));
+        // Only 2.9s elapsed for t2 → still no hint
+        assert!(!state.hint_sent);
+    }
+
+    #[test]
+    fn target_change_then_delay_fires_hint_for_new_target() {
+        let mut state = FrequencyHintState::default();
+        // Nearly full for t1
+        tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.5, 2.9, 3.0));
+        // Switch targets → timer resets, accumulate enough for t2
+        tick_frequency_hint(&mut state, &hint_input(Some("t2"), 0.9, 1.0, 3.0));
+        tick_frequency_hint(&mut state, &hint_input(Some("t2"), 0.9, 1.0, 3.0));
+        let out = tick_frequency_hint(&mut state, &hint_input(Some("t2"), 0.9, 1.5, 3.0));
+        // elapsed = 3.5 >= 3.0 → hint
+        assert_eq!(out, FrequencyHintOutput::Hint { frequency: 0.9 });
+    }
+
+    #[test]
+    fn clearing_target_resets_hint_sent_flag() {
+        let mut state = FrequencyHintState::default();
+        // Fire hint for t1
+        tick_frequency_hint(&mut state, &hint_input(Some("t1"), 0.5, 5.0, 3.0));
+        assert!(state.hint_sent);
+        // Clear target → reset
+        tick_frequency_hint(&mut state, &hint_input(None, 0.5, 1.0, 3.0));
+        assert!(!state.hint_sent);
+        assert!(state.current_target.is_none());
+    }
 
     fn tube(id: TorpedoTubeId, loaded: bool, in_arc: bool) -> TubeSummary {
         TubeSummary { id, loaded, in_arc }

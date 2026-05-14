@@ -11,7 +11,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::console_ai::{auto_fire_torpedo, TorpedoAiInput, TubeSummary};
+use crate::console_ai::{auto_fire_torpedo, tick_frequency_hint, FrequencyHintInput, FrequencyHintState, TorpedoAiInput, TubeSummary};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions};
 use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, TorpedoTube as MsgTorpedoTube};
 use crate::ship_state::ShipState;
@@ -22,7 +22,43 @@ use crate::torpedo::TorpedoTubeId;
 
 const LOW_PRESET: &str = "Low";
 
+/// Default delay (seconds) before the frequency hint fires when Science is Low.
+const DEFAULT_AUTO_HINT_DELAY_SECS: f32 = 3.0;
+
 // ── Resources ──────────────────────────────────────────────────────────────
+
+/// Wraps `FrequencyHintState` as a Bevy resource so it persists between frames.
+#[derive(Resource, Default)]
+pub struct FrequencyHintTimer(pub FrequencyHintState);
+
+/// Configurable delay (in seconds) before the auto-hint fires.
+/// Loaded from `assets/complexity/science.toml` `[preset.ai] auto_hint`.
+#[derive(Resource)]
+pub struct AutoHintDelaySecs(pub f32);
+
+impl Default for AutoHintDelaySecs {
+    fn default() -> Self {
+        Self(load_auto_hint_delay_secs())
+    }
+}
+
+/// Read `auto_hint_delay_secs` from the embedded Science complexity TOML.
+/// Falls back to `DEFAULT_AUTO_HINT_DELAY_SECS` on any parse failure.
+fn load_auto_hint_delay_secs() -> f32 {
+    let toml_str = include_str!("../assets/complexity/science.toml");
+    if let Ok(config) = crate::complexity::parse_complexity_config(toml_str) {
+        if let Some(low) = config.get_preset("Low") {
+            if let Some(ai_cfg) = low.ai.get("auto_hint") {
+                if let Some(v) = ai_cfg.params.get("auto_hint_delay_secs") {
+                    if let Some(f) = v.as_float() {
+                        return f as f32;
+                    }
+                }
+            }
+        }
+    }
+    DEFAULT_AUTO_HINT_DELAY_SECS
+}
 
 /// Server-authoritative per-console complexity preset.
 ///
@@ -52,9 +88,12 @@ pub struct ConsoleAiPlugin;
 impl Plugin for ConsoleAiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ConsoleComplexityState>()
+            .init_resource::<FrequencyHintTimer>()
+            .init_resource::<AutoHintDelaySecs>()
             .add_systems(Update, (
                 track_complexity_changes,
                 run_tactical_ai.after(track_complexity_changes),
+                run_science_hint_ai.after(track_complexity_changes),
             ));
     }
 }
@@ -166,6 +205,69 @@ fn run_tactical_ai(
                 tube,
                 target_uuid: Some(target_uuid.clone()),
             },
+        });
+    }
+}
+
+/// Run the Science-Low frequency-hint AI.
+///
+/// Conditions to run:
+/// 1. Game is InProgress
+/// 2. Tactical is **Full** (player needs the hint — they are controlling frequency)
+/// 3. Science is **Low** (the readout is hidden, so the AI provides the hint)
+/// 4. Tactical console is occupied (someone to send the hint to)
+/// 5. A target is currently locked on Tactical
+///
+/// After `auto_hint_delay_secs` of continuous lock on the same target, sends a
+/// `FrequencyHint` outbound message addressed to the Tactical holder.
+///
+/// The timer resets when:
+/// - The locked target changes
+/// - Science complexity changes (back to Full) — handled by clearing the timer
+///   via the `ConsoleComplexityState` check each tick.
+fn run_science_hint_ai(
+    phase: Res<CurrentPhase>,
+    sessions: Res<Sessions>,
+    complexity: Res<ConsoleComplexityState>,
+    ship: Res<ShipState>,
+    weapons_target: Res<WeaponsTarget>,
+    time: Res<Time>,
+    delay: Res<AutoHintDelaySecs>,
+    mut hint_timer: ResMut<FrequencyHintTimer>,
+    mut writer: MessageWriter<OutboundMessage>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+
+    // Hint is only relevant when Tactical is Full (player manages frequency)
+    // and Science is Low (readout is hidden).
+    if !complexity.is_low(&Console::Science) || complexity.is_low(&Console::Tactical) {
+        // Reset timer when conditions aren't met so it doesn't carry over.
+        hint_timer.0 = FrequencyHintState::default();
+        return;
+    }
+
+    // Need a Tactical holder to send the hint to.
+    let Some(tactical_token) = sessions.0.console_holder(Console::Tactical) else {
+        hint_timer.0 = FrequencyHintState::default();
+        return;
+    };
+
+    let input = FrequencyHintInput {
+        locked_target: weapons_target.0.clone(),
+        correct_frequency: ship.phaser_frequency,
+        dt: time.delta_secs(),
+        delay_secs: delay.0,
+    };
+
+    use crate::console_ai::FrequencyHintOutput;
+    use crate::lobby::Target;
+
+    if let FrequencyHintOutput::Hint { frequency } = tick_frequency_hint(&mut hint_timer.0, &input) {
+        writer.write(OutboundMessage {
+            target: Target::Token(tactical_token.to_string()),
+            msg: ServerMessage::FrequencyHint { frequency },
         });
     }
 }
@@ -467,5 +569,168 @@ mod tests {
             .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
             .collect();
         assert!(fired2.is_empty(), "AI must not fire after switching to Full");
+    }
+
+    // ── Science-hint AI tests ──────────────────────────────────────────────
+
+    /// Set up conditions for the Science-hint AI:
+    /// - Tactical Full, Science Low, Tactical occupied, target locked.
+    fn setup_science_hint_conditions(app: &mut App) {
+        // Register a Tactical holder.
+        push_inbound(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        app.update();
+        push_inbound(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        app.update();
+        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        // Tactical is Full (default), Science is Low.
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Science, "Low".into());
+        // Tactical complexity left at default (not Low) → Full by omission.
+        // Lock a target.
+        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("hint-target".into());
+    }
+
+    #[test]
+    fn hint_not_emitted_under_delay() {
+        let mut app = test_app();
+        setup_science_hint_conditions(&mut app);
+        // Use a very long delay so a single tick won't fire.
+        app.insert_resource(AutoHintDelaySecs(9999.0));
+
+        let (_, outbound) = tick(&mut app);
+        let hints: Vec<_> = outbound.iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
+            .collect();
+        assert!(hints.is_empty(), "hint must not emit when delay has not elapsed");
+    }
+
+    #[test]
+    fn hint_emitted_when_delay_reached() {
+        let mut app = test_app();
+        setup_science_hint_conditions(&mut app);
+        // Use zero delay so any elapsed time triggers.
+        app.insert_resource(AutoHintDelaySecs(0.0));
+
+        // Inject elapsed time directly into the hint timer.
+        app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
+            current_target: Some("hint-target".into()),
+            elapsed_secs: 5.0,
+            hint_sent: false,
+        };
+
+        let (_, outbound) = tick(&mut app);
+        let hints: Vec<_> = outbound.iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
+            .collect();
+        assert!(!hints.is_empty(), "hint must emit when delay has elapsed");
+    }
+
+    #[test]
+    fn hint_not_emitted_when_tactical_is_low() {
+        let mut app = test_app();
+        setup_science_hint_conditions(&mut app);
+        // Both Tactical and Science Low → hint should NOT emit (Tactical player
+        // doesn't need the hint, auto-fire handles frequency).
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Tactical, "Low".into());
+        app.insert_resource(AutoHintDelaySecs(0.0));
+        app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
+            current_target: Some("hint-target".into()),
+            elapsed_secs: 5.0,
+            hint_sent: false,
+        };
+
+        let (_, outbound) = tick(&mut app);
+        let hints: Vec<_> = outbound.iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
+            .collect();
+        assert!(hints.is_empty(), "hint must not emit when Tactical is also Low");
+    }
+
+    #[test]
+    fn hint_not_emitted_when_science_is_full() {
+        let mut app = test_app();
+        setup_science_hint_conditions(&mut app);
+        // Science Full → player sees the readout, no hint needed.
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Science, "Full".into());
+        app.insert_resource(AutoHintDelaySecs(0.0));
+        app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
+            current_target: Some("hint-target".into()),
+            elapsed_secs: 5.0,
+            hint_sent: false,
+        };
+
+        let (_, outbound) = tick(&mut app);
+        let hints: Vec<_> = outbound.iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
+            .collect();
+        assert!(hints.is_empty(), "hint must not emit when Science is Full");
+    }
+
+    #[test]
+    fn hint_not_emitted_without_locked_target() {
+        let mut app = test_app();
+        setup_science_hint_conditions(&mut app);
+        app.world_mut().resource_mut::<WeaponsTarget>().0 = None;
+        app.insert_resource(AutoHintDelaySecs(0.0));
+
+        let (_, outbound) = tick(&mut app);
+        let hints: Vec<_> = outbound.iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
+            .collect();
+        assert!(hints.is_empty(), "hint must not emit when no target is locked");
+    }
+
+    #[test]
+    fn hint_not_emitted_without_tactical_holder() {
+        let mut app = test_app();
+        // Science Low, no Tactical holder.
+        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().resource_mut::<ConsoleComplexityState>()
+            .set(Console::Science, "Low".into());
+        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("hint-target".into());
+        app.insert_resource(AutoHintDelaySecs(0.0));
+        app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
+            current_target: Some("hint-target".into()),
+            elapsed_secs: 5.0,
+            hint_sent: false,
+        };
+
+        let (_, outbound) = tick(&mut app);
+        let hints: Vec<_> = outbound.iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
+            .collect();
+        assert!(hints.is_empty(), "hint must not emit without a Tactical holder");
+    }
+
+    #[test]
+    fn target_change_resets_hint_timer_in_plugin() {
+        let mut app = test_app();
+        setup_science_hint_conditions(&mut app);
+        app.insert_resource(AutoHintDelaySecs(0.0));
+        // Fake nearly-elapsed timer for old target.
+        app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
+            current_target: Some("old-target".into()),
+            elapsed_secs: 2.9,
+            hint_sent: false,
+        };
+
+        // Change the locked target.
+        app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("new-target".into());
+
+        // Tick — the target change should reset the timer; no hint yet.
+        // (elapsed = 0.0 + dt, which is tiny, so delay=0.0 means it WILL fire
+        // immediately with the new target because tick_frequency_hint resets to
+        // elapsed=0 then adds dt. Let's use a longer delay to confirm reset.)
+        app.insert_resource(AutoHintDelaySecs(100.0));
+        let (_, outbound) = tick(&mut app);
+        let hints: Vec<_> = outbound.iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
+            .collect();
+        assert!(hints.is_empty(), "after target change, timer should reset and hint should not fire");
+        // Confirm the timer is now tracking the new target.
+        let state = app.world().resource::<FrequencyHintTimer>();
+        assert_eq!(state.0.current_target.as_deref(), Some("new-target"));
     }
 }

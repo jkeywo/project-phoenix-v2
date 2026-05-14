@@ -1135,4 +1135,22 @@ mod tests {
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
+
+    // ── FrequencyHint round-trip ──────────────────────────────────────────
+
+    #[test]
+    fn server_frequency_hint_round_trips() {
+        let msg = ServerMessage::FrequencyHint { frequency: 0.33 };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_frequency_hint_boundary_values_round_trip() {
+        for f in [0.0f32, 1.0f32] {
+            let msg = ServerMessage::FrequencyHint { frequency: f };
+            assert_server_roundtrip(&JsonCodec, msg.clone());
+            assert_server_roundtrip(&PrettyJsonCodec, msg);
+        }
+    }
 }

@@ -115,7 +115,8 @@ impl LobbyState {
             | ServerMessage::ClearRepairIcon
             | ServerMessage::PowerState { .. }
             | ServerMessage::EntitySpawned { .. }
-            | ServerMessage::EntityDespawned { .. } => {
+            | ServerMessage::EntityDespawned { .. }
+            | ServerMessage::FrequencyHint { .. } => {
                 // Not relevant to the lobby model.
             }
         }

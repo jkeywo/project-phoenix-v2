@@ -233,6 +233,7 @@ mod tests {
             shape: None,
             effects: None,
             station: None,
+            faction: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -268,6 +269,7 @@ mod tests {
             shape: None,
             effects: None,
             station: None,
+            faction: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -305,6 +307,7 @@ mod tests {
             shape: None,
             effects: None,
             station: None,
+            faction: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -347,6 +350,7 @@ mod tests {
             shape: None,
             effects: None,
             station: None,
+            faction: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -381,6 +385,7 @@ mod tests {
             shape: None,
             effects: None,
             station: None,
+            faction: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -440,6 +445,7 @@ mod tests {
             planet: None,
             asteroid_field: None,
             station: None,
+            faction: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -477,6 +483,7 @@ mod tests {
             planet: None,
             asteroid_field: None,
             station: None,
+            faction: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();

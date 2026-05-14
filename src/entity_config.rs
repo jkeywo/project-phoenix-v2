@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde::de::Error as SerdeError;
+use uuid::Uuid;
 use crate::map_config::{StarConfig, PlanetConfig, AsteroidFieldConfig};
 use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectsConfig;
@@ -163,6 +164,9 @@ pub struct EntityConfig {
     pub effects: Option<RegionEffectsConfig>,
     /// Station section — present for station entities.
     pub station: Option<StationConfig>,
+    /// Optional faction UUID this entity belongs to.
+    #[serde(default)]
+    pub faction: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -184,6 +188,7 @@ struct TomlConfig {
     shape: Option<RegionShape>,
     effects: Option<RegionEffectsConfig>,
     station: Option<StationConfig>,
+    faction: Option<Uuid>,
 }
 
 impl EntityConfig {
@@ -247,8 +252,10 @@ impl EntityConfig {
             shape: raw.shape,
             effects: raw.effects,
             station: raw.station,
+            faction: raw.faction,
         })
     }
+
 }
 
 #[cfg(test)]
@@ -1001,5 +1008,38 @@ hull_integrity = 100
         assert!((grid.resolution - 15.0).abs() < 1e-6);
         assert_eq!(field.asteroid_type_paths.len(), 2);
         assert_eq!(field.cosmetic_type_paths.len(), 1);
+    }
+
+    // ── Faction field tests ────────────────────────────────────────────────
+
+    #[test]
+    fn faction_field_parses_from_entity_toml() {
+        let toml_str = r#"
+tags = ["ship"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+"#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let faction = config.faction.expect("faction must be Some");
+        assert_eq!(
+            faction.to_string(),
+            "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+        );
+    }
+
+    #[test]
+    fn faction_field_defaults_to_none_when_absent() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.faction.is_none());
+    }
+
+    #[test]
+    fn player_ship_toml_parses_with_federation_faction() {
+        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
+        let faction = config.faction.expect("player_ship must declare a faction");
+        // Must match the Federation UUID in assets/factions/federation.toml
+        let fed_toml = include_str!("../assets/factions/federation.toml");
+        let fed = crate::faction::parse_faction_config(fed_toml).unwrap();
+        assert_eq!(faction, fed.uuid, "player ship faction must be Federation");
     }
 }

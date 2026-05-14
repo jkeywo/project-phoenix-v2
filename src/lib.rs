@@ -1,3 +1,4 @@
+pub mod faction;
 pub mod beam_render;
 pub mod delegation;
 pub mod impulse;

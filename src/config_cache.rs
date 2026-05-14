@@ -68,6 +68,10 @@ thread_local! {
     static COMPLEXITY_CACHE: RefCell<Option<HashMap<String, crate::complexity::ComplexityConfig>>> =
         const { RefCell::new(None) };
 
+    /// Cache of loaded faction configs by uuid.
+    static FACTION_REGISTRY: RefCell<crate::faction::FactionRegistry> =
+        RefCell::new(crate::faction::FactionRegistry::new());
+
     /// JS callback for requesting config fetches. Set by set_config_request_callback.
     static CONFIG_REQUEST_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
 
@@ -308,7 +312,7 @@ pub fn get_map_config() -> Option<MapConfig> {
     MAP_CONFIG.with(|slot| slot.borrow().clone())
 }
 
-/// Load a scenario TOML string, parse it, and store it for later use.
+/// Load a scenario TOML string, parse it, store it, and queue entity paths from spawns.
 ///
 /// On success, returns `Ok(JsValue::TRUE)`.
 /// On parse failure, logs the error and returns `Err(JsValue)`.
@@ -316,6 +320,10 @@ pub fn get_map_config() -> Option<MapConfig> {
 pub fn wasm_load_scenario(path: String, toml_str: String) -> Result<JsValue, JsValue> {
     match crate::scenario::parse_scenario(&toml_str) {
         Ok(scenario_config) => {
+            // Queue entity paths from scenario spawns so they are preloaded.
+            for spawn in &scenario_config.spawns {
+                queue_and_fire(spawn.entity_path.clone());
+            }
             SCENARIO_CONFIG.with(|slot| {
                 *slot.borrow_mut() = Some(scenario_config);
             });
@@ -329,6 +337,40 @@ pub fn wasm_load_scenario(path: String, toml_str: String) -> Result<JsValue, JsV
             Err(JsValue::from_str(&format!("Scenario parse error at {}: {}", path, e)))
         }
     }
+}
+
+/// Return the `default_scenario` path from the loaded map config, if any.
+#[cfg(target_arch = "wasm32")]
+pub fn wasm_get_default_scenario_path() -> Option<String> {
+    MAP_CONFIG.with(|slot| {
+        slot.borrow().as_ref().and_then(|m| m.default_scenario.clone())
+    })
+}
+
+/// Load a faction TOML string and insert it into the faction registry.
+#[cfg(target_arch = "wasm32")]
+pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    match crate::faction::parse_faction_config(&toml_str) {
+        Ok(config) => {
+            FACTION_REGISTRY.with(|reg| {
+                reg.borrow_mut().insert(config);
+            });
+            Ok(JsValue::TRUE)
+        }
+        Err(e) => {
+            web_sys::console::error_1(&JsValue::from_str(&format!(
+                "Failed to parse faction TOML: {}",
+                e
+            )));
+            Err(JsValue::from_str(&format!("Faction parse error: {}", e)))
+        }
+    }
+}
+
+/// Get the loaded FactionRegistry.
+#[cfg(target_arch = "wasm32")]
+pub fn get_faction_registry() -> crate::faction::FactionRegistry {
+    FACTION_REGISTRY.with(|reg| reg.borrow().clone())
 }
 
 /// Get the loaded ScenarioConfig, if any.
@@ -421,6 +463,19 @@ impl std::ops::Deref for ScenarioResource {
     }
 }
 
+/// Newtype wrapper so `FactionRegistry` can be inserted as a Bevy Resource.
+#[cfg(target_arch = "wasm32")]
+#[derive(Resource)]
+pub struct FactionRegistryResource(pub crate::faction::FactionRegistry);
+
+#[cfg(target_arch = "wasm32")]
+impl std::ops::Deref for FactionRegistryResource {
+    type Target = crate::faction::FactionRegistry;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Bevy plugin for setting up config resources from the preloaded state.
 /// This should be added to the app in wasm_init().
 #[cfg(target_arch = "wasm32")]
@@ -444,6 +499,9 @@ impl Plugin for ConfigCachePlugin {
         if let Some(scenario_config) = get_scenario_config() {
             app.insert_resource(ScenarioResource(scenario_config));
         }
+
+        // Insert the FactionRegistry
+        app.insert_resource(FactionRegistryResource(get_faction_registry()));
     }
 }
 
@@ -500,6 +558,21 @@ pub fn get_scenario_config() -> Option<crate::scenario::ScenarioConfig> {
     None
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn wasm_get_default_scenario_path() -> Option<String> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn wasm_load_faction(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
+    Ok(JsValue::from_bool(false))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_faction_registry() -> crate::faction::FactionRegistry {
+    crate::faction::FactionRegistry::new()
+}
+
 // ── Unit Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -527,6 +600,7 @@ mod tests {
             shape: None,
             effects: None,
             station: None,
+            faction: None,
         }
     }
     

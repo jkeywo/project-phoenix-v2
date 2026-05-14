@@ -1,5 +1,6 @@
 name = "Player Ship"
 tags = ["player", "ship"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [collider]
 shape = "Capsule"

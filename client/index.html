@@ -73,7 +73,11 @@
        lobby UI rendered by Bevy is visible while the name input,
        connection status, and fullscreen button stay clickable on top. */
     #wasm-host { position: fixed; inset: 0; z-index: 0; background: #0a0a1a; }
-    #wasm-host canvas { width: 100% !important; height: 100% !important; display: block; }
+    /* touch-action: none lets Bevy receive all touch events without the
+       browser intercepting them for scroll/pan gestures. width/height are
+       managed by Bevy's fit_canvas_to_parent ResizeObserver; no !important
+       so Bevy can set inline styles freely. */
+    #wasm-host canvas { width: 100%; height: 100%; display: block; touch-action: none; }
     #red-alert-overlay { position: fixed; z-index: 15; }
     #wasm-spinner {
       position: fixed; inset: 0; z-index: 200;
@@ -92,14 +96,14 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-fd6138ad1e94175f.js" crossorigin="anonymous" integrity="sha384-2Kaigfh+fgFGahKndq9xiB9MP1w/NQwe+3xQIDo9ltxjQFbVn08bpD7q0zws/x3j"><link rel="preload" href="./project-phoenix-fd6138ad1e94175f_bg.wasm" crossorigin="anonymous" integrity="sha384-TlLD7CSbmIko77z7Go40cEscA/0pqKSKwM97HnjR0Ek9R0elU+RicjxrAPFix4e9" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-5e43d4dbe5d673f7.js" crossorigin="anonymous" integrity="sha384-6aFXxqC4qxVinDsP8RJk9vS18TU5gMagTXG3PEdiVQdUWAeyrhjSuDIMkmB01hgI"><link rel="preload" href="./project-phoenix-5e43d4dbe5d673f7_bg.wasm" crossorigin="anonymous" integrity="sha384-HmJfuLibuvzERk1K5cJSZysYT2pFRq+1giKvB2yJA89kF1RRmzIXiH1LAhgLJEeW" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-fd6138ad1e94175f.js';
-const wasm = await init({ module_or_path: './project-phoenix-fd6138ad1e94175f_bg.wasm' });
+import init, * as bindings from './project-phoenix-5e43d4dbe5d673f7.js';
+const wasm = await init({ module_or_path: './project-phoenix-5e43d4dbe5d673f7_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -224,6 +228,28 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         p && p.catch(() => {});
       });
       document.addEventListener('fullscreenchange', syncIcon);
+    })();
+
+    // ── Canvas resize ──────────────────────────────────────────────────
+    // Bevy's fit_canvas_to_parent uses a ResizeObserver as the primary
+    // mechanism. This handler is a belt-and-braces fallback: it sets the
+    // canvas buffer dimensions to physical pixels (CSS size × dPR) whenever
+    // the window resizes, so the WebGL surface stays crisp and correctly
+    // sized even if Bevy's observer fires late or is overridden.
+    (function initCanvasResize() {
+      const canvas = document.getElementById('canvas');
+      function syncCanvasSize() {
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.round(window.innerWidth  * dpr);
+        const h = Math.round(window.innerHeight * dpr);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width  = w;
+          canvas.height = h;
+        }
+      }
+      window.addEventListener('resize', syncCanvasSize);
+      // Also fire once at startup in case the initial DPR != 1.
+      syncCanvasSize();
     })();
 
     setConnectionStatus('connecting');

@@ -103,7 +103,8 @@ pub fn wasm_init() {
         }
     });
 
-    app.add_systems(PreUpdate, (drain_inbound, drain_disconnects))
+    app.insert_resource(bevy::winit::WinitSettings::game())
+    .add_systems(PreUpdate, (drain_inbound, drain_disconnects))
     .add_systems(PostUpdate, flush_outbound);
 
     // Insert the validated ShipStations resource if it was pre-validated.

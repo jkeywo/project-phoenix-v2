@@ -1100,7 +1100,7 @@ hull_integrity = 150.0
 
     #[test]
     fn station_outpost_template_parses_with_station_section() {
-        let toml_str = include_str!("../assets/entities/station_outpost.toml");
+        let toml_str = include_str!("../../assets/entities/station_outpost.toml");
         let config = EntityConfig::from_toml(toml_str).expect("station_outpost.toml must parse");
         let station = config.station.as_ref().expect("must have [station]");
         assert_eq!(station.name, "Outpost Alpha");
@@ -1149,7 +1149,7 @@ hull_integrity = 100
 
     #[test]
     fn star_sun_template_parses_with_star_section() {
-        let toml_str = include_str!("../assets/entities/star_sun.toml");
+        let toml_str = include_str!("../../assets/entities/star_sun.toml");
         let config = EntityConfig::from_toml(toml_str).expect("star_sun.toml must parse");
         let star = config.star.as_ref().expect("star_sun.toml must have [star]");
         assert_eq!(star.name, "Sun");
@@ -1159,7 +1159,7 @@ hull_integrity = 100
 
     #[test]
     fn planet_earth_template_parses_with_planet_section() {
-        let toml_str = include_str!("../assets/entities/planet_earth.toml");
+        let toml_str = include_str!("../../assets/entities/planet_earth.toml");
         let config = EntityConfig::from_toml(toml_str).expect("planet_earth.toml must parse");
         let planet = config.planet.as_ref().expect("planet_earth.toml must have [planet]");
         assert_eq!(planet.name, "Earth");
@@ -1168,7 +1168,7 @@ hull_integrity = 100
 
     #[test]
     fn asteroid_field_main_template_parses_with_field_and_grid() {
-        let toml_str = include_str!("../assets/entities/asteroid_field_main.toml");
+        let toml_str = include_str!("../../assets/entities/asteroid_field_main.toml");
         let config = EntityConfig::from_toml(toml_str).expect("asteroid_field_main.toml must parse");
         let field = config.asteroid_field.as_ref().expect("must have [asteroid_field]");
         assert!((field.inner_radius - 100.0).abs() < 1e-6);
@@ -1203,11 +1203,11 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
     #[test]
     fn player_ship_toml_parses_with_federation_faction() {
-        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
         let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
         let faction = config.faction.expect("player_ship must declare a faction");
         // Must match the Federation UUID in assets/factions/federation.toml
-        let fed_toml = include_str!("../assets/factions/federation.toml");
+        let fed_toml = include_str!("../../assets/factions/federation.toml");
         let fed = crate::faction::parse_faction_config(fed_toml).unwrap();
         assert_eq!(faction, fed.uuid, "player ship faction must be Federation");
     }
@@ -1351,7 +1351,7 @@ target_speed = 0.5
 
     #[test]
     fn pirate_raider_template_parses_with_pirate_faction() {
-        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         // Must have pirate faction UUID
         let faction = config.faction.expect("pirate_raider must declare a faction");
@@ -1364,7 +1364,7 @@ target_speed = 0.5
 
     #[test]
     fn pirate_raider_template_has_hull() {
-        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         assert!(config.hull.is_some(), "pirate_raider must have a [hull] section");
         let hull = config.hull.as_ref().unwrap();
@@ -1373,7 +1373,7 @@ target_speed = 0.5
 
     #[test]
     fn pirate_raider_template_has_helm_and_weapons_console() {
-        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         assert!(config.helm_console.is_some(), "pirate_raider must have a [helm_console]");
         assert!(config.weapons_console.is_some(), "pirate_raider must have a [weapons_console]");
@@ -1381,7 +1381,7 @@ target_speed = 0.5
 
     #[test]
     fn pirate_raider_template_has_behaviour_with_all_six_states() {
-        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         let behaviour = config.behaviour.expect("pirate_raider must have a [behaviour] block");
         let state_kinds: Vec<&str> = behaviour.state.iter().map(|s| s.kind.as_str()).collect();
@@ -1394,7 +1394,7 @@ target_speed = 0.5
 
     #[test]
     fn pirate_raider_template_transitions_include_enemy_in_range_and_on_attacked() {
-        let toml_str = include_str!("../assets/entities/pirate_raider.toml");
+        let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         let behaviour = config.behaviour.expect("behaviour must be Some");
         let conditions: Vec<&str> = behaviour.transition.iter().map(|t| t.condition.as_str()).collect();

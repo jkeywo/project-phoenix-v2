@@ -751,7 +751,7 @@ extra_scenarios = ["assets/scenarios/patrol.toml"]
 
     #[test]
     fn default_map_toml_references_patrol_scenario() {
-        let toml_str = include_str!("../assets/maps/default.toml");
+        let toml_str = include_str!("../../assets/maps/default.toml");
         let config = parse_map_config(toml_str).unwrap();
         assert!(
             config.extra_scenarios.iter().any(|s| s.contains("patrol")),

@@ -341,15 +341,15 @@ impl Plugin for SimulationPlugin {
             ))
             .add_systems(Update, (
                 broadcast_sim_state.after(process_helm_inputs),
-                broadcast_weapons_update.after(broadcast_sim_state),
-                broadcast_repair_state.after(broadcast_sim_state),
                 broadcast_shield_status.after(broadcast_sim_state),
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
                 broadcast_modifier_events,
-                broadcast_repair_icons.after(broadcast_repair_state),
+                broadcast_repair_icons,
                 reconcile_runtime_entities.after(crate::lobby::process_lobby),
             ))
-            .add_plugins(power_state_broadcaster());
+            .add_plugins(power_state_broadcaster())
+            .add_plugins(weapons_update_broadcaster())
+            .add_plugins(repair_state_broadcaster());
     }
 }
 
@@ -370,6 +370,86 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
                 sensors: power.0.sensors,
                 battery_charge: power.0.battery_charge,
                 locked: power.0.locked,
+            })
+        },
+    )
+}
+
+/// Returns a [`SimBroadcaster`] pre-configured with the `WeaponsUpdate` producer.
+///
+/// Broadcasts `WeaponsUpdate` at 10 Hz to the `Tactical` console holder only.
+/// Registered by [`SimulationPlugin`] and the test harness in `test_app()`.
+pub fn weapons_update_broadcaster() -> SimBroadcaster {
+    SimBroadcaster::new().register(
+        Audience::Holding(Console::Tactical),
+        Cadence::Hz(10.0),
+        |world: &World| {
+            let ship = world.resource::<ShipState>();
+            let world_res = world.resource::<WorldResource>();
+            let weapons_target = world.resource::<WeaponsTarget>();
+            let cooldown = world.resource::<PhaserCooldown>();
+            let beam = world.resource::<ActiveBeam>();
+            let torpedo_sys = world.resource::<TorpedoSystemResource>();
+            let modifiers = world.resource::<ShipModifiers>();
+
+            let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
+            let fire_ready = match &weapons_target.0 {
+                None => false,
+                Some(uuid) => {
+                    world_res.0.entities.iter()
+                        .find(|a| &a.uuid == uuid)
+                        .map(|a| crate::radar::is_fire_ready_with_range(a.x(), a.z(), ship.x, ship.z, ship.yaw, effective_phaser_range))
+                        .unwrap_or(false)
+                }
+            };
+
+            let ts = &torpedo_sys.0;
+            Some(ServerMessage::WeaponsUpdate {
+                target_uuid: weapons_target.0.clone(),
+                fire_ready,
+                on_cooldown: cooldown.is_active() || beam.target_uuid.is_some(),
+                torpedo_count: ts.torpedoes_remaining,
+                fore_port_loaded: ts.fore_port.is_loaded(),
+                fore_port_reload_secs: ts.fore_port.reload_remaining,
+                fore_starboard_loaded: ts.fore_starboard.is_loaded(),
+                fore_starboard_reload_secs: ts.fore_starboard.reload_remaining,
+                aft_loaded: ts.aft.is_loaded(),
+                aft_reload_secs: ts.aft.reload_remaining,
+            })
+        },
+    )
+}
+
+/// Returns a [`SimBroadcaster`] pre-configured with the `RepairState` producer.
+///
+/// Broadcasts `RepairState` at 10 Hz to the `Repair` console holder only.
+/// Registered by [`SimulationPlugin`] and the test harness in `test_app()`.
+pub fn repair_state_broadcaster() -> SimBroadcaster {
+    SimBroadcaster::new().register(
+        Audience::Holding(Console::Repair),
+        Cadence::Hz(10.0),
+        |world: &World| {
+            use crate::messages::TeamSlot;
+            let teams = world.resource::<ShipRepairTeams>();
+            let breakdowns = world.resource::<BreakdownQueueResource>();
+
+            let slots = teams.0.slots();
+            let in_progress = slots.iter().any(|s| matches!(s, TeamSlot::Repairing { .. }));
+            let penalty = slots.iter().any(|s| matches!(s, TeamSlot::Cooldown { .. }));
+            let remaining_cooldown_secs = slots.iter().map(|s| match s {
+                TeamSlot::Repairing { progress } => (1.0 - progress) * 30.0,
+                TeamSlot::Cooldown { progress } => progress * 10.0,
+                TeamSlot::Idle => 0.0,
+            }).fold(0.0_f32, f32::max);
+
+            let current_breakdown = breakdowns.queue.front().map(|entry| (entry.console.clone(), entry.shape));
+
+            Some(ServerMessage::RepairState {
+                remaining_cooldown_secs,
+                in_progress,
+                penalty,
+                teams: *slots,
+                current_breakdown,
             })
         },
     )
@@ -1106,57 +1186,6 @@ fn tick_repair_teams(
     }
 }
 
-/// Broadcast `RepairState` at 10 Hz to every console holder.
-///
-/// Derives state from the `RepairTeams` resource:
-/// - `in_progress` if any team is repairing.
-/// - `penalty` if any team is on cooldown.
-/// - `remaining_cooldown_secs` derived from team with the longest remaining
-///   time (repair or cooldown).
-/// - `teams` copied from the current team slots.
-/// - `current_breakdown` from the front of the breakdown queue.
-fn broadcast_repair_state(
-    timer: Res<SimBroadcastTimer>,
-    mut writer: MessageWriter<OutboundMessage>,
-    sessions: Res<Sessions>,
-    teams: Res<ShipRepairTeams>,
-    breakdowns: Res<BreakdownQueueResource>,
-    phase: Res<CurrentPhase>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    if !timer.0.just_finished() {
-        return;
-    }
-
-    use crate::messages::TeamSlot;
-    let slots = teams.0.slots();
-    let in_progress = slots.iter().any(|s| matches!(s, TeamSlot::Repairing { .. }));
-    let penalty = slots.iter().any(|s| matches!(s, TeamSlot::Cooldown { .. }));
-    let remaining_cooldown_secs = slots.iter().map(|s| match s {
-        TeamSlot::Repairing { progress } => (1.0 - progress) * 30.0,
-        TeamSlot::Cooldown { progress } => progress * 10.0,
-        TeamSlot::Idle => 0.0,
-    }).fold(0.0_f32, f32::max);
-
-    let current_breakdown = breakdowns.queue.front().map(|entry| (entry.console.clone(), entry.shape));
-
-    let all_consoles = [Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Sensors, Console::Shields, Console::Navigation, Console::Power];
-    for console in &all_consoles {
-        let Some(token) = sessions.0.console_holder(console.clone()) else { continue };
-        writer.write(OutboundMessage {
-            target: Target::Token(token.to_string()),
-            msg: ServerMessage::RepairState {
-                remaining_cooldown_secs,
-                in_progress,
-                penalty,
-                teams: *slots,
-                current_breakdown: current_breakdown.clone(),
-            },
-        });
-    }
-}
 
 /// Tick the active beam each frame: apply damage, check sever conditions
 /// (arc, range, target destroyed), and handle natural expiry.
@@ -1359,62 +1388,6 @@ fn broadcast_shield_status(
     });
 }
 
-/// Broadcast `WeaponsUpdate` to the Weapons console player at 10 Hz.
-///
-/// Reuses `SimBroadcastTimer`; after the timer ticks in `broadcast_sim_state`
-/// the `just_finished()` flag is still `true` for the remainder of the frame
-/// because `Repeating` timers latch it until the next `tick`.
-fn broadcast_weapons_update(
-    timer: Res<SimBroadcastTimer>,
-    mut writer: MessageWriter<OutboundMessage>,
-    sessions: Res<Sessions>,
-    ship: Res<ShipState>,
-    world: Res<WorldResource>,
-    weapons_target: Res<WeaponsTarget>,
-    cooldown: Res<PhaserCooldown>,
-    beam: Res<ActiveBeam>,
-    phase: Res<CurrentPhase>,
-    torpedo_sys: Res<TorpedoSystemResource>,
-    modifiers: Res<ShipModifiers>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    if !timer.0.just_finished() {
-        return;
-    }
-    let Some(weapons_token) = sessions.0.console_holder(Console::Tactical) else {
-        return;
-    };
-
-    let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
-    let fire_ready = match &weapons_target.0 {
-        None => false,
-        Some(uuid) => {
-            world.0.entities.iter()
-                .find(|a| &a.uuid == uuid)
-                .map(|a| crate::radar::is_fire_ready_with_range(a.x(), a.z(), ship.x, ship.z, ship.yaw, effective_phaser_range))
-                .unwrap_or(false)
-        }
-    };
-
-    let ts = &torpedo_sys.0;
-    writer.write(OutboundMessage {
-        target: Target::Token(weapons_token.to_string()),
-        msg: ServerMessage::WeaponsUpdate {
-            target_uuid: weapons_target.0.clone(),
-            fire_ready,
-            on_cooldown: cooldown.is_active() || beam.target_uuid.is_some(),
-            torpedo_count: ts.torpedoes_remaining,
-            fore_port_loaded: ts.fore_port.is_loaded(),
-            fore_port_reload_secs: ts.fore_port.reload_remaining,
-            fore_starboard_loaded: ts.fore_starboard.is_loaded(),
-            fore_starboard_reload_secs: ts.fore_starboard.reload_remaining,
-            aft_loaded: ts.aft.is_loaded(),
-            aft_reload_secs: ts.aft.reload_remaining,
-        },
-    });
-}
 
 /// Emit a single `WorldSetup` broadcast the first frame the game enters
 /// `InProgress`. Stays silent in Lobby and on subsequent in-game ticks.
@@ -1937,8 +1910,10 @@ fn test_app() -> App {
             tick_active_beam, tick_repair_teams,
             tick_torpedo_system, tick_power_system,
         ))
-        .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state), reconcile_runtime_entities.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (broadcast_sim_state, broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons, reconcile_runtime_entities.after(crate::lobby::process_lobby)))
         .add_plugins(power_state_broadcaster())
+        .add_plugins(weapons_update_broadcaster())
+        .add_plugins(repair_state_broadcaster())
         .add_systems(PostUpdate, collect);
     app
 }

@@ -45,10 +45,12 @@ Cadence::Once                  fires on the first tick only
 | Producer | Audience | Cadence | Registered in |
 |---|---|---|---|
 | `PowerState` | `Holding(Console::Power)` | `Hz(10.0)` | `simulation::power_state_broadcaster()` |
+| `WeaponsUpdate` | `Holding(Console::Tactical)` | `Hz(10.0)` | `simulation::weapons_update_broadcaster()` |
+| `RepairState` | `Holding(Console::Repair)` | `Hz(10.0)` | `simulation::repair_state_broadcaster()` |
 
 ## Registration points
 
-- `SimulationPlugin::build()` calls `power_state_broadcaster()` and adds it as a sub-plugin.
+- `SimulationPlugin::build()` calls `power_state_broadcaster()`, `weapons_update_broadcaster()`, and `repair_state_broadcaster()` and adds each as a sub-plugin.
 - `LobbyBroadcaster::new()` (no producers yet) is added in `src/bridge.rs` / `src/server/bridge.rs`.
 
 ## Subsequent slices

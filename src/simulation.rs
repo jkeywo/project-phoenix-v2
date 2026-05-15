@@ -284,6 +284,7 @@ impl Plugin for SimulationPlugin {
             .add_plugins(crate::region_plugin::RegionPlugin)
             .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
             .add_plugins(crate::ai_plugin::AiPlugin)
+            .add_plugins(crate::captain_plugin::CaptainPlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
@@ -315,8 +316,6 @@ impl Plugin for SimulationPlugin {
             ))
             .add_systems(Update, (
                 (
-                    handle_toggle,
-                    handle_set_view,
                     handle_set_target,
                     handle_set_science_target,
                     handle_set_sensors_target,
@@ -378,51 +377,6 @@ fn is_valid_console_holder(
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────
-fn handle_toggle(
-    mut reader: MessageReader<InboundMessage>,
-    mut ship: ResMut<ShipState>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        if matches!(ev.msg, ClientMessage::ToggleRedAlert)
-            && sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str())
-        {
-            ship.toggle_red_alert();
-        }
-    }
-}
-
-fn handle_set_view(
-    mut reader: MessageReader<InboundMessage>,
-    mut ship: ResMut<ShipState>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        if let ClientMessage::SetView { mode } = ev.msg.clone() {
-            // Authorization is per-variant: Camera views are the captain's call,
-            // Radar is the helm's call. A request from the wrong console is
-            // silently ignored.
-            let required = match &mode {
-                ViewMode::Camera(_) => Console::CaptainChair,
-                ViewMode::Radar => Console::Helm,
-                ViewMode::ScienceRadar | ViewMode::SensorsRadar => Console::Sensors,
-                ViewMode::SystemChart | ViewMode::NavigationChart => Console::Navigation,
-                ViewMode::Comms => Console::Comms,
-            };
-            if sessions.0.console_holder(required) == Some(ev.token.as_str()) {
-                ship.view_mode = mode;
-            }
-        }
-    }
-}
 
 fn handle_set_target(
     mut reader: MessageReader<InboundMessage>,
@@ -1979,8 +1933,9 @@ fn test_app() -> App {
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
         .init_resource::<Outbox>()
+        .add_plugins(crate::captain_plugin::CaptainPlugin)
         .add_systems(Update, (
-            handle_set_view, handle_set_target,
+            handle_set_target,
             handle_set_science_target, handle_set_sensors_target,
             handle_fire_phaser, handle_set_phaser_mode,
             handle_set_phaser_frequency, handle_fire_torpedo,

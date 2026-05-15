@@ -2,7 +2,20 @@
 #
 # Loaded when Ironveil attacks the crew or the crew attacks Ironveil.
 # Reveals decrypted Harrow operational orders naming the weapon's targets.
-# This path gives operational context: who ordered it and why.
+# This path gives operational context: who ordered it and why. Unlocks the
+# "broadcast the manifest on open channels" option in the Aphelion Protocol.
+#
+# On load: sets path_chosen + path_c_chosen flags, pushes lock-out comms to
+# both stations (they go to emergency protocols on combat start).
+
+[[trigger]]
+condition = "on_load"
+actions = [
+    { set_flag = "path_chosen" },
+    { set_flag = "path_c_chosen" },
+    { push_comms = "lockout_axiom_from_c" },
+    { push_comms = "lockout_outpost_from_c" },
+]
 
 # ── OBJECTIVES ────────────────────────────────────────────────────────────────
 
@@ -86,6 +99,16 @@ message = "Forty million. Agriculture and settlements, mostly. No military prese
 [[comms.responses]]
 text = "Transmit the orders. Move to intercept Ashrender."
 follow_up = "manifest_transmitted"
+
+[[comms.responses]]
+text = "If Ashrender arms, we put this on every open channel while we hold them off."
+follow_up = "manifest_broadcast_option"
+
+[[comms]]
+id = "manifest_broadcast_option"
+from = "Starcorp Command"
+subject = "Re: Broadcast Option"
+message = "Understood. If it comes to that — get it out on all channels. Make Harrow answer for every name on that list."
 
 [[trigger]]
 condition = "on_destroyed"

@@ -1,8 +1,27 @@
 # Path B — The Scholar
 #
-# Loaded when the crew hails the Research Outpost.
-# Contact: Dr. Myst. Reveals the weapon's resonance signature and a faint
-# Singularity signal — the proto-echo of what will become the Neutral Zone.
+# Loaded when the crew commits to working with Dr. Myst (gateway in
+# before_the_fire.toml). Contact: Dr. Myst. Reveals the weapon's resonance
+# signature and a faint outer-system signal. This path gives scientific context
+# for the weapon and unlocks the "Dr. Myst broadcasts resonance degradation
+# data" option in the Aphelion Protocol finale.
+#
+# On load: sets path_chosen + path_b_chosen flags, adds working_with_myst
+# objective, and pushes lock-out comms to Axiom Station.
+
+[[trigger]]
+condition = "on_load"
+actions = [
+    { set_flag = "path_chosen" },
+    { set_flag = "path_b_chosen" },
+    { add_objective = "working_with_myst" },
+    { push_comms = "lockout_axiom_from_b" },
+]
+
+[[objective]]
+id = "working_with_myst"
+text = "Continue working with Dr. Myst at the Research Outpost."
+auto_add = false
 
 # ── OBJECTIVES ────────────────────────────────────────────────────────────────
 
@@ -87,6 +106,16 @@ id = "myst_neutral_zone"
 from = "Research Outpost — Dr. Myst"
 subject = "Re: Sub-harmonic"
 message = "Yes. They don't want to win the war. They want to redraw the map."
+
+[[comms.responses]]
+text = "You said there was something else. Something underneath all of this."
+follow_up = "myst_singularity"
+
+[[comms]]
+id = "myst_singularity"
+from = "Research Outpost — Dr. Myst"
+subject = "Re: The Outer Signal"
+message = "There's a coherent signal from the outer system. Not Harrow, not Alliance. Whatever it is, it's watching. I'd give anything to chase it right now — but the weapon has to come first."
 
 [[comms]]
 id = "myst_effect"

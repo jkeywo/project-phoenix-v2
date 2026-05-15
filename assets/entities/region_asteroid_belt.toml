@@ -1,0 +1,7 @@
+tags = ["region"]
+
+[region]
+radius = 180.0
+
+[region.effects]
+blocks_impulse = true

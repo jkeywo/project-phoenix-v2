@@ -4,11 +4,11 @@ use bevy_rapier3d::prelude::*;
 use crate::breakdown::BreakdownQueue;
 #[cfg(test)]
 use crate::breakdown::breakdowns_from_damage;
-use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage, HullIntegrity};
+use crate::damage::{HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::repair_teams::RepairTeams;
-use crate::shield::{attacker_bearing_relative, ShieldSystem};
+use crate::shield::ShieldSystem;
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::messages::{
@@ -16,14 +16,16 @@ use crate::messages::{
 };
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
 use crate::messages::TorpedoTube as MsgTorpedoTube;
-use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
+use crate::ship_physics::ShipPhysicsConfig;
 use crate::ship_state::ShipState;
+use crate::damage::{collision_damage, apply_damage_with_shields, apply_hull_damage};
+use crate::shield::attacker_bearing_relative;
+use bevy_rapier3d::prelude::ReadRapierContext;
+
 use crate::impulse::ImpulseState;
 use crate::modifiers::ShipModifiers;
 use crate::messages::ModifierSlot;
-use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, RegionEffectsSection, EntityTagsSection};
-use crate::region_plugin::RegionMembership;
-use crate::region_effects::RegionEffectKind;
+use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, EntityTagsSection};
 use std::collections::HashMap;
 
 // â”€â”€ Beam constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -53,10 +55,7 @@ pub struct AsteroidDamage {
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
 
-#[derive(Resource)]
-struct HelmInputTimer(Timer);
-
-/// Ship-wide Hull Integrity (0â€“100). Tracked as a Bevy resource so systems
+/// Ship-wide Hull Integrity (0–100). Tracked as a Bevy resource so systems
 /// can read/write it independently of `ShipState`.
 #[derive(Resource)]
 pub struct ShipHullIntegrity(pub HullIntegrity);
@@ -175,7 +174,7 @@ pub struct ShipPowerSystem(pub crate::power_system::PowerSystem);
 #[derive(Resource)]
 pub struct PowerConfigResource(pub crate::power_system::PowerConfig);
 
-/// Per-console power multiplier configuration: `[f32; 4]` indexed by level−1
+/// Per-console power multiplier configuration: `[f32; 4]` indexed by level-1
 /// (index 0 = level 1, index 3 = level 4). Defaults give `[-0.5, 0.0, 0.25, 0.5]`
 /// for every console unless overridden in the ship TOML.
 #[derive(Resource, Clone, Debug)]
@@ -224,17 +223,6 @@ impl Default for BreakdownQueueResource {
             rng: rand::rngs::SmallRng::from_os_rng(),
         }
     }
-}
-
-/// Remembers the most recent helm input so the 10 Hz physics tick can
-/// keep applying it even when no new client message has arrived that tick.
-///
-/// Made `pub` so the `ConsoleAiPlugin` can read the current thrust value for
-/// the Power-Low movement-rule AI without duplicating state.
-#[derive(Resource, Default)]
-pub struct LastHelmInput {
-    pub thrust: f32,
-    pub steering: f32,
 }
 
 /// Prevents `handle_collisions` from applying damage every frame while the
@@ -305,6 +293,7 @@ impl Plugin for SimulationPlugin {
             .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
             .add_plugins(crate::ai_plugin::AiPlugin)
             .add_plugins(crate::captain_plugin::CaptainPlugin)
+            .add_plugins(crate::ship_plugin::ShipPlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
@@ -319,7 +308,6 @@ impl Plugin for SimulationPlugin {
             .init_resource::<PhaserRenderConfig>()
             .insert_resource(ShipRepairTeams(RepairTeams::new()))
             .init_resource::<BreakdownQueueResource>()
-            .init_resource::<LastHelmInput>()
             .init_resource::<CollisionCooldown>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .init_resource::<RepairIconState>()
@@ -329,7 +317,6 @@ impl Plugin for SimulationPlugin {
             .init_resource::<TrackedEntities>()
             .init_resource::<SimOutbox>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
-            .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
             .add_systems(Update, (
                 spawn_game_start_entities.after(crate::lobby::process_lobby),
@@ -348,7 +335,6 @@ impl Plugin for SimulationPlugin {
                     handle_fire_torpedo,
                     handle_repair,
                     handle_power_messages,
-                    handle_impulse_messages,
                     handle_set_shield_focus,
                 ),
                 (
@@ -357,8 +343,8 @@ impl Plugin for SimulationPlugin {
                     tick_torpedo_system,
                     tick_shields,
                     tick_power_system,
+                    handle_collisions,
                 ),
-                (process_helm_inputs, sync_ship_position, handle_collisions),
                 (
                     broadcast_shield_status,
                     broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
@@ -372,7 +358,7 @@ impl Plugin for SimulationPlugin {
                 .after(tick_power_system)
                 .after(crate::lobby::process_lobby))
             .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers
-                .after(handle_impulse_messages)
+                .after(crate::ship_plugin::handle_impulse_messages)
                 .after(crate::lobby::process_lobby))
             .add_systems(Update, (
                 crate::modifier_coordination::translate_region_modifiers,
@@ -619,7 +605,7 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
     )
 }
 
-// ── Helper: token validation with AI fallback ────────────────────────────────
+// -- Helper: token validation with AI fallback --------------------------------
 
 /// Returns `true` when `token` is the holder of `console` in the session
 /// manager, OR when `token` is a registered AI token (so AI-generated
@@ -642,7 +628,7 @@ fn is_valid_console_holder(
     ai_registry.entity_uuid_for_token(token).is_some()
 }
 
-// ── Systems ───────────────────────────────────────────────────────────────────
+// -- Systems -------------------------------------------------------------------
 
 fn handle_set_target(
     mut reader: MessageReader<InboundMessage>,
@@ -741,76 +727,6 @@ fn handle_set_sensors_target(
     }
 }
 
-fn process_helm_inputs(
-    time: Res<Time>,
-    mut timer: ResMut<HelmInputTimer>,
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    mut ship: ResMut<ShipState>,
-    phase: Res<CurrentPhase>,
-    mut last_input: ResMut<LastHelmInput>,
-    modifiers: Res<ShipModifiers>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    if !timer.0.tick(time.delta()).just_finished() {
-        return;
-    }
-
-    // Only process if helm is occupied
-    let helm_token = sessions.0.console_holder(Console::Helm);
-    if helm_token.is_none() {
-        return;
-    }
-
-    // Update the stored input from any messages that arrived this tick.
-    // If none arrived, last_input retains its previous values so a steady
-    // joystick position keeps applying thrust rather than decelerating.
-    for ev in reader.read() {
-        if ev.token != helm_token.unwrap() {
-            continue;
-        }
-        if let ClientMessage::HelmInput { thrust: t, steering: s } = ev.msg {
-            last_input.thrust = t;
-            last_input.steering = s;
-        }
-    }
-
-    // Compute physics â€” use the timer's nominal period, not the frame delta.
-    // The timer fires every 100 ms; time.delta_secs() is only one frame (~16 ms).
-    let dt = timer.0.duration().as_secs_f32();
-    let state = ShipPhysicsState {
-        x: ship.x,
-        z: ship.z,
-        yaw: ship.yaw,
-        forward_speed: ship.forward_speed,
-    };
-    let input = ShipPhysicsInput { thrust: last_input.thrust, steering: last_input.steering };
-    let mut config = ShipPhysicsConfig::new();
-    config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
-    config.max_reverse_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
-    config.max_yaw_rate *= modifiers.get(&ModifierSlot::MaxYawRate);
-    let result = compute_physics(state, input, dt, &config);
-
-    ship.x = result.x;
-    ship.z = result.z;
-    ship.yaw = result.yaw;
-    ship.forward_speed = result.forward_speed;
-}
-
-fn sync_ship_position(
-    ship: Res<ShipState>,
-    mut ship_query: Query<&mut Transform, With<Ship>>,
-) {
-    let Ok(mut transform) = ship_query.single_mut() else {
-        return;
-    };
-
-    transform.translation.x = ship.x;
-    transform.translation.z = ship.z;
-    transform.rotation = Quat::from_axis_angle(Vec3::Y, ship.yaw);
-}
 
 fn handle_collisions(
     time: Res<Time>,
@@ -830,13 +746,11 @@ fn handle_collisions(
     let Ok(ctx) = context.single() else { return };
     let Ok(ship_entity) = ship_query.single() else { return };
 
-    // Collect the first contact partner entity (if any).
     let contact = ctx.contact_pairs_with(ship_entity).next().map(|pair| {
         if pair.collider1() == Some(ship_entity) { pair.collider2() } else { pair.collider1() }
     }).flatten();
 
     if contact.is_some() {
-        // Only apply damage once per contact event; skip while immune.
         if cooldown.remaining_secs > 0.0 {
             return;
         }
@@ -844,9 +758,6 @@ fn handle_collisions(
         let damage = collision_damage(ship.forward_speed, max_speed) as f32
             * modifiers.get(&ModifierSlot::HullDamageTaken);
 
-        // Determine which shield facing absorbs the hit by finding the
-        // attacker's world-space position and computing its bearing relative
-        // to the ship's current yaw.
         let bearing = contact
             .and_then(|attacker_entity| {
                 asteroid_query.get(attacker_entity).ok().map(|(t, _)| {
@@ -859,9 +770,8 @@ fn handle_collisions(
                     )
                 })
             })
-            .unwrap_or(0.0); // fallback: treat as fore hit
+            .unwrap_or(0.0);
 
-        // Route damage through shields and apply remaining to hull via the shared helper.
         let hull_damage_from_shields = apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
         if hull_damage_from_shields > 0 {
             let (_, new_cumulative, new_count) = apply_hull_damage(
@@ -879,7 +789,6 @@ fn handle_collisions(
         cooldown.remaining_secs = 1.0;
     }
 }
-
 /// Tick shield regen and offline timers each frame.
 fn tick_shields(time: Res<Time>, mut shields: ResMut<ShipShields>) {
     shields.0.tick(time.delta_secs());
@@ -1221,73 +1130,6 @@ fn tick_power_system(
 /// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/navigation.
 /// Also cancels impulse whenever the hull takes damage this frame.
 /// `StartImpulseCharge` is ignored when the ship is inside a `BlocksImpulse` region.
-fn handle_impulse_messages(
-    mut reader: MessageReader<InboundMessage>,
-    mut impulse: ResMut<ShipImpulse>,
-    phase: Res<CurrentPhase>,
-    hull: Res<ShipHullIntegrity>,
-    mut last_hull_hp: Local<f32>,
-    membership: Option<Res<RegionMembership>>,
-    region_query: Query<&RegionEffectsSection>,
-    ship_query: Query<Entity, With<Ship>>,
-) {
-    // Initialise on first call.
-    if *last_hull_hp == 0.0 && (hull.0.current() - 100.0).abs() < 1e-6 {
-        *last_hull_hp = 100.0;
-    }
-
-    // Cancel impulse if hull HP decreased since last frame.
-    let current_hp = hull.0.current();
-    if current_hp < *last_hull_hp {
-        impulse.0.cancel_charge();
-    }
-    *last_hull_hp = current_hp;
-
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-
-    for msg in reader.read() {
-        match &msg.msg {
-            ClientMessage::StartImpulseCharge => {
-                // Gate: ignore if ship is inside any BlocksImpulse region
-                if !is_inside_blocks_impulse(&membership, &region_query, &ship_query) {
-                    impulse.0.start_charge();
-                }
-            }
-            ClientMessage::CancelImpulse => {
-                impulse.0.cancel_charge();
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Returns true if the ship is currently inside any region with `BlocksImpulse` effect.
-fn is_inside_blocks_impulse(
-    membership: &Option<Res<RegionMembership>>,
-    region_query: &Query<&RegionEffectsSection>,
-    ship_query: &Query<Entity, With<Ship>>,
-) -> bool {
-    let Some(membership) = membership else {
-        return false;
-    };
-    let Ok(ship_entity) = ship_query.single() else {
-        return false;
-    };
-    let Some(inside) = membership.inside.get(&ship_entity) else {
-        return false;
-    };
-    for &region_entity in inside {
-        if let Ok(effects) = region_query.get(region_entity) {
-            if effects.0.iter().any(|e| *e == RegionEffectKind::BlocksImpulse) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// Tick repair teams each frame: advance progress, apply HP for completed
 /// repairs.
 fn tick_repair_teams(
@@ -1641,7 +1483,7 @@ fn setup_world_from_config(
     map_config: MapConfig,
     config_cache: crate::config_cache::ConfigCache,
 ) {
-    // ── Spawn immediate entities from entity instances ────────────
+    // -- Spawn immediate entities from entity instances ------------
     for entity_inst in &map_config.entities {
         if entity_inst.spawn_on != crate::map_config::EntityInstanceSpawnOn::Immediate {
             continue;
@@ -1649,7 +1491,7 @@ fn setup_world_from_config(
         spawn_entity_instance(&mut commands, &map_config, &config_cache, entity_inst);
     }
 
-    // ── Starfield skybox ──────────────────────────────────────────
+    // -- Starfield skybox ------------------------------------------
     spawn_starfield(&mut commands, &mut meshes, &mut materials);
 }
 
@@ -1870,12 +1712,10 @@ fn render_spawned_entities(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::damage::collision_damage;
     use crate::lobby::{LobbyPlugin, InboundMessage, OutboundMessage};
     use crate::messages::*;
-    use crate::entity_spawner::spawn_entity;
-    use crate::entity_config::EntityConfig;
-    use crate::region_shape::RegionShape;
-    use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
+    use crate::ship_plugin::handle_impulse_messages;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -2813,7 +2653,7 @@ fn test_app() -> App {
         matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Idle)
     }
 
-    // ── Shape-matching repair tests ──────────────────────────────────────
+    // -- Shape-matching repair tests --------------------------------------
 
     /// Non-Repair console holder sending `Repair { shape }` is ignored.
     #[test]
@@ -2865,7 +2705,7 @@ fn test_app() -> App {
             "breakdown queue should be unchanged after wrong shape press");
     }
 
-    /// All-busy teams: no free team → further presses are ignored.
+    /// All-busy teams: no free team ? further presses are ignored.
     #[test]
     fn all_busy_teams_ignore_further_presses() {
         let mut app = test_app();
@@ -3035,218 +2875,7 @@ fn test_app() -> App {
         tick(app);
     }
 
-    // â”€â”€ Impulse Drive / Damage Cancellation tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-    fn start_game_with_helm_and_science(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
-        tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
-        tick(app);
-        push(app, "helm", ClientMessage::Identify { token: "helm".into(), name: "Hikaru".into() });
-        tick(app);
-        push(app, "helm", ClientMessage::SelectStation { station: "Helm".into() });
-        tick(app);
-        push(app, "captain", ClientMessage::StartGame);
-        tick(app);
-    }
-
-    #[test]
-    fn hull_damage_cancels_charging_impulse() {
-        let mut app = test_app();
-        start_game_with_helm_and_science(&mut app);
-
-        // Helm begins charging impulse.
-        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
-        tick(&mut app);
-
-        // Verify impulse is now charging.
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Charging,
-            "impulse should be charging after StartImpulseCharge"
-        );
-
-        // Direct hull damage (simulates a collision landing hull damage).
-        app.world_mut()
-            .resource_mut::<ShipHullIntegrity>()
-            .0.apply_damage(10.0);
-        tick(&mut app);
-
-        // Impulse should have been cancelled.
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Idle,
-            "impulse charge should be cancelled when hull damage is taken"
-        );
-    }
-
-    #[test]
-    fn hull_damage_cancels_active_impulse() {
-        let mut app = test_app();
-        start_game_with_helm_and_science(&mut app);
-
-        // Force impulse to Active by directly mutating the resource.
-        {
-            let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
-            imp.0.start_charge();
-            imp.0.tick(crate::impulse::IMPULSE_CHARGE_DURATION);
-        }
-        assert!(app.world().resource::<ShipImpulse>().0.is_active(),
-            "impulse should be active before damage");
-
-        // Apply hull damage.
-        app.world_mut()
-            .resource_mut::<ShipHullIntegrity>()
-            .0.apply_damage(10.0);
-        tick(&mut app);
-
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Idle,
-            "active impulse should be cancelled when hull damage is taken"
-        );
-    }
-
-    #[test]
-    fn no_hull_damage_does_not_cancel_impulse() {
-        let mut app = test_app();
-        start_game_with_helm_and_science(&mut app);
-
-        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
-        tick(&mut app);
-
-        // No damage applied â€” tick without damage.
-        tick(&mut app);
-
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Charging,
-            "impulse should still be charging when no damage occurred"
-        );
-    }
-
-    #[test]
-    fn start_impulse_charge_message_begins_charge() {
-        let mut app = test_app();
-        start_game_with_helm_and_science(&mut app);
-
-        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
-        tick(&mut app);
-
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Charging,
-        );
-    }
-
-    #[test]
-    fn cancel_impulse_message_cancels_charge() {
-        let mut app = test_app();
-        start_game_with_helm_and_science(&mut app);
-
-        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
-        tick(&mut app);
-        push(&mut app, "helm", ClientMessage::CancelImpulse);
-        tick(&mut app);
-
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Idle,
-        );
-    }
-
-    // ── BlocksImpulse region gating tests ────────────────────────────
-
-    fn blocks_impulse_test_app() -> App {
-        let mut app = test_app();
-        app.add_plugins(crate::region_plugin::RegionPlugin);
-        // Spawn a Ship entity (needed for region membership tracking)
-        app.world_mut().spawn((Ship, Transform::default()));
-        app
-    }
-
-    fn spawn_blocks_impulse_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
-        let config = EntityConfig {
-            tags: vec!["region".to_string()],
-            shape: Some(RegionShape::Sphere { radius }),
-            effects: Some(RegionEffectsConfig {
-                blocks_impulse: Some(BlocksImpulseEffect {}),
-                ..Default::default()
-            }),
-            hull: None,
-            collider: None,
-            appearance: None,
-            helm_console: None,
-            weapons_console: None,
-            engineering_console: None,
-            captain_console: None,
-            power: None,
-            science_console: None,
-            shields_console: None,
-            sensors_console: None,
-            star: None,
-            planet: None,
-            asteroid_field: None,
-            station: None,
-            faction: None,
-            behaviour: None,
-        };
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
-    }
-
-    #[test]
-    fn start_impulse_charge_ignored_inside_blocks_impulse_region() {
-        let mut app = blocks_impulse_test_app();
-
-        // Spawn a blocks_impulse region at the ship's position
-        let _region = spawn_blocks_impulse_region(&mut app, 0.0, 0.0, 50.0);
-
-        // Start a game with a helm player (this ticks multiple times, allowing
-        // update_region_membership to populate RegionMembership)
-        start_game_with_helm_and_science(&mut app);
-
-        // Impulse should start idle
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Idle,
-            "impulse should be idle before StartImpulseCharge"
-        );
-
-        // Try to start impulse charge while inside the blocks_impulse region
-        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
-        tick(&mut app);
-
-        // Impulse should remain idle (blocked by region)
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Idle,
-            "StartImpulseCharge should be ignored inside BlocksImpulse region"
-        );
-    }
-
-    #[test]
-    fn start_impulse_charge_works_outside_blocks_impulse_region() {
-        let mut app = blocks_impulse_test_app();
-
-        // Spawn region far from ship
-        let _region = spawn_blocks_impulse_region(&mut app, 500.0, 0.0, 50.0);
-
-        start_game_with_helm_and_science(&mut app);
-
-        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
-        tick(&mut app);
-
-        assert_eq!(
-            app.world().resource::<ShipImpulse>().0.phase,
-            crate::impulse::ImpulsePhase::Charging,
-            "StartImpulseCharge should work when outside BlocksImpulse region"
-        );
-    }
-
-    #[test]
-    fn sensors_set_science_target_broadcasts_suggestion_to_weapons() {
+      fn sensors_set_science_target_broadcasts_suggestion_to_weapons() {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
 
@@ -3629,7 +3258,7 @@ fn test_app() -> App {
         }).expect("expected SimState");
         assert!(near(snap.hull_integrity, 97.0), "hull should be 100 - 3 = 97 with halved collision damage");
     }
-    // ── Repair icon broadcast tests ────────────────────────────────────────
+    // -- Repair icon broadcast tests ----------------------------------------
 
     /// Register captain, repair, helm, tactical, and power players, then start
     /// the game. Returns the repair console token.
@@ -3771,7 +3400,7 @@ fn test_app() -> App {
 
         // Undamaged pool = {CaptainChair, Helm, Tactical, Power}.
         // Push breaks for ALL of these EXCEPT CaptainChair and Helm.
-        // That leaves {CaptainChair, Helm} as undamaged → 2 items.
+        // That leaves {CaptainChair, Helm} as undamaged ? 2 items.
         // The RNG (seed 0, random_range(0..2)) picks either CaptainChair or Helm.
         let others: Vec<Console> = crate::breakdown::ALL_CONSOLES.iter()
             .filter(|c| **c != Console::Repair && **c != Console::CaptainChair && **c != Console::Helm)
@@ -3787,8 +3416,8 @@ fn test_app() -> App {
         let state = app.world().resource::<RepairIconState>();
 
         // The RNG picked one of {CaptainChair, Helm}. There are two possibilities:
-        // - RNG picks CaptainChair → Helm loses decoy → ClearRepairIcon for Helm
-        // - RNG picks Helm → Helm stays decoy → no change
+        // - RNG picks CaptainChair ? Helm loses decoy ? ClearRepairIcon for Helm
+        // - RNG picks Helm ? Helm stays decoy ? no change
         //
         // Check POSTCONDITION state instead of outbound messages:
         // 1. If RNG picked CaptainChair: Helm is NOT in last_icons (cleared)
@@ -3801,7 +3430,7 @@ fn test_app() -> App {
         let captain_in_state = state.last_icons.contains_key(&Console::CaptainChair);
         // One of them should be the decoy.
         assert!(helm_in_state || captain_in_state, "either Helm (old decoy) or Captain (new decoy) should be in state");
-        // If Captain is the new decoy, Helm was cleared → ClearRepairIcon to helm.
+        // If Captain is the new decoy, Helm was cleared ? ClearRepairIcon to helm.
         if captain_in_state && !helm_in_state {
             assert!(has_clear_for(&out, "helm"), "Helm should receive ClearRepairIcon when replaced as decoy");
         }
@@ -3885,7 +3514,7 @@ fn test_app() -> App {
         assert_eq!(state.last_icons.len(), 5, "only 5 damaged consoles should have icons, no decoy");
     }
 
-    // ── Power system integration tests ──────────────────────────────────────
+    // -- Power system integration tests --------------------------------------
 
     /// Helper: captain + power console player, game started.
     fn start_game_with_power(app: &mut App) {
@@ -4014,7 +3643,7 @@ fn test_app() -> App {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
             _ => None,
         }).expect("expected a SimState broadcast");
-        // Default (2,2,2) → increase helm → (3,2,2) → increase sensors → (3,2,3)
+        // Default (2,2,2) ? increase helm ? (3,2,2) ? increase sensors ? (3,2,3)
         assert_eq!(snap.power_levels, (3, 2, 3), "SimState.power_levels should reflect power system state");
     }
 
@@ -4037,23 +3666,23 @@ fn test_app() -> App {
         assert_eq!(power_state, 4, "helm should stay at 4 (max bound enforced by PowerSystem)");
     }
 
-    // ── Power → Modifier wiring integration tests ─────────────────────────
+    // -- Power ? Modifier wiring integration tests -------------------------
 
     #[test]
     fn increasing_helm_power_updates_max_speed_via_modifiers() {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Override multipliers for Helm so level 2 → 0.0, level 3 → 1.0
+        // Override multipliers for Helm so level 2 ? 0.0, level 3 ? 1.0
         app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
             Console::Helm, [-0.5, 0.0, 1.0, 2.0],
         );
 
-        // Increase Helm from 2 → 3
+        // Increase Helm from 2 ? 3
         push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
         let _ = tick(&mut app);
 
-        // Level 3 → index 2 → bonus 1.0 → MaxSpeed multiplier = 2.0
+        // Level 3 ? index 2 ? bonus 1.0 ? MaxSpeed multiplier = 2.0
         let mult = app.world().resource::<ShipModifiers>().get(&ModifierSlot::MaxSpeed);
         assert!((mult - 2.0).abs() < 1e-6,
             "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}");
@@ -4064,16 +3693,16 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        // Override multipliers for Tactical: level 2 → 0.0, level 1 → -0.5
+        // Override multipliers for Tactical: level 2 ? 0.0, level 1 ? -0.5
         app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
             Console::Tactical, [-0.5, 0.0, 0.25, 0.5],
         );
 
-        // Decrease Weapons from 2 → 1
+        // Decrease Weapons from 2 ? 1
         push(&mut app, "power", ClientMessage::DecreasePower { console: Console::Tactical });
         let _ = tick(&mut app);
 
-        // Level 1 → index 0 → bonus -0.5 (negative) → 1.0 / (1.0 + 0.5) = 0.666...
+        // Level 1 ? index 0 ? bonus -0.5 (negative) ? 1.0 / (1.0 + 0.5) = 0.666...
         let expected = 1.0 / 1.5;
         let mult = app.world().resource::<ShipModifiers>().get(&ModifierSlot::PhaserDamage);
         assert!((mult - expected).abs() < 1e-6,
@@ -4095,7 +3724,7 @@ fn test_app() -> App {
             Console::Sensors, defaults);
 
         // Set state that will trigger exhaustion on the next tick:
-        // total=8 (negative rate), battery already at 0 → tick keeps it at 0
+        // total=8 (negative rate), battery already at 0 ? tick keeps it at 0
         // and forces all consoles to 1 + lock.
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
@@ -4106,10 +3735,10 @@ fn test_app() -> App {
             ps.0.locked = false;
         }
 
-        // Tick triggers exhaustion → lock changes → sync_power_modifiers runs
+        // Tick triggers exhaustion ? lock changes ? sync_power_modifiers runs
         tick(&mut app);
 
-        // All three forced to 1 → bonus -0.5 (negative) → multiplier = 1.0 / (1.0 + 0.5) ≈ 0.666...
+        // All three forced to 1 ? bonus -0.5 (negative) ? multiplier = 1.0 / (1.0 + 0.5) ˜ 0.666...
         let expected = 1.0 / 1.5;
         let mods = app.world().resource::<ShipModifiers>();
 
@@ -4143,7 +3772,7 @@ fn test_app() -> App {
             "total should remain 8");
     }
 
-    // ── Runtime entity lifecycle (EntitySpawned / EntityDespawned) ─────
+    // -- Runtime entity lifecycle (EntitySpawned / EntityDespawned) -----
 
     #[test]
     fn reconcile_system_seeds_on_first_inprogress_frame() {
@@ -4306,7 +3935,7 @@ fn test_app() -> App {
         );
     }
 
-    // ── SetPhaserFrequency delegation tests ────────────────────────────
+    // -- SetPhaserFrequency delegation tests ----------------------------
 
     /// Tactical holder may always set phaser frequency.
     #[test]
@@ -4339,7 +3968,7 @@ fn test_app() -> App {
     fn sensors_holder_cannot_set_phaser_frequency_when_tactical_is_full() {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
-        // Default complexity is Full (unset = no override → not Low).
+        // Default complexity is Full (unset = no override ? not Low).
         push(&mut app, "sensors", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
@@ -4373,7 +4002,7 @@ fn test_app() -> App {
         assert!((freq - 0.0).abs() < 1e-5, "frequency below 0.0 should clamp to 0.0, got {freq}");
     }
 
-    // ── Shield focus tests ──────────────────────────────────────────────────
+    // -- Shield focus tests --------------------------------------------------
 
     fn start_game_with_shields(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
@@ -4461,3 +4090,10 @@ fn test_app() -> App {
         assert!(!shield_status[3].is_focused, "Starboard should not be focused");
     }
 }
+
+
+
+
+
+
+

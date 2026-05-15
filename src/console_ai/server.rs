@@ -22,7 +22,8 @@ use crate::lobby::{CurrentPhase, InboundMessage, Sessions};
 use crate::simulation::SimOutbox;
 use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, TorpedoTube as MsgTorpedoTube};
 use crate::ship_state::ShipState;
-use crate::simulation::{LastHelmInput, ShipPowerSystem, TorpedoSystemResource, WeaponsTarget};
+use crate::ship_plugin::LastHelmInput;
+use crate::simulation::{ShipPowerSystem, TorpedoSystemResource, WeaponsTarget};
 use crate::torpedo::TorpedoTubeId;
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -617,12 +618,13 @@ mod tests {
     use super::*;
     use crate::lobby::{LobbyPlugin, OutboundMessage, Target};
     use crate::messages::*;
+    use crate::ship_plugin::LastHelmInput;
     use crate::simulation::{
         ShipHullIntegrity, ShipImpulse, ShipRepairTeams, ShipShields,
         TorpedoSystemResource, WeaponsTarget,
         BreakdownQueueResource, RepairIconState, ShipPowerSystem,
         PowerConfigResource, PowerMultiplierResource, TrackedEntities,
-        ActiveBeam, PhaserCooldown, CurrentPhaserMode, LastHelmInput,
+        ActiveBeam, PhaserCooldown, CurrentPhaserMode,
     };
     use crate::damage::HullIntegrity;
     use crate::shield::ShieldSystem;

@@ -2,9 +2,11 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::messages::{Console, ModifierSlot, ModifierSource};
+use crate::lobby::CurrentPhase;
+use crate::messages::{Console, GamePhase, ModifierSlot, ModifierSource};
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::power_system::PowerSystem;
+use crate::simulation::{PowerMultiplierResource, ShipPowerSystem};
 
 /// Single owner of `ShipModifiers` lifecycle.
 ///
@@ -12,12 +14,38 @@ use crate::power_system::PowerSystem;
 /// the duplicate registrations that existed in `SimulationPlugin` and
 /// `RegionPlugin`. All other plugins read `Res<ShipModifiers>` or write
 /// `ResMut<ShipModifiers>` after this plugin has initialised the resource.
+///
+/// Also owns the power → modifiers translator system.
 pub struct ModifierCoordinationPlugin;
 
 impl Plugin for ModifierCoordinationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ShipModifiers>();
     }
+}
+
+/// Power → modifier translator system.
+///
+/// Reads the current `ShipPowerSystem` and `PowerMultiplierResource` each
+/// frame and writes the corresponding power-level modifiers into
+/// `ShipModifiers`.  This is the single routing point for power-side modifier
+/// writes — `handle_power_messages` and `tick_power_system` in simulation.rs
+/// no longer touch `ShipModifiers` directly.
+///
+/// The system is registered by `SimulationPlugin` (not by
+/// `ModifierCoordinationPlugin`) so it can be chained after the power‑handling
+/// systems with explicit `.after()` ordering.
+pub fn translate_power_modifiers(
+    phase: Res<CurrentPhase>,
+    power: Res<ShipPowerSystem>,
+    mult_cfg: Option<Res<PowerMultiplierResource>>,
+    mut modifiers: ResMut<ShipModifiers>,
+) {
+    if phase.0 != GamePhase::InProgress {
+        return;
+    }
+    let Some(mult_cfg) = mult_cfg else { return };
+    apply_power_modifiers(&mut modifiers, &power.0, &mult_cfg.multipliers);
 }
 
 /// Apply power-level modifiers to `modifiers` based on the current `PowerSystem`

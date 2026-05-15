@@ -367,6 +367,10 @@ impl Plugin for SimulationPlugin {
                     sim_processing_anchor,
                 ),
             ).after(crate::lobby::process_lobby))
+            .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
+                .after(handle_power_messages)
+                .after(tick_power_system)
+                .after(crate::lobby::process_lobby))
             .add_plugins(power_state_broadcaster())
             .add_plugins(weapons_update_broadcaster())
             .add_plugins(repair_state_broadcaster())
@@ -1165,13 +1169,13 @@ fn handle_repair(
 ///
 /// Validates: game is in-progress, sender holds `Console::Power`.
 /// Forwards to `PowerSystem::increase` / `decrease` which enforce bounds and lock.
+/// Modifier sync is handled separately by `translate_power_modifiers` in the
+/// coordination plugin (runs after this system each frame).
 fn handle_power_messages(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
     mut power: ResMut<ShipPowerSystem>,
-    mut modifiers: ResMut<ShipModifiers>,
-    mult_cfg: Res<PowerMultiplierResource>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1181,13 +1185,11 @@ fn handle_power_messages(
             ClientMessage::IncreasePower { console } => {
                 if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
                     power.0.increase(console.clone());
-                    sync_power_modifiers(&power.0, &mult_cfg, &mut modifiers);
                 }
             }
             ClientMessage::DecreasePower { console } => {
                 if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
                     power.0.decrease(console.clone());
-                    sync_power_modifiers(&power.0, &mult_cfg, &mut modifiers);
                 }
             }
             _ => {}
@@ -1201,31 +1203,12 @@ fn tick_power_system(
     phase: Res<CurrentPhase>,
     mut power: ResMut<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
-    mut modifiers: ResMut<ShipModifiers>,
-    mult_cfg: Res<PowerMultiplierResource>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
     }
     let dt = time.delta_secs();
-    let changed = power.0.tick(dt, &config.0);
-    if changed {
-        sync_power_modifiers(&power.0, &mult_cfg, &mut modifiers);
-    }
-}
-
-/// Synchronise the `ShipModifiers` cache with the current power allocation levels.
-///
-/// Called whenever a power level changes (increase, decrease, or exhaustion
-/// forcing all consoles to 1). Registers/updates a `Modifier` per affected
-/// slot using `ModifierSource::Console(console)`, so re-registration replaces
-/// the previous entry (no stacking).
-fn sync_power_modifiers(
-    power: &crate::power_system::PowerSystem,
-    mult_cfg: &PowerMultiplierResource,
-    modifiers: &mut ShipModifiers,
-) {
-    crate::modifier_coordination::apply_power_modifiers(modifiers, power, &mult_cfg.multipliers);
+    power.0.tick(dt, &config.0);
 }
 
 /// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/navigation.
@@ -1945,6 +1928,9 @@ fn test_app() -> App {
             broadcast_repair_icons,
             reconcile_runtime_entities.after(crate::lobby::process_lobby),
         ))
+        .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
+            .after(handle_power_messages)
+            .after(tick_power_system))
         .add_systems(Update, sim_processing_anchor)
         .add_plugins(power_state_broadcaster())
         .add_plugins(weapons_update_broadcaster())

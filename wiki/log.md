@@ -334,3 +334,5 @@ Not yet touched (deferred to the actual reorg PRs): `wiki/roadmap/open-architect
 ## [2026-05-15] ingest | Folder reorg #1: Create src/ship/ and move ship pure modules | Moved ship_state.rs → ship/state.rs, ship_physics.rs → ship/physics.rs, impulse.rs → ship/impulse.rs, damage.rs → ship/damage.rs. Added src/ship/mod.rs. Added pub use re-exports in lib.rs so existing crate::ship_state:: paths compile unchanged. Closes #229.
 
 ## [2026-05-15] ingest | Folder reorg #2: Create src/weapons/ and move phaser/torpedo/shield/beam_render | Moved phaser.rs → weapons/phaser.rs, torpedo.rs → weapons/torpedo.rs, shield.rs → weapons/shield.rs, beam_render.rs → weapons/beam_render.rs. Added src/weapons/mod.rs. Added pub use re-exports in lib.rs. Closes #235.
+
+## [2026-05-15] ingest | Folder reorg #3: Create src/asteroids/ and move spawner/window/lifecycle | Moved asteroid_spawner.rs → asteroids/spawner.rs, asteroid_window.rs → asteroids/window.rs, asteroid_lifecycle.rs → asteroids/lifecycle.rs. Added src/asteroids/mod.rs. Added pub use re-exports in lib.rs. Closes #241.

@@ -16,8 +16,8 @@ use crate::client_app::{
     OutboundClientMessage,
 };
 use crate::client_helm::{HelmJoystickState, drag, release};
-use crate::client_sim::ClientSimState;
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
+use crate::ship_view::ShipView;
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -750,14 +750,14 @@ fn on_phone_helm_drag_end(
 /// Rotate the compass ring container so that the bearing at the top
 /// matches the ship's current heading (yaw).
 fn rotate_compass_ring_by_yaw(
-    sim: Res<ClientSimState>,
+    ship_view: Res<ShipView>,
     mut rings: Query<&mut Transform, With<PhoneCompassRing>>,
 ) {
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
     for mut tf in rings.iter_mut() {
-        tf.rotation = Quat::from_rotation_z(sim.ship_yaw);
+        tf.rotation = Quat::from_rotation_z(ship_view.ship_yaw);
     }
 }
 
@@ -793,31 +793,31 @@ fn refresh_phone_helm_readout(
 
 /// Update the HDG/SPD/X/Z readout text nodes in the four radar corners.
 fn update_radar_readouts(
-    sim: Res<ClientSimState>,
+    ship_view: Res<ShipView>,
     mut speed: ResMut<PhoneShipSpeed>,
     mut hdg: Query<&mut Text, (With<PhoneHdgReadout>, Without<PhoneSpdReadout>, Without<PhoneXReadout>, Without<PhoneZReadout>)>,
     mut spd: Query<&mut Text, (With<PhoneSpdReadout>, Without<PhoneHdgReadout>, Without<PhoneXReadout>, Without<PhoneZReadout>)>,
     mut x_read: Query<&mut Text, (With<PhoneXReadout>, Without<PhoneHdgReadout>, Without<PhoneSpdReadout>, Without<PhoneZReadout>)>,
     mut z_read: Query<&mut Text, (With<PhoneZReadout>, Without<PhoneHdgReadout>, Without<PhoneSpdReadout>, Without<PhoneXReadout>)>,
 ) {
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
 
     // Compute speed from position delta.
     if speed.initialized {
-        let dx = sim.ship_x - speed.prev_x;
-        let dz = sim.ship_z - speed.prev_z;
+        let dx = ship_view.ship_x - speed.prev_x;
+        let dz = ship_view.ship_z - speed.prev_z;
         speed.speed = (dx * dx + dz * dz).sqrt();
     } else {
         speed.initialized = true;
     }
-    speed.prev_x = sim.ship_x;
-    speed.prev_z = sim.ship_z;
+    speed.prev_x = ship_view.ship_x;
+    speed.prev_z = ship_view.ship_z;
 
     // HDG from yaw
     for mut text in hdg.iter_mut() {
-        **text = format!("HDG {}", yaw_to_heading(sim.ship_yaw));
+        **text = format!("HDG {}", yaw_to_heading(ship_view.ship_yaw));
     }
 
     // SPD
@@ -827,12 +827,12 @@ fn update_radar_readouts(
 
     // X coordinate
     for mut text in x_read.iter_mut() {
-        **text = format!("X {:.0}", sim.ship_x);
+        **text = format!("X {:.0}", ship_view.ship_x);
     }
 
     // Z coordinate
     for mut text in z_read.iter_mut() {
-        **text = format!("Z {:.0}", sim.ship_z);
+        **text = format!("Z {:.0}", ship_view.ship_z);
     }
 }
 

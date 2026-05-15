@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 
 use crate::client_app::{CaptainPanel, OutboundClientMessage};
-use crate::client_sim::ClientSimState;
 use crate::messages::{ClientMessage, ViewDirection, ViewMode};
 use crate::phone_border::framing::PhoneAssets;
+use crate::ship_view::ShipView;
 
 // ── Constants ──
 
@@ -303,15 +303,15 @@ pub fn direction_press_message(dir: ViewDirection) -> ClientMessage {
 
 /// Highlights the active direction button's background and LED.
 fn refresh_dir_highlights(
-    sim: Res<ClientSimState>,
+    ship_view: Res<ShipView>,
     mut buttons: Query<(&DirButton, &Children, &mut BackgroundColor), Without<DirLed>>,
     mut leds: Query<&mut BackgroundColor, With<DirLed>>,
 ) {
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
     for (dir_btn, children, mut bg) in buttons.iter_mut() {
-        let active = sim.is_active_camera_direction(&dir_btn.0);
+        let active = ship_view.is_active_camera_direction(&dir_btn.0);
         bg.0 = if active { DIR_BG_ACTIVE } else { DIR_BG_IDLE };
 
         for child in children.iter() {
@@ -324,22 +324,22 @@ fn refresh_dir_highlights(
 
 /// Updates the red alert toggle background and the armed glow pulse.
 fn refresh_red_alert_ui(
-    sim: Option<Res<ClientSimState>>,
+    ship_view: Option<Res<ShipView>>,
     time: Res<Time>,
     mut toggle_q: Query<&mut BackgroundColor, (With<RedAlertToggle>, Without<ArmedGlow>)>,
     mut glow_q: Query<&mut BackgroundColor, With<ArmedGlow>>,
 ) {
-    let Some(sim) = sim else { return };
-    if !sim.is_changed() && !sim.red_alert {
+    let Some(ship_view) = ship_view else { return };
+    if !ship_view.is_changed() && !ship_view.red_alert {
         return;
     }
 
     for mut bg in toggle_q.iter_mut() {
-        bg.0 = if sim.red_alert { RA_BG_ACTIVE } else { RA_BG_IDLE };
+        bg.0 = if ship_view.red_alert { RA_BG_ACTIVE } else { RA_BG_IDLE };
     }
 
     for mut glow in glow_q.iter_mut() {
-        if sim.red_alert {
+        if ship_view.red_alert {
             let pulse = ((time.elapsed_secs() * 3.0).sin() + 1.0) * 0.3 + 0.2;
             glow.0 = Color::srgba(1.0, 0.2, 0.2, pulse);
         } else {
@@ -350,13 +350,13 @@ fn refresh_red_alert_ui(
 
 /// Rotates the compass needle to match the active `ViewDirection`.
 fn rotate_needle_by_direction(
-    sim: Res<ClientSimState>,
+    ship_view: Res<ShipView>,
     mut needles: Query<&mut Transform, With<CompassNeedle>>,
 ) {
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
-    let dir = match &sim.view_mode {
+    let dir = match &ship_view.view_mode {
         ViewMode::Camera(d) => d,
         _ => return,
     };

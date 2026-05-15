@@ -371,7 +371,6 @@ impl Plugin for ClientAppPlugin {
                 )))
             .init_resource::<LobbyState>()
             .init_resource::<ClientSimState>()
-            .init_resource::<crate::ship_view::ShipView>()
             .init_resource::<LocalPlayerToken>()
             .init_resource::<ActiveConsole>()
             .init_resource::<SelectedTube>()
@@ -755,7 +754,6 @@ fn apply_inbound_messages(
     mut reader: MessageReader<InboundServerMessage>,
     mut lobby: ResMut<LobbyState>,
     mut sim: ResMut<ClientSimState>,
-    mut ship_view: ResMut<crate::ship_view::ShipView>,
     mut complexity: ResMut<ComplexityStore>,
     token: Res<LocalPlayerToken>,
     mut active: ResMut<ActiveConsole>,
@@ -779,7 +777,7 @@ fn apply_inbound_messages(
         }
         lobby.apply(&ev.0);
         sim.apply(&ev.0);
-        ship_view.apply(&ev.0);
+        // ShipView is updated by ShipViewPlugin's own system.
     }
 }
 
@@ -1395,33 +1393,33 @@ fn toggle_captain_panel_visibility(
 }
 
 fn refresh_view_dir_highlights(
-    sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     mut buttons: Query<(&ViewDirButton, &mut BackgroundColor)>,
 ) {
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
     for (ViewDirButton(direction), mut bg) in buttons.iter_mut() {
-        let active = sim.is_active_camera_direction(direction);
+        let active = ship_view.is_active_camera_direction(direction);
         bg.0 = if active { VIEW_BTN_BG_ACTIVE } else { VIEW_BTN_BG_INACTIVE };
     }
 }
 
 fn refresh_red_alert_button(
-    sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     mut button: Query<(Entity, &mut BackgroundColor), With<RedAlertButton>>,
     children_q: Query<&Children>,
     mut labels: Query<&mut Text, With<RedAlertLabel>>,
 ) {
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
     let Ok((button_entity, mut bg)) = button.single_mut() else { return };
-    bg.0 = if sim.red_alert { RED_ALERT_BG_ON } else { RED_ALERT_BG_OFF };
+    bg.0 = if ship_view.red_alert { RED_ALERT_BG_ON } else { RED_ALERT_BG_OFF };
     if let Ok(children) = children_q.get(button_entity) {
         for child in children.iter() {
             if let Ok(mut text) = labels.get_mut(child) {
-                **text = if sim.red_alert {
+                **text = if ship_view.red_alert {
                     "Red Alert: ON".to_string()
                 } else {
                     "Red Alert: OFF".to_string()
@@ -2096,16 +2094,16 @@ fn handle_nav_cancel_impulse_button_press(
     }
 }
 
-/// Refresh the Navigation panel impulse status from ClientSimState.
+/// Refresh the Navigation panel impulse status from ShipView.
 fn refresh_navigation_panel(
-    sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     mut status_text: Query<&mut Text, With<NavImpulseStatusText>>,
 ) {
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
     for mut text in status_text.iter_mut() {
-        let charge = sim.impulse_charge_progress;
+        let charge = ship_view.impulse_charge_progress;
         let label = if charge >= 1.0 {
             "Impulse: ACTIVE"
         } else if charge > 0.0 {
@@ -2237,13 +2235,13 @@ const ON_SCREEN_BG_IDLE:   Color = Color::srgb(0.13, 0.13, 0.27);
 const ON_SCREEN_BG_ACTIVE: Color = Color::srgb(0.10, 0.40, 0.15);
 
 fn refresh_on_screen_button_style(
-    sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     mut buttons: Query<&mut BackgroundColor, With<OnScreenButton>>,
 ) {
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
-    let color = if matches!(sim.view_mode, ViewMode::Radar) {
+    let color = if matches!(ship_view.view_mode, ViewMode::Radar) {
         ON_SCREEN_BG_ACTIVE
     } else {
         ON_SCREEN_BG_IDLE
@@ -2274,6 +2272,7 @@ fn draw_helm_radar(
     panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<RadarPanel>>,
     helm_panel: Query<&Visibility, With<HelmPanel>>,
     sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     windows: Query<&Window>,
 ) {
     // Only draw while the helm panel is shown.
@@ -2313,7 +2312,7 @@ fn draw_helm_radar(
     gizmos.circle_2d(centre, radius * mid_ratio / ZOOM, RADAR_MID_RING_COLOR);
 
     // Asteroids — use the unified helm radar view (RadarConfig-filtered).
-    let helm_view = crate::client_sim::compute_helm_radar_view(&sim);
+    let helm_view = crate::client_sim::compute_helm_radar_view(&sim, &ship_view);
     for dot in &helm_view.dots {
         let pos = centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
         let pix_radius = (dot.scaled_radius * radius / ZOOM).max(2.0);
@@ -2337,6 +2336,7 @@ fn draw_nav_chart(
     panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<NavChartPanel>>,
     nav_panel: Query<&Visibility, With<NavigationPanel>>,
     sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     windows: Query<&Window>,
 ) {
     if !nav_panel
@@ -2365,7 +2365,7 @@ fn draw_nav_chart(
     }
 
     // Draw system chart entities using the navigation chart view.
-    let chart_view = crate::client_sim::compute_system_chart_view(&sim);
+    let chart_view = crate::client_sim::compute_system_chart_view(&sim, &ship_view);
     const ZOOM: f32 = 1.0;
 
     // Draw rings (asteroid fields, regions)
@@ -2402,6 +2402,7 @@ fn draw_weapons_radar(
     panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<WeaponsRadarPanel>>,
     weapons_panel: Query<&Visibility, With<WeaponsPanel>>,
     sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     windows: Query<&Window>,
 ) {
     if !weapons_panel
@@ -2434,7 +2435,7 @@ fn draw_weapons_radar(
     let mid_ratio = crate::radar::RADAR_MID_RING / weapons_range;
     gizmos.circle_2d(centre, radius * mid_ratio, RADAR_MID_RING_COLOR);
 
-    let weapons_view = crate::client_sim::compute_weapons_radar_view(&sim);
+    let weapons_view = crate::client_sim::compute_weapons_radar_view(&sim, &ship_view);
     for dot in &weapons_view.dots {
         let pos = centre + Vec2::new(dot.radar_x * radius, dot.radar_y * radius);
         let pix_radius = (dot.scaled_radius * radius).max(2.0);
@@ -3241,6 +3242,7 @@ fn toggle_power_panel_visibility(
 /// Refresh the power panel: power levels, button enable/disable, battery bar, lock state.
 fn refresh_power_panel(
     sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     mut row_bg: Query<(&mut BackgroundColor, &PowerRow), (Without<PowerIncButton>, Without<PowerDecButton>)>,
     mut level_labels: Query<(&mut Text, &PowerRowLevel), Without<BatteryLabel>>,
     mut inc_buttons: Query<(&mut BackgroundColor, &PowerIncButton), (Without<PowerRow>, Without<PowerDecButton>)>,
@@ -3248,7 +3250,7 @@ fn refresh_power_panel(
     mut battery_bar: Query<&mut Node, With<BatteryBar>>,
     mut battery_label: Query<&mut Text, (With<BatteryLabel>, Without<PowerRowLevel>)>,
 ) {
-    if !sim.is_changed() {
+    if !sim.is_changed() && !ship_view.is_changed() {
         return;
     }
 
@@ -3272,9 +3274,9 @@ fn refresh_power_panel(
     // Update level labels, matching by console
     for (mut text, level_component) in level_labels.iter_mut() {
         let lvl = match level_component.0 {
-            Console::Helm => sim.power_levels.0,
-            Console::Tactical => sim.power_levels.1,
-            Console::Sensors => sim.power_levels.2,
+            Console::Helm => ship_view.power_levels.0,
+            Console::Tactical => ship_view.power_levels.1,
+            Console::Sensors => ship_view.power_levels.2,
             _ => 0,
         };
         **text = format!("{}", lvl);
@@ -3283,7 +3285,7 @@ fn refresh_power_panel(
     // Update increment buttons by matching their console
     for (mut bg, inc) in inc_buttons.iter_mut() {
         let can_inc = crate::client_sim::can_increase_power(
-            &sim.power_levels, &inc.0, locked,
+            &ship_view.power_levels, &inc.0, locked,
         );
         bg.0 = if can_inc { POWER_INC_COLOR } else { POWER_INC_LOCKED };
     }
@@ -3291,7 +3293,7 @@ fn refresh_power_panel(
     // Update decrement buttons by matching their console
     for (mut bg, dec) in dec_buttons.iter_mut() {
         let can_dec = crate::client_sim::can_decrease_power(
-            &sim.power_levels, &dec.0, locked,
+            &ship_view.power_levels, &dec.0, locked,
         );
         bg.0 = if can_dec { POWER_DEC_COLOR } else { POWER_DEC_LOCKED };
     }
@@ -3301,6 +3303,7 @@ fn refresh_power_panel(
 fn handle_increase_power(
     interactions: Query<(&Interaction, &PowerIncButton), Changed<Interaction>>,
     sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     for (interaction, inc) in interactions.iter() {
@@ -3308,7 +3311,7 @@ fn handle_increase_power(
             continue;
         }
         let locked = crate::client_sim::is_power_locked(&sim.power_state_payload);
-        if !crate::client_sim::can_increase_power(&sim.power_levels, &inc.0, locked) {
+        if !crate::client_sim::can_increase_power(&ship_view.power_levels, &inc.0, locked) {
             continue;
         }
         outbound.write(OutboundClientMessage(
@@ -3321,6 +3324,7 @@ fn handle_increase_power(
 fn handle_decrease_power(
     interactions: Query<(&Interaction, &PowerDecButton), Changed<Interaction>>,
     sim: Res<ClientSimState>,
+    ship_view: Res<crate::ship_view::ShipView>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     for (interaction, dec) in interactions.iter() {
@@ -3328,7 +3332,7 @@ fn handle_decrease_power(
             continue;
         }
         let locked = crate::client_sim::is_power_locked(&sim.power_state_payload);
-        if !crate::client_sim::can_decrease_power(&sim.power_levels, &dec.0, locked) {
+        if !crate::client_sim::can_decrease_power(&ship_view.power_levels, &dec.0, locked) {
             continue;
         }
         outbound.write(OutboundClientMessage(

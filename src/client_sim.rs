@@ -72,13 +72,16 @@ pub fn science_radar_config() -> RadarConfig {
 ///
 /// Filters to asteroids, ships, and asteroid fields within `SCIENCE_RADAR_RANGE`.
 /// Normalises all coordinates to `[-1, 1]` using `science_radar_config().range`.
-pub fn compute_science_long_range_radar_view(state: &ClientSimState) -> ScienceRadarView {
+pub fn compute_science_long_range_radar_view(
+    state: &ClientSimState,
+    ship_view: &crate::ship_view::ShipView,
+) -> ScienceRadarView {
     let config = science_radar_config();
     compute_science_radar_view(
         &state.world.entities,
-        state.ship_x,
-        state.ship_z,
-        state.ship_yaw,
+        ship_view.ship_x,
+        ship_view.ship_z,
+        ship_view.ship_yaw,
         &config,
     )
 }
@@ -87,13 +90,16 @@ pub fn compute_science_long_range_radar_view(state: &ClientSimState) -> ScienceR
 ///
 /// Filters to asteroids within `HELM_RADAR_RANGE`.  Normalises all
 /// coordinates to `[-1, 1]` using `helm_radar_config().range`.
-pub fn compute_helm_radar_view(state: &ClientSimState) -> ScienceRadarView {
+pub fn compute_helm_radar_view(
+    state: &ClientSimState,
+    ship_view: &crate::ship_view::ShipView,
+) -> ScienceRadarView {
     let config = helm_radar_config();
     compute_science_radar_view(
         &state.world.entities,
-        state.ship_x,
-        state.ship_z,
-        state.ship_yaw,
+        ship_view.ship_x,
+        ship_view.ship_z,
+        ship_view.ship_yaw,
         &config,
     )
 }
@@ -102,13 +108,16 @@ pub fn compute_helm_radar_view(state: &ClientSimState) -> ScienceRadarView {
 ///
 /// Filters to asteroids within `WEAPONS_RADAR_RANGE`.  Normalises all
 /// coordinates to `[-1, 1]` using `weapons_radar_config().range`.
-pub fn compute_weapons_radar_view(state: &ClientSimState) -> ScienceRadarView {
+pub fn compute_weapons_radar_view(
+    state: &ClientSimState,
+    ship_view: &crate::ship_view::ShipView,
+) -> ScienceRadarView {
     let config = weapons_radar_config();
     compute_science_radar_view(
         &state.world.entities,
-        state.ship_x,
-        state.ship_z,
-        state.ship_yaw,
+        ship_view.ship_x,
+        ship_view.ship_z,
+        ship_view.ship_yaw,
         &config,
     )
 }
@@ -129,13 +138,16 @@ pub fn system_chart_config() -> RadarConfig {
 /// Non-interactive: returns dots and rings for navigational entities (stars,
 /// planets, asteroid fields) within `SYSTEM_CHART_RANGE` of the ship.
 /// Individual asteroids are excluded (they are not navigational features).
-pub fn compute_system_chart_view(state: &ClientSimState) -> ScienceRadarView {
+pub fn compute_system_chart_view(
+    state: &ClientSimState,
+    ship_view: &crate::ship_view::ShipView,
+) -> ScienceRadarView {
     let config = system_chart_config();
     compute_science_radar_view(
         &state.world.entities,
-        state.ship_x,
-        state.ship_z,
-        state.ship_yaw,
+        ship_view.ship_x,
+        ship_view.ship_z,
+        ship_view.ship_yaw,
         &config,
     )
 }
@@ -143,13 +155,12 @@ pub fn compute_system_chart_view(state: &ClientSimState) -> ScienceRadarView {
 /// Subset of `SimSnapshot` the client UI needs. Reset to defaults on
 /// `Welcome` (which also clears `LobbyState`) and refreshed every time
 /// a `SimState` message arrives.
+///
+/// Ship-level fields that are broadcast to every console (pose, red alert,
+/// view mode, power levels, impulse charge, hull fraction) have been
+/// extracted into `ShipView` and are no longer duplicated here.
 #[derive(Clone, Debug, PartialEq, Resource)]
 pub struct ClientSimState {
-    pub red_alert: bool,
-    pub view_mode: ViewMode,
-    pub ship_x:   f32,
-    pub ship_z:   f32,
-    pub ship_yaw: f32,
     /// Static world snapshot replayed on `WorldSetup` and on `Welcome`
     /// (when the server includes it). Used by the helm radar.
     pub world: WorldData,
@@ -203,9 +214,6 @@ pub struct ClientSimState {
     /// `None` means no icon is shown (no breakdown involving this console and
     /// no decoy). Updated by `ShowRepairIcon` / `ClearRepairIcon` messages.
     pub repair_icon: Option<Shape>,
-    /// Latest power allocation levels from SimSnapshot.
-    /// Updated every `SimState` broadcast. Tuple is (Helm, Weapons, Science).
-    pub power_levels: (u8, u8, u8),
     /// Latest PowerState from the Power console's dedicated 10Hz broadcast.
     pub power_state_payload: Option<(u8, u8, u8, f32, bool)>,
     /// Current state of the three repair teams, updated by `RepairState` messages.
@@ -220,19 +228,11 @@ pub struct ClientSimState {
     /// `FrequencyHint` arrives; reset to `None` on `Welcome`.
     /// The Tactical console uses this to highlight the correct frequency button.
     pub frequency_hint: Option<f32>,
-    /// Current impulse drive charge progress (0.0 = idle, 0.1–1.0 = charging,
-    /// 1.0 = active). Updated from `SimSnapshot` broadcasts.
-    pub impulse_charge_progress: f32,
 }
 
 impl Default for ClientSimState {
     fn default() -> Self {
         Self {
-            red_alert: false,
-            view_mode: ViewMode::default(),
-            ship_x:   0.0,
-            ship_z:   0.0,
-            ship_yaw: 0.0,
             world: WorldData::default(),
             repair_cooldown_secs: 0.0,
             repair_in_progress: false,
@@ -254,31 +254,25 @@ impl Default for ClientSimState {
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
             repair_icon: None,
-            power_levels: (2, 2, 2),
             power_state_payload: None,
             repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
             current_breakdown: None,
             phaser_frequency: 0.5,
             frequency_hint: None,
-            impulse_charge_progress: 0.0,
         }
     }
 }
 
 impl ClientSimState {
-    /// Apply a single inbound `ServerMessage`. Drives both the captain
-    /// console state (red alert, view mode) and the helm console state
-    /// (ship pose, world snapshot for the radar).
+    /// Apply a single inbound `ServerMessage`.
+    ///
+    /// Ship-level fields (pose, red alert, view mode, power levels, impulse
+    /// charge, hull fraction) are now owned by `ShipView` and no longer
+    /// updated here. This method handles console-specific state only.
     pub fn apply(&mut self, msg: &ServerMessage) {
         match msg {
-            ServerMessage::SimState { snapshot } => {
-                self.red_alert = snapshot.red_alert;
-                self.view_mode = snapshot.view_mode.clone();
-                self.ship_x   = snapshot.ship_x;
-                self.ship_z   = snapshot.ship_z;
-                self.ship_yaw = snapshot.ship_yaw;
-                self.power_levels = snapshot.power_levels;
-                self.impulse_charge_progress = snapshot.impulse_charge_progress;
+            ServerMessage::SimState { .. } => {
+                // Ship-level fields handled by ShipView::apply; nothing here.
             }
             ServerMessage::WorldSetup { world } => {
                 self.world = world.clone();
@@ -359,12 +353,6 @@ impl ClientSimState {
             }
             _ => {}
         }
-    }
-
-    /// True iff the captain's view direction selector should highlight
-    /// the given direction. Radar mode highlights nothing in the cross.
-    pub fn is_active_camera_direction(&self, direction: &ViewDirection) -> bool {
-        matches!(&self.view_mode, ViewMode::Camera(d) if d == direction)
     }
 
     /// Returns the bonus value for the given `(source, slot)` pair, if present.
@@ -611,56 +599,12 @@ pub fn set_phaser_frequency_message(frequency: f32) -> ClientMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{Console, EntitySnapshot, GamePhase, GameState, Player, RadarStateSnapshot, SimSnapshot, WorldData};
-
-    fn snap(red_alert: bool, view_mode: ViewMode) -> SimSnapshot {
-        SimSnapshot { red_alert, view_mode, ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0, hull_integrity: 100.0, power_levels: (2, 2, 2), flags: vec![], entity_states: vec![], radar_state: RadarStateSnapshot::default(), impulse_charge_progress: 0.0 }
-    }
-
-    fn snap_pose(x: f32, z: f32, yaw: f32) -> SimSnapshot {
-        SimSnapshot {
-            red_alert: false,
-            view_mode: ViewMode::default(),
-            ship_x: x,
-            ship_z: z,
-            ship_yaw: yaw,
-            hull_integrity: 100.0,
-            power_levels: (2, 2, 2),
-            flags: vec![],
-            entity_states: vec![],
-            radar_state: RadarStateSnapshot::default(),
-            impulse_charge_progress: 0.0,
-        }
-    }
+    use crate::messages::{Console, EntitySnapshot, GamePhase, GameState, Player, WorldData};
 
     #[test]
-    fn default_sim_state_is_calm_and_facing_forward() {
+    fn default_sim_state_has_empty_world() {
         let s = ClientSimState::default();
-        assert!(!s.red_alert);
-        assert_eq!(s.view_mode, ViewMode::Camera(ViewDirection::Fore));
-        assert_eq!(s.ship_x, 0.0);
-        assert_eq!(s.ship_z, 0.0);
-        assert_eq!(s.ship_yaw, 0.0);
         assert!(s.world.entities.is_empty());
-    }
-
-    #[test]
-    fn sim_state_message_updates_red_alert_and_view_mode() {
-        let mut s = ClientSimState::default();
-        s.apply(&ServerMessage::SimState {
-            snapshot: snap(true, ViewMode::Camera(ViewDirection::Aft)),
-        });
-        assert!(s.red_alert);
-        assert_eq!(s.view_mode, ViewMode::Camera(ViewDirection::Aft));
-    }
-
-    #[test]
-    fn sim_state_message_updates_ship_pose() {
-        let mut s = ClientSimState::default();
-        s.apply(&ServerMessage::SimState { snapshot: snap_pose(12.5, -7.25, 1.5) });
-        assert_eq!(s.ship_x, 12.5);
-        assert_eq!(s.ship_z, -7.25);
-        assert_eq!(s.ship_yaw, 1.5);
     }
 
     #[test]
@@ -678,39 +622,9 @@ mod tests {
 
     #[test]
     fn welcome_resets_sim_state_but_preserves_world_when_present() {
-        let mut s = ClientSimState {
-            red_alert: true,
-            view_mode: ViewMode::Radar,
-            ship_x: 9.0, ship_z: 9.0, ship_yaw: 1.0,
-            world: WorldData::default(),
-            repair_cooldown_secs: 0.0,
-            repair_in_progress: false,
-            repair_penalty: false,
-            phaser_mode: PhaserMode::Auto,
-            last_phaser_target: None,
-            science_target_suggestion: None,
-            sensors_target_suggestion: None,
-            shield_facings: Vec::new(),
-            fire_ready: false,
-            on_cooldown: false,
-            torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
-            torpedoes_in_flight: Vec::new(),
-            modifiers: HashMap::new(),
-            repair_icon: None,
-            power_levels: (2, 2, 2),
-            power_state_payload: None,
-            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
-            current_breakdown: None,
-            phaser_frequency: 0.5,
-            frequency_hint: None,
-            impulse_charge_progress: 0.0,
-        };
+        let mut s = ClientSimState::default();
+        s.repair_cooldown_secs = 5.0;
+        s.repair_in_progress = true;
         let world = WorldData {
             entities: vec![EntitySnapshot::asteroid("c", 1.0, 2.0, 0.5)],
         };
@@ -723,51 +637,17 @@ mod tests {
             },
             ship_stations: crate::stations_config::ShipStations::default(),
         });
-        // Everything except `world` must reset to defaults.
-        assert!(!s.red_alert);
-        assert_eq!(s.view_mode, ViewMode::default());
-        assert_eq!(s.ship_x, 0.0);
-        assert_eq!(s.ship_z, 0.0);
-        assert_eq!(s.ship_yaw, 0.0);
+        // Console-specific state must reset to defaults.
+        assert!(!s.repair_in_progress);
+        assert_eq!(s.repair_cooldown_secs, 0.0);
         assert_eq!(s.world, world, "world from Welcome must be retained");
     }
 
     #[test]
     fn welcome_without_world_clears_world_to_default() {
-        let mut s = ClientSimState {
-            red_alert: false,
-            view_mode: ViewMode::default(),
-            ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
-            world: WorldData {
-                entities: vec![EntitySnapshot::asteroid("d", 0.0, 0.0, 1.0)],
-            },
-            repair_cooldown_secs: 0.0,
-            repair_in_progress: false,
-            repair_penalty: false,
-            phaser_mode: PhaserMode::Auto,
-            last_phaser_target: None,
-            science_target_suggestion: None,
-            sensors_target_suggestion: None,
-            shield_facings: Vec::new(),
-            fire_ready: false,
-            on_cooldown: false,
-            torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
-            torpedoes_in_flight: Vec::new(),
-            modifiers: HashMap::new(),
-            repair_icon: None,
-            power_levels: (2, 2, 2),
-            power_state_payload: None,
-            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
-            current_breakdown: None,
-            phaser_frequency: 0.5,
-            frequency_hint: None,
-            impulse_charge_progress: 0.0,
+        let mut s = ClientSimState::default();
+        s.world = WorldData {
+            entities: vec![EntitySnapshot::asteroid("d", 0.0, 0.0, 1.0)],
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -784,61 +664,18 @@ mod tests {
     #[test]
     fn unrelated_messages_do_not_disturb_sim_state() {
         let mut s = ClientSimState {
-            red_alert: true,
-            view_mode: ViewMode::Camera(ViewDirection::Port),
-            ship_x: 5.0, ship_z: 6.0, ship_yaw: 0.7,
             world: WorldData {
                 entities: vec![EntitySnapshot::asteroid("e", 0.0, 0.0, 1.0)],
             },
-            repair_cooldown_secs: 0.0,
-            repair_in_progress: false,
-            repair_penalty: false,
-            phaser_mode: PhaserMode::Auto,
-            last_phaser_target: None,
-            science_target_suggestion: None,
-            sensors_target_suggestion: None,
-            shield_facings: Vec::new(),
-            fire_ready: false,
-            on_cooldown: false,
-            torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
-            torpedoes_in_flight: Vec::new(),
-            modifiers: HashMap::new(),
-            repair_icon: None,
-            power_levels: (2, 2, 2),
-            power_state_payload: None,
-            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
-            current_breakdown: None,
-            phaser_frequency: 0.5,
-            frequency_hint: None,
-            impulse_charge_progress: 0.0,
+            repair_cooldown_secs: 2.5,
+            repair_in_progress: true,
+            ..Default::default()
         };
         let before = s.clone();
         s.apply(&ServerMessage::PlayerJoined {
             player: Player { token: "x".into(), name: "Y".into(), consoles: vec![Console::Helm], connected: true },
         });
         assert_eq!(s, before);
-    }
-
-    #[test]
-    fn is_active_camera_direction_only_matches_in_camera_mode() {
-        let mut s = ClientSimState::default();
-        assert!( s.is_active_camera_direction(&ViewDirection::Fore));
-        assert!(!s.is_active_camera_direction(&ViewDirection::Aft));
-
-        s.view_mode = ViewMode::Camera(ViewDirection::Port);
-        assert!( s.is_active_camera_direction(&ViewDirection::Port));
-        assert!(!s.is_active_camera_direction(&ViewDirection::Fore));
-
-        s.view_mode = ViewMode::Radar;
-        for d in [ViewDirection::Fore, ViewDirection::Aft, ViewDirection::Port, ViewDirection::Starboard] {
-            assert!(!s.is_active_camera_direction(&d), "Radar mode highlights no cross arrow");
-        }
     }
 
     #[test]
@@ -977,7 +814,8 @@ mod tests {
     #[test]
     fn system_chart_view_empty_world_produces_empty_view() {
         let s = ClientSimState::default();
-        let view = compute_system_chart_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_system_chart_view(&s, &sv);
         assert!(view.dots.is_empty());
         assert!(view.rings.is_empty());
     }
@@ -985,7 +823,8 @@ mod tests {
     #[test]
     fn system_chart_view_includes_asteroid_field_ring_within_range() {
         let s = state_with_field(0.0, -100.0);
-        let view = compute_system_chart_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_system_chart_view(&s, &sv);
         assert_eq!(view.rings.len(), 1, "asteroid field within range should appear as a ring");
         assert_eq!(view.rings[0].uuid, "field-1");
     }
@@ -995,7 +834,8 @@ mod tests {
         // Place field far outside SYSTEM_CHART_RANGE.
         let far = SYSTEM_CHART_RANGE + 200.0;
         let s = state_with_field(far, 0.0);
-        let view = compute_system_chart_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_system_chart_view(&s, &sv);
         assert!(view.rings.is_empty(), "field beyond system chart range must be excluded");
     }
 
@@ -1007,7 +847,8 @@ mod tests {
                 EntitySnapshot::asteroid("a1", 0.0, -50.0, 2.0)
             ],
         };
-        let view = compute_system_chart_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_system_chart_view(&s, &sv);
         assert!(view.dots.is_empty(), "individual asteroids must not appear on system chart");
     }
 
@@ -1017,7 +858,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::simple("region-1", 0.0, -(SYSTEM_CHART_RANGE * 0.5), vec!["region".into()])],
         };
-        let view = compute_system_chart_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_system_chart_view(&s, &sv);
         assert_eq!(view.dots.len(), 1, "system chart must show region entity as a dot");
         assert_eq!(view.dots[0].uuid, "region-1");
     }
@@ -1026,7 +868,8 @@ mod tests {
     fn system_chart_view_ring_position_respects_ship_pose() {
         // Field directly ahead at 100 units (ship at origin, yaw=0 → forward is -Z).
         let s = state_with_field(0.0, -100.0);
-        let view = compute_system_chart_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_system_chart_view(&s, &sv);
         assert_eq!(view.rings.len(), 1);
         // Ring centre should be at roughly (0, positive) in radar space.
         assert!(view.rings[0].centre_y > 0.0, "field ahead should map to positive radar_y");
@@ -1298,7 +1141,8 @@ mod tests {
     #[test]
     fn helm_radar_view_empty_world_produces_empty_view() {
         let s = ClientSimState::default();
-        let view = compute_helm_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_helm_radar_view(&s, &sv);
         assert!(view.dots.is_empty());
         assert!(view.rings.is_empty());
     }
@@ -1309,7 +1153,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("a1", 0.0, -(HELM_RADAR_RANGE - 5.0), 1.0)],
         };
-        let view = compute_helm_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_helm_radar_view(&s, &sv);
         assert_eq!(view.dots.len(), 1);
         assert_eq!(view.dots[0].uuid, "a1");
     }
@@ -1320,7 +1165,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::simple("region-1", 0.0, -(HELM_RADAR_RANGE * 0.5), vec!["region".into()])],
         };
-        let view = compute_helm_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_helm_radar_view(&s, &sv);
         assert!(view.dots.is_empty(), "helm radar must NOT show region entities");
     }
 
@@ -1332,7 +1178,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("far", 0.0, -beyond_helm, 1.0)],
         };
-        let view = compute_helm_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_helm_radar_view(&s, &sv);
         assert!(view.dots.is_empty(), "asteroid beyond helm range must not appear");
     }
 
@@ -1342,7 +1189,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("at-edge", 0.0, -HELM_RADAR_RANGE, 1.0)],
         };
-        let view = compute_helm_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_helm_radar_view(&s, &sv);
         assert_eq!(view.dots.len(), 1);
         // Asteroid directly ahead at exactly helm range → radar_y = 1.0.
         let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
@@ -1354,7 +1202,8 @@ mod tests {
     #[test]
     fn weapons_radar_view_empty_world_produces_empty_view() {
         let s = ClientSimState::default();
-        let view = compute_weapons_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_weapons_radar_view(&s, &sv);
         assert!(view.dots.is_empty());
         assert!(view.rings.is_empty());
     }
@@ -1367,7 +1216,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("mid", 0.0, -between, 1.0)],
         };
-        let view = compute_weapons_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_weapons_radar_view(&s, &sv);
         assert_eq!(view.dots.len(), 1, "weapons radar should see asteroid between the two ranges");
         assert_eq!(view.dots[0].uuid, "mid");
     }
@@ -1378,7 +1228,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::simple("region-1", 0.0, -(WEAPONS_RADAR_RANGE * 0.5), vec!["region".into()])],
         };
-        let view = compute_weapons_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_weapons_radar_view(&s, &sv);
         assert!(view.dots.is_empty(), "weapons radar must NOT show region entities");
     }
 
@@ -1389,7 +1240,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("very-far", 0.0, -beyond, 1.0)],
         };
-        let view = compute_weapons_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_weapons_radar_view(&s, &sv);
         assert!(view.dots.is_empty(), "asteroid beyond weapons range must not appear");
     }
 
@@ -1399,7 +1251,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("at-edge", 0.0, -WEAPONS_RADAR_RANGE, 1.0)],
         };
-        let view = compute_weapons_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_weapons_radar_view(&s, &sv);
         assert_eq!(view.dots.len(), 1);
         let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
         close(view.dots[0].radar_y, 1.0);
@@ -1413,8 +1266,9 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("between", 0.0, -between, 1.0)],
         };
-        let helm_view = compute_helm_radar_view(&s);
-        let weapons_view = compute_weapons_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let helm_view = compute_helm_radar_view(&s, &sv);
+        let weapons_view = compute_weapons_radar_view(&s, &sv);
         assert!(helm_view.dots.is_empty(), "helm should NOT see asteroid beyond its range");
         assert_eq!(weapons_view.dots.len(), 1, "weapons SHOULD see asteroid within its range");
     }
@@ -1458,7 +1312,8 @@ mod tests {
     #[test]
     fn science_long_range_radar_view_empty_world_produces_empty_view() {
         let s = ClientSimState::default();
-        let view = compute_science_long_range_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_science_long_range_radar_view(&s, &sv);
         assert!(view.dots.is_empty());
         assert!(view.rings.is_empty());
     }
@@ -1469,7 +1324,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("a1", 0.0, -(SCIENCE_RADAR_RANGE * 0.5), 1.0)],
         };
-        let view = compute_science_long_range_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_science_long_range_radar_view(&s, &sv);
         assert_eq!(view.dots.len(), 1, "science radar must show asteroid within range");
     }
 
@@ -1479,7 +1335,8 @@ mod tests {
         s.world = WorldData {
             entities: vec![EntitySnapshot::simple("region-1", 0.0, -(SCIENCE_RADAR_RANGE * 0.5), vec!["region".into()])],
         };
-        let view = compute_science_long_range_radar_view(&s);
+        let sv = crate::ship_view::ShipView::default();
+        let view = compute_science_long_range_radar_view(&s, &sv);
         assert_eq!(view.dots.len(), 1, "science radar must show region entity as a dot");
         assert_eq!(view.dots[0].uuid, "region-1");
     }
@@ -1758,25 +1615,6 @@ mod tests {
     // ── Power state in ClientSimState ────────────────────────────────
 
     #[test]
-    fn sim_state_updates_power_levels_from_snapshot() {
-        let mut s = ClientSimState::default();
-        s.apply(&ServerMessage::SimState {
-            snapshot: SimSnapshot {
-                red_alert: false,
-                view_mode: ViewMode::default(),
-                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
-                hull_integrity: 100.0,
-                power_levels: (4, 1, 3),
-                flags: vec![],
-                entity_states: vec![],
-                radar_state: RadarStateSnapshot::default(),
-                impulse_charge_progress: 0.0,
-            },
-        });
-        assert_eq!(s.power_levels, (4, 1, 3));
-    }
-
-    #[test]
     fn power_state_message_sets_power_state_payload() {
         let mut s = ClientSimState::default();
         assert!(s.power_state_payload.is_none(), "default: no power state payload");
@@ -1806,44 +1644,12 @@ mod tests {
 
     #[test]
     fn welcome_resets_power_state_fields() {
-        let mut s = ClientSimState {
-            red_alert: false,
-            view_mode: ViewMode::default(),
-            ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
-            world: WorldData::default(),
-            repair_cooldown_secs: 0.0,
-            repair_in_progress: false,
-            repair_penalty: false,
-            phaser_mode: PhaserMode::Auto,
-            last_phaser_target: None,
-            science_target_suggestion: None,
-            sensors_target_suggestion: None,
-            shield_facings: Vec::new(),
-            fire_ready: false,
-            on_cooldown: false,
-            torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
-            torpedoes_in_flight: Vec::new(),
-            modifiers: HashMap::new(),
-            repair_icon: None,
-            power_levels: (4, 1, 3),
-            power_state_payload: Some((4, 2, 2, 100.0, false)),
-            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
-            current_breakdown: None,
-            phaser_frequency: 0.5,
-            frequency_hint: None,
-            impulse_charge_progress: 0.0,
-        };
+        let mut s = ClientSimState::default();
+        s.power_state_payload = Some((4, 2, 2, 100.0, false));
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
         });
-        assert_eq!(s.power_levels, (2, 2, 2), "power_levels reset to default on Welcome");
         assert_eq!(s.power_state_payload, None, "power_state_payload cleared on Welcome");
     }
 

@@ -1,4 +1,4 @@
-use bevy::prelude::Resource;
+use bevy::prelude::*;
 use crate::messages::{ServerMessage, ViewMode};
 
 /// Shared ship state broadcast to all consoles every 10Hz via `SimState`.
@@ -34,6 +34,12 @@ impl Default for ShipView {
 }
 
 impl ShipView {
+    /// True iff the captain's view direction selector should highlight
+    /// the given direction. Radar mode highlights nothing in the cross.
+    pub fn is_active_camera_direction(&self, direction: &crate::messages::ViewDirection) -> bool {
+        matches!(&self.view_mode, ViewMode::Camera(d) if d == direction)
+    }
+
     /// Apply one inbound server message to this view, updating whichever
     /// fields the message carries.
     pub fn apply(&mut self, msg: &ServerMessage) {
@@ -53,6 +59,34 @@ impl ShipView {
             }
             _ => {}
         }
+    }
+}
+
+/// Bevy plugin that owns the `ShipView` resource.
+///
+/// Registers the resource and runs a system that reads every inbound
+/// `ServerMessage` event (via `InboundServerMessage`) and calls
+/// `ShipView::apply` to keep the resource current. Consumer systems
+/// (captain panel, helm HUD, navigation impulse text, power console)
+/// read `Res<ShipView>` instead of reaching into `ClientSimState`.
+#[cfg(feature = "client")]
+pub struct ShipViewPlugin;
+
+#[cfg(feature = "client")]
+impl Plugin for ShipViewPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ShipView>()
+            .add_systems(Update, apply_ship_view_messages);
+    }
+}
+
+#[cfg(feature = "client")]
+fn apply_ship_view_messages(
+    mut reader: MessageReader<crate::client_app::InboundServerMessage>,
+    mut ship_view: ResMut<ShipView>,
+) {
+    for ev in reader.read() {
+        ship_view.apply(&ev.0);
     }
 }
 
@@ -125,5 +159,23 @@ mod tests {
         assert_eq!(view.ship_x, 12.5);
         assert_eq!(view.ship_z, -7.25);
         assert_eq!(view.power_levels, (3, 2, 4));
+    }
+
+    #[test]
+    fn is_active_camera_direction_only_matches_in_camera_mode() {
+        use crate::messages::ViewDirection;
+        let mut view = ShipView::default();
+        // Default view mode is Camera(Fore).
+        assert!( view.is_active_camera_direction(&ViewDirection::Fore));
+        assert!(!view.is_active_camera_direction(&ViewDirection::Aft));
+
+        view.view_mode = ViewMode::Camera(ViewDirection::Port);
+        assert!( view.is_active_camera_direction(&ViewDirection::Port));
+        assert!(!view.is_active_camera_direction(&ViewDirection::Fore));
+
+        view.view_mode = ViewMode::Radar;
+        for d in [ViewDirection::Fore, ViewDirection::Aft, ViewDirection::Port, ViewDirection::Starboard] {
+            assert!(!view.is_active_camera_direction(&d), "Radar mode highlights no cross arrow");
+        }
     }
 }

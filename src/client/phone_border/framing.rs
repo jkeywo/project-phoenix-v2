@@ -20,7 +20,7 @@ use bevy::shader::ShaderRef;
 use bevy::ui::widget::NodeImageMode;
 use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 
-use crate::client_sim::ClientSimState;
+use crate::ship_view::ShipView;
 
 // ── Layout constants ─────────────────────────────────────────────────
 
@@ -283,18 +283,18 @@ fn reparent_panels_into_bezel(
 }
 
 /// Rewrites each bezel `ImageNode`'s image handle to the alert or normal
-/// variant whenever `ClientSimState.red_alert` changes.
+/// variant whenever `ShipView.red_alert` changes.
 fn swap_bezel_textures(
-    sim: Option<Res<ClientSimState>>,
+    ship_view: Option<Res<ShipView>>,
     assets: Option<Res<PhoneAssets>>,
     mut q: Query<(&BezelSlot, &mut ImageNode)>,
 ) {
-    let Some(sim) = sim else { return };
+    let Some(ship_view) = ship_view else { return };
     let Some(assets) = assets else { return };
-    if !sim.is_changed() {
+    if !ship_view.is_changed() {
         return;
     }
-    let alert = sim.red_alert;
+    let alert = ship_view.red_alert;
     for (slot, mut image_node) in q.iter_mut() {
         image_node.image = slot.handle(&assets, alert).clone();
     }
@@ -304,16 +304,16 @@ fn swap_bezel_textures(
 /// uniform via the pure `pulse_intensity` helper.
 fn drive_vignette_intensity(
     time: Res<Time>,
-    sim: Option<Res<ClientSimState>>,
+    ship_view: Option<Res<ShipView>>,
     handle: Option<Res<VignetteMaterialHandle>>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
 ) {
-    let Some(sim) = sim else { return };
+    let Some(ship_view) = ship_view else { return };
     let Some(handle) = handle else { return };
     let Some(material) = materials.get_mut(&handle.0) else { return };
     material.intensity = pulse_intensity(
         time.elapsed_secs(),
-        sim.red_alert,
+        ship_view.red_alert,
         material.intensity,
         time.delta_secs(),
     );
@@ -321,12 +321,12 @@ fn drive_vignette_intensity(
 
 /// Shows/hides the "RED ALERT" status banner text based on Red Alert state.
 fn refresh_alert_banner(
-    sim: Option<Res<ClientSimState>>,
+    ship_view: Option<Res<ShipView>>,
     mut banner: Query<&mut Visibility, With<AlertBannerText>>,
 ) {
-    let Some(sim) = sim else { return };
+    let Some(ship_view) = ship_view else { return };
     for mut vis in banner.iter_mut() {
-        *vis = if sim.red_alert {
+        *vis = if ship_view.red_alert {
             Visibility::Visible
         } else {
             Visibility::Hidden

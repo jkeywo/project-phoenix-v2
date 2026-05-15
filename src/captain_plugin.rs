@@ -57,3 +57,142 @@ fn handle_set_view(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lobby::{LobbyPlugin, OutboundMessage};
+    use crate::messages::ViewDirection;
+
+    #[derive(Resource, Default)]
+    struct Outbox(Vec<OutboundMessage>);
+
+    fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(CaptainPlugin)
+            .init_resource::<Outbox>()
+            .insert_resource(ShipState::new())
+            .add_systems(PostUpdate, collect);
+        app
+    }
+
+    fn push(app: &mut App, token: &str, msg: ClientMessage) {
+        app.world_mut()
+            .resource_mut::<Messages<InboundMessage>>()
+            .write(InboundMessage { token: token.into(), msg });
+    }
+
+    fn tick(app: &mut App) -> Vec<OutboundMessage> {
+        app.update();
+        let out = app.world().resource::<Outbox>().0.clone();
+        app.world_mut().resource_mut::<Outbox>().0.clear();
+        out
+    }
+
+    fn start_game(app: &mut App) {
+        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        tick(app);
+        push(app, "captain", ClientMessage::StartGame);
+        tick(app);
+    }
+
+    // ── ToggleRedAlert tests ────────────────────────────────────────────────
+
+    #[test]
+    fn toggle_red_alert_during_lobby_is_ignored() {
+        let mut app = test_app();
+        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        tick(&mut app);
+        // Still in Lobby — game not started
+        push(&mut app, "captain", ClientMessage::ToggleRedAlert);
+        tick(&mut app);
+        assert!(!app.world().resource::<ShipState>().red_alert());
+    }
+
+    #[test]
+    fn non_captain_toggle_red_alert_is_ignored() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(&mut app, "crew", ClientMessage::Identify { token: "crew".into(), name: "Bob".into() });
+        tick(&mut app);
+        push(&mut app, "crew", ClientMessage::ToggleRedAlert);
+        tick(&mut app);
+        assert!(!app.world().resource::<ShipState>().red_alert());
+    }
+
+    #[test]
+    fn captain_toggle_red_alert_works() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(&mut app, "captain", ClientMessage::ToggleRedAlert);
+        tick(&mut app);
+        assert!(app.world().resource::<ShipState>().red_alert());
+    }
+
+    #[test]
+    fn captain_toggle_red_alert_twice_returns_to_off() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(&mut app, "captain", ClientMessage::ToggleRedAlert);
+        tick(&mut app);
+        assert!(app.world().resource::<ShipState>().red_alert());
+        push(&mut app, "captain", ClientMessage::ToggleRedAlert);
+        tick(&mut app);
+        assert!(!app.world().resource::<ShipState>().red_alert());
+    }
+
+    // ── SetView tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn set_view_during_lobby_is_ignored() {
+        let mut app = test_app();
+        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        tick(&mut app);
+        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        tick(&mut app);
+        // Still in Lobby — game not started
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
+    }
+
+    #[test]
+    fn non_captain_set_view_is_ignored() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(&mut app, "crew", ClientMessage::Identify { token: "crew".into(), name: "Bob".into() });
+        tick(&mut app);
+        push(&mut app, "crew", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Port) });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Fore)
+        );
+    }
+
+    #[test]
+    fn captain_set_view_changes_direction() {
+        let mut app = test_app();
+        start_game(&mut app);
+        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) });
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipState>().view_mode,
+            ViewMode::Camera(ViewDirection::Aft)
+        );
+    }
+}

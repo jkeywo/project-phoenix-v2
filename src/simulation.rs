@@ -1979,48 +1979,6 @@ fn test_app() -> App {
         tick(app);
     }
 
-    #[test]
-    fn set_view_during_lobby_is_ignored() {
-        let mut app = test_app();
-        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
-        tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
-        tick(&mut app);
-        // Still in Lobby â€” game not started
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) });
-        tick(&mut app);
-        assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
-            ViewMode::Camera(ViewDirection::Fore)
-        );
-    }
-
-    #[test]
-    fn non_captain_set_view_is_ignored() {
-        let mut app = test_app();
-        start_game(&mut app);
-        push(&mut app, "crew", ClientMessage::Identify { token: "crew".into(), name: "Bob".into() });
-        tick(&mut app);
-        push(&mut app, "crew", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Port) });
-        tick(&mut app);
-        assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
-            ViewMode::Camera(ViewDirection::Fore)
-        );
-    }
-
-    #[test]
-    fn captain_set_view_changes_direction() {
-        let mut app = test_app();
-        start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) });
-        tick(&mut app);
-        assert_eq!(
-            app.world().resource::<ShipState>().view_mode,
-            ViewMode::Camera(ViewDirection::Aft)
-        );
-    }
-
     fn start_game_with_helm(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);

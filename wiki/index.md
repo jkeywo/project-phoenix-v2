@@ -44,6 +44,7 @@ Architecture, patterns, processes.
 - **[View-Model Pattern](./concepts/view-model-pattern.md)** — Pure derived snapshots for renderers.
 - **[Console Plugin Pattern](./concepts/console-plugin-pattern.md)** — One Bevy plugin per console.
 - **[WorldPlugin](./concepts/world-plugin.md)** — Owns world bootstrap (starfield + player ship). Landing zone for the World/Scenario merger (#218).
+- **[CaptainPlugin](./concepts/captain-plugin.md)** — First extracted console plugin: red alert toggle + view selector. Validates the simulation-split pattern (#227).
 - **[Broadcaster Seam](./concepts/broadcaster-seam.md)** — `SimBroadcaster` + `LobbyBroadcaster` registration API; Audience, Cadence, producer-registration recipe, full message catalogue with file:line references, `OutboundMessage` write contract, and cross-links to PRDs #117/#118/#120/#153/#154/#180/#187.
 - **[Modifier Coordination](./concepts/modifier-coordination.md)** — Single owner of `ShipModifiers`; complete catalogue of three modifier sources (power, regions, impulse) with translator recipe, read-interface guide, and per-UUID source identity.
 - **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.

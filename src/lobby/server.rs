@@ -12,7 +12,9 @@ use crate::stations_config::ShipStations;
 pub struct GameStateCache(pub GameState);
 
 /// Pending outbound messages produced by lobby systems.
-/// Drained each frame by the `LobbyBroadcaster` dispatch.
+/// Drained each frame by `drain_lobby_outbox`, which runs unconditionally so
+/// messages queued on the Lobby→InProgress transition frame (e.g. GameStarted)
+/// are not lost.
 #[derive(Resource, Default)]
 pub struct LobbyOutbox(pub Vec<(Target, ServerMessage)>);
 
@@ -162,34 +164,37 @@ fn apply_result(
     outbox.0.extend(result.outbound);
 }
 
-// ── Broadcaster helper ─────────────────────────────────────────────────────
+// ── Outbox drain ───────────────────────────────────────────────────────────
 
-/// Returns a [`LobbyBroadcaster`] pre-configured with a producer that drains
-/// [`LobbyOutbox`] each frame and writes each entry as an `OutboundMessage`.
+/// Plugin that drains [`LobbyOutbox`] into the `OutboundMessage` bus every
+/// frame, regardless of the current game phase.
 ///
-/// Uses `Cadence::OnEvent` so the producer fires every frame.  When the outbox
-/// is empty the producer returns an empty `Vec` and no messages are emitted.
-/// When populated (by `process_lobby` or `handle_disconnect`) the queued
-/// entries are flushed directly to `OutboundMessage` with their original
-/// `Target` routing.
+/// This phase-agnostic drain is intentional: `process_lobby` both transitions
+/// the phase to `InProgress` *and* queues `GameStarted` in the same frame.
+/// A phase-gated drain (such as routing through `LobbyBroadcaster`) would skip
+/// the outbox on that transition frame, causing `GameStarted` to be lost.
+pub struct LobbyOutboxPlugin;
+
+impl Plugin for LobbyOutboxPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, drain_lobby_outbox.after(process_lobby));
+    }
+}
+
+fn drain_lobby_outbox(world: &mut World) {
+    let entries = std::mem::take(&mut world.resource_mut::<LobbyOutbox>().0);
+    for (target, msg) in entries {
+        world.write_message(OutboundMessage { target, msg });
+    }
+}
+
+/// Returns a [`LobbyOutboxPlugin`] that drains [`LobbyOutbox`] into the
+/// `OutboundMessage` bus each frame.
 ///
 /// This must be registered once (typically in `bridge.rs`) alongside
-/// `LobbyPlugin`.  Multiple registrations are safe because
-/// `LobbyBroadcaster::is_unique` returns `false`.
-pub fn lobby_outbox_broadcaster() -> crate::core::broadcast::LobbyBroadcaster {
-    use crate::core::broadcast::{Audience, Cadence, LobbyBroadcaster};
-    LobbyBroadcaster::new().register(
-        Audience::All,
-        Cadence::OnEvent,
-        |world: &mut bevy::prelude::World| {
-            let mut outbox = world.resource_mut::<LobbyOutbox>();
-            let entries = std::mem::take(&mut outbox.0);
-            for (target, msg) in entries {
-                world.write_message(OutboundMessage { target, msg });
-            }
-            vec![]
-        },
-    )
+/// `LobbyPlugin`.
+pub fn lobby_outbox_broadcaster() -> LobbyOutboxPlugin {
+    LobbyOutboxPlugin
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

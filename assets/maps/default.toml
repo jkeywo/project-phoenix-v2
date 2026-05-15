@@ -27,7 +27,7 @@ position = [0.0, 0.0, 0.0]
 [[entity]]
 template_path = "assets/entities/player_ship.toml"
 id = "player-ship"
-position = [0.0, 0.0, 0.0]
+position = [150.0, 0.0, 0.0]
 spawn_on = "game_start"
 
 [[entity]]

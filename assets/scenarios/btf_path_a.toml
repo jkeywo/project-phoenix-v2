@@ -1,8 +1,50 @@
 # Path A — The Diplomat
 #
-# Loaded when the crew hails Axiom Station.
-# Contact: Administrator Chen. Reveals missing negotiator Dr. Sol Varen is
-# detained aboard Ironveil. This path gives political context for the weapon.
+# Loaded when the crew commits to working with Administrator Chen (gateway in
+# before_the_fire.toml). Contact: Administrator Chen. Reveals that Dr. Sol
+# Varen is detained aboard Ironveil. This path gives political context for the
+# weapon and unlocks the "Dr. Varen broadcasts her peace record" option in the
+# Aphelion Protocol finale.
+#
+# On load: sets path_chosen + path_a_chosen flags, adds working_with_chen
+# objective, and pushes lock-out comms to the Research Outpost.
+
+[[trigger]]
+condition = "on_load"
+actions = [
+    { set_flag = "path_chosen" },
+    { set_flag = "path_a_chosen" },
+    { add_objective = "working_with_chen" },
+    { push_comms = "lockout_outpost_from_a" },
+    { push_comms = "chen_sol_detail" },
+]
+
+[[objective]]
+id = "working_with_chen"
+text = "Continue working with Administrator Chen."
+auto_add = false
+
+[[comms]]
+id = "chen_sol_detail"
+from = "Axiom Station — Adm. Chen"
+subject = "Dr. Varen — What We Know"
+message = "Sol was heading to grid 18-Kappa when contact cut out. That's Ironveil's patrol zone. I think they're holding her aboard. I can't prove it."
+
+# Ironveil-specific hail handler for Path A — Sol-specific denial dialogue
+[[trigger]]
+condition = "on_hailed"
+entity = "ironveil"
+flag_is_set = "path_a_chosen"
+actions = [
+    { push_comms = "ironveil_denies_sol" },
+    { force_ai_state = "ironveil", state = "pursuing", delay_secs = 10 },
+]
+
+[[comms]]
+id = "ironveil_denies_sol"
+from = "I.V. Ironveil"
+subject = "Transmission"
+message = "There is no Alliance personnel aboard this vessel. You are trespassing. Ten seconds to change your heading."
 
 # ── OBJECTIVES ────────────────────────────────────────────────────────────────
 
@@ -22,7 +64,6 @@ id = "chen_intro"
 from = "Axiom Station — Adm. Chen"
 subject = "Situation Report"
 message = "Our lead negotiator, Dr. Sol Varen, has not reported in for six hours. The Harrow patrol refused our docking request and is not responding."
-trigger = "on_load"
 
 [[comms.responses]]
 text = "We'll scan for Dr. Varen. What was their last known position?"
@@ -83,3 +124,10 @@ message = "This is Sol Varen — I'm aboard an escape pod. They have a weapon on
 
 [[comms.responses]]
 text = "Dr. Varen, get clear. We'll handle Ashrender."
+follow_up = "sol_broadcast_offer"
+
+[[comms]]
+id = "sol_broadcast_offer"
+from = "Dr. Sol Varen"
+subject = "Re: Ashrender"
+message = "I have thirty years of peace negotiations on this chip. If the worst happens — I can get it out. Every relay in range. Just give me time."

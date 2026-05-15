@@ -313,11 +313,11 @@ During an architectural-improvement grilling session, the running plan called fo
 
 Wiki updates:
 
-- `wiki/concepts/architecture.md` � replaced the entire `src/server/` / `src/client/` / `src/shared/` module map (none of those folders exist) with the actual flat ~56-module layout, grouped by naming convention. Noted the planned domain-grouped folder reorg.
-- `wiki/concepts/console-plugin-pattern.md` � flipped from `current plugins: CaptainConsolePlugin, HelmConsolePlugin` (neither file exists) to `partially realised`: documents the current god-module reality (`client_app.rs` ~2329 LoC, `client_sim.rs` ~2136 LoC) and the planned per-console split. Added locality-of-behaviour rationale.
-- `wiki/sources/prd-142-ai-and-behaviour.md` � status flipped from `open` to `in-flight`. Documented the landed pieces (`ai.rs`, `ai_plugin.rs`, `faction.rs`, console-AI siblings) and the still-open work (TOML state-machine schema, squad behaviours, scenario integration).
+- `wiki/concepts/architecture.md` � replaced the entire `src/server/` / `src/client/` / `src/shared/` module map (none of those folders exist) with the actual flat ~56-module layout, grouped by naming convention. Noted the planned domain-grouped folder reorg.
+- `wiki/concepts/console-plugin-pattern.md` � flipped from `current plugins: CaptainConsolePlugin, HelmConsolePlugin` (neither file exists) to `partially realised`: documents the current god-module reality (`client_app.rs` ~2329 LoC, `client_sim.rs` ~2136 LoC) and the planned per-console split. Added locality-of-behaviour rationale.
+- `wiki/sources/prd-142-ai-and-behaviour.md` � status flipped from `open` to `in-flight`. Documented the landed pieces (`ai.rs`, `ai_plugin.rs`, `faction.rs`, console-AI siblings) and the still-open work (TOML state-machine schema, squad behaviours, scenario integration).
 
-Filed issue #218 � `Architecture: Merge Scenario into World` � capturing the rationale for the planned merger of `scenario_plugin.rs` into a unified `WorldPlugin` at `src/world/server.rs`. To be executed as part of the upcoming reorg.
+Filed issue #218 � `Architecture: Merge Scenario into World` � capturing the rationale for the planned merger of `scenario_plugin.rs` into a unified `WorldPlugin` at `src/world/server.rs`. To be executed as part of the upcoming reorg.
 
 Not yet touched (deferred to the actual reorg PRs): `wiki/roadmap/open-architectural-questions.md` (will be amended once the reorg + 6 deepenings start landing); per-PRD source pages for the AI sub-issues (#175/#176/#177/#179).
 
@@ -340,3 +340,5 @@ Not yet touched (deferred to the actual reorg PRs): `wiki/roadmap/open-architect
 ## [2026-05-15] ingest | Folder reorg #4: Create src/regions/ and src/entities/ | Moved region_effects.rs → regions/effects.rs, region_shape.rs → regions/shape.rs, region_plugin.rs → regions/server.rs. Moved entity_config.rs → entities/config.rs, entity_tags.rs → entities/tags.rs, entity_loader.rs → entities/loader.rs, entity_override.rs → entities/entity_override.rs, entity_spawner.rs → entities/spawner.rs, map_config.rs → entities/map_config.rs, config_cache.rs → entities/config_cache.rs. Fixed include_str! paths. Added pub use re-exports in lib.rs. Closes #247.
 
 ## [2026-05-15] ingest | Folder reorg #5: Create src/modifiers/ and src/core/ | Moved modifiers.rs → modifiers/cache.rs, power_system.rs → modifiers/power_system.rs, repair_teams.rs → modifiers/repair_teams.rs, breakdown.rs → modifiers/breakdown.rs, modifier_coordination.rs → modifiers/coordination.rs. Moved messages.rs → core/messages.rs, codec.rs → core/codec.rs, flag_kind.rs → core/flag_kind.rs. Added re-exports in mod.rs files and lib.rs. Closes #252.
+
+## [2026-05-15] ingest | Stations split #1: StationsConfig in src/lobby/stations_config.rs | stations_config (parse + lookup) and stations_policy (assignment) live in src/lobby/; src/stations.rs is a thin re-export shim; wiki/concepts/stations.md created. Closes #230.

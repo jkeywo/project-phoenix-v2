@@ -23,7 +23,7 @@ use crate::messages::ModifierSlot;
 use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, EntityTagsSection};
 use std::collections::HashMap;
 
-// â”€â”€ Beam constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 pub use crate::weapons_plugin::{
     WeaponsTarget, ActiveBeam, PhaserCooldown, CurrentPhaserMode,
     PhaserRenderConfig, TorpedoSystemResource, AsteroidDestroyedVfx,
@@ -40,7 +40,7 @@ pub use crate::power_plugin::{
     power_state_broadcaster,
 };
 
-// â”€â”€ Marker Components â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Marker Components â"€â"€â"€â"€â"€â"€â"€â"€
 #[derive(Component)]
 pub struct Ship;
 
@@ -58,7 +58,7 @@ pub struct AsteroidDamage {
     pub current_hp: i32,
 }
 
-// â”€â”€ Resources â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Resources â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
 
@@ -130,7 +130,7 @@ pub struct TrackedEntities {
 
 
 
-// â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Plugin â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 /// Empty system used as an ordering anchor for the sim broadcast dispatch.
 /// All sim-phase systems (message handlers, tick systems, broadcasters) should
 /// run before this anchor so that `dispatch_sim_broadcasts` (which has
@@ -150,6 +150,7 @@ impl Plugin for SimulationPlugin {
             .add_plugins(crate::weapons_plugin::WeaponsPlugin)
             .add_plugins(crate::repair_plugin::RepairPlugin)
             .add_plugins(crate::power_plugin::PowerPlugin)
+            .add_plugins(crate::science_plugin::SciencePlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
@@ -168,7 +169,6 @@ impl Plugin for SimulationPlugin {
             ))
             .add_systems(Update, (
                 (
-                    handle_set_science_target,
                     handle_set_sensors_target,
                 ),
                 (
@@ -358,32 +358,6 @@ fn is_valid_console_holder(
 }
 
 // -- Systems -------------------------------------------------------------------
-
-fn handle_set_science_target(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        let ClientMessage::SetScienceTarget { uuid } = &ev.msg else { continue };
-
-        // Only the Sensors console holder may broadcast a target suggestion.
-        if sessions.0.console_holder(Console::Sensors) != Some(ev.token.as_str()) {
-            continue;
-        }
-
-        // Only broadcast if there is a Weapons console player to receive it.
-        let Some(weapons_token) = sessions.0.console_holder(Console::Tactical) else {
-            continue;
-        };
-
-        outbox.0.push((Target::Token(weapons_token.to_string()), ServerMessage::ScienceTargetSuggestion { uuid: uuid.clone() }));
-    }
-}
 
 fn handle_set_sensors_target(
     mut reader: MessageReader<InboundMessage>,
@@ -655,7 +629,7 @@ fn reconcile_runtime_entities(
     }
 }
 
-// â”€â”€ World Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ World Setup â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 fn setup_world(
     commands: Commands,
     meshes: ResMut<Assets<Mesh>>,
@@ -903,7 +877,7 @@ fn render_spawned_entities(
 }
 
 
-// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€ Tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -948,8 +922,9 @@ fn test_app() -> App {
         .add_plugins(crate::weapons_plugin::WeaponsPlugin)
         .add_plugins(crate::repair_plugin::RepairPlugin)
         .add_plugins(crate::power_plugin::PowerPlugin)
+        .add_plugins(crate::science_plugin::SciencePlugin)
         .add_systems(Update, (
-            handle_set_science_target, handle_set_sensors_target,
+            handle_set_sensors_target,
             handle_impulse_messages, handle_set_shield_focus,
             broadcast_shield_status,
             broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
@@ -1387,7 +1362,7 @@ fn test_app() -> App {
         assert_ne!(first, second, "consecutive entries are different consoles");
     }
 
-    // â”€â”€ SetTarget / TargetLock tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ SetTarget / TargetLock tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     fn setup_weapons_world(app: &mut App, asteroid_x: f32, asteroid_z: f32) {
         app.world_mut().insert_resource(WorldResource(WorldData {
@@ -1423,7 +1398,7 @@ fn test_app() -> App {
     #[test]
     fn valid_target_within_range_replies_with_target_lock_confirmed() {
         let mut app = test_app();
-        // Asteroid at (30, 0) â€” 30 units from ship origin, within 60-unit range.
+        // Asteroid at (30, 0) â€" 30 units from ship origin, within 60-unit range.
         setup_weapons_world(&mut app, 30.0, 0.0);
         start_game_with_weapons(&mut app);
 
@@ -1447,7 +1422,7 @@ fn test_app() -> App {
     #[test]
     fn asteroid_outside_weapons_range_replies_with_target_lock_rejected() {
         let mut app = test_app();
-        // Asteroid at (80, 0) â€” 80 units away, outside 60-unit Weapons range.
+        // Asteroid at (80, 0) â€" 80 units away, outside 60-unit Weapons range.
         setup_weapons_world(&mut app, 80.0, 0.0);
         start_game_with_weapons(&mut app);
 
@@ -1479,9 +1454,9 @@ fn test_app() -> App {
         assert!(app.world().resource::<WeaponsTarget>().0.is_none());
     }
 
-    // â”€â”€ WeaponsUpdate / fire_ready tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ WeaponsUpdate / fire_ready tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-    /// Target locked, within 40-unit phaser range, in forward arc â†’ fire_ready = true.
+    /// Target locked, within 40-unit phaser range, in forward arc â†' fire_ready = true.
     #[test]
     fn weapons_update_fire_ready_true_when_target_in_range_and_arc() {
         let mut app = test_app();
@@ -1504,11 +1479,11 @@ fn test_app() -> App {
         assert!(update.1, "expected fire_ready=true for in-range, forward-arc target");
     }
 
-    /// Target locked but beyond 40-unit phaser range (within 60u lock range) â†’ fire_ready = false.
+    /// Target locked but beyond 40-unit phaser range (within 60u lock range) â†' fire_ready = false.
     #[test]
     fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
         let mut app = test_app();
-        // Ship at origin, yaw=0. Asteroid at (0, -50): directly ahead, 50 units â€” within lock range
+        // Ship at origin, yaw=0. Asteroid at (0, -50): directly ahead, 50 units â€" within lock range
         // (60u) but outside phaser range (40u).
         setup_weapons_world(&mut app, 0.0, -50.0);
         start_game_with_weapons(&mut app);
@@ -1526,7 +1501,7 @@ fn test_app() -> App {
         assert!(!update.1, "expected fire_ready=false for beyond-phaser-range target");
     }
 
-    // â”€â”€ FirePhaser / beam lifecycle tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ FirePhaser / beam lifecycle tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     /// Helper: lock target then fire phaser; returns messages from the fire tick.
     fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<OutboundMessage> {
@@ -1544,7 +1519,7 @@ fn test_app() -> App {
     #[test]
     fn fire_phaser_on_valid_target_broadcasts_beam_started() {
         let mut app = test_app();
-        // Asteroid directly ahead at 20 units (yaw=0 â†’ facing -Z â†’ asteroid at (0,-20)).
+        // Asteroid directly ahead at 20 units (yaw=0 â†' facing -Z â†' asteroid at (0,-20)).
         let out = lock_and_fire(&mut app, 0.0, -20.0);
 
         let beam_started = out.iter().find(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. }));
@@ -1600,13 +1575,13 @@ fn test_app() -> App {
     #[test]
     fn fire_phaser_rejected_when_target_behind_ship() {
         let mut app = test_app();
-        // Yaw=0 means ship faces -Z. Asteroid at (0, +20) is directly behind â€” in rear arc.
+        // Yaw=0 means ship faces -Z. Asteroid at (0, +20) is directly behind â€" in rear arc.
         setup_weapons_world(&mut app, 0.0, 20.0);
         start_game_with_weapons(&mut app);
-        // Lock (within 60u range) â€” lock doesn't require arc.
+        // Lock (within 60u range) â€" lock doesn't require arc.
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
         let _ = tick(&mut app);
-        // Fire â€” rejected because target is behind.
+        // Fire â€" rejected because target is behind.
         push(&mut app, "weapons", ClientMessage::FirePhaser);
         let out = tick(&mut app);
 
@@ -1683,7 +1658,7 @@ fn test_app() -> App {
         let mut app = test_app();
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
-        // Now rotate ship so the asteroid is behind it (yaw = Ï€ â†’ facing +Z, asteroid at (0,-20) is behind).
+        // Now rotate ship so the asteroid is behind it (yaw = Ï€ â†' facing +Z, asteroid at (0,-20) is behind).
         app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
 
         let out = tick(&mut app);
@@ -1715,7 +1690,7 @@ fn test_app() -> App {
             "cooldown should start after range sever");
     }
 
-    /// No damage refund on sever â€” whatever HP was dealt is permanent.
+    /// No damage refund on sever â€" whatever HP was dealt is permanent.
     #[test]
     fn no_damage_refund_on_sever() {
         let mut app = test_app();
@@ -1789,7 +1764,7 @@ fn test_app() -> App {
         assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t2"));
     }
 
-    // â”€â”€ Repair helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ Repair helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     /// Set up a game with a captain, repair player, and a single breakdown
     /// with a known shape (Triangle) at the front. HP = 90.
@@ -2004,7 +1979,7 @@ fn test_app() -> App {
             "RepairState with penalty=true should be broadcast after wrong shape press");
     }
 
-    // â”€â”€ SetPhaserMode tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ SetPhaserMode tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     /// The Weapons console holder can change the phaser mode to Manual.
     #[test]
@@ -2034,7 +2009,7 @@ fn test_app() -> App {
         );
     }
 
-    // â”€â”€ SetScienceTarget / ScienceTargetSuggestion tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ SetSensorsTarget / SensorsTargetSuggestion tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     fn start_game_with_sensors_and_weapons(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
@@ -2052,60 +2027,6 @@ fn test_app() -> App {
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
-
-      fn sensors_set_science_target_broadcasts_suggestion_to_weapons() {
-        let mut app = test_app();
-        start_game_with_sensors_and_weapons(&mut app);
-
-        push(&mut app, "sensors", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
-        let out = tick(&mut app);
-
-        let suggestion = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::ScienceTargetSuggestion { uuid } => Some(uuid.clone()),
-            _ => None,
-        }).expect("expected a ScienceTargetSuggestion message");
-        assert_eq!(suggestion, "asteroid-42");
-
-        // Should be targeted to Weapons console player only.
-        let suggestion_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. }))
-            .unwrap();
-        assert!(
-            matches!(&suggestion_msg.target, Target::Token(t) if t == "weapons"),
-            "ScienceTargetSuggestion should be sent only to Weapons console"
-        );
-    }
-
-    #[test]
-    fn non_sensors_player_cannot_send_science_target() {
-        let mut app = test_app();
-        start_game_with_sensors_and_weapons(&mut app);
-
-        push(&mut app, "captain", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
-        let out = tick(&mut app);
-
-        assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
-            "non-Sensors player should not be able to send ScienceTargetSuggestion"
-        );
-    }
-
-    #[test]
-    fn set_science_target_ignored_in_lobby() {
-        let mut app = test_app();
-        push(&mut app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
-        tick(&mut app);
-        push(&mut app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
-        tick(&mut app);
-
-        push(&mut app, "sensors", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
-        let out = tick(&mut app);
-
-        assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
-            "SetScienceTarget should be ignored during Lobby phase"
-        );
-    }
-    // -- SetSensorsTarget / SensorsTargetSuggestion tests --
 
     #[test]
     fn sensors_set_sensors_target_broadcasts_sensors_target_suggestion_to_tactical() {
@@ -2163,7 +2084,7 @@ fn test_app() -> App {
     }
 
 
-    // â”€â”€ FireTorpedo tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ FireTorpedo tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     #[test]
     fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
@@ -2238,7 +2159,7 @@ fn test_app() -> App {
         );
     }
 
-    // â”€â”€ ShipModifiers integration tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ ShipModifiers integration tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     /// Empty modifier table: phaser damage is identical to the base BEAM_DAMAGE_PER_SEC
     /// (5 HP/s). After 1 second of beam fire on a 30-HP asteroid the HP decreases by 5.
@@ -2264,7 +2185,7 @@ fn test_app() -> App {
         // With identity modifier this should work; with a 2Ã— modifier it would be faster.
 
         // Run 500 ms worth of ticks at ~16ms each (â‰ˆ31 ticks).
-        // After that, asteroid should have taken ~2â€“3 HP (not destroyed yet).
+        // After that, asteroid should have taken ~2â€"3 HP (not destroyed yet).
         let hp_before = {
             let world = app.world().resource::<WorldResource>();
             world.0.entities.iter().find(|a| a.uuid == "target-uuid").map(|_| true)
@@ -2291,7 +2212,7 @@ fn test_app() -> App {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::PhaserDamage,
-                bonus: 1.0,  // â†’ multiplier 2.0
+                bonus: 1.0,  // â†' multiplier 2.0
             });
         }
         start_game_with_weapons(&mut app_fast);
@@ -2300,7 +2221,7 @@ fn test_app() -> App {
         push(&mut app_fast, "weapons", ClientMessage::FirePhaser);
         tick(&mut app_fast); // processes FirePhaser, beam becomes active
 
-        // Inject accumulated damage: 3.5s Ã— (5 HP/s Ã— 2Ã—) = 35 HP â†’ enough to destroy 30-HP asteroid.
+        // Inject accumulated damage: 3.5s Ã— (5 HP/s Ã— 2Ã—) = 35 HP â†' enough to destroy 30-HP asteroid.
         {
             let mut beam = app_fast.world_mut().resource_mut::<ActiveBeam>();
             beam.damage_accumulator = BEAM_DAMAGE_PER_SEC * 2.0 * 3.5;
@@ -2331,9 +2252,9 @@ fn test_app() -> App {
         assert!(still_exists_base, "with identity modifier, asteroid should survive 3.5s of beam (only 17.5/30 HP removed)");
     }
 
-    /// HullDamageTaken modifier at -1 (â†’ 0.5Ã— multiplier) halves collision damage.
+    /// HullDamageTaken modifier at -1 (â†' 0.5Ã— multiplier) halves collision damage.
     /// At zero ship speed, base collision_damage=5. With 0.5Ã— modifier: round(5Ã—0.5)=3.
-    // â”€â”€ modifier broadcast tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â"€â"€ modifier broadcast tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     #[test]
     fn add_modifier_broadcasts_modifier_added_message() {
@@ -2412,7 +2333,7 @@ fn test_app() -> App {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::HullDamageTaken,
-                bonus: -1.0,  // â†’ multiplier 0.5
+                bonus: -1.0,  // â†' multiplier 0.5
             });
         }
 

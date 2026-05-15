@@ -6,7 +6,7 @@ use crate::breakdown::BreakdownQueue;
 use crate::breakdown::breakdowns_from_damage;
 use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
-use crate::core::broadcast::Audience;
+use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::repair_teams::RepairTeams;
 use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
@@ -344,13 +344,35 @@ impl Plugin for SimulationPlugin {
                 broadcast_weapons_update.after(broadcast_sim_state),
                 broadcast_repair_state.after(broadcast_sim_state),
                 broadcast_shield_status.after(broadcast_sim_state),
-                broadcast_power_state.after(broadcast_sim_state),
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
                 broadcast_modifier_events,
                 broadcast_repair_icons.after(broadcast_repair_state),
                 reconcile_runtime_entities.after(crate::lobby::process_lobby),
-            ));
+            ))
+            .add_plugins(power_state_broadcaster());
     }
+}
+
+/// Returns a [`SimBroadcaster`] pre-configured with the `PowerState` producer.
+///
+/// Broadcasts `PowerState` at 10 Hz to the `Power` console holder only.
+/// This is the canonical registration; it is added by [`SimulationPlugin`]
+/// and also by the test harness in `test_app()`.
+pub fn power_state_broadcaster() -> SimBroadcaster {
+    SimBroadcaster::new().register(
+        Audience::Holding(Console::Power),
+        Cadence::Hz(10.0),
+        |world: &World| {
+            let power = world.resource::<ShipPowerSystem>();
+            Some(ServerMessage::PowerState {
+                helm: power.0.helm,
+                weapons: power.0.weapons,
+                sensors: power.0.sensors,
+                battery_charge: power.0.battery_charge,
+                locked: power.0.locked,
+            })
+        },
+    )
 }
 
 // ── Helper: token validation with AI fallback ────────────────────────────────
@@ -978,35 +1000,6 @@ fn tick_power_system(
     if changed {
         sync_power_modifiers(&power.0, &mult_cfg, &mut modifiers);
     }
-}
-
-/// Broadcast `PowerState` at 10 Hz to the Power console holder only.
-fn broadcast_power_state(
-    timer: Res<SimBroadcastTimer>,
-    mut writer: MessageWriter<OutboundMessage>,
-    sessions: Res<Sessions>,
-    power: Res<ShipPowerSystem>,
-    phase: Res<CurrentPhase>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    if !timer.0.just_finished() {
-        return;
-    }
-    let Some(target) = Audience::Holding(Console::Power).resolve(&sessions.0) else {
-        return;
-    };
-    writer.write(OutboundMessage {
-        target,
-        msg: ServerMessage::PowerState {
-            helm: power.0.helm,
-            weapons: power.0.weapons,
-            sensors: power.0.sensors,
-            battery_charge: power.0.battery_charge,
-            locked: power.0.locked,
-        },
-    });
 }
 
 /// Synchronise the `ShipModifiers` cache with the current power allocation levels.
@@ -1944,7 +1937,8 @@ fn test_app() -> App {
             tick_active_beam, tick_repair_teams,
             tick_torpedo_system, tick_power_system,
         ))
-        .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_power_state.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state), reconcile_runtime_entities.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (broadcast_sim_state, broadcast_weapons_update.after(broadcast_sim_state), broadcast_repair_state.after(broadcast_sim_state), broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons.after(broadcast_repair_state), reconcile_runtime_entities.after(crate::lobby::process_lobby)))
+        .add_plugins(power_state_broadcaster())
         .add_systems(PostUpdate, collect);
     app
 }

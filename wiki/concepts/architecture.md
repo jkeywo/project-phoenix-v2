@@ -3,7 +3,7 @@ title: Architecture
 type: concept
 tags: [architecture, layers, server, client, wasm]
 sources: [AGENTS.md, src/lib.rs]
-updated: 2026-05-14
+updated: 2026-05-15
 ---
 
 # Architecture
@@ -25,12 +25,48 @@ Project Phoenix ships as **two HTML pages** built from **one Rust crate**, talki
 ## Two pages, one crate
 
 - **`server.html`** loads the WASM binary built with `cargo` features `["server"]`. Trunk drives the build (`Trunk.toml`).
-- **`client.html`** loads the *same* crate with feature `["client"]`. The client now also runs Bevy/WASM (post-PRD #66 prep), but its UI is much smaller and there's no Rapier.
-- `src/lib.rs` declares ~56 modules in a **flat layout** under `src/`. Audience and concern are encoded in module *names* (`client_*`, `*_plugin`) and `#[cfg(feature = "server" | "client")]` gates. A folder reorg into domain-grouped subdirectories (`ship/`, `weapons/`, `regions/`, `console/<name>/`, `lobby/`, `world/`, `core/`, `client/`, `server/`) is planned (see [Open Architectural Questions](../roadmap/open-architectural-questions.md)).
+- **`client.html`** loads the *same* crate with feature `["client"]`. The client runs Bevy/WASM for UI; no Rapier physics.
+- `src/lib.rs` declares all top-level modules. The codebase is migrating from a flat layout into **domain-grouped subdirectories** (see below).
 
-## Module map
+## Target module tree
 
-The current flat layout groups modules by concern through naming:
+Modules are organised by **domain**, not by audience (server vs client) or layer. Pure logic sits beside its Bevy plugin inside the same domain folder.
+
+```
+src/
+├── core/           messages.rs, codec.rs, flag_kind.rs, broadcast seam
+├── lobby/          lobby.rs, lobby_handler.rs, stations*.rs, client_panel.rs, session.rs
+├── ship/           ship_state.rs, ship_physics.rs, impulse.rs, damage.rs
+├── weapons/        phaser.rs, torpedo.rs, shield.rs, beam_render.rs
+├── regions/        region_*.rs, region_plugin.rs → server.rs
+├── world/          content.rs (scenario types), server.rs (WorldPlugin) ← merged #218–222
+├── console/
+│   ├── captain/    client.rs, server.rs
+│   ├── helm/       client.rs, server.rs, joystick.rs
+│   ├── weapons/    client.rs, server.rs
+│   ├── repair/     client.rs, server.rs
+│   ├── power/      client.rs, server.rs
+│   ├── science/    client.rs, server.rs
+│   └── comms/      client.rs, server.rs
+├── console_ai/     console_ai.rs, console_ai_plugin.rs, complexity.rs, delegation.rs
+├── ai/             ai.rs, ai_plugin.rs, faction.rs
+├── asteroids/      asteroid_spawner.rs, asteroid_window.rs, asteroid_lifecycle.rs
+├── entities/       entity_*.rs, map_config.rs, config_cache.rs, entity_tags.rs
+├── modifiers/      modifiers.rs, power_system.rs, repair_teams.rs, breakdown.rs
+├── server/         bridge.rs, renderer.rs, viewscreen_border.rs, debug_overlay.rs
+└── client/         app.rs, bridge.rs, elements.rs, phone_border/
+```
+
+**Design rules:**
+- Domain-grouped, not audience-grouped or layer-grouped.
+- Pure modules co-located with Bevy plugins inside each domain folder.
+- Lobby is top-level (it is a phase, not a console).
+- `src/world/` is complete (landed via #218–222).
+- All other domains are being migrated slice-by-slice via issues #229 → #256.
+
+## Current module map (transitional)
+
+While migration is in progress, modules live at their old flat paths alongside the new `src/world/` domain. `pub use` re-exports in each domain's `mod.rs` keep external paths stable.
 
 | Naming pattern | Role |
 |---|---|
@@ -39,7 +75,7 @@ The current flat layout groups modules by concern through naming:
 | `radar.rs`, `radar_config.rs` | Pure radar projection, reused by server renderer and Helm/Weapons consoles. |
 | `session.rs`, `stations.rs` | Server identity + station assignment. |
 | `lobby.rs` (plugin) + `lobby_handler.rs` (pure) | Lobby-phase Bevy plugin + pure handler functions. |
-| `simulation.rs` | God-module Bevy plugin: helm input → physics → weapons → collision → breakdown → broadcast. Slated for split per the Plugin Pattern. |
+| `simulation.rs` | God-module Bevy plugin: helm input → physics → weapons → collision → breakdown → broadcast. Slated for split. |
 | `ship_physics.rs`, `ship_state.rs`, `impulse.rs` | Pure physics + Bevy resource. |
 | `phaser.rs`, `torpedo.rs`, `shield.rs` | Pure weapon/defence state machines. |
 | `damage.rs`, `breakdown.rs`, `repair_teams.rs` | Pure damage formula + breakdown queue + repair dispatch. |
@@ -47,13 +83,13 @@ The current flat layout groups modules by concern through naming:
 | `asteroid_spawner.rs`, `asteroid_window.rs`, `asteroid_lifecycle.rs` | Pure density + ring-buffer window + Bevy lifecycle systems. |
 | `region_*.rs`, `region_plugin.rs` | Region effects (damage zones, slow zones, jammers). |
 | `entity_config.rs`, `entity_loader.rs`, `entity_spawner.rs`, `entity_override.rs`, `entity_tags.rs`, `map_config.rs`, `config_cache.rs` | Data-driven entity pipeline (PRD #153). |
-| `scenario.rs`, `scenario_plugin.rs`, `objectives.rs`, `comms_inbox.rs` | Scenario engine (PRD #119, in flight). Planned to merge into a unified `world/` domain — see [#218](https://github.com/jkeywo/project-phoenix-v2/issues/218). |
-| `ai.rs`, `ai_plugin.rs`, `faction.rs` | NPC state machines (PRD #142, partially landed via issues #175/#176/#177/#179). |
-| `console_ai.rs`, `console_ai_plugin.rs`, `complexity.rs`, `delegation.rs` | Server-side AI that operates hidden console controls (PRD #154) + cross-console delegation allowlist. |
+| `world/content.rs`, `objectives.rs`, `comms_inbox.rs` | Scenario engine (PRD #119). Merged into `src/world/` via #218–222. |
+| `ai.rs`, `ai_plugin.rs`, `faction.rs` | NPC state machines (PRD #142). |
+| `console_ai.rs`, `console_ai_plugin.rs`, `complexity.rs`, `delegation.rs` | Server-side AI for hidden console controls (PRD #154). |
 | `renderer.rs`, `beam_render.rs`, `viewscreen_border.rs`, `debug_overlay.rs` | Server-side Bevy rendering. |
 | `client_app.rs`, `client_lobby.rs`, `client_sim.rs`, `client_helm.rs`, `client_comms.rs`, `client_complexity.rs`, `client_elements.rs` | Client-side Bevy app + per-console state. |
-| `comms_plugin.rs`, `phone_border/` | Client-side console plugin shells + phone bezel chrome (PRD #187). |
-| `bridge.rs` (server feature) · `client_bridge.rs` (client feature) | `wasm-bindgen` exports. |
+| `comms_plugin.rs` | Client-side comms console plugin. |
+| `bridge.rs` (server) · `client_bridge.rs` (client) | `wasm-bindgen` exports. |
 
 ## Where state lives
 
@@ -82,6 +118,7 @@ Several modules are deliberately framework-free so they can be unit-tested witho
 - `lobby_handler` — `(state, message) -> LobbyHandlerResult`.
 - `radar::radar_dots` — pure iterator.
 - `codec::JsonCodec` — encode/decode round-trip.
+- `world::content` — scenario parser, trigger evaluator, comms template engine.
 
 This keeps the test pyramid wide. See [Testing Strategy](./testing-strategy.md).
 
@@ -89,3 +126,4 @@ This keeps the test pyramid wide. See [Testing Strategy](./testing-strategy.md).
 
 - [Networking](./networking.md) · [Message Flow](./message-flow.md)
 - [Build & Deployment](./build-and-deployment.md)
+- [WorldPlugin](./world-plugin.md) — first landed domain module.

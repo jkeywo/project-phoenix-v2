@@ -11,7 +11,7 @@ use {
     crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
     crate::modifier_coordination::ModifierCoordinationPlugin,
     crate::renderer::RendererPlugin,
-    crate::simulation::SimulationPlugin,
+    crate::server_app::add_simulation_plugins,
     crate::world::WorldPlugin,
     crate::stations_config::ShipStations,
     crate::viewscreen_border::ViewscreenBorderPlugin,
@@ -93,9 +93,9 @@ pub fn wasm_init() {
     .add_plugins(AsteroidLifecyclePlugin)
     .add_plugins(ModifierCoordinationPlugin)
     .add_plugins(LobbyPlugin)
-    .add_plugins(crate::lobby::lobby_outbox_broadcaster())
-    .add_plugins(SimulationPlugin)
-    .add_plugins(WorldPlugin)
+    .add_plugins(crate::lobby::lobby_outbox_broadcaster());
+    add_simulation_plugins(&mut app);
+    app.add_plugins(WorldPlugin)
     .add_plugins(RendererPlugin)
     .add_plugins(ViewscreenBorderPlugin);
 

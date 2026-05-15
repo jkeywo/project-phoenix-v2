@@ -50,7 +50,9 @@ pub use lobby::session;
 pub use ship::state as ship_state;
 pub use ship::physics as ship_physics;
 pub use lobby::handler as lobby_handler;
-pub mod simulation;
+pub mod server_app;
+// Backward-compat alias: all `crate::simulation::*` imports continue to resolve.
+pub use server_app as simulation;
 pub mod ship_plugin;
 pub mod weapons_plugin;
 pub mod repair_plugin;

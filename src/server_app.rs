@@ -137,10 +137,11 @@ pub struct TrackedEntities {
 /// `.after(sim_processing_anchor)`) drains their `SimOutbox` writes.
 pub fn sim_processing_anchor() {}
 
-pub struct SimulationPlugin;
-
-impl Plugin for SimulationPlugin {
-    fn build(&self, app: &mut App) {
+/// Compose all per-table simulation plugins onto `app`.
+///
+/// This is the canonical registration point for the server simulation.
+/// Call this from `wasm_init()` (bridge) instead of using a `SimulationPlugin`.
+pub fn add_simulation_plugins(app: &mut App) {
         app.add_plugins(RapierPhysicsPlugin::<()>::default())
             .add_plugins(crate::region_plugin::RegionPlugin)
             .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
@@ -200,14 +201,13 @@ impl Plugin for SimulationPlugin {
             .add_plugins(sim_state_broadcaster())
             .add_plugins(modifier_events_broadcaster())
             .add_plugins(sim_outbox_broadcaster());
-    }
 }
 
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.
 ///
 /// Broadcasts `SimState` at 10 Hz to all players (`Audience::All`).
-/// Registered by [`SimulationPlugin`] and the test harness in `test_app()`.
+/// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
 pub fn sim_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
         Audience::All,
@@ -286,7 +286,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 /// broadcasts each as a separate `ServerMessage` to all players (`Audience::All`).
 /// Uses `Cadence::OnEvent` so the producer is called every frame regardless of
 /// any Hz timer; an empty drain produces no outbound messages.
-/// Registered by [`SimulationPlugin`] and the test harness in `test_app()`.
+/// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
 pub fn modifier_events_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
         Audience::All,

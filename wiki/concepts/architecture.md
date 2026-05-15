@@ -75,7 +75,7 @@ While migration is in progress, modules live at their old flat paths alongside t
 | `radar.rs`, `radar_config.rs` | Pure radar projection, reused by server renderer and Helm/Weapons consoles. |
 | `session.rs`, `stations.rs` | Server identity + station assignment. |
 | `lobby.rs` (plugin) + `lobby_handler.rs` (pure) | Lobby-phase Bevy plugin + pure handler functions. |
-| `simulation.rs` | God-module Bevy plugin: helm input → physics → weapons → collision → breakdown → broadcast. Slated for split. |
+| `server_app.rs` | Composition root: `add_simulation_plugins(&mut App)` wires all per-table plugins (CaptainPlugin, ShipPlugin, WeaponsPlugin, RepairPlugin, PowerPlugin, SciencePlugin) plus core resources, broadcaster registrations, and shared systems (collision, shields, world setup, entity reconciliation). Replaces the former `simulation.rs` god-module. |
 | `ship_physics.rs`, `ship_state.rs`, `impulse.rs` | Pure physics + Bevy resource. |
 | `phaser.rs`, `torpedo.rs`, `shield.rs` | Pure weapon/defence state machines. |
 | `damage.rs`, `breakdown.rs`, `repair_teams.rs` | Pure damage formula + breakdown queue + repair dispatch. |

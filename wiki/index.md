@@ -44,7 +44,7 @@ Architecture, patterns, processes.
 - **[View-Model Pattern](./concepts/view-model-pattern.md)** — Pure derived snapshots for renderers.
 - **[Console Plugin Pattern](./concepts/console-plugin-pattern.md)** — One Bevy plugin per console.
 - **[WorldPlugin](./concepts/world-plugin.md)** — Owns world bootstrap (starfield + player ship). Landing zone for the World/Scenario merger (#218).
-- **[Broadcaster Seam](./concepts/broadcaster-seam.md)** — `SimBroadcaster` + `LobbyBroadcaster` registration API; replaces hand-written broadcast boilerplate.
+- **[Broadcaster Seam](./concepts/broadcaster-seam.md)** — `SimBroadcaster` + `LobbyBroadcaster` registration API; Audience, Cadence, producer-registration recipe, full message catalogue with file:line references, `OutboundMessage` write contract, and cross-links to PRDs #117/#118/#120/#153/#154/#180/#187.
 - **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.
 - **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
 

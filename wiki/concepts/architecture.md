@@ -122,6 +122,10 @@ Several modules are deliberately framework-free so they can be unit-tested witho
 
 This keeps the test pyramid wide. See [Testing Strategy](./testing-strategy.md).
 
+### Broadcaster seam
+
+The **broadcaster seam** (`src/core/broadcast/`) replaces hand-written broadcast systems with a `register(audience, cadence, producer)` API. Two plugins (`SimBroadcaster` for `InProgress`, `LobbyBroadcaster` for `Lobby`) gate on `GamePhase`, resolve `Audience` → `Target`, and call producers. Producers are `Fn(&mut World) -> Vec<ServerMessage>` closures that know nothing about routing or timing. See [Broadcaster Seam](./broadcaster-seam.md) for the full catalogue, recipe, and contract.
+
 ## Related
 
 - [Networking](./networking.md) · [Message Flow](./message-flow.md)

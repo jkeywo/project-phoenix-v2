@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 use crate::comms_inbox::CommsInbox;
 use crate::entity_spawner::spawn_entity;
-use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target};
+use crate::lobby::{CurrentPhase, InboundMessage, Sessions, Target};
+use crate::simulation::SimOutbox;
 use crate::messages::{
     ClientMessage, CommsContact, CommsMessage, Console, GamePhase, ObjectiveSnapshot,
     ServerMessage,
@@ -508,7 +509,7 @@ fn broadcast_comms_state(
     mut runtime: ResMut<ScenarioRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
-    mut writer: MessageWriter<OutboundMessage>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -529,14 +530,11 @@ fn broadcast_comms_state(
     let objectives_snap = objectives.0.sorted_snapshots();
     let contacts = runtime.contacts.clone();
 
-    writer.write(OutboundMessage {
-        target: Target::Token(comms_token.to_string()),
-        msg: ServerMessage::CommsState {
-            messages,
-            objectives: objectives_snap,
-            contacts,
-        },
-    });
+    outbox.0.push((Target::Token(comms_token.to_string()), ServerMessage::CommsState {
+        messages,
+        objectives: objectives_snap,
+        contacts,
+    }));
 
     inbox.0.mark_clean();
     runtime.needs_broadcast = false;
@@ -547,7 +545,7 @@ fn broadcast_objective_summary(
     phase: Res<CurrentPhase>,
     sessions: Res<Sessions>,
     mut objectives: ResMut<ObjectiveManagerRes>,
-    mut writer: MessageWriter<OutboundMessage>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -564,12 +562,9 @@ fn broadcast_objective_summary(
 
     let objectives_snap = objectives.0.sorted_snapshots();
 
-    writer.write(OutboundMessage {
-        target: Target::Token(captain_token.to_string()),
-        msg: ServerMessage::ObjectiveSummary {
-            objectives: objectives_snap,
-        },
-    });
+    outbox.0.push((Target::Token(captain_token.to_string()), ServerMessage::ObjectiveSummary {
+        objectives: objectives_snap,
+    }));
 
     objectives.0.mark_clean();
 }
@@ -715,6 +710,7 @@ position    = [100.0, 0.0, 200.0]
             .init_resource::<ScenarioRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
+            .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
             .add_systems(
                 Update,
@@ -739,7 +735,11 @@ position    = [100.0, 0.0, 200.0]
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
         app.update();
-        let msgs = app.world().resource::<Outbox>().0.clone();
+        let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
+        let mut msgs = app.world().resource::<Outbox>().0.clone();
+        for (target, msg) in sim_entries {
+            msgs.push(OutboundMessage { target, msg });
+        }
         app.world_mut().resource_mut::<Outbox>().0.clear();
         msgs
     }
@@ -1042,6 +1042,7 @@ position    = [100.0, 0.0, 200.0]
             .init_resource::<ScenarioRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
+            .init_resource::<SimOutbox>()
             .add_systems(Update, handle_ai_events);
         // Set phase to InProgress
         app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;

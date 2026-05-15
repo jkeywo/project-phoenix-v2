@@ -116,7 +116,7 @@ impl Plugin for SimBroadcaster {
     fn build(&self, app: &mut App) {
         if !app.world().contains_resource::<SimBroadcastRegistry>() {
             app.insert_resource(SimBroadcastRegistry::new());
-            app.add_systems(Update, dispatch_sim_broadcasts);
+            app.add_systems(Update, dispatch_sim_broadcasts.after(crate::simulation::sim_processing_anchor));
         }
         let mut registry = app.world_mut().resource_mut::<SimBroadcastRegistry>();
         for reg in &self.pending {

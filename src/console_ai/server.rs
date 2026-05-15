@@ -18,7 +18,8 @@ use crate::console_ai::{
     FrequencyMatchState, PowerEngageOutput, PowerMovementInput,
     PowerRedAlertInput, TorpedoAiInput, TubeSummary,
 };
-use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions};
+use crate::lobby::{CurrentPhase, InboundMessage, Sessions};
+use crate::simulation::SimOutbox;
 use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, TorpedoTube as MsgTorpedoTube};
 use crate::ship_state::ShipState;
 use crate::simulation::{LastHelmInput, ShipPowerSystem, TorpedoSystemResource, WeaponsTarget};
@@ -231,7 +232,7 @@ impl Plugin for ConsoleAiPlugin {
 /// message is observed.  We tap the outbound message stream so the AI state
 /// stays consistent with what every client was told.
 fn track_complexity_changes(
-    mut outbound: MessageReader<OutboundMessage>,
+    mut outbound: MessageReader<crate::lobby::OutboundMessage>,
     mut complexity: ResMut<ConsoleComplexityState>,
 ) {
     for msg in outbound.read() {
@@ -361,7 +362,7 @@ fn run_science_hint_ai(
     time: Res<Time>,
     delay: Res<AutoHintDelaySecs>,
     mut hint_timer: ResMut<FrequencyHintTimer>,
-    mut writer: MessageWriter<OutboundMessage>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -392,10 +393,7 @@ fn run_science_hint_ai(
     use crate::lobby::Target;
 
     if let FrequencyHintOutput::Hint { frequency } = tick_frequency_hint(&mut hint_timer.0, &input) {
-        writer.write(OutboundMessage {
-            target: Target::Token(tactical_token.to_string()),
-            msg: ServerMessage::FrequencyHint { frequency },
-        });
+        outbox.0.push((Target::Token(tactical_token.to_string()), ServerMessage::FrequencyHint { frequency }));
     }
 }
 
@@ -676,6 +674,7 @@ mod tests {
             .init_resource::<PowerMultiplierResource>()
             .init_resource::<TrackedEntities>()
             .init_resource::<LastHelmInput>()
+            .init_resource::<SimOutbox>()
             .init_resource::<Inbox>()
             .init_resource::<Outbox>()
             // Collect inbound messages AFTER the AI plugin generates them
@@ -699,8 +698,12 @@ mod tests {
 
     fn tick(app: &mut App) -> (Vec<InboundMessage>, Vec<OutboundMessage>) {
         app.update();
+        let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
         let inbound = app.world().resource::<Inbox>().0.clone();
-        let outbound = app.world().resource::<Outbox>().0.clone();
+        let mut outbound = app.world().resource::<Outbox>().0.clone();
+        for (target, msg) in sim_entries {
+            outbound.push(OutboundMessage { target, msg });
+        }
         app.world_mut().resource_mut::<Inbox>().0.clear();
         app.world_mut().resource_mut::<Outbox>().0.clear();
         (inbound, outbound)

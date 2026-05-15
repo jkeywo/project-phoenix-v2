@@ -13,7 +13,8 @@ use std::collections::HashMap;
 use crate::asteroid_spawner::eval_cell;
 use crate::asteroid_window::{compute_player_grid_cell, compute_slot_for_world_cell, eval_on_player_move};
 use crate::entity_spawner::AsteroidFieldSection;
-use crate::lobby::{OutboundMessage, Target};
+use crate::lobby::Target;
+use crate::simulation::SimOutbox;
 use crate::messages::ServerMessage;
 use crate::ship_state::ShipState;
 
@@ -85,8 +86,8 @@ pub fn check_destroyed_asteroids(
     mut commands: Commands,
     mut window: ResMut<AsteroidWindow>,
     mut entity_map: ResMut<AsteroidEntityMap>,
-    mut writer: MessageWriter<OutboundMessage>,
     asteroid_query: Query<(Entity, &Transform, &AsteroidUuid, &AsteroidDamage)>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     for (entity, transform, uuid, damage) in asteroid_query.iter() {
         if damage.current_hp > 0 {
@@ -112,10 +113,7 @@ pub fn check_destroyed_asteroids(
         }
         entity_map.0.remove(&uuid.0);
 
-        writer.write(OutboundMessage {
-            target: Target::All,
-            msg: ServerMessage::AsteroidDestroyed { uuid: uuid.0.clone() },
-        });
+        outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: uuid.0.clone() }));
         commands.entity(entity).despawn();
     }
 }
@@ -132,7 +130,7 @@ pub fn update_asteroid_window(
     mut window: ResMut<AsteroidWindow>,
     mut player_grid: ResMut<PlayerGridPosition>,
     mut entity_map: ResMut<AsteroidEntityMap>,
-    mut writer: MessageWriter<OutboundMessage>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     let (field_idx, field) = match fields.iter().enumerate().find(|(_, f)| f.0.grid.is_some()) {
         Some((idx, f)) => (idx, f.0.clone()),
@@ -156,7 +154,7 @@ pub fn update_asteroid_window(
 
     if needs_init || delta.full_rebuild {
         full_rebuild(
-            &mut commands, &mut window, &mut entity_map, &mut writer,
+            &mut commands, &mut window, &mut entity_map, &mut outbox,
             gx, gz, field_idx, &grid, field.inner_radius, field.outer_radius,
             &field.asteroid_type_paths,
         );
@@ -177,7 +175,7 @@ pub fn update_asteroid_window(
                 window.arena_gx, window.arena_gz, *cell_gx, *cell_gz, window.despawn_cells,
             ) {
                 try_spawn_cell(
-                    &mut commands, &mut window, &mut entity_map, &mut writer,
+                    &mut commands, &mut window, &mut entity_map, &mut outbox,
                     *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
                     field.inner_radius, field.outer_radius, &field.asteroid_type_paths,
                 );
@@ -196,7 +194,7 @@ fn full_rebuild(
     commands: &mut Commands,
     window: &mut AsteroidWindow,
     entity_map: &mut AsteroidEntityMap,
-    writer: &mut MessageWriter<OutboundMessage>,
+    outbox: &mut ResMut<SimOutbox>,
     gx: i32, gz: i32,
     field_idx: usize,
     grid: &crate::map_config::GridConfig,
@@ -224,7 +222,7 @@ fn full_rebuild(
                 gx, gz, cx, cz, window.despawn_cells,
             ) {
                 try_spawn_cell(
-                    commands, window, entity_map, writer,
+                    commands, window, entity_map, outbox,
                     cx, cz, sx, sz, field_idx, grid,
                     inner_radius, outer_radius, gameplay_type_paths,
                 );
@@ -240,7 +238,7 @@ fn try_spawn_cell(
     commands: &mut Commands,
     window: &mut AsteroidWindow,
     entity_map: &mut AsteroidEntityMap,
-    writer: &mut MessageWriter<OutboundMessage>,
+    outbox: &mut ResMut<SimOutbox>,
     cell_gx: i32, cell_gz: i32,
     slot_x: usize, slot_z: usize,
     field_idx: usize,
@@ -291,18 +289,15 @@ fn try_spawn_cell(
     });
     entity_map.0.insert(uuid.clone(), entity);
 
-    writer.write(OutboundMessage {
-        target: Target::All,
-        msg: ServerMessage::AsteroidSpawned {
-            uuid,
-            x: spawn.x,
-            y: spawn.y,
-            z: spawn.z,
-            config_path: spawn.config_path,
-            max_hp,
-            current_hp,
-        },
-    });
+    outbox.0.push((Target::All, ServerMessage::AsteroidSpawned {
+        uuid,
+        x: spawn.x,
+        y: spawn.y,
+        z: spawn.z,
+        config_path: spawn.config_path,
+        max_hp,
+        current_hp,
+    }));
 }
 
 /// Clear a single window slot: remove data and despawn the associated entity.
@@ -345,12 +340,14 @@ mod tests {
     use super::*;
     use crate::entity_spawner::AsteroidFieldSection;
     use crate::lobby::OutboundMessage;
+    use crate::simulation::SimOutbox;
     use crate::map_config::{AsteroidFieldConfig, GridConfig};
 
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
         app.add_message::<OutboundMessage>();
+        app.init_resource::<SimOutbox>();
         app.init_resource::<AsteroidWindow>();
         app.init_resource::<PlayerGridPosition>();
         app.init_resource::<AsteroidEntityMap>();

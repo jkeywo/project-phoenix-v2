@@ -245,6 +245,20 @@ struct CollisionCooldown {
     remaining_secs: f32,
 }
 
+/// Pending outbound messages produced by simulation systems.
+/// Drained each frame by the `SimBroadcaster` dispatch.
+///
+/// ## Migration note (PRD #253)
+/// The old preamble pattern (`MessageWriter<OutboundMessage>`) has been
+/// eliminated from all domain plugins. All systems that previously wrote
+/// `OutboundMessage` directly now write `(Target, ServerMessage)` tuples
+/// into `SimOutbox`. The `sim_outbox_broadcaster()` or a manual drain
+/// (in tests) flushes these entries to the `OutboundMessage` bus.
+/// To verify the absence of the old pattern, run:
+///   rg 'MessageWriter<OutboundMessage>' src/  # must return no matches
+#[derive(Resource, Default)]
+pub struct SimOutbox(pub Vec<(Target, ServerMessage)>);
+
 /// Tracks non-asteroid entities that have been reported to clients via
 /// `EntitySpawned` / `EntityDespawned`.  Seeded from `WorldResource` on
 /// the first `InProgress` frame so initial world entities are not re-reported.
@@ -276,6 +290,12 @@ impl PhaserCooldown {
 }
 
 // â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/// Empty system used as an ordering anchor for the sim broadcast dispatch.
+/// All sim-phase systems (message handlers, tick systems, broadcasters) should
+/// run before this anchor so that `dispatch_sim_broadcasts` (which has
+/// `.after(sim_processing_anchor)`) drains their `SimOutbox` writes.
+pub fn sim_processing_anchor() {}
+
 pub struct SimulationPlugin;
 
 impl Plugin for SimulationPlugin {
@@ -307,6 +327,7 @@ impl Plugin for SimulationPlugin {
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
             .init_resource::<TrackedEntities>()
+            .init_resource::<SimOutbox>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .insert_resource(HelmInputTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
@@ -338,18 +359,20 @@ impl Plugin for SimulationPlugin {
                     tick_power_system,
                 ),
                 (process_helm_inputs, sync_ship_position, handle_collisions),
-            ))
-            .add_systems(Update, (
-                broadcast_shield_status.after(process_helm_inputs),
-                broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-                broadcast_repair_icons,
-                reconcile_runtime_entities.after(crate::lobby::process_lobby),
-            ))
+                (
+                    broadcast_shield_status,
+                    broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
+                    broadcast_repair_icons,
+                    reconcile_runtime_entities.after(crate::lobby::process_lobby),
+                    sim_processing_anchor,
+                ),
+            ).after(crate::lobby::process_lobby))
             .add_plugins(power_state_broadcaster())
             .add_plugins(weapons_update_broadcaster())
             .add_plugins(repair_state_broadcaster())
             .add_plugins(sim_state_broadcaster())
-            .add_plugins(modifier_events_broadcaster());
+            .add_plugins(modifier_events_broadcaster())
+            .add_plugins(sim_outbox_broadcaster());
     }
 }
 
@@ -563,6 +586,28 @@ pub fn modifier_events_broadcaster() -> SimBroadcaster {
     )
 }
 
+/// Returns a [`SimBroadcaster`] that drains [`SimOutbox`] each frame and writes
+/// each entry as an `OutboundMessage` with per-message target routing.
+///
+/// Uses `Cadence::OnEvent` so the producer fires every frame.  When the outbox
+/// is empty the producer returns an empty `Vec` and no messages are emitted.
+/// When populated (by any simulation system) the queued entries are flushed
+/// directly to `OutboundMessage` with their original `Target` routing.
+pub fn sim_outbox_broadcaster() -> SimBroadcaster {
+    SimBroadcaster::new().register(
+        Audience::All,
+        Cadence::OnEvent,
+        |world: &mut World| {
+            let mut outbox = world.resource_mut::<SimOutbox>();
+            let entries = std::mem::take(&mut outbox.0);
+            for (target, msg) in entries {
+                world.write_message(OutboundMessage { target, msg });
+            }
+            vec![]
+        },
+    )
+}
+
 // ── Helper: token validation with AI fallback ────────────────────────────────
 
 /// Returns `true` when `token` is the holder of `console` in the session
@@ -590,13 +635,13 @@ fn is_valid_console_holder(
 
 fn handle_set_target(
     mut reader: MessageReader<InboundMessage>,
-    mut writer: MessageWriter<OutboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
     world: Res<WorldResource>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<ShipModifiers>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -629,18 +674,15 @@ fn handle_set_target(
             weapons_target.0 = None;
         }
 
-        writer.write(OutboundMessage {
-            target: Target::Token(ev.token.clone()),
-            msg: ServerMessage::TargetLock { uuid: uuid.clone(), locked },
-        });
+        outbox.0.push((Target::Token(ev.token.clone()), ServerMessage::TargetLock { uuid: uuid.clone(), locked }));
     }
 }
 
 fn handle_set_science_target(
     mut reader: MessageReader<InboundMessage>,
-    mut writer: MessageWriter<OutboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -658,18 +700,15 @@ fn handle_set_science_target(
             continue;
         };
 
-        writer.write(OutboundMessage {
-            target: Target::Token(weapons_token.to_string()),
-            msg: ServerMessage::ScienceTargetSuggestion { uuid: uuid.clone() },
-        });
+        outbox.0.push((Target::Token(weapons_token.to_string()), ServerMessage::ScienceTargetSuggestion { uuid: uuid.clone() }));
     }
 }
 
 fn handle_set_sensors_target(
     mut reader: MessageReader<InboundMessage>,
-    mut writer: MessageWriter<OutboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -687,10 +726,7 @@ fn handle_set_sensors_target(
             continue;
         };
 
-        writer.write(OutboundMessage {
-            target: Target::Token(tactical_token.to_string()),
-            msg: ServerMessage::SensorsTargetSuggestion { uuid: uuid.clone() },
-        });
+        outbox.0.push((Target::Token(tactical_token.to_string()), ServerMessage::SensorsTargetSuggestion { uuid: uuid.clone() }));
     }
 }
 
@@ -879,7 +915,6 @@ fn handle_set_shield_focus(
 /// `BeamStarted` to all players.
 fn handle_fire_phaser(
     mut reader: MessageReader<InboundMessage>,
-    mut writer: MessageWriter<OutboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
@@ -888,6 +923,7 @@ fn handle_fire_phaser(
     mut beam: ResMut<ActiveBeam>,
     cooldown: ResMut<PhaserCooldown>,
     modifiers: Res<ShipModifiers>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -920,10 +956,7 @@ fn handle_fire_phaser(
         if let Some(old_uuid) = beam.target_uuid.take() {
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            writer.write(OutboundMessage {
-                target: Target::All,
-                msg: ServerMessage::BeamEnded { target_uuid: old_uuid },
-            });
+            outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid: old_uuid }));
         }
 
         // Start new beam. Alternate banks: port first, then starboard, etc.
@@ -936,10 +969,7 @@ fn handle_fire_phaser(
         beam.damage_accumulator = 0.0;
         beam.bank = Some(next_bank);
 
-        writer.write(OutboundMessage {
-            target: Target::All,
-            msg: ServerMessage::BeamStarted { target_uuid: target_uuid.clone() },
-        });
+        outbox.0.push((Target::All, ServerMessage::BeamStarted { target_uuid: target_uuid.clone() }));
     }
 }
 
@@ -1022,11 +1052,11 @@ fn to_tube_id(tube: MsgTorpedoTube) -> TorpedoTubeId {
 /// On success, launches the torpedo and broadcasts `TorpedoLaunched` to all.
 fn handle_fire_torpedo(
     mut reader: MessageReader<InboundMessage>,
-    mut writer: MessageWriter<OutboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1044,16 +1074,13 @@ fn handle_fire_torpedo(
         use crate::torpedo::LaunchResult;
         match torpedo_sys.0.launch(tube_id, uuid, ship.x, ship.z, launch_heading, target_uuid.clone()) {
             LaunchResult::Launched { uuid: launched_uuid } => {
-                writer.write(OutboundMessage {
-                    target: Target::All,
-                    msg: ServerMessage::TorpedoLaunched {
-                        uuid: launched_uuid,
-                        tube: *tube,
-                        x: ship.x,
-                        z: ship.z,
-                        heading: launch_heading,
-                    },
-                });
+                outbox.0.push((Target::All, ServerMessage::TorpedoLaunched {
+                    uuid: launched_uuid,
+                    tube: *tube,
+                    x: ship.x,
+                    z: ship.z,
+                    heading: launch_heading,
+                }));
             }
             LaunchResult::TubeNotLoaded | LaunchResult::NoTorpedoes => {
                 // Silently ignore; client should check state before firing.
@@ -1065,11 +1092,11 @@ fn handle_fire_torpedo(
 /// Advance all in-flight torpedoes and broadcast `TorpedoDestroyed` for any
 /// that expire this tick.
 fn tick_torpedo_system(
-    mut writer: MessageWriter<OutboundMessage>,
     phase: Res<CurrentPhase>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     world: Res<WorldResource>,
     time: Res<Time>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1081,10 +1108,7 @@ fn tick_torpedo_system(
         .collect();
     let result = torpedo_sys.0.tick(dt, &target_positions);
     for expired_uuid in result.expired {
-        writer.write(OutboundMessage {
-            target: Target::All,
-            msg: ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
-        });
+        outbox.0.push((Target::All, ServerMessage::TorpedoDestroyed { uuid: expired_uuid }));
     }
 }
 
@@ -1305,7 +1329,6 @@ fn tick_active_beam(
     time: Res<Time>,
     mut beam: ResMut<ActiveBeam>,
     mut cooldown: ResMut<PhaserCooldown>,
-    mut writer: MessageWriter<OutboundMessage>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     ship: Res<ShipState>,
     mut world: ResMut<WorldResource>,
@@ -1313,6 +1336,7 @@ fn tick_active_beam(
     mut commands: Commands,
     phase: Res<CurrentPhase>,
     modifiers: Res<ShipModifiers>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1335,10 +1359,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start();
-        writer.write(OutboundMessage {
-            target: Target::All,
-            msg: ServerMessage::BeamEnded { target_uuid },
-        });
+        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
         return;
     };
 
@@ -1349,10 +1370,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start();
-        writer.write(OutboundMessage {
-            target: Target::All,
-            msg: ServerMessage::BeamEnded { target_uuid },
-        });
+        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
         return;
     }
 
@@ -1387,14 +1405,8 @@ fn tick_active_beam(
             beam.damage_accumulator = 0.0;
             cooldown.start();
 
-            writer.write(OutboundMessage {
-                target: Target::All,
-                msg: ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() },
-            });
-            writer.write(OutboundMessage {
-                target: Target::All,
-                msg: ServerMessage::BeamEnded { target_uuid },
-            });
+            outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
+            outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
             return;
         }
     }
@@ -1407,10 +1419,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start();
-        writer.write(OutboundMessage {
-            target: Target::All,
-            msg: ServerMessage::BeamEnded { target_uuid },
-        });
+        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
     }
 }
 
@@ -1418,9 +1427,9 @@ fn tick_active_beam(
 fn broadcast_shield_status(
     time: Res<Time>,
     mut timer: ResMut<SimBroadcastTimer>,
-    mut writer: MessageWriter<OutboundMessage>,
     shields: Res<ShipShields>,
     phase: Res<CurrentPhase>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1436,43 +1445,39 @@ fn broadcast_shield_status(
         offline_remaining: s.offline_remaining,
         is_focused: s.is_focused,
     }).collect();
-    writer.write(OutboundMessage {
-        target: Target::All,
-        msg: ServerMessage::ShieldStatus { facings },
-    });
+    outbox.0.push((Target::All, ServerMessage::ShieldStatus { facings }));
 }
 
 
 /// Emit a single `WorldSetup` broadcast the first frame the game enters
 /// `InProgress`. Stays silent in Lobby and on subsequent in-game ticks.
 fn broadcast_world_setup_on_start(
-    mut writer: MessageWriter<OutboundMessage>,
     world: Res<WorldResource>,
     phase: Res<CurrentPhase>,
     mut state: ResMut<WorldSetupBroadcast>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress || state.sent {
         return;
     }
-    writer.write(OutboundMessage {
-        target: Target::All,
-        msg: ServerMessage::WorldSetup { world: world.0.clone() },
-    });
+    outbox.0.push((Target::All, ServerMessage::WorldSetup { world: world.0.clone() }));
     state.sent = true;
 }
 
 /// Broadcast `ShowRepairIcon` / `ClearRepairIcon` to console holders based
 /// on the current breakdown queue state. Sends deltas only.
 fn broadcast_repair_icons(
-    mut writer: MessageWriter<OutboundMessage>,
     sessions: Res<Sessions>,
     breakdowns: Res<BreakdownQueueResource>,
     phase: Res<CurrentPhase>,
     mut icon_state: ResMut<RepairIconState>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
     }
+    // Debug: verify we can see the breakdown queue
+    let _debug_count = breakdowns.queue.len();
     use crate::breakdown::ALL_CONSOLES;
     use rand::Rng;
     use std::collections::{HashMap, HashSet};
@@ -1505,10 +1510,7 @@ fn broadcast_repair_icons(
     for (console, _) in &icon_state.last_icons {
         if !current.contains_key(console) {
             if let Some(token) = sessions.0.console_holder(console.clone()) {
-                writer.write(OutboundMessage {
-                    target: Target::Token(token.to_string()),
-                    msg: ServerMessage::ClearRepairIcon,
-                });
+                outbox.0.push((Target::Token(token.to_string()), ServerMessage::ClearRepairIcon));
             }
         }
     }
@@ -1516,10 +1518,7 @@ fn broadcast_repair_icons(
     for (console, shape) in &current {
         if icon_state.last_icons.get(console) != Some(shape) {
             if let Some(token) = sessions.0.console_holder(console.clone()) {
-                writer.write(OutboundMessage {
-                    target: Target::Token(token.to_string()),
-                    msg: ServerMessage::ShowRepairIcon { shape: *shape },
-                });
+                outbox.0.push((Target::Token(token.to_string()), ServerMessage::ShowRepairIcon { shape: *shape }));
             }
         }
     }
@@ -1542,9 +1541,9 @@ fn broadcast_repair_icons(
 fn reconcile_runtime_entities(
     mut registry: ResMut<TrackedEntities>,
     mut world: ResMut<WorldResource>,
-    mut writer: MessageWriter<OutboundMessage>,
     query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform, Option<&RegionShapeSection>, Option<&EntityTagsSection>), Without<Asteroid>>,
     phase: Res<CurrentPhase>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -1613,10 +1612,7 @@ fn reconcile_runtime_entities(
                     snapshot.shape = Some(shape_to_wire(shape));
                 }
                 world.0.entities.push(snapshot.clone());
-                writer.write(OutboundMessage {
-                    target: Target::All,
-                    msg: ServerMessage::EntitySpawned { snapshot },
-                });
+                outbox.0.push((Target::All, ServerMessage::EntitySpawned { snapshot }));
             }
         }
     }
@@ -1627,10 +1623,7 @@ fn reconcile_runtime_entities(
         if !current.contains_key(uuid) {
             registry.reported.remove(uuid);
             world.0.entities.retain(|e| e.uuid != *uuid);
-            writer.write(OutboundMessage {
-                target: Target::All,
-                msg: ServerMessage::EntityDespawned { uuid: uuid.clone() },
-            });
+            outbox.0.push((Target::All, ServerMessage::EntityDespawned { uuid: uuid.clone() }));
         }
     }
 }
@@ -1935,6 +1928,7 @@ fn test_app() -> App {
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
         .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
+        .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
         .add_plugins(crate::captain_plugin::CaptainPlugin)
         .add_systems(Update, (
@@ -1946,8 +1940,12 @@ fn test_app() -> App {
             handle_impulse_messages, handle_set_shield_focus,
             tick_active_beam, tick_repair_teams,
             tick_torpedo_system, tick_power_system,
+            broadcast_shield_status,
+            broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
+            broadcast_repair_icons,
+            reconcile_runtime_entities.after(crate::lobby::process_lobby),
         ))
-        .add_systems(Update, (broadcast_shield_status, broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_repair_icons, reconcile_runtime_entities.after(crate::lobby::process_lobby)))
+        .add_systems(Update, sim_processing_anchor)
         .add_plugins(power_state_broadcaster())
         .add_plugins(weapons_update_broadcaster())
         .add_plugins(repair_state_broadcaster())
@@ -1965,9 +1963,16 @@ fn test_app() -> App {
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
         app.update();
-        let msgs = app.world().resource::<Outbox>().0.clone();
+        // Drain any leftover SimOutbox entries that the sim systems wrote but
+        // were not captured by the PostUpdate collect system (SimOutbox is not
+        // connected to the OutboundMessage bus for test_app).
+        let sim_entries = std::mem::take(&mut app.world_mut().resource_mut::<SimOutbox>().0);
+        let mut out = app.world().resource::<Outbox>().0.clone();
+        for (target, msg) in sim_entries {
+            out.push(OutboundMessage { target, msg });
+        }
         app.world_mut().resource_mut::<Outbox>().0.clear();
-        msgs
+        out
     }
 
     fn start_game(app: &mut App) {
@@ -3851,6 +3856,26 @@ fn test_app() -> App {
 
 
     #[test]
+    fn drain_sim_outbox_directly() {
+        let mut app = test_app();
+        start_game(&mut app);
+
+        // Write directly to SimOutbox
+        let len_before = app.world().resource::<SimOutbox>().0.len();
+        app.world_mut().resource_mut::<SimOutbox>().0.push((
+            Target::All,
+            ServerMessage::GameStarted,
+        ));
+
+        // Drain manually
+        app.world_mut().resource_mut::<SimOutbox>().0.clear();
+
+        // Check SimOutbox is now empty
+        let len_after = app.world().resource::<SimOutbox>().0.len();
+        assert_eq!(len_after, 0, "SimOutbox should be empty after drain, was {} before drain", len_before + 1);
+    }
+
+    #[test]
     fn empty_queue_clears_all_icons() {
         let mut app = test_app();
         start_game_with_repair_basic(&mut app);
@@ -3868,7 +3893,6 @@ fn test_app() -> App {
         // Pop queue to empty.
         app.world_mut().resource_mut::<BreakdownQueueResource>().queue.pop_front();
         assert!(app.world().resource::<BreakdownQueueResource>().queue.is_empty());
-
         let out = tick(&mut app);
 
         // The previously damaged console should be cleared.

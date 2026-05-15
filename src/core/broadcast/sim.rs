@@ -110,7 +110,12 @@ impl SimBroadcaster {
 
 impl Plugin for SimBroadcaster {
     fn build(&self, app: &mut App) {
-        let mut registry = SimBroadcastRegistry::new();
+        let first_registration = !app.world().contains_resource::<SimBroadcastRegistry>();
+        if first_registration {
+            app.insert_resource(SimBroadcastRegistry::new());
+            app.add_systems(Update, dispatch_sim_broadcasts);
+        }
+        let mut registry = app.world_mut().resource_mut::<SimBroadcastRegistry>();
         for reg in &self.pending {
             registry.add(SimRegistration {
                 audience: reg.audience.clone(),
@@ -118,8 +123,6 @@ impl Plugin for SimBroadcaster {
                 producer: reg.producer.clone(),
             });
         }
-        app.insert_resource(registry)
-            .add_systems(Update, dispatch_sim_broadcasts);
     }
 }
 

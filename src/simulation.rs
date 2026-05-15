@@ -1,18 +1,15 @@
 ﻿use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::breakdown::BreakdownQueue;
 #[cfg(test)]
-use crate::breakdown::breakdowns_from_damage;
+use crate::breakdown::{BreakdownQueue, breakdowns_from_damage};
 use crate::damage::{HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::repair_teams::RepairTeams;
 use crate::shield::ShieldSystem;
 use crate::map_config::MapConfig;
-use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::messages::{
-    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewDirection,
+    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, ViewDirection,
 };
 use crate::ship_physics::ShipPhysicsConfig;
 use crate::ship_state::ShipState;
@@ -31,6 +28,11 @@ pub use crate::weapons_plugin::{
     WeaponsTarget, ActiveBeam, PhaserCooldown, CurrentPhaserMode,
     PhaserRenderConfig, TorpedoSystemResource, AsteroidDestroyedVfx,
     weapons_update_broadcaster,
+};
+
+pub use crate::repair_plugin::{
+    ShipRepairTeams, RepairIconState, BreakdownQueueResource,
+    repair_state_broadcaster, REPAIR_TEAM_HP,
 };
 
 // â”€â”€ Marker Components â”€â”€â”€â”€â”€â”€â”€â”€
@@ -81,33 +83,6 @@ struct WorldSetupBroadcast {
 
 
 
-// â”€â”€ Repair constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-/// HP restored per completed repair team.
-const REPAIR_TEAM_HP: f32 = 10.0;
-
-/// Bevy resource wrapping the pure `RepairTeams` state machine.
-#[derive(Resource)]
-pub struct ShipRepairTeams(pub RepairTeams);
-
-/// Tracks the last-broadcast repair-icon state so the `broadcast_repair_icons`
-/// system can send deltas (ClearRepairIcon for stale icons, ShowRepairIcon for
-/// new/changed ones).
-#[derive(Resource)]
-pub struct RepairIconState {
-    /// Map from console to the last shape sent to its holder.
-    pub last_icons: std::collections::HashMap<Console, Shape>,
-    pub(crate) rng: rand::rngs::SmallRng,
-}
-
-impl Default for RepairIconState {
-    fn default() -> Self {
-        use rand::SeedableRng;
-        Self {
-            last_icons: std::collections::HashMap::new(),
-            rng: rand::rngs::SmallRng::from_os_rng(),
-        }
-    }
-}
 
 /// Wraps the pure-Rust power system so it can be used as a Bevy resource.
 #[derive(Resource)]
@@ -144,25 +119,6 @@ impl Default for PowerConfigResource {
     }
 }
 
-/// Bevy resource wrapping the breakdown queue.
-#[derive(Resource)]
-pub struct BreakdownQueueResource {
-    pub queue: BreakdownQueue,
-    /// Cumulative damage taken since game start (tracks 10-HP bucket crossings).
-    pub cumulative_damage: f32,
-    pub(crate) rng: rand::rngs::SmallRng,
-}
-
-impl Default for BreakdownQueueResource {
-    fn default() -> Self {
-        use rand::SeedableRng as _;
-        Self {
-            queue: BreakdownQueue::new(),
-            cumulative_damage: 0.0,
-            rng: rand::rngs::SmallRng::from_os_rng(),
-        }
-    }
-}
 
 /// Prevents `handle_collisions` from applying damage every frame while the
 /// ship is in contact. After damage is applied once, a 1-second cooldown
@@ -222,6 +178,7 @@ impl Plugin for SimulationPlugin {
             .add_plugins(crate::captain_plugin::CaptainPlugin)
             .add_plugins(crate::ship_plugin::ShipPlugin)
             .add_plugins(crate::weapons_plugin::WeaponsPlugin)
+            .add_plugins(crate::repair_plugin::RepairPlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
@@ -229,10 +186,7 @@ impl Plugin for SimulationPlugin {
             .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
-            .insert_resource(ShipRepairTeams(RepairTeams::new()))
-            .init_resource::<BreakdownQueueResource>()
             .init_resource::<CollisionCooldown>()
-            .init_resource::<RepairIconState>()
             .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
@@ -250,12 +204,10 @@ impl Plugin for SimulationPlugin {
                     handle_set_sensors_target,
                 ),
                 (
-                    handle_repair,
                     handle_power_messages,
                     handle_set_shield_focus,
                 ),
                 (
-                    tick_repair_teams,
                     tick_shields,
                     tick_power_system,
                     handle_collisions,
@@ -263,7 +215,6 @@ impl Plugin for SimulationPlugin {
                 (
                     broadcast_shield_status,
                     broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-                    broadcast_repair_icons,
                     reconcile_runtime_entities.after(crate::lobby::process_lobby),
                     sim_processing_anchor,
                 ),
@@ -281,7 +232,6 @@ impl Plugin for SimulationPlugin {
             ).chain().after(crate::region_plugin::update_region_membership))
             .add_plugins(power_state_broadcaster())
             .add_plugins(weapons_update_broadcaster())
-            .add_plugins(repair_state_broadcaster())
             .add_plugins(sim_state_broadcaster())
             .add_plugins(modifier_events_broadcaster())
             .add_plugins(sim_outbox_broadcaster());
@@ -305,41 +255,6 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
                 sensors: power.0.sensors,
                 battery_charge: power.0.battery_charge,
                 locked: power.0.locked,
-            }]
-        },
-    )
-}
-
-/// Returns a [`SimBroadcaster`] pre-configured with the `RepairState` producer.
-///
-/// Broadcasts `RepairState` at 10 Hz to the `Repair` console holder only.
-/// Registered by [`SimulationPlugin`] and the test harness in `test_app()`.
-pub fn repair_state_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
-        Audience::Holding(Console::Repair),
-        Cadence::Hz(10.0),
-        |world: &mut World| {
-            use crate::messages::TeamSlot;
-            let teams = world.resource::<ShipRepairTeams>();
-            let breakdowns = world.resource::<BreakdownQueueResource>();
-
-            let slots = teams.0.slots();
-            let in_progress = slots.iter().any(|s| matches!(s, TeamSlot::Repairing { .. }));
-            let penalty = slots.iter().any(|s| matches!(s, TeamSlot::Cooldown { .. }));
-            let remaining_cooldown_secs = slots.iter().map(|s| match s {
-                TeamSlot::Repairing { progress } => (1.0 - progress) * 30.0,
-                TeamSlot::Cooldown { progress } => progress * 10.0,
-                TeamSlot::Idle => 0.0,
-            }).fold(0.0_f32, f32::max);
-
-            let current_breakdown = breakdowns.queue.front().map(|entry| (entry.console.clone(), entry.shape));
-
-            vec![ServerMessage::RepairState {
-                remaining_cooldown_secs,
-                in_progress,
-                penalty,
-                teams: *slots,
-                current_breakdown,
             }]
         },
     )
@@ -652,55 +567,6 @@ fn handle_set_shield_focus(
     }
 }
 
-/// Handle `Repair { shape }` messages from the Repair console.
-///
-/// Validates: game is in-progress, sender holds `Console::Repair`.
-/// - If no free team exists: message ignored.
-/// - If queue head shape matches pressed shape: lowest-numbered free team
-///   dispatched, breakdown popped from queue.
-/// - If queue head shape does not match (or queue empty): lowest-numbered
-///   free team penalised.
-fn handle_repair(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-    mut breakdowns: ResMut<BreakdownQueueResource>,
-    mut teams: ResMut<ShipRepairTeams>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        let pressed_shape = match &ev.msg {
-            ClientMessage::Repair { shape } => *shape,
-            _ => continue,
-        };
-        // Only the Repair console holder may send shape-matching presses.
-        let Some(repair_token) = sessions.0.console_holder(Console::Repair) else {
-            continue;
-        };
-        if ev.token.as_str() != repair_token {
-            continue;
-        }
-        // Must have a free team to act.
-        let Some(team_idx) = teams.0.lowest_free_team() else {
-            continue;
-        };
-        // Check queue front shape (or empty queue).
-        match breakdowns.queue.front() {
-            Some(entry) if entry.shape == pressed_shape => {
-                // Correct shape: dispatch team and pop breakdown.
-                teams.0.dispatch(team_idx);
-                breakdowns.queue.pop_front();
-            }
-            _ => {
-                // Wrong shape or queue empty: penalise the free team.
-                teams.0.penalise(team_idx);
-            }
-        }
-    }
-}
-
 /// Handle `IncreasePower` and `DecreasePower` messages from the Power console.
 ///
 /// Validates: game is in-progress, sender holds `Console::Power`.
@@ -747,30 +613,6 @@ fn tick_power_system(
     power.0.tick(dt, &config.0);
 }
 
-/// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/navigation.
-/// Also cancels impulse whenever the hull takes damage this frame.
-/// `StartImpulseCharge` is ignored when the ship is inside a `BlocksImpulse` region.
-/// Tick repair teams each frame: advance progress, apply HP for completed
-/// repairs.
-fn tick_repair_teams(
-    time: Res<Time>,
-    mut teams: ResMut<ShipRepairTeams>,
-    mut hull: ResMut<ShipHullIntegrity>,
-    phase: Res<CurrentPhase>,
-    modifiers: Res<ShipModifiers>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    let dt = time.delta_secs();
-    let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
-    let completed = teams.0.tick(dt * repair_mult);
-    for _team_idx in completed {
-        hull.0.restore(REPAIR_TEAM_HP);
-    }
-}
-
-
 /// Broadcast `ShieldStatus` to all players at 10 Hz.
 fn broadcast_shield_status(
     time: Res<Time>,
@@ -810,68 +652,6 @@ fn broadcast_world_setup_on_start(
     }
     outbox.0.push((Target::All, ServerMessage::WorldSetup { world: world.0.clone() }));
     state.sent = true;
-}
-
-/// Broadcast `ShowRepairIcon` / `ClearRepairIcon` to console holders based
-/// on the current breakdown queue state. Sends deltas only.
-fn broadcast_repair_icons(
-    sessions: Res<Sessions>,
-    breakdowns: Res<BreakdownQueueResource>,
-    phase: Res<CurrentPhase>,
-    mut icon_state: ResMut<RepairIconState>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    // Debug: verify we can see the breakdown queue
-    let _debug_count = breakdowns.queue.len();
-    use crate::breakdown::ALL_CONSOLES;
-    use rand::Rng;
-    use std::collections::{HashMap, HashSet};
-
-    let mut current: HashMap<Console, Shape> = HashMap::new();
-    let mut damaged: HashSet<Console> = HashSet::new();
-
-    for entry in breakdowns.queue.entries() {
-        damaged.insert(entry.console.clone());
-        current.insert(entry.console.clone(), entry.shape);
-    }
-
-    if !breakdowns.queue.is_empty() {
-        let undamaged: Vec<&Console> = ALL_CONSOLES
-            .iter()
-            .filter(|c| !damaged.contains(c))
-            .collect();
-        if !undamaged.is_empty() {
-            let idx = icon_state.rng.random_range(0..undamaged.len());
-            let decoy = undamaged[idx].clone();
-            let shape = match icon_state.rng.random_range(0..3) {
-                0 => Shape::Square,
-                1 => Shape::Triangle,
-                _ => Shape::Circle,
-            };
-            current.insert(decoy, shape);
-        }
-    }
-
-    for (console, _) in &icon_state.last_icons {
-        if !current.contains_key(console) {
-            if let Some(token) = sessions.0.console_holder(console.clone()) {
-                outbox.0.push((Target::Token(token.to_string()), ServerMessage::ClearRepairIcon));
-            }
-        }
-    }
-
-    for (console, shape) in &current {
-        if icon_state.last_icons.get(console) != Some(shape) {
-            if let Some(token) = sessions.0.console_holder(console.clone()) {
-                outbox.0.push((Target::Token(token.to_string()), ServerMessage::ShowRepairIcon { shape: *shape }));
-            }
-        }
-    }
-
-    icon_state.last_icons = current;
 }
 
 /// Reconciles the live ECS entities with the `TrackedEntities` registry each tick.
@@ -1258,10 +1038,7 @@ fn test_app() -> App {
         .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<WorldResource>()
         .init_resource::<WorldSetupBroadcast>()
-        .insert_resource(ShipRepairTeams(RepairTeams::new()))
-        .init_resource::<BreakdownQueueResource>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
-        .init_resource::<RepairIconState>()
         .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
         .init_resource::<PowerConfigResource>()
         .init_resource::<PowerMultiplierResource>()
@@ -1273,15 +1050,14 @@ fn test_app() -> App {
         .init_resource::<Outbox>()
         .add_plugins(crate::captain_plugin::CaptainPlugin)
         .add_plugins(crate::weapons_plugin::WeaponsPlugin)
+        .add_plugins(crate::repair_plugin::RepairPlugin)
         .add_systems(Update, (
             handle_set_science_target, handle_set_sensors_target,
-            handle_repair, handle_power_messages,
+            handle_power_messages,
             handle_impulse_messages, handle_set_shield_focus,
-            tick_repair_teams,
             tick_power_system,
             broadcast_shield_status,
             broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-            broadcast_repair_icons,
             reconcile_runtime_entities.after(crate::lobby::process_lobby),
         ))
         .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
@@ -1292,7 +1068,6 @@ fn test_app() -> App {
         .add_systems(Update, sim_processing_anchor)
         .add_plugins(power_state_broadcaster())
         .add_plugins(weapons_update_broadcaster())
-        .add_plugins(repair_state_broadcaster())
         .add_plugins(sim_state_broadcaster())
         .add_plugins(modifier_events_broadcaster())
         .add_systems(PostUpdate, collect);

@@ -14,7 +14,7 @@ use crate::messages::{
     ServerMessage,
 };
 use crate::objectives::ObjectiveManager;
-use crate::scenario::{
+use crate::world::content::{
     ActiveDialogue, CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerAction,
     TriggerState, WorldEvent, evaluate_comms_templates, evaluate_triggers,
     trigger_states_from_config,
@@ -106,7 +106,7 @@ fn spawn_scenario_entities(mut commands: Commands) {
 
     let config_cache = crate::config_cache::get_config_cache();
 
-    let resolved = match crate::scenario::resolve_positions(&scenario_config, &anchors) {
+    let resolved = match crate::world::content::resolve_positions(&scenario_config, &anchors) {
         Ok(r) => r,
         Err(e) => {
             bevy::log::error!("ScenarioPlugin: failed to resolve spawn positions: {e}");
@@ -163,7 +163,7 @@ fn init_scenario_runtime(
     runtime.scenario_id = "default".to_string();
     runtime.name_to_uuid = scenario_config.name_to_uuid.clone();
     runtime.comms_template_states =
-        crate::scenario::comms_template_states_from_config(&scenario_config);
+        crate::world::content::comms_template_states_from_config(&scenario_config);
     runtime.trigger_states = trigger_states_from_config(&scenario_config);
 
     // Build contacts list from comms templates: any entity referenced as
@@ -575,7 +575,7 @@ mod tests {
     use super::*;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
-    use crate::scenario::{CommsResponse, CommsTemplateState, TriggerCondition};
+    use crate::world::content::{CommsResponse, CommsTemplateState, TriggerCondition};
 
     // ── Test app ─────────────────────────────────────────────────────────────
 
@@ -675,7 +675,7 @@ mod tests {
             name: "Starbase Alpha".into(),
         });
         runtime.comms_template_states.push(CommsTemplateState {
-            template: crate::scenario::CommsTemplate {
+            template: crate::world::content::CommsTemplate {
                 from: "starbase_alpha".into(),
                 trigger: TriggerCondition::OnHailed {
                     entity_name: "starbase_alpha".into(),
@@ -937,7 +937,7 @@ mod tests {
         runtime.scenario_id = "test".to_string();
         runtime.name_to_uuid.insert("station_alpha".to_string(), npc_uuid.to_string());
         runtime.trigger_states = vec![TriggerState {
-            trigger: crate::scenario::Trigger {
+            trigger: crate::world::content::Trigger {
                 condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
                 actions: vec![TriggerAction::AddObjective {
                     id: "obj-001".to_string(),
@@ -973,7 +973,7 @@ mod tests {
             runtime.scenario_id = "test".to_string();
             runtime.name_to_uuid.insert("enemy_ship".to_string(), npc_uuid.to_string());
             runtime.trigger_states = vec![TriggerState {
-                trigger: crate::scenario::Trigger {
+                trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnAttacked { entity_name: "enemy_ship".to_string() },
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-002".to_string(),
@@ -1041,7 +1041,7 @@ mod tests {
             runtime.scenario_id = "test".to_string();
             runtime.name_to_uuid.insert("npc_alpha".to_string(), npc_uuid.to_string());
             runtime.trigger_states = vec![TriggerState {
-                trigger: crate::scenario::Trigger {
+                trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnAttacked { entity_name: "npc_alpha".to_string() },
                     actions: vec![TriggerAction::SetAiState {
                         entity: "npc_alpha".to_string(),

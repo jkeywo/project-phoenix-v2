@@ -8,9 +8,14 @@
 - `setup_world_hardcoded` spawns the procedural starfield and the player ship when no `MapConfig` is preloaded (development/testing fallback path).
 - When a `MapConfig` is present, the hardcoded setup skips itself and `SimulationPlugin`'s config-based path runs instead.
 
-## Location
+## Modules
 
-`src/world/server.rs` — registered in `src/bridge.rs` alongside `SimulationPlugin` and `ScenarioPlugin`.
+| File | Contents |
+|------|----------|
+| `src/world/server.rs` | `WorldPlugin` and the `setup_world_hardcoded` startup system |
+| `src/world/content.rs` | Pure (Bevy-free) scenario types: `ScenarioConfig`, triggers, comms templates, position resolution |
+
+`WorldPlugin` is registered in `src/bridge.rs` alongside `SimulationPlugin` and `ScenarioPlugin`.
 
 ## Relationship to #218
 

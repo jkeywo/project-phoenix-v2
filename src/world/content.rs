@@ -2025,13 +2025,13 @@ entity = "raider"
 
     #[test]
     fn default_scenario_toml_parses_without_error() {
-        let toml_str = include_str!("../assets/scenarios/default.toml");
+        let toml_str = include_str!("../../assets/scenarios/default.toml");
         parse_scenario(toml_str).expect("default.toml must parse");
     }
 
     #[test]
     fn default_scenario_has_starbase_alpha_spawn() {
-        let toml_str = include_str!("../assets/scenarios/default.toml");
+        let toml_str = include_str!("../../assets/scenarios/default.toml");
         let config = parse_scenario(toml_str).expect("default.toml must parse");
         let starbase = config.spawns.iter().find(|s| s.name == "Starbase Alpha");
         assert!(starbase.is_some(), "default scenario must have a spawn named 'Starbase Alpha'");
@@ -2039,7 +2039,7 @@ entity = "raider"
 
     #[test]
     fn default_scenario_has_starbase_alpha_comms_with_responses_and_actions() {
-        let toml_str = include_str!("../assets/scenarios/default.toml");
+        let toml_str = include_str!("../../assets/scenarios/default.toml");
         let config = parse_scenario(toml_str).expect("default.toml must parse");
         let tmpl = config.comms.iter().find(|c| c.from == "Starbase Alpha");
         assert!(tmpl.is_some(), "default scenario must have a comms template from 'Starbase Alpha'");
@@ -2058,13 +2058,13 @@ entity = "raider"
 
     #[test]
     fn patrol_scenario_toml_parses_without_error() {
-        let toml_str = include_str!("../assets/scenarios/patrol.toml");
+        let toml_str = include_str!("../../assets/scenarios/patrol.toml");
         parse_scenario(toml_str).expect("patrol.toml must parse");
     }
 
     #[test]
     fn patrol_scenario_has_one_named_raider_spawn() {
-        let toml_str = include_str!("../assets/scenarios/patrol.toml");
+        let toml_str = include_str!("../../assets/scenarios/patrol.toml");
         let config = parse_scenario(toml_str).expect("patrol.toml must parse");
         let raider = config.spawns.iter().find(|s| s.name == "raider");
         assert!(raider.is_some(), "patrol scenario must have a spawn named 'raider'");
@@ -2078,7 +2078,7 @@ entity = "raider"
 
     #[test]
     fn patrol_scenario_has_on_entity_destroyed_trigger_with_add_objective() {
-        let toml_str = include_str!("../assets/scenarios/patrol.toml");
+        let toml_str = include_str!("../../assets/scenarios/patrol.toml");
         let config = parse_scenario(toml_str).expect("patrol.toml must parse");
         let has_destroyed_trigger = config.triggers.iter().any(|t| {
             matches!(&t.condition, TriggerCondition::OnDestroyed { .. })

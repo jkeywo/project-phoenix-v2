@@ -18,7 +18,7 @@
 use {
     crate::entity_config::EntityConfig,
     crate::map_config::MapConfig,
-    crate::scenario::ScenarioConfig,
+    crate::world::content::ScenarioConfig,
     bevy::prelude::*,
     js_sys::Function,
     std::cell::RefCell,
@@ -318,7 +318,7 @@ pub fn get_map_config() -> Option<MapConfig> {
 /// On parse failure, logs the error and returns `Err(JsValue)`.
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_scenario(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    match crate::scenario::parse_scenario(&toml_str) {
+    match crate::world::content::parse_scenario(&toml_str) {
         Ok(scenario_config) => {
             // Queue entity paths from scenario spawns so they are preloaded.
             for spawn in &scenario_config.spawns {
@@ -453,11 +453,11 @@ pub type ComplexityResources = std::collections::HashMap<String, crate::complexi
 /// Newtype wrapper so `ScenarioConfig` can be inserted as a Bevy Resource.
 #[cfg(target_arch = "wasm32")]
 #[derive(Resource)]
-pub struct ScenarioResource(pub crate::scenario::ScenarioConfig);
+pub struct ScenarioResource(pub crate::world::content::ScenarioConfig);
 
 #[cfg(target_arch = "wasm32")]
 impl std::ops::Deref for ScenarioResource {
-    type Target = crate::scenario::ScenarioConfig;
+    type Target = crate::world::content::ScenarioConfig;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -554,7 +554,7 @@ pub fn wasm_load_scenario(_path: String, _toml_str: String) -> Result<JsValue, J
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_scenario_config() -> Option<crate::scenario::ScenarioConfig> {
+pub fn get_scenario_config() -> Option<crate::world::content::ScenarioConfig> {
     None
 }
 
@@ -864,7 +864,7 @@ name = "asteroid_alpha"
 entity_path = "entities/asteroid_large.toml"
 position = [100.0, 0.0, 200.0]
 "#;
-        let config = crate::scenario::parse_scenario(toml).expect("parse must succeed");
+        let config = crate::world::content::parse_scenario(toml).expect("parse must succeed");
         assert_eq!(config.spawns.len(), 1);
         assert_eq!(config.spawns[0].name, "asteroid_alpha");
         assert_eq!(config.spawns[0].entity_path, "entities/asteroid_large.toml");
@@ -879,10 +879,10 @@ name = "station"
 entity_path = "entities/station.toml"
 anchor = "alpha_point"
 "#;
-        let config = crate::scenario::parse_scenario(toml).expect("parse must succeed");
+        let config = crate::world::content::parse_scenario(toml).expect("parse must succeed");
         let mut anchors: HashMap<String, Vec<f32>> = HashMap::new();
         anchors.insert("alpha_point".to_string(), vec![50.0, 0.0, 100.0]);
-        let resolved = crate::scenario::resolve_positions(&config, &anchors)
+        let resolved = crate::world::content::resolve_positions(&config, &anchors)
             .expect("resolve must succeed");
         assert_eq!(resolved[0].position, [50.0, 0.0, 100.0]);
     }

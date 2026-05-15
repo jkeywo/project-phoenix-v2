@@ -1905,11 +1905,13 @@ mod tests {
 
 fn test_app() -> App {
     let mut app = App::new();
-    // Use a 1-nanosecond timer so that any non-zero time delta finishes
-    // the broadcast cycle, letting tests observe the snapshot after a
-    // couple of update ticks.
     app.add_plugins(LobbyPlugin)
         .add_plugins(bevy::time::TimePlugin)
+        // Advance time by 200 ms per tick so Hz-based SimBroadcaster timers
+        // (period = 100 ms) always fire within a single update call.
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(200),
+        ))
         .insert_resource(ShipState::new())
         .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
         .insert_resource(ShipShields(ShieldSystem::default()))

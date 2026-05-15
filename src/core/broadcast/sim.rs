@@ -109,9 +109,12 @@ impl SimBroadcaster {
 }
 
 impl Plugin for SimBroadcaster {
+    fn is_unique(&self) -> bool {
+        false
+    }
+
     fn build(&self, app: &mut App) {
-        let first_registration = !app.world().contains_resource::<SimBroadcastRegistry>();
-        if first_registration {
+        if !app.world().contains_resource::<SimBroadcastRegistry>() {
             app.insert_resource(SimBroadcastRegistry::new());
             app.add_systems(Update, dispatch_sim_broadcasts);
         }
@@ -191,7 +194,6 @@ mod tests {
     use crate::core::broadcast::audience::Audience;
     use crate::core::broadcast::cadence::Cadence;
     use crate::lobby::{CurrentPhase, LobbyPlugin, OutboundMessage, Sessions};
-    use crate::lobby_handler::SessionManager;
     use crate::messages::{GamePhase, ServerMessage};
 
     // ── Test harness ──────────────────────────────────────────────────────

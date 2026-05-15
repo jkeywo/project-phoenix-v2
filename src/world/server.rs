@@ -86,15 +86,34 @@ impl Plugin for WorldPlugin {
 }
 
 
+/// Bootstrap precedence: scenario → map-config → hardcoded.
+///
+/// Returns true when the hardcoded fallback should run (no preloaded configs).
+pub fn choose_bootstrap() -> bool {
+    if crate::config_cache::get_scenario_config().is_some() {
+        return false; // scenario-driven spawn handled by spawn_scenario_entities
+    }
+    if let Some(map) = crate::config_cache::get_map_config() {
+        if let Some(path) = map.default_scenario {
+            bevy::log::warn!(
+                "WorldPlugin: default scenario '{}' not preloaded — using hardcoded bootstrap",
+                path
+            );
+        }
+        return false; // map-config-driven setup handled by SimulationPlugin
+    }
+    true // pure fallback
+}
+
 /// Fallback world setup with hardcoded values for development/testing.
-/// Runs only when no map config was preloaded; config-based setup takes over otherwise.
+/// Runs only when no map config and no scenario was preloaded.
 fn setup_world_hardcoded(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     _world: ResMut<WorldResource>,
 ) {
-    if crate::config_cache::get_map_config().is_some() {
+    if !choose_bootstrap() {
         return;
     }
 
@@ -653,7 +672,30 @@ mod tests {
     use super::*;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
-    use crate::world::content::{CommsResponse, CommsTemplateState, TriggerCondition};
+    use crate::world::content::{CommsResponse, CommsTemplateState, TriggerCondition, parse_scenario};
+
+    // ── Bootstrap selection tests ─────────────────────────────────────────────
+
+    #[test]
+    fn choose_bootstrap_selects_hardcoded_when_nothing_is_preloaded() {
+        // In native (non-wasm) builds, get_map_config() and get_scenario_config()
+        // always return None, so choose_bootstrap() must return true (use fallback).
+        assert!(choose_bootstrap(), "hardcoded fallback should be selected when no configs preloaded");
+    }
+
+    #[test]
+    fn parse_scenario_with_spawn_entry_produces_expected_entity() {
+        let toml = r#"
+[[spawn]]
+name        = "Test Station"
+entity_path = "assets/entities/station_outpost.toml"
+position    = [100.0, 0.0, 200.0]
+"#;
+        let config = parse_scenario(toml).expect("fixture must parse");
+        assert_eq!(config.spawns.len(), 1);
+        assert_eq!(config.spawns[0].name, "Test Station");
+        assert_eq!(config.spawns[0].entity_path, "assets/entities/station_outpost.toml");
+    }
 
     // ── Test app ─────────────────────────────────────────────────────────────
 

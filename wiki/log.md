@@ -326,3 +326,5 @@ Not yet touched (deferred to the actual reorg PRs): `wiki/roadmap/open-architect
 ## [2026-05-15] ingest | World merger #2: scenario types moved to world/content.rs | Moved all pure scenario types/functions/tests from src/scenario.rs into src/world/content.rs. Deleted src/scenario.rs, removed pub mod scenario from lib.rs, updated imports in config_cache.rs and scenario_plugin.rs. Fixed include_str! paths. Closes #220.
 
 ## [2026-05-15] ingest | World merger #3: scenario_plugin.rs folded into WorldPlugin | Moved all resources (ScenarioRuntime, CommsInboxRes, ObjectiveManagerRes) and systems from src/scenario_plugin.rs into src/world/server.rs under WorldPlugin. Deleted scenario_plugin.rs, removed pub mod from lib.rs, removed ScenarioPlugin registration from bridge.rs. Closes #221.
+
+## [2026-05-15] ingest | World merger #4: wire default_scenario from map config | Added choose_bootstrap() to WorldPlugin with three-tier precedence (scenario → map-config → hardcoded). Added unit tests for fallback and parse paths. Added smoke spec tests/smoke/world-bootstrap.spec.ts. Documented bootstrap precedence in wiki. Closes #222.

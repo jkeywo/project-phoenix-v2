@@ -1,3 +1,4 @@
+pub mod core;
 pub mod ai;
 pub mod ai_plugin;
 pub mod faction;

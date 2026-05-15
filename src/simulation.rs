@@ -6,6 +6,7 @@ use crate::breakdown::BreakdownQueue;
 use crate::breakdown::breakdowns_from_damage;
 use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage, HullIntegrity};
 use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
+use crate::core::broadcast::Audience;
 use crate::repair_teams::RepairTeams;
 use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
@@ -1040,11 +1041,11 @@ fn broadcast_power_state(
     if !timer.0.just_finished() {
         return;
     }
-    let Some(power_token) = sessions.0.console_holder(Console::Power) else {
+    let Some(target) = Audience::Holding(Console::Power).resolve(&sessions.0) else {
         return;
     };
     writer.write(OutboundMessage {
-        target: Target::Token(power_token.to_string()),
+        target,
         msg: ServerMessage::PowerState {
             helm: power.0.helm,
             weapons: power.0.weapons,

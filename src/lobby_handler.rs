@@ -6,7 +6,7 @@ use crate::messages::{
 use crate::session::SessionManager;
 use crate::stations::{advance_on_join, all_stations_filled, get_station, reassign_on_leave, ShipStations, StationAssignments};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Target {
     All,
     Token(String),

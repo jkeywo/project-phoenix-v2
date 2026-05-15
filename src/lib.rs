@@ -56,27 +56,65 @@ pub mod world;
 pub mod radar;
 pub mod radar_config;
 pub use modifiers::repair_teams;
-pub mod renderer;
 pub use lobby::client_panel as client_lobby;
-pub mod client_sim;
-pub mod client_helm;
-pub mod client_comms;
 pub mod comms_plugin;
+pub mod client_sim;
+pub mod client_comms;
 pub mod client_complexity;
-pub mod client_elements;
-pub mod client_app;
+
+// ── New folder layout ────────────────────────────────────────────────────────
+
+pub mod console;
+
+// Keep flat-file modules in place for now — callers still use their old paths.
+// New code should import from console::helm::joystick directly.
+pub mod client_helm;
+
+// Server-only grouped module (bridge, renderer, viewscreen_border, debug_overlay).
+#[cfg(feature = "server")]
+pub mod server;
+
+// Backwards-compat re-exports so any code using the old top-level names still
+// compiles without modification.
+#[cfg(feature = "server")]
+pub use server::bridge;
 
 #[cfg(feature = "server")]
-pub mod bridge;
+pub mod renderer {
+    pub use crate::server::renderer::*;
+}
 
 #[cfg(feature = "server")]
-pub mod viewscreen_border;
+pub mod viewscreen_border {
+    pub use crate::server::viewscreen_border::*;
+}
 
 #[cfg(feature = "server")]
-pub mod debug_overlay;
+pub mod debug_overlay {
+    pub use crate::server::debug_overlay::*;
+}
+
+// Client-only grouped module (app, bridge, elements, phone_border).
+#[cfg(feature = "client")]
+pub mod client;
+
+// Backwards-compat flat modules for client.
+#[cfg(feature = "client")]
+pub mod client_app {
+    pub use crate::client::app::*;
+}
 
 #[cfg(feature = "client")]
-pub mod client_bridge;
+pub mod client_bridge {
+    pub use crate::client::bridge::*;
+}
 
 #[cfg(feature = "client")]
-pub mod phone_border;
+pub mod client_elements {
+    pub use crate::client::elements::*;
+}
+
+#[cfg(feature = "client")]
+pub mod phone_border {
+    pub use crate::client::phone_border::*;
+}

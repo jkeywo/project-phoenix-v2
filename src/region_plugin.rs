@@ -37,7 +37,6 @@ pub struct RegionPlugin;
 impl Plugin for RegionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RegionMembership>()
-            .init_resource::<ShipModifiers>()
             .add_message::<RegionEntered>()
             .add_message::<RegionExited>()
             .add_systems(Update, (
@@ -394,7 +393,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(RegionPlugin)
-            .insert_resource(ShipState::new());
+            .insert_resource(ShipState::new())
+            .insert_resource(ShipModifiers::new());
         // Spawn the ship entity
         app.world_mut().spawn((
             Ship,
@@ -625,6 +625,7 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.insert_resource(ShipState::new());
         app.insert_resource(ShipHullIntegrity(HullIntegrity::new()));
+        app.insert_resource(ShipModifiers::new());
         app.init_resource::<BreakdownQueueResource>();
         app.world_mut().spawn((Ship, Transform::default()));
         app
@@ -636,6 +637,7 @@ mod tests {
         app.insert_resource(Time::<()>::default());
         app.insert_resource(ShipState::new());
         app.insert_resource(ShipImpulse(ImpulseState::new()));
+        app.insert_resource(ShipModifiers::new());
         app.world_mut().spawn((Ship, Transform::default()));
         app
     }

@@ -300,7 +300,6 @@ impl Plugin for SimulationPlugin {
             .init_resource::<BreakdownQueueResource>()
             .init_resource::<LastHelmInput>()
             .init_resource::<CollisionCooldown>()
-            .insert_resource(ShipModifiers::new())
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .init_resource::<RepairIconState>()
             .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
@@ -1067,39 +1066,7 @@ fn sync_power_modifiers(
     mult_cfg: &PowerMultiplierResource,
     modifiers: &mut ShipModifiers,
 ) {
-    let default_mult = [-0.5, 0.0, 0.25, 0.5];
-
-    // Helm → MaxSpeed and MaxYawRate
-    let helm_level = (power.helm as usize).saturating_sub(1).min(3);
-    let helm_bonus = mult_cfg.multipliers.get(&Console::Helm).unwrap_or(&default_mult)[helm_level];
-    modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Helm),
-        slot: ModifierSlot::MaxSpeed,
-        bonus: helm_bonus,
-    });
-    modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Helm),
-        slot: ModifierSlot::MaxYawRate,
-        bonus: helm_bonus,
-    });
-
-    // Weapons (Tactical) → PhaserDamage
-    let weapons_level = (power.weapons as usize).saturating_sub(1).min(3);
-    let weapons_bonus = mult_cfg.multipliers.get(&Console::Tactical).unwrap_or(&default_mult)[weapons_level];
-    modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Tactical),
-        slot: ModifierSlot::PhaserDamage,
-        bonus: weapons_bonus,
-    });
-
-    // Sensors → RadarRange
-    let sensors_level = (power.sensors as usize).saturating_sub(1).min(3);
-    let sensors_bonus = mult_cfg.multipliers.get(&Console::Sensors).unwrap_or(&default_mult)[sensors_level];
-    modifiers.add_or_update(Modifier {
-        source: ModifierSource::Console(Console::Sensors),
-        slot: ModifierSlot::RadarRange,
-        bonus: sensors_bonus,
-    });
+    crate::modifier_coordination::apply_power_modifiers(modifiers, power, &mult_cfg.multipliers);
 }
 
 /// Handle `StartImpulseCharge` and `CancelImpulse` messages from helm/navigation.

@@ -33,6 +33,7 @@ pub mod stations_config;
 pub mod stations_policy;
 pub mod stations;
 pub mod modifiers;
+pub mod modifier_coordination;
 pub mod power_system;
 pub mod codec;
 pub mod session;

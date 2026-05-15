@@ -9,6 +9,7 @@ use {
     crate::codec::{JsonCodec, MessageCodec},
     crate::config_cache::ConfigCachePlugin,
     crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
+    crate::modifier_coordination::ModifierCoordinationPlugin,
     crate::renderer::RendererPlugin,
     crate::simulation::SimulationPlugin,
     crate::world::WorldPlugin,
@@ -90,6 +91,7 @@ pub fn wasm_init() {
     }))
     .add_plugins(ConfigCachePlugin)
     .add_plugins(AsteroidLifecyclePlugin)
+    .add_plugins(ModifierCoordinationPlugin)
     .add_plugins(LobbyPlugin)
     .add_plugins(SimulationPlugin)
     .add_plugins(WorldPlugin)

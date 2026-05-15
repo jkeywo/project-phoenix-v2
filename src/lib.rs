@@ -28,6 +28,8 @@ pub mod map_config;
 pub mod objectives;
 pub mod comms_inbox;
 pub mod messages;
+pub mod stations_config;
+pub mod stations_policy;
 pub mod stations;
 pub mod modifiers;
 pub mod power_system;

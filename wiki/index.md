@@ -43,6 +43,7 @@ Architecture, patterns, processes.
 - **[UiMaterial Shader Pattern](./concepts/ui-materials.md)** — Custom WGSL fragment shaders behind UI nodes (Red Alert vignette as worked example).
 - **[View-Model Pattern](./concepts/view-model-pattern.md)** — Pure derived snapshots for renderers.
 - **[Console Plugin Pattern](./concepts/console-plugin-pattern.md)** — One Bevy plugin per console.
+- **[WorldPlugin](./concepts/world-plugin.md)** — Owns world bootstrap (starfield + player ship). Landing zone for the World/Scenario merger (#218).
 - **[Build & Deployment](./concepts/build-and-deployment.md)** — Trunk, two HTML entry points, GitHub Pages.
 - **[Testing Strategy](./concepts/testing-strategy.md)** — `cargo test` + Playwright smoke tests.
 

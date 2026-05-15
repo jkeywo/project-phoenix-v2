@@ -12,6 +12,7 @@ use {
     crate::renderer::RendererPlugin,
     crate::scenario_plugin::ScenarioPlugin,
     crate::simulation::SimulationPlugin,
+    crate::world::WorldPlugin,
     crate::stations::ShipStations,
     crate::viewscreen_border::ViewscreenBorderPlugin,
     bevy::{prelude::*, DefaultPlugins},
@@ -92,6 +93,7 @@ pub fn wasm_init() {
     .add_plugins(AsteroidLifecyclePlugin)
     .add_plugins(LobbyPlugin)
     .add_plugins(SimulationPlugin)
+    .add_plugins(WorldPlugin)
     .add_plugins(ScenarioPlugin)
     .add_plugins(RendererPlugin)
     .add_plugins(ViewscreenBorderPlugin);

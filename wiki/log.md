@@ -320,3 +320,5 @@ Wiki updates:
 Filed issue #218 — `Architecture: Merge Scenario into World` — capturing the rationale for the planned merger of `scenario_plugin.rs` into a unified `WorldPlugin` at `src/world/server.rs`. To be executed as part of the upcoming reorg.
 
 Not yet touched (deferred to the actual reorg PRs): `wiki/roadmap/open-architectural-questions.md` (will be amended once the reorg + 6 deepenings start landing); per-PRD source pages for the AI sub-issues (#175/#176/#177/#179).
+
+## [2026-05-15] ingest | World merger #1: WorldPlugin skeleton | Created src/world/mod.rs + src/world/server.rs; moved setup_world_hardcoded from simulation.rs into WorldPlugin; registered WorldPlugin in bridge.rs. Added wiki/concepts/world-plugin.md. Closes #219.

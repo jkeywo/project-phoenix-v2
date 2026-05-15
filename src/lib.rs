@@ -40,6 +40,7 @@ pub mod ship_physics;
 pub mod lobby_handler;
 pub mod lobby;
 pub mod simulation;
+pub mod world;
 pub mod radar;
 pub mod radar_config;
 pub mod region_plugin;

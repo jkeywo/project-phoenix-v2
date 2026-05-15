@@ -371,6 +371,9 @@ impl Plugin for SimulationPlugin {
                 .after(handle_power_messages)
                 .after(tick_power_system)
                 .after(crate::lobby::process_lobby))
+            .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers
+                .after(handle_impulse_messages)
+                .after(crate::lobby::process_lobby))
             .add_systems(Update, (
                 crate::modifier_coordination::translate_region_modifiers,
                 crate::region_plugin::handle_slow_zone_speed_clamp,
@@ -1935,6 +1938,8 @@ fn test_app() -> App {
         .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
             .after(handle_power_messages)
             .after(tick_power_system))
+        .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers
+            .after(handle_impulse_messages))
         .add_systems(Update, sim_processing_anchor)
         .add_plugins(power_state_broadcaster())
         .add_plugins(weapons_update_broadcaster())

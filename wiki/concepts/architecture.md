@@ -52,7 +52,7 @@ src/
 ├── ai/             ai.rs, ai_plugin.rs, faction.rs
 ├── asteroids/      asteroid_spawner.rs, asteroid_window.rs, asteroid_lifecycle.rs
 ├── entities/       entity_*.rs, map_config.rs, config_cache.rs, entity_tags.rs
-├── modifiers/      modifiers.rs, power_system.rs, repair_teams.rs, breakdown.rs
+├── modifiers/      cache.rs, coordination.rs, power_system.rs, repair_teams.rs, breakdown.rs
 ├── server/         bridge.rs, renderer.rs, viewscreen_border.rs, debug_overlay.rs
 └── client/         app.rs, bridge.rs, elements.rs, phone_border/
 ```
@@ -121,6 +121,16 @@ Several modules are deliberately framework-free so they can be unit-tested witho
 - `world::content` — scenario parser, trigger evaluator, comms template engine.
 
 This keeps the test pyramid wide. See [Testing Strategy](./testing-strategy.md).
+
+### Modifier coordinator
+
+The **modifier coordinator** (`src/modifiers/coordination.rs`) is the single
+owner of the `ShipModifiers` resource lifecycle. `ModifierCoordinationPlugin`
+is the sole call site for `init_resource::<ShipModifiers>()`. Translator systems
+for each modifier source (power at `translate_power_modifiers:43`, regions at
+`translate_region_modifiers:194`, impulse at `translate_impulse_modifiers:174`)
+read source state and write through pure helpers into `ShipModifiers`. Consumers
+read `Res<ShipModifiers>` only. See [Modifier Coordination](./modifier-coordination.md).
 
 ### Broadcaster seam
 

@@ -14,8 +14,6 @@ use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::messages::{
     ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewDirection,
 };
-use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
-use crate::messages::TorpedoTube as MsgTorpedoTube;
 use crate::ship_physics::ShipPhysicsConfig;
 use crate::ship_state::ShipState;
 use crate::damage::{collision_damage, apply_damage_with_shields, apply_hull_damage};
@@ -29,9 +27,11 @@ use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, EntityTags
 use std::collections::HashMap;
 
 // â”€â”€ Beam constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const BEAM_DURATION_SECS: f32 = 6.0;
-const BEAM_DAMAGE_PER_SEC: f32 = 5.0;
-const BEAM_COOLDOWN_SECS: f32 = 6.0;
+pub use crate::weapons_plugin::{
+    WeaponsTarget, ActiveBeam, PhaserCooldown, CurrentPhaserMode,
+    PhaserRenderConfig, TorpedoSystemResource, AsteroidDestroyedVfx,
+    weapons_update_broadcaster,
+};
 
 // â”€â”€ Marker Components â”€â”€â”€â”€â”€â”€â”€â”€
 #[derive(Component)]
@@ -76,59 +76,10 @@ struct WorldSetupBroadcast {
     sent: bool,
 }
 
-/// The currently locked target UUID on the Weapons console. `None` means no
-/// lock is active.
-#[derive(Resource, Default)]
-pub struct WeaponsTarget(pub Option<String>);
 
-/// Active phaser beam state. `target_uuid` is `Some` while a beam is firing.
-/// `remaining_secs` counts down to 0. `damage_accumulator` tracks fractional
-/// damage between ticks so 5 HP/s is applied accurately at any frame rate.
-#[derive(Resource, Default)]
-pub struct ActiveBeam {
-    pub target_uuid: Option<String>,
-    pub remaining_secs: f32,
-    pub damage_accumulator: f32,
-    /// Which bank is firing this beam. `None` when no beam is active.
-    pub bank: Option<crate::messages::PhaserBank>,
-}
 
-/// Post-beam cooldown. The weapons console is locked out for `BEAM_COOLDOWN_SECS`
-/// after every beam end (natural, sever, or cancel).
-#[derive(Resource, Default)]
-pub struct PhaserCooldown {
-    pub remaining_secs: f32,
-}
 
-/// Current phaser firing mode (Auto or Manual), set by the Weapons console.
-#[derive(Resource)]
-pub struct CurrentPhaserMode(pub crate::messages::PhaserMode);
 
-impl Default for CurrentPhaserMode {
-    fn default() -> Self {
-        Self(crate::messages::PhaserMode::Auto)
-    }
-}
-
-/// Rendering config for the phaser beam (colour, max range).
-/// Populated from ship entity TOML during world setup; defaults are used if
-/// the TOML is absent.
-#[derive(Resource, Clone, Debug)]
-pub struct PhaserRenderConfig {
-    /// RGBA beam colour in 0.0â€“1.0.
-    pub beam_color: [f32; 4],
-    /// Maximum beam range (world units); beam endpoint is clamped to this.
-    pub beam_range: f32,
-}
-
-impl Default for PhaserRenderConfig {
-    fn default() -> Self {
-        Self {
-            beam_color: crate::beam_render::DEFAULT_BEAM_COLOR,
-            beam_range: 40.0,
-        }
-    }
-}
 
 // â”€â”€ Repair constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /// HP restored per completed repair team.
@@ -137,14 +88,6 @@ const REPAIR_TEAM_HP: f32 = 10.0;
 /// Bevy resource wrapping the pure `RepairTeams` state machine.
 #[derive(Resource)]
 pub struct ShipRepairTeams(pub RepairTeams);
-
-/// Bevy message fired (with world-space position) when an asteroid is destroyed
-/// by phaser fire. The renderer uses this to spawn a ripple VFX at the site.
-#[derive(Message, Clone, Debug)]
-pub struct AsteroidDestroyedVfx {
-    pub x: f32,
-    pub z: f32,
-}
 
 /// Tracks the last-broadcast repair-icon state so the `broadcast_repair_icons`
 /// system can send deltas (ClearRepairIcon for stale icons, ShowRepairIcon for
@@ -200,10 +143,6 @@ impl Default for PowerConfigResource {
         Self(crate::power_system::PowerConfig::default())
     }
 }
-
-/// Wraps the pure-Rust torpedo system so it can be used as a Bevy resource.
-#[derive(Resource)]
-pub struct TorpedoSystemResource(pub TorpedoSystem);
 
 /// Bevy resource wrapping the breakdown queue.
 #[derive(Resource)]
@@ -263,19 +202,7 @@ pub struct TrackedEntities {
     pub seeded: bool,
 }
 
-impl PhaserCooldown {
-    pub fn is_active(&self) -> bool {
-        self.remaining_secs > 0.0
-    }
 
-    pub fn start(&mut self) {
-        self.remaining_secs = BEAM_COOLDOWN_SECS;
-    }
-
-    pub fn tick(&mut self, dt: f32) {
-        self.remaining_secs = (self.remaining_secs - dt).max(0.0);
-    }
-}
 
 // â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /// Empty system used as an ordering anchor for the sim broadcast dispatch.
@@ -294,6 +221,7 @@ impl Plugin for SimulationPlugin {
             .add_plugins(crate::ai_plugin::AiPlugin)
             .add_plugins(crate::captain_plugin::CaptainPlugin)
             .add_plugins(crate::ship_plugin::ShipPlugin)
+            .add_plugins(crate::weapons_plugin::WeaponsPlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
@@ -301,15 +229,9 @@ impl Plugin for SimulationPlugin {
             .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
-            .init_resource::<WeaponsTarget>()
-            .init_resource::<ActiveBeam>()
-            .init_resource::<PhaserCooldown>()
-            .init_resource::<CurrentPhaserMode>()
-            .init_resource::<PhaserRenderConfig>()
             .insert_resource(ShipRepairTeams(RepairTeams::new()))
             .init_resource::<BreakdownQueueResource>()
             .init_resource::<CollisionCooldown>()
-            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .init_resource::<RepairIconState>()
             .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
@@ -324,23 +246,16 @@ impl Plugin for SimulationPlugin {
             ))
             .add_systems(Update, (
                 (
-                    handle_set_target,
                     handle_set_science_target,
                     handle_set_sensors_target,
                 ),
                 (
-                    handle_fire_phaser,
-                    handle_set_phaser_mode,
-                    handle_set_phaser_frequency,
-                    handle_fire_torpedo,
                     handle_repair,
                     handle_power_messages,
                     handle_set_shield_focus,
                 ),
                 (
-                    tick_active_beam,
                     tick_repair_teams,
-                    tick_torpedo_system,
                     tick_shields,
                     tick_power_system,
                     handle_collisions,
@@ -390,51 +305,6 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
                 sensors: power.0.sensors,
                 battery_charge: power.0.battery_charge,
                 locked: power.0.locked,
-            }]
-        },
-    )
-}
-
-/// Returns a [`SimBroadcaster`] pre-configured with the `WeaponsUpdate` producer.
-///
-/// Broadcasts `WeaponsUpdate` at 10 Hz to the `Tactical` console holder only.
-/// Registered by [`SimulationPlugin`] and the test harness in `test_app()`.
-pub fn weapons_update_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
-        Audience::Holding(Console::Tactical),
-        Cadence::Hz(10.0),
-        |world: &mut World| {
-            let ship = world.resource::<ShipState>();
-            let world_res = world.resource::<WorldResource>();
-            let weapons_target = world.resource::<WeaponsTarget>();
-            let cooldown = world.resource::<PhaserCooldown>();
-            let beam = world.resource::<ActiveBeam>();
-            let torpedo_sys = world.resource::<TorpedoSystemResource>();
-            let modifiers = world.resource::<ShipModifiers>();
-
-            let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
-            let fire_ready = match &weapons_target.0 {
-                None => false,
-                Some(uuid) => {
-                    world_res.0.entities.iter()
-                        .find(|a| &a.uuid == uuid)
-                        .map(|a| crate::radar::is_fire_ready_with_range(a.x(), a.z(), ship.x, ship.z, ship.yaw, effective_phaser_range))
-                        .unwrap_or(false)
-                }
-            };
-
-            let ts = &torpedo_sys.0;
-            vec![ServerMessage::WeaponsUpdate {
-                target_uuid: weapons_target.0.clone(),
-                fire_ready,
-                on_cooldown: cooldown.is_active() || beam.target_uuid.is_some(),
-                torpedo_count: ts.torpedoes_remaining,
-                fore_port_loaded: ts.fore_port.is_loaded(),
-                fore_port_reload_secs: ts.fore_port.reload_remaining,
-                fore_starboard_loaded: ts.fore_starboard.is_loaded(),
-                fore_starboard_reload_secs: ts.fore_starboard.reload_remaining,
-                aft_loaded: ts.aft.is_loaded(),
-                aft_reload_secs: ts.aft.reload_remaining,
             }]
         },
     )
@@ -630,51 +500,6 @@ fn is_valid_console_holder(
 
 // -- Systems -------------------------------------------------------------------
 
-fn handle_set_target(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-    ship: Res<ShipState>,
-    world: Res<WorldResource>,
-    mut weapons_target: ResMut<WeaponsTarget>,
-    modifiers: Res<ShipModifiers>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        let ClientMessage::SetTarget { uuid } = &ev.msg else { continue };
-
-        // Only the Weapons console holder may lock a target.
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
-            continue;
-        }
-
-        // Validate: asteroid must exist in world data and be within WEAPONS_RADAR_RANGE.
-        let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-        let effective_weapons_range = WEAPONS_RADAR_RANGE * radar_range_mult;
-        let asteroid = world.0.entities.iter().find(|a| &a.uuid == uuid);
-        let locked = match asteroid {
-            None => false,
-            Some(a) => {
-                let dx = a.x() - ship.x;
-                let dz = a.z() - ship.z;
-                dx * dx + dz * dz <= effective_weapons_range * effective_weapons_range
-            }
-        };
-
-        if locked {
-            weapons_target.0 = Some(uuid.clone());
-        } else {
-            // Rejection clears the visual lock.
-            weapons_target.0 = None;
-        }
-
-        outbox.0.push((Target::Token(ev.token.clone()), ServerMessage::TargetLock { uuid: uuid.clone(), locked }));
-    }
-}
-
 fn handle_set_science_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
@@ -827,211 +652,6 @@ fn handle_set_shield_focus(
     }
 }
 
-/// Handle `FirePhaser` messages from the Weapons console.
-///
-/// Validates: sender is Weapons holder, game is in-progress, no active cooldown,
-/// a locked target exists, and that target is currently fire-ready.
-/// On success, starts a new beam (cancelling any active beam first) and broadcasts
-/// `BeamStarted` to all players.
-fn handle_fire_phaser(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-    ship: Res<ShipState>,
-    world: Res<WorldResource>,
-    weapons_target: Res<WeaponsTarget>,
-    mut beam: ResMut<ActiveBeam>,
-    cooldown: ResMut<PhaserCooldown>,
-    modifiers: Res<ShipModifiers>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        if !matches!(ev.msg, ClientMessage::FirePhaser) {
-            continue;
-        }
-        // Only the Weapons console holder may fire.
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
-            continue;
-        }
-        // Reject if on cooldown or a beam is already active.
-        if cooldown.is_active() || beam.target_uuid.is_some() {
-            continue;
-        }
-        // Need a locked target.
-        let Some(target_uuid) = &weapons_target.0 else { continue };
-        // Target must still exist in world data and be fire-ready.
-        let Some(asteroid) = world.0.entities.iter().find(|a| &a.uuid == target_uuid) else {
-            continue;
-        };
-        let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
-        if !crate::radar::is_fire_ready_with_range(asteroid.x(), asteroid.z(), ship.x, ship.z, ship.yaw, effective_phaser_range) {
-            continue;
-        }
-
-        // If another beam was active (shouldn't happen with cooldown enforcement,
-        // but guard defensively), end it first.
-        if let Some(old_uuid) = beam.target_uuid.take() {
-            beam.remaining_secs = 0.0;
-            beam.damage_accumulator = 0.0;
-            outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid: old_uuid }));
-        }
-
-        // Start new beam. Alternate banks: port first, then starboard, etc.
-        let next_bank = match beam.bank {
-            Some(crate::messages::PhaserBank::Port) => crate::messages::PhaserBank::Starboard,
-            _ => crate::messages::PhaserBank::Port,
-        };
-        beam.target_uuid = Some(target_uuid.clone());
-        beam.remaining_secs = BEAM_DURATION_SECS;
-        beam.damage_accumulator = 0.0;
-        beam.bank = Some(next_bank);
-
-        outbox.0.push((Target::All, ServerMessage::BeamStarted { target_uuid: target_uuid.clone() }));
-    }
-}
-
-/// Handle `SetPhaserMode` messages from the Weapons console.
-///
-/// Only the Tactical console holder may change the phaser mode.
-fn handle_set_phaser_mode(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-    mut phaser_mode: ResMut<CurrentPhaserMode>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        let ClientMessage::SetPhaserMode { mode } = &ev.msg else { continue };
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
-            continue;
-        }
-        phaser_mode.0 = *mode;
-    }
-}
-
-/// Handle `SetPhaserFrequency` messages.
-///
-/// Authorization is checked via the delegation allowlist:
-/// - Tactical holder may always set phaser frequency.
-/// - Sensors holder may set phaser frequency only when Tactical is at Low
-///   complexity (delegated control, per PRD #176).
-/// All other senders are silently rejected.
-fn handle_set_phaser_frequency(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-    complexity: Res<crate::console_ai_plugin::ConsoleComplexityState>,
-    mut ship: ResMut<ShipState>,
-) {
-    use crate::delegation::{is_sender_authorized, ComplexityContext, DelegatedControl};
-
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    let ctx = ComplexityContext {
-        tactical_is_low: complexity.is_low(&Console::Tactical),
-    };
-    for ev in reader.read() {
-        let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else { continue };
-
-        // Determine which console the sender holds (if any).
-        let sender_console = if sessions.0.console_holder(Console::Tactical) == Some(ev.token.as_str()) {
-            Console::Tactical
-        } else if sessions.0.console_holder(Console::Sensors) == Some(ev.token.as_str()) {
-            Console::Sensors
-        } else {
-            continue;
-        };
-
-        if !is_sender_authorized(DelegatedControl::SetPhaserFrequency, &sender_console, &ctx) {
-            continue;
-        }
-
-        ship.phaser_frequency = frequency.clamp(0.0, 1.0);
-    }
-}
-
-/// Convert a `messages::TorpedoTube` to a `torpedo::TorpedoTubeId`.
-fn to_tube_id(tube: MsgTorpedoTube) -> TorpedoTubeId {
-    match tube {
-        MsgTorpedoTube::ForePort => TorpedoTubeId::ForePort,
-        MsgTorpedoTube::ForeStarboard => TorpedoTubeId::ForeStarboard,
-        MsgTorpedoTube::Aft => TorpedoTubeId::Aft,
-    }
-}
-
-/// Handle `FireTorpedo` messages from the Tactical console.
-///
-/// Validates: sender is Tactical holder, game is in-progress, tube is loaded,
-/// and there are torpedoes remaining.
-/// On success, launches the torpedo and broadcasts `TorpedoLaunched` to all.
-fn handle_fire_torpedo(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-    ship: Res<ShipState>,
-    mut torpedo_sys: ResMut<TorpedoSystemResource>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else { continue };
-        // Only the Tactical console holder may fire torpedoes.
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
-            continue;
-        }
-        let tube_id = to_tube_id(*tube);
-        let uuid = uuid::Uuid::new_v4().to_string();
-        // Heading matches ship yaw (torpedoes fire along ship forward for fore tubes).
-        let launch_heading = ship.yaw;
-        use crate::torpedo::LaunchResult;
-        match torpedo_sys.0.launch(tube_id, uuid, ship.x, ship.z, launch_heading, target_uuid.clone()) {
-            LaunchResult::Launched { uuid: launched_uuid } => {
-                outbox.0.push((Target::All, ServerMessage::TorpedoLaunched {
-                    uuid: launched_uuid,
-                    tube: *tube,
-                    x: ship.x,
-                    z: ship.z,
-                    heading: launch_heading,
-                }));
-            }
-            LaunchResult::TubeNotLoaded | LaunchResult::NoTorpedoes => {
-                // Silently ignore; client should check state before firing.
-            }
-        }
-    }
-}
-
-/// Advance all in-flight torpedoes and broadcast `TorpedoDestroyed` for any
-/// that expire this tick.
-fn tick_torpedo_system(
-    phase: Res<CurrentPhase>,
-    mut torpedo_sys: ResMut<TorpedoSystemResource>,
-    world: Res<WorldResource>,
-    time: Res<Time>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    let dt = time.delta_secs();
-    let target_positions: std::collections::HashMap<String, (f32, f32)> = world.0.entities
-        .iter()
-        .map(|a| (a.uuid.clone(), (a.x(), a.z())))
-        .collect();
-    let result = torpedo_sys.0.tick(dt, &target_positions);
-    for expired_uuid in result.expired {
-        outbox.0.push((Target::All, ServerMessage::TorpedoDestroyed { uuid: expired_uuid }));
-    }
-}
-
 /// Handle `Repair { shape }` messages from the Repair console.
 ///
 /// Validates: game is in-progress, sender holds `Console::Repair`.
@@ -1150,110 +770,6 @@ fn tick_repair_teams(
     }
 }
 
-
-/// Tick the active beam each frame: apply damage, check sever conditions
-/// (arc, range, target destroyed), and handle natural expiry.
-///
-/// When the beam ends (any cause), starts the post-beam cooldown and broadcasts
-/// `BeamEnded`. If the target asteroid reaches 0 HP, also broadcasts
-/// `AsteroidDestroyed` and removes it from `WorldData`.
-fn tick_active_beam(
-    time: Res<Time>,
-    mut beam: ResMut<ActiveBeam>,
-    mut cooldown: ResMut<PhaserCooldown>,
-    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
-    ship: Res<ShipState>,
-    mut world: ResMut<WorldResource>,
-    mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut AsteroidDamage)>,
-    mut commands: Commands,
-    phase: Res<CurrentPhase>,
-    modifiers: Res<ShipModifiers>,
-    mut outbox: ResMut<SimOutbox>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-
-    let dt = time.delta_secs();
-
-    // Tick cooldown regardless of beam state.
-    cooldown.tick(dt);
-
-    let Some(target_uuid) = beam.target_uuid.clone() else {
-        return;
-    };
-
-    // Check sever: target no longer exists in world data.
-    let asteroid_info = world.0.entities.iter().find(|a| a.uuid == target_uuid).cloned();
-    let Some(info) = asteroid_info else {
-        // Target was already destroyed (e.g., double-tick race). End beam silently.
-        beam.target_uuid = None;
-        beam.remaining_secs = 0.0;
-        beam.damage_accumulator = 0.0;
-        cooldown.start();
-        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
-        return;
-    };
-
-    // Check sever: out of range or out of arc.
-    let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
-    if !crate::radar::is_fire_ready_with_range(info.x(), info.z(), ship.x, ship.z, ship.yaw, effective_phaser_range) {
-        beam.target_uuid = None;
-        beam.remaining_secs = 0.0;
-        beam.damage_accumulator = 0.0;
-        cooldown.start();
-        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
-        return;
-    }
-
-    // Apply damage proportionally to elapsed time.
-    beam.damage_accumulator += BEAM_DAMAGE_PER_SEC * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
-    let damage_to_apply = beam.damage_accumulator.floor() as i32;
-    if damage_to_apply > 0 {
-        beam.damage_accumulator -= damage_to_apply as f32;
-
-        // Find the asteroid entity and apply damage.
-        let mut destroyed = false;
-        for (entity, uuid_comp, mut dmg) in asteroid_query.iter_mut() {
-            if uuid_comp.0 == target_uuid {
-                dmg.current_hp = (dmg.current_hp - damage_to_apply).max(0);
-                if dmg.current_hp == 0 {
-                    destroyed = true;
-                    commands.entity(entity).despawn();
-                }
-            }
-        }
-
-        if destroyed {
-            // Remove from world data.
-            world.0.entities.retain(|a| a.uuid != target_uuid);
-
-            // Fire VFX event with the asteroid's last known position so the
-            // renderer can play the destruction ripple.
-            vfx_events.write(AsteroidDestroyedVfx { x: info.x(), z: info.z() });
-
-            beam.target_uuid = None;
-            beam.remaining_secs = 0.0;
-            beam.damage_accumulator = 0.0;
-            cooldown.start();
-
-            outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
-            outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
-            return;
-        }
-    }
-
-    // Tick beam duration.
-    beam.remaining_secs -= dt;
-    if beam.remaining_secs <= 0.0 {
-        // Natural expiry.
-        beam.target_uuid = None;
-        beam.remaining_secs = 0.0;
-        beam.damage_accumulator = 0.0;
-        cooldown.start();
-        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
-    }
-}
 
 /// Broadcast `ShieldStatus` to all players at 10 Hz.
 fn broadcast_shield_status(
@@ -1716,6 +1232,7 @@ mod tests {
     use crate::lobby::{LobbyPlugin, InboundMessage, OutboundMessage};
     use crate::messages::*;
     use crate::ship_plugin::handle_impulse_messages;
+    use crate::weapons_plugin::BEAM_DAMAGE_PER_SEC;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -1741,15 +1258,9 @@ fn test_app() -> App {
         .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<WorldResource>()
         .init_resource::<WorldSetupBroadcast>()
-        .init_resource::<WeaponsTarget>()
-        .init_resource::<ActiveBeam>()
-        .add_message::<AsteroidDestroyedVfx>()
-        .init_resource::<PhaserCooldown>()
-        .init_resource::<CurrentPhaserMode>()
         .insert_resource(ShipRepairTeams(RepairTeams::new()))
         .init_resource::<BreakdownQueueResource>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
-        .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
         .init_resource::<RepairIconState>()
         .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
         .init_resource::<PowerConfigResource>()
@@ -1761,15 +1272,13 @@ fn test_app() -> App {
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
         .add_plugins(crate::captain_plugin::CaptainPlugin)
+        .add_plugins(crate::weapons_plugin::WeaponsPlugin)
         .add_systems(Update, (
-            handle_set_target,
             handle_set_science_target, handle_set_sensors_target,
-            handle_fire_phaser, handle_set_phaser_mode,
-            handle_set_phaser_frequency, handle_fire_torpedo,
             handle_repair, handle_power_messages,
             handle_impulse_messages, handle_set_shield_focus,
-            tick_active_beam, tick_repair_teams,
-            tick_torpedo_system, tick_power_system,
+            tick_repair_teams,
+            tick_power_system,
             broadcast_shield_status,
             broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
             broadcast_repair_icons,

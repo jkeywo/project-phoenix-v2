@@ -52,6 +52,7 @@ pub use ship::physics as ship_physics;
 pub use lobby::handler as lobby_handler;
 pub mod simulation;
 pub mod ship_plugin;
+pub mod weapons_plugin;
 pub mod world;
 pub mod radar;
 pub mod radar_config;

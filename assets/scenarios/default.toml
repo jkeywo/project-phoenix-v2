@@ -6,6 +6,23 @@
 # choosing "We require docking clearance" adds a mandatory docking objective.
 
 [[spawn]]
+name        = "raider"
+entity_path = "assets/entities/pirate_raider.toml"
+anchor      = "patrol_alpha"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-raider-destroyed"
+  text      = "Pirate raider eliminated."
+  mandatory = false
+
+# ── Static entities ────────────────────────────────────────────────────────
+
+[[spawn]]
 name       = "Starbase Alpha"
 entity_path = "assets/entities/station_outpost.toml"
 anchor     = "starbase_alpha"

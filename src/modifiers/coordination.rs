@@ -11,7 +11,8 @@ use crate::power_system::PowerSystem;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::{RegionEntered, RegionExited, RegionMembership};
 use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
-use crate::simulation::{PowerMultiplierResource, ShipImpulse, ShipPowerSystem};
+use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
+use crate::simulation::ShipImpulse;
 
 /// Single owner of `ShipModifiers` lifecycle.
 ///

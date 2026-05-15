@@ -35,6 +35,11 @@ pub use crate::repair_plugin::{
     repair_state_broadcaster, REPAIR_TEAM_HP,
 };
 
+pub use crate::power_plugin::{
+    ShipPowerSystem, PowerConfigResource, PowerMultiplierResource,
+    power_state_broadcaster,
+};
+
 // â”€â”€ Marker Components â”€â”€â”€â”€â”€â”€â”€â”€
 #[derive(Component)]
 pub struct Ship;
@@ -83,41 +88,6 @@ struct WorldSetupBroadcast {
 
 
 
-
-/// Wraps the pure-Rust power system so it can be used as a Bevy resource.
-#[derive(Resource)]
-pub struct ShipPowerSystem(pub crate::power_system::PowerSystem);
-
-/// Wraps the power config for the ship's power system.
-#[derive(Resource)]
-pub struct PowerConfigResource(pub crate::power_system::PowerConfig);
-
-/// Per-console power multiplier configuration: `[f32; 4]` indexed by level-1
-/// (index 0 = level 1, index 3 = level 4). Defaults give `[-0.5, 0.0, 0.25, 0.5]`
-/// for every console unless overridden in the ship TOML.
-#[derive(Resource, Clone, Debug)]
-pub struct PowerMultiplierResource {
-    pub multipliers: std::collections::HashMap<Console, [f32; 4]>,
-}
-
-impl Default for PowerMultiplierResource {
-    fn default() -> Self {
-        let defaults = [-0.5, 0.0, 0.25, 0.5];
-        Self {
-            multipliers: std::collections::HashMap::from([
-                (Console::Helm, defaults),
-                (Console::Tactical, defaults),
-                (Console::Sensors, defaults),
-            ]),
-        }
-    }
-}
-
-impl Default for PowerConfigResource {
-    fn default() -> Self {
-        Self(crate::power_system::PowerConfig::default())
-    }
-}
 
 
 /// Prevents `handle_collisions` from applying damage every frame while the
@@ -179,6 +149,7 @@ impl Plugin for SimulationPlugin {
             .add_plugins(crate::ship_plugin::ShipPlugin)
             .add_plugins(crate::weapons_plugin::WeaponsPlugin)
             .add_plugins(crate::repair_plugin::RepairPlugin)
+            .add_plugins(crate::power_plugin::PowerPlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
@@ -187,9 +158,6 @@ impl Plugin for SimulationPlugin {
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
             .init_resource::<CollisionCooldown>()
-            .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
-            .init_resource::<PowerConfigResource>()
-            .init_resource::<PowerMultiplierResource>()
             .init_resource::<TrackedEntities>()
             .init_resource::<SimOutbox>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
@@ -204,12 +172,10 @@ impl Plugin for SimulationPlugin {
                     handle_set_sensors_target,
                 ),
                 (
-                    handle_power_messages,
                     handle_set_shield_focus,
                 ),
                 (
                     tick_shields,
-                    tick_power_system,
                     handle_collisions,
                 ),
                 (
@@ -220,8 +186,8 @@ impl Plugin for SimulationPlugin {
                 ),
             ).after(crate::lobby::process_lobby))
             .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
-                .after(handle_power_messages)
-                .after(tick_power_system)
+                .after(crate::power_plugin::handle_power_messages)
+                .after(crate::power_plugin::tick_power_system)
                 .after(crate::lobby::process_lobby))
             .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers
                 .after(crate::ship_plugin::handle_impulse_messages)
@@ -230,7 +196,6 @@ impl Plugin for SimulationPlugin {
                 crate::modifier_coordination::translate_region_modifiers,
                 crate::region_plugin::handle_slow_zone_speed_clamp,
             ).chain().after(crate::region_plugin::update_region_membership))
-            .add_plugins(power_state_broadcaster())
             .add_plugins(weapons_update_broadcaster())
             .add_plugins(sim_state_broadcaster())
             .add_plugins(modifier_events_broadcaster())
@@ -238,27 +203,6 @@ impl Plugin for SimulationPlugin {
     }
 }
 
-/// Returns a [`SimBroadcaster`] pre-configured with the `PowerState` producer.
-///
-/// Broadcasts `PowerState` at 10 Hz to the `Power` console holder only.
-/// This is the canonical registration; it is added by [`SimulationPlugin`]
-/// and also by the test harness in `test_app()`.
-pub fn power_state_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
-        Audience::Holding(Console::Power),
-        Cadence::Hz(10.0),
-        |world: &mut World| {
-            let power = world.resource::<ShipPowerSystem>();
-            vec![ServerMessage::PowerState {
-                helm: power.0.helm,
-                weapons: power.0.weapons,
-                sensors: power.0.sensors,
-                battery_charge: power.0.battery_charge,
-                locked: power.0.locked,
-            }]
-        },
-    )
-}
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.
 ///
@@ -567,51 +511,6 @@ fn handle_set_shield_focus(
     }
 }
 
-/// Handle `IncreasePower` and `DecreasePower` messages from the Power console.
-///
-/// Validates: game is in-progress, sender holds `Console::Power`.
-/// Forwards to `PowerSystem::increase` / `decrease` which enforce bounds and lock.
-/// Modifier sync is handled separately by `translate_power_modifiers` in the
-/// coordination plugin (runs after this system each frame).
-fn handle_power_messages(
-    mut reader: MessageReader<InboundMessage>,
-    sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
-    mut power: ResMut<ShipPowerSystem>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    for ev in reader.read() {
-        match &ev.msg {
-            ClientMessage::IncreasePower { console } => {
-                if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
-                    power.0.increase(console.clone());
-                }
-            }
-            ClientMessage::DecreasePower { console } => {
-                if sessions.0.console_holder(Console::Power) == Some(ev.token.as_str()) {
-                    power.0.decrease(console.clone());
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Tick the power system battery charge each frame.
-fn tick_power_system(
-    time: Res<Time>,
-    phase: Res<CurrentPhase>,
-    mut power: ResMut<ShipPowerSystem>,
-    config: Res<PowerConfigResource>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    let dt = time.delta_secs();
-    power.0.tick(dt, &config.0);
-}
 
 /// Broadcast `ShieldStatus` to all players at 10 Hz.
 fn broadcast_shield_status(
@@ -1039,9 +938,6 @@ fn test_app() -> App {
         .init_resource::<WorldResource>()
         .init_resource::<WorldSetupBroadcast>()
         .insert_resource(crate::modifiers::ShipModifiers::new())
-        .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
-        .init_resource::<PowerConfigResource>()
-        .init_resource::<PowerMultiplierResource>()
         .init_resource::<TrackedEntities>()
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
@@ -1051,22 +947,20 @@ fn test_app() -> App {
         .add_plugins(crate::captain_plugin::CaptainPlugin)
         .add_plugins(crate::weapons_plugin::WeaponsPlugin)
         .add_plugins(crate::repair_plugin::RepairPlugin)
+        .add_plugins(crate::power_plugin::PowerPlugin)
         .add_systems(Update, (
             handle_set_science_target, handle_set_sensors_target,
-            handle_power_messages,
             handle_impulse_messages, handle_set_shield_focus,
-            tick_power_system,
             broadcast_shield_status,
             broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
             reconcile_runtime_entities.after(crate::lobby::process_lobby),
         ))
         .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
-            .after(handle_power_messages)
-            .after(tick_power_system))
+            .after(crate::power_plugin::handle_power_messages)
+            .after(crate::power_plugin::tick_power_system))
         .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers
             .after(handle_impulse_messages))
         .add_systems(Update, sim_processing_anchor)
-        .add_plugins(power_state_broadcaster())
         .add_plugins(weapons_update_broadcaster())
         .add_plugins(sim_state_broadcaster())
         .add_plugins(modifier_events_broadcaster())

@@ -371,6 +371,7 @@ impl Plugin for ClientAppPlugin {
                 )))
             .init_resource::<LobbyState>()
             .init_resource::<ClientSimState>()
+            .init_resource::<crate::ship_view::ShipView>()
             .init_resource::<LocalPlayerToken>()
             .init_resource::<ActiveConsole>()
             .init_resource::<SelectedTube>()
@@ -754,6 +755,7 @@ fn apply_inbound_messages(
     mut reader: MessageReader<InboundServerMessage>,
     mut lobby: ResMut<LobbyState>,
     mut sim: ResMut<ClientSimState>,
+    mut ship_view: ResMut<crate::ship_view::ShipView>,
     mut complexity: ResMut<ComplexityStore>,
     token: Res<LocalPlayerToken>,
     mut active: ResMut<ActiveConsole>,
@@ -777,6 +779,7 @@ fn apply_inbound_messages(
         }
         lobby.apply(&ev.0);
         sim.apply(&ev.0);
+        ship_view.apply(&ev.0);
     }
 }
 

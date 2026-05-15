@@ -7,7 +7,7 @@
 //! WASM client UI layer.
 
 use crate::messages::{ClientMessage, Console, GamePhase, GameState, Player, ServerMessage};
-use crate::stations::ShipStations;
+use crate::stations_config::ShipStations;
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
@@ -360,7 +360,7 @@ impl<'a> LobbyView<'a> {
             .flat_map(|p| p.consoles.iter().cloned())
             .collect();
 
-        crate::stations::all_stations_filled(&self.state.ship_stations, check_count, &all_held)
+        crate::stations_config::all_stations_filled(&self.state.ship_stations, check_count, &all_held)
     }
 }
 
@@ -458,7 +458,7 @@ mod tests {
                 complexity: HashMap::new(),
                 world: None,
             },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert_eq!(s.players.len(), 1);
         assert_eq!(s.players[0].name, "Alice");
@@ -756,8 +756,8 @@ mod tests {
 
     // ── Station-based LobbyView ────────────────────────────────────────────
 
-    fn two_station_ship() -> crate::stations::ShipStations {
-        crate::stations::parse_and_validate(r#"
+    fn two_station_ship() -> crate::stations_config::ShipStations {
+        crate::stations_config::parse_and_validate(r#"
 [stations]
 min_players = 1
 max_players = 2
@@ -875,7 +875,7 @@ consoles = ["Tactical"]
 
     #[test]
     fn station_slots_propagates_short_code() {
-        let ship = crate::stations::parse_and_validate(r#"
+        let ship = crate::stations_config::parse_and_validate(r#"
 [stations]
 min_players = 1
 max_players = 1

@@ -721,7 +721,7 @@ mod tests {
                 complexity: HashMap::new(),
                 world: Some(world.clone()),
             },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         // Everything except `world` must reset to defaults.
         assert!(!s.red_alert);
@@ -776,7 +776,7 @@ mod tests {
                 complexity: HashMap::new(),
                 world: None,
             },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert_eq!(s, ClientSimState::default());
     }
@@ -885,7 +885,7 @@ mod tests {
         s.apply(&ServerMessage::ScienceTargetSuggestion { uuid: "some-entity".into() });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert!(s.science_target_suggestion.is_none());
     }
@@ -920,7 +920,7 @@ mod tests {
         s.apply(&ServerMessage::SensorsTargetSuggestion { uuid: "sensors-entity".into() });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert!(s.sensors_target_suggestion.is_none());
     }
@@ -1088,7 +1088,7 @@ mod tests {
         });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert!(s.shield_facings.is_empty());
     }
@@ -1747,7 +1747,7 @@ mod tests {
         });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert!(
             s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed).is_none(),
@@ -1841,7 +1841,7 @@ mod tests {
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert_eq!(s.power_levels, (2, 2, 2), "power_levels reset to default on Welcome");
         assert_eq!(s.power_state_payload, None, "power_state_payload cleared on Welcome");
@@ -1894,7 +1894,7 @@ mod tests {
         });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert_eq!(s.repair_teams, [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle]);
         assert_eq!(s.current_breakdown, None);
@@ -2068,7 +2068,7 @@ mod tests {
                 complexity: HashMap::new(),
                 world: Some(world_with_runtime.clone()),
             },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         // After Welcome, if the same entity is spawned again via EntitySpawned,
         // it must not duplicate.
@@ -2096,7 +2096,7 @@ mod tests {
                 complexity: HashMap::new(),
                 world: Some(world_with_runtime),
             },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert_eq!(s.world.entities.len(), 1);
 
@@ -2193,7 +2193,7 @@ mod tests {
                 complexity: HashMap::new(),
                 world: None,
             },
-            ship_stations: crate::stations::ShipStations::default(),
+            ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert_eq!(s.frequency_hint, None, "frequency_hint must be cleared on Welcome");
     }

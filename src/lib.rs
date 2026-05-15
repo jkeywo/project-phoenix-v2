@@ -41,7 +41,6 @@ pub use core::messages;
 pub mod lobby;
 pub use lobby::stations_config;
 pub use lobby::stations_policy;
-pub mod stations;
 pub mod modifiers;
 pub use modifiers::coordination as modifier_coordination;
 pub mod ship_view;

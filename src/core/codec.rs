@@ -68,8 +68,8 @@ mod tests {
         GameState { phase: GamePhase::Lobby, players: vec![player()], complexity: HashMap::new(), world: None }
     }
 
-    fn empty_ship_stations() -> crate::stations::ShipStations {
-        crate::stations::ShipStations::default()
+    fn empty_ship_stations() -> crate::stations_config::ShipStations {
+        crate::stations_config::ShipStations::default()
     }
 
     // ClientMessage round-trips
@@ -791,7 +791,7 @@ mod tests {
 
     #[test]
     fn welcome_with_ship_stations_round_trips() {
-        use crate::stations::{ShipStations, StationDef};
+        use crate::stations_config::{ShipStations, StationDef};
         use std::collections::HashMap;
         let mut configs = HashMap::new();
         configs.insert(1u32, vec![

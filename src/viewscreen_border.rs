@@ -66,7 +66,7 @@ use crate::lobby::{CurrentPhase, Sessions};
 use crate::messages::GamePhase;
 use crate::ship_state::ShipState;
 use crate::simulation::ShipHullIntegrity;
-use crate::stations::{ShipStations, StationDef};
+use crate::stations_config::{ShipStations, StationDef};
 
 // ── Layout constants ─────────────────────────────────────────────────
 //

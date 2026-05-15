@@ -13,7 +13,7 @@ use {
     crate::renderer::RendererPlugin,
     crate::simulation::SimulationPlugin,
     crate::world::WorldPlugin,
-    crate::stations::ShipStations,
+    crate::stations_config::ShipStations,
     crate::viewscreen_border::ViewscreenBorderPlugin,
     bevy::{prelude::*, DefaultPlugins},
     js_sys::Function,
@@ -59,7 +59,7 @@ thread_local! {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_validate_stations(toml_str: &str) -> Result<JsValue, JsValue> {
-    match crate::stations::parse_and_validate(toml_str) {
+    match crate::stations_config::parse_and_validate(toml_str) {
         Ok(stations) => {
             SHIP_STATIONS.with(|slot| {
                 *slot.borrow_mut() = Some(stations);

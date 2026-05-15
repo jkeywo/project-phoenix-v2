@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 pub use crate::entity_tags::EntityTag;
 use crate::flag_kind::FlagKind;
-use crate::stations::ShipStations;
+use crate::stations_config::ShipStations;
 
 /// Which ship attribute a modifier affects. Defined here so it can be used in
 /// wire messages without creating a circular dependency with `modifiers.rs`.

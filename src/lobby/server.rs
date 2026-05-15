@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::lobby_handler::{self, LobbyHandlerResult};
 use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage, WorldData};
 use crate::session::SessionManager;
-use crate::stations::ShipStations;
+use crate::stations_config::ShipStations;
 
 /// Cached `GameState` snapshot derived from `Sessions` + `CurrentPhase` each frame.
 /// Renderer systems read this instead of accessing `Sessions` directly.

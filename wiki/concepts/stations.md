@@ -20,7 +20,7 @@ pub use lobby::stations_config;
 pub use lobby::stations_policy;
 ```
 
-And a thin shim at `src/stations.rs` re-exports the public surface for callers that import `crate::stations::*`.
+The old `src/stations.rs` shim has been deleted (issue #242). All call sites now import directly from `crate::stations_config` or `crate::stations_policy`.
 
 ## Config (`stations_config`)
 

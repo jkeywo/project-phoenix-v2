@@ -89,8 +89,8 @@ next = "Helm"
 # 2P: command bridge + tactical ops.
 [[stations.2]]
 name = "Helm"
-description = "Pilot the ship, command the bridge, and manage comms."
-consoles = ["CaptainChair", "Helm", "Comms"]
+description = "Pilot the ship, command the bridge, shields and manage comms."
+consoles = ["CaptainChair", "Helm", "Shields", "Comms"]
 rank = "Cpt."
 next = "Helm"
 previous = "Captain"
@@ -98,15 +98,15 @@ previous = "Captain"
 [[stations.2]]
 name = "Tactical"
 description = "Weapons, damage control, power, and science operations."
-consoles = ["Tactical", "Repair", "Power", "Sensors", "Shields", "Navigation"]
+consoles = ["Tactical", "Repair", "Power", "Sensors", "Navigation"]
 rank = "Ltn."
 next = "Tactical"
 
-# 3P: bridge, weapons, and engineering. Science ops bundle with Tactical.
+# 3P: bridge, weapons, and engineering. Science ops split.
 [[stations.3]]
 name = "Helm"
-description = "Pilot the ship, command the bridge, and manage comms."
-consoles = ["CaptainChair", "Helm", "Comms"]
+description = "Pilot the ship, command the bridge."
+consoles = ["CaptainChair", "Helm"]
 rank = "Cpt."
 previous = "Helm"
 next = "Helm"
@@ -114,19 +114,19 @@ next = "Helm"
 [[stations.3]]
 name = "Tactical"
 description = "Manage weapons, sensors, shields, and navigation."
-consoles = ["Tactical", "Sensors", "Shields", "Navigation"]
+consoles = ["Tactical", "Sensors", "Navigation"]
 rank = "Ltn."
 previous = "Tactical"
 next = "Tactical"
 
 [[stations.3]]
 name = "Engineering"
-description = "Maintain and repair ship systems, manage power."
-consoles = ["Repair", "Power"]
+description = "Maintain and repair ship systems, manage power, shields, and manage comms."
+consoles = ["Repair", "Power", "Shields", "Comms"]
 rank = "Ltn."
 next = "Engineering"
 
-# 4P: dedicated Comms station breaks off from the bridge.
+# 4P: dedicated Science station.
 [[stations.4]]
 name = "Helm"
 description = "Pilot the ship and command the bridge."
@@ -152,10 +152,11 @@ previous = "Engineering"
 next = "Engineering"
 
 [[stations.4]]
-name = "Comms"
+name = "Science"
 description = "Hail stations, monitor sensors, shields, and navigation."
 consoles = ["Comms", "Sensors", "Shields", "Navigation"]
 rank = "Ens."
+next = "Science"
 
 # 5P: Captain breaks off from Helm.
 [[stations.5]]
@@ -190,13 +191,14 @@ previous = "Engineering"
 next = "Engineering"
 
 [[stations.5]]
-name = "Comms"
+name = "Science"
 description = "Hail stations, monitor sensors, shields, and navigation."
 consoles = ["Comms", "Sensors", "Shields", "Navigation"]
 rank = "Ens."
+previous = "Science"
 next = "Sensors"
 
-# 6P: Comms splits into dedicated Comms and dedicated Sensors/Shields/Navigation stations.
+# 6P: Science splits into dedicated Sensors and dedicated Shields/Navigation stations.
 [[stations.6]]
 name = "Captain"
 description = "Command the bridge."
@@ -230,11 +232,10 @@ name = "Comms"
 description = "Hail stations and relay intelligence."
 consoles = ["Comms"]
 rank = "Ens."
-previous = "Comms"
 
 [[stations.6]]
 name = "Sensors"
 description = "Monitor long-range sensors, shields, and navigation."
 consoles = ["Sensors", "Shields", "Navigation"]
 rank = "Ens."
-previous = "Comms"
+previous = "Science"

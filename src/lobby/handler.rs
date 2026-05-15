@@ -4,7 +4,8 @@ use crate::messages::{
     ClientMessage, Console, GamePhase, GameState, ServerMessage, WorldData,
 };
 use crate::session::SessionManager;
-use crate::stations::{advance_on_join, all_stations_filled, get_station, reassign_on_leave, ShipStations, StationAssignments};
+use crate::stations_config::{all_stations_filled, get_station, ShipStations, StationAssignments};
+use crate::stations_policy::{advance_on_join, reassign_on_leave};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
@@ -310,7 +311,7 @@ fn apply_station_assignments(
         let name_changed = old.map(|s| s != station_name).unwrap_or(true);
 
         // Look up the station def at the new count to know the target consoles.
-        let Some(station_def) = crate::stations::get_station(ship_stations, new_count, station_name) else {
+        let Some(station_def) = get_station(ship_stations, new_count, station_name) else {
             continue;
         };
 
@@ -439,7 +440,7 @@ pub fn process_disconnect(token: &str, sessions: &mut SessionManager) -> LobbyHa
 mod tests {
     use super::*;
     use crate::messages::{EntitySnapshot, WorldData};
-    use crate::stations::ShipStations;
+    use crate::stations_config::{ShipStations, parse_and_validate};
 
     fn sessions_with(token: &str, name: &str) -> SessionManager {
         let mut s = SessionManager::new();
@@ -558,7 +559,7 @@ mod tests {
 
     fn ship_stations() -> ShipStations {
         let toml_str = include_str!("../../assets/entities/player_ship.toml");
-        crate::stations::parse_and_validate(toml_str).unwrap()
+        parse_and_validate(toml_str).unwrap()
     }
 
     fn pm_stations(token: &str, msg: &ClientMessage, sessions: &mut SessionManager, phase: GamePhase, world: Option<&WorldData>) -> LobbyHandlerResult {
@@ -753,7 +754,7 @@ mod tests {
         let player_count = 6u32;
         // At 6P: "Captain" (CaptainChair), "Helm" (Helm), "Tactical" (Tactical), "Engineering" (Repair+Power), "Comms" (Comms), "Sensors" (Sensors+Shields+Navigation)
         for (tok, station_name) in [("t1", "Captain"), ("t2", "Helm"), ("t3", "Tactical"), ("t4", "Engineering"), ("t5", "Comms"), ("t6", "Sensors")] {
-            let station_def = crate::stations::get_station(stations, player_count, station_name).unwrap();
+            let station_def = get_station(stations, player_count, station_name).unwrap();
             for console in &station_def.consoles {
                 let _ = sessions.toggle_console(tok, console.clone());
             }
@@ -958,7 +959,7 @@ mod tests {
         let mut sessions = SessionManager::new();
         sessions.register("t1".into(), "Alice".into()).unwrap();
         // Manually assign t1 to Captain station (1P).
-        let captain_def = crate::stations::get_station(&stations, 1, "Captain").unwrap();
+        let captain_def = get_station(&stations, 1, "Captain").unwrap();
         for c in &captain_def.consoles {
             let _ = sessions.toggle_console("t1", c.clone());
         }

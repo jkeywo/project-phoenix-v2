@@ -54,11 +54,13 @@ Loaded from `assets/player_ship.toml` at runtime.
 
 ## Policy (`stations_policy`)
 
-Pure functions with no Bevy dependencies:
+Pure functions with no Bevy dependencies, imported via `crate::stations_policy::`:
 
-- `reassign_on_join(assignments, stations, player_count, token, spectator_queue) -> StationAssignments` — called when a player joins; advances the cascade.
-- `reassign_on_leave(assignments, stations, player_count, token, spectator_queue) -> StationAssignments` — called when a player leaves; demotes cascade and promotes spectators if any.
-- `advance_on_join(assignments, stations, player_count) -> StationAssignments` — promotes all stations when count increases (called internally).
+- `reassign_on_join(stations: &ShipStations, current: &StationAssignments, new_player: &str) -> StationAssignments` — cascades the N+1 station layout when a player joins; the new player is placed at the station with no predecessor.
+- `reassign_on_leave(stations: &ShipStations, current: &StationAssignments, leaving_player: &str, spectators: &VecDeque<String>) -> (StationAssignments, VecDeque<String>)` — cascades the N-1 station layout when a player leaves; promotes a spectator if a slot stays empty.
+- `advance_on_join(stations: &ShipStations, current: &StationAssignments) -> StationAssignments` — lobby-safe variant: advances existing assigned players to the N+1 layout without assigning the new joiner (they must select a station explicitly).
+
+Call sites import directly from `crate::stations_policy` rather than via the legacy `crate::stations` shim.
 
 ## Complexity presets
 

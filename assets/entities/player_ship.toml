@@ -196,7 +196,7 @@ description = "Hail stations, monitor sensors, shields, and navigation."
 consoles = ["Comms", "Sensors", "Shields", "Navigation"]
 rank = "Ens."
 previous = "Science"
-next = "Science"
+next = "Sensors"
 
 # 6P: Science splits into dedicated Sensors and dedicated Shields/Navigation stations.
 [[stations.6]]

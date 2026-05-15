@@ -93,11 +93,11 @@ pub struct PlannedChanges {
 /// or for preset names that don't exist in the config.
 pub fn hideable_element_names(console: &Console, preset_name: &str) -> Vec<String> {
     let toml_str = match console {
-        Console::Tactical => include_str!("../assets/complexity/tactical.toml"),
-        Console::Sensors => include_str!("../assets/complexity/sensors.toml"),
-        Console::Shields => include_str!("../assets/complexity/shields.toml"),
-        Console::Navigation => include_str!("../assets/complexity/navigation.toml"),
-        Console::Power => include_str!("../assets/complexity/power.toml"),
+        Console::Tactical => include_str!("../../assets/complexity/tactical.toml"),
+        Console::Sensors => include_str!("../../assets/complexity/sensors.toml"),
+        Console::Shields => include_str!("../../assets/complexity/shields.toml"),
+        Console::Navigation => include_str!("../../assets/complexity/navigation.toml"),
+        Console::Power => include_str!("../../assets/complexity/power.toml"),
         _ => return vec![],
     };
     let Ok(config) = parse_complexity_config(toml_str) else {

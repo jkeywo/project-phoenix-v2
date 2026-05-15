@@ -59,6 +59,19 @@ emergency_threshold = 25.0
 
 [helm_console]
 
+[navigation_console]
+
+[navigation_console.system_chart]
+range = 500.0
+shows = ["region", "asteroid_field", "star", "planet"]
+
+[shields_console]
+focus_bonus_max_hp = 50
+focus_bonus_regen = 5.0
+focus_penalty_max_hp = 25
+focus_penalty_regen = 2.5
+focus_decay_rate = 10.0
+
 [engineering_console]
 
 [stations]
@@ -139,11 +152,10 @@ previous = "Engineering"
 next = "Engineering"
 
 [[stations.4]]
-name = "Science"
+name = "Comms"
 description = "Hail stations, monitor sensors, shields, and navigation."
 consoles = ["Comms", "Sensors", "Shields", "Navigation"]
 rank = "Ens."
-next = "Science"
 
 # 5P: Captain breaks off from Helm.
 [[stations.5]]
@@ -178,14 +190,13 @@ previous = "Engineering"
 next = "Engineering"
 
 [[stations.5]]
-name = "Science"
+name = "Comms"
 description = "Hail stations, monitor sensors, shields, and navigation."
 consoles = ["Comms", "Sensors", "Shields", "Navigation"]
 rank = "Ens."
-previous = "Science"
 next = "Sensors"
 
-# 6P: Science splits into dedicated Sensors and dedicated Shields/Navigation stations.
+# 6P: Comms splits into dedicated Comms and dedicated Sensors/Shields/Navigation stations.
 [[stations.6]]
 name = "Captain"
 description = "Command the bridge."
@@ -219,11 +230,11 @@ name = "Comms"
 description = "Hail stations and relay intelligence."
 consoles = ["Comms"]
 rank = "Ens."
-previous = "Science"
+previous = "Comms"
 
 [[stations.6]]
 name = "Sensors"
 description = "Monitor long-range sensors, shields, and navigation."
 consoles = ["Sensors", "Shields", "Navigation"]
 rank = "Ens."
-previous = "Science"
+previous = "Comms"

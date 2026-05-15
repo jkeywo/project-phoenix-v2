@@ -8,9 +8,13 @@ use crate::messages::{GamePhase, ServerMessage};
 
 // ── Registration types ─────────────────────────────────────────────────────
 
-/// A boxed producer function: given read-only world access, yields a
-/// `ServerMessage` if it has something to send this tick, or `None` to skip.
-pub type Producer = Arc<dyn Fn(&World) -> Option<ServerMessage> + Send + Sync>;
+/// A boxed producer function: given exclusive world access, yields zero or more
+/// `ServerMessage`s to send this tick.  Returning an empty `Vec` skips the
+/// broadcast for this tick.
+///
+/// Exclusive (`&mut World`) access lets producers drain mutable resources (e.g.
+/// event queues) without needing a separate drain system.
+pub type Producer = Arc<dyn Fn(&mut World) -> Vec<ServerMessage> + Send + Sync>;
 
 /// A single registered broadcast entry for the simulation phase.
 pub struct SimRegistration {
@@ -53,8 +57,8 @@ fn cadence_timer(cadence: &Cadence) -> Option<Timer> {
             }
         }
         Cadence::Period(d) => Some(Timer::new(*d, TimerMode::Repeating)),
-        // `OnEvent` producers are called every frame and choose whether to
-        // emit via the `Option` return of the producer closure.
+        // `OnEvent` producers are called every frame and emit by returning a
+        // non-empty Vec.
         Cadence::OnEvent => None,
         // `Once` fires on the very first tick (zero-duration timer).
         Cadence::Once => Some(Timer::from_seconds(0.0, TimerMode::Once)),
@@ -87,9 +91,13 @@ impl SimBroadcaster {
 
     /// Register a producer that fires at `cadence` to `audience` during the
     /// simulation (`InProgress`) phase.
+    ///
+    /// The producer receives exclusive `&mut World` access so it can drain
+    /// mutable resources (e.g. event queues).  Read-only producers may simply
+    /// call `world.resource::<T>()` as usual.
     pub fn register<F>(mut self, audience: Audience, cadence: Cadence, producer: F) -> Self
     where
-        F: Fn(&World) -> Option<ServerMessage> + Send + Sync + 'static,
+        F: Fn(&mut World) -> Vec<ServerMessage> + Send + Sync + 'static,
     {
         self.pending.push(SimRegistration {
             audience,
@@ -137,9 +145,9 @@ fn dispatch_sim_broadcasts(world: &mut World) {
         }
     }
 
-    // Collect (index, target, producer) for entries that should fire this tick.
+    // Collect (target, producer) for entries that should fire this tick.
     // We clone Arcs so we can release the borrow on `registry` before calling
-    // into the world (producers may need immutable world access).
+    // into the world (producers need exclusive world access).
     let ready: Vec<(crate::lobby_handler::Target, Producer)> = {
         let registry = world.resource::<SimBroadcastRegistry>();
         let sessions = world.resource::<Sessions>();
@@ -165,8 +173,135 @@ fn dispatch_sim_broadcasts(world: &mut World) {
 
     // Call producers and write resulting messages.
     for (target, producer) in ready {
-        if let Some(msg) = producer(world) {
-            world.write_message(OutboundMessage { target, msg });
+        for msg in producer(world) {
+            world.write_message(OutboundMessage { target: target.clone(), msg });
         }
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::*;
+    use crate::core::broadcast::audience::Audience;
+    use crate::core::broadcast::cadence::Cadence;
+    use crate::lobby::{CurrentPhase, LobbyPlugin, OutboundMessage, Sessions};
+    use crate::lobby_handler::SessionManager;
+    use crate::messages::{GamePhase, ServerMessage};
+
+    // ── Test harness ──────────────────────────────────────────────────────
+
+    #[derive(Resource, Default)]
+    struct Outbox(Vec<OutboundMessage>);
+
+    fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    /// Build a minimal `App` for dispatch tests.
+    ///
+    /// - `LobbyPlugin` registers the message bus (`add_message::<OutboundMessage>()`).
+    /// - `CurrentPhase` is set to `InProgress` so the dispatch gate passes.
+    /// - One player is registered so `Audience::All` can resolve a `Target`.
+    /// - A `collect` PostUpdate system drains outbound messages into `Outbox`.
+    fn dispatch_app(broadcaster: SimBroadcaster) -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin);
+        app.add_plugins(bevy::time::TimePlugin);
+
+        // Wire the broadcaster under test.
+        app.add_plugins(broadcaster);
+
+        // Register one player and advance to InProgress.
+        {
+            let mut sm = app.world_mut().resource_mut::<Sessions>();
+            sm.0.register("alice".to_string(), "Alice".to_string()).unwrap();
+        }
+        app.world_mut().insert_resource(CurrentPhase(GamePhase::InProgress));
+
+        // Outbox + collector.
+        app.init_resource::<Outbox>();
+        app.add_systems(PostUpdate, collect);
+
+        app
+    }
+
+    /// Advance one update tick and return all outbound messages collected.
+    fn tick_and_collect(app: &mut App) -> Vec<OutboundMessage> {
+        app.update();
+        let msgs = app.world().resource::<Outbox>().0.clone();
+        msgs
+    }
+
+    // ── Audience::All resolution ───────────────────────────────────────────
+
+    /// A producer registered with `Audience::All` and `Cadence::Once` must
+    /// broadcast to all connected sessions.  The key assertion is that the
+    /// message is present at all — i.e. `Audience::All` resolves to a valid
+    /// `Target` with at least one connected player.
+    #[test]
+    fn audience_all_resolves_and_delivers_message() {
+        let broadcaster = SimBroadcaster::new().register(
+            Audience::All,
+            Cadence::Once,
+            |_world: &mut World| vec![ServerMessage::GameStarted],
+        );
+
+        let mut app = dispatch_app(broadcaster);
+        let msgs = tick_and_collect(&mut app);
+
+        assert!(
+            msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),
+            "expected GameStarted from Audience::All producer, got: {:?}",
+            msgs.iter().map(|m| &m.msg).collect::<Vec<_>>(),
+        );
+    }
+
+    // ── Cadence::OnEvent drain-once semantics ─────────────────────────────
+
+    /// A producer registered with `Cadence::OnEvent` is called every frame.
+    /// When it has pending work it emits messages; when the queue is empty it
+    /// returns nothing.  This test verifies the drain-once contract:
+    ///
+    /// - Events queued before a tick are all broadcast in that tick.
+    /// - A second tick with no new events produces no messages.
+    #[test]
+    fn on_event_producer_drains_once_per_frame() {
+        use std::sync::{Arc, Mutex};
+        let queue: Arc<Mutex<Vec<ServerMessage>>> = Arc::new(Mutex::new(vec![]));
+        let queue_clone = queue.clone();
+
+        let broadcaster = SimBroadcaster::new().register(
+            Audience::All,
+            Cadence::OnEvent,
+            move |_world: &mut World| {
+                let mut q = queue_clone.lock().unwrap();
+                std::mem::take(&mut *q)
+            },
+        );
+
+        let mut app = dispatch_app(broadcaster);
+
+        // Pre-load two events.
+        {
+            let mut q = queue.lock().unwrap();
+            q.push(ServerMessage::GameStarted);
+            q.push(ServerMessage::GameStarted);
+        }
+
+        // Tick 1: both events should be drained and broadcast.
+        let msgs1 = tick_and_collect(&mut app);
+        let count1 = msgs1.iter().filter(|m| matches!(m.msg, ServerMessage::GameStarted)).count();
+        assert_eq!(count1, 2, "tick 1: expected 2 GameStarted messages, got {count1}");
+
+        // Clear the outbox, then tick again with an empty queue.
+        app.world_mut().resource_mut::<Outbox>().0.clear();
+        let msgs2 = tick_and_collect(&mut app);
+        let count2 = msgs2.iter().filter(|m| matches!(m.msg, ServerMessage::GameStarted)).count();
+        assert_eq!(count2, 0, "tick 2: expected 0 messages after drain, got {count2}");
     }
 }

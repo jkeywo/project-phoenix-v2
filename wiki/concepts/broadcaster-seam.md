@@ -10,7 +10,7 @@ Before this seam, every periodic broadcast was a hand-written Bevy system that d
 - resolve the audience from `Sessions`,
 - write an `OutboundMessage`.
 
-The broadcaster seam replaces this boilerplate with a `register(audience, cadence, producer)` API. Each producer is a pure function `Fn(&World) -> Option<ServerMessage>` that knows nothing about routing or timing.
+The broadcaster seam replaces this boilerplate with a `register(audience, cadence, producer)` API. Each producer is a function `Fn(&mut World) -> Vec<ServerMessage>` that knows nothing about routing or timing. Exclusive world access (`&mut World`) lets producers drain mutable resources (e.g. event queues) without a separate system.
 
 ## Plugins
 
@@ -36,7 +36,7 @@ Audience::AllExcept(t)         → Target::AllExcept(t)
 
 Cadence::Hz(f32)               periodic at the given frequency
 Cadence::Period(Duration)      periodic at the given interval
-Cadence::OnEvent               every frame; producer decides via Option
+Cadence::OnEvent               every frame; producer returns Vec (empty = nothing to send)
 Cadence::Once                  fires on the first tick only
 ```
 
@@ -47,10 +47,12 @@ Cadence::Once                  fires on the first tick only
 | `PowerState` | `Holding(Console::Power)` | `Hz(10.0)` | `simulation::power_state_broadcaster()` |
 | `WeaponsUpdate` | `Holding(Console::Tactical)` | `Hz(10.0)` | `simulation::weapons_update_broadcaster()` |
 | `RepairState` | `Holding(Console::Repair)` | `Hz(10.0)` | `simulation::repair_state_broadcaster()` |
+| `SimState` | `All` | `Hz(10.0)` | `simulation::sim_state_broadcaster()` |
+| `ModifierAdded` / `ModifierRemoved` | `All` | `OnEvent` | `simulation::modifier_events_broadcaster()` |
 
 ## Registration points
 
-- `SimulationPlugin::build()` calls `power_state_broadcaster()`, `weapons_update_broadcaster()`, and `repair_state_broadcaster()` and adds each as a sub-plugin.
+- `SimulationPlugin::build()` calls all five broadcaster functions above and adds each as a sub-plugin.
 - `LobbyBroadcaster::new()` (no producers yet) is added in `src/bridge.rs` / `src/server/bridge.rs`.
 
 ## Subsequent slices

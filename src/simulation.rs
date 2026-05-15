@@ -12,15 +12,15 @@ use crate::shield::{attacker_bearing_relative, ShieldSystem};
 use crate::map_config::MapConfig;
 use crate::radar::WEAPONS_RADAR_RANGE;
 use crate::messages::{
-    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewDirection, ViewMode,
+    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, Shape, ShieldFacingStatus, ViewDirection,
 };
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
 use crate::messages::TorpedoTube as MsgTorpedoTube;
 use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
 use crate::ship_state::ShipState;
 use crate::impulse::ImpulseState;
-use crate::modifiers::{ShipModifiers, Modifier};
-use crate::messages::{ModifierSlot, ModifierSource};
+use crate::modifiers::ShipModifiers;
+use crate::messages::ModifierSlot;
 use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, RegionEffectsSection, EntityTagsSection};
 use crate::region_plugin::RegionMembership;
 use crate::region_effects::RegionEffectKind;
@@ -340,16 +340,16 @@ impl Plugin for SimulationPlugin {
                 (process_helm_inputs, sync_ship_position, handle_collisions),
             ))
             .add_systems(Update, (
-                broadcast_sim_state.after(process_helm_inputs),
-                broadcast_shield_status.after(broadcast_sim_state),
+                broadcast_shield_status.after(process_helm_inputs),
                 broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-                broadcast_modifier_events,
                 broadcast_repair_icons,
                 reconcile_runtime_entities.after(crate::lobby::process_lobby),
             ))
             .add_plugins(power_state_broadcaster())
             .add_plugins(weapons_update_broadcaster())
-            .add_plugins(repair_state_broadcaster());
+            .add_plugins(repair_state_broadcaster())
+            .add_plugins(sim_state_broadcaster())
+            .add_plugins(modifier_events_broadcaster());
     }
 }
 
@@ -362,15 +362,15 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
         Audience::Holding(Console::Power),
         Cadence::Hz(10.0),
-        |world: &World| {
+        |world: &mut World| {
             let power = world.resource::<ShipPowerSystem>();
-            Some(ServerMessage::PowerState {
+            vec![ServerMessage::PowerState {
                 helm: power.0.helm,
                 weapons: power.0.weapons,
                 sensors: power.0.sensors,
                 battery_charge: power.0.battery_charge,
                 locked: power.0.locked,
-            })
+            }]
         },
     )
 }
@@ -383,7 +383,7 @@ pub fn weapons_update_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
         Audience::Holding(Console::Tactical),
         Cadence::Hz(10.0),
-        |world: &World| {
+        |world: &mut World| {
             let ship = world.resource::<ShipState>();
             let world_res = world.resource::<WorldResource>();
             let weapons_target = world.resource::<WeaponsTarget>();
@@ -404,7 +404,7 @@ pub fn weapons_update_broadcaster() -> SimBroadcaster {
             };
 
             let ts = &torpedo_sys.0;
-            Some(ServerMessage::WeaponsUpdate {
+            vec![ServerMessage::WeaponsUpdate {
                 target_uuid: weapons_target.0.clone(),
                 fire_ready,
                 on_cooldown: cooldown.is_active() || beam.target_uuid.is_some(),
@@ -415,7 +415,7 @@ pub fn weapons_update_broadcaster() -> SimBroadcaster {
                 fore_starboard_reload_secs: ts.fore_starboard.reload_remaining,
                 aft_loaded: ts.aft.is_loaded(),
                 aft_reload_secs: ts.aft.reload_remaining,
-            })
+            }]
         },
     )
 }
@@ -428,7 +428,7 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(
         Audience::Holding(Console::Repair),
         Cadence::Hz(10.0),
-        |world: &World| {
+        |world: &mut World| {
             use crate::messages::TeamSlot;
             let teams = world.resource::<ShipRepairTeams>();
             let breakdowns = world.resource::<BreakdownQueueResource>();
@@ -444,13 +444,121 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 
             let current_breakdown = breakdowns.queue.front().map(|entry| (entry.console.clone(), entry.shape));
 
-            Some(ServerMessage::RepairState {
+            vec![ServerMessage::RepairState {
                 remaining_cooldown_secs,
                 in_progress,
                 penalty,
                 teams: *slots,
                 current_breakdown,
-            })
+            }]
+        },
+    )
+}
+
+/// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.
+///
+/// Broadcasts `SimState` at 10 Hz to all players (`Audience::All`).
+/// Registered by [`SimulationPlugin`] and the test harness in `test_app()`.
+pub fn sim_state_broadcaster() -> SimBroadcaster {
+    SimBroadcaster::new().register(
+        Audience::All,
+        Cadence::Hz(10.0),
+        |world: &mut World| {
+            // Build per-tick entity state from live ECS first (before any resource
+            // borrows, so world.query() can get the exclusive access it needs).
+            let entity_states: Vec<crate::messages::EntityStateSnapshot> = {
+                let mut query = world.query::<(&Transform, &AsteroidUuid, Option<&AsteroidDamage>)>();
+                query.iter(world)
+                    .map(|(transform, uuid, damage)| {
+                        let hull_fraction = damage.map(|d| d.current_hp as f32 / d.max_hp as f32);
+                        crate::messages::EntityStateSnapshot {
+                            uuid: uuid.0.clone(),
+                            position: Some([transform.translation.x, transform.translation.y, transform.translation.z]),
+                            yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                            hull_fraction,
+                            flags: vec![],
+                            shields: None,
+                            warp_out_remaining_secs: None,
+                        }
+                    })
+                    .collect()
+            };
+
+            // Extract all resource data (borrows are confined to this block).
+            let (hull_current, power_levels, flags, helm_range_mult, charge_progress,
+                 ship_x, ship_z, ship_yaw, ship_red_alert, ship_view_mode) = {
+                let ship = world.resource::<ShipState>();
+                let hull = world.resource::<ShipHullIntegrity>();
+                let power = world.get_resource::<ShipPowerSystem>();
+                let impulse = world.resource::<ShipImpulse>();
+                let modifiers = world.resource::<crate::modifiers::ShipModifiers>();
+
+                let power_levels = power
+                    .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
+                    .unwrap_or((2, 2, 2));
+                let flags = modifiers.flags();
+                let helm_range_mult = modifiers.get(&ModifierSlot::RadarRange);
+                (
+                    hull.0.current(), power_levels, flags, helm_range_mult,
+                    impulse.0.charge_progress,
+                    ship.x, ship.z, ship.yaw, ship.red_alert(), ship.view_mode.clone(),
+                )
+            };
+
+            let radar_state = crate::messages::RadarStateSnapshot {
+                helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
+                tactical_range: crate::client_sim::WEAPONS_RADAR_RANGE * helm_range_mult,
+                science_long_range: crate::client_sim::SCIENCE_RADAR_RANGE * helm_range_mult,
+                science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
+            };
+
+            let snapshot = crate::messages::SimSnapshot {
+                red_alert: ship_red_alert,
+                view_mode: ship_view_mode,
+                ship_x,
+                ship_z,
+                ship_yaw,
+                hull_integrity: hull_current,
+                power_levels,
+                flags,
+                entity_states,
+                radar_state,
+                impulse_charge_progress: charge_progress,
+            };
+            vec![ServerMessage::SimState { snapshot }]
+        },
+    )
+}
+
+/// Returns a [`SimBroadcaster`] pre-configured with the `ModifierAdded` and
+/// `ModifierRemoved` producers.
+///
+/// Drains pending modifier events from [`ShipModifiers`] once per frame and
+/// broadcasts each as a separate `ServerMessage` to all players (`Audience::All`).
+/// Uses `Cadence::OnEvent` so the producer is called every frame regardless of
+/// any Hz timer; an empty drain produces no outbound messages.
+/// Registered by [`SimulationPlugin`] and the test harness in `test_app()`.
+pub fn modifier_events_broadcaster() -> SimBroadcaster {
+    SimBroadcaster::new().register(
+        Audience::All,
+        Cadence::OnEvent,
+        |world: &mut World| {
+            use crate::modifiers::ModifierEvent;
+            let events: Vec<_> = {
+                let mut modifiers = world.resource_mut::<crate::modifiers::ShipModifiers>();
+                std::mem::take(&mut modifiers.pending_events)
+            };
+            events
+                .into_iter()
+                .map(|event| match event {
+                    ModifierEvent::Added { source, slot, bonus } => {
+                        ServerMessage::ModifierAdded { source, slot, bonus }
+                    }
+                    ModifierEvent::Removed { source, slot } => {
+                        ServerMessage::ModifierRemoved { source, slot }
+                    }
+                })
+                .collect()
         },
     )
 }
@@ -1306,64 +1414,10 @@ fn tick_active_beam(
     }
 }
 
-fn broadcast_sim_state(
-    time: Res<Time>,
-    mut timer: ResMut<SimBroadcastTimer>,
-    mut writer: MessageWriter<OutboundMessage>,
-    ship: Res<ShipState>,
-    hull: Res<ShipHullIntegrity>,
-    phase: Res<CurrentPhase>,
-    power: Option<Res<ShipPowerSystem>>,
-    impulse: Res<ShipImpulse>,
-    modifiers: Res<crate::modifiers::ShipModifiers>,
-    asteroid_query: Query<(&Transform, &AsteroidUuid, Option<&AsteroidDamage>)>,
-) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-    if timer.0.tick(time.delta()).just_finished() {
-        let power_levels = power.as_ref()
-            .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
-            .unwrap_or((2, 2, 2));
-        let flags = modifiers.flags();
-
-        // Build per-tick entity state from live ECS.
-        let entity_states: Vec<crate::messages::EntityStateSnapshot> = asteroid_query
-            .iter()
-            .map(|(transform, uuid, damage)| {
-                let hull_fraction = damage.map(|d| d.current_hp as f32 / d.max_hp as f32);
-                crate::messages::EntityStateSnapshot {
-                    uuid: uuid.0.clone(),
-                    position: Some([transform.translation.x, transform.translation.y, transform.translation.z]),
-                    yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
-                    hull_fraction,
-                    flags: vec![],
-                    shields: None,
-                    warp_out_remaining_secs: None,
-                }
-            })
-            .collect();
-
-        let helm_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-        let radar_state = crate::messages::RadarStateSnapshot {
-            helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
-            tactical_range: crate::client_sim::WEAPONS_RADAR_RANGE * helm_range_mult,
-            science_long_range: crate::client_sim::SCIENCE_RADAR_RANGE * helm_range_mult,
-            science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
-        };
-
-        writer.write(OutboundMessage {
-            target: Target::All,
-            msg: ServerMessage::SimState {
-                snapshot: ship.snapshot(hull.0.current(), power_levels, flags, entity_states, radar_state, impulse.0.charge_progress),
-            },
-        });
-    }
-}
-
 /// Broadcast `ShieldStatus` to all players at 10 Hz.
 fn broadcast_shield_status(
-    timer: Res<SimBroadcastTimer>,
+    time: Res<Time>,
+    mut timer: ResMut<SimBroadcastTimer>,
     mut writer: MessageWriter<OutboundMessage>,
     shields: Res<ShipShields>,
     phase: Res<CurrentPhase>,
@@ -1371,7 +1425,7 @@ fn broadcast_shield_status(
     if phase.0 != GamePhase::InProgress {
         return;
     }
-    if !timer.0.just_finished() {
+    if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
     let facings = shields.0.snapshot().into_iter().map(|s| ShieldFacingStatus {
@@ -1407,25 +1461,6 @@ fn broadcast_world_setup_on_start(
     state.sent = true;
 }
 
-/// Drain pending modifier events from `ShipModifiers` and broadcast them to all clients.
-fn broadcast_modifier_events(
-    mut modifiers: ResMut<ShipModifiers>,
-    mut writer: MessageWriter<OutboundMessage>,
-) {
-    use crate::modifiers::ModifierEvent;
-    let events: Vec<_> = std::mem::take(&mut modifiers.pending_events);
-    for event in events {
-        let msg = match event {
-            ModifierEvent::Added { source, slot, bonus } => {
-                ServerMessage::ModifierAdded { source, slot, bonus }
-            }
-            ModifierEvent::Removed { source, slot } => {
-                ServerMessage::ModifierRemoved { source, slot }
-            }
-        };
-        writer.write(OutboundMessage { target: Target::All, msg });
-    }
-}
 /// Broadcast `ShowRepairIcon` / `ClearRepairIcon` to console holders based
 /// on the current breakdown queue state. Sends deltas only.
 fn broadcast_repair_icons(
@@ -1910,10 +1945,12 @@ fn test_app() -> App {
             tick_active_beam, tick_repair_teams,
             tick_torpedo_system, tick_power_system,
         ))
-        .add_systems(Update, (broadcast_sim_state, broadcast_shield_status.after(broadcast_sim_state), broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_modifier_events, broadcast_repair_icons, reconcile_runtime_entities.after(crate::lobby::process_lobby)))
+        .add_systems(Update, (broadcast_shield_status, broadcast_world_setup_on_start.after(crate::lobby::process_lobby), broadcast_repair_icons, reconcile_runtime_entities.after(crate::lobby::process_lobby)))
         .add_plugins(power_state_broadcaster())
         .add_plugins(weapons_update_broadcaster())
         .add_plugins(repair_state_broadcaster())
+        .add_plugins(sim_state_broadcaster())
+        .add_plugins(modifier_events_broadcaster())
         .add_systems(PostUpdate, collect);
     app
 }

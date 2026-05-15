@@ -4,9 +4,16 @@
 
 ## Current scope
 
-- Registers `setup_world_hardcoded` as a `Startup` system.
-- `setup_world_hardcoded` spawns the procedural starfield and the player ship when no `MapConfig` is preloaded (development/testing fallback path).
-- When a `MapConfig` is present, the hardcoded setup skips itself and `SimulationPlugin`'s config-based path runs instead.
+`WorldPlugin` is the single owner of world content lifecycle: parse, spawn, triggers, comms, and broadcast.
+
+**Startup systems:**
+- `setup_world_hardcoded` — starfield + player ship fallback when no `MapConfig` is present
+- `spawn_scenario_entities` — resolves scenario spawn positions and calls the entity-spawn pipeline
+- `init_scenario_runtime` — initialises `ScenarioRuntime`, `CommsInboxRes`, `ObjectiveManagerRes` from loaded `ScenarioConfig`
+
+**Resources:** `ScenarioRuntime`, `CommsInboxRes`, `ObjectiveManagerRes`
+
+**Update systems:** `handle_hail`, `handle_respond_to_message`, `handle_clear_comms`, `broadcast_comms_state`, `broadcast_objective_summary`, `handle_ai_events`
 
 ## Modules
 

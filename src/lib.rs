@@ -25,7 +25,6 @@ pub mod entity_loader;
 pub mod entity_override;
 pub mod entity_spawner;
 pub mod map_config;
-pub mod scenario_plugin;
 pub mod objectives;
 pub mod comms_inbox;
 pub mod messages;

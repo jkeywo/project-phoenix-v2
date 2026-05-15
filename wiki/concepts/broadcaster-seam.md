@@ -49,11 +49,12 @@ Cadence::Once                  fires on the first tick only
 | `RepairState` | `Holding(Console::Repair)` | `Hz(10.0)` | `simulation::repair_state_broadcaster()` |
 | `SimState` | `All` | `Hz(10.0)` | `simulation::sim_state_broadcaster()` |
 | `ModifierAdded` / `ModifierRemoved` | `All` | `OnEvent` | `simulation::modifier_events_broadcaster()` |
+| `LobbyOutbox` (drains `Welcome`, `PlayerJoined`, `PlayerLeft`, `StationAssigned`, `GameStarted`, `ComplexityChanged`, etc.) | `All` | `OnEvent` | `lobby::lobby_outbox_broadcaster()` |
 
 ## Registration points
 
 - `SimulationPlugin::build()` calls all five broadcaster functions above and adds each as a sub-plugin.
-- `LobbyBroadcaster::new()` (no producers yet) is added in `src/bridge.rs` / `src/server/bridge.rs`.
+- `lobby_outbox_broadcaster()` is called in `src/bridge.rs` / `src/server/bridge.rs` alongside `LobbyPlugin`.
 
 ## Subsequent slices
 

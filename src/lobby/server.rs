@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
-use crate::lobby_handler::{self, LobbyHandlerResult};
+use crate::lobby_handler;
+pub use crate::lobby_handler::Target;
 use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage, WorldData};
 use crate::session::SessionManager;
 use crate::stations_config::ShipStations;
@@ -10,7 +11,10 @@ use crate::stations_config::ShipStations;
 #[derive(Resource, Clone)]
 pub struct GameStateCache(pub GameState);
 
-pub use crate::lobby_handler::Target;
+/// Pending outbound messages produced by lobby systems.
+/// Drained each frame by the `LobbyBroadcaster` dispatch.
+#[derive(Resource, Default)]
+pub struct LobbyOutbox(pub Vec<(Target, ServerMessage)>);
 
 // ── Resources ──────────────────────────────────────────────────────────────
 
@@ -64,6 +68,7 @@ impl Plugin for LobbyPlugin {
         app.insert_resource(Sessions(SessionManager::new()))
             .insert_resource(CurrentPhase(GamePhase::Lobby))
             .insert_resource(initial_cache)
+            .insert_resource(LobbyOutbox::default())
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()
             .add_message::<PlayerDisconnected>()
@@ -101,9 +106,9 @@ pub fn update_game_state_cache(
 
 pub fn process_lobby(
     mut inbound: MessageReader<InboundMessage>,
-    mut outbound: MessageWriter<OutboundMessage>,
     mut sessions: ResMut<Sessions>,
     mut phase: ResMut<CurrentPhase>,
+    mut outbox: ResMut<LobbyOutbox>,
     world: Option<Res<WorldResource>>,
     ship_stations: Option<Res<ShipStations>>,
 ) {
@@ -125,15 +130,15 @@ pub fn process_lobby(
             world_data,
             stations,
         );
-        apply_result(result, &mut outbound, &mut phase);
+        apply_result(result, &mut outbox, &mut phase);
     }
 }
 
 fn handle_disconnect(
     mut events: MessageReader<PlayerDisconnected>,
-    mut outbound: MessageWriter<OutboundMessage>,
     mut sessions: ResMut<Sessions>,
     mut phase: ResMut<CurrentPhase>,
+    mut outbox: ResMut<LobbyOutbox>,
     ship_stations: Option<Res<ShipStations>>,
 ) {
     for ev in events.read() {
@@ -142,21 +147,49 @@ fn handle_disconnect(
         } else {
             lobby_handler::process_disconnect(&ev.token, &mut sessions.0)
         };
-        apply_result(result, &mut outbound, &mut phase);
+        apply_result(result, &mut outbox, &mut phase);
     }
 }
 
 fn apply_result(
-    result: LobbyHandlerResult,
-    outbound: &mut MessageWriter<OutboundMessage>,
+    result: lobby_handler::LobbyHandlerResult,
+    outbox: &mut ResMut<LobbyOutbox>,
     phase: &mut ResMut<CurrentPhase>,
 ) {
     if let Some(new_phase) = result.new_phase {
         phase.0 = new_phase;
     }
-    for (target, msg) in result.outbound {
-        outbound.write(OutboundMessage { target, msg });
-    }
+    outbox.0.extend(result.outbound);
+}
+
+// ── Broadcaster helper ─────────────────────────────────────────────────────
+
+/// Returns a [`LobbyBroadcaster`] pre-configured with a producer that drains
+/// [`LobbyOutbox`] each frame and writes each entry as an `OutboundMessage`.
+///
+/// Uses `Cadence::OnEvent` so the producer fires every frame.  When the outbox
+/// is empty the producer returns an empty `Vec` and no messages are emitted.
+/// When populated (by `process_lobby` or `handle_disconnect`) the queued
+/// entries are flushed directly to `OutboundMessage` with their original
+/// `Target` routing.
+///
+/// This must be registered once (typically in `bridge.rs`) alongside
+/// `LobbyPlugin`.  Multiple registrations are safe because
+/// `LobbyBroadcaster::is_unique` returns `false`.
+pub fn lobby_outbox_broadcaster() -> crate::core::broadcast::LobbyBroadcaster {
+    use crate::core::broadcast::{Audience, Cadence, LobbyBroadcaster};
+    LobbyBroadcaster::new().register(
+        Audience::All,
+        Cadence::OnEvent,
+        |world: &mut bevy::prelude::World| {
+            let mut outbox = world.resource_mut::<LobbyOutbox>();
+            let entries = std::mem::take(&mut outbox.0);
+            for (target, msg) in entries {
+                world.write_message(OutboundMessage { target, msg });
+            }
+            vec![]
+        },
+    )
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -164,6 +197,7 @@ fn apply_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -177,6 +211,8 @@ mod tests {
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
+            .add_plugins(lobby_outbox_broadcaster())
+            .add_plugins(bevy::time::TimePlugin)
             .init_resource::<Outbox>()
             .add_systems(PostUpdate, collect);
         app

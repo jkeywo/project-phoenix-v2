@@ -9,7 +9,11 @@ use crate::messages::{GamePhase, ServerMessage};
 // ── Registration types ─────────────────────────────────────────────────────
 
 /// A boxed producer function for lobby broadcasts.
-pub type LobbyProducer = Arc<dyn Fn(&World) -> Option<ServerMessage> + Send + Sync>;
+///
+/// The producer receives exclusive `&mut World` access so it can drain mutable
+/// resources (e.g. the lobby outbox).  Returning an empty `Vec` skips the
+/// broadcast for this tick.
+pub type LobbyProducer = Arc<dyn Fn(&mut World) -> Vec<ServerMessage> + Send + Sync>;
 
 /// A single registered broadcast entry for the lobby phase.
 pub struct LobbyRegistration {
@@ -83,9 +87,12 @@ impl LobbyBroadcaster {
 
     /// Register a producer that fires at `cadence` to `audience` during the
     /// lobby phase.
+    ///
+    /// The producer receives exclusive `&mut World` access so it can drain
+    /// mutable resources (e.g. the lobby outbox).
     pub fn register<F>(mut self, audience: Audience, cadence: Cadence, producer: F) -> Self
     where
-        F: Fn(&World) -> Option<ServerMessage> + Send + Sync + 'static,
+        F: Fn(&mut World) -> Vec<ServerMessage> + Send + Sync + 'static,
     {
         self.pending.push(LobbyRegistration {
             audience,
@@ -97,8 +104,16 @@ impl LobbyBroadcaster {
 }
 
 impl Plugin for LobbyBroadcaster {
+    fn is_unique(&self) -> bool {
+        false
+    }
+
     fn build(&self, app: &mut App) {
-        let mut registry = LobbyBroadcastRegistry::new();
+        if !app.world().contains_resource::<LobbyBroadcastRegistry>() {
+            app.insert_resource(LobbyBroadcastRegistry::new());
+            app.add_systems(Update, dispatch_lobby_broadcasts.after(crate::lobby::process_lobby));
+        }
+        let mut registry = app.world_mut().resource_mut::<LobbyBroadcastRegistry>();
         for reg in &self.pending {
             registry.add(LobbyRegistration {
                 audience: reg.audience.clone(),
@@ -106,8 +121,6 @@ impl Plugin for LobbyBroadcaster {
                 producer: reg.producer.clone(),
             });
         }
-        app.insert_resource(registry)
-            .add_systems(Update, dispatch_lobby_broadcasts);
     }
 }
 
@@ -157,8 +170,146 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
 
     // Call producers and write resulting messages.
     for (target, producer) in ready {
-        if let Some(msg) = producer(world) {
-            world.write_message(OutboundMessage { target, msg });
+        for msg in producer(world) {
+            world.write_message(OutboundMessage { target: target.clone(), msg });
         }
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::broadcast::audience::Audience;
+    use crate::core::broadcast::cadence::Cadence;
+    use crate::lobby::{CurrentPhase, LobbyPlugin, OutboundMessage};
+    use crate::messages::{GamePhase, ServerMessage};
+
+    #[derive(Resource, Default)]
+    struct Outbox(Vec<OutboundMessage>);
+
+    fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    fn dispatch_app(broadcaster: LobbyBroadcaster) -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin);
+        app.add_plugins(bevy::time::TimePlugin);
+        app.add_plugins(broadcaster);
+
+        app.world_mut().insert_resource(CurrentPhase(GamePhase::Lobby));
+        app.init_resource::<Outbox>();
+        app.add_systems(PostUpdate, collect);
+        app
+    }
+
+    fn tick_and_collect(app: &mut App) -> Vec<OutboundMessage> {
+        app.update();
+        let msgs = app.world().resource::<Outbox>().0.clone();
+        msgs
+    }
+
+    #[test]
+    fn once_cadence_delivers_message_on_first_tick() {
+        let broadcaster = LobbyBroadcaster::new().register(
+            Audience::All,
+            Cadence::Once,
+            |_world: &mut World| vec![ServerMessage::GameStarted],
+        );
+        let mut app = dispatch_app(broadcaster);
+        let msgs = tick_and_collect(&mut app);
+        assert!(
+            msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),
+            "Cadence::Once should deliver message on first tick"
+        );
+    }
+
+    #[test]
+    fn once_cadence_does_not_fire_again() {
+        let broadcaster = LobbyBroadcaster::new().register(
+            Audience::All,
+            Cadence::Once,
+            |_world: &mut World| vec![ServerMessage::GameStarted],
+        );
+        let mut app = dispatch_app(broadcaster);
+        let _ = tick_and_collect(&mut app);
+        app.world_mut().resource_mut::<Outbox>().0.clear();
+        let msgs = tick_and_collect(&mut app);
+        assert!(
+            !msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),
+            "Cadence::Once should not fire on second tick"
+        );
+    }
+
+    #[test]
+    fn on_event_producer_drains_per_frame() {
+        use std::sync::{Arc, Mutex};
+        let queue: Arc<Mutex<Vec<ServerMessage>>> = Arc::new(Mutex::new(vec![]));
+        let q2 = queue.clone();
+
+        let broadcaster = LobbyBroadcaster::new().register(
+            Audience::All,
+            Cadence::OnEvent,
+            move |_world: &mut World| {
+                let mut q = q2.lock().unwrap();
+                std::mem::take(&mut *q)
+            },
+        );
+
+        let mut app = dispatch_app(broadcaster);
+
+        queue.lock().unwrap().push(ServerMessage::GameStarted);
+        queue.lock().unwrap().push(ServerMessage::GameStarted);
+
+        let msgs1 = tick_and_collect(&mut app);
+        let count1 = msgs1.iter().filter(|m| matches!(m.msg, ServerMessage::GameStarted)).count();
+        assert_eq!(count1, 2, "tick 1: expected 2 messages, got {count1}");
+
+        app.world_mut().resource_mut::<Outbox>().0.clear();
+        let msgs2 = tick_and_collect(&mut app);
+        let count2 = msgs2.iter().filter(|m| matches!(m.msg, ServerMessage::GameStarted)).count();
+        assert_eq!(count2, 0, "tick 2: expected 0 messages after drain, got {count2}");
+    }
+
+    #[test]
+    fn multiple_registrations_all_fire() {
+        let broadcaster = LobbyBroadcaster::new()
+            .register(
+                Audience::All,
+                Cadence::Once,
+                |_world: &mut World| vec![ServerMessage::GameStarted],
+            )
+            .register(
+                Audience::All,
+                Cadence::Once,
+                |_world: &mut World| vec![ServerMessage::PlayerLeft { token: "t1".into() }],
+            );
+
+        let mut app = dispatch_app(broadcaster);
+        let msgs = tick_and_collect(&mut app);
+        let game_started = msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted));
+        let player_left = msgs.iter().any(|m| matches!(m.msg, ServerMessage::PlayerLeft { .. }));
+        assert!(game_started, "first registration should fire");
+        assert!(player_left, "second registration should fire");
+    }
+
+    #[test]
+    fn dispatch_skips_when_not_in_lobby_phase() {
+        let broadcaster = LobbyBroadcaster::new().register(
+            Audience::All,
+            Cadence::Once,
+            |_world: &mut World| vec![ServerMessage::GameStarted],
+        );
+        let mut app = dispatch_app(broadcaster);
+        app.world_mut().insert_resource(CurrentPhase(GamePhase::InProgress));
+        let msgs = tick_and_collect(&mut app);
+        assert!(
+            !msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),
+            "broadcasts should not fire outside lobby phase"
+        );
     }
 }

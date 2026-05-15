@@ -371,6 +371,10 @@ impl Plugin for SimulationPlugin {
                 .after(handle_power_messages)
                 .after(tick_power_system)
                 .after(crate::lobby::process_lobby))
+            .add_systems(Update, (
+                crate::modifier_coordination::translate_region_modifiers,
+                crate::region_plugin::handle_slow_zone_speed_clamp,
+            ).chain().after(crate::region_plugin::update_region_membership))
             .add_plugins(power_state_broadcaster())
             .add_plugins(weapons_update_broadcaster())
             .add_plugins(repair_state_broadcaster())

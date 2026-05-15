@@ -5,9 +5,8 @@ use crate::entity_spawner::{RegionShapeSection, RegionEffectsSection, EntityUuid
 use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
 use crate::ship_state::ShipState;
 use crate::region_effects::RegionEffectKind;
-use crate::modifiers::{ShipModifiers, Modifier};
-use crate::messages::{ModifierSlot, ModifierSource};
-use crate::flag_kind::FlagKind;
+use crate::modifiers::ShipModifiers;
+use crate::messages::ModifierSlot;
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -43,13 +42,6 @@ impl Plugin for RegionPlugin {
                 update_region_membership,
                 apply_damage_zone_damage.after(update_region_membership),
                 handle_blocks_impulse_region_enter.after(update_region_membership),
-                handle_comms_jam_enter.after(update_region_membership),
-                handle_sensor_blind_enter.after(update_region_membership),
-                handle_radar_dampening_enter.after(update_region_membership),
-                handle_radar_dampening_exit.after(update_region_membership),
-                handle_slow_zone_enter.after(update_region_membership),
-                handle_slow_zone_exit.after(update_region_membership),
-                handle_flag_region_exit.after(update_region_membership),
             ));
     }
 }
@@ -59,7 +51,7 @@ impl Plugin for RegionPlugin {
 ///
 /// Automatically handles region despawn: if a region was previously occupied
 /// and is no longer in the ECS, an implicit `RegionExited` is emitted.
-fn update_region_membership(
+pub(crate) fn update_region_membership(
     mut membership: ResMut<RegionMembership>,
     mut entered: MessageWriter<RegionEntered>,
     mut exited: MessageWriter<RegionExited>,
@@ -184,124 +176,32 @@ fn handle_blocks_impulse_region_enter(
     }
 }
 
-/// Sets the `CommsJammed` flag on the ship when entering a region with the
-/// `CommsJam` effect. Multiple jammer regions OR-aggregate via the flag API.
-fn handle_comms_jam_enter(
-    mut entered: MessageReader<RegionEntered>,
-    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
-    mut modifiers: ResMut<ShipModifiers>,
-) {
-    for ev in entered.read() {
-        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
-            continue;
-        };
-        if !effects.0.iter().any(|e| *e == RegionEffectKind::CommsJam) {
-            continue;
-        }
-        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        modifiers.add_flag(ModifierSource::RegionEffect { uuid }, FlagKind::CommsJammed);
-    }
-}
 
-/// Sets the `SensorBlind` flag on the ship when entering a region with the
-/// `SensorBlind` effect. Multiple blind regions OR-aggregate via the flag API.
-fn handle_sensor_blind_enter(
-    mut entered: MessageReader<RegionEntered>,
-    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
-    mut modifiers: ResMut<ShipModifiers>,
-) {
-    for ev in entered.read() {
-        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
-            continue;
-        };
-        if !effects.0.iter().any(|e| *e == RegionEffectKind::SensorBlind) {
-            continue;
-        }
-        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        modifiers.add_flag(ModifierSource::RegionEffect { uuid }, FlagKind::SensorBlind);
-    }
-}
 
-/// Registers a `RadarRange` modifier when the ship enters a region with the
-/// `RadarDampening` effect. The modifier's bonus is the region's multiplier value.
-fn handle_radar_dampening_enter(
-    mut entered: MessageReader<RegionEntered>,
-    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
-    mut modifiers: ResMut<ShipModifiers>,
-) {
-    for ev in entered.read() {
-        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
-            continue;
-        };
-        for effect in &effects.0 {
-            if let RegionEffectKind::RadarDampening { multiplier } = effect {
-                let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
-                    Ok(u) => u,
-                    // If the UUID is somehow invalid, skip this region silently
-                    Err(_) => continue,
-                };
-                modifiers.add_or_update(Modifier {
-                    source: ModifierSource::RegionEffect { uuid },
-                    slot: ModifierSlot::RadarRange,
-                    bonus: *multiplier,
-                });
-            }
-        }
-    }
-}
 
-/// Registers `SlowZone` modifiers on `MaxSpeed` and/or `MaxYawRate` when
-/// the ship enters a region with the `SlowZone` effect, then immediately
-/// clamps the ship's forward speed to the new effective maximum.
-fn handle_slow_zone_enter(
+
+
+
+/// Clamps the ship's forward speed to the effective maximum when entering a
+/// slow zone region. The modifier registration is handled by the coordinator's
+/// `translate_region_modifiers` system — this system only clamps speed.
+///
+/// This is a non-modifier side effect that must run after the coordinator so
+/// the effective max reflects the updated modifier state.
+pub(crate) fn handle_slow_zone_speed_clamp(
     mut entered: MessageReader<RegionEntered>,
-    region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
-    mut modifiers: ResMut<ShipModifiers>,
+    region_query: Query<&RegionEffectsSection>,
+    modifiers: Res<ShipModifiers>,
     mut ship: ResMut<ShipState>,
 ) {
     for ev in entered.read() {
-        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
+        let Ok(effects) = region_query.get(ev.region_entity) else {
             continue;
         };
         let has_slow = effects.0.iter().any(|e| matches!(e, RegionEffectKind::SlowZone { .. }));
         if !has_slow {
             continue;
         }
-        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        let source = ModifierSource::RegionEffect { uuid };
-
-        // Find the SlowZone effect to extract modifier values
-        for effect in &effects.0 {
-            if let RegionEffectKind::SlowZone { thrust_modifier, yaw_rate_modifier } = effect {
-                // Register thrust modifier on MaxSpeed
-                if let Some(bonus) = thrust_modifier {
-                    modifiers.add_or_update(Modifier {
-                        source: source.clone(),
-                        slot: ModifierSlot::MaxSpeed,
-                        bonus: *bonus,
-                    });
-                }
-                // Register yaw rate modifier on MaxYawRate
-                if let Some(bonus) = yaw_rate_modifier {
-                    modifiers.add_or_update(Modifier {
-                        source: source.clone(),
-                        slot: ModifierSlot::MaxYawRate,
-                        bonus: *bonus,
-                    });
-                }
-            }
-        }
-
-        // Immediately clamp forward speed to the new effective max
         let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
         let effective_max = base_max * modifiers.get(&ModifierSlot::MaxSpeed);
         if ship.forward_speed.abs() > effective_max {
@@ -310,69 +210,7 @@ fn handle_slow_zone_enter(
     }
 }
 
-/// Removes all modifiers originating from a region when the ship exits it.
-/// Uses `clear_source` so that any future region effects that register
-/// modifiers under the same `ModifierSource::RegionEffect { uuid }` are
-/// also cleaned up on exit.
-fn handle_radar_dampening_exit(
-    mut exited: MessageReader<RegionExited>,
-    membership: Res<RegionMembership>,
-    mut modifiers: ResMut<ShipModifiers>,
-) {
-    for ev in exited.read() {
-        let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
-            Some(s) => s,
-            None => continue,
-        };
-        let uuid = match uuid::Uuid::parse_str(uuid_str) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        modifiers.clear_source(&ModifierSource::RegionEffect { uuid });
-    }
-}
 
-/// Removes flag effects (`CommsJammed`, `SensorBlind`) when the ship exits any
-/// region. Uses `remove_flag` so that OR-aggregation is preserved: the flag
-/// clears only when the last source exits.
-fn handle_flag_region_exit(
-    mut exited: MessageReader<RegionExited>,
-    membership: Res<RegionMembership>,
-    mut modifiers: ResMut<ShipModifiers>,
-) {
-    for ev in exited.read() {
-        let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
-            Some(s) => s,
-            None => continue,
-        };
-        let uuid = match uuid::Uuid::parse_str(uuid_str) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        modifiers.remove_flag(ModifierSource::RegionEffect { uuid }, FlagKind::CommsJammed);
-        modifiers.remove_flag(ModifierSource::RegionEffect { uuid }, FlagKind::SensorBlind);
-    }
-}
-
-/// Removes `SlowZone` modifiers when the ship exits a slow zone region.
-/// Does NOT restore previously-clamped velocity.
-fn handle_slow_zone_exit(
-    mut exited: MessageReader<RegionExited>,
-    membership: Res<RegionMembership>,
-    mut modifiers: ResMut<ShipModifiers>,
-) {
-    for ev in exited.read() {
-        let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
-            Some(s) => s,
-            None => continue,
-        };
-        let uuid = match uuid::Uuid::parse_str(uuid_str) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        modifiers.clear_source(&ModifierSource::RegionEffect { uuid });
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -883,10 +721,12 @@ mod tests {
 
     fn radar_dampening_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(RegionPlugin);
-        app.insert_resource(Time::<()>::default());
-        app.insert_resource(ShipState::new());
-        app.insert_resource(ShipModifiers::new());
+        app.add_plugins(RegionPlugin)
+            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
+            .insert_resource(Time::<()>::default())
+            .insert_resource(ShipState::new())
+            .add_systems(Update, crate::modifier_coordination::translate_region_modifiers
+                .after(super::update_region_membership));
         app.world_mut().spawn((Ship, Transform::default()));
         app
     }
@@ -1008,10 +848,14 @@ mod tests {
 
     fn slow_zone_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(RegionPlugin);
-        app.insert_resource(Time::<()>::default());
-        app.insert_resource(ShipState::new());
-        app.insert_resource(ShipModifiers::new());
+        app.add_plugins(RegionPlugin)
+            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
+            .insert_resource(Time::<()>::default())
+            .insert_resource(ShipState::new())
+            .add_systems(Update, (
+                crate::modifier_coordination::translate_region_modifiers,
+                handle_slow_zone_speed_clamp,
+            ).chain().after(super::update_region_membership));
         app.world_mut().spawn((Ship, Transform::default()));
         app
     }
@@ -1214,10 +1058,12 @@ mod tests {
 
     fn flag_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(RegionPlugin);
-        app.insert_resource(Time::<()>::default());
-        app.insert_resource(ShipState::new());
-        app.insert_resource(ShipModifiers::new());
+        app.add_plugins(RegionPlugin)
+            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
+            .insert_resource(Time::<()>::default())
+            .insert_resource(ShipState::new())
+            .add_systems(Update, crate::modifier_coordination::translate_region_modifiers
+                .after(super::update_region_membership));
         app.world_mut().spawn((Ship, Transform::default()));
         app
     }

@@ -25,7 +25,7 @@ own systems, ensuring inputs have settled before modifiers are recomputed.
 
 ### Power translator (first source)
 
-Located at `src/modifiers/coordination.rs:43`.  System
+Located at `src/modifiers/coordination.rs:38`.  System
 `translate_power_modifiers` reads `ShipPowerSystem` + `PowerMultiplierResource`
 and calls `apply_power_modifiers()` into `ResMut<ShipModifiers>`.
 
@@ -33,26 +33,54 @@ The system is ordered `.after(handle_power_messages).after(tick_power_system)`
 so that power-level changes (increase, decrease, battery-exhaustion resets)
 are applied to `ShipModifiers` in the same frame.
 
-### Future translators
+### Region translator (second source)
 
-- **Region translator** -- reads `RegionMembership` + region config, writes
-  region-effect modifiers into `ShipModifiers`.  Planned.
-- **Console-AI translator** -- reads console-complexity state, translates AI
-  decisions into the modifier cache.  Planned.
+Located at `src/modifiers/coordination.rs:142`.  System
+`translate_region_modifiers` reads `RegionEntered` / `RegionExited` messages
+each frame.  On region entry it calls `apply_region_effects()` to write
+modifiers and flags; on region exit it calls `clear_source()` to remove all
+modifier entries and flags for the exiting region's `ModifierSource::RegionEffect`
+UUID.
+
+The system is ordered `.chain().after(crate::region_plugin::update_region_membership)`
+so that boundary-crossing detection has settled before effects are applied.
+A companion system `handle_slow_zone_speed_clamp` in `region_plugin.rs`
+reads the updated modifiers and clamps the ship's forward speed on slow-zone
+entry; it is chained after `translate_region_modifiers` in `SimulationPlugin`.
+
+Effects translated by this system:
+- `RadarDampening { multiplier }` → `ModifierSlot::RadarRange` modifier
+- `SlowZone { thrust_modifier, yaw_rate_modifier }` → `MaxSpeed` / `MaxYawRate` modifiers
+- `CommsJam` → `FlagKind::CommsJammed` (OR-aggregated across sources)
+- `SensorBlind` → `FlagKind::SensorBlind` (OR-aggregated across sources)
+- `DamageZone` and `BlocksImpulse` are **not** modifier effects and are
+  handled directly by `region_plugin.rs`.
+
+### Console-AI translator (future)
+
+Reads console-complexity state, translates AI decisions into the modifier
+cache.  Planned.
 
 ## Pure helpers
 
 ### `apply_power_modifiers(modifiers, power, multipliers)`
 
-`src/modifiers/coordination.rs:29`.  Non-Bevy, fully unit-tested.  Computes
+`src/modifiers/coordination.rs:57`.  Non-Bevy, fully unit-tested.  Computes
 the per-console bonus from the current power level and writes
 `Modifier` entries using `ModifierSource::Console(console)`.  Re-calling with
 the same input is idempotent (add_or_update replaces, not stacks).
+
+### `apply_region_effects(modifiers, region_uuid, effects)`
+
+`src/modifiers/coordination.rs:96`.  Non-Bevy, fully unit-tested.  Iterates
+a slice of `RegionEffectKind` and registers the corresponding modifiers and
+flags under `ModifierSource::RegionEffect { uuid: region_uuid }`.
 
 ## Files
 
 | File | Role |
 |---|---|
-| `src/modifiers/coordination.rs` | Plugin + pure helper + translator system |
+| `src/modifiers/coordination.rs` | Plugin + pure helpers + translator systems (power + region) |
 | `src/modifiers/cache.rs` | `ShipModifiers` resource definition |
 | `src/modifiers/mod.rs` | Module re-exports |
+| `src/regions/server.rs` | Region membership detection + speed clamp (no modifier writes) |

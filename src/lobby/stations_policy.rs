@@ -702,7 +702,7 @@ consoles = ["CaptainChair", "Helm"]
     ///     Tactical [Tactical]  prev=Tactical
     ///     Repair [Repair, Power]  (no prev)
     fn worked_example_stations() -> ShipStations {
-        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
         parse_and_validate(toml_str).unwrap()
     }
 
@@ -1128,7 +1128,7 @@ consoles = ["Tactical"]
     /// valid `[stations]` section that passes `parse_and_validate`.
     #[test]
     fn player_ship_toml_stations_section_is_valid() {
-        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
         let result = parse_and_validate(toml_str);
         assert!(
             result.is_ok(),
@@ -1141,7 +1141,7 @@ consoles = ["Tactical"]
     /// every console (CaptainChair, Helm, Tactical, Repair, Power).
     #[test]
     fn player_ship_1p_station_covers_all_consoles() {
-        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
         let stations = parse_and_validate(toml_str).unwrap();
         let current = vec![
             Console::CaptainChair,

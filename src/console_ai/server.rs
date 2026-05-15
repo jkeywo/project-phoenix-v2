@@ -61,7 +61,7 @@ impl Default for AutoHintDelaySecs {
 /// Read `auto_hint_delay_secs` from the embedded Science complexity TOML.
 /// Falls back to `DEFAULT_AUTO_HINT_DELAY_SECS` on any parse failure.
 fn load_auto_hint_delay_secs() -> f32 {
-    let toml_str = include_str!("../assets/complexity/science.toml");
+    let toml_str = include_str!("../../assets/complexity/science.toml");
     if let Ok(config) = crate::complexity::parse_complexity_config(toml_str) {
         if let Some(low) = config.get_preset("Low") {
             if let Some(ai_cfg) = low.ai.get("auto_hint") {
@@ -94,7 +94,7 @@ impl Default for AutoMatchDelaySecs {
 /// Read `auto_match_delay_secs` from the embedded Tactical complexity TOML.
 /// Falls back to `DEFAULT_AUTO_MATCH_DELAY_SECS` on any parse failure.
 fn load_auto_match_delay_secs() -> f32 {
-    let toml_str = include_str!("../assets/complexity/tactical.toml");
+    let toml_str = include_str!("../../assets/complexity/tactical.toml");
     if let Ok(config) = crate::complexity::parse_complexity_config(toml_str) {
         if let Some(low) = config.get_preset("Low") {
             if let Some(ai_cfg) = low.ai.get("frequency_match") {
@@ -130,7 +130,7 @@ impl PowerAiConfig {
     /// Load tuning params from the embedded power TOML. Falls back to
     /// compiled-in defaults on any parse failure.
     pub fn load() -> Self {
-        let toml_str = include_str!("../assets/complexity/power.toml");
+        let toml_str = include_str!("../../assets/complexity/power.toml");
         let mut cfg = Self {
             thrust_threshold: DEFAULT_THRUST_THRESHOLD,
             movement_engage_delay_secs: DEFAULT_ENGAGE_DELAY_SECS,

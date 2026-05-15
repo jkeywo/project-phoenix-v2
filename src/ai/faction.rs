@@ -204,7 +204,7 @@ name = "Pirate"
     // Load actual TOML asset files
     #[test]
     fn federation_toml_parses_correctly() {
-        let toml_str = include_str!("../assets/factions/federation.toml");
+        let toml_str = include_str!("../../assets/factions/federation.toml");
         let config = parse_faction_config(toml_str).expect("federation.toml must parse");
         assert_eq!(config.name, "Federation");
         assert!(!config.uuid.is_nil());
@@ -214,7 +214,7 @@ name = "Pirate"
 
     #[test]
     fn pirate_toml_parses_correctly() {
-        let toml_str = include_str!("../assets/factions/pirate.toml");
+        let toml_str = include_str!("../../assets/factions/pirate.toml");
         let config = parse_faction_config(toml_str).expect("pirate.toml must parse");
         assert_eq!(config.name, "Pirate");
         assert!(!config.uuid.is_nil());
@@ -222,8 +222,8 @@ name = "Pirate"
 
     #[test]
     fn federation_and_pirate_are_mutually_hostile() {
-        let fed_toml = include_str!("../assets/factions/federation.toml");
-        let pirate_toml = include_str!("../assets/factions/pirate.toml");
+        let fed_toml = include_str!("../../assets/factions/federation.toml");
+        let pirate_toml = include_str!("../../assets/factions/pirate.toml");
         let fed = parse_faction_config(fed_toml).unwrap();
         let pirate = parse_faction_config(pirate_toml).unwrap();
 

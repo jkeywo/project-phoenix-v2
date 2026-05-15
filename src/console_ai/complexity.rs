@@ -229,7 +229,7 @@ name = "Bad"
 
     #[test]
     fn shields_toml_has_only_std_preset() {
-        let toml = include_str!("../assets/complexity/shields.toml");
+        let toml = include_str!("../../assets/complexity/shields.toml");
         let config = parse_complexity_config(toml).expect("shields.toml should parse");
         assert_eq!(config.presets.len(), 1, "Shields should have exactly one preset");
         assert_eq!(config.presets[0].name, "Std", "Shields preset should be 'Std'");
@@ -238,7 +238,7 @@ name = "Bad"
 
     #[test]
     fn navigation_toml_has_only_std_preset() {
-        let toml = include_str!("../assets/complexity/navigation.toml");
+        let toml = include_str!("../../assets/complexity/navigation.toml");
         let config = parse_complexity_config(toml).expect("navigation.toml should parse");
         assert_eq!(config.presets.len(), 1, "Navigation should have exactly one preset");
         assert_eq!(config.presets[0].name, "Std", "Navigation preset should be 'Std'");
@@ -247,7 +247,7 @@ name = "Bad"
 
     #[test]
     fn sensors_toml_has_only_std_preset() {
-        let toml = include_str!("../assets/complexity/sensors.toml");
+        let toml = include_str!("../../assets/complexity/sensors.toml");
         let config = parse_complexity_config(toml).expect("sensors.toml should parse");
         assert_eq!(config.presets.len(), 1, "Sensors should have exactly one preset (no Low)");
         assert_eq!(config.presets[0].name, "Std", "Sensors preset should be 'Std'");

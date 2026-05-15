@@ -557,7 +557,7 @@ mod tests {
     // ── Helpers for station-aware tests ──────────────────────────────────
 
     fn ship_stations() -> ShipStations {
-        let toml_str = include_str!("../assets/entities/player_ship.toml");
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
         crate::stations::parse_and_validate(toml_str).unwrap()
     }
 

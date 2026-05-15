@@ -308,7 +308,7 @@ fn tick_ai_controllers(
 
         // Apply the first Helm input to the entity's Transform.
         for input in &output.inputs {
-            if let crate::ai::AiInput::Helm { thrust, steering } = input {
+            if let crate::ai::AiInput::Helm { thrust, steering } = *input {
                 let physics_state = crate::ship_physics::ShipPhysicsState {
                     x: pos.x,
                     z: pos.z,
@@ -316,8 +316,8 @@ fn tick_ai_controllers(
                     forward_speed: 0.0,
                 };
                 let physics_input = crate::ship_physics::ShipPhysicsInput {
-                    thrust: *thrust,
-                    steering: *steering,
+                    thrust,
+                    steering,
                 };
                 let result = crate::ship_physics::compute_physics(
                     physics_state,

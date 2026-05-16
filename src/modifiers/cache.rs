@@ -278,7 +278,115 @@ impl Default for ShipModifiers {
     }
 }
 
+impl ShipModifiers {
+    /// Returns a pre-formatted text block summarising the current state of all
+    /// three modifier systems (flags, float modifiers, integer modifiers).
+    ///
+    /// Output has three labelled sections — `[Flags]`, `[Float Modifiers]`,
+    /// `[Int Modifiers]` — each listing active entries with their value and
+    /// source(s), or `(none)` if the section is empty.
+    pub fn format_debug(&self) -> String {
+        let mut out = String::new();
 
+        // ── Flags ────────────────────────────────────────────────────────────
+        out.push_str("[Flags]\n");
+        let flag_entries: Vec<(&FlagKind, &HashSet<ModifierSource>)> = {
+            let mut v: Vec<_> = self.flags.iter().collect();
+            v.sort_by_key(|(f, _)| format!("{f:?}"));
+            v
+        };
+        if flag_entries.is_empty() {
+            out.push_str("(none)\n");
+        } else {
+            for (flag, sources) in flag_entries {
+                let mut srcs: Vec<String> = sources.iter().map(format_source).collect();
+                srcs.sort();
+                out.push_str(&format!("{:?}  ← {}\n", flag, srcs.join(", ")));
+            }
+        }
+
+        out.push('\n');
+
+        // ── Float Modifiers ──────────────────────────────────────────────────
+        out.push_str("[Float Modifiers]\n");
+        // Group by slot, collect active entries.
+        let mut float_by_slot: Vec<(ModifierSlot, f32, Vec<String>)> = ModifierSlot::all()
+            .iter()
+            .filter_map(|slot| {
+                let entries: Vec<(&(ModifierSource, ModifierSlot), &f32)> = self
+                    .table
+                    .iter()
+                    .filter(|((_, s), _)| s == slot)
+                    .collect();
+                if entries.is_empty() {
+                    None
+                } else {
+                    let multiplier = self.get(slot);
+                    let mut detail: Vec<String> = entries
+                        .iter()
+                        .map(|((src, _), bonus)| format!("{} ({:+.2})", format_source(src), bonus))
+                        .collect();
+                    detail.sort();
+                    Some((slot.clone(), multiplier, detail))
+                }
+            })
+            .collect();
+        float_by_slot.sort_by_key(|(s, _, _)| format!("{s:?}"));
+        if float_by_slot.is_empty() {
+            out.push_str("(none)\n");
+        } else {
+            for (slot, mult, detail) in float_by_slot {
+                out.push_str(&format!("{:?}  ×{:.2}  ← {}\n", slot, mult, detail.join(", ")));
+            }
+        }
+
+        out.push('\n');
+
+        // ── Int Modifiers ────────────────────────────────────────────────────
+        out.push_str("[Int Modifiers]\n");
+        let mut int_by_slot: Vec<(IntModifierSlot, i32, Vec<String>)> = IntModifierSlot::all()
+            .iter()
+            .filter_map(|slot| {
+                let entries: Vec<(&(ModifierSource, IntModifierSlot), &i32)> = self
+                    .int_table
+                    .iter()
+                    .filter(|((_, s), _)| s == slot)
+                    .collect();
+                if entries.is_empty() {
+                    None
+                } else {
+                    let sum = self.get_int(slot);
+                    let mut detail: Vec<String> = entries
+                        .iter()
+                        .map(|((src, _), bonus)| format!("{} ({:+})", format_source(src), bonus))
+                        .collect();
+                    detail.sort();
+                    Some((slot.clone(), sum, detail))
+                }
+            })
+            .collect();
+        int_by_slot.sort_by_key(|(s, _, _)| format!("{s:?}"));
+        if int_by_slot.is_empty() {
+            out.push_str("(none)\n");
+        } else {
+            for (slot, sum, detail) in int_by_slot {
+                out.push_str(&format!("{:?}  {:+}  ← {}\n", slot, sum, detail.join(", ")));
+            }
+        }
+
+        out
+    }
+}
+
+/// Formats a `ModifierSource` as a human-readable string for the debug overlay.
+fn format_source(source: &ModifierSource) -> String {
+    match source {
+        ModifierSource::Console(c) => format!("Console({c:?})"),
+        ModifierSource::ImpulseDrive => "ImpulseDrive".to_string(),
+        ModifierSource::RegionEffect { uuid } => format!("Region({})", &uuid.to_string()[..8]),
+        ModifierSource::Scenario { id, tag } => format!("Scenario({id}/{tag})"),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -678,5 +786,68 @@ mod tests {
         mods.clear_source(&ModifierSource::ImpulseDrive);
         assert_eq!(mods.pending_events.len(), 2);
         assert!(mods.pending_events.iter().all(|e| matches!(e, ModifierEvent::Removed { .. })));
+    }
+
+    // ── format_debug tests ────────────────────────────────────────────────
+
+    #[test]
+    fn format_debug_empty_shows_none_in_all_sections() {
+        let mods = ShipModifiers::new();
+        let s = mods.format_debug();
+        assert!(s.contains("[Flags]"), "missing [Flags] header");
+        assert!(s.contains("[Float Modifiers]"), "missing [Float Modifiers] header");
+        assert!(s.contains("[Int Modifiers]"), "missing [Int Modifiers] header");
+        // All three sections should show (none)
+        assert_eq!(s.matches("(none)").count(), 3, "expected (none) in all three sections");
+    }
+
+    #[test]
+    fn format_debug_shows_active_flag_with_source() {
+        let mut mods = ShipModifiers::new();
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
+        let s = mods.format_debug();
+        assert!(s.contains("CommsJammed"), "missing flag name");
+        assert!(s.contains("ImpulseDrive"), "missing source name");
+        // Only Float and Int sections should be (none)
+        assert_eq!(s.matches("(none)").count(), 2, "expected (none) for float and int sections only");
+    }
+
+    #[test]
+    fn format_debug_shows_float_modifier_with_multiplier_and_source() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        let s = mods.format_debug();
+        assert!(s.contains("MaxSpeed"), "missing slot name");
+        assert!(s.contains("×1.50"), "missing multiplier");
+        assert!(s.contains("ImpulseDrive"), "missing source");
+        assert!(s.contains("+0.50"), "missing bonus detail");
+    }
+
+    #[test]
+    fn format_debug_shows_int_modifier_with_sum_and_source() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::ImpulseDrive,
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 2,
+        });
+        let s = mods.format_debug();
+        assert!(s.contains("RepairTeams"), "missing int slot name");
+        assert!(s.contains("+2"), "missing sum");
+        assert!(s.contains("ImpulseDrive"), "missing source");
+    }
+
+    #[test]
+    fn format_debug_empty_float_and_int_slots_not_shown() {
+        let mut mods = ShipModifiers::new();
+        // Only a flag — no float or int modifiers
+        mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::SensorBlind);
+        let s = mods.format_debug();
+        // Float and Int sections should both say (none)
+        let lines: Vec<&str> = s.lines().collect();
+        let float_idx = lines.iter().position(|l| l.contains("[Float Modifiers]")).unwrap();
+        let int_idx = lines.iter().position(|l| l.contains("[Int Modifiers]")).unwrap();
+        assert_eq!(lines[float_idx + 1], "(none)", "float section should be (none)");
+        assert_eq!(lines[int_idx + 1], "(none)", "int section should be (none)");
     }
 }

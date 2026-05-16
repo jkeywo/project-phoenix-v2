@@ -61,6 +61,9 @@
     </a>
   </div>
 
+  <!-- Modifier debug overlay (F3) -->
+  <div id="debug-overlay" style="display:none;position:fixed;top:0;left:0;z-index:9999;background:rgba(0,0,0,0.8);color:#0f0;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:50vw;max-height:100vh;overflow-y:auto;"></div>
+
   <div id="top-bar">
     <div id="top-bar-row">
       <span id="conn-label"></span>
@@ -321,6 +324,8 @@ function finishInit() {
   window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
   window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
+  window.wasm_toggle_debug_overlay = wasmBindings.wasm_toggle_debug_overlay;
+  window.wasm_get_debug_state = wasmBindings.wasm_get_debug_state;
 
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.
@@ -423,6 +428,32 @@ window.addEventListener('TrunkApplicationStarted', startPhoenix);
         }
       }
     });
+
+    // ── F3 — toggle modifier debug overlay ───────────────────────────────
+    (function() {
+      var overlayEl = document.getElementById('debug-overlay');
+      var overlayVisible = false;
+
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'F3') {
+          e.preventDefault();
+          overlayVisible = !overlayVisible;
+          overlayEl.style.display = overlayVisible ? 'block' : 'none';
+          if (typeof wasm_toggle_debug_overlay === 'function') {
+            wasm_toggle_debug_overlay();
+          }
+        }
+      });
+
+      // Refresh overlay text every animation frame while visible.
+      function rafLoop() {
+        if (overlayVisible && typeof wasm_get_debug_state === 'function') {
+          overlayEl.textContent = wasm_get_debug_state();
+        }
+        requestAnimationFrame(rafLoop);
+      }
+      requestAnimationFrame(rafLoop);
+    })();
   </script>
 </body>
 </html>

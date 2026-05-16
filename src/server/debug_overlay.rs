@@ -2,10 +2,15 @@ use bevy::prelude::*;
 
 use crate::entity_spawner::RegionShapeSection;
 use crate::region_shape::RegionShape;
+use crate::modifiers::ShipModifiers;
 
 /// Resource indicating whether debug region wireframes are enabled.
 #[derive(Resource)]
 pub struct DebugRegionsEnabled(pub bool);
+
+/// Resource indicating whether the modifier debug overlay (F3) is enabled.
+#[derive(Resource, Default)]
+pub struct DebugOverlayEnabled(pub bool);
 
 /// Server-only plugin that draws region shape wireframes when enabled.
 ///
@@ -18,12 +23,31 @@ pub struct DebugOverlayPlugin {
 impl Plugin for DebugOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DebugRegionsEnabled(self.enabled));
+        app.init_resource::<DebugOverlayEnabled>();
         app.add_systems(
             Update,
             draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),
         );
+        app.add_systems(
+            PostUpdate,
+            write_debug_state.run_if(|r: Res<DebugOverlayEnabled>| r.0),
+        );
     }
 }
+
+/// Reads `ShipModifiers` (as a Bevy resource) and writes the formatted debug
+/// text to the WASM thread-local `DEBUG_STATE_STRING`.
+///
+/// Only runs when `DebugOverlayEnabled` is true.
+#[cfg(target_arch = "wasm32")]
+fn write_debug_state(modifiers: Res<ShipModifiers>) {
+    let text = modifiers.format_debug();
+    crate::bridge::set_debug_state_string(text);
+}
+
+/// Native / test stub — does nothing (no thread-locals available outside WASM).
+#[cfg(not(target_arch = "wasm32"))]
+fn write_debug_state(_modifiers: Res<ShipModifiers>) {}
 
 /// Draws wireframe outlines for every region entity with a shape component.
 fn draw_region_wireframes(
@@ -152,5 +176,37 @@ mod tests {
         app.world_mut().resource_mut::<DebugRegionsEnabled>().0 = false;
         let enabled = app.world().resource::<DebugRegionsEnabled>();
         assert!(!enabled.0, "resource should be false after toggle");
+    }
+
+    // ── DebugOverlayEnabled tests ─────────────────────────────────────────
+
+    #[test]
+    fn debug_overlay_disabled_by_default() {
+        let plugin = DebugOverlayPlugin { enabled: false };
+        let mut app = App::new();
+        plugin.build(&mut app);
+        let enabled = app.world().resource::<DebugOverlayEnabled>();
+        assert!(!enabled.0, "overlay should be disabled by default");
+    }
+
+    #[test]
+    fn toggle_debug_overlay_false_to_true() {
+        let plugin = DebugOverlayPlugin { enabled: false };
+        let mut app = App::new();
+        plugin.build(&mut app);
+        app.world_mut().resource_mut::<DebugOverlayEnabled>().0 = true;
+        let enabled = app.world().resource::<DebugOverlayEnabled>();
+        assert!(enabled.0, "overlay should be enabled after toggle");
+    }
+
+    #[test]
+    fn toggle_debug_overlay_true_to_false() {
+        let plugin = DebugOverlayPlugin { enabled: false };
+        let mut app = App::new();
+        plugin.build(&mut app);
+        app.world_mut().resource_mut::<DebugOverlayEnabled>().0 = true;
+        app.world_mut().resource_mut::<DebugOverlayEnabled>().0 = false;
+        let enabled = app.world().resource::<DebugOverlayEnabled>();
+        assert!(!enabled.0, "overlay should be disabled after second toggle");
     }
 }

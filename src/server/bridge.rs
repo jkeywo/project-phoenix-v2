@@ -49,6 +49,15 @@ thread_local! {
     /// Pending toggle request from `wasm_toggle_debug_regions()`. Drained by
     /// `drain_debug_toggles` each `PreUpdate` frame.
     static PENDING_DEBUG_TOGGLE: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Pending toggle request from `wasm_toggle_debug_overlay()`. Drained by
+    /// `drain_debug_toggles` each `PreUpdate` frame.
+    static PENDING_TOGGLE_OVERLAY: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Pre-formatted modifier debug text written by `write_debug_state` each
+    /// `PostUpdate` frame when the overlay is enabled. Read by
+    /// `wasm_get_debug_state()` from JS.
+    static DEBUG_STATE_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -188,6 +197,31 @@ pub fn wasm_toggle_debug_regions() {
     PENDING_DEBUG_TOGGLE.with(|v| *v.borrow_mut() = true);
 }
 
+/// Called by JS (e.g. F3 keydown) to toggle the modifier debug overlay at runtime.
+///
+/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
+/// `PreUpdate` frame, which flips the `DebugOverlayEnabled` Bevy resource.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_debug_overlay() {
+    PENDING_TOGGLE_OVERLAY.with(|v| *v.borrow_mut() = true);
+}
+
+/// Called by JS each animation frame to read the latest formatted modifier
+/// debug state when the overlay is visible.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_debug_state() -> String {
+    DEBUG_STATE_STRING.with(|v| v.borrow().clone())
+}
+
+/// Called by the Bevy `write_debug_state` system to update the debug state
+/// string that JS reads via `wasm_get_debug_state()`.
+#[cfg(target_arch = "wasm32")]
+pub fn set_debug_state_string(text: String) {
+    DEBUG_STATE_STRING.with(|v| *v.borrow_mut() = text);
+}
+
 // ── Config Preload Exports ──────────────────────────────────────────────────
 
 /// Re-export config preload functions from config_cache module.
@@ -250,18 +284,33 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
     }
 }
 
-/// Drains the pending debug-toggle flag each frame and flips `DebugRegionsEnabled`.
+/// Drains the pending debug-toggle flags each frame and updates the corresponding
+/// Bevy resources: `DebugRegionsEnabled` (F4) and `DebugOverlayEnabled` (F3).
 #[cfg(target_arch = "wasm32")]
-fn drain_debug_toggles(mut enabled: ResMut<crate::debug_overlay::DebugRegionsEnabled>) {
-    let pending = PENDING_DEBUG_TOGGLE.with(|v| {
+fn drain_debug_toggles(
+    mut regions_enabled: ResMut<crate::debug_overlay::DebugRegionsEnabled>,
+    mut overlay_enabled: ResMut<crate::debug_overlay::DebugOverlayEnabled>,
+) {
+    // ── Region wireframes toggle (F4) ──────────────────────────────────────
+    let pending_regions = PENDING_DEBUG_TOGGLE.with(|v| {
         let was = *v.borrow();
         *v.borrow_mut() = false;
         was
     });
-    if pending {
-        let new_val = !enabled.0;
-        enabled.0 = new_val;
+    if pending_regions {
+        let new_val = !regions_enabled.0;
+        regions_enabled.0 = new_val;
         DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = new_val);
+    }
+
+    // ── Modifier overlay toggle (F3) ───────────────────────────────────────
+    let pending_overlay = PENDING_TOGGLE_OVERLAY.with(|v| {
+        let was = *v.borrow();
+        *v.borrow_mut() = false;
+        was
+    });
+    if pending_overlay {
+        overlay_enabled.0 = !overlay_enabled.0;
     }
 }
 

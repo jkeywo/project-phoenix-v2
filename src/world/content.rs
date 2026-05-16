@@ -104,6 +104,19 @@ pub enum TriggerAction {
     /// - `tag`: identity tag matching the one used in `ApplyFlag`.
     /// - `kind`: which `FlagKind` to clear.
     RemoveFlag { entity: String, tag: String, kind: crate::flag_kind::FlagKind },
+    /// Apply an integer modifier to the target entity's `ShipModifiers`.
+    ///
+    /// - `entity`: spawn name resolved to UUID at runtime.
+    /// - `tag`: identity tag; paired with the scenario ID forms `ModifierSource::Scenario { id, tag }`.
+    /// - `slot`: which `IntModifierSlot` to modify.
+    /// - `bonus`: additive integer bonus.
+    ApplyIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot, bonus: i32 },
+    /// Remove an integer modifier previously applied by this scenario+tag pair.
+    ///
+    /// - `entity`: spawn name resolved to UUID at runtime.
+    /// - `tag`: identity tag matching the one used in `ApplyIntModifier`.
+    /// - `slot`: which `IntModifierSlot` to remove.
+    RemoveIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -206,7 +219,9 @@ fn substitute_action(
         | TriggerAction::ApplyModifier { .. }
         | TriggerAction::RemoveModifier { .. }
         | TriggerAction::ApplyFlag { .. }
-        | TriggerAction::RemoveFlag { .. } => action.clone(),
+        | TriggerAction::RemoveFlag { .. }
+        | TriggerAction::ApplyIntModifier { .. }
+        | TriggerAction::RemoveIntModifier { .. } => action.clone(),
     }
 }
 
@@ -262,9 +277,12 @@ struct RawActionEntry {
     /// Used by `apply_modifier` / `remove_modifier`: which `ModifierSlot` to affect.
     #[serde(default)]
     slot: Option<String>,
-    /// Used by `apply_modifier`: the additive bonus value.
+    /// Used by `apply_modifier`: the additive float bonus value.
     #[serde(default)]
     bonus: Option<f32>,
+    /// Used by `apply_int_modifier`: the additive integer bonus value.
+    #[serde(default)]
+    int_bonus: Option<i32>,
     /// Used by `apply_flag` / `remove_flag`: which `FlagKind` to affect.
     /// Named `flag_kind` in TOML to avoid shadowing the action's own `kind` field.
     #[serde(default, rename = "kind")]
@@ -392,6 +410,14 @@ fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String>
     }
 }
 
+fn parse_int_modifier_slot(s: &str) -> Result<crate::modifiers::IntModifierSlot, String> {
+    use crate::modifiers::IntModifierSlot;
+    match s {
+        "RepairTeams" => Ok(IntModifierSlot::RepairTeams),
+        other => Err(format!("Unknown int slot '{}'; valid values: RepairTeams", other)),
+    }
+}
+
 fn parse_flag_kind(s: &str) -> Result<crate::flag_kind::FlagKind, String> {
     use crate::flag_kind::FlagKind;
     match s {
@@ -497,6 +523,35 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                 })?;
                 let kind = parse_flag_kind(kind_str)?;
                 TriggerAction::RemoveFlag { entity, tag, kind }
+            }
+            "apply_int_modifier" => {
+                let entity = raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'apply_int_modifier' requires an 'entity' field".to_string()
+                })?;
+                let tag = raw_action.tag.clone().ok_or_else(|| {
+                    "Action 'apply_int_modifier' requires a 'tag' field".to_string()
+                })?;
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                    "Action 'apply_int_modifier' requires a 'slot' field".to_string()
+                })?;
+                let slot = parse_int_modifier_slot(slot_str)?;
+                let bonus = raw_action.int_bonus.ok_or_else(|| {
+                    "Action 'apply_int_modifier' requires an 'int_bonus' field".to_string()
+                })?;
+                TriggerAction::ApplyIntModifier { entity, tag, slot, bonus }
+            }
+            "remove_int_modifier" => {
+                let entity = raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'remove_int_modifier' requires an 'entity' field".to_string()
+                })?;
+                let tag = raw_action.tag.clone().ok_or_else(|| {
+                    "Action 'remove_int_modifier' requires a 'tag' field".to_string()
+                })?;
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                    "Action 'remove_int_modifier' requires a 'slot' field".to_string()
+                })?;
+                let slot = parse_int_modifier_slot(slot_str)?;
+                TriggerAction::RemoveIntModifier { entity, tag, slot }
             }
             other => {
                 return Err(format!("Unknown trigger action '{}'", other));
@@ -2419,5 +2474,135 @@ kind = "UnknownFlag"
             has_destroyed_trigger,
             "patrol scenario must have an on_entity_destroyed trigger with add_objective action"
         );
+    }
+
+    // ── Cycles 57-61: apply_int_modifier / remove_int_modifier ───────────────
+
+    // Cycle 57: parse apply_int_modifier action from TOML
+    #[test]
+    fn parse_apply_int_modifier_action_from_toml() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 5.0
+
+[[trigger.action]]
+type = "apply_int_modifier"
+entity = "player_ship"
+tag = "extra_team"
+slot = "RepairTeams"
+int_bonus = 1
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.triggers[0].actions.len(), 1);
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::ApplyIntModifier {
+                entity: "player_ship".to_string(),
+                tag: "extra_team".to_string(),
+                slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                bonus: 1,
+            }
+        );
+    }
+
+    // Cycle 58: parse remove_int_modifier action from TOML
+    #[test]
+    fn parse_remove_int_modifier_action_from_toml() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 10.0
+
+[[trigger.action]]
+type = "remove_int_modifier"
+entity = "player_ship"
+tag = "extra_team"
+slot = "RepairTeams"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::RemoveIntModifier {
+                entity: "player_ship".to_string(),
+                tag: "extra_team".to_string(),
+                slot: crate::modifiers::IntModifierSlot::RepairTeams,
+            }
+        );
+    }
+
+    // Cycle 59: apply_int_modifier with unknown slot returns error
+    #[test]
+    fn parse_apply_int_modifier_with_invalid_slot_returns_error() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "apply_int_modifier"
+entity = "player_ship"
+tag = "boost"
+slot = "NotAnIntSlot"
+int_bonus = 2
+"#;
+        let result = parse_scenario(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("slot") || err.contains("NotAnIntSlot"),
+            "error should mention bad slot: {err}"
+        );
+    }
+
+    // Cycle 60: apply_int_modifier missing int_bonus returns error
+    #[test]
+    fn parse_apply_int_modifier_without_int_bonus_returns_error() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "apply_int_modifier"
+entity = "player_ship"
+tag = "boost"
+slot = "RepairTeams"
+"#;
+        let result = parse_scenario(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("int_bonus"),
+            "error should mention 'int_bonus': {err}"
+        );
+    }
+
+    // Cycle 61: new variants pass through substitute_action unchanged
+    #[test]
+    fn substitute_action_passes_through_int_modifier_variants() {
+        let name_to_uuid = HashMap::new();
+        let actions = vec![
+            TriggerAction::ApplyIntModifier {
+                entity: "player_ship".to_string(),
+                tag: "extra_team".to_string(),
+                slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                bonus: 1,
+            },
+            TriggerAction::RemoveIntModifier {
+                entity: "player_ship".to_string(),
+                tag: "extra_team".to_string(),
+                slot: crate::modifiers::IntModifierSlot::RepairTeams,
+            },
+        ];
+        let trigger = Trigger {
+            condition: TriggerCondition::OnTimer { after_secs: 0.0 },
+            actions: actions.clone(),
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+        let events = vec![WorldEvent::TimerElapsed { elapsed_secs: 1.0 }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].actions, actions);
     }
 }

@@ -451,7 +451,9 @@ fn handle_respond_to_message(
                 TriggerAction::ApplyModifier { .. }
                 | TriggerAction::RemoveModifier { .. }
                 | TriggerAction::ApplyFlag { .. }
-                | TriggerAction::RemoveFlag { .. } => {
+                | TriggerAction::RemoveFlag { .. }
+                | TriggerAction::ApplyIntModifier { .. }
+                | TriggerAction::RemoveIntModifier { .. } => {
                     // Modifier/flag actions are handled by the AI-event trigger system.
                     // No-op in the comms response path.
                 }
@@ -729,6 +731,41 @@ fn handle_ai_events(
                                 tag: tag.clone(),
                             },
                             kind.clone(),
+                        );
+                    }
+                }
+                TriggerAction::ApplyIntModifier { entity, tag, slot, bonus } => {
+                    if name_to_uuid.get(entity).is_none() {
+                        bevy::log::warn!(
+                            "handle_ai_events: ApplyIntModifier: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.add_or_update_int(crate::modifiers::IntModifier {
+                            source: crate::messages::ModifierSource::Scenario {
+                                id: runtime.scenario_id.clone(),
+                                tag: tag.clone(),
+                            },
+                            slot: slot.clone(),
+                            bonus: *bonus,
+                        });
+                    }
+                }
+                TriggerAction::RemoveIntModifier { entity, tag, slot } => {
+                    if name_to_uuid.get(entity).is_none() {
+                        bevy::log::warn!(
+                            "handle_ai_events: RemoveIntModifier: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.remove_int(
+                            &crate::messages::ModifierSource::Scenario {
+                                id: runtime.scenario_id.clone(),
+                                tag: tag.clone(),
+                            },
+                            slot,
                         );
                     }
                 }

@@ -1982,10 +1982,10 @@ fn toggle_shields_panel_visibility(
 /// Refresh the Shields panel: HP bars, focus indicators, and arc colors.
 fn refresh_shields_panel(
     sim: Res<ClientSimState>,
-    mut bars: Query<(&ShieldFacingBar, &mut BackgroundColor)>,
+    mut bars: Query<(&ShieldFacingBar, &mut BackgroundColor), Without<ShieldFocusButton>>,
     mut hp_nodes: Query<(&ShieldFacingHP, &mut Node)>,
     mut hp_texts: Query<(&ShieldFacingHP, &mut Text)>,
-    mut focus_btns: Query<(&ShieldFocusButton, &mut BackgroundColor)>,
+    mut focus_btns: Query<(&ShieldFocusButton, &mut BackgroundColor), Without<ShieldFacingBar>>,
 ) {
     if !sim.is_changed() {
         return;

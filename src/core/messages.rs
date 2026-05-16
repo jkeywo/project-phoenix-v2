@@ -181,6 +181,21 @@ impl Console {
             Console::Comms => "Comms",
         }
     }
+
+    /// Short abbreviation for use when the tab bar is crowded (5+ consoles).
+    pub fn initial(&self) -> &'static str {
+        match self {
+            Console::CaptainChair => "CC",
+            Console::Helm => "H",
+            Console::Tactical => "T",
+            Console::Repair => "R",
+            Console::Sensors => "S",
+            Console::Shields => "SH",
+            Console::Navigation => "N",
+            Console::Power => "P",
+            Console::Comms => "C",
+        }
+    }
 }
 
 // ── Comms wire types ──────────────────────────────────────────────────────

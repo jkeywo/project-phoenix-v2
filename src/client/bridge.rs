@@ -116,6 +116,7 @@ pub fn wasm_client_init() {
     app.add_plugins(ClientRendererPlugin)
         .add_systems(Update, (
             forward_local_token,
+            forward_active_console,
             forward_complexity_presets,
             forward_inbound_messages,
             flush_outbound_messages,
@@ -204,12 +205,35 @@ fn forward_local_token(mut token: ResMut<LocalPlayerToken>) {
 }
 
 /// Pulls the active-console override from the thread-local slot (set by the
-/// JS tab bar) into Bevy's `ActiveConsole` resource each frame.
-/// 
-/// NOTE: This system is intentionally disabled. The Bevy `ActiveConsole` resource
-/// is the source of truth and is managed entirely by the `handle_tab_button_press`
-/// system in `client_app.rs`. JS tab bar clicks are handled via the `TabBarRoot`
-/// visibility logic, not via this bridge.
+/// JS tab bar or swipe gesture) into Bevy's `ActiveConsole` resource each frame.
+/// Empty string means "auto" mode (no override), which is mapped to `None`.
+#[cfg(target_arch = "wasm32")]
+fn forward_active_console(mut active: ResMut<ActiveConsole>) {
+    ACTIVE_CONSOLE.with(|c| {
+        let latest = c.borrow();
+        if latest.is_empty() {
+            if active.0.is_some() {
+                active.0 = None;
+            }
+        } else {
+            let parsed: Option<Console> = match latest.as_str() {
+                "CaptainChair" => Some(Console::CaptainChair),
+                "Helm" => Some(Console::Helm),
+                "Tactical" => Some(Console::Tactical),
+                "Repair" => Some(Console::Repair),
+                "Sensors" => Some(Console::Sensors),
+                "Shields" => Some(Console::Shields),
+                "Navigation" => Some(Console::Navigation),
+                "Power" => Some(Console::Power),
+                "Comms" => Some(Console::Comms),
+                _ => None,
+            };
+            if active.0 != parsed {
+                active.0 = parsed;
+            }
+        }
+    });
+}
 
 /// Reads the thread-local complexity presets JSON (set by JS on page
 /// load) and applies them to the `ComplexityStore` resource exactly

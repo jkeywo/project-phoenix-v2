@@ -306,13 +306,28 @@
 
     // ── Rendering ───────────────────────────────────────────────
 
-    const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power'];
+    const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Sensors', 'Shields', 'Navigation', 'Power', 'Comms'];
     const CONSOLE_LABEL = {
       CaptainChair: "Captain's Chair",
       Helm: 'Helm',
       Tactical: 'Tactical',
       Repair: 'Repair',
+      Sensors: 'Sensors',
+      Shields: 'Shields',
+      Navigation: 'Navigation',
       Power: 'Power',
+      Comms: 'Comms',
+    };
+    const CONSOLE_INITIAL = {
+      CaptainChair: 'CC',
+      Helm: 'H',
+      Tactical: 'T',
+      Repair: 'R',
+      Sensors: 'S',
+      Shields: 'SH',
+      Navigation: 'N',
+      Power: 'P',
+      Comms: 'C',
     };
 
     // Defer re-render so rapid server messages don't steal pointer events.
@@ -405,11 +420,12 @@
         }
       }
 
+      const useInitials = mine.length >= 5;
       bar.innerHTML = '';
       for (const c of mine) {
         const btn = document.createElement('button');
         btn.dataset.console = c;
-        btn.textContent = CONSOLE_LABEL[c] || c;
+        btn.textContent = useInitials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c);
         if (c === activeConsole) btn.classList.add('active');
         btn.addEventListener('click', () => {
           activeConsole = c;
@@ -731,9 +747,14 @@
       let startX = 0, startY = 0, startT = 0, swiping = false, swipeCommitted = false;
 
       root.addEventListener('touchstart', e => {
-        // The Bevy WASM canvas owns helm joystick gestures (#49); don't
-        // hijack swipes that begin on the canvas.
-        if (e.target.closest('#wasm-host')) return;
+        // Block swipe from buttons (tab bar, lobby buttons, etc.) so a
+        // tap-to-press isn't misinterpreted as the start of a gesture.
+        if (e.target.closest('button, [role="button"]')) return;
+        // Block swipe from the bottom portion of the screen where the
+        // virtual thumbstick joystick lives (~200px pad at the bottom).
+        const touchY = e.touches[0].clientY;
+        const viewportH = window.innerHeight;
+        if (touchY > viewportH * 0.65) return;
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
         startT = performance.now();
@@ -770,6 +791,9 @@
           ? (idx + 1) % mine.length
           : (idx - 1 + mine.length) % mine.length;
         activeConsole = mine[next];
+        if (typeof wasm_client_set_active_console === 'function') {
+          wasm_client_set_active_console(mine[next]);
+        }
         render(state);
       }, { passive: true });
     })();

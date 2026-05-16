@@ -1884,6 +1884,7 @@ fn rebuild_tab_bar(
     let my_consoles = view.my_consoles();
     let in_game = lobby.phase == GamePhase::InProgress;
     let show_tabs = in_game && my_consoles.len() >= 2;
+    let use_initials = my_consoles.len() >= 5;
 
     // Show/hide the bar.
     if let Ok(mut vis) = tab_vis_q.single_mut() {
@@ -1909,9 +1910,14 @@ fn rebuild_tab_bar(
             } else {
                 Color::srgb(0.10, 0.15, 0.30)
             };
+            let padding = if use_initials {
+                UiRect::axes(Val::Px(6.0), Val::Px(6.0))
+            } else {
+                UiRect::axes(Val::Px(14.0), Val::Px(6.0))
+            };
             let mut btn = parent.spawn((
                 Node {
-                    padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+                    padding,
                     ..default()
                 },
                 BackgroundColor(bg),
@@ -1919,7 +1925,7 @@ fn rebuild_tab_bar(
             btn.insert((Button, TabButton(console.clone())));
             btn.with_children(|inner| {
                 inner.spawn((
-                    Text::new(console.display_name()),
+                    Text::new(if use_initials { console.initial() } else { console.display_name() }),
                     TextFont { font_size: 14.0, ..default() },
                     TextColor(Color::WHITE),
                 ));

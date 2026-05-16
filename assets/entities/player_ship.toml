@@ -10,11 +10,6 @@ length = 6.0
 [hull]
 hull_integrity = 100
 
-[physics]
-mass = 100.0
-linear_damping = 0.9
-angular_damping = 0.9
-
 [weapons]
 phaser_range = 200.0
 phaser_damage = 10

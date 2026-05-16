@@ -97,14 +97,14 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-cbe301b5c1fb939f.js" crossorigin="anonymous" integrity="sha384-HQFCcy7xKCnCKHvnM1rvSECkSb1H8vW91xWjjsUCuRSTeYqtC5HYKMp6IjtGoJDJ"><link rel="preload" href="./project-phoenix-cbe301b5c1fb939f_bg.wasm" crossorigin="anonymous" integrity="sha384-JYuu7+b+cdCTiuBMJS5QLLA8/OlTKb6251lNBq+XcIbUemzygwKhSSSunoxyjB2/" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-a19831d4b98c78f5.js" crossorigin="anonymous" integrity="sha384-FPZD1kjcoeBvnJ+JcVt5w+lOPy8C4kkcbzjIY6YnbtF8IhEb3XER8M73bvMoqT8o"><link rel="preload" href="./project-phoenix-a19831d4b98c78f5_bg.wasm" crossorigin="anonymous" integrity="sha384-b9CB1Cg4W/EZmYqKfoDKkAbTDIoFM6tJfbV8yL8Ylm0tSQtK4+5AcQXHu8emPjHc" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-cbe301b5c1fb939f.js';
-const wasm = await init({ module_or_path: './project-phoenix-cbe301b5c1fb939f_bg.wasm' });
+import init, * as bindings from './project-phoenix-a19831d4b98c78f5.js';
+const wasm = await init({ module_or_path: './project-phoenix-a19831d4b98c78f5_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -317,13 +317,28 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     // ── Rendering ───────────────────────────────────────────────
 
-    const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power'];
+    const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Sensors', 'Shields', 'Navigation', 'Power', 'Comms'];
     const CONSOLE_LABEL = {
       CaptainChair: "Captain's Chair",
       Helm: 'Helm',
       Tactical: 'Tactical',
       Repair: 'Repair',
+      Sensors: 'Sensors',
+      Shields: 'Shields',
+      Navigation: 'Navigation',
       Power: 'Power',
+      Comms: 'Comms',
+    };
+    const CONSOLE_INITIAL = {
+      CaptainChair: 'CC',
+      Helm: 'H',
+      Tactical: 'T',
+      Repair: 'R',
+      Sensors: 'S',
+      Shields: 'SH',
+      Navigation: 'N',
+      Power: 'P',
+      Comms: 'C',
     };
 
     // Defer re-render so rapid server messages don't steal pointer events.
@@ -416,11 +431,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         }
       }
 
+      const useInitials = mine.length >= 5;
       bar.innerHTML = '';
       for (const c of mine) {
         const btn = document.createElement('button');
         btn.dataset.console = c;
-        btn.textContent = CONSOLE_LABEL[c] || c;
+        btn.textContent = useInitials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c);
         if (c === activeConsole) btn.classList.add('active');
         btn.addEventListener('click', () => {
           activeConsole = c;
@@ -742,9 +758,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       let startX = 0, startY = 0, startT = 0, swiping = false, swipeCommitted = false;
 
       root.addEventListener('touchstart', e => {
-        // The Bevy WASM canvas owns helm joystick gestures (#49); don't
-        // hijack swipes that begin on the canvas.
-        if (e.target.closest('#wasm-host')) return;
+        // Block swipe from buttons (tab bar, lobby buttons, etc.) so a
+        // tap-to-press isn't misinterpreted as the start of a gesture.
+        if (e.target.closest('button, [role="button"]')) return;
+        // Block swipe from the bottom portion of the screen where the
+        // virtual thumbstick joystick lives (~200px pad at the bottom).
+        const touchY = e.touches[0].clientY;
+        const viewportH = window.innerHeight;
+        if (touchY > viewportH * 0.65) return;
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
         startT = performance.now();
@@ -781,6 +802,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           ? (idx + 1) % mine.length
           : (idx - 1 + mine.length) % mine.length;
         activeConsole = mine[next];
+        if (typeof wasm_client_set_active_console === 'function') {
+          wasm_client_set_active_console(mine[next]);
+        }
         render(state);
       }, { passive: true });
     })();

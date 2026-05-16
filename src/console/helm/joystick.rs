@@ -109,12 +109,11 @@ pub fn release(state: &mut HelmJoystickState) -> ClientMessage {
     ClientMessage::HelmInput { thrust: 0.0, steering: 0.0 }
 }
 
-/// 10Hz tick. While active, resends the last input. While idle, returns
-/// `None` so we don't spam the wire.
+/// 10Hz tick. While active, resends the last input. While idle, sends
+/// zero input so the server always receives periodic updates (handles the
+/// case where the release message is lost over WebRTC, preventing steering
+/// drift).
 pub fn tick(state: &HelmJoystickState) -> Option<ClientMessage> {
-    if !state.active {
-        return None;
-    }
     Some(ClientMessage::HelmInput {
         thrust: state.last_thrust,
         steering: state.last_steering,
@@ -275,14 +274,14 @@ mod tests {
     #[test]
     fn tick_resends_last_values_only_while_active() {
         let mut s = HelmJoystickState::default();
-        assert!(tick(&s).is_none());
+        assert_eq!(tick(&s), Some(helm(0.0, 0.0)), "idle tick sends zero");
 
         press(&mut s, 0.0, -25.0, 50.0); // thrust 0.5
         assert_eq!(tick(&s), Some(helm(0.5, 0.0)));
         assert_eq!(tick(&s), Some(helm(0.5, 0.0)), "tick is repeatable");
 
         release(&mut s);
-        assert!(tick(&s).is_none(), "no resend after release");
+        assert_eq!(tick(&s), Some(helm(0.0, 0.0)), "idle tick sends zero after release");
     }
 
     // --- impulse button ---

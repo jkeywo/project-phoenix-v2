@@ -21,6 +21,11 @@ pub struct LastHelmInput {
     pub steering: f32,
 }
 
+/// Runtime ship physics config, loaded from `[helm_console]` in the entity TOML.
+/// When absent, `ShipPhysicsConfig::new()` defaults are used.
+#[derive(Resource, Clone)]
+pub struct ShipPhysicsConfigResource(pub crate::ship_physics::ShipPhysicsConfig);
+
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 pub struct ShipPlugin;
@@ -55,6 +60,7 @@ fn process_helm_inputs(
     phase: Res<CurrentPhase>,
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
+    ship_physics_config: Option<Res<ShipPhysicsConfigResource>>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -93,7 +99,10 @@ fn process_helm_inputs(
         thrust: last_input.thrust,
         steering: last_input.steering,
     };
-    let mut config = ShipPhysicsConfig::new();
+    let mut config = match ship_physics_config.as_deref() {
+        Some(cfg) => cfg.0.clone(),
+        None => ShipPhysicsConfig::new(),
+    };
     config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
     config.max_reverse_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
     config.max_yaw_rate *= modifiers.get(&ModifierSlot::MaxYawRate);

@@ -831,6 +831,22 @@ fn spawn_game_start_entities(
                 }
             }
             commands.insert_resource(PowerMultiplierResource { multipliers });
+
+            // Ship physics config from [helm_console] TOML, or default
+            let physics_cfg = config.helm_console.as_ref().map(|hc| {
+                crate::ship_physics::ShipPhysicsConfig {
+                    max_speed: hc.max_speed,
+                    max_reverse_speed: hc.max_reverse_speed,
+                    acceleration: hc.acceleration,
+                    deceleration: hc.deceleration,
+                    max_yaw_rate: hc.max_yaw_rate,
+                }
+            });
+            commands.insert_resource(
+                crate::ship_plugin::ShipPhysicsConfigResource(
+                    physics_cfg.unwrap_or(crate::ship_physics::ShipPhysicsConfig::new())
+                )
+            );
         }
     }
 

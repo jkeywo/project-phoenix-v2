@@ -1984,9 +1984,9 @@ fn test_app() -> App {
         assert_eq!(completed, vec![0], "team 0 should complete after 30s");
 
         // Manually apply HP as the system would: for each completed team, restore HP.
-        // Restore to Helm as a representative damaged console.
+        // Use restore_any_damaged because ConsoleHull distributes damage randomly.
         for _ in completed {
-            app.world_mut().resource_mut::<ShipHullIntegrity>().0.restore(Console::Helm, REPAIR_TEAM_HP);
+            app.world_mut().resource_mut::<ShipHullIntegrity>().0.restore_any_damaged(REPAIR_TEAM_HP);
         }
 
         let hp_after = app.world().resource::<ShipHullIntegrity>().0.total_current();

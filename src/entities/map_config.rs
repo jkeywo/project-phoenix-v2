@@ -38,6 +38,16 @@ pub struct StarConfig {
     /// Tags for categorization.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Range of the point light emitted by this star. Defaults to radius * 60.0.
+    #[serde(default)]
+    pub light_range: Option<f32>,
+    /// Intensity of the point light emitted by this star in candela. Defaults to radius * 2000.0.
+    #[serde(default)]
+    pub light_intensity: Option<f32>,
+    /// RGB colour of the point light (normalized 0.0-1.0). Defaults to white [1.0, 1.0, 1.0].
+    /// Typically whiter than the star's visual colour for a more natural illumination.
+    #[serde(default)]
+    pub light_colour: Option<Vec<f32>>,
 }
 
 /// Configuration for a planet entity.
@@ -367,6 +377,31 @@ tags = ["star", "center"]
         assert_eq!(config.stars[0].colour, vec![1.0, 0.8, 0.0]);
         assert_eq!(config.stars[0].position, vec![0.0, 0.0, 0.0]);
         assert_eq!(config.stars[0].tags, vec!["star", "center"]);
+        assert_eq!(config.stars[0].light_range, None);
+        assert_eq!(config.stars[0].light_intensity, None);
+        assert_eq!(config.stars[0].light_colour, None);
+    }
+
+    #[test]
+    fn parse_star_with_light_fields() {
+        let toml = r#"
+[[star]]
+name = "Axiom Prime"
+radius = 60.0
+colour = [1.0, 0.9, 0.7]
+position = [0.0, 0.0, -800.0]
+light_range = 8000.0
+light_intensity = 200000.0
+light_colour = [1.0, 0.95, 0.85]
+tags = ["star"]
+"#;
+        let config = parse_map_config(toml).unwrap();
+        assert_eq!(config.stars.len(), 1);
+        assert_eq!(config.stars[0].name, "Axiom Prime");
+        assert_eq!(config.stars[0].radius, 60.0);
+        assert_eq!(config.stars[0].light_range, Some(8000.0));
+        assert_eq!(config.stars[0].light_intensity, Some(200000.0));
+        assert_eq!(config.stars[0].light_colour, Some(vec![1.0, 0.95, 0.85]));
     }
 
     #[test]

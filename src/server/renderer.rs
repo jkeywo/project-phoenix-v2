@@ -132,16 +132,11 @@ fn setup(
         Camera { is_active: false, order: 1, ..default() },
     ));
 
-    // Directional light for the 3D scene
-    commands.spawn((
-        DirectionalLight { illuminance: 5_000.0, ..default() },
-        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, 0.5, 0.0)),
-    ));
-
-    // Low ambient so cosmetic asteroids out of the directional light still register.
+    // Ambient light — stars provide per-system point lights, so the directional
+    // sky light is replaced by a warm ambient fill.
     commands.spawn(AmbientLight {
-        color: Color::srgb(0.5, 0.55, 0.7),
-        brightness: 80.0,
+        color: Color::srgb(0.6, 0.55, 0.5),
+        brightness: 300.0,
         ..default()
     });
 

@@ -164,9 +164,22 @@ pub fn render_star_sections(
             emissive: LinearRgba::from(color) * 2.0,
             ..default()
         });
+        let light_color = star.0.light_colour.as_ref()
+            .filter(|c| c.len() >= 3)
+            .map(|c| Color::srgb(c[0], c[1], c[2]))
+            .unwrap_or(Color::WHITE);
+        let range = star.0.light_range.unwrap_or(star.0.radius * 60.0);
+        let intensity = star.0.light_intensity.unwrap_or(star.0.radius * 2000.0);
         commands.entity(entity).insert((
             Mesh3d(mesh),
             MeshMaterial3d(mat),
+            PointLight {
+                color: light_color,
+                intensity,
+                range,
+                shadows_enabled: false,
+                ..default()
+            },
         ));
     }
 }
@@ -239,6 +252,9 @@ mod tests {
                 colour: vec![1.0, 1.0, 1.0],
                 position: vec![0.0, 0.0, 0.0],
                 tags: vec![],
+                light_range: None,
+                light_intensity: None,
+                light_colour: None,
             }),
             collider: None,
             appearance: None,

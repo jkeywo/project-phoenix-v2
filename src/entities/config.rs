@@ -926,6 +926,26 @@ cosmetic_type_paths = ["assets/entities/asteroid_cosmetic.toml"]
     }
 
     #[test]
+    fn star_section_parses_with_light_config() {
+        let toml_str = r##"
+[star]
+name = "Sun"
+radius = 50.0
+colour = [1.0, 0.8, 0.0]
+light_range = 5000.0
+light_intensity = 150000.0
+light_colour = [1.0, 0.95, 0.85]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let star = config.star.expect("star must be Some");
+        assert_eq!(star.name, "Sun");
+        assert!((star.radius - 50.0).abs() < 1e-6);
+        assert_eq!(star.light_range, Some(5000.0));
+        assert_eq!(star.light_intensity, Some(150000.0));
+        assert_eq!(star.light_colour, Some(vec![1.0, 0.95, 0.85]));
+    }
+
+    #[test]
     fn star_section_omitted_when_not_in_toml() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.star.is_none());
@@ -1155,6 +1175,9 @@ hull_integrity = 100
         assert_eq!(star.name, "Sun");
         assert!((star.radius - 50.0).abs() < 1e-6);
         assert_eq!(star.colour, vec![1.0, 0.8, 0.0]);
+        assert_eq!(star.light_range, Some(5000.0));
+        assert_eq!(star.light_intensity, Some(150000.0));
+        assert_eq!(star.light_colour, Some(vec![1.0, 0.95, 0.85]));
     }
 
     #[test]

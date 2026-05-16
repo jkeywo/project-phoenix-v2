@@ -2013,3 +2013,36 @@ fn sync_complexity_hiding(
         registry.last_applied.insert(console.clone(), current);
     }
 }
+
+// ── Thin composition ────────────────────────────────────────────────────────
+
+/// Register all client-side plugins onto `app`.
+///
+/// Call this from the WASM entry point (`wasm_client_init`) instead of
+/// listing plugins individually.  Every panel plugin is registered here so
+/// that `client/bridge.rs` remains a thin JS/WASM boundary with no
+/// knowledge of the panel set.
+///
+/// Panel inventory (as of client-split series, issue #228):
+/// - `ShipViewPlugin`         — ship-level broadcast resource
+/// - `ClientAppPlugin`        — lobby UI + sensors/shields/navigation panels + tab bar + complexity UI
+/// - `PhoneBorderPlugin`      — diegetic phone bezel frame
+/// - `CaptainPanelPlugin`     — view selector + red-alert toggle
+/// - `HelmPanelPlugin`        — joystick + helm radar
+/// - `WeaponsPanelPlugin`     — phaser / torpedo / weapons radar
+/// - `RepairPanelPlugin`      — shape-matching repair console
+/// - `PowerPanelPlugin`       — 6+2 power allocation console
+/// - `SciencePanelPlugin`     — long-range radar + system chart + cancel-impulse
+/// - `CommsPanelPlugin`       — comms console (placeholder)
+pub fn add_client_plugins(app: &mut App) {
+    app.add_plugins(ClientAppPlugin)
+        .add_plugins(crate::ship_view::ShipViewPlugin)
+        .add_plugins(crate::phone_border::PhoneBorderPlugin)
+        .add_plugins(crate::helm_panel::HelmPanelPlugin)
+        .add_plugins(crate::weapons_panel::WeaponsPanelPlugin)
+        .add_plugins(crate::repair_panel::RepairPanelPlugin)
+        .add_plugins(crate::power_panel::PowerPanelPlugin)
+        .add_plugins(crate::phone_border::CaptainPanelPlugin)
+        .add_plugins(crate::science_panel::SciencePanelPlugin)
+        .add_plugins(crate::comms_panel::CommsPanelPlugin);
+}

@@ -20,12 +20,11 @@
 
 #[cfg(target_arch = "wasm32")]
 use {
-    crate::client_app::{ClientAppPlugin, InboundServerMessage, OutboundClientMessage},
+    crate::client_app::{add_client_plugins, InboundServerMessage, OutboundClientMessage},
     crate::client_complexity::ComplexityStore,
     crate::client_lobby::{ActiveConsole, LocalPlayerToken},
     crate::messages::Console,
     crate::codec::{JsonCodec, MessageCodec},
-    crate::phone_border::PhoneBorderPlugin,
     bevy::{prelude::*, DefaultPlugins},
     js_sys::Function,
     std::cell::RefCell,
@@ -104,26 +103,17 @@ impl Default for ClientRendererPlugin {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_client_init() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
-            primary_window: Some(bevy::window::Window {
-                canvas: Some("#canvas".into()),
-                fit_canvas_to_parent: true,
-                ..default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
+        primary_window: Some(bevy::window::Window {
+            canvas: Some("#canvas".into()),
+            fit_canvas_to_parent: true,
             ..default()
-        }))
-        .add_plugins(ClientAppPlugin)
-        .add_plugins(crate::ship_view::ShipViewPlugin)
-        .add_plugins(PhoneBorderPlugin)
-        .add_plugins(crate::helm_panel::HelmPanelPlugin)
-        .add_plugins(crate::weapons_panel::WeaponsPanelPlugin)
-        .add_plugins(crate::repair_panel::RepairPanelPlugin)
-        .add_plugins(crate::power_panel::PowerPanelPlugin)
-        .add_plugins(crate::phone_border::CaptainPanelPlugin)
-        .add_plugins(crate::science_panel::SciencePanelPlugin)
-        .add_plugins(crate::comms_panel::CommsPanelPlugin)
-        .add_plugins(ClientRendererPlugin)
+        }),
+        ..default()
+    }));
+    add_client_plugins(&mut app);
+    app.add_plugins(ClientRendererPlugin)
         .add_systems(Update, (
             forward_local_token,
             forward_complexity_presets,

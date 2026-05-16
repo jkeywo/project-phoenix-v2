@@ -73,6 +73,10 @@ impl Plugin for WorldPlugin {
                 (spawn_scenario_entities, init_scenario_runtime),
             )
             .add_systems(
+                OnEnter(crate::messages::GamePhase::InProgress),
+                mark_comms_dirty_on_game_start,
+            )
+            .add_systems(
                 Update,
                 (
                     handle_hail.in_set(crate::sim_sets::SimSet::Input),
@@ -286,6 +290,24 @@ fn init_scenario_runtime(
 
     // Mark inbox dirty so the first InProgress broadcast fires even though
     // no messages have arrived yet.
+    inbox.0.mark_dirty();
+}
+
+/// Re-mark the comms runtime dirty when the game enters InProgress.
+///
+/// `init_scenario_runtime` marks the runtime dirty during Startup so the first
+/// `broadcast_comms_state` fires. However, if no player holds the Comms console
+/// during Lobby, that broadcast clears the dirty flag without sending anything.
+/// This system ensures the flag is restored when InProgress begins, so the Comms
+/// console holder receives the initial contact list on the first InProgress tick.
+fn mark_comms_dirty_on_game_start(
+    mut runtime: ResMut<WorldContentRuntime>,
+    mut inbox: ResMut<CommsInboxRes>,
+) {
+    if runtime.contacts.is_empty() && runtime.comms_template_states.is_empty() {
+        return;
+    }
+    runtime.needs_broadcast = true;
     inbox.0.mark_dirty();
 }
 

@@ -1,3 +1,4 @@
+use bevy::prelude::States;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -234,8 +235,9 @@ pub struct CommsContact {
     pub name: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default, States)]
 pub enum GamePhase {
+    #[default]
     Lobby,
     InProgress,
 }

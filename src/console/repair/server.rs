@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 
 use crate::breakdown::BreakdownQueue;
-use crate::lobby::{CurrentPhase, InboundMessage, Sessions, Target};
+use crate::lobby::{InboundMessage, Sessions, Target};
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, Shape};
+use crate::messages::{ClientMessage, Console, ServerMessage, Shape};
 use crate::repair_teams::RepairTeams;
 use crate::simulation::{ShipHullIntegrity, SimOutbox};
 use crate::modifiers::ShipModifiers;
@@ -127,13 +127,9 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 pub fn handle_repair(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut breakdowns: ResMut<BreakdownQueueResource>,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         let pressed_shape = match &ev.msg {
             ClientMessage::Repair { shape } => *shape,
@@ -170,12 +166,8 @@ pub fn tick_repair_teams(
     time: Res<Time>,
     mut teams: ResMut<ShipRepairTeams>,
     mut hull: ResMut<ShipHullIntegrity>,
-    phase: Res<CurrentPhase>,
     modifiers: Res<ShipModifiers>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     let dt = time.delta_secs();
     let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
     let completed = teams.0.tick(dt * repair_mult);
@@ -189,13 +181,9 @@ pub fn tick_repair_teams(
 pub fn broadcast_repair_icons(
     sessions: Res<Sessions>,
     breakdowns: Res<BreakdownQueueResource>,
-    phase: Res<CurrentPhase>,
     mut icon_state: ResMut<RepairIconState>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     // Debug: verify we can see the breakdown queue
     let _debug_count = breakdowns.queue.len();
     use crate::breakdown::ALL_CONSOLES;

@@ -62,7 +62,7 @@ use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 use js_sys::Date;
 
 use crate::console_ai_plugin::ConsoleComplexityState;
-use crate::lobby::{CurrentPhase, Sessions};
+use crate::lobby::Sessions;
 use crate::messages::GamePhase;
 use crate::ship_state::ShipState;
 use crate::simulation::ShipHullIntegrity;
@@ -415,13 +415,13 @@ fn attach_initial_strip(
 /// exists is a no-op.
 fn sync_hud_strips_to_phase(
     mut commands: Commands,
-    phase: Res<CurrentPhase>,
+    state: Res<State<GamePhase>>,
     assets: Option<Res<ViewscreenAssets>>,
     slots: Query<(&BorderSlot, Entity)>,
     lobby_strip: Query<Entity, With<LobbyHudStrip>>,
     ingame_strip: Query<Entity, With<InGameHudStrip>>,
 ) {
-    if !phase.is_changed() {
+    if !state.is_changed() {
         return;
     }
     let Some(assets) = assets else { return };
@@ -429,9 +429,9 @@ fn sync_hud_strips_to_phase(
         .iter()
         .find(|(slot, _)| **slot == BorderSlot::CapBottom)
         .map(|(_, e)| e)
-        .or_else(|| slots.iter().next().map(|(_, e)| e)); // fallback: any slot's parent
+        .or_else(|| slots.iter().next().map(|(_, e)| e));
 
-    match phase.0 {
+    match state.get() {
         GamePhase::InProgress => {
             for e in lobby_strip.iter() {
                 commands.entity(e).despawn();
@@ -1327,13 +1327,13 @@ fn spawn_lobby_screen(mut commands: Commands, assets: Res<ViewscreenAssets>) {
 
 /// Show the lobby overlay during Lobby phase; hide it during InProgress.
 fn toggle_lobby_screen_visibility(
-    phase: Res<CurrentPhase>,
+    state: Res<State<GamePhase>>,
     mut screen_q: Query<&mut Visibility, With<LobbyScreenRoot>>,
 ) {
-    if !phase.is_changed() {
+    if !state.is_changed() {
         return;
     }
-    let target = match phase.0 {
+    let target = match state.get() {
         GamePhase::Lobby => Visibility::Visible,
         GamePhase::InProgress => Visibility::Hidden,
     };
@@ -1350,7 +1350,7 @@ fn rebuild_lobby_station_grid(
     ship_stations: Option<Res<ShipStations>>,
     complexity: Option<Res<ConsoleComplexityState>>,
     assets: Option<Res<ViewscreenAssets>>,
-    phase: Res<CurrentPhase>,
+    state: Res<State<GamePhase>>,
     mut commands: Commands,
     grid_q: Query<Entity, With<LobbyGridRoot>>,
     old_cards: Query<Entity, With<LobbyStationCard>>,
@@ -1363,7 +1363,7 @@ fn rebuild_lobby_station_grid(
         return;
     }
 
-    if phase.0 != GamePhase::Lobby {
+    if state.get() != &GamePhase::Lobby {
         return;
     }
 

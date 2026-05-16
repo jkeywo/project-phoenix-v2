@@ -18,9 +18,9 @@ use crate::console_ai::{
     FrequencyMatchState, PowerEngageOutput, PowerMovementInput,
     PowerRedAlertInput, TorpedoAiInput, TubeSummary,
 };
-use crate::lobby::{CurrentPhase, InboundMessage, Sessions};
+use crate::lobby::{InboundMessage, Sessions};
 use crate::simulation::SimOutbox;
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, TorpedoTube as MsgTorpedoTube};
+use crate::messages::{ClientMessage, Console, ServerMessage, TorpedoTube as MsgTorpedoTube};
 use crate::ship_state::ShipState;
 use crate::ship_plugin::LastHelmInput;
 use crate::simulation::{ShipPowerSystem, TorpedoSystemResource, WeaponsTarget};
@@ -253,7 +253,6 @@ fn track_complexity_changes(
 /// messages are processed by `handle_fire_torpedo` in the same frame via the
 /// normal message pipeline.
 fn run_tactical_ai(
-    phase: Res<CurrentPhase>,
     sessions: Res<Sessions>,
     complexity: Res<ConsoleComplexityState>,
     ship: Res<ShipState>,
@@ -262,9 +261,6 @@ fn run_tactical_ai(
     world: Res<crate::lobby::WorldResource>,
     mut writer: MessageWriter<InboundMessage>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     // AI only runs on occupied consoles.
     let Some(holder_token) = sessions.0.console_holder(Console::Tactical) else {
@@ -355,7 +351,6 @@ fn run_tactical_ai(
 /// - Science complexity changes (back to Full) — handled by clearing the timer
 ///   via the `ConsoleComplexityState` check each tick.
 fn run_science_hint_ai(
-    phase: Res<CurrentPhase>,
     sessions: Res<Sessions>,
     complexity: Res<ConsoleComplexityState>,
     ship: Res<ShipState>,
@@ -365,9 +360,6 @@ fn run_science_hint_ai(
     mut hint_timer: ResMut<FrequencyHintTimer>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     // Hint is only relevant when Tactical is Full (player manages frequency)
     // and Sensors is Low (readout is hidden).
@@ -419,7 +411,6 @@ fn run_science_hint_ai(
 /// - Either console flips to Full (trigger_active becomes false)
 /// - The locked target changes (handled inside `tick_auto_match_frequency`)
 fn run_auto_match_ai(
-    phase: Res<CurrentPhase>,
     sessions: Res<Sessions>,
     complexity: Res<ConsoleComplexityState>,
     ship: Res<ShipState>,
@@ -429,9 +420,6 @@ fn run_auto_match_ai(
     mut match_timer: ResMut<FrequencyMatchTimer>,
     mut writer: MessageWriter<InboundMessage>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     // Tactical must be Low for the AI to act.
     if !complexity.is_low(&Console::Tactical) {
@@ -486,7 +474,6 @@ fn run_auto_match_ai(
 /// Both rules stack independently (both can fire → 8 total).
 /// Switching Power to Full (power_is_low = false) cancels pending engages.
 fn run_power_ai(
-    phase: Res<CurrentPhase>,
     sessions: Res<Sessions>,
     complexity: Res<ConsoleComplexityState>,
     power_sys: Res<ShipPowerSystem>,
@@ -498,9 +485,6 @@ fn run_power_ai(
     mut red_alert_state: ResMut<PowerRedAlertEngageState>,
     mut writer: MessageWriter<InboundMessage>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     // AI only runs on occupied consoles.
     let Some(holder_token) = sessions.0.console_holder(Console::Power) else {
@@ -718,7 +702,7 @@ mod tests {
         push_inbound(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         app.update();
         // Switch to InProgress phase manually
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         // Set Tactical to Low complexity
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
@@ -735,7 +719,7 @@ mod tests {
     fn ai_does_not_fire_when_no_console_holder() {
         let mut app = test_app();
         // No one is holding Tactical
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
@@ -754,7 +738,7 @@ mod tests {
         app.update();
         push_inbound(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         app.update();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         // Tactical is Full (default / unset → not Low)
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
@@ -826,7 +810,7 @@ mod tests {
         app.update();
         push_inbound(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         app.update();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         // No target locked
@@ -916,7 +900,7 @@ mod tests {
         app.update();
         push_inbound(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         app.update();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         // Tactical is Full (default), Science is Low.
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Low".into());
@@ -1021,7 +1005,7 @@ mod tests {
     fn hint_not_emitted_without_tactical_holder() {
         let mut app = test_app();
         // Science Low, no Tactical holder.
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("hint-target".into());
@@ -1078,7 +1062,7 @@ mod tests {
         app.update();
         push_inbound(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         app.update();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         app.world_mut().resource_mut::<ConsoleComplexityState>()
@@ -1178,7 +1162,7 @@ mod tests {
         app.update();
         push_inbound(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
         app.update();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         // Science NOT set to Low AND no holder → unmanned
@@ -1216,7 +1200,7 @@ mod tests {
     fn auto_match_not_emitted_without_tactical_holder() {
         let mut app = test_app();
         // No Tactical holder.
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         app.world_mut().resource_mut::<ConsoleComplexityState>()
@@ -1301,7 +1285,7 @@ mod tests {
         app.update();
         push_inbound(app, "power", ClientMessage::SelectStation { station: "Power".into() });
         app.update();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Power, "Low".into());
         // Full battery
@@ -1311,7 +1295,7 @@ mod tests {
     #[test]
     fn power_ai_does_not_run_when_console_unoccupied() {
         let mut app = test_app();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Power, "Low".into());
         // Thrust above threshold

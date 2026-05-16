@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
 use crate::entity_spawner::RegionEffectsSection;
-use crate::lobby::{CurrentPhase, InboundMessage, Sessions};
-use crate::messages::{ClientMessage, GamePhase, ModifierSlot};
+use crate::lobby::{InboundMessage, Sessions};
+use crate::messages::{ClientMessage, ModifierSlot};
 use crate::modifiers::ShipModifiers;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
@@ -57,14 +57,10 @@ fn process_helm_inputs(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     mut ship: ResMut<ShipState>,
-    phase: Res<CurrentPhase>,
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
     ship_physics_config: Option<Res<ShipPhysicsConfigResource>>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
@@ -127,7 +123,6 @@ fn sync_ship_position(ship: Res<ShipState>, mut ship_query: Query<&mut Transform
 pub fn handle_impulse_messages(
     mut reader: MessageReader<InboundMessage>,
     mut impulse: ResMut<ShipImpulse>,
-    phase: Res<CurrentPhase>,
     hull: Res<ShipHullIntegrity>,
     mut last_hull_hp: Local<f32>,
     membership: Option<Res<RegionMembership>>,
@@ -143,10 +138,6 @@ pub fn handle_impulse_messages(
         impulse.0.cancel_charge();
     }
     *last_hull_hp = current_hp;
-
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     for msg in reader.read() {
         match &msg.msg {

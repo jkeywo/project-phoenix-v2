@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
-use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Target, Sessions, WorldResource};
+use crate::lobby::{InboundMessage, OutboundMessage, Target, Sessions, WorldResource};
 use crate::messages::{
-    ClientMessage, Console, GamePhase, ModifierSlot, ServerMessage,
+    ClientMessage, Console, ModifierSlot, ServerMessage,
 };
 use crate::simulation::{Ship, Asteroid, AsteroidUuid, AsteroidDamage, SimOutbox};
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
@@ -129,16 +129,12 @@ impl Plugin for WeaponsPlugin {
 fn handle_set_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
     world: Res<WorldResource>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         let ClientMessage::SetTarget { uuid } = &ev.msg else { continue };
 
@@ -171,7 +167,6 @@ fn handle_set_target(
 fn handle_fire_phaser(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
     world: Res<WorldResource>,
     weapons_target: Res<WeaponsTarget>,
@@ -180,9 +175,6 @@ fn handle_fire_phaser(
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         if !matches!(ev.msg, ClientMessage::FirePhaser) {
             continue;
@@ -224,12 +216,8 @@ fn handle_fire_phaser(
 fn handle_set_phaser_mode(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         let ClientMessage::SetPhaserMode { mode } = &ev.msg else { continue };
         if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
@@ -242,15 +230,10 @@ fn handle_set_phaser_mode(
 fn handle_set_phaser_frequency(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     complexity: Res<crate::console_ai_plugin::ConsoleComplexityState>,
     mut ship: ResMut<ShipState>,
 ) {
     use crate::delegation::{is_sender_authorized, ComplexityContext, DelegatedControl};
-
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     let ctx = ComplexityContext {
         tactical_is_low: complexity.is_low(&Console::Tactical),
     };
@@ -284,14 +267,10 @@ fn to_tube_id(tube: MsgTorpedoTube) -> TorpedoTubeId {
 fn handle_fire_torpedo(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else { continue };
         if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
@@ -317,15 +296,11 @@ fn handle_fire_torpedo(
 }
 
 fn tick_torpedo_system(
-    phase: Res<CurrentPhase>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     world: Res<WorldResource>,
     time: Res<Time>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     let dt = time.delta_secs();
     let target_positions: std::collections::HashMap<String, (f32, f32)> = world.0.entities
         .iter()
@@ -347,14 +322,10 @@ fn tick_active_beam(
     mut world: ResMut<WorldResource>,
     mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut AsteroidDamage)>,
     mut commands: Commands,
-    phase: Res<CurrentPhase>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     let dt = time.delta_secs();
     cooldown.tick(dt);
@@ -952,7 +923,9 @@ mod tests {
     }
 
     #[test]
-    fn fire_torpedo_ignored_in_lobby() {
+    fn fire_torpedo_during_lobby_fires_when_no_simset_gate() {
+        // Note: The Lobby gate is now at the SimSet chain level.
+        // In test configurations without SimSet, the system processes messages during Lobby.
         let mut app = test_app();
         push(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
         tick(&mut app);
@@ -966,8 +939,8 @@ mod tests {
         let out = tick(&mut app);
 
         assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
-            "FireTorpedo should be ignored during Lobby phase"
+            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            "FireTorpedo should fire during Lobby when no SimSet gate is configured"
         );
     }
 

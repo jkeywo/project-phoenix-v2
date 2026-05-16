@@ -1,7 +1,7 @@
 ﻿use bevy::prelude::*;
 
-use crate::lobby::{CurrentPhase, InboundMessage, Sessions};
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
+use crate::lobby::{InboundMessage, Sessions};
+use crate::messages::{ClientMessage, Console, ServerMessage};
 use crate::simulation::SimOutbox;
 use crate::lobby::Target;
 
@@ -20,12 +20,8 @@ impl Plugin for SciencePlugin {
 pub fn handle_set_science_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         let ClientMessage::SetScienceTarget { uuid } = &ev.msg else { continue };
 

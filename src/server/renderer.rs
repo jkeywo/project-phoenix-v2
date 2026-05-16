@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::lobby::{CurrentPhase, GameStateCache, WorldResource};
+use crate::lobby::{GameStateCache, WorldResource};
 use crate::messages::{GamePhase, PhaserBank, ViewDirection, ViewMode};
 use crate::radar;
 use crate::ship_state::ShipState;
@@ -88,15 +88,15 @@ impl Plugin for RendererPlugin {
                 toggle_cameras,
                 update_view_screen_text,
                 update_view_direction_label,
-                hull_camera,
-                draw_radar_overlay,
+                hull_camera.run_if(in_state(GamePhase::InProgress)),
+                draw_radar_overlay.run_if(in_state(GamePhase::InProgress)),
             ))
             .add_systems(Update, (
-                draw_beam_vfx,
+                draw_beam_vfx.run_if(in_state(GamePhase::InProgress)),
                 spawn_ripples,
-                tick_ripples,
-                sync_torpedo_entities,
-                draw_warp_exit_markers,
+                tick_ripples.run_if(in_state(GamePhase::InProgress)),
+                sync_torpedo_entities.run_if(in_state(GamePhase::InProgress)),
+                draw_warp_exit_markers.run_if(in_state(GamePhase::InProgress)),
             ));
     }
 }
@@ -239,15 +239,15 @@ fn update_camera_aspect(
 }
 
 fn toggle_cameras(
-    phase: Res<CurrentPhase>,
+    state: Res<State<GamePhase>>,
     ship: Res<ShipState>,
     mut game: Query<&mut Camera, (With<GameCamera>, Without<RadarCamera>)>,
     mut radar_cam: Query<&mut Camera, (With<RadarCamera>, Without<GameCamera>)>,
 ) {
-    if !phase.is_changed() && !ship.is_changed() {
+    if !state.is_changed() && !ship.is_changed() {
         return;
     }
-    let in_game = phase.0 == GamePhase::InProgress;
+    let in_game = state.get() == &GamePhase::InProgress;
     let radar_active = in_game && matches!(ship.view_mode, ViewMode::Radar | ViewMode::ScienceRadar | ViewMode::SystemChart | ViewMode::NavigationChart);
     let game_active  = in_game && !radar_active;
 
@@ -277,11 +277,7 @@ fn update_view_screen_text(
 fn hull_camera(
     ship: Res<ShipState>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
-    phase: Res<CurrentPhase>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     let Ok(mut transform) = cam_query.single_mut() else { return };
 
     // Direction vectors relative to ship heading (yaw=0 → ship faces -Z).
@@ -318,15 +314,15 @@ fn hull_camera(
 
 fn update_view_direction_label(
     ship: Res<ShipState>,
-    phase: Res<CurrentPhase>,
+    state: Res<State<GamePhase>>,
     mut label_query: Query<(&Children, &mut Visibility), With<ViewDirectionLabel>>,
     mut text_query: Query<&mut Text>,
 ) {
-    if !ship.is_changed() && !phase.is_changed() {
+    if !ship.is_changed() && !state.is_changed() {
         return;
     }
     let Ok((children, mut vis)) = label_query.single_mut() else { return };
-    if phase.0 != GamePhase::InProgress {
+    if state.get() != &GamePhase::InProgress {
         *vis = Visibility::Hidden;
         return;
     }
@@ -358,14 +354,10 @@ const RADAR_PIXEL_RADIUS: f32 = 220.0;
 /// the ship's view mode is Radar; otherwise it does nothing (so the gizmo
 /// buffer is empty and nothing is rendered).
 fn draw_radar_overlay(
-    phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
     world: Option<Res<WorldResource>>,
     mut gizmos: Gizmos,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     if !matches!(ship.view_mode, ViewMode::Radar) {
         return;
     }
@@ -408,16 +400,12 @@ fn draw_radar_overlay(
 /// the asteroid position, clamped to max range via `beam_render::beam_endpoint`.
 /// The beam colour is taken from `PhaserRenderConfig` (configurable via ship TOML).
 fn draw_beam_vfx(
-    phase: Res<CurrentPhase>,
     ship: Res<ShipState>,
     beam: Res<ActiveBeam>,
     render_cfg: Res<PhaserRenderConfig>,
     world: Option<Res<WorldResource>>,
     mut gizmos: Gizmos,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     let Some(target_uuid) = &beam.target_uuid else { return };
     let Some(world) = world else { return };
 
@@ -474,14 +462,10 @@ fn spawn_ripples(
 /// ring via 3D gizmos, and despawns the entity once the animation completes.
 fn tick_ripples(
     time: Res<Time>,
-    phase: Res<CurrentPhase>,
     mut query: Query<(Entity, &mut RippleEffect)>,
     mut gizmos: Gizmos,
     mut commands: Commands,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     let dt = time.delta_secs();
     for (entity, mut ripple) in query.iter_mut() {
         ripple.elapsed += dt;
@@ -531,7 +515,6 @@ fn tick_ripples(
 /// Only runs during `InProgress` phase; despawns all remaining torpedo spheres
 /// when the game is not in progress.
 fn sync_torpedo_entities(
-    phase: Res<CurrentPhase>,
     torpedo_sys: Option<Res<TorpedoSystemResource>>,
     mut entity_map: ResMut<TorpedoEntityMap>,
     mut commands: Commands,
@@ -541,12 +524,8 @@ fn sync_torpedo_entities(
 ) {
     let Some(torpedo_sys) = torpedo_sys else { return };
 
-    if phase.0 != GamePhase::InProgress {
-        for (_, entity) in entity_map.0.drain() {
-            commands.entity(entity).despawn();
-        }
-        return;
-    }
+    // Entity cleanup for non-InProgress is handled by OnExit schedule
+
 
     let in_flight = &torpedo_sys.0.in_flight;
     let in_flight_uuids: HashSet<String> = in_flight.iter().map(|t| t.uuid.clone()).collect();
@@ -639,13 +618,9 @@ mod tests {
 /// The ring glows cyan and pulses in opacity with the remaining time so crews
 /// can anticipate where the entity will disappear.
 fn draw_warp_exit_markers(
-    phase: Res<CurrentPhase>,
     query: Query<(&WarpOutMarker, &Transform)>,
     mut gizmos: Gizmos,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for (marker, transform) in query.iter() {
         let center = transform.translation;
         // Pulse: brightest at full time remaining, dims as time runs out.

@@ -7,10 +7,10 @@ use std::collections::HashMap;
 
 use crate::comms_inbox::CommsInbox;
 use crate::entity_spawner::spawn_entity;
-use crate::lobby::{CurrentPhase, InboundMessage, Sessions, Target};
+use crate::lobby::{InboundMessage, Sessions, Target};
 use crate::simulation::SimOutbox;
 use crate::messages::{
-    ClientMessage, CommsContact, CommsMessage, Console, GamePhase, ObjectiveSnapshot,
+    ClientMessage, CommsContact, CommsMessage, Console, ObjectiveSnapshot,
     ServerMessage,
 };
 use crate::objectives::ObjectiveManager;
@@ -298,14 +298,9 @@ fn init_scenario_runtime(
 fn handle_hail(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-
     for ev in reader.read() {
         // Gate: sender must hold Console::Comms.
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
@@ -376,15 +371,10 @@ fn handle_hail(
 fn handle_respond_to_message(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut objectives: ResMut<ObjectiveManagerRes>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-
     for ev in reader.read() {
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
             continue;
@@ -483,13 +473,8 @@ fn handle_respond_to_message(
 fn handle_clear_comms(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-
     for ev in reader.read() {
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
             continue;
@@ -504,16 +489,12 @@ fn handle_clear_comms(
 /// Broadcast `CommsState` to the Comms console holder when the inbox is dirty
 /// or `WorldContentRuntime::needs_broadcast` is set.
 fn broadcast_comms_state(
-    phase: Res<CurrentPhase>,
     sessions: Res<Sessions>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     let dirty = inbox.0.is_dirty() || runtime.needs_broadcast || objectives.0.is_dirty();
     if !dirty {
@@ -542,14 +523,10 @@ fn broadcast_comms_state(
 
 /// Broadcast `ObjectiveSummary` to the Captain when objectives change.
 fn broadcast_objective_summary(
-    phase: Res<CurrentPhase>,
     sessions: Res<Sessions>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     if !objectives.0.is_dirty() {
         return;
@@ -575,16 +552,12 @@ fn broadcast_objective_summary(
 /// into `WorldEvent`s, evaluate the scenario trigger table, and execute the
 /// resulting actions (including `SetAiState`).
 fn handle_ai_events(
-    phase: Res<CurrentPhase>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
     mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in attacked_reader.read() {
@@ -1045,7 +1018,7 @@ position    = [100.0, 0.0, 200.0]
             .init_resource::<SimOutbox>()
             .add_systems(Update, handle_ai_events);
         // Set phase to InProgress
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         app
     }
 

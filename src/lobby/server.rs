@@ -6,7 +6,7 @@ use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage, WorldD
 use crate::session::SessionManager;
 use crate::stations_config::ShipStations;
 
-/// Cached `GameState` snapshot derived from `Sessions` + `CurrentPhase` each frame.
+/// Cached `GameState` snapshot derived from `Sessions` + `GamePhase` each frame.
 /// Renderer systems read this instead of accessing `Sessions` directly.
 #[derive(Resource, Clone)]
 pub struct GameStateCache(pub GameState);
@@ -22,9 +22,6 @@ pub struct LobbyOutbox(pub Vec<(Target, ServerMessage)>);
 
 #[derive(Resource)]
 pub struct Sessions(pub SessionManager);
-
-#[derive(Resource)]
-pub struct CurrentPhase(pub GamePhase);
 
 /// Server's authoritative copy of the world layout — populated once during
 /// world setup and broadcast to clients via `WorldSetup` after `StartGame`,
@@ -68,9 +65,10 @@ impl Plugin for LobbyPlugin {
             world: None,
         });
         app.insert_resource(Sessions(SessionManager::new()))
-            .insert_resource(CurrentPhase(GamePhase::Lobby))
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
+            .insert_resource(State::new(GamePhase::Lobby))
+            .insert_resource(NextState::<GamePhase>::Unchanged)
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()
             .add_message::<PlayerDisconnected>()
@@ -93,15 +91,15 @@ fn update_session_with_config(
 
 pub fn update_game_state_cache(
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
+    state: Res<State<GamePhase>>,
     world: Option<Res<WorldResource>>,
     mut cache: ResMut<GameStateCache>,
 ) {
-    if !sessions.is_changed() && !phase.is_changed() {
+    if !sessions.is_changed() && !state.is_changed() {
         return;
     }
     let world_data = world.as_ref().map(|w| &w.0);
-    cache.0 = lobby_handler::derive_game_state(&sessions.0, &phase.0, world_data);
+    cache.0 = lobby_handler::derive_game_state(&sessions.0, state.get(), world_data);
 }
 
 // ── Systems ────────────────────────────────────────────────────────────────
@@ -109,7 +107,8 @@ pub fn update_game_state_cache(
 pub fn process_lobby(
     mut inbound: MessageReader<InboundMessage>,
     mut sessions: ResMut<Sessions>,
-    mut phase: ResMut<CurrentPhase>,
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
     world: Option<Res<WorldResource>>,
     ship_stations: Option<Res<ShipStations>>,
@@ -117,7 +116,7 @@ pub fn process_lobby(
     // Only consume inbound messages during the Lobby phase.  In InProgress the
     // simulation systems own the message queue; draining here would silently
     // discard HelmInput and other sim messages before they can be processed.
-    if phase.0 != GamePhase::Lobby {
+    if state.get() != &GamePhase::Lobby {
         return;
     }
     let default_stations = ShipStations::default();
@@ -128,18 +127,18 @@ pub fn process_lobby(
             &ev.token,
             &ev.msg,
             &mut sessions.0,
-            phase.0.clone(),
+            state.get().clone(),
             world_data,
             stations,
         );
-        apply_result(result, &mut outbox, &mut phase);
+        apply_result(result, &mut outbox, &mut next_state);
     }
 }
 
 fn handle_disconnect(
     mut events: MessageReader<PlayerDisconnected>,
     mut sessions: ResMut<Sessions>,
-    mut phase: ResMut<CurrentPhase>,
+    mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
     ship_stations: Option<Res<ShipStations>>,
 ) {
@@ -149,17 +148,17 @@ fn handle_disconnect(
         } else {
             lobby_handler::process_disconnect(&ev.token, &mut sessions.0)
         };
-        apply_result(result, &mut outbox, &mut phase);
+        apply_result(result, &mut outbox, &mut next_state);
     }
 }
 
 fn apply_result(
     result: lobby_handler::LobbyHandlerResult,
     outbox: &mut ResMut<LobbyOutbox>,
-    phase: &mut ResMut<CurrentPhase>,
+    next_state: &mut ResMut<NextState<GamePhase>>,
 ) {
     if let Some(new_phase) = result.new_phase {
-        phase.0 = new_phase;
+        next_state.set(new_phase);
     }
     outbox.0.extend(result.outbound);
 }

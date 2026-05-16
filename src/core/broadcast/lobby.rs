@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::core::broadcast::audience::Audience;
 use crate::core::broadcast::cadence::Cadence;
-use crate::lobby::{CurrentPhase, OutboundMessage, Sessions};
+use crate::lobby::{OutboundMessage, Sessions};
 use crate::messages::{GamePhase, ServerMessage};
 
 // ── Registration types ─────────────────────────────────────────────────────
@@ -127,10 +127,12 @@ impl Plugin for LobbyBroadcaster {
 // ── Dispatch system (exclusive: needs &mut World for write_message) ────────
 
 /// Each frame, tick cadence timers and call producers that are ready.
-/// Skips the whole system when the game is not in the `Lobby` phase.
+/// Only active during the `Lobby` phase.
 fn dispatch_lobby_broadcasts(world: &mut World) {
-    // Gate: only active during lobby.
-    let phase = world.resource::<CurrentPhase>().0.clone();
+    let phase = match world.get_resource::<State<GamePhase>>() {
+        Some(s) => s.get().clone(),
+        None => return,
+    };
     if phase != GamePhase::Lobby {
         return;
     }
@@ -183,7 +185,7 @@ mod tests {
     use super::*;
     use crate::core::broadcast::audience::Audience;
     use crate::core::broadcast::cadence::Cadence;
-    use crate::lobby::{CurrentPhase, LobbyPlugin, OutboundMessage};
+    use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::{GamePhase, ServerMessage};
 
     #[derive(Resource, Default)]
@@ -201,7 +203,7 @@ mod tests {
         app.add_plugins(bevy::time::TimePlugin);
         app.add_plugins(broadcaster);
 
-        app.world_mut().insert_resource(CurrentPhase(GamePhase::Lobby));
+        app.world_mut().insert_resource(State::new(GamePhase::Lobby));
         app.init_resource::<Outbox>();
         app.add_systems(PostUpdate, collect);
         app
@@ -305,7 +307,7 @@ mod tests {
             |_world: &mut World| vec![ServerMessage::GameStarted],
         );
         let mut app = dispatch_app(broadcaster);
-        app.world_mut().insert_resource(CurrentPhase(GamePhase::InProgress));
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         let msgs = tick_and_collect(&mut app);
         assert!(
             !msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),

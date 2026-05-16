@@ -4,7 +4,7 @@ use bevy_rapier3d::prelude::*;
 #[cfg(test)]
 use crate::breakdown::{BreakdownQueue, breakdowns_from_damage};
 use crate::damage::{HullIntegrity};
-use crate::lobby::{CurrentPhase, InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
+use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::shield::ShieldSystem;
 use crate::map_config::MapConfig;
@@ -76,12 +76,7 @@ pub struct ShipShields(pub ShieldSystem);
 #[derive(Resource)]
 pub struct ShipImpulse(pub ImpulseState);
 
-/// Tracks whether the initial WorldSetup broadcast has fired, so it only
-/// goes out once per game.
-#[derive(Resource, Default)]
-struct WorldSetupBroadcast {
-    sent: bool,
-}
+
 
 
 
@@ -148,7 +143,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             crate::sim_sets::SimSet::Damage,
             crate::sim_sets::SimSet::Modifiers,
             crate::sim_sets::SimSet::Broadcast,
-        ).chain().after(crate::lobby::process_lobby))
+        ).chain().run_if(in_state(GamePhase::InProgress)).after(crate::lobby::process_lobby))
         .add_plugins(RapierPhysicsPlugin::<()>::default())
             .add_plugins(crate::region_plugin::RegionPlugin)
             .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
@@ -171,18 +166,20 @@ pub fn add_simulation_plugins(app: &mut App) {
             .init_resource::<SimOutbox>()
             .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_systems(Startup, setup_world)
-            .add_systems(Update, (
-                spawn_game_start_entities.after(crate::lobby::process_lobby),
-                render_spawned_entities.after(spawn_game_start_entities),
+            .add_systems(OnEnter(GamePhase::InProgress), (
+                spawn_game_start_entities,
+                render_spawned_entities,
             ))
+            .add_systems(Update, (
+                broadcast_world_setup_on_start,
+                reconcile_runtime_entities,
+            ).after(crate::lobby::process_lobby))
             .add_systems(Update, (
                 handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_shield_focus.in_set(crate::sim_sets::SimSet::Input),
                 tick_shields.in_set(crate::sim_sets::SimSet::Physics),
                 handle_collisions.in_set(crate::sim_sets::SimSet::Physics),
                 broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
-                broadcast_world_setup_on_start.in_set(crate::sim_sets::SimSet::Broadcast),
-                reconcile_runtime_entities.in_set(crate::sim_sets::SimSet::Broadcast),
                 sim_processing_anchor,
             ).after(crate::lobby::process_lobby))
             .add_systems(Update, crate::modifier_coordination::translate_power_modifiers.in_set(crate::sim_sets::SimSet::Modifiers))
@@ -356,12 +353,8 @@ fn is_valid_console_holder(
 fn handle_set_sensors_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         let ClientMessage::SetSensorsTarget { uuid } = &ev.msg else { continue };
 
@@ -455,12 +448,8 @@ fn handle_set_shield_focus(
     mut reader: MessageReader<InboundMessage>,
     mut shields: ResMut<ShipShields>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         let facing = match &ev.msg {
             ClientMessage::SetShieldFocus { facing } => facing.clone(),
@@ -499,12 +488,8 @@ fn broadcast_shield_status(
     time: Res<Time>,
     mut timer: ResMut<SimBroadcastTimer>,
     shields: Res<ShipShields>,
-    phase: Res<CurrentPhase>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
@@ -520,19 +505,26 @@ fn broadcast_shield_status(
 }
 
 
-/// Emit a single `WorldSetup` broadcast the first frame the game enters
-/// `InProgress`. Stays silent in Lobby and on subsequent in-game ticks.
+/// Tracks whether the initial WorldSetup broadcast has fired, so it only
+/// goes out once per game.
+#[derive(Resource, Default)]
+struct WorldSetupBroadcast {
+    sent: bool,
+}
+
+/// Emit a single `WorldSetup` broadcast when the game enters `InProgress`.
+/// Uses `State<GamePhase>` + sentry to fire exactly once.
 fn broadcast_world_setup_on_start(
+    state: Res<State<GamePhase>>,
     world: Res<WorldResource>,
-    phase: Res<CurrentPhase>,
-    mut state: ResMut<WorldSetupBroadcast>,
+    mut sent: ResMut<WorldSetupBroadcast>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress || state.sent {
+    if sent.sent || state.get() != &GamePhase::InProgress {
         return;
     }
     outbox.0.push((Target::All, ServerMessage::WorldSetup { world: world.0.clone() }));
-    state.sent = true;
+    sent.sent = true;
 }
 
 /// Reconciles the live ECS entities with the `TrackedEntities` registry each tick.
@@ -551,13 +543,8 @@ fn reconcile_runtime_entities(
     mut registry: ResMut<TrackedEntities>,
     mut world: ResMut<WorldResource>,
     query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform, Option<&RegionShapeSection>, Option<&EntityTagsSection>), Without<Asteroid>>,
-    phase: Res<CurrentPhase>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
-
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
@@ -729,17 +716,13 @@ fn spawn_starfield(
 }
 
 /// Spawn entities with `spawn_on = GameStart` (e.g. player ship) when the
-/// game transitions to InProgress. Runs once per game.
+/// game transitions to InProgress. Registered in `OnEnter(GamePhase::InProgress)`.
 fn spawn_game_start_entities(
     mut commands: Commands,
-    phase: Res<crate::lobby::CurrentPhase>,
     map_config: Option<Res<MapConfig>>,
     mut has_spawned: Local<bool>,
 ) {
     if *has_spawned {
-        return;
-    }
-    if phase.0 != crate::messages::GamePhase::InProgress {
         return;
     }
 
@@ -950,11 +933,12 @@ fn test_app() -> App {
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<WorldResource>()
-        .init_resource::<WorldSetupBroadcast>()
+
         .insert_resource(crate::modifiers::ShipModifiers::new())
         .init_resource::<TrackedEntities>()
         .insert_resource(SimBroadcastTimer(Timer::new(
             std::time::Duration::from_nanos(1), TimerMode::Repeating)))
+        .init_resource::<WorldSetupBroadcast>()
         .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
@@ -1009,7 +993,8 @@ fn test_app() -> App {
         push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
-        tick(app);
+        tick(app); // process_lobby → sets NextState::Set(InProgress)
+        tick(app); // NextState takes effect: Phase switches to InProgress
     }
 
     fn start_game_with_helm(app: &mut App) {
@@ -1278,8 +1263,10 @@ fn test_app() -> App {
         tick(&mut app);
         push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(&mut app);
-        // The StartGame tick should produce the WorldSetup broadcast
+        // Simulate OnEnter(InProgress) having run by inserting ShipHullIntegrity.
+        // The test explicitly advances phase to InProgress so broadcast_world_setup_on_start fires.
         push(&mut app, "captain", ClientMessage::StartGame);
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         let start_out = tick(&mut app);
 
         let world_setups: Vec<_> = start_out.iter().filter(|m|
@@ -2161,7 +2148,9 @@ fn test_app() -> App {
     }
 
     #[test]
-    fn fire_torpedo_ignored_in_lobby() {
+    fn fire_torpedo_during_lobby_fires_when_no_simset_gate() {
+        // Note: The Lobby gate is now at the SimSet chain level.
+        // In test configurations without SimSet, the system processes messages during Lobby.
         let mut app = test_app();
         push(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
         tick(&mut app);
@@ -2175,8 +2164,8 @@ fn test_app() -> App {
         let out = tick(&mut app);
 
         assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
-            "FireTorpedo should be ignored during Lobby phase"
+            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            "FireTorpedo should fire during Lobby when no SimSet gate is configured"
         );
     }
 

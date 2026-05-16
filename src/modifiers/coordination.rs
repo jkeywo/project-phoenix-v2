@@ -4,8 +4,7 @@ use bevy::prelude::*;
 
 use crate::entity_spawner::{EntityUuid, RegionEffectsSection};
 use crate::flag_kind::FlagKind;
-use crate::lobby::CurrentPhase;
-use crate::messages::{Console, GamePhase, ModifierSlot, ModifierSource};
+use crate::messages::{Console, ModifierSlot, ModifierSource};
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::power_system::PowerSystem;
 use crate::region_effects::RegionEffectKind;
@@ -42,14 +41,10 @@ impl Plugin for ModifierCoordinationPlugin {
 /// `ModifierCoordinationPlugin`) so it can be chained after the power‑handling
 /// systems with explicit `.after()` ordering.
 pub fn translate_power_modifiers(
-    phase: Res<CurrentPhase>,
     power: Res<ShipPowerSystem>,
     mult_cfg: Option<Res<PowerMultiplierResource>>,
     mut modifiers: ResMut<ShipModifiers>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     let Some(mult_cfg) = mult_cfg else { return };
     apply_power_modifiers(&mut modifiers, &power.0, &mult_cfg.multipliers);
 }

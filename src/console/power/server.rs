@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::lobby::{CurrentPhase, InboundMessage, Sessions};
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
+use crate::lobby::{InboundMessage, Sessions};
+use crate::messages::{ClientMessage, Console, ServerMessage};
 use crate::power_system::{PowerConfig, PowerSystem};
 
 // ── Resources ──────────────────────────────────────────────────────────────────
@@ -94,12 +94,8 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 pub fn handle_power_messages(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
     mut power: ResMut<ShipPowerSystem>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         match &ev.msg {
             ClientMessage::IncreasePower { console } => {
@@ -120,13 +116,9 @@ pub fn handle_power_messages(
 /// Tick the power system battery charge each frame.
 pub fn tick_power_system(
     time: Res<Time>,
-    phase: Res<CurrentPhase>,
     mut power: ResMut<ShipPowerSystem>,
     config: Res<PowerConfigResource>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     let dt = time.delta_secs();
     power.0.tick(dt, &config.0);
 }

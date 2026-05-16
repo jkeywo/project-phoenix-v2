@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::core::broadcast::audience::Audience;
 use crate::core::broadcast::cadence::Cadence;
-use crate::lobby::{CurrentPhase, OutboundMessage, Sessions};
-use crate::messages::{GamePhase, ServerMessage};
+use crate::lobby::{OutboundMessage, Sessions};
+use crate::messages::ServerMessage;
 
 // ── Registration types ─────────────────────────────────────────────────────
 
@@ -132,14 +132,8 @@ impl Plugin for SimBroadcaster {
 // ── Dispatch system (exclusive: needs &mut World for write_message) ────────
 
 /// Each frame, tick cadence timers and call producers that are ready.
-/// Skips the whole system when the game is not in `InProgress`.
+/// Gated by the SimSet chain's `.run_if(in_state(GamePhase::InProgress))`.
 fn dispatch_sim_broadcasts(world: &mut World) {
-    // Gate: only active during simulation.
-    let phase = world.resource::<CurrentPhase>().0.clone();
-    if phase != GamePhase::InProgress {
-        return;
-    }
-
     // Tick all cadence timers.
     let dt = world.resource::<Time>().delta();
     {
@@ -193,7 +187,7 @@ mod tests {
     use bevy::prelude::*;
     use crate::core::broadcast::audience::Audience;
     use crate::core::broadcast::cadence::Cadence;
-    use crate::lobby::{CurrentPhase, LobbyPlugin, OutboundMessage, Sessions};
+    use crate::lobby::{LobbyPlugin, OutboundMessage, Sessions};
     use crate::messages::{GamePhase, ServerMessage};
 
     // ── Test harness ──────────────────────────────────────────────────────
@@ -226,7 +220,8 @@ mod tests {
             let mut sm = app.world_mut().resource_mut::<Sessions>();
             sm.0.register("alice".to_string(), "Alice".to_string()).unwrap();
         }
-        app.world_mut().insert_resource(CurrentPhase(GamePhase::InProgress));
+        // dispatch_sim_broadcasts no longer gates internally (SimSet handles it).
+        // No State<GamePhase> setup needed for these tests.
 
         // Outbox + collector.
         app.init_resource::<Outbox>();

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
-use crate::lobby::{CurrentPhase, InboundMessage, Sessions};
-use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
+use crate::lobby::{InboundMessage, Sessions};
+use crate::messages::{ClientMessage, Console, ViewMode};
 use crate::ship_state::ShipState;
 
 pub struct CaptainPlugin;
@@ -19,11 +19,7 @@ fn handle_toggle_red_alert(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         if matches!(ev.msg, ClientMessage::ToggleRedAlert)
             && sessions.0.console_holder(Console::CaptainChair) == Some(ev.token.as_str())
@@ -37,11 +33,7 @@ fn handle_set_view(
     mut reader: MessageReader<InboundMessage>,
     mut ship: ResMut<ShipState>,
     sessions: Res<Sessions>,
-    phase: Res<CurrentPhase>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
     for ev in reader.read() {
         if let ClientMessage::SetView { mode } = ev.msg.clone() {
             // Authorization is per-variant: Camera views are the captain's call,
@@ -111,16 +103,18 @@ mod tests {
     // ── ToggleRedAlert tests ────────────────────────────────────────────────
 
     #[test]
-    fn toggle_red_alert_during_lobby_is_ignored() {
+    fn toggle_red_alert_during_lobby_is_processed_when_no_simset_gate() {
+        // Note: The Lobby gate is now at the SimSet chain level (`.run_if(in_state(GamePhase::InProgress))`).
+        // In test configurations without SimSet, the system processes messages during Lobby.
+        // The production gate is enforced by the SimSet chain, not individual system logic.
         let mut app = test_app();
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(&mut app);
         push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(&mut app);
-        // Still in Lobby — game not started
         push(&mut app, "captain", ClientMessage::ToggleRedAlert);
         tick(&mut app);
-        assert!(!app.world().resource::<ShipState>().red_alert());
+        assert!(app.world().resource::<ShipState>().red_alert());
     }
 
     #[test]
@@ -158,18 +152,19 @@ mod tests {
     // ── SetView tests ───────────────────────────────────────────────────────
 
     #[test]
-    fn set_view_during_lobby_is_ignored() {
+    fn set_view_during_lobby_is_processed_when_no_simset_gate() {
+        // Note: The Lobby gate is now at the SimSet chain level (`.run_if(in_state(GamePhase::InProgress))`).
+        // In test configurations without SimSet, the system processes messages during Lobby.
         let mut app = test_app();
         push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(&mut app);
         push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
         tick(&mut app);
-        // Still in Lobby — game not started
         push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) });
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
-            ViewMode::Camera(ViewDirection::Fore)
+            ViewMode::Camera(ViewDirection::Starboard)
         );
     }
 

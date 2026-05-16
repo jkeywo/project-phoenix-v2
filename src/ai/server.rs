@@ -9,8 +9,7 @@ use std::collections::HashMap;
 
 use crate::ai::{AiController, AiTickOutput, WorldView, WorldEntity};
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
-use crate::lobby::CurrentPhase;
-use crate::messages::GamePhase;
+
 #[cfg(target_arch = "wasm32")]
 use crate::config_cache::FactionRegistryResource;
 
@@ -198,9 +197,8 @@ fn attach_controllers_on_spawn(
     }
 }
 
-/// Tick AI controllers, but only during `InProgress` phase.
+/// Tick AI controllers.
 fn tick_ai_controllers(
-    phase: Res<CurrentPhase>,
     mut commands: Commands,
     mut query: Query<(Entity, &mut AiControllerComponent, &mut Transform, &BehaviourSection, Option<&AttackerThisTick>)>,
     time: Res<Time>,
@@ -210,9 +208,6 @@ fn tick_ai_controllers(
     entity_query: Query<(&EntityUuid, &Transform), Without<AiControllerComponent>>,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
 ) {
-    if phase.0 != GamePhase::InProgress {
-        return;
-    }
 
     // Build anchor map once (shared across all controllers this tick)
     let anchors: HashMap<String, [f32; 3]> = if let Some(ref mc) = map_config {
@@ -489,7 +484,7 @@ mod tests {
 
     use crate::entity_config::{BehaviourConfig, StateConfig};
     use crate::entity_spawner::EntityUuid;
-    use crate::lobby::{CurrentPhase, LobbyPlugin};
+    use crate::lobby::LobbyPlugin;
     use crate::messages::GamePhase;
 
     #[derive(Resource, Default)]
@@ -581,7 +576,7 @@ mod tests {
     fn idle_controller_produces_no_inputs_in_progress_phase() {
         let mut app = build_test_app();
         // Set InProgress phase
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
         let entity = spawn_behaviour_entity(&mut app, "ent-005");
         app.update();
         // Controller stays idle - we verify it's still Idle
@@ -643,7 +638,7 @@ mod tests {
     #[test]
     fn ai_entity_attacked_event_emitted_when_attacker_set_and_on_attacked_fires() {
         let mut app = build_test_app();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
 
         // Spawn entity with on_attacked transition and an attacker component.
         let attacker_id = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000099").unwrap();
@@ -670,7 +665,7 @@ mod tests {
     #[test]
     fn ai_entity_destroyed_event_emitted_when_hull_reaches_zero() {
         let mut app = build_test_app();
-        app.world_mut().resource_mut::<CurrentPhase>().0 = GamePhase::InProgress;
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
 
         let entity = app.world_mut().spawn((
             Transform::from_xyz(0.0, 0.0, 0.0),

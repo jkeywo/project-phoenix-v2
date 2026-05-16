@@ -108,6 +108,9 @@ pub mod helm_panel;
 pub mod weapons_panel;
 
 #[cfg(feature = "client")]
+pub mod repair_panel;
+
+#[cfg(feature = "client")]
 pub mod client;
 
 // Backwards-compat flat modules for client.

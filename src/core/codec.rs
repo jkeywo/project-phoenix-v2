@@ -743,6 +743,66 @@ mod tests {
     }
 
     #[test]
+    fn server_modifier_scenario_source_round_trips() {
+        // ModifierAdded with Scenario source
+        let msg = ServerMessage::ModifierAdded {
+            source: crate::messages::ModifierSource::Scenario {
+                id: "before_the_fire".into(),
+                tag: "speed_boost".into(),
+            },
+            slot: crate::messages::ModifierSlot::MaxSpeed,
+            bonus: 0.25,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+
+        // ModifierRemoved with Scenario source
+        let msg = ServerMessage::ModifierRemoved {
+            source: crate::messages::ModifierSource::Scenario {
+                id: "before_the_fire".into(),
+                tag: "speed_boost".into(),
+            },
+            slot: crate::messages::ModifierSlot::MaxSpeed,
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn modifier_source_scenario_hash_and_eq() {
+        use std::collections::HashSet;
+        use crate::messages::ModifierSource;
+
+        let a = ModifierSource::Scenario { id: "s1".into(), tag: "t1".into() };
+        let b = ModifierSource::Scenario { id: "s1".into(), tag: "t1".into() };
+        let c = ModifierSource::Scenario { id: "s1".into(), tag: "t2".into() };
+        let d = ModifierSource::Scenario { id: "s2".into(), tag: "t1".into() };
+
+        // Same (id, tag) → equal
+        assert_eq!(a, b);
+
+        // Different tag → not equal
+        assert_ne!(a, c);
+
+        // Different id → not equal
+        assert_ne!(a, d);
+
+        // HashSet deduplication: same pair stored once
+        let mut set = HashSet::new();
+        set.insert(a.clone());
+        set.insert(b.clone());
+        assert_eq!(set.len(), 1);
+
+        // Different tag stored separately
+        set.insert(c);
+        assert_eq!(set.len(), 2);
+
+        // Different id stored separately
+        set.insert(d);
+        assert_eq!(set.len(), 3);
+    }
+
+    #[test]
     fn flag_kind_round_trips() {
         for flag in &[crate::flag_kind::FlagKind::CommsJammed, crate::flag_kind::FlagKind::SensorBlind] {
             let json = serde_json::to_string(flag).unwrap();

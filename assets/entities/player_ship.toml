@@ -14,10 +14,6 @@ hull_integrity = 100
 mass = 100.0
 linear_damping = 0.9
 angular_damping = 0.9
-max_speed = 50.0
-acceleration = 16.7
-decceleration = 50.0
-max_yaw_rate = 1.5708
 
 [weapons]
 phaser_range = 200.0
@@ -58,6 +54,10 @@ emergency_threshold = 25.0
 [captain_console]
 
 [helm_console]
+max_speed = 50.0
+acceleration = 16.7
+deceleration = 50.0
+max_yaw_rate = 1.5708
 
 [navigation_console]
 

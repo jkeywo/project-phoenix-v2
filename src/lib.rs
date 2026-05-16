@@ -105,6 +105,9 @@ pub mod debug_overlay {
 pub mod helm_panel;
 
 #[cfg(feature = "client")]
+pub mod weapons_panel;
+
+#[cfg(feature = "client")]
 pub mod client;
 
 // Backwards-compat flat modules for client.

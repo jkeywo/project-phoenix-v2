@@ -117,6 +117,7 @@ pub fn wasm_client_init() {
         .add_plugins(crate::ship_view::ShipViewPlugin)
         .add_plugins(PhoneBorderPlugin)
         .add_plugins(crate::helm_panel::HelmPanelPlugin)
+        .add_plugins(crate::weapons_panel::WeaponsPanelPlugin)
         .add_plugins(crate::phone_border::CaptainPanelPlugin)
         .add_plugins(ClientRendererPlugin)
         .add_systems(Update, (

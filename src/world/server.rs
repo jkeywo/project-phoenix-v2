@@ -22,14 +22,14 @@ use crate::world::content::{
 
 // ── Resources ──────────────────────────────────────────────────────────────
 
-/// Server-side runtime state for the currently active scenario.
+/// Server-side runtime state for the currently active world content.
 ///
-/// Populated at `Startup` from `ScenarioResource` (which is itself populated
-/// by `ConfigCachePlugin` when `wasm_load_scenario` is called before
-/// `wasm_init`). When no scenario is loaded all vecs/maps are empty and comms
+/// Populated at `Startup` from `WorldContentResource` (which is itself populated
+/// by `ConfigCachePlugin` when `wasm_load_world_content` is called before
+/// `wasm_init`). When no world content is loaded all vecs/maps are empty and comms
 /// systems are no-ops.
 #[derive(Resource, Default)]
-pub struct ScenarioRuntime {
+pub struct WorldContentRuntime {
     /// Stable scenario ID string (used to scope inbox messages and objectives).
     pub scenario_id: String,
     /// Mutable per-trigger runtime state (fired flag).
@@ -65,7 +65,7 @@ pub struct WorldPlugin;
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_world_hardcoded)
-            .init_resource::<ScenarioRuntime>()
+            .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .add_systems(
@@ -91,7 +91,7 @@ impl Plugin for WorldPlugin {
 ///
 /// Returns true when the hardcoded fallback should run (no preloaded configs).
 pub fn choose_bootstrap() -> bool {
-    if crate::config_cache::get_scenario_config().is_some() {
+    if crate::config_cache::get_world_content_config().is_some() {
         return false; // scenario-driven spawn handled by spawn_scenario_entities
     }
     if let Some(map) = crate::config_cache::get_map_config() {
@@ -191,7 +191,7 @@ fn setup_world_hardcoded(
 /// Startup system: resolves all scenario spawn positions and spawns each entity
 /// through the shared `spawn_entity` helper.
 fn spawn_scenario_entities(mut commands: Commands) {
-    let scenario_config = match crate::config_cache::get_scenario_config() {
+    let scenario_config = match crate::config_cache::get_world_content_config() {
         Some(s) => s,
         None => return, // No scenario loaded — nothing to do.
     };
@@ -207,7 +207,7 @@ fn spawn_scenario_entities(mut commands: Commands) {
     let resolved = match crate::world::content::resolve_positions(&scenario_config, &anchors) {
         Ok(r) => r,
         Err(e) => {
-            bevy::log::error!("ScenarioPlugin: failed to resolve spawn positions: {e}");
+            bevy::log::error!("WorldPlugin: failed to resolve spawn positions: {e}");
             return;
         }
     };
@@ -216,8 +216,8 @@ fn spawn_scenario_entities(mut commands: Commands) {
         let config = config_cache.get(&spawn.entity_path);
 
         let Some(config) = config else {
-            bevy::log::warn!(
-                "ScenarioPlugin: no config found for entity path '{}' (spawn '{}') — skipping",
+                bevy::log::warn!(
+                "WorldPlugin: no config found for entity path '{}' (spawn '{}') — skipping",
                 spawn.entity_path,
                 spawn.name
             );
@@ -239,7 +239,7 @@ fn spawn_scenario_entities(mut commands: Commands) {
         );
 
         bevy::log::info!(
-            "ScenarioPlugin: spawned '{}' at {:?} uuid={}",
+            "WorldPlugin: spawned '{}' at {:?} uuid={}",
             spawn.name,
             spawn.position,
             spawn.uuid
@@ -247,13 +247,13 @@ fn spawn_scenario_entities(mut commands: Commands) {
     }
 }
 
-/// Startup system: initialises `ScenarioRuntime`, `CommsInboxRes`, and
+/// Startup system: initialises `WorldContentRuntime`, `CommsInboxRes`, and
 /// `ObjectiveManagerRes` from the loaded `ScenarioConfig` (if any).
 fn init_scenario_runtime(
-    mut runtime: ResMut<ScenarioRuntime>,
+    mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
-    let scenario_config = match crate::config_cache::get_scenario_config() {
+    let scenario_config = match crate::config_cache::get_world_content_config() {
         Some(s) => s,
         None => return,
     };
@@ -299,7 +299,7 @@ fn handle_hail(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
-    mut runtime: ResMut<ScenarioRuntime>,
+    mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
 ) {
     if phase.0 != GamePhase::InProgress {
@@ -377,7 +377,7 @@ fn handle_respond_to_message(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
-    mut runtime: ResMut<ScenarioRuntime>,
+    mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut objectives: ResMut<ObjectiveManagerRes>,
 ) {
@@ -502,11 +502,11 @@ fn handle_clear_comms(
 }
 
 /// Broadcast `CommsState` to the Comms console holder when the inbox is dirty
-/// or `ScenarioRuntime::needs_broadcast` is set.
+/// or `WorldContentRuntime::needs_broadcast` is set.
 fn broadcast_comms_state(
     phase: Res<CurrentPhase>,
     sessions: Res<Sessions>,
-    mut runtime: ResMut<ScenarioRuntime>,
+    mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     objectives: Res<ObjectiveManagerRes>,
     mut outbox: ResMut<SimOutbox>,
@@ -576,7 +576,7 @@ fn broadcast_objective_summary(
 /// resulting actions (including `SetAiState`).
 fn handle_ai_events(
     phase: Res<CurrentPhase>,
-    mut runtime: ResMut<ScenarioRuntime>,
+    mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn choose_bootstrap_selects_hardcoded_when_nothing_is_preloaded() {
-        // In native (non-wasm) builds, get_map_config() and get_scenario_config()
+        // In native (non-wasm) builds, get_map_config() and get_world_content_config()
         // always return None, so choose_bootstrap() must return true (use fallback).
         assert!(choose_bootstrap(), "hardcoded fallback should be selected when no configs preloaded");
     }
@@ -707,7 +707,7 @@ position    = [100.0, 0.0, 200.0]
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
-            .init_resource::<ScenarioRuntime>()
+            .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<SimOutbox>()
@@ -788,7 +788,7 @@ position    = [100.0, 0.0, 200.0]
 
         // Manually install a comms template into the runtime so tests are
         // independent of TOML loading.
-        let runtime = &mut app.world_mut().resource_mut::<ScenarioRuntime>();
+        let runtime = &mut app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.name_to_uuid.insert("starbase_alpha".into(), station_uuid.into());
         runtime.contacts.push(CommsContact {
             uuid: station_uuid.into(),
@@ -1039,7 +1039,7 @@ position    = [100.0, 0.0, 200.0]
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::ai_plugin::AiPlugin)
-            .init_resource::<ScenarioRuntime>()
+            .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<SimOutbox>()
@@ -1054,7 +1054,7 @@ position    = [100.0, 0.0, 200.0]
         let mut app = ai_trigger_test_app();
 
         let npc_uuid = "dead-npc-uuid-001";
-        let mut runtime = app.world_mut().resource_mut::<ScenarioRuntime>();
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.scenario_id = "test".to_string();
         runtime.name_to_uuid.insert("station_alpha".to_string(), npc_uuid.to_string());
         runtime.trigger_states = vec![TriggerState {
@@ -1090,7 +1090,7 @@ position    = [100.0, 0.0, 200.0]
         let npc_uuid = "attacked-npc-uuid-002";
         let attacker_uuid = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
         {
-            let mut runtime = app.world_mut().resource_mut::<ScenarioRuntime>();
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime.scenario_id = "test".to_string();
             runtime.name_to_uuid.insert("enemy_ship".to_string(), npc_uuid.to_string());
             runtime.trigger_states = vec![TriggerState {
@@ -1158,7 +1158,7 @@ position    = [100.0, 0.0, 200.0]
 
         // Set up trigger: on attacked → SetAiState to "chase"
         {
-            let mut runtime = app.world_mut().resource_mut::<ScenarioRuntime>();
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime.scenario_id = "test".to_string();
             runtime.name_to_uuid.insert("npc_alpha".to_string(), npc_uuid.to_string());
             runtime.trigger_states = vec![TriggerState {

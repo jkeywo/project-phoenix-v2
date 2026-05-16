@@ -206,21 +206,21 @@ pub fn wasm_is_preload_complete() -> bool {
     crate::config_cache::wasm_is_preload_complete()
 }
 
-/// Called by JS with the path and TOML content of a scenario file.
+/// Called by JS with the path and TOML content of a world content file.
 ///
-/// On success, parses and stores the scenario; returns `Ok(JsValue::TRUE)`.
+/// On success, parses and stores the world content; returns `Ok(JsValue::TRUE)`.
 /// On parse failure, returns `Err(JsValue)` with a human-readable error.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_load_scenario(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    crate::config_cache::wasm_load_scenario(path, toml_str)
+pub fn wasm_load_world_content(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    crate::config_cache::wasm_load_world_content(path, toml_str)
 }
 
 /// Return the `default_scenario` path from the loaded map config, or `undefined`.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_get_default_scenario_path() -> Option<String> {
-    crate::config_cache::wasm_get_default_scenario_path()
+pub fn wasm_get_world_content_path() -> Option<String> {
+    crate::config_cache::wasm_get_world_content_path()
 }
 
 // ── Bevy bridge systems ────────────────────────────────────────────────────

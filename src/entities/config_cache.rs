@@ -78,8 +78,8 @@ thread_local! {
     /// Whether all pending configs have been loaded.
     static PRELOAD_COMPLETE: RefCell<bool> = const { RefCell::new(false) };
 
-    /// The loaded ScenarioConfig, if any. Set by wasm_load_scenario.
-    static SCENARIO_CONFIG: RefCell<Option<ScenarioConfig>> = const { RefCell::new(None) };
+    /// The loaded ScenarioConfig, if any. Set by wasm_load_world_content.
+    static WORLD_CONTENT_CONFIG: RefCell<Option<ScenarioConfig>> = const { RefCell::new(None) };
 }
 
 // ── Public WASM API ──────────────────────────────────────────────────────────
@@ -312,36 +312,36 @@ pub fn get_map_config() -> Option<MapConfig> {
     MAP_CONFIG.with(|slot| slot.borrow().clone())
 }
 
-/// Load a scenario TOML string, parse it, store it, and queue entity paths from spawns.
+/// Load a world content TOML string, parse it, store it, and queue entity paths from spawns.
 ///
 /// On success, returns `Ok(JsValue::TRUE)`.
 /// On parse failure, logs the error and returns `Err(JsValue)`.
 #[cfg(target_arch = "wasm32")]
-pub fn wasm_load_scenario(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+pub fn wasm_load_world_content(path: String, toml_str: String) -> Result<JsValue, JsValue> {
     match crate::world::content::parse_scenario(&toml_str) {
         Ok(scenario_config) => {
             // Queue entity paths from scenario spawns so they are preloaded.
             for spawn in &scenario_config.spawns {
                 queue_and_fire(spawn.entity_path.clone());
             }
-            SCENARIO_CONFIG.with(|slot| {
+            WORLD_CONTENT_CONFIG.with(|slot| {
                 *slot.borrow_mut() = Some(scenario_config);
             });
             Ok(JsValue::TRUE)
         }
         Err(e) => {
             web_sys::console::error_1(&JsValue::from_str(&format!(
-                "Failed to parse scenario TOML at {}: {}",
+                "Failed to parse world content TOML at {}: {}",
                 path, e
             )));
-            Err(JsValue::from_str(&format!("Scenario parse error at {}: {}", path, e)))
+            Err(JsValue::from_str(&format!("World content parse error at {}: {}", path, e)))
         }
     }
 }
 
 /// Return the `default_scenario` path from the loaded map config, if any.
 #[cfg(target_arch = "wasm32")]
-pub fn wasm_get_default_scenario_path() -> Option<String> {
+pub fn wasm_get_world_content_path() -> Option<String> {
     MAP_CONFIG.with(|slot| {
         slot.borrow().as_ref().and_then(|m| m.default_scenario.clone())
     })
@@ -375,8 +375,8 @@ pub fn get_faction_registry() -> crate::faction::FactionRegistry {
 
 /// Get the loaded ScenarioConfig, if any.
 #[cfg(target_arch = "wasm32")]
-pub fn get_scenario_config() -> Option<ScenarioConfig> {
-    SCENARIO_CONFIG.with(|slot| slot.borrow().clone())
+pub fn get_world_content_config() -> Option<ScenarioConfig> {
+    WORLD_CONTENT_CONFIG.with(|slot| slot.borrow().clone())
 }
 
 /// Get a reference to the config cache.
@@ -453,10 +453,10 @@ pub type ComplexityResources = std::collections::HashMap<String, crate::complexi
 /// Newtype wrapper so `ScenarioConfig` can be inserted as a Bevy Resource.
 #[cfg(target_arch = "wasm32")]
 #[derive(Resource)]
-pub struct ScenarioResource(pub crate::world::content::ScenarioConfig);
+pub struct WorldContentResource(pub crate::world::content::ScenarioConfig);
 
 #[cfg(target_arch = "wasm32")]
-impl std::ops::Deref for ScenarioResource {
+impl std::ops::Deref for WorldContentResource {
     type Target = crate::world::content::ScenarioConfig;
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -496,8 +496,8 @@ impl Plugin for ConfigCachePlugin {
         app.insert_resource(get_complexity_resources());
 
         // Insert the ScenarioConfig if one was loaded
-        if let Some(scenario_config) = get_scenario_config() {
-            app.insert_resource(ScenarioResource(scenario_config));
+        if let Some(scenario_config) = get_world_content_config() {
+            app.insert_resource(WorldContentResource(scenario_config));
         }
 
         // Insert the FactionRegistry
@@ -549,17 +549,17 @@ pub fn get_complexity_resources() -> ComplexityResources {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn wasm_load_scenario(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
+pub fn wasm_load_world_content(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
     Ok(JsValue::from_bool(false))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_scenario_config() -> Option<crate::world::content::ScenarioConfig> {
+pub fn get_world_content_config() -> Option<crate::world::content::ScenarioConfig> {
     None
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn wasm_get_default_scenario_path() -> Option<String> {
+pub fn wasm_get_world_content_path() -> Option<String> {
     None
 }
 
@@ -854,7 +854,7 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         assert_eq!(pending, vec!["asteroid_cosmetic.toml", "asteroid_small.toml"]);
     }
 
-    // ── wasm_load_scenario integration ────────────────────────────────────────
+    // ── wasm_load_world_content integration ────────────────────────────────────
 
     #[test]
     fn scenario_toml_round_trip_via_parse_scenario() {

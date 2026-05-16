@@ -130,7 +130,7 @@ impl Default for NpcHullFraction {
 /// Emitted by the AI plugin when an NPC entity's `on_attacked` condition fires
 /// (first hit per state-entry, i.e. while `on_attacked_armed` is true).
 ///
-/// The scenario plugin observes this event to evaluate `on_entity_attacked`
+/// The world plugin observes this event to evaluate `on_entity_attacked`
 /// trigger conditions without a direct dependency on the AI module.
 #[derive(Message, Clone, Debug)]
 pub struct AiEntityAttacked {
@@ -140,7 +140,7 @@ pub struct AiEntityAttacked {
 
 /// Emitted by the AI plugin when an NPC entity's hull reaches ≤ 0.0.
 ///
-/// The scenario plugin observes this event to evaluate `on_entity_destroyed`
+/// The world plugin observes this event to evaluate `on_entity_destroyed`
 /// trigger conditions without a direct dependency on the AI module.
 #[derive(Message, Clone, Debug)]
 pub struct AiEntityDestroyed {

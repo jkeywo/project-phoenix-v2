@@ -79,6 +79,31 @@ pub enum TriggerAction {
     /// Load-time validation should confirm the state name is known in the
     /// entity's `BehaviourConfig`; runtime errors are logged and ignored.
     SetAiState { entity: String, state: String, target: Option<String> },
+    /// Apply a float modifier to the target entity's `ShipModifiers`.
+    ///
+    /// - `entity`: spawn name resolved to UUID at runtime.
+    /// - `tag`: identity tag; paired with the scenario ID forms `ModifierSource::Scenario { id, tag }`.
+    /// - `slot`: which `ModifierSlot` to modify.
+    /// - `bonus`: additive bonus (positive = buff, negative = debuff).
+    ApplyModifier { entity: String, tag: String, slot: crate::messages::ModifierSlot, bonus: f32 },
+    /// Remove a float modifier previously applied by this scenario+tag pair.
+    ///
+    /// - `entity`: spawn name resolved to UUID at runtime.
+    /// - `tag`: identity tag matching the one used in `ApplyModifier`.
+    /// - `slot`: which `ModifierSlot` to remove.
+    RemoveModifier { entity: String, tag: String, slot: crate::messages::ModifierSlot },
+    /// Set a boolean flag on the target entity's `ShipModifiers`.
+    ///
+    /// - `entity`: spawn name resolved to UUID at runtime.
+    /// - `tag`: identity tag; paired with the scenario ID forms `ModifierSource::Scenario { id, tag }`.
+    /// - `kind`: which `FlagKind` to set.
+    ApplyFlag { entity: String, tag: String, kind: crate::flag_kind::FlagKind },
+    /// Clear a boolean flag previously set by this scenario+tag pair.
+    ///
+    /// - `entity`: spawn name resolved to UUID at runtime.
+    /// - `tag`: identity tag matching the one used in `ApplyFlag`.
+    /// - `kind`: which `FlagKind` to clear.
+    RemoveFlag { entity: String, tag: String, kind: crate::flag_kind::FlagKind },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -173,11 +198,15 @@ fn substitute_action(
             let resolved = substitute_params(path, name_to_uuid);
             TriggerAction::LoadScenario { path: resolved }
         }
-        // Objective actions carry no path parameters — pass through unchanged.
+        // Objective, AI-state, modifier, and flag actions carry no path parameters — pass through unchanged.
         TriggerAction::AddObjective { .. }
         | TriggerAction::CompleteObjective { .. }
         | TriggerAction::FailObjective { .. }
-        | TriggerAction::SetAiState { .. } => action.clone(),
+        | TriggerAction::SetAiState { .. }
+        | TriggerAction::ApplyModifier { .. }
+        | TriggerAction::RemoveModifier { .. }
+        | TriggerAction::ApplyFlag { .. }
+        | TriggerAction::RemoveFlag { .. } => action.clone(),
     }
 }
 
@@ -218,6 +247,7 @@ struct RawActionEntry {
     #[serde(default)]
     mandatory: Option<bool>,
     /// Used by `set_ai_state`: the spawn entity name to force into a new state.
+    /// Also used by modifier/flag actions: the target spawn entity name.
     #[serde(default)]
     entity: Option<String>,
     /// Used by `set_ai_state`: the state name to transition into.
@@ -226,6 +256,19 @@ struct RawActionEntry {
     /// Used by `set_ai_state`: optional spawn entity name to write into blackboard `target`.
     #[serde(default)]
     target: Option<String>,
+    /// Used by modifier/flag actions: identity tag for `ModifierSource::Scenario`.
+    #[serde(default)]
+    tag: Option<String>,
+    /// Used by `apply_modifier` / `remove_modifier`: which `ModifierSlot` to affect.
+    #[serde(default)]
+    slot: Option<String>,
+    /// Used by `apply_modifier`: the additive bonus value.
+    #[serde(default)]
+    bonus: Option<f32>,
+    /// Used by `apply_flag` / `remove_flag`: which `FlagKind` to affect.
+    /// Named `flag_kind` in TOML to avoid shadowing the action's own `kind` field.
+    #[serde(default, rename = "kind")]
+    flag_kind: Option<String>,
 }
 
 // ── TOML-facing deserialization for comms blocks ──────────────────────────
@@ -336,6 +379,28 @@ pub struct ResolvedSpawn {
 
 // ── Internal helpers ───────────────────────────────────────────────────────
 
+fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String> {
+    use crate::messages::ModifierSlot;
+    match s {
+        "MaxSpeed" => Ok(ModifierSlot::MaxSpeed),
+        "MaxYawRate" => Ok(ModifierSlot::MaxYawRate),
+        "RadarRange" => Ok(ModifierSlot::RadarRange),
+        "PhaserDamage" => Ok(ModifierSlot::PhaserDamage),
+        "HullDamageTaken" => Ok(ModifierSlot::HullDamageTaken),
+        "RepairRate" => Ok(ModifierSlot::RepairRate),
+        other => Err(format!("Unknown slot '{}'; valid values: MaxSpeed, MaxYawRate, RadarRange, PhaserDamage, HullDamageTaken, RepairRate", other)),
+    }
+}
+
+fn parse_flag_kind(s: &str) -> Result<crate::flag_kind::FlagKind, String> {
+    use crate::flag_kind::FlagKind;
+    match s {
+        "CommsJammed" => Ok(FlagKind::CommsJammed),
+        "SensorBlind" => Ok(FlagKind::SensorBlind),
+        other => Err(format!("Unknown kind '{}'; valid values: CommsJammed, SensorBlind", other)),
+    }
+}
+
 fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction>, String> {
     let mut actions = Vec::new();
     for raw_action in raw_actions {
@@ -377,6 +442,61 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                 })?;
                 let target = raw_action.target.clone();
                 TriggerAction::SetAiState { entity, state, target }
+            }
+            "apply_modifier" => {
+                let entity = raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'apply_modifier' requires an 'entity' field".to_string()
+                })?;
+                let tag = raw_action.tag.clone().ok_or_else(|| {
+                    "Action 'apply_modifier' requires a 'tag' field".to_string()
+                })?;
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                    "Action 'apply_modifier' requires a 'slot' field".to_string()
+                })?;
+                let slot = parse_modifier_slot(slot_str)?;
+                let bonus = raw_action.bonus.ok_or_else(|| {
+                    "Action 'apply_modifier' requires a 'bonus' field".to_string()
+                })?;
+                TriggerAction::ApplyModifier { entity, tag, slot, bonus }
+            }
+            "remove_modifier" => {
+                let entity = raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'remove_modifier' requires an 'entity' field".to_string()
+                })?;
+                let tag = raw_action.tag.clone().ok_or_else(|| {
+                    "Action 'remove_modifier' requires a 'tag' field".to_string()
+                })?;
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                    "Action 'remove_modifier' requires a 'slot' field".to_string()
+                })?;
+                let slot = parse_modifier_slot(slot_str)?;
+                TriggerAction::RemoveModifier { entity, tag, slot }
+            }
+            "apply_flag" => {
+                let entity = raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'apply_flag' requires an 'entity' field".to_string()
+                })?;
+                let tag = raw_action.tag.clone().ok_or_else(|| {
+                    "Action 'apply_flag' requires a 'tag' field".to_string()
+                })?;
+                let kind_str = raw_action.flag_kind.as_deref().ok_or_else(|| {
+                    "Action 'apply_flag' requires a 'kind' field".to_string()
+                })?;
+                let kind = parse_flag_kind(kind_str)?;
+                TriggerAction::ApplyFlag { entity, tag, kind }
+            }
+            "remove_flag" => {
+                let entity = raw_action.entity.clone().ok_or_else(|| {
+                    "Action 'remove_flag' requires an 'entity' field".to_string()
+                })?;
+                let tag = raw_action.tag.clone().ok_or_else(|| {
+                    "Action 'remove_flag' requires a 'tag' field".to_string()
+                })?;
+                let kind_str = raw_action.flag_kind.as_deref().ok_or_else(|| {
+                    "Action 'remove_flag' requires a 'kind' field".to_string()
+                })?;
+                let kind = parse_flag_kind(kind_str)?;
+                TriggerAction::RemoveFlag { entity, tag, kind }
             }
             other => {
                 return Err(format!("Unknown trigger action '{}'", other));
@@ -2019,6 +2139,217 @@ entity = "raider"
         // Second evaluation with same events: must not fire again.
         let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired2.len(), 0);
+    }
+
+    // ── Cycles 49-56: modifier and flag actions ───────────────────────────────
+
+    // Cycle 49: parse apply_modifier action from TOML
+    #[test]
+    fn parse_apply_modifier_action_from_toml() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 5.0
+
+[[trigger.action]]
+type = "apply_modifier"
+entity = "player_ship"
+tag = "speed_boost"
+slot = "MaxSpeed"
+bonus = 0.5
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.triggers[0].actions.len(), 1);
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::ApplyModifier {
+                entity: "player_ship".to_string(),
+                tag: "speed_boost".to_string(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+                bonus: 0.5,
+            }
+        );
+    }
+
+    // Cycle 50: parse remove_modifier action from TOML
+    #[test]
+    fn parse_remove_modifier_action_from_toml() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 10.0
+
+[[trigger.action]]
+type = "remove_modifier"
+entity = "player_ship"
+tag = "speed_boost"
+slot = "MaxSpeed"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::RemoveModifier {
+                entity: "player_ship".to_string(),
+                tag: "speed_boost".to_string(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+            }
+        );
+    }
+
+    // Cycle 51: parse apply_flag action from TOML
+    #[test]
+    fn parse_apply_flag_action_from_toml() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "apply_flag"
+entity = "player_ship"
+tag = "jammer"
+kind = "CommsJammed"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::ApplyFlag {
+                entity: "player_ship".to_string(),
+                tag: "jammer".to_string(),
+                kind: crate::flag_kind::FlagKind::CommsJammed,
+            }
+        );
+    }
+
+    // Cycle 52: parse remove_flag action from TOML
+    #[test]
+    fn parse_remove_flag_action_from_toml() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 2.0
+
+[[trigger.action]]
+type = "remove_flag"
+entity = "player_ship"
+tag = "jammer"
+kind = "CommsJammed"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::RemoveFlag {
+                entity: "player_ship".to_string(),
+                tag: "jammer".to_string(),
+                kind: crate::flag_kind::FlagKind::CommsJammed,
+            }
+        );
+    }
+
+    // Cycle 53: all four new variants are passed through substitute_action unchanged
+    #[test]
+    fn substitute_action_passes_through_modifier_and_flag_variants() {
+        let name_to_uuid = {
+            let mut m = HashMap::new();
+            m.insert("player_ship".to_string(), "uuid-player-001".to_string());
+            m
+        };
+
+        let actions = vec![
+            TriggerAction::ApplyModifier {
+                entity: "player_ship".to_string(),
+                tag: "tag1".to_string(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+                bonus: 0.3,
+            },
+            TriggerAction::RemoveModifier {
+                entity: "player_ship".to_string(),
+                tag: "tag1".to_string(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+            },
+            TriggerAction::ApplyFlag {
+                entity: "player_ship".to_string(),
+                tag: "jammer".to_string(),
+                kind: crate::flag_kind::FlagKind::SensorBlind,
+            },
+            TriggerAction::RemoveFlag {
+                entity: "player_ship".to_string(),
+                tag: "jammer".to_string(),
+                kind: crate::flag_kind::FlagKind::SensorBlind,
+            },
+        ];
+
+        let trigger = Trigger {
+            condition: TriggerCondition::OnTimer { after_secs: 0.0 },
+            actions: actions.clone(),
+        };
+        let mut states = vec![TriggerState { trigger, fired: false }];
+        let events = vec![WorldEvent::TimerElapsed { elapsed_secs: 1.0 }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].actions, actions);
+    }
+
+    // Cycle 54: apply_modifier requires entity field
+    #[test]
+    fn parse_apply_modifier_without_entity_returns_error() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "apply_modifier"
+tag = "boost"
+slot = "MaxSpeed"
+bonus = 0.5
+"#;
+        let result = parse_scenario(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("entity"), "error should mention 'entity': {err}");
+    }
+
+    // Cycle 55: apply_modifier with invalid slot returns error
+    #[test]
+    fn parse_apply_modifier_with_invalid_slot_returns_error() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "apply_modifier"
+entity = "player_ship"
+tag = "boost"
+slot = "NotASlot"
+bonus = 0.5
+"#;
+        let result = parse_scenario(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("slot") || err.contains("NotASlot"), "error should mention bad slot: {err}");
+    }
+
+    // Cycle 56: apply_flag with unknown kind returns error
+    #[test]
+    fn parse_apply_flag_with_unknown_kind_returns_error() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 1.0
+
+[[trigger.action]]
+type = "apply_flag"
+entity = "player_ship"
+tag = "jammer"
+kind = "UnknownFlag"
+"#;
+        let result = parse_scenario(toml);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("kind") || err.contains("UnknownFlag"), "error should mention bad kind: {err}");
     }
 
     // ── default.toml compile-time template tests ────────────────────────────

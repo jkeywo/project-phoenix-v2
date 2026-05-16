@@ -448,6 +448,13 @@ fn handle_respond_to_message(
                     // SetAiState is handled by the AI-event trigger system, not
                     // the comms response path. No-op here.
                 }
+                TriggerAction::ApplyModifier { .. }
+                | TriggerAction::RemoveModifier { .. }
+                | TriggerAction::ApplyFlag { .. }
+                | TriggerAction::RemoveFlag { .. } => {
+                    // Modifier/flag actions are handled by the AI-event trigger system.
+                    // No-op in the comms response path.
+                }
             }
         }
 
@@ -577,13 +584,15 @@ fn broadcast_objective_summary(
 
 /// Read `AiEntityAttacked` and `AiEntityDestroyed` messages, translate them
 /// into `WorldEvent`s, evaluate the scenario trigger table, and execute the
-/// resulting actions (including `SetAiState`).
+/// resulting actions (including `SetAiState`, `ApplyModifier`, `RemoveModifier`,
+/// `ApplyFlag`, and `RemoveFlag`).
 fn handle_ai_events(
     mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
     mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
+    mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
 ) {
 
     let mut world_events: Vec<WorldEvent> = Vec::new();
@@ -653,6 +662,75 @@ fn handle_ai_events(
                 }
                 TriggerAction::LoadScenario { .. } => {
                     // Not yet implemented at the plugin layer.
+                }
+                TriggerAction::ApplyModifier { entity, tag, slot, bonus } => {
+                    if name_to_uuid.get(entity).is_none() {
+                        bevy::log::warn!(
+                            "handle_ai_events: ApplyModifier: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.add_or_update(crate::modifiers::Modifier {
+                            source: crate::messages::ModifierSource::Scenario {
+                                id: runtime.scenario_id.clone(),
+                                tag: tag.clone(),
+                            },
+                            slot: slot.clone(),
+                            bonus: *bonus,
+                        });
+                    }
+                }
+                TriggerAction::RemoveModifier { entity, tag, slot } => {
+                    if name_to_uuid.get(entity).is_none() {
+                        bevy::log::warn!(
+                            "handle_ai_events: RemoveModifier: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.remove(
+                            &crate::messages::ModifierSource::Scenario {
+                                id: runtime.scenario_id.clone(),
+                                tag: tag.clone(),
+                            },
+                            slot,
+                        );
+                    }
+                }
+                TriggerAction::ApplyFlag { entity, tag, kind } => {
+                    if name_to_uuid.get(entity).is_none() {
+                        bevy::log::warn!(
+                            "handle_ai_events: ApplyFlag: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.add_flag(
+                            crate::messages::ModifierSource::Scenario {
+                                id: runtime.scenario_id.clone(),
+                                tag: tag.clone(),
+                            },
+                            kind.clone(),
+                        );
+                    }
+                }
+                TriggerAction::RemoveFlag { entity, tag, kind } => {
+                    if name_to_uuid.get(entity).is_none() {
+                        bevy::log::warn!(
+                            "handle_ai_events: RemoveFlag: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.remove_flag(
+                            crate::messages::ModifierSource::Scenario {
+                                id: runtime.scenario_id.clone(),
+                                tag: tag.clone(),
+                            },
+                            kind.clone(),
+                        );
+                    }
                 }
             }
         }

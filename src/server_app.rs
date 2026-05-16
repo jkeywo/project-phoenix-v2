@@ -462,6 +462,7 @@ fn handle_set_shield_focus(
     mut shields: ResMut<ShipShields>,
     sessions: Res<Sessions>,
     phase: Res<CurrentPhase>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     if phase.0 != GamePhase::InProgress {
         return;
@@ -482,6 +483,19 @@ fn handle_set_shield_focus(
             ViewDirection::Starboard => Some(3),
         });
         shields.0.set_focused_facing(idx);
+
+        // Immediately broadcast the updated shield status so the client UI
+        // sees the new max_hp / is_focused values without waiting for the
+        // 10 Hz tick.
+        let facings = shields.0.snapshot().into_iter().map(|s| ShieldFacingStatus {
+            label: s.label,
+            hp: s.hp,
+            max_hp: s.max_hp,
+            online: s.online,
+            offline_remaining: s.offline_remaining,
+            is_focused: s.is_focused,
+        }).collect();
+        outbox.0.push((Target::All, ServerMessage::ShieldStatus { facings }));
     }
 }
 

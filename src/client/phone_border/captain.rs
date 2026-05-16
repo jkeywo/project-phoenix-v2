@@ -220,19 +220,27 @@ fn spawn_captain_ui(
                 }
 
                 // Rotating needle (centred in the dial)
+                // Parent: absolute-positioned Node for layout only.
+                // Child: ImageNode + Transform, NO Node component so the UI
+                // layout system does not overwrite the rotation.
                 dial.spawn((
-                    CompassNeedle,
-                    ImageNode::new(assets.needle.clone()),
                     Node {
-                        width: Val::Px(NEEDLE_SIZE),
-                        height: Val::Px(NEEDLE_SIZE),
                         position_type: PositionType::Absolute,
                         left: Val::Px(dial_radius - NEEDLE_SIZE / 2.0),
                         top: Val::Px(dial_radius - NEEDLE_SIZE / 2.0),
+                        width: Val::Px(NEEDLE_SIZE),
+                        height: Val::Px(NEEDLE_SIZE),
                         ..default()
                     },
-                    Transform::default(),
-                ));
+                ))
+                .with_children(|wrapper| {
+                    wrapper.spawn((
+                        CompassNeedle,
+                        ImageNode::new(assets.needle.clone()),
+                        Transform::default(),
+                        GlobalTransform::default(),
+                    ));
+                });
 
                 // Direction pad buttons at the 4 cardinal points
                 let buttons = [

@@ -1593,12 +1593,13 @@ fn handle_nav_cancel_impulse_button_press(
 fn refresh_navigation_panel(
     ship_view: Res<crate::ship_view::ShipView>,
     mut status_text: Query<&mut Text, With<NavImpulseStatusText>>,
+    mut cancel_btn: Query<&mut Visibility, With<NavCancelImpulseButton>>,
 ) {
     if !ship_view.is_changed() {
         return;
     }
+    let charge = ship_view.impulse_charge_progress;
     for mut text in status_text.iter_mut() {
-        let charge = ship_view.impulse_charge_progress;
         let label = if charge >= 1.0 {
             "Impulse: ACTIVE"
         } else if charge > 0.0 {
@@ -1607,6 +1608,9 @@ fn refresh_navigation_panel(
             "Impulse: Idle"
         };
         **text = label.to_string();
+    }
+    for mut vis in cancel_btn.iter_mut() {
+        *vis = if charge > 0.0 { Visibility::Visible } else { Visibility::Hidden };
     }
 }
 

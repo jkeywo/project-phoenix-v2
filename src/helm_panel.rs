@@ -15,7 +15,7 @@ use crate::client_app::{HelmPanel, OnScreenButton, RadarPanel, OutboundClientMes
 use crate::client_helm::{HelmJoystickState, release, tick, drag};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::{on_screen_message, ClientSimState};
-use crate::messages::{Console, GamePhase, ViewMode};
+use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
@@ -142,6 +142,10 @@ pub struct PhoneHelmReadout;
 #[derive(Resource)]
 pub struct PhoneHelmSpawned;
 
+/// Marks the "Impulse" button on the helm console.
+#[derive(Component)]
+pub struct HelmImpulseButton;
+
 // ── Bearing tick model ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -226,6 +230,7 @@ impl Plugin for HelmPanelPlugin {
                 update_radar_readouts,
                 handle_on_screen_button_press,
                 refresh_on_screen_button_style,
+                handle_helm_impulse_button_press,
                 draw_helm_radar,
             ));
     }
@@ -301,6 +306,22 @@ fn refresh_on_screen_button_style(
     };
     for mut bg in buttons.iter_mut() {
         bg.0 = color;
+    }
+}
+
+// ── Helm Impulse button ──────────────────────────────────────────────
+
+fn handle_helm_impulse_button_press(
+    mut interactions: Query<
+        &Interaction,
+        (Changed<Interaction>, With<Button>, With<HelmImpulseButton>),
+    >,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(ClientMessage::StartImpulseCharge));
+        }
     }
 }
 
@@ -816,6 +837,22 @@ fn spawn_helm_radar_children(col: &mut ChildSpawnerCommands, assets: &PhoneAsset
                 Text::new("ON SCREEN"),
                 TextFont { font: assets.font_display.clone(), font_size: 12.0, ..default() },
                 TextColor(Color::srgb(0.93, 0.93, 1.0)),
+            ));
+        });
+        row.spawn((
+            HelmImpulseButton,
+            Button,
+            Node {
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.10, 0.25, 0.40)),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("IMPULSE"),
+                TextFont { font: assets.font_display.clone(), font_size: 12.0, ..default() },
+                TextColor(Color::srgb(0.5, 0.8, 1.0)),
             ));
         });
     });

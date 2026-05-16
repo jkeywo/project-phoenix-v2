@@ -173,7 +173,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             .add_systems(Update, (
                 reconcile_runtime_entities,
                 broadcast_world_setup_on_start,
-            ).chain().after(crate::lobby::process_lobby))
+            ).chain().after(crate::lobby::process_lobby).before(crate::sim_sets::SimSet::Input))
             .add_systems(Update, (
                 handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_shield_focus.in_set(crate::sim_sets::SimSet::Input),

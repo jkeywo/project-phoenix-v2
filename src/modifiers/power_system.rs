@@ -334,20 +334,15 @@ mod tests {
     }
 
     #[test]
-    fn increase_shields_is_noop_on_power_system() {
+    fn increase_noop_consoles_leave_defaults_unchanged() {
         let mut ps = PowerSystem::default();
         ps.increase(Console::Shields);
-        // Shields has no power slot in the system — should be a no-op
         assert_eq!(ps.helm, 2);
         assert_eq!(ps.weapons, 2);
         assert_eq!(ps.sensors, 2);
-    }
 
-    #[test]
-    fn increase_navigation_is_noop_on_power_system() {
         let mut ps = PowerSystem::default();
         ps.increase(Console::Navigation);
-        // Navigation has no power slot in the system — should be a no-op
         assert_eq!(ps.helm, 2);
         assert_eq!(ps.weapons, 2);
         assert_eq!(ps.sensors, 2);

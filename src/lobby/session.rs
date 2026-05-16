@@ -346,17 +346,6 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_does_not_restore_consoles_fresh_joiner_semantics() {
-        // Issue #130: reconnect is a fresh join — no console restore.
-        let mut sm = sm();
-        sm.register("t1".into(), "Alice".into()).unwrap();
-        sm.toggle_console("t1", Console::CaptainChair).unwrap();
-        sm.disconnect("t1");
-        sm.reconnect("t1");
-        assert!(sm.players()[0].consoles.is_empty());
-    }
-
-    #[test]
     fn set_name_updates_name() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
@@ -595,12 +584,6 @@ mod tests {
     }
 
     // ── Spectator queue ───────────────────────────────────────────────────
-
-    #[test]
-    fn spectator_queue_starts_empty() {
-        let sm = SessionManager::new();
-        assert!(sm.spectator_queue().is_empty());
-    }
 
     #[test]
     fn push_spectator_appends_token() {

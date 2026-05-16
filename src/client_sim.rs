@@ -13,23 +13,12 @@ use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
 
-/// Range used by the Science console system chart — large enough to show the
-/// full solar system layout.
-pub const SYSTEM_CHART_RANGE: f32 = 500.0;
-
-/// Range used by the Helm console radar — tactical situational awareness.
-pub const HELM_RADAR_RANGE: f32 = 50.0;
-
-/// Range used by the Weapons console radar — target acquisition range.
-pub const WEAPONS_RADAR_RANGE: f32 = 60.0;
-
-/// Maximum range for the Science console long-range radar at full power.
-///
-/// This is hardcoded to the max-power value.
-/// TODO: integrate with the power system so that Science radar range scales
-///       with allocated power once the Engineering/Power Console PRD is
-///       implemented.
-pub const SCIENCE_RADAR_RANGE: f32 = 200.0;
+// ── Radar-range constants ─────────────────────────────────────────────────
+// These are re-exported from `radar.rs` to keep a single source of truth.
+pub use crate::radar::RADAR_RANGE as HELM_RADAR_RANGE;
+pub use crate::radar::WEAPONS_RADAR_RANGE;
+pub use crate::radar::SCIENCE_RADAR_RANGE;
+pub use crate::radar::SYSTEM_CHART_RANGE;
 
 /// Returns the `RadarConfig` for the Helm console radar.
 ///

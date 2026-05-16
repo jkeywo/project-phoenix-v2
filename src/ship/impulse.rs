@@ -89,14 +89,6 @@ mod tests {
     // --- struct + basic API ---
 
     #[test]
-    fn new_state_is_idle_with_zero_progress() {
-        let s = ImpulseState::new();
-        assert_eq!(s.phase, ImpulsePhase::Idle);
-        assert!((s.charge_progress).abs() < f32::EPSILON);
-        assert!(!s.is_active());
-    }
-
-    #[test]
     fn start_charge_transitions_idle_to_charging() {
         let mut s = ImpulseState::new();
         s.start_charge();

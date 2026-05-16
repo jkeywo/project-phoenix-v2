@@ -1,9 +1,7 @@
-pub mod joystick;
-
 #[cfg(feature = "client")]
 pub mod client;
-
-pub use joystick::*;
+pub mod inbox;
 
 #[cfg(feature = "client")]
 pub use client::*;
+pub use inbox::*;

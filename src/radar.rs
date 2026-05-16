@@ -378,6 +378,13 @@ pub fn compute_science_radar_view(
 
 /// Range used by the Navigation console system chart — large enough to show the
 /// full solar system layout. Matches the old Science system map range.
+/// Range used by the Science console system chart — large enough to show the
+/// full solar system layout.
+pub const SYSTEM_CHART_RANGE: f32 = 500.0;
+
+/// Maximum range for the Science console long-range radar at full power.
+pub const SCIENCE_RADAR_RANGE: f32 = 200.0;
+
 pub const NAVIGATION_CHART_RANGE: f32 = 500.0;
 
 /// Returns the `RadarConfig` for the Navigation console system chart tab.

@@ -2,7 +2,6 @@ pub mod core;
 pub mod ai;
 pub use ai::core as ai_core;
 pub use ai::server as ai_plugin;
-pub mod captain_plugin;
 pub use ai::faction;
 pub mod weapons;
 pub use weapons::beam_render;
@@ -36,7 +35,6 @@ pub use entities::entity_override;
 pub use entities::spawner as entity_spawner;
 pub use entities::map_config;
 pub mod objectives;
-pub mod comms_inbox;
 pub use core::messages;
 pub mod lobby;
 pub use lobby::stations_config;
@@ -54,10 +52,6 @@ pub mod server_app;
 // Backward-compat alias: all `crate::simulation::*` imports continue to resolve.
 pub use server_app as simulation;
 pub mod ship_plugin;
-pub mod weapons_plugin;
-pub mod repair_plugin;
-pub mod power_plugin;
-pub mod science_plugin;
 pub mod world;
 pub mod radar;
 pub mod radar_config;
@@ -67,13 +61,30 @@ pub mod client_sim;
 pub mod client_comms;
 pub mod client_complexity;
 
-// ── New folder layout ────────────────────────────────────────────────────────
+// ── Console module ─────────────────────────────────────────────────────────
 
 pub mod console;
 
-// Keep flat-file modules in place for now — callers still use their old paths.
-// New code should import from console::helm::joystick directly.
-pub mod client_helm;
+// Backwards-compat aliases so old paths still resolve.
+pub use console::captain::server as captain_plugin;
+pub use console::weapons::server as weapons_plugin;
+pub use console::repair::server as repair_plugin;
+pub use console::power::server as power_plugin;
+pub use console::science::server as science_plugin;
+pub use console::comms::inbox as comms_inbox;
+
+#[cfg(feature = "client")]
+pub use console::helm::client as helm_panel;
+#[cfg(feature = "client")]
+pub use console::weapons::client as weapons_panel;
+#[cfg(feature = "client")]
+pub use console::repair::client as repair_panel;
+#[cfg(feature = "client")]
+pub use console::power::client as power_panel;
+#[cfg(feature = "client")]
+pub use console::science::client as science_panel;
+#[cfg(feature = "client")]
+pub use console::comms::client as comms_panel;
 
 // Server-only grouped module (bridge, renderer, viewscreen_border, debug_overlay).
 #[cfg(feature = "server")]
@@ -100,24 +111,6 @@ pub mod debug_overlay {
 }
 
 // Client-only grouped module (app, bridge, elements, phone_border).
-#[cfg(feature = "client")]
-pub mod helm_panel;
-
-#[cfg(feature = "client")]
-pub mod weapons_panel;
-
-#[cfg(feature = "client")]
-pub mod repair_panel;
-
-#[cfg(feature = "client")]
-pub mod power_panel;
-
-#[cfg(feature = "client")]
-pub mod science_panel;
-
-#[cfg(feature = "client")]
-pub mod comms_panel;
-
 #[cfg(feature = "client")]
 pub mod client;
 

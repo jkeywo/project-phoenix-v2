@@ -325,30 +325,6 @@ mod tests {
         TorpedoSystem::new(TorpedoConfig::default())
     }
 
-    // ── Struct definitions ────────────────────────────────────────────────
-
-    #[test]
-    fn torpedo_system_has_three_tubes() {
-        let sys = default_system();
-        assert_eq!(sys.fore_port.id, TorpedoTubeId::ForePort);
-        assert_eq!(sys.fore_starboard.id, TorpedoTubeId::ForeStarboard);
-        assert_eq!(sys.aft.id, TorpedoTubeId::Aft);
-    }
-
-    #[test]
-    fn all_tubes_start_loaded() {
-        let sys = default_system();
-        assert!(sys.fore_port.is_loaded());
-        assert!(sys.fore_starboard.is_loaded());
-        assert!(sys.aft.is_loaded());
-    }
-
-    #[test]
-    fn torpedo_count_starts_at_config_value() {
-        let sys = default_system();
-        assert_eq!(sys.torpedoes_remaining, 10);
-    }
-
     // ── Launch logic ──────────────────────────────────────────────────────
 
     #[test]

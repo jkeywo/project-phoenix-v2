@@ -112,16 +112,13 @@ mod tests {
     // ── Default state ────────────────────────────────────────────────────
 
     #[test]
-    fn new_has_three_idle_slots() {
+    fn new_repair_teams_all_idle() {
         let teams = RepairTeams::new();
         assert!(teams.slots.iter().all(|s| matches!(s, TeamSlot::Idle)));
         assert_eq!(teams.slots.len(), 3);
-    }
 
-    #[test]
-    fn default_is_all_idle() {
-        let teams: RepairTeams = Default::default();
-        assert!(teams.slots.iter().all(|s| matches!(s, TeamSlot::Idle)));
+        let teams_default: RepairTeams = Default::default();
+        assert!(teams_default.slots.iter().all(|s| matches!(s, TeamSlot::Idle)));
     }
 
     // ── lowest_free_team ─────────────────────────────────────────────────

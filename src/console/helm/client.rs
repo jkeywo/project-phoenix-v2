@@ -12,7 +12,7 @@
 use bevy::prelude::*;
 
 use crate::client_app::{HelmPanel, OnScreenButton, RadarPanel, OutboundClientMessage};
-use crate::client_helm::{HelmJoystickState, release, tick, drag};
+use crate::console::helm::joystick::{HelmJoystickState, release, tick, drag};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::{on_screen_message, ClientSimState};
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};

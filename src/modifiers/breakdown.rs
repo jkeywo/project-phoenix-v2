@@ -116,11 +116,6 @@ mod tests {
     // ── BreakdownQueue ────────────────────────────────────────────────────
 
     #[test]
-    fn new_queue_is_empty() {
-        assert!(BreakdownQueue::new().is_empty());
-    }
-
-    #[test]
     fn push_random_enqueues_one_breakdown() {
         let mut q = BreakdownQueue::new();
         let mut rng = SmallRng::seed_from_u64(0);

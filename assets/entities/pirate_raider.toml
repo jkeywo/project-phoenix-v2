@@ -15,15 +15,6 @@ shape = "Capsule"
 radius = 2.0
 length = 4.0
 
-[physics]
-mass = 60.0
-linear_damping = 0.9
-angular_damping = 0.9
-max_speed = 70.0
-acceleration = 25.0
-decceleration = 60.0
-max_yaw_rate = 2.0
-
 [helm_console]
 max_speed = 70.0
 max_reverse_speed = 0.0

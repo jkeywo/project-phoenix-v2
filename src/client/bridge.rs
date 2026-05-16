@@ -121,6 +121,8 @@ pub fn wasm_client_init() {
         .add_plugins(crate::repair_panel::RepairPanelPlugin)
         .add_plugins(crate::power_panel::PowerPanelPlugin)
         .add_plugins(crate::phone_border::CaptainPanelPlugin)
+        .add_plugins(crate::science_panel::SciencePanelPlugin)
+        .add_plugins(crate::comms_panel::CommsPanelPlugin)
         .add_plugins(ClientRendererPlugin)
         .add_systems(Update, (
             forward_local_token,

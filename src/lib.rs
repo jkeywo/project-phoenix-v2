@@ -63,7 +63,6 @@ pub mod radar;
 pub mod radar_config;
 pub use modifiers::repair_teams;
 pub use lobby::client_panel as client_lobby;
-pub mod comms_plugin;
 pub mod client_sim;
 pub mod client_comms;
 pub mod client_complexity;
@@ -112,6 +111,12 @@ pub mod repair_panel;
 
 #[cfg(feature = "client")]
 pub mod power_panel;
+
+#[cfg(feature = "client")]
+pub mod science_panel;
+
+#[cfg(feature = "client")]
+pub mod comms_panel;
 
 #[cfg(feature = "client")]
 pub mod client;

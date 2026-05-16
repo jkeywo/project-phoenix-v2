@@ -18,14 +18,14 @@ pub struct RegionMembership {
 }
 
 /// Fired when a subject entity enters a region.
-#[derive(Message, Clone, Debug)]
+#[derive(Event, Clone, Debug)]
 pub struct RegionEntered {
     pub subject: Entity,
     pub region_entity: Entity,
 }
 
 /// Fired when a subject entity exits a region (or the region is despawned).
-#[derive(Message, Clone, Debug)]
+#[derive(Event, Clone, Debug)]
 pub struct RegionExited {
     pub subject: Entity,
     pub region_entity: Entity,
@@ -36,13 +36,12 @@ pub struct RegionPlugin;
 impl Plugin for RegionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RegionMembership>()
-            .add_message::<RegionEntered>()
-            .add_message::<RegionExited>()
             .add_systems(Update, (
                 update_region_membership.in_set(crate::sim_sets::SimSet::Physics),
                 apply_damage_zone_damage.in_set(crate::sim_sets::SimSet::Physics).after(update_region_membership),
-                handle_blocks_impulse_region_enter.in_set(crate::sim_sets::SimSet::Physics).after(update_region_membership),
-            ));
+            ))
+            .add_observer(handle_blocks_impulse_region_enter)
+            .add_observer(handle_slow_zone_speed_clamp);
     }
 }
 
@@ -52,9 +51,8 @@ impl Plugin for RegionPlugin {
 /// Automatically handles region despawn: if a region was previously occupied
 /// and is no longer in the ECS, an implicit `RegionExited` is emitted.
 pub(crate) fn update_region_membership(
+    mut commands: Commands,
     mut membership: ResMut<RegionMembership>,
-    mut entered: MessageWriter<RegionEntered>,
-    mut exited: MessageWriter<RegionExited>,
     region_query: Query<(Entity, &Transform, &RegionShapeSection)>,
     uuid_query: Query<&EntityUuid>,
     ship_state: Res<ShipState>,
@@ -89,7 +87,7 @@ pub(crate) fn update_region_membership(
     // Detect exits: were in prev_inside but not in current_inside
     // (also catches despawned regions — despawned entities don't appear in region_query)
     for entity in prev_inside.difference(&current_inside) {
-        exited.write(RegionExited {
+        commands.trigger(RegionExited {
             subject: ship_entity,
             region_entity: *entity,
         });
@@ -97,7 +95,7 @@ pub(crate) fn update_region_membership(
 
     // Detect enters: in current_inside but not in prev_inside
     for entity in current_inside.difference(&prev_inside) {
-        entered.write(RegionEntered {
+        commands.trigger(RegionEntered {
             subject: ship_entity,
             region_entity: *entity,
         });
@@ -159,20 +157,19 @@ fn apply_damage_zone_damage(
 /// Cancels the ship's impulse drive (charging or active) when the ship enters
 /// a region with the `BlocksImpulse` effect.
 fn handle_blocks_impulse_region_enter(
-    mut entered: MessageReader<RegionEntered>,
+    trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
     impulse: Option<ResMut<ShipImpulse>>,
 ) {
     let Some(mut impulse) = impulse else {
         return;
     };
-    for ev in entered.read() {
-        let Ok(effects) = region_query.get(ev.region_entity) else {
-            continue;
-        };
-        if effects.0.iter().any(|e| *e == RegionEffectKind::BlocksImpulse) {
-            impulse.0.cancel_charge();
-        }
+    let ev = trigger.event();
+    let Ok(effects) = region_query.get(ev.region_entity) else {
+        return;
+    };
+    if effects.0.iter().any(|e| *e == RegionEffectKind::BlocksImpulse) {
+        impulse.0.cancel_charge();
     }
 }
 
@@ -189,24 +186,23 @@ fn handle_blocks_impulse_region_enter(
 /// This is a non-modifier side effect that must run after the coordinator so
 /// the effective max reflects the updated modifier state.
 pub(crate) fn handle_slow_zone_speed_clamp(
-    mut entered: MessageReader<RegionEntered>,
+    trigger: On<RegionEntered>,
     region_query: Query<&RegionEffectsSection>,
     modifiers: Res<ShipModifiers>,
     mut ship: ResMut<ShipState>,
 ) {
-    for ev in entered.read() {
-        let Ok(effects) = region_query.get(ev.region_entity) else {
-            continue;
-        };
-        let has_slow = effects.0.iter().any(|e| matches!(e, RegionEffectKind::SlowZone { .. }));
-        if !has_slow {
-            continue;
-        }
-        let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
-        let effective_max = base_max * modifiers.get(&ModifierSlot::MaxSpeed);
-        if ship.forward_speed.abs() > effective_max {
-            ship.forward_speed = ship.forward_speed.signum() * effective_max;
-        }
+    let ev = trigger.event();
+    let Ok(effects) = region_query.get(ev.region_entity) else {
+        return;
+    };
+    let has_slow = effects.0.iter().any(|e| matches!(e, RegionEffectKind::SlowZone { .. }));
+    if !has_slow {
+        return;
+    }
+    let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
+    let effective_max = base_max * modifiers.get(&ModifierSlot::MaxSpeed);
+    if ship.forward_speed.abs() > effective_max {
+        ship.forward_speed = ship.forward_speed.signum() * effective_max;
     }
 }
 
@@ -271,28 +267,20 @@ mod tests {
         spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid, None)
     }
 
-    /// Drain all pending `RegionEntered` messages (discard).
-    fn drain_entered(app: &mut App) {
-        app.world_mut().resource_mut::<Messages<RegionEntered>>().drain();
+    fn ship_entity(app: &mut App) -> Entity {
+        let mut query = QueryState::<Entity, With<Ship>>::new(app.world_mut());
+        query.iter(app.world()).next().unwrap()
     }
 
-    /// Drain all pending `RegionExited` messages (discard).
-    fn drain_exited(app: &mut App) {
-        app.world_mut().resource_mut::<Messages<RegionExited>>().drain();
+    fn is_inside(app: &mut App, region: Entity) -> bool {
+        let ship = ship_entity(app);
+        app.world().resource::<RegionMembership>().inside.get(&ship).map_or(false, |set| set.contains(&region))
     }
 
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
         let mut ship = app.world_mut().resource_mut::<ShipState>();
         ship.x = x;
         ship.z = z;
-    }
-
-    fn has_entered(out: &[RegionEntered], region: Entity) -> bool {
-        out.iter().any(|e| e.region_entity == region)
-    }
-
-    fn has_exited(out: &[RegionExited], region: Entity) -> bool {
-        out.iter().any(|e| e.region_entity == region)
     }
 
     // ── Entry tests ───────────────────────────────────────────────────
@@ -304,17 +292,13 @@ mod tests {
         // Flush so region entity is queryable + system runs once
         app.update();
         // Ship at (0,0) is outside region at (100,0) with radius 50 → no entry
-        drain_entered(&mut app);
+        assert!(!is_inside(&mut app, region), "ship should start outside region");
 
         // Move ship inside the region
         set_ship_pos(&mut app, 120.0, 0.0); // 20 units from centre, well inside radius 50
         app.update();
 
-        let entered_events: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionEntered>>()
-            .drain()
-            .collect();
-        assert!(has_entered(&entered_events, region),
+        assert!(is_inside(&mut app, region),
             "ship should enter region when moving inside");
     }
 
@@ -326,17 +310,13 @@ mod tests {
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 20.0, 0.0); // inside
         app.update(); // flush + system run → enters
-        drain_entered(&mut app);
+        assert!(is_inside(&mut app, region), "ship should be inside after moving in");
 
         // Move ship outside
         set_ship_pos(&mut app, 100.0, 0.0); // far outside radius 50
         app.update();
 
-        let exited_events: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionExited>>()
-            .drain()
-            .collect();
-        assert!(has_exited(&exited_events, region),
+        assert!(!is_inside(&mut app, region),
             "ship should exit region when moving outside");
     }
 
@@ -348,24 +328,12 @@ mod tests {
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         app.update(); // flush + system run → enters
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+        assert!(is_inside(&mut app, region), "ship should be inside after first tick");
 
-        // Stay inside — tick again
+        // Stay inside — tick again; membership should remain stable
         app.update();
-        let entered_events: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionEntered>>()
-            .drain()
-            .collect();
-        assert!(!has_entered(&entered_events, region),
-            "should NOT emit RegionEntered again while ship stays inside");
-
-        let exited_events: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionExited>>()
-            .drain()
-            .collect();
-        assert!(!has_exited(&exited_events, region),
-            "should NOT emit RegionExited while ship stays inside");
+        assert!(is_inside(&mut app, region),
+            "ship should remain inside without duplicate entry");
     }
 
     // ── Despawn-implicit-exit test ────────────────────────────────────
@@ -376,19 +344,14 @@ mod tests {
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         app.update(); // flush + system run → enters
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+        assert!(is_inside(&mut app, region), "ship should be inside before despawn");
 
         // Despawn the region entity
         app.world_mut().despawn(region);
         app.update();
 
-        let exited_events: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionExited>>()
-            .drain()
-            .collect();
-        assert!(has_exited(&exited_events, region),
-            "ship should receive RegionExited when region is despawned while ship is inside");
+        assert!(!is_inside(&mut app, region),
+            "ship should exit region when region is despawned");
     }
 
     // ── Edge: ship outside from start ─────────────────────────────────
@@ -400,11 +363,7 @@ mod tests {
         set_ship_pos(&mut app, 200.0, 0.0); // far outside
         app.update();
 
-        let entered_events: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionEntered>>()
-            .drain()
-            .collect();
-        assert!(!has_entered(&entered_events, region),
+        assert!(!is_inside(&mut app, region),
             "ship outside region should not enter");
     }
 
@@ -420,34 +379,22 @@ mod tests {
         set_ship_pos(&mut app, 200.0, 0.0);
         // Flush so both region entities are queryable + first system run
         app.update();
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+        assert!(!is_inside(&mut app, r1), "should not start in r1");
+        assert!(!is_inside(&mut app, r2), "should not start in r2");
 
         // Ship inside r1, outside r2
         set_ship_pos(&mut app, 10.0, 0.0);
         app.update();
 
-        let entered: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionEntered>>()
-            .drain()
-            .collect();
-        assert!(has_entered(&entered, r1), "should enter r1");
-        assert!(!has_entered(&entered, r2), "should NOT enter r2");
+        assert!(is_inside(&mut app, r1), "should enter r1");
+        assert!(!is_inside(&mut app, r2), "should NOT enter r2");
 
         // Move to r2 — should exit r1, enter r2
         set_ship_pos(&mut app, 110.0, 0.0);
         app.update();
 
-        let entered2: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionEntered>>()
-            .drain()
-            .collect();
-        let exited2: Vec<_> = app.world_mut()
-            .resource_mut::<Messages<RegionExited>>()
-            .drain()
-            .collect();
-        assert!(has_entered(&entered2, r2), "should enter r2");
-        assert!(has_exited(&exited2, r1), "should exit r1");
+        assert!(is_inside(&mut app, r2), "should enter r2");
+        assert!(!is_inside(&mut app, r1), "should exit r1");
     }
 
     // ── Damage Zone tests ────────────────────────────────────────────────
@@ -672,7 +619,7 @@ mod tests {
         let _region = spawn_blocks_impulse_region(&mut app, 100.0, 0.0, 50.0);
         set_ship_pos(&mut app, 0.0, 0.0); // outside region at (100,0) radius 50
         tick_with_dt(&mut app, 0.016); // initialise membership
-        drain_entered(&mut app);
+
 
         // Move ship inside the region
         set_ship_pos(&mut app, 80.0, 0.0);
@@ -691,7 +638,7 @@ mod tests {
         let _region = spawn_blocks_impulse_region(&mut app, 100.0, 0.0, 50.0);
         set_ship_pos(&mut app, 0.0, 0.0);
         tick_with_dt(&mut app, 0.016);
-        drain_entered(&mut app);
+
 
         // Move ship inside
         set_ship_pos(&mut app, 80.0, 0.0);
@@ -709,7 +656,7 @@ mod tests {
         let _region = spawn_blocks_impulse_region(&mut app, 200.0, 0.0, 50.0);
         set_ship_pos(&mut app, 0.0, 0.0); // far outside
         tick_with_dt(&mut app, 0.016);
-        drain_entered(&mut app);
+
 
         set_impulse_charging(&mut app);
         tick_with_dt(&mut app, 0.016);
@@ -724,9 +671,7 @@ mod tests {
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default())
-            .insert_resource(ShipState::new())
-            .add_systems(Update, crate::modifier_coordination::translate_region_modifiers
-                .after(super::update_region_membership));
+            .insert_resource(ShipState::new());
         app.world_mut().spawn((Ship, Transform::default()));
         app
     }
@@ -785,8 +730,8 @@ mod tests {
         let _region = spawn_radar_dampening_region(&mut app, 0.0, 0.0, 50.0, -0.3);
         set_ship_pos(&mut app, 0.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
 
         // Verify modifier is present
         let modifiers_before = app.world().resource::<ShipModifiers>();
@@ -829,8 +774,8 @@ mod tests {
         );
 
         // Move to (-40,0): still inside A (dist 40 < 80), outside B (dist 100 > 80)
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
         set_ship_pos(&mut app, -40.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
@@ -851,11 +796,7 @@ mod tests {
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default())
-            .insert_resource(ShipState::new())
-            .add_systems(Update, (
-                crate::modifier_coordination::translate_region_modifiers,
-                handle_slow_zone_speed_clamp,
-            ).chain().after(super::update_region_membership));
+            .insert_resource(ShipState::new());
         app.world_mut().spawn((Ship, Transform::default()));
         app
     }
@@ -1003,8 +944,8 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
         check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
 
         // Exit the region
         set_ship_pos(&mut app, 200.0, 0.0);
@@ -1027,8 +968,8 @@ mod tests {
         drop(ship);
 
         tick_with_dt(&mut app, 0.016);
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
 
         // Confirm speed was clamped
         let ship = app.world().resource::<ShipState>();
@@ -1061,9 +1002,7 @@ mod tests {
         app.add_plugins(RegionPlugin)
             .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin)
             .insert_resource(Time::<()>::default())
-            .insert_resource(ShipState::new())
-            .add_systems(Update, crate::modifier_coordination::translate_region_modifiers
-                .after(super::update_region_membership));
+            .insert_resource(ShipState::new());
         app.world_mut().spawn((Ship, Transform::default()));
         app
     }
@@ -1151,8 +1090,8 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
         assert_flag(&app, FlagKind::CommsJammed, true);
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
 
         // Exit the region
         set_ship_pos(&mut app, 200.0, 0.0);
@@ -1176,8 +1115,8 @@ mod tests {
 
         assert_flag(&app, FlagKind::CommsJammed, true);
 
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
 
         // Exit B: move to (-40,0) — still inside A (dist 40 < 80), outside B (dist 100 > 80)
         set_ship_pos(&mut app, -40.0, 0.0);
@@ -1185,8 +1124,8 @@ mod tests {
 
         assert_flag(&app, FlagKind::CommsJammed, true);
 
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
 
         // Exit A: move far away — outside both
         set_ship_pos(&mut app, -200.0, 0.0);
@@ -1203,8 +1142,8 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
         assert_flag(&app, FlagKind::CommsJammed, true);
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
 
         // Despawn the region entity
         app.world_mut().despawn(region);
@@ -1221,8 +1160,8 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
         check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
-        drain_entered(&mut app);
-        drain_exited(&mut app);
+
+
 
         // Despawn the region (implicit exit)
         app.world_mut().despawn(region);

@@ -25,7 +25,9 @@ pub struct ModifierCoordinationPlugin;
 
 impl Plugin for ModifierCoordinationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ShipModifiers>();
+        app.init_resource::<ShipModifiers>()
+            .add_observer(on_region_entered)
+            .add_observer(on_region_exited);
     }
 }
 
@@ -179,43 +181,39 @@ pub fn translate_impulse_modifiers(
     }
 }
 
-/// Region → modifier translator system.
-///
-/// Reads `RegionEntered` / `RegionExited` events each frame and updates
-/// `ShipModifiers` accordingly. On enter it calls `apply_region_effects`;
-/// on exit it calls `clear_source` to remove all modifiers and flags for
-/// that region's source UUID.
-///
-/// This is the single routing point for region-side modifier writes.
-pub fn translate_region_modifiers(
-    mut entered: MessageReader<RegionEntered>,
-    mut exited: MessageReader<RegionExited>,
+/// Observer: applies region effects to `ShipModifiers` when the ship enters a region.
+fn on_region_entered(
+    trigger: On<RegionEntered>,
     region_query: Query<(&EntityUuid, &RegionEffectsSection)>,
+    mut modifiers: ResMut<ShipModifiers>,
+) {
+    let ev = trigger.event();
+    let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
+        return;
+    };
+    let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    apply_region_effects(&mut modifiers, uuid, &effects.0);
+}
+
+/// Observer: clears region effects from `ShipModifiers` when the ship exits a region.
+fn on_region_exited(
+    trigger: On<RegionExited>,
     membership: Res<RegionMembership>,
     mut modifiers: ResMut<ShipModifiers>,
 ) {
-    for ev in exited.read() {
-        let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
-            Some(s) => s,
-            None => continue,
-        };
-        let uuid = match uuid::Uuid::parse_str(uuid_str) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        modifiers.clear_source(&ModifierSource::RegionEffect { uuid });
-    }
-
-    for ev in entered.read() {
-        let Ok((uuid_comp, effects)) = region_query.get(ev.region_entity) else {
-            continue;
-        };
-        let uuid = match uuid::Uuid::parse_str(&uuid_comp.0) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        apply_region_effects(&mut modifiers, uuid, &effects.0);
-    }
+    let ev = trigger.event();
+    let uuid_str = match membership.region_uuids.get(&ev.region_entity) {
+        Some(s) => s,
+        None => return,
+    };
+    let uuid = match uuid::Uuid::parse_str(uuid_str) {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    modifiers.clear_source(&ModifierSource::RegionEffect { uuid });
 }
 
 #[cfg(test)]

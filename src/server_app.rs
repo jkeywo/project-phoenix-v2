@@ -184,10 +184,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             ).after(crate::lobby::process_lobby))
             .add_systems(Update, crate::modifier_coordination::translate_power_modifiers.in_set(crate::sim_sets::SimSet::Modifiers))
             .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers.in_set(crate::sim_sets::SimSet::Modifiers))
-            .add_systems(Update, (
-                crate::modifier_coordination::translate_region_modifiers.in_set(crate::sim_sets::SimSet::Modifiers),
-                crate::region_plugin::handle_slow_zone_speed_clamp.in_set(crate::sim_sets::SimSet::Physics),
-            ).after(crate::region_plugin::update_region_membership))
+
             .add_plugins(weapons_update_broadcaster())
             .add_plugins(sim_state_broadcaster())
             .add_plugins(modifier_events_broadcaster())

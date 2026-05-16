@@ -6,7 +6,7 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 ## Game Domain
 
-**Console** — a role a player occupies on the ship. Currently shipped: `CaptainChair`, `Helm`, `Tactical`, `Repair`, `Science`, `Power` (six). Each console has exactly one seat; vacancy is immediate on disconnect. A player may hold more than one console simultaneously (the `Player.consoles` field is a `Vec<Console>`); the JS tab bar uses the `ActiveConsole` resource to switch which console panel is displayed. Planned (PRD #119): `Comms` console.
+**Console** — a role a player occupies on the ship. Currently shipped: `CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms` (nine). Each console has exactly one seat; vacancy is immediate on disconnect. A player may hold more than one console simultaneously (the `Player.consoles` field is a `Vec<Console>`); the JS tab bar uses the `ActiveConsole` resource to switch which console panel is displayed. When 5+ consoles are held the tab bar shows one- or two-character initials (`CC`, `H`, `T`, `R`, `S`, `SH`, `N`, `P`, `C`) and swipe-anywhere gesture switching is active. The old `Science` console was split into `Sensors`, `Shields`, and `Navigation` (see individual entries below).
 
 **Station** — a player's role bundle of one or more consoles, defined per player count in `player_ship.toml` and parsed by `stations.rs`. Joining/leaving auto-shuffles players between stations via `reassign_on_join` / `reassign_on_leave`. Spectators wait in a FIFO queue. Lobby selection is per-station (`SelectStation` / `ReleaseStation` / `StationAssigned`), not per-console. Shipped with PRD #120.
 
@@ -58,7 +58,15 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 **Console Complexity** — a per-console preset (`Low` / `Full`, defined in `assets/complexity/<console>.toml`) selected by the console holder via `SetComplexity { console, preset_name }` and broadcast as `ComplexityChanged`. Low complexity hides UI elements (`Display::None`) and runs server-side AI in `console_ai` to operate the hidden controls (auto-fire torpedoes, auto-match phaser frequency, auto-manage power battery overflow). Game mechanics are unchanged; the cost of Low is reaction-time and coordination latency. Three-tier delegation: native → delegated to partner console → AI fallback. Shipped with PRD #154.
 
-**View Mode** — the server-side camera perspective on the view screen. `Camera(direction)` shows one of four hull cameras (Fore/Aft/Port/Starboard); `Radar` shows a top-down tactical view; `ScienceRadar` and `SystemChart` are pushed by Science. Settable by clients via `SetView`.
+**Sensors Console** — split from the old `Science` console. Handles long-range radar overlay, advisory target suggestion (`SetScienceTarget`), and pushes `SensorsRadar` to the viewscreen. Console holder check uses `Console::Sensors`.
+
+**Shields Console** — split from the old `Science` console. Handles four-quadrant shield status and the focus mechanic (directing shield strength to one facing). Console holder check uses `Console::Shields`.
+
+**Navigation Console** — split from the old `Science` console. Handles system chart on the viewscreen (`NavigationChart`), and cancelling an active impulse charge (`CancelImpulse`). Console holder check uses `Console::Navigation`.
+
+**Comms Console** — manages contacts, the message inbox, and active mission objectives. Receives `CommsState { messages, contacts }` per broadcast. Sends `SelectCommsMessage { message_id }`. Client state in `client_comms.rs` (`ClientCommsState`); server inbox in `console/comms/inbox.rs`; client panel in `console/comms/client.rs`. Comms is re-marked dirty via `mark_comms_dirty_on_game_start` (an `OnEnter(InProgress)` system) so the initial contact list is delivered on the first InProgress tick.
+
+**View Mode** — the server-side camera perspective on the view screen. `Camera(direction)` shows one of four hull cameras (Fore/Aft/Port/Starboard); `Radar` shows a top-down tactical view; `SensorsRadar` is pushed by the Sensors console; `NavigationChart` is pushed by the Navigation console; `CommsMessage` is pushed by Comms. Settable by clients via `SetView`.
 
 **Radar** — the overhead mini-map showing asteroid (and planned: station) positions relative to the ship. Rendered on the server view screen (when in `Radar` mode), and inside the Helm and Tactical (weapons radar) panels. Science shows a longer-range overlay.
 
@@ -72,22 +80,28 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 ## Architecture
 
-**LobbyHandlerResult** — the return type of `process_message()` and `process_disconnect()` in `lobby_handler.rs`. Contains `new_phase: Option<GamePhase>` (None = no transition) and `outbound: Vec<(Target, ServerMessage)>`. `Target` is `All | Token(String) | AllExcept(String)`. Lobby selection is per-station: `SelectStation { station }` and `ReleaseStation` from clients; `StationAssigned { token, station, consoles }` broadcast in response.
+**LobbyHandlerResult** — the return type of `process_message()` and `process_disconnect()` in `lobby/handler.rs`. Contains `new_phase: Option<GamePhase>` (None = no transition) and `outbound: Vec<(Target, ServerMessage)>`. `Target` is `All | Token(String) | AllExcept(String)`. Lobby selection is per-station: `SelectStation { station }` and `ReleaseStation` from clients; `StationAssigned { token, station, consoles }` broadcast in response.
 
-**radar_dots** — the shared pure iterator in `radar.rs` that projects a slice of `AsteroidInfo` onto the radar plane given ship position and yaw. Returns `impl Iterator<Item = (f32, f32, f32)>` (radar_x, radar_y, scaled_radius). Both the server renderer and client helm console use this.
+**radar_dots** — the shared pure iterator in `radar.rs` that projects a slice of `AsteroidInfo` onto the radar plane given ship position and yaw. Returns `impl Iterator<Item = (f32, f32, f32)>` (radar_x, radar_y, scaled_radius). Both the server renderer and client panels use this.
 
-**Console Plugin** — a Bevy plugin that owns all UI, marker components, setup systems, and event handlers for a single console. On the server, the renderer handles all console views in `renderer.rs`. On the client, console panels are registered in `client_app.rs` (which hosts `CaptainPanel`, `HelmPanel`, etc.). Adding a new console = one new panel setup + visibility toggle + button handlers in `client_app.rs`.
+**Console Plugin** — a Bevy plugin that owns all UI, marker components, setup systems, and event handlers for a single console. Consoles are organised as `src/console/<name>/` with `server.rs` (server-side logic) and `client.rs` (client Bevy panel). On the client, panels are registered in `client/app.rs`. Adding a new console = `src/console/<name>/{mod,server,client}.rs` + registration in `client/app.rs` and `lib.rs`.
 
-**View-Model** — a pure derived snapshot that a renderer reads instead of raw session/simulation state. On the client, `LobbyView` (in `client_lobby.rs`) is the view-model for lobby rendering; `ClientSimState` (in `client_sim.rs`) is the view-model for in-game console rendering. On the server, `GameState` serves as the view-model for `renderer.rs`.
+**View-Model** — a pure derived snapshot that a renderer reads instead of raw session/simulation state. On the client, `LobbyView` (in `lobby/client_panel.rs`) is the view-model for lobby rendering; `ClientSimState` (in `client_sim.rs`) is the view-model for in-game console rendering; `ClientCommsState` (in `client_comms.rs`) is the view-model for the Comms panel. On the server, `GameState` serves as the view-model for `server/renderer.rs`.
 
 **ClientSimState** — the client-side mirror of the server's `SimSnapshot`. Maintained by applying `ServerMessage`s in `client_sim.rs`. Holds `red_alert`, `view_mode`, ship pose, `world` (asteroid layout), and repair state fields. Bevy `Resource`.
 
 **ActiveConsole** — a Bevy `Resource` on the client that tracks which console panel the local player is currently viewing (set by the JS tab bar via `wasm_client_set_active_console`). `None` means auto-select the sole held console.
 
-**Broadcaster** — the seam through which all `OutboundMessage`s are emitted. A per-domain plugin registers a payload-builder system together with a `Cadence` and an `Audience`; the broadcaster resolves the audience against the live `SessionManager` each tick/event and invokes the system only when the audience is non-empty. Replaces the hand-coded `if phase != InProgress { return; } if !timer.just_finished() { return; } for console ... write(OutboundMessage { ... })` preamble that previously appeared at every broadcast site.
+**Broadcaster** — the seam through which all `OutboundMessage`s are emitted. A per-domain plugin registers a payload-builder system together with a `Cadence` and an `Audience`; the broadcaster resolves the audience against the live `SessionManager` each tick/event and invokes the system only when the audience is non-empty. Replaces the hand-coded `if phase != InProgress { return; } if !timer.just_finished() { return; } for console ... write(OutboundMessage { ... })` preamble that previously appeared at every broadcast site. Lives in `src/core/broadcast/`.
 
-**LobbyBroadcaster / SimBroadcaster** — two `Broadcaster` instances, each phase-gated. `LobbyBroadcaster` runs only in `GamePhase::Lobby`; `SimBroadcaster` runs only in `GamePhase::InProgress`. The pure `lobby_handler.rs` keeps returning `Vec<(Target, ServerMessage)>`; the `lobby/server.rs` plugin funnels those outputs into `LobbyBroadcaster` as `Cadence::Once` registrations so all writes go through one path.
+**LobbyBroadcaster / SimBroadcaster** — two `Broadcaster` instances, each phase-gated. `LobbyBroadcaster` runs only in `GamePhase::Lobby`; `SimBroadcaster` runs only in `GamePhase::InProgress`. The pure `lobby/handler.rs` keeps returning `Vec<(Target, ServerMessage)>`; the `lobby/server.rs` plugin funnels those outputs into `LobbyBroadcaster` as `Cadence::Once` registrations so all writes go through one path.
 
 **Audience** — a predicate over the live session set, resolved by the `Broadcaster` to a set of session tokens. Built-ins: `Audience::all()`, `Audience::holding(Console)`, `Audience::all_except(Token)`, `Audience::token(Token)`. Because each console has exactly one seat, `holding(_)` resolves to 0 or 1 tokens.
 
 **Cadence** — when a registered broadcast fires. `Cadence::hz(f32)` / `Cadence::period(Duration)` for periodic; `Cadence::on_event::<E>()` for event-driven; `Cadence::once()` for single-shot. The broadcaster owns timers internally; callers do not manage `Timer` resources.
+
+**SimSet** — a `SystemSet` enum (`Input`, `Physics`, `Damage`, `Modifiers`, `Broadcast`) defined in `sim_sets.rs` and chained `Input → Physics → Damage → Modifiers → Broadcast` in `server_app.rs`. All in-game systems declare membership via `.in_set(SimSet::X)`. The entire chain is gated by `.run_if(in_state(GamePhase::InProgress))`.
+
+**States\<GamePhase\>** — Bevy's native state framework (`bevy::state`) replacing the old `CurrentPhase` resource. `GamePhase` derives `States`, `Hash`, `Default` (default = `Lobby`). Transitions use `NextState<GamePhase>`. `LobbyPlugin` calls `app.init_state::<GamePhase>()` and adds `StatesPlugin` explicitly (required because unit tests don't add `DefaultPlugins`). Start-of-game systems use `OnEnter(GamePhase::InProgress)` schedules.
+
+**WorldPlugin** — the unified server-side substrate in `src/world/server.rs` that owns scenario loading (`wasm_load_world_content`), entity lifecycle, trigger evaluation, objective tracking, and `WorldSetup` broadcast. Scenario content is loaded via `WorldContentResource` / `WorldContentRuntime`; the JS bridge calls `wasm_get_world_content_path()` to fetch the default scenario path from the map config. The old "ScenarioPlugin" name was retired; the file format types (`ScenarioConfig`, `parse_scenario`, `LoadScenario`) retain their names.

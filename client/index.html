@@ -48,23 +48,7 @@
     }
     /* In lobby phase the name input sits at the bottom; don't give it a
        background so the Bevy canvas shows through on either side. */
-    /* Console tab bar — fixed at the top, only when in-game with 2+ consoles */
-    #console-tabs {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      z-index: 10;
-      gap: 0;
-    }
-    #console-tabs.active { display: flex; }
-    #console-tabs button {
-      flex: 1; margin: 0; padding: 0.7rem 0.4rem; font-size: 1rem;
-      background: #0d0d1f; border: none; border-bottom: 2px solid #336; color: #99b;
-      font-family: monospace;
-    }
-    #console-tabs button.active {
-      background: #161630; border-bottom-color: #8af; color: #cce;
-    }
+    /* Console tabs removed - Bevy renders the tab bar in src/client/app.rs */
     /* Helm console UI moved to Bevy WASM (#49). */
     /* Bevy WASM canvas — full-viewport, behind the JS overlays so the
        lobby UI rendered by Bevy is visible while the name input,
@@ -93,14 +77,14 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-52b0d141ebe7bb64.js" crossorigin="anonymous" integrity="sha384-MCbGJgJOiZUnoSuGX2a91JeTx5YbRGyFMeRW7vfbVLGe3y7t9j/R/n7ELPBLETvk"><link rel="preload" href="./project-phoenix-52b0d141ebe7bb64_bg.wasm" crossorigin="anonymous" integrity="sha384-tmvtQOnsou2H8D9VXh7YXokpaYwqVe/2kQZAuwSx33X3+sBhosEWrsofj8XBrJRP" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-34a20f1e11d60a00.js" crossorigin="anonymous" integrity="sha384-RqKj2EvV/fixifysMGAbYc6k7Z7ic1F+X+eUx2x3ngShbDkoCd+5veCBoYeOgKb8"><link rel="preload" href="./project-phoenix-34a20f1e11d60a00_bg.wasm" crossorigin="anonymous" integrity="sha384-g6C6xL0HNEa9u/2MbyP6OpkMLmjE5o9XNR0AfYgpiWxSZeRxJ9APXZC6US2byhJW" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-52b0d141ebe7bb64.js';
-const wasm = await init({ module_or_path: './project-phoenix-52b0d141ebe7bb64_bg.wasm' });
+import init, * as bindings from './project-phoenix-34a20f1e11d60a00.js';
+const wasm = await init({ module_or_path: './project-phoenix-34a20f1e11d60a00_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -125,8 +109,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
        button) positioned above via z-index. -->
   <div id="wasm-host"><canvas id="canvas"></canvas></div>
 
-  <!-- Console tab bar: fixed at top, shown only in-game with 2+ consoles -->
-  <div id="console-tabs"></div>
+  <!-- Console tab bar removed - Bevy renders the tab bar in src/client/app.rs -->
 
   <div id="console-container">
     <section id="lobby-ui">
@@ -387,57 +370,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       $('repair-ui').className = (inGame && activeConsole === 'Repair') ? 'active' : '';
       // Helm console UI is rendered by Bevy WASM (#49).
 
-      // Tabs only appear when in-game with 2+ consoles.
-      renderTabs(s, inGame);
-
       if (inGame) renderGame(s);
       // Lobby UI is rendered by the Bevy WASM bridge (#47).
-    }
-
-    function renderTabs(s, inGame) {
-      const bar = $('console-tabs');
-      const mine = myConsoles(s);
-      if (!inGame || mine.length < 2) {
-        bar.classList.remove('active');
-        bar.innerHTML = '';
-        return;
-      }
-      bar.classList.add('active');
-
-      // Reuse existing buttons instead of recreating every frame.
-      // Only rebuild when the console set actually changes.
-      const existing = Array.from(bar.querySelectorAll('button'));
-      if (existing.length === mine.length) {
-        let allMatch = true;
-        for (let i = 0; i < mine.length; i++) {
-          if (existing[i].dataset.console !== mine[i]) { allMatch = false; break; }
-        }
-        if (allMatch) {
-          // Just update active class
-          for (let i = 0; i < mine.length; i++) {
-            if (mine[i] === activeConsole) existing[i].classList.add('active');
-            else existing[i].classList.remove('active');
-          }
-          return;
-        }
-      }
-
-      const useInitials = mine.length >= 5;
-      bar.innerHTML = '';
-      for (const c of mine) {
-        const btn = document.createElement('button');
-        btn.dataset.console = c;
-        btn.textContent = useInitials ? (CONSOLE_INITIAL[c] || c) : (CONSOLE_LABEL[c] || c);
-        if (c === activeConsole) btn.classList.add('active');
-        btn.addEventListener('click', () => {
-          activeConsole = c;
-          if (typeof wasm_client_set_active_console === 'function') {
-            wasm_client_set_active_console(c);
-          }
-          scheduleRender();
-        });
-        bar.appendChild(btn);
-      }
     }
 
     function renderLobby(_s) {

@@ -171,9 +171,9 @@ pub fn add_simulation_plugins(app: &mut App) {
                 render_spawned_entities,
             ))
             .add_systems(Update, (
-                broadcast_world_setup_on_start,
                 reconcile_runtime_entities,
-            ).after(crate::lobby::process_lobby))
+                broadcast_world_setup_on_start,
+            ).chain().after(crate::lobby::process_lobby))
             .add_systems(Update, (
                 handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_shield_focus.in_set(crate::sim_sets::SimSet::Input),
@@ -948,8 +948,8 @@ fn test_app() -> App {
             handle_set_sensors_target,
             handle_impulse_messages, handle_set_shield_focus,
             broadcast_shield_status,
+            reconcile_runtime_entities.after(crate::lobby::process_lobby).before(broadcast_world_setup_on_start),
             broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-            reconcile_runtime_entities.after(crate::lobby::process_lobby),
         ))
         .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
             .after(crate::power_plugin::handle_power_messages)

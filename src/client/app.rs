@@ -624,9 +624,6 @@ fn toggle_lobby_visibility_on_phase(
     state: Res<LobbyState>,
     mut roots: Query<&mut Visibility, With<LobbyRoot>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
     let in_lobby = state.phase == GamePhase::Lobby;
     for mut vis in roots.iter_mut() {
         *vis = if in_lobby { Visibility::Visible } else { Visibility::Hidden };
@@ -1432,9 +1429,6 @@ fn toggle_sensors_panel_visibility(
     active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<SensorsPanel>>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
     let view = LobbyView::new(&lobby, &token.0);
     let holds = lobby.phase == GamePhase::InProgress
         && view.my_consoles().contains(&Console::Sensors);
@@ -1455,9 +1449,6 @@ fn toggle_shields_panel_visibility(
     active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<ShieldsPanel>>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
     let view = LobbyView::new(&lobby, &token.0);
     let holds = lobby.phase == GamePhase::InProgress
         && view.my_consoles().contains(&Console::Shields);
@@ -1620,9 +1611,6 @@ fn toggle_navigation_panel_visibility(
     active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<NavigationPanel>>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
     let view = LobbyView::new(&lobby, &token.0);
     let holds = lobby.phase == GamePhase::InProgress
         && view.my_consoles().contains(&Console::Navigation);

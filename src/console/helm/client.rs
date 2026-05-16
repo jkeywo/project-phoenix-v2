@@ -246,9 +246,6 @@ fn toggle_helm_panel_visibility(
     mut state: ResMut<HelmJoystickState>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
     let visible = helm_panel_visible(&lobby, &token.0, &active);
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };

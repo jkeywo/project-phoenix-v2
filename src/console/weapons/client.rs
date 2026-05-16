@@ -419,9 +419,6 @@ fn toggle_weapons_panel_visibility(
     active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<WeaponsPanel>>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
     let visible = weapons_panel_visible(&lobby, &token.0, &active);
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };

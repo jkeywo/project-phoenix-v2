@@ -14,6 +14,8 @@
 //! When Red Alert is active the bezel textures swap to alert variants and
 //! the vignette pulses.
 
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
@@ -249,37 +251,14 @@ fn reparent_panels_into_bezel(
     navigation: Query<Entity, With<crate::client_app::NavigationPanel>>,
     weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
     tab_bar: Query<Entity, With<crate::client_app::TabBarRoot>>,
-    mut done: Local<bool>,
+    mut reparented: Local<HashSet<Entity>>,
 ) {
-    if *done {
-        return;
-    }
     let Ok(target) = content_area.single() else { return };
-    for entity in lobby.iter() {
-        commands.entity(entity).set_parent_in_place(target);
+    for entity in lobby.iter().chain(captain.iter()).chain(helm.iter()).chain(sensors.iter()).chain(shields.iter()).chain(navigation.iter()).chain(weapons.iter()).chain(tab_bar.iter()) {
+        if reparented.insert(entity) {
+            commands.entity(entity).set_parent_in_place(target);
+        }
     }
-    for entity in captain.iter() {
-        commands.entity(entity).set_parent_in_place(target);
-    }
-    for entity in helm.iter() {
-        commands.entity(entity).set_parent_in_place(target);
-    }
-    for entity in sensors.iter() {
-        commands.entity(entity).set_parent_in_place(target);
-    }
-    for entity in shields.iter() {
-        commands.entity(entity).set_parent_in_place(target);
-    }
-    for entity in navigation.iter() {
-        commands.entity(entity).set_parent_in_place(target);
-    }
-    for entity in weapons.iter() {
-        commands.entity(entity).set_parent_in_place(target);
-    }
-    for entity in tab_bar.iter() {
-        commands.entity(entity).set_parent_in_place(target);
-    }
-    *done = true;
 }
 
 /// Rewrites each bezel `ImageNode`'s image handle to the alert or normal

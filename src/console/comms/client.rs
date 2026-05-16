@@ -120,9 +120,6 @@ fn toggle_comms_panel_visibility(
     active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<CommsPanel>>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
     let visible = comms_panel_visible(&lobby, &token.0, &active);
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };

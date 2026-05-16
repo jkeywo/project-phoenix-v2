@@ -58,6 +58,9 @@ pub struct LobbyPlugin;
 
 impl Plugin for LobbyPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<bevy::state::app::StatesPlugin>() {
+            app.add_plugins(bevy::state::app::StatesPlugin);
+        }
         let initial_cache = GameStateCache(GameState {
             phase: GamePhase::Lobby,
             players: vec![],
@@ -67,7 +70,6 @@ impl Plugin for LobbyPlugin {
         app.insert_resource(Sessions(SessionManager::new()))
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
-            .add_plugins(bevy::state::app::StatesPlugin)
             .init_state::<GamePhase>()
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()

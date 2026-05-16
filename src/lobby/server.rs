@@ -67,6 +67,7 @@ impl Plugin for LobbyPlugin {
         app.insert_resource(Sessions(SessionManager::new()))
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
+            .add_plugins(bevy::state::app::StatesPlugin)
             .init_state::<GamePhase>()
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()

@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 
 use crate::client_app::{CaptainPanel, OutboundClientMessage};
-use crate::messages::{ClientMessage, ViewDirection, ViewMode};
+use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
+use crate::messages::{ClientMessage, Console, GamePhase, ViewDirection, ViewMode};
 use crate::phone_border::framing::PhoneAssets;
 use crate::ship_view::ShipView;
 
@@ -74,12 +75,63 @@ impl Plugin for CaptainPanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, (
             spawn_captain_ui.run_if(not(resource_exists::<CaptainPanelSpawned>)),
+            toggle_captain_panel_visibility,
             refresh_dir_highlights,
             refresh_red_alert_ui,
             rotate_needle_by_direction,
             handle_direction_press,
             handle_red_alert_press,
         ));
+    }
+}
+
+// ── Pure helpers ──
+
+/// Returns whether the captain panel should be visible, given the current
+/// lobby state, local player token, and active console override.
+///
+/// Visibility rules:
+/// - Game must be in progress.
+/// - Local player must hold `CaptainChair`.
+/// - If the player holds only one console, always show it.
+/// - If the player holds multiple consoles, only show when the active tab
+///   is explicitly set to `CaptainChair`.
+pub fn captain_panel_visible(
+    lobby: &LobbyState,
+    token: &str,
+    active: &ActiveConsole,
+) -> bool {
+    if lobby.phase != GamePhase::InProgress {
+        return false;
+    }
+    let view = LobbyView::new(lobby, token);
+    if !view.is_captain() {
+        return false;
+    }
+    let my_consoles_count = view.my_consoles().len();
+    match &active.0 {
+        Some(c) => *c == Console::CaptainChair,
+        None => my_consoles_count == 1,
+    }
+}
+
+// ── Systems ──
+
+/// Shows or hides the captain panel based on lobby phase, captaincy, and
+/// active console tab. Delegates the decision to the pure `captain_panel_visible`
+/// helper so the rule is unit-testable without Bevy.
+fn toggle_captain_panel_visibility(
+    lobby: Res<LobbyState>,
+    token: Res<LocalPlayerToken>,
+    active: Res<ActiveConsole>,
+    mut panel: Query<&mut Visibility, With<CaptainPanel>>,
+) {
+    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
+        return;
+    }
+    let visible = captain_panel_visible(&lobby, &token.0, &active);
+    for mut vis in panel.iter_mut() {
+        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
     }
 }
 
@@ -463,5 +515,91 @@ mod tests {
             msg,
             ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Fore) }
         );
+    }
+
+    // ── captain_panel_visible ───────────────────────────────────────
+
+    use crate::messages::{GameState, Player, ServerMessage};
+    use crate::stations_config::ShipStations;
+    use std::collections::HashMap;
+
+    fn player(token: &str, consoles: Vec<Console>) -> Player {
+        Player { token: token.into(), name: "test".into(), consoles, connected: true }
+    }
+
+    fn game_state(phase: GamePhase, players: Vec<Player>) -> GameState {
+        GameState { phase, players, complexity: HashMap::new(), world: None }
+    }
+
+    fn welcome(state: GameState) -> ServerMessage {
+        ServerMessage::Welcome { state, ship_stations: ShipStations::default() }
+    }
+
+    fn in_progress_lobby(captain_token: &str) -> LobbyState {
+        let mut s = LobbyState::default();
+        s.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player(captain_token, vec![Console::CaptainChair])],
+        )));
+        s
+    }
+
+    #[test]
+    fn hidden_during_lobby_phase() {
+        let lobby = LobbyState::default(); // Lobby phase, no players
+        let active = ActiveConsole::default();
+        assert!(!captain_panel_visible(&lobby, "me", &active));
+    }
+
+    #[test]
+    fn hidden_when_player_does_not_hold_captain_chair() {
+        let mut lobby = LobbyState::default();
+        lobby.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("me", vec![Console::Helm])],
+        )));
+        let active = ActiveConsole::default();
+        assert!(!captain_panel_visible(&lobby, "me", &active));
+    }
+
+    #[test]
+    fn visible_when_captain_and_only_console() {
+        let lobby = in_progress_lobby("me");
+        let active = ActiveConsole::default(); // None = auto
+        assert!(captain_panel_visible(&lobby, "me", &active));
+    }
+
+    #[test]
+    fn hidden_when_captain_but_tab_set_to_other_console() {
+        let mut lobby = LobbyState::default();
+        lobby.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("me", vec![Console::CaptainChair, Console::Helm])],
+        )));
+        let active = ActiveConsole(Some(Console::Helm));
+        assert!(!captain_panel_visible(&lobby, "me", &active));
+    }
+
+    #[test]
+    fn visible_when_captain_and_tab_explicitly_set_to_captain_chair() {
+        let mut lobby = LobbyState::default();
+        lobby.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("me", vec![Console::CaptainChair, Console::Helm])],
+        )));
+        let active = ActiveConsole(Some(Console::CaptainChair));
+        assert!(captain_panel_visible(&lobby, "me", &active));
+    }
+
+    #[test]
+    fn hidden_when_multi_console_captain_and_no_tab_set() {
+        // With 2 consoles and no explicit tab, captain panel is NOT auto-shown
+        let mut lobby = LobbyState::default();
+        lobby.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("me", vec![Console::CaptainChair, Console::Helm])],
+        )));
+        let active = ActiveConsole::default(); // None
+        assert!(!captain_panel_visible(&lobby, "me", &active));
     }
 }

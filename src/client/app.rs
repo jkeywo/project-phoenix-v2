@@ -18,7 +18,7 @@ use crate::client_lobby::{
     LobbyState, LobbyView, LocalPlayerToken, ActiveConsole,
 };
 use crate::client_sim::{
-    message_for_direction_press, on_screen_message, red_alert_toggle_message,
+    on_screen_message,
     fire_phaser_message, set_phaser_mode_message, fire_torpedo_message, ClientSimState,
 };
 use crate::client_complexity::{self, ComplexityStore};
@@ -116,20 +116,6 @@ struct StationDetailConsoles;
 /// InProgress.
 #[derive(Component)]
 pub struct CaptainPanel;
-
-/// Marks one direction button in the view-selector cross.
-#[derive(Component)]
-struct ViewDirButton(ViewDirection);
-
-/// Marks the Red Alert toggle button so its background and label can
-/// reflect the current `ClientSimState.red_alert`.
-#[derive(Component)]
-struct RedAlertButton;
-
-/// Marks the text node *inside* the Red Alert button so we can update
-/// the "ON"/"OFF" label without rebuilding the button entity.
-#[derive(Component)]
-struct RedAlertLabel;
 
 /// Marks the root of the helm joystick UI; shown only when the local
 /// player holds Helm and the phase is InProgress.
@@ -381,7 +367,7 @@ impl Plugin for ClientAppPlugin {
             .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
-            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_captain_ui, setup_helm_ui, setup_sensors_ui, setup_shields_ui, setup_navigation_ui, setup_weapons_ui, setup_repair_ui, setup_power_ui, setup_tab_bar_ui))
+            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_helm_ui, setup_sensors_ui, setup_shields_ui, setup_navigation_ui, setup_weapons_ui, setup_repair_ui, setup_power_ui, setup_tab_bar_ui))
                 .add_systems(
                     Update,
                     (
@@ -394,17 +380,12 @@ impl Plugin for ClientAppPlugin {
                             refresh_footer_status,
                             refresh_station_detail,
                             toggle_lobby_visibility_on_phase,
-                            toggle_captain_panel_visibility,
-                            refresh_view_dir_highlights,
-                            refresh_red_alert_button,
                         ),
                         (
                             handle_station_button_press,
                             handle_release_station_button_press,
                             handle_engage_button_press,
                             handle_complexity_option_press,
-                            handle_view_dir_button_press,
-                            handle_red_alert_button_press,
                         ),
                         (
                             toggle_helm_panel_visibility,
@@ -1346,113 +1327,6 @@ fn handle_complexity_option_press(
                 console: console.clone(),
                 preset_name: preset.clone(),
             }));
-        }
-    }
-}
-
-// ── Captain console UI ─────────────────────────────────────────────
-
-/// Background colour for an inactive direction button in the cross.
-const VIEW_BTN_BG_INACTIVE: Color = Color::srgb(0.13, 0.13, 0.27);
-/// Background colour for the currently active direction button.
-const VIEW_BTN_BG_ACTIVE:   Color = Color::srgb(0.20, 0.24, 0.40);
-/// Background for the Red Alert toggle when alert is OFF.
-const RED_ALERT_BG_OFF: Color = Color::srgb(0.13, 0.13, 0.27);
-/// Background for the Red Alert toggle when alert is ON (deep red).
-const RED_ALERT_BG_ON:  Color = Color::srgb(0.40, 0.0, 0.0);
-
-fn setup_captain_ui(_commands: Commands) {
-    // Replaced by phone_border::captain::CaptainPanelPlugin.
-    // The old captain UI (direction grid + red alert text toggle) is no
-    // longer spawned here — the phone-border captain panel plugin takes
-    // over all captain panel rendering.
-}
-
-fn toggle_captain_panel_visibility(
-    lobby: Res<LobbyState>,
-    token: Res<LocalPlayerToken>,
-    active: Res<ActiveConsole>,
-    mut panel: Query<&mut Visibility, With<CaptainPanel>>,
-) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
-    let view = LobbyView::new(&lobby, &token.0);
-    let holds_captain = lobby.phase == GamePhase::InProgress && view.is_captain();
-    let my_consoles_count = view.my_consoles().len();
-    // When the player holds multiple consoles, only show this panel when
-    // the tab is explicitly set to CaptainChair. When holding 1 console, show it automatically.
-    let tab_active = match &active.0 {
-        Some(c) => *c == Console::CaptainChair,
-        None => my_consoles_count == 1,
-    };
-    let visible = holds_captain && tab_active;
-    for mut vis in panel.iter_mut() {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
-    }
-}
-
-fn refresh_view_dir_highlights(
-    ship_view: Res<crate::ship_view::ShipView>,
-    mut buttons: Query<(&ViewDirButton, &mut BackgroundColor)>,
-) {
-    if !ship_view.is_changed() {
-        return;
-    }
-    for (ViewDirButton(direction), mut bg) in buttons.iter_mut() {
-        let active = ship_view.is_active_camera_direction(direction);
-        bg.0 = if active { VIEW_BTN_BG_ACTIVE } else { VIEW_BTN_BG_INACTIVE };
-    }
-}
-
-fn refresh_red_alert_button(
-    ship_view: Res<crate::ship_view::ShipView>,
-    mut button: Query<(Entity, &mut BackgroundColor), With<RedAlertButton>>,
-    children_q: Query<&Children>,
-    mut labels: Query<&mut Text, With<RedAlertLabel>>,
-) {
-    if !ship_view.is_changed() {
-        return;
-    }
-    let Ok((button_entity, mut bg)) = button.single_mut() else { return };
-    bg.0 = if ship_view.red_alert { RED_ALERT_BG_ON } else { RED_ALERT_BG_OFF };
-    if let Ok(children) = children_q.get(button_entity) {
-        for child in children.iter() {
-            if let Ok(mut text) = labels.get_mut(child) {
-                **text = if ship_view.red_alert {
-                    "Red Alert: ON".to_string()
-                } else {
-                    "Red Alert: OFF".to_string()
-                };
-            }
-        }
-    }
-}
-
-fn handle_view_dir_button_press(
-    mut interactions: Query<
-        (&Interaction, &ViewDirButton),
-        (Changed<Interaction>, With<Button>),
-    >,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for (interaction, ViewDirButton(direction)) in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(message_for_direction_press(direction.clone())));
-        }
-    }
-}
-
-fn handle_red_alert_button_press(
-    mut interactions: Query<
-        &Interaction,
-        (Changed<Interaction>, With<Button>, With<RedAlertButton>),
-    >,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(red_alert_toggle_message()));
         }
     }
 }

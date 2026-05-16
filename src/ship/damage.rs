@@ -23,18 +23,20 @@ pub fn apply_damage_with_shields(
 /// - `hull_damage_applied`: what was actually absorbed by consoles
 /// - `new_cumulative_damage`: the updated cumulative total
 /// - `breakdown_count`: how many complete 10-HP buckets were crossed
+/// - `ship_destroyed`: true when all consoles have reached 0 HP after this hit
 pub fn apply_hull_damage(
     hull: &mut ConsoleHull,
     amount: f32,
     cumulative_damage: f32,
     rng: &mut impl rand::Rng,
-) -> (f32, f32, u32) {
+) -> (f32, f32, u32, bool) {
     let before = hull.total_current();
     hull.apply_damage(amount, rng);
     let hull_damage = before - hull.total_current();
     let new_cumulative = cumulative_damage + hull_damage;
     let breakdown_count = crate::breakdown::breakdowns_from_damage(cumulative_damage, new_cumulative);
-    (hull_damage, new_cumulative, breakdown_count)
+    let ship_destroyed = hull.is_destroyed();
+    (hull_damage, new_cumulative, breakdown_count, ship_destroyed)
 }
 
 /// Compute collision damage to the ship hull.
@@ -199,7 +201,7 @@ mod tests {
     fn apply_hull_damage_zero_damage_no_change() {
         let mut hull = single_console_hull(100.0);
         let mut rng = rand::rng();
-        let (applied, cumulative, breakdowns) = crate::damage::apply_hull_damage(&mut hull, 0.0, 0.0, &mut rng);
+        let (applied, cumulative, breakdowns, _) = crate::damage::apply_hull_damage(&mut hull, 0.0, 0.0, &mut rng);
         assert_eq!(applied, 0.0);
         assert_eq!(cumulative, 0.0);
         assert_eq!(breakdowns, 0);
@@ -210,7 +212,7 @@ mod tests {
     fn apply_hull_damage_fractional_accumulates() {
         let mut hull = single_console_hull(100.0);
         let mut rng = rand::rng();
-        let (applied, cumulative, breakdowns) = crate::damage::apply_hull_damage(&mut hull, 3.5, 0.0, &mut rng);
+        let (applied, cumulative, breakdowns, _) = crate::damage::apply_hull_damage(&mut hull, 3.5, 0.0, &mut rng);
         assert!((applied - 3.5).abs() < 1e-6, "applied={}", applied);
         assert!((cumulative - 3.5).abs() < 1e-6, "cumulative={}", cumulative);
         assert_eq!(breakdowns, 0);
@@ -222,11 +224,11 @@ mod tests {
         let mut hull = single_console_hull(100.0);
         let mut rng = rand::rng();
         // First tick: 5.5 damage
-        let (applied, cumulative, breakdowns) = crate::damage::apply_hull_damage(&mut hull, 5.5, 0.0, &mut rng);
+        let (applied, cumulative, breakdowns, _) = crate::damage::apply_hull_damage(&mut hull, 5.5, 0.0, &mut rng);
         assert!((applied - 5.5).abs() < 1e-6);
         assert_eq!(breakdowns, 0);
         // Second tick: 5.5 damage = 11 total → crosses 10
-        let (_, cumulative2, breakdowns2) = crate::damage::apply_hull_damage(&mut hull, 5.5, cumulative, &mut rng);
+        let (_, cumulative2, breakdowns2, _) = crate::damage::apply_hull_damage(&mut hull, 5.5, cumulative, &mut rng);
         assert!((cumulative2 - 11.0).abs() < 1e-6);
         assert_eq!(breakdowns2, 1);
         assert!((hull.total_current() - 89.0).abs() < 1e-6);
@@ -236,7 +238,7 @@ mod tests {
     fn apply_hull_damage_crosses_two_buckets() {
         let mut hull = single_console_hull(100.0);
         let mut rng = rand::rng();
-        let (applied, cumulative, breakdowns) = crate::damage::apply_hull_damage(&mut hull, 25.0, 0.0, &mut rng);
+        let (applied, cumulative, breakdowns, _) = crate::damage::apply_hull_damage(&mut hull, 25.0, 0.0, &mut rng);
         assert!((applied - 25.0).abs() < 1e-6);
         assert!((cumulative - 25.0).abs() < 1e-6);
         assert_eq!(breakdowns, 2);
@@ -255,7 +257,7 @@ mod tests {
     fn station_hull_can_be_initialised_with_custom_hp_and_absorbs_damage() {
         let mut station_hull = single_console_hull(80.0);
         let mut rng = rand::rng();
-        let (applied, cumulative, breakdowns) = apply_hull_damage(&mut station_hull, 30.0, 0.0, &mut rng);
+        let (applied, cumulative, breakdowns, _) = apply_hull_damage(&mut station_hull, 30.0, 0.0, &mut rng);
         assert!((applied - 30.0).abs() < 1e-6, "applied={}", applied);
         assert!((cumulative - 30.0).abs() < 1e-6);
         assert_eq!(breakdowns, 3, "30 hp crosses three 10-HP buckets");
@@ -268,6 +270,37 @@ mod tests {
         let mut rng = rand::rng();
         apply_hull_damage(&mut station_hull, 100.0, 0.0, &mut rng);
         assert_eq!(station_hull.total_current(), 0.0, "station hull should reach zero");
+    }
+
+    #[test]
+    fn apply_hull_damage_returns_ship_destroyed_false_when_hp_remains() {
+        let mut hull = single_console_hull(100.0);
+        let mut rng = rand::rng();
+        let (_, _, _, destroyed) = apply_hull_damage(&mut hull, 10.0, 0.0, &mut rng);
+        assert!(!destroyed, "ship should not be destroyed when HP remains");
+    }
+
+    #[test]
+    fn apply_hull_damage_returns_ship_destroyed_true_when_all_consoles_at_zero() {
+        let mut hull = single_console_hull(20.0);
+        let mut rng = rand::rng();
+        let (_, _, _, destroyed) = apply_hull_damage(&mut hull, 100.0, 0.0, &mut rng);
+        assert!(destroyed, "ship should be destroyed when all consoles reach 0");
+    }
+
+    #[test]
+    fn apply_hull_damage_spillover_fires_destroyed_after_second_console_wiped() {
+        // Two consoles: first takes 5 HP (exhausted), spillover wipes second.
+        // is_destroyed() must be true and the returned flag must be true.
+        let mut hull = ConsoleHull::from_config(&[
+            (Console::Helm, 5.0),
+            (Console::Tactical, 10.0),
+        ]);
+        let mut rng = rand::rng();
+        // 20 damage: 5 absorbed by Helm → 0, 10 by Tactical → 0, 5 wasted (no targets).
+        let (_, _, _, destroyed) = apply_hull_damage(&mut hull, 20.0, 0.0, &mut rng);
+        assert!(destroyed, "spillover should destroy the ship after both consoles reach 0");
+        assert!(hull.is_destroyed());
     }
 
     // ── apply_damage_with_shields ─────────────────────────────────────────────

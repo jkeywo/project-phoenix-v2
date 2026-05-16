@@ -1535,6 +1535,13 @@ mod tests {
     }
 
     #[test]
+    fn ship_destroyed_round_trips() {
+        let msg = ServerMessage::ShipDestroyed;
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn entity_state_snapshot_without_shields_field_defaults_to_none() {
         // Shields field omitted from JSON → deserializes to None
         let json = r#"{"type":"SimState","data":{"snapshot":{"red_alert":false,"view_mode":{"kind":"Camera","data":"Fore"},"ship_x":0.0,"ship_z":0.0,"ship_yaw":0.0,"hull_integrity":1.0,"power_levels":[2,2,2],"flags":[],"entity_states":[{"uuid":"e1","flags":[]}],"radar_state":{"helm_range":50.0,"tactical_range":60.0,"science_long_range":200.0,"science_system_map":500.0}}}}"#;

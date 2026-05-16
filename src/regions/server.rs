@@ -6,7 +6,9 @@ use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse, BreakdownQueueReso
 use crate::ship_state::ShipState;
 use crate::region_effects::RegionEffectKind;
 use crate::modifiers::ShipModifiers;
-use crate::messages::ModifierSlot;
+use crate::messages::{ModifierSlot, ServerMessage};
+use crate::lobby::Target;
+use crate::server_app::SimOutbox;
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -114,6 +116,7 @@ fn apply_damage_zone_damage(
     ship_query: Query<Entity, With<Ship>>,
     hull: Option<ResMut<ShipHullIntegrity>>,
     breakdowns: Option<ResMut<BreakdownQueueResource>>,
+    mut outbox: Option<ResMut<SimOutbox>>,
 ) {
     let (Some(mut hull), Some(mut breakdowns)) = (hull, breakdowns) else {
         return;
@@ -140,7 +143,7 @@ fn apply_damage_zone_damage(
             if let crate::region_effects::RegionEffectKind::DamageZone { dps } = effect {
                 let total_damage = dps * dt;
                 let BreakdownQueueResource { queue, rng, cumulative_damage, .. } = &mut *breakdowns;
-                let (_, new_cumulative, new_count) = crate::damage::apply_hull_damage(
+                let (_, new_cumulative, new_count, ship_destroyed) = crate::damage::apply_hull_damage(
                     &mut hull.0,
                     total_damage,
                     *cumulative_damage,
@@ -149,6 +152,11 @@ fn apply_damage_zone_damage(
                 *cumulative_damage = new_cumulative;
                 for _ in 0..new_count {
                     queue.push_random(rng);
+                }
+                if ship_destroyed {
+                    if let Some(ref mut ob) = outbox {
+                        ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                    }
                 }
             }
         }

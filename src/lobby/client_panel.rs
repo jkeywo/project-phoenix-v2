@@ -121,7 +121,8 @@ impl LobbyState {
             | ServerMessage::StationSpawned { .. }
             | ServerMessage::StationDestroyed { .. }
             | ServerMessage::ObjectiveSummary { .. }
-            | ServerMessage::CommsState { .. } => {
+            | ServerMessage::CommsState { .. }
+            | ServerMessage::ShipDestroyed => {
                 // Not relevant to the lobby model.
             }
         }

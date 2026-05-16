@@ -678,6 +678,9 @@ pub enum ServerMessage {
         objectives: Vec<ObjectiveSnapshot>,
         contacts: Vec<CommsContact>,
     },
+    /// Broadcast to all players when every console's HP reaches 0.
+    /// Clients should show a game-over screen.
+    ShipDestroyed,
 }
 
 // ── Objective wire types ───────────────────────────────────────────────────

@@ -381,6 +381,7 @@ fn handle_collisions(
     mut breakdowns: ResMut<BreakdownQueueResource>,
     mut cooldown: ResMut<CollisionCooldown>,
     modifiers: Res<ShipModifiers>,
+    mut outbox: ResMut<SimOutbox>,
 ) {
     let dt = time.delta_secs();
     cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
@@ -417,7 +418,7 @@ fn handle_collisions(
         let hull_damage_from_shields = apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
         if hull_damage_from_shields > 0 {
             let BreakdownQueueResource { queue, rng, cumulative_damage, .. } = &mut *breakdowns;
-            let (_, new_cumulative, new_count) = apply_hull_damage(
+            let (_, new_cumulative, new_count, ship_destroyed) = apply_hull_damage(
                 &mut hull.0,
                 hull_damage_from_shields as f32,
                 *cumulative_damage,
@@ -426,6 +427,9 @@ fn handle_collisions(
             *cumulative_damage = new_cumulative;
             for _ in 0..new_count {
                 queue.push_random(rng);
+            }
+            if ship_destroyed {
+                outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
             }
         }
         ship.forward_speed = 0.0;

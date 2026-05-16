@@ -9,6 +9,23 @@ length = 6.0
 
 [hull]
 hull_integrity = 100
+repair_team_count = 2
+
+[[hull.console_hull]]
+console = "Helm"
+max_hp = 25.0
+
+[[hull.console_hull]]
+console = "Tactical"
+max_hp = 25.0
+
+[[hull.console_hull]]
+console = "Power"
+max_hp = 25.0
+
+[[hull.console_hull]]
+console = "Shields"
+max_hp = 25.0
 
 [weapons]
 phaser_range = 200.0

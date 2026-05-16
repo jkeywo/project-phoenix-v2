@@ -102,6 +102,9 @@ pub mod debug_overlay {
 
 // Client-only grouped module (app, bridge, elements, phone_border).
 #[cfg(feature = "client")]
+pub mod helm_panel;
+
+#[cfg(feature = "client")]
 pub mod client;
 
 // Backwards-compat flat modules for client.

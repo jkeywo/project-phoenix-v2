@@ -12,13 +12,11 @@
 
 use bevy::prelude::*;
 
-use crate::client_helm::{release, tick, HelmJoystickState};
 use crate::client_lobby::{
     engage_message, message_for_station_slot_click, reconcile_active_console, StationSlot,
     LobbyState, LobbyView, LocalPlayerToken, ActiveConsole,
 };
 use crate::client_sim::{
-    on_screen_message,
     fire_phaser_message, set_phaser_mode_message, fire_torpedo_message, ClientSimState,
 };
 use crate::client_complexity::{self, ComplexityStore};
@@ -363,8 +361,6 @@ impl Plugin for ClientAppPlugin {
             .init_resource::<ComplexityStore>()
             .init_resource::<HideableElementRegistry>()
             .init_resource::<LandscapeMode>()
-            .insert_resource(HelmJoystickState::default())
-            .insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
             .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_helm_ui, setup_sensors_ui, setup_shields_ui, setup_navigation_ui, setup_weapons_ui, setup_repair_ui, setup_power_ui, setup_tab_bar_ui))
@@ -388,16 +384,9 @@ impl Plugin for ClientAppPlugin {
                             handle_complexity_option_press,
                         ),
                         (
-                            toggle_helm_panel_visibility,
-                            helm_resend_tick,
-                            refresh_helm_knob_position,
-                            refresh_helm_readout,
-                            handle_on_screen_button_press,
-                            refresh_on_screen_button_style,
                             handle_repair_button_press,
                             refresh_repair_button,
                             refresh_repair_icon,
-                            draw_helm_radar,
                         ),
                         (
                             toggle_sensors_panel_visibility,
@@ -454,10 +443,6 @@ impl Plugin for ClientAppPlugin {
                 );
     }
 }
-
-/// 10Hz resend timer for the helm joystick.
-#[derive(Resource)]
-struct HelmTickTimer(Timer);
 
 // ── Setup ──────────────────────────────────────────────────────────
 
@@ -1331,21 +1316,10 @@ fn handle_complexity_option_press(
     }
 }
 
-// ── Helm console UI ────────────────────────────────────────────────
-
-/// Diameter of the joystick pad in logical pixels. The knob is constrained
-/// to a circle whose radius is `(PAD_SIZE / 2) - HELM_KNOB_RADIUS - 2`,
-/// matching the JS contract.
-const HELM_PAD_SIZE: f32 = 200.0;
-/// Radius of the knob disc, in pixels.
-const HELM_KNOB_RADIUS: f32 = 24.0;
-
-
 fn setup_helm_ui(_commands: Commands) {
-    // Replaced by phone_border::helm::HelmPanelPlugin.
-    // The old UI (radar gizmos + plain thumbstick) is no longer spawned
-    // here — the phone-border compass-ring radar + polished thumbstick
-    // plugin takes over all helm panel rendering.
+    // Helm UI is now owned by HelmPanelPlugin (src/helm_panel.rs).
+    // This startup system is retained as a no-op so the add_systems call
+    // does not need to be changed.
 }
 
 fn setup_sensors_ui(mut commands: Commands) {
@@ -2012,198 +1986,6 @@ fn toggle_navigation_panel_visibility(
     }
 }
 
-fn toggle_helm_panel_visibility(
-    lobby: Res<LobbyState>,
-    token: Res<LocalPlayerToken>,
-    active: Res<ActiveConsole>,
-    mut panel: Query<&mut Visibility, With<HelmPanel>>,
-    mut state: ResMut<HelmJoystickState>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
-    let view = LobbyView::new(&lobby, &token.0);
-    let holds_helm = lobby.phase == GamePhase::InProgress && view.is_helm();
-    let my_consoles_count = view.my_consoles().len();
-    // When the player holds multiple consoles, only show this panel when
-    // the tab is explicitly set to Helm. When holding 1 console, show it automatically.
-    let tab_active = match &active.0 {
-        Some(c) => *c == Console::Helm,
-        None => my_consoles_count == 1,
-    };
-    let visible = holds_helm && tab_active;
-    for mut vis in panel.iter_mut() {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
-    }
-    // If the helm panel disappears mid-drag (e.g. console released), make
-    // sure the ship stops by emitting a final zero `HelmInput`.
-    if !visible && state.active {
-        let msg = release(&mut state);
-        outbound.write(OutboundClientMessage(msg));
-    }
-}
-
-
-
-/// 10Hz repeating timer: while the joystick is active, resend the most
-/// recent `HelmInput` so the server keeps applying it.
-fn helm_resend_tick(
-    time: Res<Time>,
-    mut timer: ResMut<HelmTickTimer>,
-    state: Res<HelmJoystickState>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    timer.0.tick(time.delta());
-    if !timer.0.just_finished() {
-        return;
-    }
-    if let Some(msg) = tick(&state) {
-        outbound.write(OutboundClientMessage(msg));
-    }
-}
-
-fn refresh_helm_knob_position(
-    state: Res<HelmJoystickState>,
-    mut knob: Query<&mut Node, With<HelmKnob>>,
-) {
-    if !state.is_changed() {
-        return;
-    }
-    let centre = HELM_PAD_SIZE / 2.0 - HELM_KNOB_RADIUS;
-    for mut node in knob.iter_mut() {
-        node.left = Val::Px(centre + state.knob_dx);
-        node.top  = Val::Px(centre + state.knob_dy);
-    }
-}
-
-fn refresh_helm_readout(
-    state: Res<HelmJoystickState>,
-    mut readout: Query<&mut Text, With<HelmReadout>>,
-) {
-    if !state.is_changed() {
-        return;
-    }
-    let thrust_pct   = (state.last_thrust   * 100.0).round() as i32;
-    let steering_pct = (state.last_steering * 100.0).round() as i32;
-    for mut text in readout.iter_mut() {
-        **text = format!("Thrust {thrust_pct}% / Steering {steering_pct}%");
-    }
-}
-
-fn handle_on_screen_button_press(
-    mut interactions: Query<
-        &Interaction,
-        (Changed<Interaction>, With<Button>, With<OnScreenButton>),
-    >,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(on_screen_message()));
-        }
-    }
-}
-
-const ON_SCREEN_BG_IDLE:   Color = Color::srgb(0.13, 0.13, 0.27);
-const ON_SCREEN_BG_ACTIVE: Color = Color::srgb(0.10, 0.40, 0.15);
-
-fn refresh_on_screen_button_style(
-    ship_view: Res<crate::ship_view::ShipView>,
-    mut buttons: Query<&mut BackgroundColor, With<OnScreenButton>>,
-) {
-    if !ship_view.is_changed() {
-        return;
-    }
-    let color = if matches!(ship_view.view_mode, ViewMode::Radar) {
-        ON_SCREEN_BG_ACTIVE
-    } else {
-        ON_SCREEN_BG_IDLE
-    };
-    for mut bg in buttons.iter_mut() {
-        bg.0 = color;
-    }
-}
-
-// ── Helm radar drawing ─────────────────────────────────────────────
-
-/// Outer ring colour for the helm radar.
-const RADAR_OUTER_RING_COLOR: Color = Color::srgb(0.55, 0.70, 1.0);
-/// Mid ring colour (drawn at `RADAR_MID_RING / RADAR_RANGE` of the outer
-/// radius).
-const RADAR_MID_RING_COLOR:   Color = Color::srgb(0.30, 0.40, 0.65);
-/// Asteroid blip colour.
-const RADAR_ASTEROID_COLOR:   Color = Color::srgb(0.85, 0.75, 0.45);
-/// Ship triangle colour (always points "up" since the radar is
-/// ship-aligned).
-const RADAR_SHIP_COLOR:       Color = Color::srgb(0.95, 0.95, 1.0);
-
-/// Reads the radar panel's on-screen rect and draws rings, asteroids and
-/// ship via `Gizmos` in the Camera2d's world space. Skipped when the
-/// helm panel is hidden so we don't paint stale visuals.
-fn draw_helm_radar(
-    mut gizmos: Gizmos,
-    panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<RadarPanel>>,
-    helm_panel: Query<&Visibility, With<HelmPanel>>,
-    sim: Res<ClientSimState>,
-    ship_view: Res<crate::ship_view::ShipView>,
-    windows: Query<&Window>,
-) {
-    // Only draw while the helm panel is shown.
-    if !helm_panel
-        .iter()
-        .any(|v| matches!(v, Visibility::Visible | Visibility::Inherited))
-    {
-        return;
-    }
-    let Ok((node, gt, view_vis)) = panel.single() else { return };
-    if !view_vis.get() {
-        return;
-    }
-    let Ok(window) = windows.single() else { return };
-    let viewport_w = window.width();   // logical pixels
-    let viewport_h = window.height();  // logical pixels
-
-    // In Bevy 0.18, GlobalTransform::translation() for UI nodes returns the
-    // node centre in logical pixels (+y up). Shift origin from top-left to
-    // screen-centre and flip y for Camera2d world space.
-    let node_size = node.size();
-    let node_centre_screen = gt.translation().truncate();
-    let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
-    let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
-    let centre = Vec2::new(centre_world_x, centre_world_y);
-
-    let radius = node_size.x.min(node_size.y) * 0.5;
-    if radius <= 0.0 {
-        return;
-    }
-
-    // Outer ring represents 1.5x the helm radar range; everything inside is scaled down.
-    const ZOOM: f32 = 1.5;
-    gizmos.circle_2d(centre, radius, RADAR_OUTER_RING_COLOR);
-    let helm_range = crate::client_sim::helm_radar_config().range;
-    let mid_ratio = crate::radar::RADAR_MID_RING / helm_range;
-    gizmos.circle_2d(centre, radius * mid_ratio / ZOOM, RADAR_MID_RING_COLOR);
-
-    // Asteroids — use the unified helm radar view (RadarConfig-filtered).
-    let helm_view = crate::client_sim::compute_helm_radar_view(&sim, &ship_view);
-    for dot in &helm_view.dots {
-        let pos = centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
-        let pix_radius = (dot.scaled_radius * radius / ZOOM).max(2.0);
-        gizmos.circle_2d(pos, pix_radius, RADAR_ASTEROID_COLOR);
-    }
-
-    // Ship triangle, always pointing "up" (radar is ship-aligned).
-    let nose_len  = radius * 0.10;
-    let half_base = radius * 0.06;
-    let nose  = centre + Vec2::new(0.0,  nose_len);
-    let left  = centre + Vec2::new(-half_base, -nose_len * 0.6);
-    let right = centre + Vec2::new( half_base, -nose_len * 0.6);
-    gizmos.line_2d(nose, left,  RADAR_SHIP_COLOR);
-    gizmos.line_2d(left, right, RADAR_SHIP_COLOR);
-    gizmos.line_2d(right, nose, RADAR_SHIP_COLOR);
-}
-
 /// Draw the Navigation system chart on the NavChartPanel using gizmos.
 fn draw_nav_chart(
     mut gizmos: Gizmos,
@@ -2270,6 +2052,12 @@ fn draw_nav_chart(
     gizmos.line_2d(left, right, Color::srgb(0.5, 1.0, 0.8));
     gizmos.line_2d(right, nose, Color::srgb(0.5, 1.0, 0.8));
 }
+
+// ── Weapons radar drawing colours ─────────────────────────────────
+const RADAR_OUTER_RING_COLOR: Color = Color::srgb(0.55, 0.70, 1.0);
+const RADAR_MID_RING_COLOR:   Color = Color::srgb(0.30, 0.40, 0.65);
+const RADAR_ASTEROID_COLOR:   Color = Color::srgb(0.85, 0.75, 0.45);
+const RADAR_SHIP_COLOR:       Color = Color::srgb(0.95, 0.95, 1.0);
 
 fn draw_weapons_radar(
     mut gizmos: Gizmos,

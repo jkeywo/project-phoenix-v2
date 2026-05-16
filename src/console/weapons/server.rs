@@ -443,7 +443,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::HullIntegrity;
+    use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::{EntitySnapshot, WorldData, *};
     use crate::modifiers::ShipModifiers;
@@ -466,7 +466,12 @@ mod tests {
                 std::time::Duration::from_millis(200),
             ))
             .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<WorldResource>()
             .init_resource::<WeaponsTarget>()

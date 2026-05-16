@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::damage::HullIntegrity;
+use crate::damage::ConsoleHull;
 use crate::lobby::WorldResource;
 use crate::simulation::{Ship, ShipHullIntegrity};
 use bevy::prelude::*;
@@ -162,7 +162,7 @@ fn setup_world_hardcoded(
             radius: 6.0,
             length: 6.0,
         }),
-        hull: Some(crate::entity_config::HullConfig { hull_integrity: 100.0 }),
+        hull: Some(crate::entity_config::HullConfig { hull_integrity: 100.0, ..Default::default() }),
         appearance: None,
         helm_console: None,
         weapons_console: None,
@@ -186,7 +186,12 @@ fn setup_world_hardcoded(
         &mut commands, &ship_config, Vec3::ZERO, ship_uuid, Some("player-ship".to_string()),
     );
     commands.entity(ship_entity).insert(Ship);
-    commands.insert_resource(ShipHullIntegrity(HullIntegrity::with_hp(100.0)));
+    commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+        (crate::messages::Console::Helm, 25.0),
+        (crate::messages::Console::Tactical, 25.0),
+        (crate::messages::Console::Power, 25.0),
+        (crate::messages::Console::Shields, 25.0),
+    ])));
 }
 
 

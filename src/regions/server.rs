@@ -139,13 +139,14 @@ fn apply_damage_zone_damage(
         for effect in &effects.0 {
             if let crate::region_effects::RegionEffectKind::DamageZone { dps } = effect {
                 let total_damage = dps * dt;
+                let BreakdownQueueResource { queue, rng, cumulative_damage, .. } = &mut *breakdowns;
                 let (_, new_cumulative, new_count) = crate::damage::apply_hull_damage(
                     &mut hull.0,
                     total_damage,
-                    breakdowns.cumulative_damage,
+                    *cumulative_damage,
+                    rng,
                 );
-                breakdowns.cumulative_damage = new_cumulative;
-                let BreakdownQueueResource { queue, rng, .. } = &mut *breakdowns;
+                *cumulative_damage = new_cumulative;
                 for _ in 0..new_count {
                     queue.push_random(rng);
                 }
@@ -214,7 +215,7 @@ mod tests {
     use crate::entity_spawner::spawn_entity;
     use crate::entity_config::EntityConfig;
     use crate::region_shape::RegionShape;
-    use crate::damage::HullIntegrity;
+    use crate::damage::ConsoleHull;
     use crate::simulation::{ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
     use crate::impulse::{ImpulseState, ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
@@ -409,7 +410,12 @@ mod tests {
         // we insert Time<()> ourselves and use advance_by() before each update.
         app.insert_resource(Time::<()>::default());
         app.insert_resource(ShipState::new());
-        app.insert_resource(ShipHullIntegrity(HullIntegrity::new()));
+        app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+            (crate::messages::Console::Helm, 25.0),
+            (crate::messages::Console::Tactical, 25.0),
+            (crate::messages::Console::Power, 25.0),
+            (crate::messages::Console::Shields, 25.0),
+        ])));
         app.insert_resource(ShipModifiers::new());
         app.init_resource::<BreakdownQueueResource>();
         app.world_mut().spawn((Ship, Transform::default()));
@@ -501,7 +507,7 @@ mod tests {
         spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 50.0);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.current();
+        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
         assert!(
             (hull_hp - 95.0).abs() < 1e-6,
             "hull should be ~95 after 0.1s at 50 dps, got {}",
@@ -518,7 +524,7 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.current();
+        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
         assert!(
             (hull_hp - 100.0).abs() < 1e-6,
             "hull should remain at 100 when outside damage zone, got {}",
@@ -541,7 +547,7 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
 
         // Hull should have taken damage (bypassing shields)
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.current();
+        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
         assert!(
             (hull_hp - 95.0).abs() < 1e-6,
             "hull should be ~95 (damage bypassed shields), got {}",
@@ -565,7 +571,7 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.current();
+        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
         assert!(
             (hull_hp - 99.1).abs() < 0.001,
             "hull should be ~99.1 after 0.3s at 3 dps, got {}",

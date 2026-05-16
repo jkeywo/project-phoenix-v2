@@ -3,7 +3,7 @@ use bevy_rapier3d::prelude::*;
 
 #[cfg(test)]
 use crate::breakdown::{BreakdownQueue, breakdowns_from_damage};
-use crate::damage::{HullIntegrity};
+use crate::damage::{ConsoleHull};
 use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::shield::ShieldSystem;
@@ -62,10 +62,10 @@ pub struct AsteroidDamage {
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
 
-/// Ship-wide Hull Integrity (0–100). Tracked as a Bevy resource so systems
-/// can read/write it independently of `ShipState`.
+/// Per-console hull tracker for the player ship. Tracked as a Bevy resource so
+/// systems can read/write it independently of `ShipState`.
 #[derive(Resource)]
-pub struct ShipHullIntegrity(pub HullIntegrity);
+pub struct ShipHullIntegrity(pub ConsoleHull);
 
 /// The ship's shield system. Damage from collisions is routed through shields
 /// first; only overflow passes through to the hull.
@@ -156,7 +156,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             .add_plugins(crate::science_plugin::SciencePlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(Console::Helm, 100.0)])))
             .insert_resource(ShipShields(ShieldSystem::default()))
             .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<WorldResource>()
@@ -236,7 +236,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 let flags = modifiers.flags();
                 let helm_range_mult = modifiers.get(&ModifierSlot::RadarRange);
                 (
-                    hull.0.current(), power_levels, flags, helm_range_mult,
+                    hull.0.total_current(), power_levels, flags, helm_range_mult,
                     impulse.0.charge_progress,
                     ship.x, ship.z, ship.yaw, ship.red_alert(), ship.view_mode.clone(),
                 )
@@ -416,13 +416,14 @@ fn handle_collisions(
 
         let hull_damage_from_shields = apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
         if hull_damage_from_shields > 0 {
+            let BreakdownQueueResource { queue, rng, cumulative_damage, .. } = &mut *breakdowns;
             let (_, new_cumulative, new_count) = apply_hull_damage(
                 &mut hull.0,
                 hull_damage_from_shields as f32,
-                breakdowns.cumulative_damage,
+                *cumulative_damage,
+                rng,
             );
-            breakdowns.cumulative_damage = new_cumulative;
-            let BreakdownQueueResource { queue, rng, .. } = &mut *breakdowns;
+            *cumulative_damage = new_cumulative;
             for _ in 0..new_count {
                 queue.push_random(rng);
             }
@@ -761,9 +762,19 @@ fn spawn_game_start_entities(
 
             // Ship-specific resource setup
             if let Some(hc) = &config.hull {
-                commands.insert_resource(ShipHullIntegrity(HullIntegrity::with_hp(hc.hull_integrity)));
+                let entries: Vec<(Console, f32)> = hc.console_hull
+                    .iter()
+                    .map(|e| (e.console.clone(), e.max_hp))
+                    .collect();
+                let hull = if entries.is_empty() {
+                    // Legacy fallback: single "virtual" console with hull_integrity HP.
+                    ConsoleHull::from_config(&[(Console::Helm, hc.hull_integrity)])
+                } else {
+                    ConsoleHull::from_config(&entries)
+                };
+                commands.insert_resource(ShipHullIntegrity(hull));
             } else {
-                commands.insert_resource(ShipHullIntegrity(HullIntegrity::new()));
+                commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(Console::Helm, 100.0)])));
             }
 
             // Apply shield focus config from TOML if present
@@ -926,7 +937,12 @@ fn test_app() -> App {
             std::time::Duration::from_millis(200),
         ))
         .insert_resource(ShipState::new())
-        .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+            (Console::Helm, 25.0),
+            (Console::Tactical, 25.0),
+            (Console::Power, 25.0),
+            (Console::Shields, 25.0),
+        ])))
         .insert_resource(ShipShields(ShieldSystem::default()))
         .insert_resource(ShipImpulse(ImpulseState::new()))
         .init_resource::<WorldResource>()
@@ -1321,9 +1337,12 @@ fn test_app() -> App {
         start_game(&mut app);
 
         // Directly apply damage to the resource (simulates collision at ~half speed).
-        app.world_mut()
-            .resource_mut::<ShipHullIntegrity>()
-            .0.apply_damage(10.0);
+        {
+            let mut rng = rand::rng();
+            app.world_mut()
+                .resource_mut::<ShipHullIntegrity>()
+                .0.apply_damage(10.0, &mut rng);
+        }
 
         let out = tick(&mut app);
         let snap = out.iter().find_map(|m| match &m.msg {
@@ -1805,7 +1824,10 @@ fn test_app() -> App {
         tick(app);
 
         // Apply 10 damage so HP = 90.
-        app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10.0);
+        {
+            let mut rng = rand::rng();
+            app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10.0, &mut rng);
+        }
 
         // Push a single breakdown with the requested shape and Repair console.
         {
@@ -1946,7 +1968,7 @@ fn test_app() -> App {
 
         fn near(a: f32, b: f32) -> bool { (a - b).abs() < 1e-6 }
 
-        let initial_hp = app.world().resource::<ShipHullIntegrity>().0.current(); // 90
+        let initial_hp = app.world().resource::<ShipHullIntegrity>().0.total_current(); // 90
 
         // Dispatch team 0 via correct shape press.
         push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
@@ -1958,11 +1980,12 @@ fn test_app() -> App {
         assert_eq!(completed, vec![0], "team 0 should complete after 30s");
 
         // Manually apply HP as the system would: for each completed team, restore HP.
+        // Restore to Helm as a representative damaged console.
         for _ in completed {
-            app.world_mut().resource_mut::<ShipHullIntegrity>().0.restore(REPAIR_TEAM_HP);
+            app.world_mut().resource_mut::<ShipHullIntegrity>().0.restore(Console::Helm, REPAIR_TEAM_HP);
         }
 
-        let hp_after = app.world().resource::<ShipHullIntegrity>().0.current();
+        let hp_after = app.world().resource::<ShipHullIntegrity>().0.total_current();
         assert!(near(hp_after, initial_hp + REPAIR_TEAM_HP),
             "HP should increase by {} after repair team completion", REPAIR_TEAM_HP);
     }
@@ -2375,7 +2398,10 @@ fn test_app() -> App {
         assert!(near(scaled_damage, 3.0), "with 0.5Ã— modifier, damage should be 3 (round(5Ã—0.5)=3)");
 
         // Verify the hull loses only the scaled amount by triggering damage through the resource.
-        app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(scaled_damage);
+        {
+            let mut rng = rand::rng();
+            app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(scaled_damage, &mut rng);
+        }
         let out = tick(&mut app);
         let snap = out.iter().find_map(|m| match &m.msg {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),

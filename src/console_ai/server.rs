@@ -610,7 +610,7 @@ mod tests {
         PowerConfigResource, PowerMultiplierResource, TrackedEntities,
         ActiveBeam, PhaserCooldown, CurrentPhaserMode,
     };
-    use crate::damage::HullIntegrity;
+    use crate::damage::ConsoleHull;
     use crate::shield::ShieldSystem;
     use crate::impulse::ImpulseState;
     use crate::repair_teams::RepairTeams;
@@ -641,7 +641,12 @@ mod tests {
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(ConsoleAiPlugin)
             .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (crate::messages::Console::Helm, 25.0),
+                (crate::messages::Console::Tactical, 25.0),
+                (crate::messages::Console::Power, 25.0),
+                (crate::messages::Console::Shields, 25.0),
+            ])))
             .insert_resource(ShipShields(ShieldSystem::default()))
             .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<WorldResource>()

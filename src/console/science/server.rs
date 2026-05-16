@@ -44,7 +44,7 @@ pub fn handle_set_science_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::HullIntegrity;
+    use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::simulation::{ShipHullIntegrity, ShipImpulse, SimOutbox};
@@ -66,7 +66,12 @@ mod tests {
                 std::time::Duration::from_millis(200),
             ))
             .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()

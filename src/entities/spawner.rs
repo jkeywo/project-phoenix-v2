@@ -245,7 +245,7 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             tags: vec!["test".to_string()],
-            hull: Some(HullConfig { hull_integrity: 100.0 }),
+            hull: Some(HullConfig { hull_integrity: 100.0, ..Default::default() }),
             star: Some(StarConfig {
                 name: "TestStar".to_string(),
                 radius: 10.0,

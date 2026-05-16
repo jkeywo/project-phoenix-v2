@@ -76,9 +76,26 @@ pub struct StationConfig {
     pub hull_integrity: f32,
 }
 
+/// One entry in the `[[hull.console_hull]]` TOML array.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConsoleHullEntry {
+    /// Console name matching the `Console` enum variant (e.g. `"Helm"`).
+    pub console: crate::messages::Console,
+    /// Maximum (and starting) HP for this console.
+    pub max_hp: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct HullConfig {
+    /// Legacy single-value hull integrity (kept for backward compat with NPC configs).
+    #[serde(default)]
     pub hull_integrity: f32,
+    /// Per-console hull entries. When present, replaces the single `hull_integrity` value.
+    #[serde(default)]
+    pub console_hull: Vec<ConsoleHullEntry>,
+    /// Number of repair teams available to this ship (default 0 = legacy).
+    #[serde(default)]
+    pub repair_team_count: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

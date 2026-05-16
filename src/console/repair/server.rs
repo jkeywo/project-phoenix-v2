@@ -172,7 +172,7 @@ pub fn tick_repair_teams(
     let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
     let completed = teams.0.tick(dt * repair_mult);
     for _team_idx in completed {
-        hull.0.restore(REPAIR_TEAM_HP);
+        hull.0.restore_any_damaged(REPAIR_TEAM_HP);
     }
 }
 
@@ -239,7 +239,7 @@ pub fn broadcast_repair_icons(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::HullIntegrity;
+    use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::simulation::{ShipImpulse, ShipShields};
@@ -262,7 +262,12 @@ mod tests {
                 std::time::Duration::from_millis(200),
             ))
             .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])))
             .insert_resource(ShipShields(ShieldSystem::default()))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(crate::modifiers::ShipModifiers::new())
@@ -316,7 +321,10 @@ mod tests {
         tick(app);
 
         // Apply 10 damage so HP = 90.
-        app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10.0);
+        {
+            let mut rng = rand::rng();
+            app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10.0, &mut rng);
+        }
 
         // Push a single breakdown with the requested shape and Repair console.
         {
@@ -500,7 +508,7 @@ mod tests {
 
         fn near(a: f32, b: f32) -> bool { (a - b).abs() < 1e-6 }
 
-        let initial_hp = app.world().resource::<ShipHullIntegrity>().0.current(); // 90
+        let initial_hp = app.world().resource::<ShipHullIntegrity>().0.total_current(); // 90
 
         // Dispatch team 0 via correct shape press.
         push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
@@ -513,10 +521,10 @@ mod tests {
 
         // Manually apply HP as the system would: for each completed team, restore HP.
         for _ in completed {
-            app.world_mut().resource_mut::<ShipHullIntegrity>().0.restore(REPAIR_TEAM_HP);
+            app.world_mut().resource_mut::<ShipHullIntegrity>().0.restore_any_damaged(REPAIR_TEAM_HP);
         }
 
-        let hp_after = app.world().resource::<ShipHullIntegrity>().0.current();
+        let hp_after = app.world().resource::<ShipHullIntegrity>().0.total_current();
         assert!(near(hp_after, initial_hp + REPAIR_TEAM_HP),
             "HP should increase by {} after repair team completion", REPAIR_TEAM_HP);
     }

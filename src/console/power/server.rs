@@ -128,7 +128,7 @@ pub fn tick_power_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::HullIntegrity;
+    use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage, Target};
     use crate::messages::{ModifierSlot, ServerMessage, *};
     use crate::modifiers::ShipModifiers;
@@ -152,7 +152,12 @@ mod tests {
                 std::time::Duration::from_millis(200),
             ))
             .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(HullIntegrity::new()))
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])))
             .insert_resource(ShipShields(ShieldSystem::default()))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())

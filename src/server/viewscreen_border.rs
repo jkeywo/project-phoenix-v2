@@ -1097,7 +1097,12 @@ fn update_hud(
     for (kind, mut text, mut color) in values.iter_mut() {
         let new_value = match kind {
             HudValue::Heading => format!("{:03}", yaw_to_compass_bearing(ship.yaw)),
-            HudValue::Hull => format!("{}", (hull.0.current().clamp(0.0, 100.0).round()) as i32),
+            HudValue::Hull => {
+                let pct = if hull.0.total_max() > 0.0 {
+                    (hull.0.total_current() / hull.0.total_max() * 100.0).clamp(0.0, 100.0)
+                } else { 0.0 };
+                format!("{}", pct.round() as i32)
+            },
             HudValue::Condition => if alert { "ALERT" } else { "NOMINAL" }.to_string(),
         };
         if text.0 != new_value {

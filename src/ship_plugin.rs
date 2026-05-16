@@ -129,11 +129,11 @@ pub fn handle_impulse_messages(
     region_query: Query<&RegionEffectsSection>,
     ship_query: Query<Entity, With<Ship>>,
 ) {
-    if *last_hull_hp == 0.0 && (hull.0.current() - 100.0).abs() < 1e-6 {
-        *last_hull_hp = 100.0;
+    if *last_hull_hp == 0.0 && (hull.0.total_current() - hull.0.total_max()).abs() < 1e-6 {
+        *last_hull_hp = hull.0.total_max();
     }
 
-    let current_hp = hull.0.current();
+    let current_hp = hull.0.total_current();
     if current_hp < *last_hull_hp {
         impulse.0.cancel_charge();
     }
@@ -206,7 +206,12 @@ mod tests {
                 std::time::Duration::from_millis(200),
             ))
             .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(crate::damage::HullIntegrity::new()))
+            .insert_resource(ShipHullIntegrity(crate::damage::ConsoleHull::from_config(&[
+                (crate::messages::Console::Helm, 25.0),
+                (crate::messages::Console::Tactical, 25.0),
+                (crate::messages::Console::Power, 25.0),
+                (crate::messages::Console::Shields, 25.0),
+            ])))
             .insert_resource(crate::simulation::ShipShields(crate::shield::ShieldSystem::default()))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())
@@ -321,10 +326,13 @@ mod tests {
             "impulse should be charging after StartImpulseCharge"
         );
 
-        app.world_mut()
-            .resource_mut::<ShipHullIntegrity>()
-            .0
-            .apply_damage(10.0);
+        {
+            let mut rng = rand::rng();
+            app.world_mut()
+                .resource_mut::<ShipHullIntegrity>()
+                .0
+                .apply_damage(10.0, &mut rng);
+        }
         tick(&mut app);
 
         assert_eq!(
@@ -349,10 +357,13 @@ mod tests {
             "impulse should be active before damage"
         );
 
-        app.world_mut()
-            .resource_mut::<ShipHullIntegrity>()
-            .0
-            .apply_damage(10.0);
+        {
+            let mut rng = rand::rng();
+            app.world_mut()
+                .resource_mut::<ShipHullIntegrity>()
+                .0
+                .apply_damage(10.0, &mut rng);
+        }
         tick(&mut app);
 
         assert_eq!(

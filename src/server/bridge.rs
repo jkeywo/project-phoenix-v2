@@ -45,6 +45,10 @@ thread_local! {
     /// Whether `?debug_regions=1` was specified in the URL. Set by JS via
     /// `wasm_set_debug_regions()` before `wasm_init()`.
     static DEBUG_REGIONS_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Pending toggle request from `wasm_toggle_debug_regions()`. Drained by
+    /// `drain_debug_toggles` each `PreUpdate` frame.
+    static PENDING_DEBUG_TOGGLE: RefCell<bool> = const { RefCell::new(false) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -99,15 +103,13 @@ pub fn wasm_init() {
     .add_plugins(RendererPlugin)
     .add_plugins(ViewscreenBorderPlugin);
 
-    // Conditionally add the debug overlay when ?debug_regions=1 is present.
-    DEBUG_REGIONS_ENABLED.with(|v| {
-        if *v.borrow() {
-            app.add_plugins(crate::debug_overlay::DebugOverlayPlugin { enabled: true });
-        }
-    });
+    // Always add the debug overlay plugin; ?debug_regions=1 sets initial state.
+    // Runtime toggling via F4 is handled by drain_debug_toggles.
+    let debug_regions_initial = DEBUG_REGIONS_ENABLED.with(|v| *v.borrow());
+    app.add_plugins(crate::debug_overlay::DebugOverlayPlugin { enabled: debug_regions_initial });
 
     app.insert_resource(bevy::winit::WinitSettings::game())
-    .add_systems(PreUpdate, (drain_inbound, drain_disconnects))
+    .add_systems(PreUpdate, (drain_inbound, drain_disconnects, drain_debug_toggles))
     .add_systems(PostUpdate, flush_outbound);
 
     // Insert the validated ShipStations resource if it was pre-validated.
@@ -176,6 +178,16 @@ pub fn wasm_is_debug_regions_enabled() -> bool {
     DEBUG_REGIONS_ENABLED.with(|v| *v.borrow())
 }
 
+/// Called by JS (e.g. F4 keydown) to toggle region wireframes at runtime.
+///
+/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
+/// `PreUpdate` frame, which flips the `DebugRegionsEnabled` Bevy resource.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_debug_regions() {
+    PENDING_DEBUG_TOGGLE.with(|v| *v.borrow_mut() = true);
+}
+
 // ── Config Preload Exports ──────────────────────────────────────────────────
 
 /// Re-export config preload functions from config_cache module.
@@ -235,6 +247,21 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
         if let Ok(msg) = JsonCodec.decode_client(&json) {
             writer.write(InboundMessage { token, msg });
         }
+    }
+}
+
+/// Drains the pending debug-toggle flag each frame and flips `DebugRegionsEnabled`.
+#[cfg(target_arch = "wasm32")]
+fn drain_debug_toggles(mut enabled: ResMut<crate::debug_overlay::DebugRegionsEnabled>) {
+    let pending = PENDING_DEBUG_TOGGLE.with(|v| {
+        let was = *v.borrow();
+        *v.borrow_mut() = false;
+        was
+    });
+    if pending {
+        let new_val = !enabled.0;
+        enabled.0 = new_val;
+        DEBUG_REGIONS_ENABLED.with(|v| *v.borrow_mut() = new_val);
     }
 }
 

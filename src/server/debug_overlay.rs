@@ -18,9 +18,10 @@ pub struct DebugOverlayPlugin {
 impl Plugin for DebugOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DebugRegionsEnabled(self.enabled));
-        if self.enabled {
-            app.add_systems(Update, draw_region_wireframes);
-        }
+        app.add_systems(
+            Update,
+            draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),
+        );
     }
 }
 
@@ -117,7 +118,6 @@ mod tests {
         let plugin = DebugOverlayPlugin { enabled: false };
         let mut app = App::new();
         plugin.build(&mut app);
-        app.update();
         let enabled = app.world().resource::<DebugRegionsEnabled>();
         assert!(!enabled.0, "default should be disabled");
     }
@@ -127,21 +127,30 @@ mod tests {
         let plugin = DebugOverlayPlugin { enabled: true };
         let mut app = App::new();
         plugin.build(&mut app);
-        // Resource is set during build() — no update() needed (that would
-        // trigger the gizmo system which requires DefaultPlugins).
         let enabled = app.world().resource::<DebugRegionsEnabled>();
         assert!(enabled.0, "should be enabled when flag is set");
     }
 
+    /// Toggling the resource from false → true should flip DebugRegionsEnabled.
     #[test]
-    fn wireframe_system_not_added_when_disabled() {
-        let mut app = App::new();
+    fn toggle_debug_regions_false_to_true() {
         let plugin = DebugOverlayPlugin { enabled: false };
+        let mut app = App::new();
         plugin.build(&mut app);
-        // If the system were added with `enabled: false`, there would be no
-        // entity queries to fail. This test verifies compilation and defaults.
-        app.update();
+        // Simulate what drain_debug_toggles does: flip the resource.
+        app.world_mut().resource_mut::<DebugRegionsEnabled>().0 = true;
         let enabled = app.world().resource::<DebugRegionsEnabled>();
-        assert!(!enabled.0);
+        assert!(enabled.0, "resource should be true after toggle");
+    }
+
+    /// Toggling the resource from true → false should flip DebugRegionsEnabled.
+    #[test]
+    fn toggle_debug_regions_true_to_false() {
+        let plugin = DebugOverlayPlugin { enabled: true };
+        let mut app = App::new();
+        plugin.build(&mut app);
+        app.world_mut().resource_mut::<DebugRegionsEnabled>().0 = false;
+        let enabled = app.world().resource::<DebugRegionsEnabled>();
+        assert!(!enabled.0, "resource should be false after toggle");
     }
 }

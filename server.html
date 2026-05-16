@@ -320,6 +320,7 @@ function finishInit() {
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
   window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
   window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
+  window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
 
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.
@@ -412,6 +413,16 @@ window.addEventListener('TrunkApplicationStarted', startPhoenix);
       document.addEventListener('touchstart', ensureAudio);
       document.addEventListener('keydown', ensureAudio);
     })();
+
+    // ── F4 — toggle region wireframes ────────────────────────────────────
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'F4') {
+        e.preventDefault();
+        if (typeof wasm_toggle_debug_regions === 'function') {
+          wasm_toggle_debug_regions();
+        }
+      }
+    });
   </script>
 </body>
 </html>

@@ -69,9 +69,9 @@ impl Plugin for RepairPlugin {
             .init_resource::<BreakdownQueueResource>()
             .init_resource::<RepairIconState>()
             .add_systems(Update, (
-                handle_repair,
-                tick_repair_teams,
-                broadcast_repair_icons,
+                handle_repair.in_set(crate::sim_sets::SimSet::Input),
+                tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
+                broadcast_repair_icons.in_set(crate::sim_sets::SimSet::Broadcast),
             ))
             .add_plugins(repair_state_broadcaster());
     }

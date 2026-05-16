@@ -39,9 +39,9 @@ impl Plugin for RegionPlugin {
             .add_message::<RegionEntered>()
             .add_message::<RegionExited>()
             .add_systems(Update, (
-                update_region_membership,
-                apply_damage_zone_damage.after(update_region_membership),
-                handle_blocks_impulse_region_enter.after(update_region_membership),
+                update_region_membership.in_set(crate::sim_sets::SimSet::Physics),
+                apply_damage_zone_damage.in_set(crate::sim_sets::SimSet::Physics).after(update_region_membership),
+                handle_blocks_impulse_region_enter.in_set(crate::sim_sets::SimSet::Physics).after(update_region_membership),
             ));
     }
 }

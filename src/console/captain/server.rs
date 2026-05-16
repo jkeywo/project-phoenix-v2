@@ -8,7 +8,10 @@ pub struct CaptainPlugin;
 
 impl Plugin for CaptainPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (handle_toggle_red_alert, handle_set_view));
+        app.add_systems(Update, (
+            handle_toggle_red_alert.in_set(crate::sim_sets::SimSet::Input),
+            handle_set_view.in_set(crate::sim_sets::SimSet::Input),
+        ));
     }
 }
 

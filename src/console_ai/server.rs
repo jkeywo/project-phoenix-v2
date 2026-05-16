@@ -218,11 +218,11 @@ impl Plugin for ConsoleAiPlugin {
             .init_resource::<PowerMovementEngageState>()
             .init_resource::<PowerRedAlertEngageState>()
             .add_systems(Update, (
-                track_complexity_changes,
-                run_tactical_ai.after(track_complexity_changes),
-                run_science_hint_ai.after(track_complexity_changes),
-                run_auto_match_ai.after(track_complexity_changes),
-                run_power_ai.after(track_complexity_changes),
+                track_complexity_changes.in_set(crate::sim_sets::SimSet::Input),
+                run_tactical_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
+                run_science_hint_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
+                run_auto_match_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
+                run_power_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
             ));
     }
 }

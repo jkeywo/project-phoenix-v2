@@ -40,9 +40,9 @@ impl Plugin for ShipPlugin {
         .add_systems(
             Update,
             (
-                process_helm_inputs,
-                sync_ship_position,
-                handle_impulse_messages,
+                process_helm_inputs.in_set(crate::sim_sets::SimSet::Physics),
+                sync_ship_position.in_set(crate::sim_sets::SimSet::Physics),
+                handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
             )
                 .after(crate::lobby::process_lobby),
         );

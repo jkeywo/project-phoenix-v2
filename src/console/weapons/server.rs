@@ -111,15 +111,15 @@ impl Plugin for WeaponsPlugin {
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .add_message::<AsteroidDestroyedVfx>()
             .add_systems(Update, (
-                handle_set_target,
-                handle_fire_phaser,
-                handle_set_phaser_mode,
-                handle_set_phaser_frequency,
-                handle_fire_torpedo,
+                handle_set_target.in_set(crate::sim_sets::SimSet::Input),
+                handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
+                handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
+                handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
+                handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Input),
             ))
             .add_systems(Update, (
-                tick_active_beam,
-                tick_torpedo_system,
+                tick_active_beam.in_set(crate::sim_sets::SimSet::Physics),
+                tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
             ));
     }
 }

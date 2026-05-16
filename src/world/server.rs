@@ -75,14 +75,14 @@ impl Plugin for WorldPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_hail,
-                    handle_respond_to_message,
-                    handle_clear_comms,
-                    broadcast_comms_state,
-                    broadcast_objective_summary,
+                    handle_hail.in_set(crate::sim_sets::SimSet::Input),
+                    handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
+                    handle_clear_comms.in_set(crate::sim_sets::SimSet::Input),
+                    broadcast_comms_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                    broadcast_objective_summary.in_set(crate::sim_sets::SimSet::Broadcast),
                 ).chain(),
             )
-            .add_systems(Update, handle_ai_events);
+            .add_systems(Update, handle_ai_events.in_set(crate::sim_sets::SimSet::Physics));
     }
 }
 

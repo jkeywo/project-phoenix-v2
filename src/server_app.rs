@@ -142,7 +142,14 @@ pub fn sim_processing_anchor() {}
 /// This is the canonical registration point for the server simulation.
 /// Call this from `wasm_init()` (bridge) instead of using a `SimulationPlugin`.
 pub fn add_simulation_plugins(app: &mut App) {
-        app.add_plugins(RapierPhysicsPlugin::<()>::default())
+        app.configure_sets(Update, (
+            crate::sim_sets::SimSet::Input,
+            crate::sim_sets::SimSet::Physics,
+            crate::sim_sets::SimSet::Damage,
+            crate::sim_sets::SimSet::Modifiers,
+            crate::sim_sets::SimSet::Broadcast,
+        ).chain().after(crate::lobby::process_lobby))
+        .add_plugins(RapierPhysicsPlugin::<()>::default())
             .add_plugins(crate::region_plugin::RegionPlugin)
             .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
             .add_plugins(crate::ai_plugin::AiPlugin)
@@ -169,34 +176,21 @@ pub fn add_simulation_plugins(app: &mut App) {
                 render_spawned_entities.after(spawn_game_start_entities),
             ))
             .add_systems(Update, (
-                (
-                    handle_set_sensors_target,
-                ),
-                (
-                    handle_set_shield_focus,
-                ),
-                (
-                    tick_shields,
-                    handle_collisions,
-                ),
-                (
-                    broadcast_shield_status,
-                    broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-                    reconcile_runtime_entities.after(crate::lobby::process_lobby),
-                    sim_processing_anchor,
-                ),
+                handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
+                handle_set_shield_focus.in_set(crate::sim_sets::SimSet::Input),
+                tick_shields.in_set(crate::sim_sets::SimSet::Physics),
+                handle_collisions.in_set(crate::sim_sets::SimSet::Physics),
+                broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
+                broadcast_world_setup_on_start.in_set(crate::sim_sets::SimSet::Broadcast),
+                reconcile_runtime_entities.in_set(crate::sim_sets::SimSet::Broadcast),
+                sim_processing_anchor,
             ).after(crate::lobby::process_lobby))
-            .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
-                .after(crate::power_plugin::handle_power_messages)
-                .after(crate::power_plugin::tick_power_system)
-                .after(crate::lobby::process_lobby))
-            .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers
-                .after(crate::ship_plugin::handle_impulse_messages)
-                .after(crate::lobby::process_lobby))
+            .add_systems(Update, crate::modifier_coordination::translate_power_modifiers.in_set(crate::sim_sets::SimSet::Modifiers))
+            .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers.in_set(crate::sim_sets::SimSet::Modifiers))
             .add_systems(Update, (
-                crate::modifier_coordination::translate_region_modifiers,
-                crate::region_plugin::handle_slow_zone_speed_clamp,
-            ).chain().after(crate::region_plugin::update_region_membership))
+                crate::modifier_coordination::translate_region_modifiers.in_set(crate::sim_sets::SimSet::Modifiers),
+                crate::region_plugin::handle_slow_zone_speed_clamp.in_set(crate::sim_sets::SimSet::Physics),
+            ).after(crate::region_plugin::update_region_membership))
             .add_plugins(weapons_update_broadcaster())
             .add_plugins(sim_state_broadcaster())
             .add_plugins(modifier_events_broadcaster())

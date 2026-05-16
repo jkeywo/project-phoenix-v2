@@ -11,7 +11,7 @@ pub struct SciencePlugin;
 
 impl Plugin for SciencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_set_science_target);
+        app.add_systems(Update, handle_set_science_target.in_set(crate::sim_sets::SimSet::Input));
     }
 }
 

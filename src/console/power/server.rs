@@ -52,8 +52,8 @@ impl Plugin for PowerPlugin {
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
             .add_systems(Update, (
-                handle_power_messages,
-                tick_power_system,
+                handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
+                tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
             ))
             .add_plugins(power_state_broadcaster());
     }

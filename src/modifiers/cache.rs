@@ -4,6 +4,44 @@ use bevy::prelude::Resource;
 pub use crate::messages::{ModifierSlot, ModifierSource};
 use crate::flag_kind::FlagKind;
 
+// ── Integer modifier system ───────────────────────────────────────────────────
+
+/// Which integer attribute a modifier affects. Server-internal only; not in
+/// `messages.rs` because integer modifier values are never sent to clients.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum IntModifierSlot {
+    /// Additional repair teams granted to a ship.
+    RepairTeams,
+}
+
+impl IntModifierSlot {
+    /// Total number of slots; must be updated when new variants are added.
+    pub const COUNT: usize = 1;
+
+    /// Maps each slot to a fixed array index.
+    pub fn index(&self) -> usize {
+        match self {
+            IntModifierSlot::RepairTeams => 0,
+        }
+    }
+
+    fn all() -> [IntModifierSlot; Self::COUNT] {
+        [IntModifierSlot::RepairTeams]
+    }
+}
+
+/// A single integer modifier entry.
+///
+/// The `(source, slot)` pair is the identity key. Applying the same pair twice
+/// replaces the existing entry rather than stacking.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IntModifier {
+    pub source: ModifierSource,
+    pub slot: IntModifierSlot,
+    /// Additive bonus applied to the slot's running total.
+    pub bonus: i32,
+}
+
 impl ModifierSlot {
     pub const COUNT: usize = 6;
 
@@ -56,10 +94,12 @@ pub enum ModifierEvent {
 /// Identity: `(source, slot)` pair. Re-adding the same source+slot replaces the
 /// previous entry. Different sources on the same slot stack additively.
 ///
-/// Cache formula per slot:
+/// Cache formula per float slot:
 /// - `sum = Σ bonus` for all entries on that slot
 /// - if `sum >= 0` → multiplier = `1.0 + sum`
 /// - if `sum < 0`  → multiplier = `1.0 / (1.0 + |sum|)`
+///
+/// Cache formula per int slot: straight sum of all active bonuses.
 #[derive(Resource, Clone, Debug)]
 pub struct ShipModifiers {
     /// Sparse table: `(source, slot) → bonus`.
@@ -71,16 +111,23 @@ pub struct ShipModifiers {
     /// Boolean flags keyed by `FlagKind`, each backed by a set of sources.
     /// A flag is set iff its source-set is non-empty.
     flags: HashMap<FlagKind, HashSet<ModifierSource>>,
+    /// Sparse table for integer modifiers: `(source, slot) → bonus`.
+    int_table: HashMap<(ModifierSource, IntModifierSlot), i32>,
+    /// Pre-computed sums for integer slots, indexed by `IntModifierSlot::index()`.
+    int_cache: [i32; IntModifierSlot::COUNT],
 }
 
 impl ShipModifiers {
-    /// Creates an empty modifier set. All multipliers default to `1.0`.
+    /// Creates an empty modifier set. All multipliers default to `1.0`; all
+    /// integer sums default to `0`.
     pub fn new() -> Self {
         Self {
             table: HashMap::new(),
             cache: [1.0; ModifierSlot::COUNT],
             pending_events: Vec::new(),
             flags: HashMap::new(),
+            int_table: HashMap::new(),
+            int_cache: [0; IntModifierSlot::COUNT],
         }
     }
 
@@ -171,6 +218,41 @@ impl ShipModifiers {
         }
 
         self.rebuild_cache();
+    }
+
+    // ── Integer modifier API ──────────────────────────────────────────────────
+
+    /// Inserts or replaces the integer modifier for the given `(source, slot)`
+    /// pair, then rebuilds the integer cache.
+    pub fn add_or_update_int(&mut self, modifier: IntModifier) {
+        let key = (modifier.source, modifier.slot);
+        self.int_table.insert(key, modifier.bonus);
+        self.rebuild_int_cache();
+    }
+
+    /// Removes the integer modifier for the given `(source, slot)` pair (no-op
+    /// if absent), then rebuilds the integer cache.
+    pub fn remove_int(&mut self, source: &ModifierSource, slot: &IntModifierSlot) {
+        let key = (source.clone(), slot.clone());
+        self.int_table.remove(&key);
+        self.rebuild_int_cache();
+    }
+
+    /// Returns the computed sum for `slot` (straight sum of all active bonuses).
+    pub fn get_int(&self, slot: &IntModifierSlot) -> i32 {
+        self.int_cache[slot.index()]
+    }
+
+    fn rebuild_int_cache(&mut self) {
+        for slot in IntModifierSlot::all() {
+            let sum: i32 = self
+                .int_table
+                .iter()
+                .filter(|((_, s), _)| s == &slot)
+                .map(|(_, &bonus)| bonus)
+                .sum();
+            self.int_cache[slot.index()] = sum;
+        }
     }
 
     fn rebuild_cache(&mut self) {
@@ -454,6 +536,120 @@ mod tests {
         let mut mods = ShipModifiers::new();
         mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
         mods.clear_source(&ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(99) });
+        assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
+    }
+
+    // ── IntModifierSlot ───────────────────────────────────────────────────────
+
+    #[test]
+    fn int_modifier_slot_count_is_correct() {
+        // COUNT must equal the number of variants; currently 1 (RepairTeams).
+        assert_eq!(IntModifierSlot::COUNT, 1);
+    }
+
+    #[test]
+    fn repair_teams_slot_index_is_zero() {
+        assert_eq!(IntModifierSlot::RepairTeams.index(), 0);
+    }
+
+    // ── add_or_update_int / get_int ───────────────────────────────────────────
+
+    #[test]
+    fn get_int_returns_zero_with_no_modifiers() {
+        let mods = ShipModifiers::new();
+        assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 0);
+    }
+
+    #[test]
+    fn add_or_update_int_accumulates_bonuses_from_distinct_sources() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::ImpulseDrive,
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 2,
+        });
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) },
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 3,
+        });
+        assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 5);
+    }
+
+    #[test]
+    fn same_source_slot_pair_replaces_rather_than_stacks() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::ImpulseDrive,
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 10,
+        });
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::ImpulseDrive,
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 1,
+        });
+        // Only the latest bonus (1) should survive
+        assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 1);
+    }
+
+    // ── remove_int ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn remove_int_removes_correct_entry_and_updates_cache() {
+        let mut mods = ShipModifiers::new();
+        let region = ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(5) };
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::ImpulseDrive,
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 2,
+        });
+        mods.add_or_update_int(IntModifier {
+            source: region.clone(),
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 3,
+        });
+        mods.remove_int(&region, &IntModifierSlot::RepairTeams);
+        assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 2);
+    }
+
+    #[test]
+    fn remove_int_unknown_entry_is_noop() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::ImpulseDrive,
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 4,
+        });
+        mods.remove_int(
+            &ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(99) },
+            &IntModifierSlot::RepairTeams,
+        );
+        assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 4);
+    }
+
+    #[test]
+    fn remove_int_all_sources_returns_zero() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::ImpulseDrive,
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 7,
+        });
+        mods.remove_int(&ModifierSource::ImpulseDrive, &IntModifierSlot::RepairTeams);
+        assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 0);
+    }
+
+    #[test]
+    fn int_modifiers_are_independent_from_float_modifiers() {
+        let mut mods = ShipModifiers::new();
+        mods.add_or_update_int(IntModifier {
+            source: ModifierSource::ImpulseDrive,
+            slot: IntModifierSlot::RepairTeams,
+            bonus: 3,
+        });
+        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 3);
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
     }
 

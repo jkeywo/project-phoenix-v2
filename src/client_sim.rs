@@ -8,7 +8,7 @@
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
-use crate::messages::{ClientMessage, Console, ConsoleHullStatus, ServerMessage, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
+use crate::messages::{ClientMessage, Console, ConsoleHullStatus, EntitySnapshot, ServerMessage, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -249,6 +249,16 @@ impl ClientSimState {
         match msg {
             ServerMessage::SimState { snapshot } => {
                 self.console_hull = snapshot.console_hull.clone();
+                // Update live positions of dynamic entities (asteroids) from the
+                // per-tick state snapshot. Only position is updated; tags/radius
+                // come from the EntitySnapshot added when the entity was spawned.
+                for state in &snapshot.entity_states {
+                    if let Some(pos) = state.position {
+                        if let Some(entity) = self.world.entities.iter_mut().find(|e| e.uuid == state.uuid) {
+                            entity.position = Some(pos);
+                        }
+                    }
+                }
             }
             ServerMessage::WorldSetup { world } => {
                 self.world = world.clone();
@@ -312,6 +322,19 @@ impl ClientSimState {
                 }
             }
             ServerMessage::EntityDespawned { uuid } => {
+                self.world.entities.retain(|e| e.uuid != *uuid);
+            }
+            ServerMessage::AsteroidSpawned { uuid, x, y, z, .. } => {
+                if !self.world.entities.iter().any(|e| e.uuid == *uuid) {
+                    self.world.entities.push(EntitySnapshot {
+                        uuid: uuid.clone(),
+                        position: Some([*x, *y, *z]),
+                        tags: vec!["asteroid".into()],
+                        ..EntitySnapshot::default()
+                    });
+                }
+            }
+            ServerMessage::AsteroidDestroyed { uuid } => {
                 self.world.entities.retain(|e| e.uuid != *uuid);
             }
             ServerMessage::FrequencyHint { frequency } => {
@@ -2097,5 +2120,89 @@ mod tests {
             ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert_eq!(s.frequency_hint, None, "frequency_hint must be cleared on Welcome");
+    }
+
+    // ── AsteroidSpawned / AsteroidDestroyed ────────────────────────────
+
+    #[test]
+    fn asteroid_spawned_adds_entity_with_asteroid_tag() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::AsteroidSpawned {
+            uuid: "ast-1".into(),
+            x: 10.0, y: 0.0, z: -5.0,
+            config_path: "assets/entities/asteroid_small.toml".into(),
+            max_hp: 100, current_hp: 100,
+        });
+        assert_eq!(s.world.entities.len(), 1);
+        let e = &s.world.entities[0];
+        assert_eq!(e.uuid, "ast-1");
+        assert_eq!(e.position, Some([10.0, 0.0, -5.0]));
+        assert!(e.tags.contains(&"asteroid".to_string()));
+    }
+
+    #[test]
+    fn asteroid_spawned_idempotent_on_duplicate_uuid() {
+        let mut s = ClientSimState::default();
+        for _ in 0..2 {
+            s.apply(&ServerMessage::AsteroidSpawned {
+                uuid: "ast-dup".into(),
+                x: 1.0, y: 0.0, z: 2.0,
+                config_path: "".into(),
+                max_hp: 50, current_hp: 50,
+            });
+        }
+        assert_eq!(s.world.entities.len(), 1, "duplicate AsteroidSpawned must not add twice");
+    }
+
+    #[test]
+    fn asteroid_destroyed_removes_entity() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::AsteroidSpawned {
+            uuid: "ast-gone".into(),
+            x: 0.0, y: 0.0, z: 0.0,
+            config_path: "".into(),
+            max_hp: 50, current_hp: 50,
+        });
+        assert_eq!(s.world.entities.len(), 1);
+        s.apply(&ServerMessage::AsteroidDestroyed { uuid: "ast-gone".into() });
+        assert!(s.world.entities.is_empty(), "AsteroidDestroyed must remove entity");
+    }
+
+    #[test]
+    fn sim_state_entity_states_update_positions() {
+        let mut s = ClientSimState::default();
+        // Add an asteroid first
+        s.apply(&ServerMessage::AsteroidSpawned {
+            uuid: "ast-move".into(),
+            x: 0.0, y: 0.0, z: 0.0,
+            config_path: "".into(),
+            max_hp: 50, current_hp: 50,
+        });
+        // Now send a SimState with updated position
+        s.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: crate::messages::ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                forward_speed: 0.0,
+                hull_integrity: 100.0,
+                power_levels: (2, 2, 2),
+                impulse_charge_progress: 0.0,
+                flags: vec![],
+                radar_state: RadarStateSnapshot::default(),
+                console_hull: vec![],
+                entity_states: vec![crate::messages::EntityStateSnapshot {
+                    uuid: "ast-move".into(),
+                    position: Some([15.0, 0.0, -8.0]),
+                    yaw: None,
+                    hull_fraction: None,
+                    flags: vec![],
+                    shields: None,
+                    warp_out_remaining_secs: None,
+                }],
+            },
+        });
+        let pos = s.world.entities[0].position;
+        assert_eq!(pos, Some([15.0, 0.0, -8.0]), "entity position must update from SimState entity_states");
     }
 }

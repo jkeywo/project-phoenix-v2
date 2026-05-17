@@ -1,4 +1,4 @@
-tags = ["field", "main"]
+tags = ["field", "main", "asteroid_field"]
 
 [asteroid_field]
 inner_radius = 100.0
@@ -13,7 +13,7 @@ asteroid_type_paths = [
 cosmetic_type_paths = [
     "assets/entities/asteroid_cosmetic.toml",
 ]
-tags = ["field", "main"]
+tags = ["field", "main", "asteroid_field"]
 
 [asteroid_field.grid]
 resolution = 15.0

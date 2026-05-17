@@ -8,7 +8,7 @@
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
-use crate::messages::{ClientMessage, Console, ServerMessage, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
+use crate::messages::{ClientMessage, Console, ConsoleHullStatus, ServerMessage, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -204,6 +204,10 @@ pub struct ClientSimState {
     /// `FrequencyHint` arrives; reset to `None` on `Welcome`.
     /// The Tactical console uses this to highlight the correct frequency button.
     pub frequency_hint: Option<f32>,
+    /// Per-console hull integrity from the latest `SimSnapshot`. Mirrors the
+    /// `console_hull` field on `SimSnapshot` for consoles that need direct
+    /// access without going through `ShipView`.
+    pub console_hull: Vec<ConsoleHullStatus>,
 }
 
 impl Default for ClientSimState {
@@ -230,6 +234,7 @@ impl Default for ClientSimState {
             repair_teams: Vec::new(),
             phaser_frequency: 0.5,
             frequency_hint: None,
+            console_hull: Vec::new(),
         }
     }
 }
@@ -242,8 +247,8 @@ impl ClientSimState {
     /// updated here. This method handles console-specific state only.
     pub fn apply(&mut self, msg: &ServerMessage) {
         match msg {
-            ServerMessage::SimState { .. } => {
-                // Ship-level fields handled by ShipView::apply; nothing here.
+            ServerMessage::SimState { snapshot } => {
+                self.console_hull = snapshot.console_hull.clone();
             }
             ServerMessage::WorldSetup { world } => {
                 self.world = world.clone();
@@ -561,7 +566,7 @@ pub fn set_phaser_frequency_message(frequency: f32) -> ClientMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{Console, EntitySnapshot, GamePhase, GameState, Player, WorldData};
+    use crate::messages::{Console, ConsoleHullStatus, EntitySnapshot, GamePhase, GameState, Player, RadarStateSnapshot, SimSnapshot, WorldData};
 
     #[test]
     fn default_sim_state_has_empty_world() {
@@ -1652,6 +1657,96 @@ mod tests {
             ship_stations: crate::stations_config::ShipStations::default(),
         });
         assert!(s.repair_teams.is_empty(), "Welcome should reset repair_teams to empty");
+    }
+
+    // ── Console hull from SimState ─────────────────────────────────────
+
+    #[test]
+    fn console_hull_defaults_to_empty() {
+        let s = ClientSimState::default();
+        assert!(s.console_hull.is_empty());
+    }
+
+    #[test]
+    fn sim_state_updates_console_hull() {
+        let mut s = ClientSimState::default();
+        let hull = vec![
+            ConsoleHullStatus { console: Console::Helm, current: 20.0, max_hp: 25.0 },
+            ConsoleHullStatus { console: Console::Tactical, current: 15.0, max_hp: 25.0 },
+        ];
+        s.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100.0,
+                power_levels: (2, 2, 2),
+                flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
+                console_hull: hull.clone(),
+            },
+        });
+        assert_eq!(s.console_hull, hull);
+    }
+
+    #[test]
+    fn sim_state_overwrites_previous_console_hull() {
+        let mut s = ClientSimState::default();
+        let first = vec![
+            ConsoleHullStatus { console: Console::Helm, current: 20.0, max_hp: 25.0 },
+        ];
+        let second = vec![
+            ConsoleHullStatus { console: Console::Helm, current: 10.0, max_hp: 25.0 },
+            ConsoleHullStatus { console: Console::Power, current: 25.0, max_hp: 25.0 },
+        ];
+        s.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false, view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100.0, power_levels: (2, 2, 2),
+                flags: vec![], entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
+                console_hull: first,
+            },
+        });
+        s.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false, view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100.0, power_levels: (2, 2, 2),
+                flags: vec![], entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
+                console_hull: second.clone(),
+            },
+        });
+        assert_eq!(s.console_hull, second);
+    }
+
+    #[test]
+    fn welcome_resets_console_hull() {
+        let mut s = ClientSimState::default();
+        s.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false, view_mode: ViewMode::default(),
+                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                hull_integrity: 100.0, power_levels: (2, 2, 2),
+                flags: vec![], entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
+                console_hull: vec![
+                    ConsoleHullStatus { console: Console::Helm, current: 20.0, max_hp: 25.0 },
+                ],
+            },
+        });
+        s.apply(&ServerMessage::Welcome {
+            state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
+            ship_stations: crate::stations_config::ShipStations::default(),
+        });
+        assert!(s.console_hull.is_empty(), "Welcome should reset console_hull to empty");
     }
 
     // ── Power helper functions ──────────────────────────────────────────

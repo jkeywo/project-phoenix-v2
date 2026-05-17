@@ -1,6 +1,6 @@
 use bevy::prelude::Resource;
 use crate::flag_kind::FlagKind;
-use crate::messages::{EntityStateSnapshot, RadarStateSnapshot, SimSnapshot, ViewDirection, ViewMode};
+use crate::messages::{ConsoleHullStatus, EntityStateSnapshot, RadarStateSnapshot, SimSnapshot, ViewDirection, ViewMode};
 
 #[derive(Resource)]
 pub struct ShipState {
@@ -49,6 +49,7 @@ impl ShipState {
         entity_states: Vec<EntityStateSnapshot>,
         radar_state: RadarStateSnapshot,
         impulse_charge_progress: f32,
+        console_hull: Vec<ConsoleHullStatus>,
     ) -> SimSnapshot {
         SimSnapshot {
             red_alert: self.red_alert,
@@ -62,7 +63,7 @@ impl ShipState {
             entity_states,
             radar_state,
             impulse_charge_progress,
-            console_hull: vec![],
+            console_hull,
         }
     }
 }
@@ -95,7 +96,7 @@ mod tests {
     fn default_radar() -> RadarStateSnapshot { RadarStateSnapshot::default() }
 
     fn snap(s: &ShipState, hull: f32, levels: (u8, u8, u8)) -> SimSnapshot {
-        s.snapshot(hull, levels, vec![], empty_entity_states(), default_radar(), 0.0)
+        s.snapshot(hull, levels, vec![], empty_entity_states(), default_radar(), 0.0, vec![])
     }
 
     #[test]
@@ -125,7 +126,7 @@ mod tests {
         s.x = 3.0;
         s.z = -7.5;
         s.yaw = 1.25;
-        let snap = s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.0);
+        let snap = s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.0, vec![]);
         assert_eq!(snap.ship_x, 3.0);
         assert_eq!(snap.ship_z, -7.5);
         assert_eq!(snap.ship_yaw, 1.25);
@@ -153,7 +154,7 @@ mod tests {
     #[test]
     fn snapshot_includes_impulse_charge_progress() {
         let s = ShipState::new();
-        let snap = s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.5);
+        let snap = s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.5, vec![]);
         assert!((snap.impulse_charge_progress - 0.5).abs() < 1e-6);
     }
 }

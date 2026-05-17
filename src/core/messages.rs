@@ -102,7 +102,7 @@ pub enum PhaserMode {
 
 /// A shape used for the repair mini-game. Assigned randomly to each
 /// breakdown entry and fixed for its lifetime.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Shape {
     Square,
     Triangle,
@@ -592,10 +592,8 @@ pub enum ServerMessage {
     SensorsTargetSuggestion { uuid: String },
     /// Sent when a phaser bank fires a shot at a target.
     PhaserFired { bank: PhaserBank, target_uuid: String },
-    /// Sent at 10 Hz to each console player.  Carries the remaining cooldown
-    /// (penalty or repair) in seconds, whether a repair action is currently
     /// Sent at 10 Hz to the Repair console holder. Contains the current
-    /// state of all repair teams.
+    /// state of all repair teams, each with a `target_console` field.
     RepairState {
         teams: Vec<TeamSlot>,
     },

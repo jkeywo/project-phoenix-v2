@@ -7,7 +7,7 @@
 
 use crate::complexity::parse_complexity_config;
 use crate::messages::Console;
-use bevy::prelude::Resource;
+use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 /// Tracks which element names are registered and which are currently hidden.

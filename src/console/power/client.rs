@@ -212,6 +212,7 @@ fn setup_power_ui(mut commands: Commands) {
                             TextColor(Color::srgb(0.9, 0.9, 1.0)),
                         ));
                     });
+                });
             }
 
             // Overflow allocation controls (hidden in Low complexity — AI manages points 7 & 8).

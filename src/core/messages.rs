@@ -100,15 +100,6 @@ pub enum PhaserMode {
     Manual,
 }
 
-/// A shape used for the repair mini-game. Assigned randomly to each
-/// breakdown entry and fixed for its lifetime.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Shape {
-    Square,
-    Triangle,
-    Circle,
-}
-
 /// The state of a single repair team, broadcast as part of `RepairState`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum TeamSlot {

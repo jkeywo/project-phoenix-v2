@@ -606,7 +606,7 @@ mod tests {
     use crate::simulation::{
         ShipHullIntegrity, ShipImpulse, ShipRepairTeams, ShipShields,
         TorpedoSystemResource, WeaponsTarget,
-        BreakdownQueueResource, ShipPowerSystem,
+        ShipPowerSystem,
         PowerConfigResource, PowerMultiplierResource, TrackedEntities,
         ActiveBeam, PhaserCooldown, CurrentPhaserMode,
     };
@@ -656,7 +656,6 @@ mod tests {
             .init_resource::<PhaserCooldown>()
             .init_resource::<CurrentPhaserMode>()
             .insert_resource(ShipRepairTeams(RepairTeams::default()))
-            .init_resource::<BreakdownQueueResource>()
             .insert_resource(crate::modifiers::ShipModifiers::new())
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))

@@ -1,10 +1,9 @@
 ﻿use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-#[cfg(test)]
-use crate::breakdown::{BreakdownQueue, breakdowns_from_damage};
 use crate::damage::{ConsoleHull};
 use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
+use rand::SeedableRng as _;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::shield::ShieldSystem;
 use crate::map_config::MapConfig;
@@ -32,7 +31,7 @@ pub use crate::weapons_plugin::{
 };
 
 pub use crate::repair_plugin::{
-    ShipRepairTeams, BreakdownQueueResource,
+    ShipRepairTeams,
     repair_state_broadcaster,
 };
 
@@ -396,7 +395,6 @@ fn handle_collisions(
     mut ship: ResMut<ShipState>,
     mut hull: ResMut<ShipHullIntegrity>,
     mut shields: ResMut<ShipShields>,
-    mut breakdowns: ResMut<BreakdownQueueResource>,
     mut cooldown: ResMut<CollisionCooldown>,
     modifiers: Res<ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
@@ -437,17 +435,12 @@ fn handle_collisions(
 
         let hull_damage_from_shields = apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
         if hull_damage_from_shields > 0 {
-            let BreakdownQueueResource { queue, rng, cumulative_damage, .. } = &mut *breakdowns;
-            let (hull_applied, new_cumulative, new_count, ship_destroyed) = apply_hull_damage(
+            let rng = &mut rand::rngs::SmallRng::from_os_rng();
+            let (hull_applied, ship_destroyed) = apply_hull_damage(
                 &mut hull.0,
                 hull_damage_from_shields as f32,
-                *cumulative_damage,
                 rng,
             );
-            *cumulative_damage = new_cumulative;
-            for _ in 0..new_count {
-                queue.push_random(rng);
-            }
             outbox.0.push((Target::All, ServerMessage::DamageTaken {
                 hull: hull_applied,
                 shield: damage - hull_damage_from_shields as f32,
@@ -1402,59 +1395,6 @@ fn test_app() -> App {
             _ => None,
         }).expect("expected a SimState broadcast");
         assert!((snap.hull_integrity - 90.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn taking_25hp_damage_enqueues_2_breakdowns_and_snapshot_shows_first() {
-        let mut app = test_app();
-        start_game(&mut app);
-
-        // Apply 25 HP of damage directly in 10-HP bucket tracking terms,
-        // mimicking how handle_collisions would do it via breakdowns_from_damage.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            let before = bd.cumulative_damage; // 0.0
-            bd.cumulative_damage += 25.0;
-            let new_count = breakdowns_from_damage(before, bd.cumulative_damage);
-            assert_eq!(new_count, 2, "25 HP should create exactly 2 breakdowns");
-            let BreakdownQueueResource { queue, rng, .. } = &mut *bd;
-            for _ in 0..new_count {
-                queue.push_random(rng);
-            }
-        }
-
-        let _out = tick(&mut app);
-
-        // Verify queue length via resource.
-        let bd = app.world().resource::<BreakdownQueueResource>();
-        assert_eq!(bd.queue.len(), 2, "2 breakdowns should be queued");
-    }
-
-    #[test]
-    fn advancing_queue_exposes_next_breakdown() {
-        let mut app = test_app();
-        start_game(&mut app);
-
-        // Seed 2 breakdowns.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bd.cumulative_damage = 25.0;
-            let BreakdownQueueResource { queue, rng, .. } = &mut *bd;
-            queue.push_random(rng);
-            queue.push_random(rng);
-        }
-
-        // Capture the first (front) entry.
-        let first = app.world().resource::<BreakdownQueueResource>().queue.front().cloned();
-
-        // Pop the front (simulating a successful repair).
-        app.world_mut().resource_mut::<BreakdownQueueResource>().queue.pop_front();
-
-        // Second entry is now the front.
-        let second = app.world().resource::<BreakdownQueueResource>().queue.front().cloned();
-
-        assert!(second.is_some(), "second breakdown should now be front");
-        assert_ne!(first, second, "consecutive entries are different consoles");
     }
 
     // â"€â"€ SetTarget / TargetLock tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€

@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 
-use crate::breakdown::BreakdownQueue;
 use crate::lobby::{InboundMessage, Sessions};
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{ClientMessage, Console, ServerMessage};
@@ -15,26 +14,6 @@ use crate::messages::ModifierSlot;
 #[derive(Resource)]
 pub struct ShipRepairTeams(pub RepairTeams);
 
-/// Bevy resource wrapping the breakdown queue (populated by the damage system).
-#[derive(Resource)]
-pub struct BreakdownQueueResource {
-    pub queue: BreakdownQueue,
-    /// Cumulative damage taken since game start (tracks 10-HP bucket crossings).
-    pub cumulative_damage: f32,
-    pub(crate) rng: rand::rngs::SmallRng,
-}
-
-impl Default for BreakdownQueueResource {
-    fn default() -> Self {
-        use rand::SeedableRng as _;
-        Self {
-            queue: BreakdownQueue::new(),
-            cumulative_damage: 0.0,
-            rng: rand::rngs::SmallRng::from_os_rng(),
-        }
-    }
-}
-
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct RepairPlugin;
@@ -42,7 +21,6 @@ pub struct RepairPlugin;
 impl Plugin for RepairPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ShipRepairTeams(RepairTeams::default()))
-            .init_resource::<BreakdownQueueResource>()
             .add_systems(Update, (
                 handle_dispatch_repair_team.in_set(crate::sim_sets::SimSet::Input),
                 tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
@@ -254,9 +232,10 @@ mod tests {
         start_game(&mut app);
 
         push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
-        let out = tick(&mut app);
+        let out1 = tick(&mut app);
+        let out2 = tick(&mut app);
 
-        let has_repair_state = out.iter().any(|m| {
+        let has_repair_state = out1.iter().chain(out2.iter()).any(|m| {
             matches!(&m.msg, ServerMessage::RepairState { teams } if
                 teams.iter().any(|t| matches!(t, crate::messages::TeamSlot::Travelling { .. })))
         });

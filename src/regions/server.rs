@@ -1,8 +1,9 @@
 ﻿use bevy::prelude::*;
+use rand::SeedableRng as _;
 use std::collections::{HashMap, HashSet};
 
 use crate::entity_spawner::{RegionShapeSection, RegionEffectsSection, EntityUuid};
-use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
+use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse};
 use crate::ship_state::ShipState;
 use crate::region_effects::RegionEffectKind;
 use crate::modifiers::ShipModifiers;
@@ -115,13 +116,12 @@ fn apply_damage_zone_damage(
     membership: Res<RegionMembership>,
     region_query: Query<&RegionEffectsSection>,
     ship_query: Query<Entity, With<Ship>>,
-    hull: Option<ResMut<ShipHullIntegrity>>,
-    breakdowns: Option<ResMut<BreakdownQueueResource>>,
+    mut hull: Option<ResMut<ShipHullIntegrity>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
 ) {
-    let (Some(mut hull), Some(mut breakdowns)) = (hull, breakdowns) else {
+    let Some(mut hull) = hull else {
         return;
     };
 
@@ -145,17 +145,12 @@ fn apply_damage_zone_damage(
         for effect in &effects.0 {
             if let crate::region_effects::RegionEffectKind::DamageZone { dps } = effect {
                 let total_damage = dps * dt;
-                let BreakdownQueueResource { queue, rng, cumulative_damage, .. } = &mut *breakdowns;
-                let (hull_applied, new_cumulative, new_count, ship_destroyed) = crate::damage::apply_hull_damage(
+                let mut rng = rand::rngs::SmallRng::from_os_rng();
+                let (hull_applied, ship_destroyed) = crate::damage::apply_hull_damage(
                     &mut hull.0,
                     total_damage,
-                    *cumulative_damage,
-                    rng,
+                    &mut rng,
                 );
-                *cumulative_damage = new_cumulative;
-                for _ in 0..new_count {
-                    queue.push_random(rng);
-                }
                 if let Some(ref mut ob) = outbox {
                     ob.0.push((Target::All, ServerMessage::DamageTaken {
                         hull: hull_applied,
@@ -241,7 +236,7 @@ mod tests {
     use crate::entity_config::EntityConfig;
     use crate::region_shape::RegionShape;
     use crate::damage::ConsoleHull;
-    use crate::simulation::{ShipHullIntegrity, ShipImpulse, BreakdownQueueResource};
+    use crate::simulation::{ShipHullIntegrity, ShipImpulse};
     use crate::impulse::{ImpulseState, ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
     use crate::ship_physics::ShipPhysicsConfig;
@@ -442,7 +437,6 @@ mod tests {
             (crate::messages::Console::Shields, 25.0),
         ])));
         app.insert_resource(ShipModifiers::new());
-        app.init_resource::<BreakdownQueueResource>();
         app.world_mut().spawn((Ship, Transform::default()));
         app
     }
@@ -602,28 +596,6 @@ mod tests {
             "hull should be ~99.1 after 0.3s at 3 dps, got {}",
             hull_hp
         );
-    }
-
-    #[test]
-    fn damage_zone_feeds_breakdown_queue() {
-        let mut app = damage_test_app();
-        // High DPS to cross 10-HP threshold
-        spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 100.0);
-        // 0.15s at 100 dps = 15 HP → crosses 1 bucket (10 HP)
-        tick_with_dt(&mut app, 0.15);
-
-        let bd = app.world().resource::<BreakdownQueueResource>();
-        assert_eq!(bd.queue.len(), 1, "should have 1 breakdown after crossing 10-HP threshold");
-        assert!(
-            (bd.cumulative_damage - 15.0).abs() < 1e-6,
-            "cumulative_damage should be ~15, got {}",
-            bd.cumulative_damage
-        );
-
-        // Second tick: total 30 HP → crosses 2 more buckets = 3 total
-        tick_with_dt(&mut app, 0.15);
-        let bd2 = app.world().resource::<BreakdownQueueResource>();
-        assert_eq!(bd2.queue.len(), 3, "should have 3 breakdowns after 30 damage");
     }
 
     // ── BlocksImpulse tests ─────────────────────────────────────────────

@@ -49,7 +49,9 @@ impl PhaserCooldown {
     pub fn start(&mut self) {
         self.remaining_secs = BEAM_COOLDOWN_SECS;
     }
+}
 
+impl PhaserCooldown {
     pub fn tick(&mut self, dt: f32) {
         self.remaining_secs = (self.remaining_secs - dt).max(0.0);
     }
@@ -97,6 +99,34 @@ pub struct AsteroidDestroyedVfx {
     pub z: f32,
 }
 
+// ── Beam Events (Observer pattern) ───────────────────────────────────────
+
+#[derive(Event, Clone, Debug)]
+pub struct BeamStartedEvent {
+    pub target_uuid: String,
+}
+
+#[derive(Event, Clone, Debug)]
+pub struct BeamEndedEvent {
+    pub target_uuid: String,
+}
+
+fn on_beam_started(
+    trigger: On<BeamStartedEvent>,
+    mut outbox: ResMut<SimOutbox>,
+) {
+    let ev = trigger.event();
+    outbox.0.push((Target::All, ServerMessage::BeamStarted { target_uuid: ev.target_uuid.clone() }));
+}
+
+fn on_beam_ended(
+    trigger: On<BeamEndedEvent>,
+    mut outbox: ResMut<SimOutbox>,
+) {
+    let ev = trigger.event();
+    outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid: ev.target_uuid.clone() }));
+}
+
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 pub struct WeaponsPlugin;
@@ -110,6 +140,8 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<PhaserRenderConfig>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .add_message::<AsteroidDestroyedVfx>()
+            .add_observer(on_beam_started)
+            .add_observer(on_beam_ended)
             .add_systems(Update, (
                 handle_set_target.in_set(crate::sim_sets::SimSet::Input),
                 handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
@@ -165,6 +197,7 @@ fn handle_set_target(
 }
 
 fn handle_fire_phaser(
+    mut commands: Commands,
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     ship: Res<ShipState>,
@@ -197,7 +230,7 @@ fn handle_fire_phaser(
         if let Some(old_uuid) = beam.target_uuid.take() {
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid: old_uuid }));
+            commands.trigger(BeamEndedEvent { target_uuid: old_uuid });
         }
 
         let next_bank = match beam.bank {
@@ -209,7 +242,7 @@ fn handle_fire_phaser(
         beam.damage_accumulator = 0.0;
         beam.bank = Some(next_bank);
 
-        outbox.0.push((Target::All, ServerMessage::BeamStarted { target_uuid: target_uuid.clone() }));
+        commands.trigger(BeamStartedEvent { target_uuid: target_uuid.clone() });
     }
 }
 
@@ -340,7 +373,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start();
-        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
+        commands.trigger(BeamEndedEvent { target_uuid });
         return;
     };
 
@@ -350,7 +383,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start();
-        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
+        commands.trigger(BeamEndedEvent { target_uuid });
         return;
     }
 
@@ -380,7 +413,7 @@ fn tick_active_beam(
             cooldown.start();
 
             outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
-            outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
+            commands.trigger(BeamEndedEvent { target_uuid });
             return;
         }
     }
@@ -391,7 +424,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start();
-        outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid }));
+        commands.trigger(BeamEndedEvent { target_uuid });
     }
 }
 

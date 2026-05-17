@@ -169,7 +169,7 @@ fn refresh_repair_panel(
     }
 
     // Update aggregate hull display
-    if let Ok(mut text) = hull_text.get_single_mut() {
+    if let Ok(mut text) = hull_text.single_mut() {
         let total_current: f32 = sim.console_hull.iter().map(|h| h.current).sum();
         let total_max: f32 = sim.console_hull.iter().map(|h| h.max_hp).sum();
         **text = format!("Hull: {:.0}/{}", total_current, total_max as u32);
@@ -177,11 +177,11 @@ fn refresh_repair_panel(
 
     // Despawn all existing team rows (handles count changes cleanly)
     for entity in existing_rows.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 
     // Respawn team rows from current repair teams
-    let Ok(container_entity) = container.get_single() else {
+    let Ok(container_entity) = container.single() else {
         return;
     };
 
@@ -246,9 +246,9 @@ fn refresh_repair_panel(
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.05, 0.10, 0.20)),
-            )).with_children(|row| {
+            )).with_children(|rc| {
                 // Progress bar
-                row.spawn((
+                rc.spawn((
                     Node {
                         width: Val::Percent(30.0),
                         height: Val::Percent(100.0),
@@ -272,7 +272,7 @@ fn refresh_repair_panel(
                 });
 
                 // Status label
-                row.spawn((
+                rc.spawn((
                     RepairTeamStatusText(i),
                     Text::new(row.status.as_str()),
                     TextFont { font_size: 14.0, ..default() },
@@ -292,7 +292,7 @@ fn refresh_repair_panel(
                 ] {
                     let bg = if row.is_idle { btn_bg } else { btn_disabled_bg };
                     let fg = if row.is_idle { btn_text } else { btn_text_disabled };
-                    row.spawn((
+                    rc.spawn((
                         DispatchButton { console, team_idx: i },
                         Button,
                         Node {

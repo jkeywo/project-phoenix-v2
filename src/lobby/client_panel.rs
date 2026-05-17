@@ -24,6 +24,8 @@ pub struct LobbyState {
     pub ship_stations: ShipStations,
     /// Current per-console complexity preset selection.
     pub complexity: HashMap<Console, String>,
+    /// Reason string for game over, if the game has ended.
+    pub game_over_reason: Option<String>,
 }
 
 impl Default for LobbyState {
@@ -33,6 +35,7 @@ impl Default for LobbyState {
             players: Vec::new(),
             ship_stations: ShipStations::default(),
             complexity: HashMap::new(),
+            game_over_reason: None,
         }
     }
 }
@@ -120,8 +123,13 @@ impl LobbyState {
             | ServerMessage::StationDestroyed { .. }
             | ServerMessage::ObjectiveSummary { .. }
             | ServerMessage::CommsState { .. }
-            | ServerMessage::ShipDestroyed => {
+            | ServerMessage::ShipDestroyed
+            | ServerMessage::DamageTaken { .. } => {
                 // Not relevant to the lobby model.
+            }
+            ServerMessage::GameOver { reason } => {
+                self.phase = GamePhase::GameOver;
+                self.game_over_reason = Some(reason.clone());
             }
         }
     }
@@ -329,6 +337,7 @@ impl<'a> LobbyView<'a> {
         match self.state.phase {
             GamePhase::Lobby => true,
             GamePhase::InProgress => self.is_spectator(),
+            GamePhase::GameOver => false,
         }
     }
 

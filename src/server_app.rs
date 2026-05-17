@@ -11,6 +11,7 @@ use crate::map_config::MapConfig;
 use crate::messages::{
     ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, ViewDirection,
 };
+
 use crate::ship_physics::ShipPhysicsConfig;
 use crate::ship_state::ShipState;
 use crate::damage::{collision_damage, apply_damage_with_shields, apply_hull_damage};
@@ -84,6 +85,12 @@ pub struct ShipImpulse(pub ImpulseState);
 
 
 
+
+/// Carries the reason string when the game ends. Set to `Some(reason)` before
+/// transitioning to `GamePhase::GameOver`. The `OnEnter(GameOver)` system reads
+/// this resource and broadcasts the reason to all clients.
+#[derive(Resource, Default)]
+pub struct GameOverReason(pub Option<String>);
 
 /// Prevents `handle_collisions` from applying damage every frame while the
 /// ship is in contact. After damage is applied once, a 1-second cooldown
@@ -170,6 +177,8 @@ pub fn add_simulation_plugins(app: &mut App) {
                 spawn_game_start_entities,
                 render_spawned_entities,
             ))
+            .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
+            .insert_resource(GameOverReason(None))
             .add_systems(Update, (
                 reconcile_runtime_entities,
                 broadcast_world_setup_on_start,
@@ -391,6 +400,8 @@ fn handle_collisions(
     mut cooldown: ResMut<CollisionCooldown>,
     modifiers: Res<ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut game_over_reason: ResMut<GameOverReason>,
 ) {
     let dt = time.delta_secs();
     cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
@@ -427,7 +438,7 @@ fn handle_collisions(
         let hull_damage_from_shields = apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
         if hull_damage_from_shields > 0 {
             let BreakdownQueueResource { queue, rng, cumulative_damage, .. } = &mut *breakdowns;
-            let (_, new_cumulative, new_count, ship_destroyed) = apply_hull_damage(
+            let (hull_applied, new_cumulative, new_count, ship_destroyed) = apply_hull_damage(
                 &mut hull.0,
                 hull_damage_from_shields as f32,
                 *cumulative_damage,
@@ -437,9 +448,22 @@ fn handle_collisions(
             for _ in 0..new_count {
                 queue.push_random(rng);
             }
+            outbox.0.push((Target::All, ServerMessage::DamageTaken {
+                hull: hull_applied,
+                shield: damage - hull_damage_from_shields as f32,
+            }));
             if ship_destroyed {
                 outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
+                if game_over_reason.0.is_none() {
+                    game_over_reason.0 = Some("All consoles destroyed".into());
+                }
+                next_state.set(GamePhase::GameOver);
             }
+        } else {
+            outbox.0.push((Target::All, ServerMessage::DamageTaken {
+                hull: 0.0,
+                shield: damage,
+            }));
         }
         ship.forward_speed = 0.0;
         cooldown.remaining_secs = 1.0;
@@ -521,6 +545,17 @@ fn broadcast_shield_status(
 #[derive(Resource, Default)]
 struct WorldSetupBroadcast {
     sent: bool,
+}
+
+/// Broadcast `GameOver { reason }` to all players when the game enters the
+/// GameOver phase. Reads the reason from `GameOverReason` resource and resets
+/// it to `None` after broadcast.
+fn on_game_over_enter(
+    mut game_over_reason: ResMut<GameOverReason>,
+    mut outbox: ResMut<SimOutbox>,
+) {
+    let reason = game_over_reason.0.take().unwrap_or_default();
+    outbox.0.push((Target::All, ServerMessage::GameOver { reason }));
 }
 
 /// Emit a single `WorldSetup` broadcast when the game enters `InProgress`.

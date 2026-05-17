@@ -6,9 +6,10 @@ use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse, BreakdownQueueReso
 use crate::ship_state::ShipState;
 use crate::region_effects::RegionEffectKind;
 use crate::modifiers::ShipModifiers;
-use crate::messages::{ModifierSlot, ServerMessage};
+use crate::messages::{GamePhase, ModifierSlot, ServerMessage};
 use crate::lobby::Target;
 use crate::server_app::SimOutbox;
+use crate::simulation::GameOverReason;
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -117,6 +118,8 @@ fn apply_damage_zone_damage(
     hull: Option<ResMut<ShipHullIntegrity>>,
     breakdowns: Option<ResMut<BreakdownQueueResource>>,
     mut outbox: Option<ResMut<SimOutbox>>,
+    mut next_state: Option<ResMut<NextState<GamePhase>>>,
+    mut game_over_reason: Option<ResMut<GameOverReason>>,
 ) {
     let (Some(mut hull), Some(mut breakdowns)) = (hull, breakdowns) else {
         return;
@@ -143,7 +146,7 @@ fn apply_damage_zone_damage(
             if let crate::region_effects::RegionEffectKind::DamageZone { dps } = effect {
                 let total_damage = dps * dt;
                 let BreakdownQueueResource { queue, rng, cumulative_damage, .. } = &mut *breakdowns;
-                let (_, new_cumulative, new_count, ship_destroyed) = crate::damage::apply_hull_damage(
+                let (hull_applied, new_cumulative, new_count, ship_destroyed) = crate::damage::apply_hull_damage(
                     &mut hull.0,
                     total_damage,
                     *cumulative_damage,
@@ -153,9 +156,23 @@ fn apply_damage_zone_damage(
                 for _ in 0..new_count {
                     queue.push_random(rng);
                 }
+                if let Some(ref mut ob) = outbox {
+                    ob.0.push((Target::All, ServerMessage::DamageTaken {
+                        hull: hull_applied,
+                        shield: 0.0,
+                    }));
+                }
                 if ship_destroyed {
                     if let Some(ref mut ob) = outbox {
                         ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                    }
+                    if let Some(ref mut reason) = game_over_reason {
+                        if reason.0.is_none() {
+                            reason.0 = Some("All consoles destroyed".into());
+                        }
+                    }
+                    if let Some(ref mut ns) = next_state {
+                        ns.set(GamePhase::GameOver);
                     }
                 }
             }

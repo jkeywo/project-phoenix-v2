@@ -261,6 +261,7 @@ pub enum GamePhase {
     #[default]
     Lobby,
     InProgress,
+    GameOver,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -686,6 +687,13 @@ pub enum ServerMessage {
     /// Broadcast to all players when every console's HP reaches 0.
     /// Clients should show a game-over screen.
     ShipDestroyed,
+    /// Broadcast when the game transitions to the GameOver phase.
+    /// Carries a human-readable reason string displayed on the game-over screen.
+    GameOver { reason: String },
+    /// Broadcast when the ship takes damage (from collision or damage zone).
+    /// `shield` = HP absorbed by shields, `hull` = HP that reached the hull.
+    /// Either field may be zero (e.g. shield-only hit has `hull: 0.0`).
+    DamageTaken { hull: f32, shield: f32 },
 }
 
 // ── Objective wire types ───────────────────────────────────────────────────

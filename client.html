@@ -871,6 +871,15 @@
           renderWeaponsRadar();
           return;
         }
+        case 'DamageTaken': {
+          const { hull } = msg.data;
+          if (hull > 0) {
+            const clamped = Math.min(hull, 30);
+            const duration = Math.round(50 + (clamped / 30) * 250); // 50–300 ms
+            if (navigator.vibrate) navigator.vibrate(duration);
+          }
+          return;
+        }
         case 'ComplexityChanged': {
           const { console, preset_name } = msg.data;
           savedComplexity[console] = preset_name;

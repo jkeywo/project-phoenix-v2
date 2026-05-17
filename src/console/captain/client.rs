@@ -164,6 +164,22 @@ fn spawn_captain_ui(
             Visibility::Hidden,
         ))
         .with_children(|root| {
+            // ── Header bar ────────────────────────────────────────────
+            root.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            }).with_children(|title_row| {
+                title_row.spawn((
+                    Text::new("Captain's Chair"),
+                    TextFont { font_size: 20.0, ..default() },
+                    TextColor(Color::srgb(0.3, 1.0, 0.8)),
+                ));
+                crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::CaptainChair, 14.0);
+            });
+            crate::client_elements::spawn_help_overlay(root, crate::client_elements::HelpPanel::CaptainChair);
+
             // ── Compass dial ────────────────────────────────────────────
             root.spawn((CompassDial, Node {
                 width: Val::Px(COMPASS_DIAMETER),

@@ -413,42 +413,65 @@ fn spawn_phone_helm_ui(
                 right:  Val::Px(4.0),
                 top:    Val::Px(4.0),
                 bottom: Val::Px(4.0),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::FlexEnd,
-                justify_content: JustifyContent::SpaceBetween,
-                column_gap: Val::Px(8.0),
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
             Visibility::Hidden,
         ))
         .with_children(|root| {
-            let spawn_joystick = |root: &mut ChildSpawnerCommands, pad_entity: &mut Option<Entity>| {
-                root.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(4.0),
-                    ..default()
-                })
-                .with_children(|col| {
-                    *pad_entity = Some(spawn_helm_joystick_children(col, &assets));
-                });
-            };
-            let spawn_radar = |root: &mut ChildSpawnerCommands| {
-                root.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(6.0),
-                    ..default()
-                })
-                .with_children(|col| spawn_helm_radar_children(col, &assets));
-            };
-            if is_landscape {
-                spawn_radar(root);
-                spawn_joystick(root, &mut pad_entity);
-            } else {
-                spawn_joystick(root, &mut pad_entity);
-                spawn_radar(root);
-            }
+            // ── Header bar ────────────────────────────────────────────
+            root.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            }).with_children(|title_row| {
+                title_row.spawn((
+                    Text::new("Helm"),
+                    TextFont { font_size: 18.0, ..default() },
+                    TextColor(Color::srgb(0.3, 1.0, 0.8)),
+                ));
+                crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Helm, 14.0);
+            });
+            crate::client_elements::spawn_help_overlay(root, crate::client_elements::HelpPanel::Helm);
+
+            // ── Joystick + Radar content row ──────────────────────────
+            root.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::FlexEnd,
+                justify_content: JustifyContent::SpaceBetween,
+                flex_grow: 1.0,
+                column_gap: Val::Px(8.0),
+                ..default()
+            }).with_children(|content| {
+                let spawn_joystick = |inner: &mut ChildSpawnerCommands, pad_entity: &mut Option<Entity>| {
+                    inner.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|col| {
+                        *pad_entity = Some(spawn_helm_joystick_children(col, &assets));
+                    });
+                };
+                let spawn_radar = |inner: &mut ChildSpawnerCommands| {
+                    inner.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(6.0),
+                        ..default()
+                    })
+                    .with_children(|col| spawn_helm_radar_children(col, &assets));
+                };
+                if is_landscape {
+                    spawn_radar(content);
+                    spawn_joystick(content, &mut pad_entity);
+                } else {
+                    spawn_joystick(content, &mut pad_entity);
+                    spawn_radar(content);
+                }
+            });
         });
 
     if let Some(pad) = pad_entity {

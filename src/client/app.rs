@@ -73,6 +73,18 @@ struct EngageButton;
 #[derive(Component)]
 struct StationButton(String);
 
+/// Marks the scenario intro block (title + description) in the lobby.
+#[derive(Component)]
+struct ScenarioIntroBlock;
+
+/// Marks the scenario title text inside the intro block.
+#[derive(Component)]
+struct ScenarioIntroTitle;
+
+/// Marks the scenario description body text inside the intro block.
+#[derive(Component)]
+struct ScenarioIntroBody;
+
 /// Marks the crew header node so it can be updated.
 #[derive(Component)]
 struct CrewHeader;
@@ -232,6 +244,7 @@ impl Plugin for ClientAppPlugin {
                             rebuild_lobby_ui_on_change,
                             refresh_engage_button,
                             refresh_crew_header,
+                            update_scenario_intro,
                             refresh_footer_status,
                             refresh_station_detail,
                             toggle_lobby_visibility_on_phase,
@@ -379,6 +392,33 @@ fn setup_lobby_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                     ));
                 });
             });
+        });
+
+        // ── Scenario intro block (initially hidden) ────────────────
+        root.spawn((
+            ScenarioIntroBlock,
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.078, 0.090, 0.110, 0.4)),
+            Visibility::Hidden,
+        ))
+        .with_children(|block| {
+            block.spawn((
+                ScenarioIntroTitle,
+                Text::new(""),
+                TextFont { font: chakra.clone(), font_size: 14.0, ..default() },
+                TextColor(COL_SIGNAL),
+            ));
+            block.spawn((
+                ScenarioIntroBody,
+                Text::new(""),
+                TextFont { font: mono.clone(), font_size: 10.0, ..default() },
+                TextColor(COL_TEXT),
+            ));
         });
 
         // ── Body — rebuilt by rebuild_lobby_ui_on_change ─────────────
@@ -1091,6 +1131,28 @@ fn refresh_crew_header(
     }
     if let Ok(mut text) = pill_text_q.single_mut() {
         **text = if all_assigned { "READY".to_string() } else { "AWAITING".to_string() };
+    }
+}
+
+/// Update the scenario intro block when LobbyState changes.
+fn update_scenario_intro(
+    state: Res<LobbyState>,
+    mut block_q: Query<&mut Visibility, With<ScenarioIntroBlock>>,
+    mut title_q: Query<&mut Text, (With<ScenarioIntroTitle>, Without<ScenarioIntroBody>)>,
+    mut body_q: Query<&mut Text, (With<ScenarioIntroBody>, Without<ScenarioIntroTitle>)>,
+) {
+    if !state.is_changed() {
+        return;
+    }
+    let has_content = !state.scenario_title.is_empty() || !state.scenario_body.is_empty();
+    if let Ok(mut vis) = block_q.single_mut() {
+        *vis = if has_content { Visibility::Visible } else { Visibility::Hidden };
+    }
+    if let Ok(mut text) = title_q.single_mut() {
+        text.0 = state.scenario_title.clone();
+    }
+    if let Ok(mut text) = body_q.single_mut() {
+        text.0 = state.scenario_body.clone();
     }
 }
 

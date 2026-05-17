@@ -582,6 +582,7 @@ mod tests {
                 EntitySnapshot::asteroid("a",  3.0,  4.0, 2.0),
                 EntitySnapshot::asteroid("b", -1.5,  0.0, 1.0),
             ],
+            ..Default::default()
         };
         s.apply(&ServerMessage::WorldSetup { world: world.clone() });
         assert_eq!(s.world, world);
@@ -593,6 +594,7 @@ mod tests {
         s.phaser_frequency = 0.8; // set something non-default to verify reset
         let world = WorldData {
             entities: vec![EntitySnapshot::asteroid("c", 1.0, 2.0, 0.5)],
+            ..Default::default()
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -612,6 +614,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("d", 0.0, 0.0, 1.0)],
+            ..Default::default()
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -630,6 +633,7 @@ mod tests {
         let mut s = ClientSimState {
             world: WorldData {
                 entities: vec![EntitySnapshot::asteroid("e", 0.0, 0.0, 1.0)],
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -769,6 +773,7 @@ mod tests {
             entities: vec![
                 EntitySnapshot::asteroid_field("field-1", x, z, 10.0, 30.0),
             ],
+            ..Default::default()
         };
         s
     }
@@ -808,6 +813,7 @@ mod tests {
             entities: vec![
                 EntitySnapshot::asteroid("a1", 0.0, -50.0, 2.0)
             ],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_system_chart_view(&s, &sv);
@@ -819,6 +825,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::simple("region-1", 0.0, -(SYSTEM_CHART_RANGE * 0.5), vec!["region".into()])],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_system_chart_view(&s, &sv);
@@ -1114,6 +1121,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("a1", 0.0, -(HELM_RADAR_RANGE - 5.0), 1.0)],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_helm_radar_view(&s, &sv);
@@ -1126,6 +1134,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::simple("region-1", 0.0, -(HELM_RADAR_RANGE * 0.5), vec!["region".into()])],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_helm_radar_view(&s, &sv);
@@ -1139,6 +1148,7 @@ mod tests {
         let beyond_helm = HELM_RADAR_RANGE + 5.0;
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("far", 0.0, -beyond_helm, 1.0)],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_helm_radar_view(&s, &sv);
@@ -1150,6 +1160,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("at-edge", 0.0, -HELM_RADAR_RANGE, 1.0)],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_helm_radar_view(&s, &sv);
@@ -1177,6 +1188,7 @@ mod tests {
         let between = (HELM_RADAR_RANGE + WEAPONS_RADAR_RANGE) / 2.0;
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("mid", 0.0, -between, 1.0)],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_weapons_radar_view(&s, &sv);
@@ -1189,6 +1201,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::simple("region-1", 0.0, -(WEAPONS_RADAR_RANGE * 0.5), vec!["region".into()])],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_weapons_radar_view(&s, &sv);
@@ -1201,6 +1214,7 @@ mod tests {
         let beyond = WEAPONS_RADAR_RANGE + 5.0;
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("very-far", 0.0, -beyond, 1.0)],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_weapons_radar_view(&s, &sv);
@@ -1212,6 +1226,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("at-edge", 0.0, -WEAPONS_RADAR_RANGE, 1.0)],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_weapons_radar_view(&s, &sv);
@@ -1227,6 +1242,7 @@ mod tests {
         let between = (HELM_RADAR_RANGE + WEAPONS_RADAR_RANGE) / 2.0;
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("between", 0.0, -between, 1.0)],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let helm_view = compute_helm_radar_view(&s, &sv);
@@ -1285,6 +1301,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::asteroid("a1", 0.0, -(SCIENCE_RADAR_RANGE * 0.5), 1.0)],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_science_long_range_radar_view(&s, &sv);
@@ -1296,6 +1313,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.world = WorldData {
             entities: vec![EntitySnapshot::simple("region-1", 0.0, -(SCIENCE_RADAR_RANGE * 0.5), vec!["region".into()])],
+            ..Default::default()
         };
         let sv = crate::ship_view::ShipView::default();
         let view = compute_science_long_range_radar_view(&s, &sv);
@@ -1909,6 +1927,7 @@ mod tests {
         // Welcome should replace the entire world, including the runtime entity.
         let world_with_runtime = WorldData {
             entities: vec![EntitySnapshot::simple("runtime-1", 0.0, 0.0, vec![])],
+            ..Default::default()
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {
@@ -1937,6 +1956,7 @@ mod tests {
         // Entity is in the Welcome world data.
         let world_with_runtime = WorldData {
             entities: vec![EntitySnapshot::simple("persistent", 1.0, 2.0, vec![])],
+            ..Default::default()
         };
         s.apply(&ServerMessage::Welcome {
             state: GameState {

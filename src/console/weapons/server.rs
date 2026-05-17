@@ -523,6 +523,7 @@ mod tests {
     fn setup_weapons_world(app: &mut App, asteroid_x: f32, asteroid_z: f32) {
         app.world_mut().insert_resource(WorldResource(crate::messages::WorldData {
             entities: vec![crate::messages::EntitySnapshot::asteroid("target-uuid", asteroid_x, asteroid_z, 2.0)],
+            ..Default::default()
         }));
     }
 
@@ -836,6 +837,7 @@ mod tests {
                 crate::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
                 crate::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
             ],
+            ..Default::default()
         }));
         start_game_with_weapons(&mut app);
 

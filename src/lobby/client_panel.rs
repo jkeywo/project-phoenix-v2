@@ -26,6 +26,10 @@ pub struct LobbyState {
     pub complexity: HashMap<Console, String>,
     /// Reason string for game over, if the game has ended.
     pub game_over_reason: Option<String>,
+    /// Scenario title from the loaded scenario, displayed in the lobby.
+    pub scenario_title: String,
+    /// Scenario description / body from the loaded scenario.
+    pub scenario_body: String,
 }
 
 impl Default for LobbyState {
@@ -36,6 +40,8 @@ impl Default for LobbyState {
             ship_stations: ShipStations::default(),
             complexity: HashMap::new(),
             game_over_reason: None,
+            scenario_title: String::new(),
+            scenario_body: String::new(),
         }
     }
 }
@@ -48,6 +54,8 @@ impl LobbyState {
         self.players = state.players;
         self.ship_stations = ship_stations;
         self.complexity = state.complexity;
+        self.scenario_title = state.world.as_ref().map(|w| w.scenario_title.clone()).unwrap_or_default();
+        self.scenario_body = state.world.as_ref().map(|w| w.scenario_description.clone()).unwrap_or_default();
     }
 
     /// Apply a single inbound `ServerMessage`. Variants that don't affect
@@ -350,6 +358,16 @@ impl<'a> LobbyView<'a> {
     /// Get the current complexity preset for a given console, if any.
     pub fn complexity_preset_for(&self, console: &Console) -> Option<&str> {
         self.state.complexity.get(console).map(|s| s.as_str())
+    }
+
+    /// Scenario title from the loaded scenario, displayed in the lobby.
+    pub fn scenario_title(&self) -> &str {
+        &self.state.scenario_title
+    }
+
+    /// Scenario description / body from the loaded scenario.
+    pub fn scenario_body(&self) -> &str {
+        &self.state.scenario_body
     }
 
     /// True if every station slot at the display player count is filled.

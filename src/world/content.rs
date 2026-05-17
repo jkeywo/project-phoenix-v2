@@ -117,6 +117,8 @@ pub enum TriggerAction {
     /// - `tag`: identity tag matching the one used in `ApplyIntModifier`.
     /// - `slot`: which `IntModifierSlot` to remove.
     RemoveIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot },
+    /// Transition the game to the GameOver phase with an optional message.
+    GameOver { message: Option<String> },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -221,7 +223,8 @@ fn substitute_action(
         | TriggerAction::ApplyFlag { .. }
         | TriggerAction::RemoveFlag { .. }
         | TriggerAction::ApplyIntModifier { .. }
-        | TriggerAction::RemoveIntModifier { .. } => action.clone(),
+        | TriggerAction::RemoveIntModifier { .. }
+        | TriggerAction::GameOver { .. } => action.clone(),
     }
 }
 
@@ -287,6 +290,9 @@ struct RawActionEntry {
     /// Named `flag_kind` in TOML to avoid shadowing the action's own `kind` field.
     #[serde(default, rename = "kind")]
     flag_kind: Option<String>,
+    /// Used by `game_over`: the optional message to display.
+    #[serde(default)]
+    message: Option<String>,
 }
 
 // ── TOML-facing deserialization for comms blocks ──────────────────────────
@@ -343,6 +349,10 @@ struct RawSpawnEntry {
 
 #[derive(Deserialize)]
 struct RawScenario {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
     #[serde(default, rename = "spawn")]
     spawns: Vec<RawSpawnEntry>,
     #[serde(default, rename = "trigger")]
@@ -370,6 +380,10 @@ pub struct SpawnEntry {
 /// Parsed scenario configuration. Created by `parse_scenario`.
 #[derive(Clone, Debug)]
 pub struct ScenarioConfig {
+    /// Scenario title for display in the lobby.
+    pub title: String,
+    /// Scenario description / body text for display in the lobby.
+    pub description: String,
     /// Ordered list of spawn entries.
     pub spawns: Vec<SpawnEntry>,
     /// Map from spawn `name` to its assigned runtime UUID.
@@ -553,6 +567,9 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                 let slot = parse_int_modifier_slot(slot_str)?;
                 TriggerAction::RemoveIntModifier { entity, tag, slot }
             }
+            "game_over" => {
+                TriggerAction::GameOver { message: raw_action.message.clone() }
+            }
             other => {
                 return Err(format!("Unknown trigger action '{}'", other));
             }
@@ -697,7 +714,7 @@ pub fn parse_scenario(toml_str: &str) -> Result<ScenarioConfig, String> {
         comms.push(CommsTemplate { from: raw_comms.from, trigger, node });
     }
 
-    Ok(ScenarioConfig { spawns, name_to_uuid, triggers, comms })
+    Ok(ScenarioConfig { title: raw.title.unwrap_or_default(), description: raw.description.unwrap_or_default(), spawns, name_to_uuid, triggers, comms })
 }
 
 /// Resolve all spawn positions against the given anchor table.
@@ -908,6 +925,35 @@ mod tests {
         let config = parse_scenario("").unwrap();
         assert!(config.spawns.is_empty());
         assert!(config.name_to_uuid.is_empty());
+    }
+
+    #[test]
+    fn parse_scenario_with_title_and_description() {
+        let toml = r#"
+title = "First Contact"
+description = "A mysterious signal has been detected near Starbase Alpha."
+
+[[spawn]]
+name = "station_alpha"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.title, "First Contact");
+        assert_eq!(config.description, "A mysterious signal has been detected near Starbase Alpha.");
+    }
+
+    #[test]
+    fn parse_scenario_without_title_uses_default() {
+        let toml = r#"
+[[spawn]]
+name = "station_alpha"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.title, "");
+        assert_eq!(config.description, "");
     }
 
     // ── Cycle 2: parse [[spawn]] with absolute position ────────────────────

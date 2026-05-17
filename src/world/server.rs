@@ -1,17 +1,15 @@
 use bevy::prelude::*;
 use crate::damage::ConsoleHull;
-use crate::lobby::WorldResource;
 use crate::simulation::{Ship, ShipHullIntegrity};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::comms_inbox::CommsInbox;
 use crate::entity_spawner::spawn_entity;
-use crate::lobby::{InboundMessage, Sessions, Target};
+use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::simulation::SimOutbox;
 use crate::messages::{
-    ClientMessage, CommsContact, CommsMessage, Console, ObjectiveSnapshot,
-    ServerMessage,
+    ClientMessage, CommsContact, CommsMessage, Console, GamePhase, ServerMessage,
 };
 use crate::objectives::ObjectiveManager;
 use crate::world::content::{
@@ -258,15 +256,19 @@ fn spawn_scenario_entities(mut commands: Commands) {
 
 /// Startup system: initialises `WorldContentRuntime`, `CommsInboxRes`, and
 /// `ObjectiveManagerRes` from the loaded `ScenarioConfig` (if any).
+/// Also populates `WorldResource` with scenario metadata (title, description).
 fn init_scenario_runtime(
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
+    mut world: ResMut<WorldResource>,
 ) {
     let scenario_config = match crate::config_cache::get_world_content_config() {
         Some(s) => s,
         None => return,
     };
 
+    world.0.scenario_title = scenario_config.title.clone();
+    world.0.scenario_description = scenario_config.description.clone();
     runtime.scenario_id = "default".to_string();
     runtime.name_to_uuid = scenario_config.name_to_uuid.clone();
     runtime.comms_template_states =
@@ -453,9 +455,10 @@ fn handle_respond_to_message(
                 | TriggerAction::ApplyFlag { .. }
                 | TriggerAction::RemoveFlag { .. }
                 | TriggerAction::ApplyIntModifier { .. }
-                | TriggerAction::RemoveIntModifier { .. } => {
-                    // Modifier/flag actions are handled by the AI-event trigger system.
-                    // No-op in the comms response path.
+                | TriggerAction::RemoveIntModifier { .. }
+                | TriggerAction::GameOver { .. } => {
+                    // Modifier/flag/game-over actions are handled by the AI-event trigger
+                    // or damage systems. No-op in the comms response path.
                 }
             }
         }
@@ -595,6 +598,8 @@ fn handle_ai_events(
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
     mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
+    mut next_state: Option<ResMut<NextState<GamePhase>>>,
+    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
 ) {
 
     let mut world_events: Vec<WorldEvent> = Vec::new();
@@ -767,6 +772,15 @@ fn handle_ai_events(
                             },
                             slot,
                         );
+                    }
+                }
+                TriggerAction::GameOver { message } => {
+                    let reason = message.clone().unwrap_or_default();
+                    if let Some(ref mut gr) = game_over_reason {
+                        gr.0 = Some(reason);
+                    }
+                    if let Some(ref mut ns) = next_state {
+                        ns.set(GamePhase::GameOver);
                     }
                 }
             }

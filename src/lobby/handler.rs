@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn welcome_during_in_progress_carries_world_some() {
         let mut sessions = SessionManager::new();
-        let world = WorldData { entities: vec![EntitySnapshot::asteroid("test-uuid", 1.0, 2.0, 2.0)] };
+        let world = WorldData { entities: vec![EntitySnapshot::asteroid("test-uuid", 1.0, 2.0, 2.0)], ..Default::default() };
         let msg = ClientMessage::Identify { token: "t1".into(), name: "Alice".into() };
         let result = pm("peer", &msg, &mut sessions, GamePhase::InProgress, Some(&world));
         let state = result.outbound.iter().find_map(|(_, m)| match m {

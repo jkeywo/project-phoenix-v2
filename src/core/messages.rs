@@ -478,6 +478,12 @@ pub struct WorldData {
     /// All static entities in the world (asteroids, fields, stations, …).
     #[serde(default)]
     pub entities: Vec<EntitySnapshot>,
+    /// Scenario title for display in the lobby.
+    #[serde(default)]
+    pub scenario_title: String,
+    /// Scenario description / body for display in the lobby.
+    #[serde(default)]
+    pub scenario_description: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

@@ -349,6 +349,7 @@ mod tests {
                     hull_fraction: None,
                     inner_radius: None, warp_out_remaining_secs: None,
                 }],
+                ..Default::default()
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -385,6 +386,7 @@ mod tests {
                         inner_radius: None, warp_out_remaining_secs: None,
                     },
                 ],
+                ..Default::default()
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -411,6 +413,7 @@ mod tests {
                         hull_fraction: None,
                         inner_radius: None, warp_out_remaining_secs: None,
                     }],
+                    ..Default::default()
                 }),
             },
             ship_stations: empty_ship_stations(),
@@ -986,6 +989,7 @@ mod tests {
                     hull_fraction: None,
                     inner_radius: None, warp_out_remaining_secs: None,
                 }],
+                ..Default::default()
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1008,6 +1012,7 @@ mod tests {
                     hull_fraction: Some(0.85),
                     inner_radius: Some(2.0), warp_out_remaining_secs: None,
                 }],
+                ..Default::default()
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1031,6 +1036,7 @@ mod tests {
                     inner_radius: None,
                     warp_out_remaining_secs: Some(3.5),
                 }],
+                ..Default::default()
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1067,6 +1073,7 @@ mod tests {
                         inner_radius: Some(10.0), warp_out_remaining_secs: None,
                     },
                 ],
+                ..Default::default()
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

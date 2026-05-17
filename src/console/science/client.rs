@@ -111,11 +111,20 @@ fn setup_sensors_ui(mut commands: Commands) {
         Visibility::Hidden,
     ))
     .with_children(|panel| {
-        panel.spawn((
-            Text::new("Sensors"),
-            TextFont { font_size: 32.0, ..default() },
-            TextColor(Color::srgb(0.8, 0.8, 1.0)),
-        ));
+        panel.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        }).with_children(|title_row| {
+            title_row.spawn((
+                Text::new("Sensors"),
+                TextFont { font_size: 32.0, ..default() },
+                TextColor(Color::srgb(0.8, 0.8, 1.0)),
+            ));
+            crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Sensors, 16.0);
+        });
+        crate::client_elements::spawn_help_overlay(panel, crate::client_elements::HelpPanel::Sensors);
 
         // Long-range radar display (gizmo-drawn via ScienceRadarPanel bounds)
         panel.spawn((

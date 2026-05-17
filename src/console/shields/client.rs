@@ -83,11 +83,20 @@ fn setup_shields_ui(mut commands: Commands) {
         Visibility::Hidden,
     ))
     .with_children(|panel| {
-        panel.spawn((
-            Text::new("SHIELDS"),
-            TextFont { font_size: 24.0, ..default() },
-            TextColor(Color::srgb(0.4, 0.8, 1.0)),
-        ));
+        panel.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        }).with_children(|title_row| {
+            title_row.spawn((
+                Text::new("SHIELDS"),
+                TextFont { font_size: 24.0, ..default() },
+                TextColor(Color::srgb(0.4, 0.8, 1.0)),
+            ));
+            crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Shields, 16.0);
+        });
+        crate::client_elements::spawn_help_overlay(panel, crate::client_elements::HelpPanel::Shields);
 
         // Four facing HP bars
         for label in &facings {

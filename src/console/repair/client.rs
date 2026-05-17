@@ -106,11 +106,20 @@ fn setup_repair_ui(mut commands: Commands) {
             Visibility::Hidden,
         ))
         .with_children(|panel| {
-            panel.spawn((
-                Text::new("Repair Console"),
-                TextFont { font_size: 24.0, ..default() },
-                TextColor(Color::srgb(0.3, 1.0, 0.5)),
-            ));
+            panel.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            }).with_children(|title_row| {
+                title_row.spawn((
+                    Text::new("Repair Console"),
+                    TextFont { font_size: 24.0, ..default() },
+                    TextColor(Color::srgb(0.3, 1.0, 0.5)),
+                ));
+                crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Repair, 16.0);
+            });
+            crate::client_elements::spawn_help_overlay(panel, crate::client_elements::HelpPanel::Repair);
 
             // Aggregate hull display
             panel.spawn((

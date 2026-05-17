@@ -157,11 +157,20 @@ fn setup_weapons_ui(mut commands: Commands) {
                 BackgroundColor(Color::srgb(0.06, 0.08, 0.14)),
             ));
 
-            panel.spawn((
-                Text::new("Weapons Console"),
-                TextFont { font_size: 24.0, ..default() },
-                TextColor(Color::srgb(1.0, 0.5, 0.2)),
-            ));
+            panel.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            }).with_children(|title_row| {
+                title_row.spawn((
+                    Text::new("Weapons Console"),
+                    TextFont { font_size: 24.0, ..default() },
+                    TextColor(Color::srgb(1.0, 0.5, 0.2)),
+                ));
+                crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Tactical, 16.0);
+            });
+            crate::client_elements::spawn_help_overlay(panel, crate::client_elements::HelpPanel::Tactical);
 
             // ── Torpedo section (hideable as "torpedo_tube_selector") ──
             panel.spawn((

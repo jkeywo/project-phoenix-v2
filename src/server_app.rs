@@ -777,6 +777,8 @@ fn spawn_game_start_entities(
                     ConsoleHull::from_config(&entries)
                 };
                 commands.insert_resource(ShipHullIntegrity(hull));
+                let team_count = if hc.repair_team_count > 0 { hc.repair_team_count as usize } else { 2 };
+                commands.insert_resource(ShipRepairTeams(crate::repair_teams::RepairTeams::new(team_count)));
             } else {
                 commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(Console::Helm, 100.0)])));
             }

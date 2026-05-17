@@ -61,9 +61,12 @@ use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 #[cfg(target_arch = "wasm32")]
 use js_sys::Date;
 
+use rand::Rng;
+
 use crate::console_ai_plugin::ConsoleComplexityState;
 use crate::lobby::{OutboundMessage, Sessions};
 use crate::messages::{GamePhase, ServerMessage};
+use crate::server::renderer::GameCamera;
 use crate::ship_state::ShipState;
 use crate::sim_sets::SimSet;
 use crate::simulation::ShipHullIntegrity;
@@ -102,6 +105,10 @@ const MAX_INTENSITY: f32 = 1.0;
 
 /// Rate at which shield-hit flash decays per second (1.0 → 0.0 in 0.3 s).
 const FLASH_DECAY_RATE: f32 = 1.0 / 0.3;
+
+/// Exponential decay rate for hull-damage camera shake.
+/// `exp(-5.0 * 0.8) ≈ 0.018` — fully settled within ~0.8 s at max magnitude.
+const SHAKE_DECAY_RATE: f32 = 5.0;
 
 // ── HUD constants ────────────────────────────────────────────────────
 
@@ -193,6 +200,17 @@ struct VignetteMaterialHandle(Handle<RedAlertVignetteMaterial>);
 pub struct ShieldFlashState {
     /// Current flash intensity (0.0 = no flash, 1.0 = full white).
     pub intensity: f32,
+}
+
+/// Tracks hull-damage camera shake on the viewscreen.
+///
+/// `magnitude` is accumulated by [`process_hull_shake`] on each
+/// `DamageTaken` with `hull > 0`, then decayed exponentially each
+/// frame by [`apply_camera_shake`] — fully settled in ~0.8 s at max.
+#[derive(Resource, Default)]
+pub struct ShakeState {
+    /// Current shake magnitude in world units (0.0 = no shake).
+    pub magnitude: f32,
 }
 
 // ── Marker components ────────────────────────────────────────────────
@@ -350,6 +368,7 @@ impl Plugin for ViewscreenBorderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiMaterialPlugin::<RedAlertVignetteMaterial>::default())
             .init_resource::<ShieldFlashState>()
+            .init_resource::<ShakeState>()
             .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup, attach_initial_strip, spawn_lobby_screen).chain())
             .add_systems(
                 Update,
@@ -358,6 +377,11 @@ impl Plugin for ViewscreenBorderPlugin {
                     swap_border_textures,
                     process_shield_flash.after(SimSet::Broadcast),
                     drive_vignette_intensity.after(process_shield_flash),
+                    process_hull_shake.after(SimSet::Broadcast),
+                    apply_camera_shake
+                        .after(process_shield_flash)
+                        .after(process_hull_shake)
+                        .run_if(in_state(GamePhase::InProgress)),
                     update_hud,
                     update_lobby_hud,
                     toggle_lobby_screen_visibility,
@@ -517,6 +541,58 @@ fn process_shield_flash(
             if *shield > 0.0 {
                 flash.intensity = (*shield / 30.0).min(1.0);
             }
+        }
+    }
+}
+
+/// Reads [`OutboundMessage`] for [`ServerMessage::DamageTaken`] with
+/// `hull > 0` and accumulates [`ShakeState::magnitude`] scaled linearly
+/// over 0–30 HP (max ~5 world units at 30+ HP).
+///
+/// Runs after `SimSet::Broadcast` so the outbox has been drained into
+/// `OutboundMessage` messages and is safe to read.
+fn process_hull_shake(
+    mut outbound: MessageReader<OutboundMessage>,
+    mut shake: ResMut<ShakeState>,
+) {
+    for msg in outbound.read() {
+        if let ServerMessage::DamageTaken { hull, .. } = &msg.msg {
+            if *hull > 0.0 {
+                let added = (*hull / 30.0).min(1.0) * 5.0;
+                shake.magnitude += added;
+            }
+        }
+    }
+}
+
+/// Applies a random XZ offset to the active 3D camera each frame based on
+/// [`ShakeState::magnitude`], then decays the magnitude exponentially.
+///
+/// Runs after [`process_hull_shake`] (so it reads the accumulated shake
+/// for the current frame) and after [`hull_camera`] in the renderer plugin
+/// (so the base camera position is already set).
+///
+/// When magnitude drops below 0.01 units the shake is fully settled; the
+/// camera is left at the position set by [`hull_camera`].
+fn apply_camera_shake(
+    time: Res<Time>,
+    mut shake: ResMut<ShakeState>,
+    mut cam_query: Query<&mut Transform, With<GameCamera>>,
+) {
+    let Ok(mut transform) = cam_query.single_mut() else { return };
+
+    if shake.magnitude > 0.01 {
+        let dt = time.delta_secs();
+        let mut rng = rand::rng();
+        let offset_x = rng.random_range(-shake.magnitude..shake.magnitude);
+        let offset_z = rng.random_range(-shake.magnitude..shake.magnitude);
+
+        transform.translation.x += offset_x;
+        transform.translation.z += offset_z;
+
+        shake.magnitude *= (-SHAKE_DECAY_RATE * dt).exp();
+        if shake.magnitude < 0.01 {
+            shake.magnitude = 0.0;
         }
     }
 }

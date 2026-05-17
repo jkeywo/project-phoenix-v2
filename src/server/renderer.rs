@@ -55,7 +55,7 @@ pub fn diff_torpedo_sets(
 struct LobbyCamera;
 
 #[derive(Component)]
-struct GameCamera;
+pub struct GameCamera;
 
 /// 2D camera used to render the radar overlay during InProgress + ViewMode::Radar.
 #[derive(Component)]

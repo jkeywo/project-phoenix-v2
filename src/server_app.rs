@@ -231,7 +231,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 
             // Extract all resource data (borrows are confined to this block).
             let (hull_current, console_hull, power_levels, flags, helm_range_mult, charge_progress,
-                 ship_x, ship_z, ship_yaw, ship_red_alert, ship_view_mode) = {
+                 ship_x, ship_z, ship_yaw, ship_forward_speed, ship_red_alert, ship_view_mode) = {
                 let ship = world.resource::<ShipState>();
                 let hull = world.resource::<ShipHullIntegrity>();
                 let power = world.get_resource::<ShipPowerSystem>();
@@ -254,7 +254,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 (
                     hull.0.total_current(), console_hull, power_levels, flags, helm_range_mult,
                     impulse.0.charge_progress,
-                    ship.x, ship.z, ship.yaw, ship.red_alert(), ship.view_mode.clone(),
+                    ship.x, ship.z, ship.yaw, ship.forward_speed, ship.red_alert(), ship.view_mode.clone(),
                 )
             };
 
@@ -271,6 +271,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 ship_x,
                 ship_z,
                 ship_yaw,
+                forward_speed: ship_forward_speed,
                 hull_integrity: hull_current,
                 console_hull,
                 power_levels,

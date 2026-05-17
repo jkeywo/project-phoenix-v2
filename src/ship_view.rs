@@ -13,6 +13,8 @@ pub struct ShipView {
     pub ship_x: f32,
     pub ship_z: f32,
     pub ship_yaw: f32,
+    /// Current forward speed in world units per second (negative = reversing).
+    pub forward_speed: f32,
     pub hull_fraction: f32,
     pub power_levels: (u8, u8, u8),
     pub impulse_charge_progress: f32,
@@ -29,6 +31,7 @@ impl Default for ShipView {
             ship_x: 0.0,
             ship_z: 0.0,
             ship_yaw: 0.0,
+            forward_speed: 0.0,
             hull_fraction: 1.0,
             power_levels: (2, 2, 2),
             impulse_charge_progress: 0.0,
@@ -64,6 +67,7 @@ impl ShipView {
                 self.ship_x = snapshot.ship_x;
                 self.ship_z = snapshot.ship_z;
                 self.ship_yaw = snapshot.ship_yaw;
+                self.forward_speed = snapshot.forward_speed;
                 self.power_levels = snapshot.power_levels;
                 self.impulse_charge_progress = snapshot.impulse_charge_progress;
                 self.hull_fraction = (snapshot.hull_integrity / 100.0).clamp(0.0, 1.0);
@@ -191,6 +195,7 @@ mod tests {
             ship_x: 0.0,
             ship_z: 0.0,
             ship_yaw: 0.0,
+            forward_speed: 0.0,
             hull_integrity: 100.0,
             power_levels: (2, 2, 2),
             impulse_charge_progress: 0.0,
@@ -249,6 +254,31 @@ mod tests {
         assert_eq!(view.ship_x, 12.5);
         assert_eq!(view.ship_z, -7.25);
         assert_eq!(view.power_levels, (3, 2, 4));
+    }
+
+    #[test]
+    fn sim_state_updates_forward_speed() {
+        let mut view = ShipView::default();
+        assert_eq!(view.forward_speed, 0.0);
+        view.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                forward_speed: 18.5,
+                ..base_snapshot()
+            },
+        });
+        assert!((view.forward_speed - 18.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sim_state_negative_forward_speed_propagates() {
+        let mut view = ShipView::default();
+        view.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                forward_speed: -5.0,
+                ..base_snapshot()
+            },
+        });
+        assert!((view.forward_speed - (-5.0)).abs() < 1e-6);
     }
 
     #[test]

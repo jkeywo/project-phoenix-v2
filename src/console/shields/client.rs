@@ -130,6 +130,7 @@ fn setup_shields_ui(mut commands: Commands) {
                     BackgroundColor(Color::srgb(0.2, 0.4, 0.8)),
                 ));
                 row.spawn((
+                    ShieldFacingHP(label.to_string()),
                     Text::new("100/100"),
                     TextFont { font_size: 10.0, ..default() },
                     TextColor(Color::srgb(0.6, 0.8, 1.0)),
@@ -201,7 +202,7 @@ fn toggle_shields_panel_visibility(
 fn refresh_shields_panel(
     sim: Res<ClientSimState>,
     mut bars: Query<(&ShieldFacingBar, &mut BackgroundColor), Without<ShieldFocusButton>>,
-    mut hp_nodes: Query<(&ShieldFacingHP, &mut Node)>,
+    mut hp_nodes: Query<(&ShieldFacingHP, &mut Node), Without<Text>>,
     mut hp_texts: Query<(&ShieldFacingHP, &mut Text)>,
     mut focus_btns: Query<(&ShieldFocusButton, &mut BackgroundColor), Without<ShieldFacingBar>>,
 ) {

@@ -478,6 +478,7 @@ fn spawn_phone_helm_ui(
         commands.entity(pad).observe(on_phone_helm_drag_start);
         commands.entity(pad).observe(on_phone_helm_drag);
         commands.entity(pad).observe(on_phone_helm_drag_end);
+        commands.entity(pad).observe(on_phone_helm_drag_cancel);
     }
 }
 
@@ -919,6 +920,19 @@ fn on_phone_helm_drag_end(
     }
 }
 
+fn on_phone_helm_drag_cancel(
+    _trigger: On<Pointer<Cancel>>,
+    mut state: ResMut<HelmJoystickState>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+    mut knob_bg: Query<&mut BackgroundColor, With<PhoneHelmKnob>>,
+) {
+    let msg = release(&mut state);
+    outbound.write(OutboundClientMessage(msg));
+    for mut bg in knob_bg.iter_mut() {
+        bg.0 = HELM_KNOB_BG_IDLE;
+    }
+}
+
 // ── Update systems ───────────────────────────────────────────────────
 
 fn rotate_compass_ring_by_yaw(
@@ -963,7 +977,6 @@ fn refresh_phone_helm_readout(
 
 fn update_radar_readouts(
     ship_view: Res<ShipView>,
-    mut speed: ResMut<PhoneShipSpeed>,
     mut hdg: Query<&mut Text, (With<PhoneHdgReadout>, Without<PhoneSpdReadout>, Without<PhoneXReadout>, Without<PhoneZReadout>)>,
     mut spd: Query<&mut Text, (With<PhoneSpdReadout>, Without<PhoneHdgReadout>, Without<PhoneXReadout>, Without<PhoneZReadout>)>,
     mut x_read: Query<&mut Text, (With<PhoneXReadout>, Without<PhoneHdgReadout>, Without<PhoneSpdReadout>, Without<PhoneZReadout>)>,
@@ -973,21 +986,11 @@ fn update_radar_readouts(
         return;
     }
 
-    if speed.initialized {
-        let dx = ship_view.ship_x - speed.prev_x;
-        let dz = ship_view.ship_z - speed.prev_z;
-        speed.speed = (dx * dx + dz * dz).sqrt();
-    } else {
-        speed.initialized = true;
-    }
-    speed.prev_x = ship_view.ship_x;
-    speed.prev_z = ship_view.ship_z;
-
     for mut text in hdg.iter_mut() {
         **text = format!("HDG {}", yaw_to_heading(ship_view.ship_yaw));
     }
     for mut text in spd.iter_mut() {
-        **text = format!("SPD {:.0}", speed.speed);
+        **text = format!("SPD {:.0}", ship_view.forward_speed);
     }
     for mut text in x_read.iter_mut() {
         **text = format!("X {:.0}", ship_view.ship_x);

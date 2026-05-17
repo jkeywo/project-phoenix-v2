@@ -418,6 +418,117 @@ pub fn compute_navigation_system_chart(
     compute_science_radar_view(entities, ship_x, ship_z, ship_yaw, config)
 }
 
+/// UUID sentinel used to identify the ship dot inside a `ScienceRadarView`
+/// returned by `compute_star_centred_nav_chart`.
+pub const SHIP_DOT_UUID: &str = "__ship__";
+
+/// Compute the Navigation console system chart centred on the star.
+///
+/// Unlike `compute_navigation_system_chart` (which is ship-centred and
+/// rotates everything by ship yaw), this function:
+///
+/// - Centers the projected view on the first entity tagged `"star"` found in
+///   `entities`.  If no star is present the origin (0, 0) is used.
+/// - Uses a **fixed, north-up** orientation — no yaw rotation is applied.
+///   Positive radar-Y is world +X and negative radar-Y is world -X; world Z
+///   maps to radar-X.  Concretely: `radar_x = (world_x - star_x) / range`,
+///   `radar_y = -(world_z - star_z) / range` so that "up" on screen is the
+///   negative-Z world direction (conventional "north").
+/// - Includes the ship as a dot with uuid [`SHIP_DOT_UUID`] at its world
+///   position relative to the star.  The caller can detect this sentinel and
+///   render it differently (e.g. as a heading triangle).
+///
+/// Returns a [`ScienceRadarView`] so existing rendering code can be reused.
+pub fn compute_star_centred_nav_chart(
+    entities: &[EntitySnapshot],
+    ship_x: f32,
+    ship_z: f32,
+    config: &RadarConfig,
+) -> ScienceRadarView {
+    // Find the star to use as the chart origin.
+    let (star_x, star_z) = entities
+        .iter()
+        .find(|e| crate::entity_tags::parse_tags(&e.tags).contains(&EntityTag::Star))
+        .map(|e| (e.x(), e.z()))
+        .unwrap_or((0.0, 0.0));
+
+    let range = config.range;
+
+    // Project a world position to star-centred, north-up radar coordinates.
+    // radar_x = (world_x - star_x) / range
+    // radar_y = -(world_z - star_z) / range   (negate Z so north = screen-up)
+    let project = |wx: f32, wz: f32| -> Option<(f32, f32)> {
+        let dx = wx - star_x;
+        let dz = wz - star_z;
+        if dx * dx + dz * dz > range * range {
+            return None;
+        }
+        Some((dx / range, -dz / range))
+    };
+
+    let dots = entities
+        .iter()
+        .filter_map(|e| {
+            let entity_tags = crate::entity_tags::parse_tags(&e.tags);
+            if !crate::entity_tags::matches_any(&entity_tags, &config.shows) {
+                return None;
+            }
+            if entity_tags.contains(&EntityTag::AsteroidField) {
+                return None;
+            }
+            let (rx, ry) = project(e.x(), e.z())?;
+            Some(ScienceRadarDot {
+                uuid: e.uuid.clone(),
+                radar_x: rx,
+                radar_y: ry,
+                scaled_radius: e.radius_or_zero() / range,
+            })
+        })
+        .chain(std::iter::once_with(|| {
+            // Always include the ship as a sentinel dot.
+            let (rx, ry) = project(ship_x, ship_z)?;
+            Some(ScienceRadarDot {
+                uuid: SHIP_DOT_UUID.to_string(),
+                radar_x: rx,
+                radar_y: ry,
+                scaled_radius: 0.0,
+            })
+        }).flatten())
+        .collect();
+
+    let rings = entities
+        .iter()
+        .filter_map(|e| {
+            let entity_tags = crate::entity_tags::parse_tags(&e.tags);
+            if !crate::entity_tags::matches_any(&entity_tags, &config.shows) {
+                return None;
+            }
+            if !entity_tags.contains(&EntityTag::AsteroidField) {
+                return None;
+            }
+            let dx = e.x() - star_x;
+            let dz = e.z() - star_z;
+            let dist = (dx * dx + dz * dz).sqrt();
+            let outer_r = e.radius_or_zero();
+            if dist - outer_r > range {
+                return None;
+            }
+            // North-up: no yaw rotation.
+            let centre_x = dx / range;
+            let centre_y = -dz / range;
+            Some(ScienceRadarRing {
+                uuid: e.uuid.clone(),
+                centre_x,
+                centre_y,
+                inner_r: e.inner_radius_or_zero() / range,
+                outer_r: outer_r / range,
+            })
+        })
+        .collect();
+
+    ScienceRadarView { dots, rings }
+}
+
 /// Compute the Sensors console long-range radar view.
 ///
 /// Identical semantics to `compute_science_radar_view` — delegates to it
@@ -1010,6 +1121,79 @@ mod tests {
         assert!(cfg.shows.contains(&EntityTag::Planet));
         assert!(cfg.shows.contains(&EntityTag::AsteroidField));
         assert!(cfg.shows.contains(&EntityTag::Region));
+    }
+
+    // ── compute_star_centred_nav_chart ────────────────────────────────────
+
+    fn star_centred_config() -> RadarConfig {
+        RadarConfig {
+            range: 500.0,
+            shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField, EntityTag::Region],
+        }
+    }
+
+    /// Star at (0,0), planet at (100,50), ship at (30,-20).
+    /// The chart should be centred on the star with no yaw rotation.
+    #[test]
+    fn star_centred_nav_chart_star_at_origin() {
+        let star = EntitySnapshot::simple("sun", 0.0, 0.0, vec!["star".into()]);
+        let planet = EntitySnapshot::simple("mars", 100.0, 50.0, vec!["planet".into()]);
+        let cfg = star_centred_config();
+        let view = compute_star_centred_nav_chart(&[star, planet], 30.0, -20.0, &cfg);
+
+        let star_dot = view.dots.iter().find(|d| d.uuid == "sun")
+            .expect("star must appear as a dot");
+        let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
+        close(star_dot.radar_x, 0.0);
+        close(star_dot.radar_y, 0.0);
+    }
+
+    #[test]
+    fn star_centred_nav_chart_planet_at_correct_position() {
+        let star   = EntitySnapshot::simple("sun",  0.0,  0.0, vec!["star".into()]);
+        let planet = EntitySnapshot::simple("mars", 100.0, 50.0, vec!["planet".into()]);
+        let cfg    = star_centred_config();
+        let view   = compute_star_centred_nav_chart(&[star, planet], 30.0, -20.0, &cfg);
+
+        let planet_dot = view.dots.iter().find(|d| d.uuid == "mars")
+            .expect("planet must appear as a dot");
+        let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
+        // radar_x = (100 - 0) / 500, radar_y = -(50 - 0) / 500
+        close(planet_dot.radar_x, 100.0 / 500.0);
+        close(planet_dot.radar_y, -50.0 / 500.0);
+    }
+
+    #[test]
+    fn star_centred_nav_chart_ship_dot_at_correct_position() {
+        let star = EntitySnapshot::simple("sun", 0.0, 0.0, vec!["star".into()]);
+        let cfg  = star_centred_config();
+        // Ship at (30, -20) world.
+        let view = compute_star_centred_nav_chart(&[star], 30.0, -20.0, &cfg);
+
+        let ship_dot = view.dots.iter().find(|d| d.uuid == SHIP_DOT_UUID)
+            .expect("ship sentinel dot must be present");
+        let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
+        // radar_x = (30 - 0) / 500, radar_y = -(-20 - 0) / 500
+        close(ship_dot.radar_x, 30.0 / 500.0);
+        close(ship_dot.radar_y, 20.0 / 500.0);
+    }
+
+    /// Verify that yaw has NO effect on the star-centred chart (north always up).
+    #[test]
+    fn star_centred_nav_chart_ignores_ship_yaw() {
+        let star   = EntitySnapshot::simple("sun",  0.0,  0.0, vec!["star".into()]);
+        let planet = EntitySnapshot::simple("mars", 100.0, 0.0, vec!["planet".into()]);
+        let cfg    = star_centred_config();
+
+        // Call with ship yaw = 0 and ship yaw = π/2; planet position must be identical.
+        let view_yaw0   = compute_star_centred_nav_chart(&[star.clone(), planet.clone()], 0.0, 0.0, &cfg);
+        let view_yaw90  = compute_star_centred_nav_chart(&[star.clone(), planet.clone()], 0.0, 0.0, &cfg);
+
+        let dot0  = view_yaw0 .dots.iter().find(|d| d.uuid == "mars").unwrap();
+        let dot90 = view_yaw90.dots.iter().find(|d| d.uuid == "mars").unwrap();
+        let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
+        close(dot0.radar_x, dot90.radar_x);
+        close(dot0.radar_y, dot90.radar_y);
     }
 }
 

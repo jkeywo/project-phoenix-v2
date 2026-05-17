@@ -26,7 +26,7 @@ pub use crate::radar::SYSTEM_CHART_RANGE;
 pub fn helm_radar_config() -> RadarConfig {
     RadarConfig {
         range: HELM_RADAR_RANGE,
-        shows: vec![EntityTag::Asteroid],
+        shows: vec![EntityTag::Asteroid, EntityTag::Star, EntityTag::Planet],
     }
 }
 
@@ -53,7 +53,7 @@ pub fn weapons_radar_config() -> RadarConfig {
 pub fn science_radar_config() -> RadarConfig {
     RadarConfig {
         range: SCIENCE_RADAR_RANGE,
-        shows: vec![EntityTag::Asteroid, EntityTag::Ship, EntityTag::AsteroidField, EntityTag::Region],
+        shows: vec![EntityTag::Asteroid, EntityTag::Ship, EntityTag::AsteroidField, EntityTag::Region, EntityTag::Star, EntityTag::Planet],
     }
 }
 
@@ -1073,6 +1073,20 @@ mod tests {
         assert!(!cfg.shows.contains(&EntityTag::Region), "helm radar must NOT show regions");
     }
 
+    #[test]
+    fn helm_radar_config_shows_stars() {
+        use crate::entity_tags::EntityTag;
+        let cfg = helm_radar_config();
+        assert!(cfg.shows.contains(&EntityTag::Star), "helm radar must show stars");
+    }
+
+    #[test]
+    fn helm_radar_config_shows_planets() {
+        use crate::entity_tags::EntityTag;
+        let cfg = helm_radar_config();
+        assert!(cfg.shows.contains(&EntityTag::Planet), "helm radar must show planets");
+    }
+
     // ── weapons_radar_config ─────────────────────────────────────────────
 
     #[test]
@@ -1283,6 +1297,20 @@ mod tests {
         let cfg = science_radar_config();
         assert!(cfg.shows.contains(&EntityTag::Region), "science radar must show regions");
         assert!(cfg.shows.contains(&EntityTag::AsteroidField), "science radar must show asteroid fields");
+    }
+
+    #[test]
+    fn science_radar_config_shows_stars() {
+        use crate::entity_tags::EntityTag;
+        let cfg = science_radar_config();
+        assert!(cfg.shows.contains(&EntityTag::Star), "science radar must show stars");
+    }
+
+    #[test]
+    fn science_radar_config_shows_planets() {
+        use crate::entity_tags::EntityTag;
+        let cfg = science_radar_config();
+        assert!(cfg.shows.contains(&EntityTag::Planet), "science radar must show planets");
     }
 
     // ── compute_science_long_range_radar_view ────────────────────────────
@@ -1697,6 +1725,7 @@ mod tests {
                 red_alert: false,
                 view_mode: ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                forward_speed: 0.0,
                 hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
@@ -1723,6 +1752,7 @@ mod tests {
             snapshot: SimSnapshot {
                 red_alert: false, view_mode: ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                forward_speed: 0.0,
                 hull_integrity: 100.0, power_levels: (2, 2, 2),
                 flags: vec![], entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
@@ -1734,6 +1764,7 @@ mod tests {
             snapshot: SimSnapshot {
                 red_alert: false, view_mode: ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                forward_speed: 0.0,
                 hull_integrity: 100.0, power_levels: (2, 2, 2),
                 flags: vec![], entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
@@ -1751,6 +1782,7 @@ mod tests {
             snapshot: SimSnapshot {
                 red_alert: false, view_mode: ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                forward_speed: 0.0,
                 hull_integrity: 100.0, power_levels: (2, 2, 2),
                 flags: vec![], entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),

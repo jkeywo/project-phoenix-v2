@@ -57,6 +57,7 @@ impl ShipState {
             ship_x: self.x,
             ship_z: self.z,
             ship_yaw: self.yaw,
+            forward_speed: self.forward_speed,
             hull_integrity,
             power_levels,
             flags,
@@ -156,5 +157,13 @@ mod tests {
         let s = ShipState::new();
         let snap = s.snapshot(100.0, (2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.5, vec![]);
         assert!((snap.impulse_charge_progress - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn snapshot_includes_forward_speed() {
+        let mut s = ShipState::new();
+        s.forward_speed = 22.5;
+        let snap = snap(&s, 100.0, (2, 2, 2));
+        assert!((snap.forward_speed - 22.5).abs() < 1e-6);
     }
 }

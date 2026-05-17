@@ -223,6 +223,11 @@ fn handle_nav_cancel_impulse_button_press(
 }
 
 /// Draw the Navigation system chart on the `NavChartPanel` using gizmos.
+///
+/// Uses a star-centred, north-up projection so the star sits at the centre of
+/// the display and north (+Y screen direction) always points toward world -Z.
+/// The ship is shown as a heading triangle at its actual position relative to
+/// the star (not locked to the chart centre).
 fn draw_nav_chart(
     mut gizmos: Gizmos,
     panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<NavChartPanel>>,
@@ -249,6 +254,7 @@ fn draw_nav_chart(
     let node_centre_screen = gt.translation().truncate();
     let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
     let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
+    // `centre` is the screen position of the star (chart origin).
     let centre = Vec2::new(centre_world_x, centre_world_y);
 
     let radius = node_size.x.min(node_size.y) * 0.5;
@@ -256,7 +262,13 @@ fn draw_nav_chart(
         return;
     }
 
-    let chart_view = crate::client_sim::compute_system_chart_view(&sim, &ship_view);
+    let config = crate::radar::navigation_chart_config();
+    let chart_view = crate::radar::compute_star_centred_nav_chart(
+        &sim.world.entities,
+        ship_view.ship_x,
+        ship_view.ship_z,
+        &config,
+    );
     const ZOOM: f32 = 1.0;
 
     for ring in &chart_view.rings {
@@ -269,17 +281,31 @@ fn draw_nav_chart(
         }
     }
 
+    // Separate ship dot from other dots; track ship position for triangle.
+    let mut ship_radar_pos: Option<Vec2> = None;
     for dot in &chart_view.dots {
         let pos = centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
-        let pix_radius = (dot.scaled_radius * radius / ZOOM).max(3.0);
-        gizmos.circle_2d(pos, pix_radius, Color::srgb(0.8, 0.8, 0.4));
+        if dot.uuid == crate::radar::SHIP_DOT_UUID {
+            ship_radar_pos = Some(pos);
+        } else {
+            let pix_radius = (dot.scaled_radius * radius / ZOOM).max(3.0);
+            gizmos.circle_2d(pos, pix_radius, Color::srgb(0.8, 0.8, 0.4));
+        }
     }
 
+    // Draw ship as a small heading triangle at its star-relative position.
+    // The triangle points in the ship's yaw direction (north-up: yaw=0 → up).
+    let ship_pos = ship_radar_pos.unwrap_or(centre);
+    let yaw = ship_view.ship_yaw;
     let nose_len  = radius * 0.10;
     let half_base = radius * 0.06;
-    let nose  = centre + Vec2::new(0.0,  nose_len);
-    let left  = centre + Vec2::new(-half_base, -nose_len * 0.6);
-    let right = centre + Vec2::new( half_base, -nose_len * 0.6);
+    // In north-up space: yaw=0 means forward = -Z = screen +Y.
+    // Rotate the canonical "up" triangle by ship yaw.
+    let (sin_y, cos_y) = yaw.sin_cos();
+    let rotate = |v: Vec2| Vec2::new(v.x * cos_y + v.y * sin_y, -v.x * sin_y + v.y * cos_y);
+    let nose  = ship_pos + rotate(Vec2::new(0.0,  nose_len));
+    let left  = ship_pos + rotate(Vec2::new(-half_base, -nose_len * 0.6));
+    let right = ship_pos + rotate(Vec2::new( half_base, -nose_len * 0.6));
     gizmos.line_2d(nose, left,  Color::srgb(0.5, 1.0, 0.8));
     gizmos.line_2d(left, right, Color::srgb(0.5, 1.0, 0.8));
     gizmos.line_2d(right, nose, Color::srgb(0.5, 1.0, 0.8));

@@ -54,7 +54,7 @@ impl ShipPhysicsConfig {
             max_reverse_speed: 12.5,
             acceleration: 25.0 / 3.0,
             deceleration: 25.0,
-            max_yaw_rate: std::f32::consts::PI / 8.0,
+            max_yaw_rate: std::f32::consts::PI / 16.0,
         }
     }
 }
@@ -273,6 +273,14 @@ mod tests {
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.forward_speed > -1.0);
         assert!(result.forward_speed <= 0.0);
+    }
+
+    #[test]
+    fn max_yaw_rate_is_pi_over_16() {
+        assert_eq!(
+            ShipPhysicsConfig::new().max_yaw_rate,
+            std::f32::consts::PI / 16.0,
+        );
     }
 
     #[test]

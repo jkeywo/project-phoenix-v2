@@ -77,14 +77,14 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-770f8d2a9cb60805.js" crossorigin="anonymous" integrity="sha384-FPZD1kjcoeBvnJ+JcVt5w+lOPy8C4kkcbzjIY6YnbtF8IhEb3XER8M73bvMoqT8o"><link rel="preload" href="./project-phoenix-770f8d2a9cb60805_bg.wasm" crossorigin="anonymous" integrity="sha384-gdLY5WHiLlq+3kFNeFvgU5mfNsCbhoyC7efIWEQFUkMOox9Cg+Kxcl2I+/y0bCRB" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-48af5b0f0a64b58.js" crossorigin="anonymous" integrity="sha384-AT+KDYnWJhmGfwOQaxKi7tCtXlEWgAkY0Q7qF9N2ILr+DXug4I4HNlIH4ZPA1tkU"><link rel="preload" href="./project-phoenix-48af5b0f0a64b58_bg.wasm" crossorigin="anonymous" integrity="sha384-iVjd3BjGJUW5lPpWGZcfMVyzTEWWoHU687durE6mW21es2CBlQWEXfsbkIiy6aDP" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-770f8d2a9cb60805.js';
-const wasm = await init({ module_or_path: './project-phoenix-770f8d2a9cb60805_bg.wasm' });
+import init, * as bindings from './project-phoenix-48af5b0f0a64b58.js';
+const wasm = await init({ module_or_path: './project-phoenix-48af5b0f0a64b58_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -880,6 +880,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             if (el) { el.textContent = 'Target destroyed'; el.style.color = '#aaa'; }
           }
           renderWeaponsRadar();
+          return;
+        }
+        case 'DamageTaken': {
+          const { hull } = msg.data;
+          if (hull > 0) {
+            const clamped = Math.min(hull, 30);
+            const duration = Math.round(50 + (clamped / 30) * 250); // 50–300 ms
+            if (navigator.vibrate) navigator.vibrate(duration);
+          }
           return;
         }
         case 'ComplexityChanged': {

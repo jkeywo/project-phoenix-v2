@@ -4,4 +4,6 @@ pub mod weapons;
 pub mod repair;
 pub mod power;
 pub mod science;
+pub mod shields;
+pub mod navigation;
 pub mod comms;

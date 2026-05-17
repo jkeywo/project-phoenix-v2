@@ -67,8 +67,6 @@ pub struct CaptainPanelSpawned;
 
 // ── Plugin ──
 
-/// Replaces the simple grid-based captain UI with a direction pad overlaid on
-/// a compass ring, a rotating needle, and a red alert toggle with armed glow.
 pub struct CaptainPanelPlugin;
 
 impl Plugin for CaptainPanelPlugin {
@@ -117,9 +115,6 @@ pub fn captain_panel_visible(
 
 // ── Systems ──
 
-/// Shows or hides the captain panel based on lobby phase, captaincy, and
-/// active console tab. Delegates the decision to the pure `captain_panel_visible`
-/// helper so the rule is unit-testable without Bevy.
 fn toggle_captain_panel_visibility(
     lobby: Res<LobbyState>,
     token: Res<LocalPlayerToken>,
@@ -134,7 +129,6 @@ fn toggle_captain_panel_visibility(
 
 // ── Spawn system ──
 
-/// Spawns the full captain panel once PhoneAssets are loaded.
 fn spawn_captain_ui(
     mut commands: Commands,
     assets: Option<Res<PhoneAssets>>,
@@ -142,7 +136,6 @@ fn spawn_captain_ui(
 ) {
     let Some(assets) = assets else { return };
 
-    // Despawn any stale captain panel from a previous run.
     for entity in old_panel.iter() {
         commands.entity(entity).despawn();
     }
@@ -216,10 +209,7 @@ fn spawn_captain_ui(
                     ));
                 }
 
-                // Rotating needle (centred in the dial)
-                // Parent: absolute-positioned Node for layout only.
-                // Child: ImageNode + Transform, NO Node component so the UI
-                // layout system does not overwrite the rotation.
+                // Rotating needle
                 dial.spawn((
                     Node {
                         position_type: PositionType::Absolute,
@@ -263,7 +253,6 @@ fn spawn_captain_ui(
                 },
                 BackgroundColor(RA_BG_IDLE),
             )).with_children(|btn| {
-                // Armed glow dot
                 btn.spawn((
                     ArmedGlow,
                     Node {
@@ -273,7 +262,6 @@ fn spawn_captain_ui(
                     },
                     BackgroundColor(Color::srgba(1.0, 0.2, 0.2, 0.0)),
                 ));
-                // Label
                 btn.spawn((
                     Text::new("RED ALERT"),
                     TextFont {
@@ -287,7 +275,6 @@ fn spawn_captain_ui(
         });
 }
 
-/// Spawn one chamfered direction pad button at the given absolute position.
 fn spawn_dir_button(
     parent: &mut ChildSpawnerCommands,
     dir: ViewDirection,
@@ -358,7 +345,6 @@ pub fn direction_press_message(dir: ViewDirection) -> ClientMessage {
 
 // ── Systems ──
 
-/// Highlights the active direction button's background and LED.
 fn refresh_dir_highlights(
     ship_view: Res<ShipView>,
     mut buttons: Query<(&DirButton, &Children, &mut BackgroundColor), Without<DirLed>>,
@@ -379,7 +365,6 @@ fn refresh_dir_highlights(
     }
 }
 
-/// Updates the red alert toggle background and the armed glow pulse.
 fn refresh_red_alert_ui(
     ship_view: Option<Res<ShipView>>,
     time: Res<Time>,
@@ -405,7 +390,6 @@ fn refresh_red_alert_ui(
     }
 }
 
-/// Rotates the compass needle to match the active `ViewDirection`.
 fn rotate_needle_by_direction(
     ship_view: Res<ShipView>,
     mut needles: Query<&mut Transform, With<CompassNeedle>>,
@@ -423,7 +407,6 @@ fn rotate_needle_by_direction(
     }
 }
 
-/// Handles direction pad button presses and emits `SetView`.
 fn handle_direction_press(
     mut interactions: Query<(&Interaction, &DirButton), (Changed<Interaction>, With<Button>)>,
     mut outbound: MessageWriter<OutboundClientMessage>,
@@ -435,7 +418,6 @@ fn handle_direction_press(
     }
 }
 
-/// Handles red alert toggle presses and emits `ToggleRedAlert`.
 fn handle_red_alert_press(
     mut interactions: Query<
         &Interaction,
@@ -483,8 +465,6 @@ mod tests {
     fn needle_starboard_rotates_neg_90() {
         let rot = needle_rotation(&ViewDirection::Starboard);
         let (axis, angle) = rot.to_axis_angle();
-        // `to_axis_angle` normalises negative angles to [0, π] with
-        // reversed axis, so we check the angle magnitude and z sign.
         assert!(
             (angle - std::f32::consts::FRAC_PI_2).abs() < 1e-6,
             "starboard should be 90° magnitude, got {angle}"
@@ -551,7 +531,7 @@ mod tests {
 
     #[test]
     fn hidden_during_lobby_phase() {
-        let lobby = LobbyState::default(); // Lobby phase, no players
+        let lobby = LobbyState::default();
         let active = ActiveConsole::default();
         assert!(!captain_panel_visible(&lobby, "me", &active));
     }
@@ -570,7 +550,7 @@ mod tests {
     #[test]
     fn visible_when_captain_and_only_console() {
         let lobby = in_progress_lobby("me");
-        let active = ActiveConsole::default(); // None = auto
+        let active = ActiveConsole::default();
         assert!(captain_panel_visible(&lobby, "me", &active));
     }
 
@@ -598,13 +578,12 @@ mod tests {
 
     #[test]
     fn hidden_when_multi_console_captain_and_no_tab_set() {
-        // With 2 consoles and no explicit tab, captain panel is NOT auto-shown
         let mut lobby = LobbyState::default();
         lobby.apply(&welcome(game_state(
             GamePhase::InProgress,
             vec![player("me", vec![Console::CaptainChair, Console::Helm])],
         )));
-        let active = ActiveConsole::default(); // None
+        let active = ActiveConsole::default();
         assert!(!captain_panel_visible(&lobby, "me", &active));
     }
 }

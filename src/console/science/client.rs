@@ -1,4 +1,4 @@
-//! Client-side Science (Sensors) Panel plugin.
+//! Client-side Sensors Panel plugin.
 //!
 //! Owns the Sensors console UI: long-range radar display, science target
 //! designation, cancel-impulse button (visible only at impulse), and
@@ -17,7 +17,7 @@ use crate::ship_view::ShipView;
 // ── Pure visibility helper ────────────────────────────────────────────
 
 /// Decide whether the science panel should be visible.
-pub fn science_panel_visible(
+pub fn sensors_panel_visible(
     lobby: &LobbyState,
     token: &str,
     active: &ActiveConsole,
@@ -39,9 +39,9 @@ pub fn science_panel_visible(
 
 // ── Marker components ────────────────────────────────────────────────
 
-/// Marks the root of the Science console UI.
+/// Marks the root of the Sensors console UI.
 #[derive(Component)]
-pub struct SciencePanel;
+pub struct SensorsPanel;
 
 /// Marks the long-range radar display panel (gizmo-drawn).
 #[derive(Component)]
@@ -72,15 +72,15 @@ const RADAR_SHIP_COLOR:       Color = Color::srgb(0.95, 0.95, 1.0);
 
 // ── Plugin ────────────────────────────────────────────────────────────
 
-pub struct SciencePanelPlugin;
+pub struct SensorsPanelPlugin;
 
-impl Plugin for SciencePanelPlugin {
+impl Plugin for SensorsPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_science_ui)
+        app.add_systems(Startup, setup_sensors_ui)
             .add_systems(
                 Update,
                 (
-                    toggle_science_panel_visibility,
+                    toggle_sensors_panel_visibility,
                     refresh_cancel_impulse_visibility,
                     handle_science_radar_button_press,
                     handle_science_cancel_impulse_button_press,
@@ -93,9 +93,9 @@ impl Plugin for SciencePanelPlugin {
 
 // ── Setup ────────────────────────────────────────────────────────────
 
-fn setup_science_ui(mut commands: Commands) {
+fn setup_sensors_ui(mut commands: Commands) {
     commands.spawn((
-        SciencePanel,
+        SensorsPanel,
         Node {
             position_type: PositionType::Absolute,
             left:   Val::Px(0.0),
@@ -171,13 +171,13 @@ fn setup_science_ui(mut commands: Commands) {
 
 // ── Systems ──────────────────────────────────────────────────────────
 
-fn toggle_science_panel_visibility(
+fn toggle_sensors_panel_visibility(
     lobby: Res<LobbyState>,
     token: Res<LocalPlayerToken>,
     active: Res<ActiveConsole>,
-    mut panel: Query<&mut Visibility, With<SciencePanel>>,
+    mut panel: Query<&mut Visibility, With<SensorsPanel>>,
 ) {
-    let visible = science_panel_visible(&lobby, &token.0, &active);
+    let visible = sensors_panel_visible(&lobby, &token.0, &active);
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
     }
@@ -239,12 +239,12 @@ fn handle_science_on_screen_button_press(
 fn draw_science_radar(
     mut gizmos: Gizmos,
     panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<ScienceRadarPanel>>,
-    science_panel: Query<&Visibility, With<SciencePanel>>,
+    sensors_panel: Query<&Visibility, With<SensorsPanel>>,
     sim: Res<crate::client_sim::ClientSimState>,
     ship_view: Res<ShipView>,
     windows: Query<&Window>,
 ) {
-    if !science_panel
+    if !sensors_panel
         .iter()
         .any(|v| matches!(v, Visibility::Visible | Visibility::Inherited))
     {
@@ -324,20 +324,20 @@ mod tests {
         s
     }
 
-    // ── science_panel_visible ─────────────────────────────────────────
+    // ── sensors_panel_visible ─────────────────────────────────────────
 
     #[test]
-    fn science_panel_not_visible_in_lobby_phase() {
+    fn sensors_panel_not_visible_in_lobby_phase() {
         let lobby = LobbyState::default();
         let active = ActiveConsole::default();
-        assert!(!science_panel_visible(&lobby, "tok", &active));
+        assert!(!sensors_panel_visible(&lobby, "tok", &active));
     }
 
     #[test]
-    fn science_panel_not_visible_when_player_does_not_hold_sensors() {
+    fn sensors_panel_not_visible_when_player_does_not_hold_sensors() {
         let lobby = lobby_in_progress();
         let active = ActiveConsole::default();
-        assert!(!science_panel_visible(&lobby, "tok", &active));
+        assert!(!sensors_panel_visible(&lobby, "tok", &active));
     }
 
     // ── science_target_message ────────────────────────────────────────

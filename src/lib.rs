@@ -75,6 +75,8 @@ pub use console::science::server as science_plugin;
 pub use console::comms::inbox as comms_inbox;
 
 #[cfg(feature = "client")]
+pub use console::captain::client as captain_panel;
+#[cfg(feature = "client")]
 pub use console::helm::client as helm_panel;
 #[cfg(feature = "client")]
 pub use console::weapons::client as weapons_panel;
@@ -83,7 +85,11 @@ pub use console::repair::client as repair_panel;
 #[cfg(feature = "client")]
 pub use console::power::client as power_panel;
 #[cfg(feature = "client")]
-pub use console::science::client as science_panel;
+pub use console::science::client as sensors_panel;
+#[cfg(feature = "client")]
+pub use console::shields::client as shields_panel;
+#[cfg(feature = "client")]
+pub use console::navigation::client as navigation_panel;
 #[cfg(feature = "client")]
 pub use console::comms::client as comms_panel;
 

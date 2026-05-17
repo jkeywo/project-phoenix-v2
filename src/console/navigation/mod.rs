@@ -1,6 +1,3 @@
-pub mod server;
-pub use server::*;
-
 #[cfg(feature = "client")]
 pub mod client;
 

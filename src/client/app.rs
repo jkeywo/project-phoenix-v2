@@ -19,7 +19,7 @@ use crate::client_lobby::{
 use crate::client_sim::ClientSimState;
 use crate::client_complexity::{self, ComplexityStore};
 use crate::client_elements::HideableElementRegistry;
-use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage, ViewDirection, ViewMode};
+use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
 
 // ── Events ─────────────────────────────────────────────────────────
 
@@ -149,54 +149,6 @@ pub struct RepairButtonLabel;
 #[derive(Component)]
 pub struct RepairIconLabel;
 
-/// Marks the root of the Sensors console UI; shown only when the local
-/// player holds Sensors and the phase is InProgress.
-#[derive(Component)]
-pub struct SensorsPanel;
-
-/// Marks the root of the Shields console UI; shown only when the local
-/// player holds Shields and the phase is InProgress.
-#[derive(Component)]
-pub struct ShieldsPanel;
-
-/// Marks a shield focus selector button. Carries the `ViewDirection` it targets,
-/// or `None` to clear focus.
-#[derive(Component)]
-struct ShieldFocusButton(Option<ViewDirection>);
-
-/// Marks a single shield facing HP bar container; carries the facing label.
-#[derive(Component)]
-struct ShieldFacingBar(String);
-
-/// Marks the text node showing the HP fraction inside a facing bar.
-#[derive(Component)]
-struct ShieldFacingHP(String);
-
-/// Marks the arc display container label.
-#[derive(Component)]
-struct ShieldFacingLabel;
-
-/// Marks the root of the Navigation console UI; shown only when the local
-/// player holds Navigation and the phase is InProgress.
-#[derive(Component)]
-pub struct NavigationPanel;
-
-/// Marks the On Screen button on the Navigation console; pressing it sends
-/// `SetView { mode: ViewMode::NavigationChart }`.
-#[derive(Component)]
-pub struct NavOnScreenButton;
-
-/// Marks the Cancel Impulse button on the Navigation console.
-#[derive(Component)]
-pub struct NavCancelImpulseButton;
-
-/// Marks the impulse status text on the Navigation console.
-#[derive(Component)]
-pub struct NavImpulseStatusText;
-
-/// Marks the navigation chart radar panel container (gizmo-drawn).
-#[derive(Component)]
-pub struct NavChartPanel;
 
 /// Marks the root of the weapons console UI; shown only when the local
 /// player holds Tactical and the phase is InProgress.
@@ -260,7 +212,7 @@ impl Plugin for ClientAppPlugin {
             .init_resource::<LandscapeMode>()
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
-            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_helm_ui, setup_sensors_ui, setup_shields_ui, setup_navigation_ui, setup_tab_bar_ui))
+            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_helm_ui, setup_tab_bar_ui))
                 .add_systems(
                     Update,
                     (
@@ -284,21 +236,7 @@ impl Plugin for ClientAppPlugin {
                             handle_repair_button_press,
                             refresh_repair_button,
                         ),
-                        (
-                            toggle_sensors_panel_visibility,
-                            (
-                                toggle_shields_panel_visibility,
-                                refresh_shields_panel,
-                                handle_shield_focus_button_press,
-                            ),
-                            (
-                                toggle_navigation_panel_visibility,
-                                refresh_navigation_panel,
-                                handle_nav_on_screen_button_press,
-                                handle_nav_cancel_impulse_button_press,
-                                draw_nav_chart,
-                            ),
-                        ),
+
                         (
                             rebuild_tab_bar,
                             handle_tab_button_press,
@@ -1192,503 +1130,7 @@ fn setup_helm_ui(_commands: Commands) {
     // does not need to be changed.
 }
 
-fn setup_sensors_ui(mut commands: Commands) {
-    commands.spawn((
-        SensorsPanel,
-        Node {
-            position_type: PositionType::Absolute,
-            left:   Val::Px(0.0),
-            top:    Val::Px(0.0),
-            right:  Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },
-        Visibility::Hidden,
-    ))
-    .with_children(|panel| {
-        panel.spawn((
-            Text::new("Sensors"),
-            TextFont { font_size: 32.0, ..default() },
-            TextColor(Color::srgb(0.8, 0.8, 1.0)),
-        ));
-        panel.spawn((
-            RepairIconLabel,
-            Text::new(""),
-            TextFont { font_size: 14.0, ..default() },
-            TextColor(Color::srgb(0.8, 0.5, 0.2)),
-        ));
-    });
-}
 
-fn setup_shields_ui(mut commands: Commands) {
-    let facings = ["Fore", "Port", "Aft", "Starboard"];
-    let dirs = [Some(ViewDirection::Fore), Some(ViewDirection::Port), Some(ViewDirection::Aft), Some(ViewDirection::Starboard), None];
-
-    commands.spawn((
-        ShieldsPanel,
-        Node {
-            position_type: PositionType::Absolute,
-            left:   Val::Px(0.0),
-            top:    Val::Px(0.0),
-            right:  Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(8.0),
-            padding: UiRect::axes(Val::Px(16.0), Val::Px(16.0)),
-            ..default()
-        },
-        Visibility::Hidden,
-    ))
-    .with_children(|panel| {
-        panel.spawn((
-            Text::new("SHIELDS"),
-            TextFont { font_size: 24.0, ..default() },
-            TextColor(Color::srgb(0.4, 0.8, 1.0)),
-        ));
-
-        // Four facing HP bars
-        for label in &facings {
-            panel.spawn((
-                ShieldFacingBar(label.to_string()),
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    width: Val::Percent(80.0),
-                    height: Val::Px(32.0),
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.10, 0.12, 0.16, 1.0)),
-            ))
-            .with_children(|row| {
-                // Label
-                row.spawn((
-                    ShieldFacingLabel,
-                    Text::new(*label),
-                    TextFont { font_size: 12.0, ..default() },
-                    TextColor(Color::srgb(0.6, 0.8, 1.0)),
-                    Node { width: Val::Px(60.0), ..default() },
-                ));
-                // HP bar fill
-                row.spawn((
-                    ShieldFacingHP(label.to_string()),
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.2, 0.4, 0.8)),
-                ));
-                // HP text
-                row.spawn((
-                    Text::new("100/100"),
-                    TextFont { font_size: 10.0, ..default() },
-                    TextColor(Color::srgb(0.6, 0.8, 1.0)),
-                    Node { width: Val::Px(70.0), ..default() },
-                ));
-            });
-        }
-
-        // Focus buttons row
-        panel.spawn(Node {
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(6.0),
-            padding: UiRect::top(Val::Px(8.0)),
-            ..default()
-        })
-        .with_children(|row| {
-            for dir in &dirs {
-                let label = match dir {
-                    Some(ViewDirection::Fore) => "Fore",
-                    Some(ViewDirection::Port) => "Port",
-                    Some(ViewDirection::Aft) => "Aft",
-                    Some(ViewDirection::Starboard) => "Stbd",
-                    None => "Clear",
-                };
-                row.spawn((
-                    ShieldFocusButton(dir.clone()),
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.15, 0.18, 0.25)),
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        Text::new(label),
-                        TextFont { font_size: 11.0, ..default() },
-                        TextColor(Color::srgb(0.6, 0.8, 1.0)),
-                    ));
-                });
-            }
-        });
-    });
-}
-
-fn setup_navigation_ui(mut commands: Commands) {
-    commands.spawn((
-        NavigationPanel,
-        Node {
-            position_type: PositionType::Absolute,
-            left:   Val::Px(0.0),
-            top:    Val::Px(0.0),
-            right:  Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },
-        Visibility::Hidden,
-    ))
-    .with_children(|panel| {
-        panel.spawn((
-            Text::new("Navigation"),
-            TextFont { font_size: 32.0, ..default() },
-            TextColor(Color::srgb(0.5, 1.0, 0.8)),
-        ));
-
-        // System chart display (gizmo-drawn via NavChartPanel bounds)
-        panel.spawn((
-            NavChartPanel,
-            Node {
-                width:  Val::Px(240.0),
-                height: Val::Px(240.0),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.3, 1.0, 0.5)),
-            BackgroundColor(Color::srgb(0.04, 0.06, 0.10)),
-        ));
-
-        // Impulse status row
-        panel.spawn(Node {
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(12.0),
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(|row| {
-            row.spawn((
-                NavImpulseStatusText,
-                Text::new("Impulse: Idle"),
-                TextFont { font_size: 16.0, ..default() },
-                TextColor(Color::srgb(0.5, 1.0, 0.8)),
-            ));
-            row.spawn((
-                NavCancelImpulseButton,
-                Button,
-                Node {
-                    padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.40, 0.05, 0.05)),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("CANCEL IMPULSE"),
-                    TextFont { font_size: 14.0, ..default() },
-                    TextColor(Color::srgb(1.0, 0.4, 0.4)),
-                ));
-            });
-        });
-
-        // On Screen button
-        panel.spawn((
-            NavOnScreenButton,
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(18.0), Val::Px(10.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.10, 0.30, 0.15)),
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                Text::new("ON SCREEN"),
-                TextFont { font_size: 14.0, ..default() },
-                TextColor(Color::srgb(0.5, 1.0, 0.5)),
-            ));
-        });
-    });
-}
-
-fn toggle_sensors_panel_visibility(
-    lobby: Res<LobbyState>,
-    token: Res<LocalPlayerToken>,
-    active: Res<ActiveConsole>,
-    mut panel: Query<&mut Visibility, With<SensorsPanel>>,
-) {
-    let view = LobbyView::new(&lobby, &token.0);
-    let holds = lobby.phase == GamePhase::InProgress
-        && view.my_consoles().contains(&Console::Sensors);
-    let my_consoles_count = view.my_consoles().len();
-    let tab_active = match &active.0 {
-        Some(c) => *c == Console::Sensors,
-        None => my_consoles_count == 1,
-    };
-    let visible = holds && tab_active;
-    for mut vis in panel.iter_mut() {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
-    }
-}
-
-fn toggle_shields_panel_visibility(
-    lobby: Res<LobbyState>,
-    token: Res<LocalPlayerToken>,
-    active: Res<ActiveConsole>,
-    mut panel: Query<&mut Visibility, With<ShieldsPanel>>,
-) {
-    let view = LobbyView::new(&lobby, &token.0);
-    let holds = lobby.phase == GamePhase::InProgress
-        && view.my_consoles().contains(&Console::Shields);
-    let my_consoles_count = view.my_consoles().len();
-    let tab_active = match &active.0 {
-        Some(c) => *c == Console::Shields,
-        None => my_consoles_count == 1,
-    };
-    let visible = holds && tab_active;
-    for mut vis in panel.iter_mut() {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
-    }
-}
-
-/// Refresh the Shields panel: HP bars, focus indicators, and arc colors.
-fn refresh_shields_panel(
-    sim: Res<ClientSimState>,
-    mut bars: Query<(&ShieldFacingBar, &mut BackgroundColor), Without<ShieldFocusButton>>,
-    mut hp_nodes: Query<(&ShieldFacingHP, &mut Node)>,
-    mut hp_texts: Query<(&ShieldFacingHP, &mut Text)>,
-    mut focus_btns: Query<(&ShieldFocusButton, &mut BackgroundColor), Without<ShieldFacingBar>>,
-) {
-    if !sim.is_changed() {
-        return;
-    }
-    let facings = &sim.shield_facings;
-    if facings.is_empty() {
-        return;
-    }
-
-    // Update HP bars
-    for (bar, mut bg) in bars.iter_mut() {
-        if let Some(f) = facings.iter().find(|f| f.label == bar.0) {
-            if f.online {
-                bg.0 = if f.is_focused {
-                    Color::srgb(0.2, 0.8, 0.4)
-                } else {
-                    Color::srgb(0.2, 0.4, 0.8)
-                };
-            } else {
-                bg.0 = Color::srgb(0.3, 0.1, 0.1);
-            }
-        }
-    }
-
-    // Update HP fill widths and text
-    for (hp, mut node) in hp_nodes.iter_mut() {
-        if let Some(f) = facings.iter().find(|f| f.label == hp.0) {
-            let pct = if f.max_hp > 0 { (f.hp as f32 / f.max_hp as f32).clamp(0.0, 1.0) } else { 0.0 };
-            node.width = Val::Percent(pct * 100.0);
-        }
-    }
-
-    for (hp, mut text) in hp_texts.iter_mut() {
-        if let Some(f) = facings.iter().find(|f| f.label == hp.0) {
-            let focus_marker = if f.is_focused { " [F]" } else { "" };
-            **text = format!("{}/{} {}", f.hp, f.max_hp, focus_marker);
-        }
-    }
-
-    // Highlight the active focus button
-    for (btn, mut bg) in focus_btns.iter_mut() {
-        let is_active = match btn.0 {
-            Some(ref d) => facings.iter().any(|f| {
-                let facing_dir = match f.label.as_str() {
-                    "Fore" | "Fore (Focused)" => ViewDirection::Fore,
-                    "Port" | "Port (Focused)" => ViewDirection::Port,
-                    "Aft" | "Aft (Focused)" => ViewDirection::Aft,
-                    "Starboard" | "Starboard (Focused)" => ViewDirection::Starboard,
-                    _ => return false,
-                };
-                &facing_dir == d && f.is_focused
-            }),
-            None => facings.iter().all(|f| !f.is_focused),
-        };
-        bg.0 = if is_active {
-            Color::srgb(0.25, 0.40, 0.55)
-        } else {
-            Color::srgb(0.15, 0.18, 0.25)
-        };
-    }
-}
-
-/// Handle shield focus button presses.
-fn handle_shield_focus_button_press(
-    interactions: Query<(&Interaction, &ShieldFocusButton), Changed<Interaction>>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for (interaction, btn) in interactions.iter() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(
-                ClientMessage::SetShieldFocus { facing: btn.0.clone() },
-            ));
-        }
-    }
-}
-
-/// `ClientMessage` for the Navigation "On Screen" button: switches the server
-/// viewscreen to navigation chart mode.
-pub fn nav_on_screen_message() -> ClientMessage {
-    ClientMessage::SetView { mode: ViewMode::NavigationChart }
-}
-
-fn handle_nav_on_screen_button_press(
-    mut interactions: Query<
-        &Interaction,
-        (Changed<Interaction>, With<Button>, With<NavOnScreenButton>),
-    >,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(nav_on_screen_message()));
-        }
-    }
-}
-
-fn handle_nav_cancel_impulse_button_press(
-    mut interactions: Query<
-        &Interaction,
-        (Changed<Interaction>, With<Button>, With<NavCancelImpulseButton>),
-    >,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
-        }
-    }
-}
-
-/// Refresh the Navigation panel impulse status from ShipView.
-fn refresh_navigation_panel(
-    ship_view: Res<crate::ship_view::ShipView>,
-    mut status_text: Query<&mut Text, With<NavImpulseStatusText>>,
-    mut cancel_btn: Query<&mut Visibility, With<NavCancelImpulseButton>>,
-) {
-    if !ship_view.is_changed() {
-        return;
-    }
-    let charge = ship_view.impulse_charge_progress;
-    for mut text in status_text.iter_mut() {
-        let label = if charge >= 1.0 {
-            "Impulse: ACTIVE"
-        } else if charge > 0.0 {
-            "Impulse: Charging"
-        } else {
-            "Impulse: Idle"
-        };
-        **text = label.to_string();
-    }
-    for mut vis in cancel_btn.iter_mut() {
-        *vis = if charge > 0.0 { Visibility::Visible } else { Visibility::Hidden };
-    }
-}
-
-fn toggle_navigation_panel_visibility(
-    lobby: Res<LobbyState>,
-    token: Res<LocalPlayerToken>,
-    active: Res<ActiveConsole>,
-    mut panel: Query<&mut Visibility, With<NavigationPanel>>,
-) {
-    let view = LobbyView::new(&lobby, &token.0);
-    let holds = lobby.phase == GamePhase::InProgress
-        && view.my_consoles().contains(&Console::Navigation);
-    let my_consoles_count = view.my_consoles().len();
-    let tab_active = match &active.0 {
-        Some(c) => *c == Console::Navigation,
-        None => my_consoles_count == 1,
-    };
-    let visible = holds && tab_active;
-    for mut vis in panel.iter_mut() {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
-    }
-}
-
-/// Draw the Navigation system chart on the NavChartPanel using gizmos.
-fn draw_nav_chart(
-    mut gizmos: Gizmos,
-    panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<NavChartPanel>>,
-    nav_panel: Query<&Visibility, With<NavigationPanel>>,
-    sim: Res<ClientSimState>,
-    ship_view: Res<crate::ship_view::ShipView>,
-    windows: Query<&Window>,
-) {
-    if !nav_panel
-        .iter()
-        .any(|v| matches!(v, Visibility::Visible | Visibility::Inherited))
-    {
-        return;
-    }
-    let Ok((node, gt, view_vis)) = panel.single() else { return };
-    if !view_vis.get() {
-        return;
-    }
-    let Ok(window) = windows.single() else { return };
-    let viewport_w = window.width();
-    let viewport_h = window.height();
-
-    let node_size = node.size();
-    let node_centre_screen = gt.translation().truncate();
-    let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
-    let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
-    let centre = Vec2::new(centre_world_x, centre_world_y);
-
-    let radius = node_size.x.min(node_size.y) * 0.5;
-    if radius <= 0.0 {
-        return;
-    }
-
-    // Draw system chart entities using the navigation chart view.
-    let chart_view = crate::client_sim::compute_system_chart_view(&sim, &ship_view);
-    const ZOOM: f32 = 1.0;
-
-    // Draw rings (asteroid fields, regions)
-    for ring in &chart_view.rings {
-        let pos = centre + Vec2::new(ring.centre_x * radius / ZOOM, ring.centre_y * radius / ZOOM);
-        let outer_r = ring.outer_r * radius / ZOOM;
-        gizmos.circle_2d(pos, outer_r, Color::srgb(0.3, 0.7, 0.4));
-        let inner_r = ring.inner_r * radius / ZOOM;
-        if inner_r > 0.0 {
-            gizmos.circle_2d(pos, inner_r, Color::srgb(0.2, 0.5, 0.3));
-        }
-    }
-
-    // Draw dots (stars, planets, regions)
-    for dot in &chart_view.dots {
-        let pos = centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
-        let pix_radius = (dot.scaled_radius * radius / ZOOM).max(3.0);
-        gizmos.circle_2d(pos, pix_radius, Color::srgb(0.8, 0.8, 0.4));
-    }
-
-    // Ship triangle at centre
-    let nose_len  = radius * 0.10;
-    let half_base = radius * 0.06;
-    let nose  = centre + Vec2::new(0.0,  nose_len);
-    let left  = centre + Vec2::new(-half_base, -nose_len * 0.6);
-    let right = centre + Vec2::new( half_base, -nose_len * 0.6);
-    gizmos.line_2d(nose, left,  Color::srgb(0.5, 1.0, 0.8));
-    gizmos.line_2d(left, right, Color::srgb(0.5, 1.0, 0.8));
-    gizmos.line_2d(right, nose, Color::srgb(0.5, 1.0, 0.8));
-}
 
 fn handle_repair_button_press(
     mut interactions: Query<
@@ -2007,26 +1449,30 @@ fn sync_complexity_hiding(
 /// that `client/bridge.rs` remains a thin JS/WASM boundary with no
 /// knowledge of the panel set.
 ///
-/// Panel inventory (as of client-split series, issue #228):
-/// - `ShipViewPlugin`         — ship-level broadcast resource
-/// - `ClientAppPlugin`        — lobby UI + sensors/shields/navigation panels + tab bar + complexity UI
-/// - `PhoneBorderPlugin`      — diegetic phone bezel frame
-/// - `CaptainPanelPlugin`     — view selector + red-alert toggle
-/// - `HelmPanelPlugin`        — joystick + helm radar
-/// - `WeaponsPanelPlugin`     — phaser / torpedo / weapons radar
-/// - `RepairPanelPlugin`      — shape-matching repair console
-/// - `PowerPanelPlugin`       — 6+2 power allocation console
-/// - `SciencePanelPlugin`     — long-range radar + system chart + cancel-impulse
-/// - `CommsPanelPlugin`       — comms console (placeholder)
+/// Panel inventory:
+/// - `ShipViewPlugin`          — ship-level broadcast resource
+/// - `ClientAppPlugin`         — lobby UI + tab bar + complexity UI
+/// - `PhoneBorderPlugin`       — diegetic phone bezel frame
+/// - `CaptainPanelPlugin`      — view selector + red-alert toggle
+/// - `HelmPanelPlugin`         — joystick + helm radar
+/// - `WeaponsPanelPlugin`      — phaser / torpedo / weapons radar
+/// - `RepairPanelPlugin`       — shape-matching repair console
+/// - `PowerPanelPlugin`        — 6+2 power allocation console
+/// - `SensorsPanelPlugin`      — long-range radar + science target designation
+/// - `ShieldsPanelPlugin`      — 4-quadrant HP bars + focus mechanic
+/// - `NavigationPanelPlugin`   — system chart + impulse status + cancel
+/// - `CommsPanelPlugin`        — comms console (placeholder)
 pub fn add_client_plugins(app: &mut App) {
     app.add_plugins(ClientAppPlugin)
         .add_plugins(crate::ship_view::ShipViewPlugin)
         .add_plugins(crate::phone_border::PhoneBorderPlugin)
+        .add_plugins(crate::captain_panel::CaptainPanelPlugin)
         .add_plugins(crate::helm_panel::HelmPanelPlugin)
         .add_plugins(crate::weapons_panel::WeaponsPanelPlugin)
         .add_plugins(crate::repair_panel::RepairPanelPlugin)
         .add_plugins(crate::power_panel::PowerPanelPlugin)
-        .add_plugins(crate::phone_border::CaptainPanelPlugin)
-        .add_plugins(crate::science_panel::SciencePanelPlugin)
+        .add_plugins(crate::sensors_panel::SensorsPanelPlugin)
+        .add_plugins(crate::shields_panel::ShieldsPanelPlugin)
+        .add_plugins(crate::navigation_panel::NavigationPanelPlugin)
         .add_plugins(crate::comms_panel::CommsPanelPlugin);
 }

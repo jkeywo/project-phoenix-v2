@@ -129,11 +129,20 @@ fn setup_power_ui(mut commands: Commands) {
             Visibility::Hidden,
         ))
         .with_children(|panel| {
-            panel.spawn((
-                Text::new("Power Console"),
-                TextFont { font_size: 24.0, ..default() },
-                TextColor(Color::srgb(0.3, 1.0, 0.8)),
-            ));
+            // Title row with help button
+            panel.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            }).with_children(|title_row| {
+                title_row.spawn((
+                    Text::new("Power Console"),
+                    TextFont { font_size: 24.0, ..default() },
+                    TextColor(Color::srgb(0.3, 1.0, 0.8)),
+                ));
+                crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Power, 16.0);
+            });
 
             // Three power rows: Helm, Weapons, Sensors
             for (console, label) in [
@@ -201,8 +210,7 @@ fn setup_power_ui(mut commands: Commands) {
                             Text::new("+"),
                             TextFont { font_size: 22.0, ..default() },
                             TextColor(Color::srgb(0.9, 0.9, 1.0)),
-                        ));
-                    });
+                    ));
                 });
             }
 
@@ -266,6 +274,9 @@ fn setup_power_ui(mut commands: Commands) {
                     TextColor(Color::srgb(0.5, 0.8, 1.0)),
                 ));
             });
+
+            // Help overlay (initially hidden, shown by ? button)
+            crate::client_elements::spawn_help_overlay(panel, crate::client_elements::HelpPanel::Power);
         });
 }
 

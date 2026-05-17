@@ -18,7 +18,9 @@ use crate::client_lobby::{
 };
 use crate::client_sim::ClientSimState;
 use crate::client_complexity::{self, ComplexityStore};
-use crate::client_elements::HideableElementRegistry;
+use crate::client_elements::{
+    handle_help_button_press, handle_help_overlay_dismiss, HideableElementRegistry,
+};
 use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
 
 // ── Events ─────────────────────────────────────────────────────────
@@ -44,6 +46,14 @@ pub struct LandscapeMode(pub bool);
 /// the phase changes, and reparented into the bezel content area.
 #[derive(Component)]
 pub struct LobbyRoot;
+
+/// Marks the game-over overlay screen.
+#[derive(Component)]
+pub struct GameOverScreen;
+
+/// Marks the text entity that displays the game-over reason.
+#[derive(Component)]
+pub struct GameOverReasonText;
 
 /// Marks the container of the per-console buttons so it can be cleared
 /// and rebuilt on every `LobbyState` change.
@@ -225,6 +235,7 @@ impl Plugin for ClientAppPlugin {
                             refresh_footer_status,
                             refresh_station_detail,
                             toggle_lobby_visibility_on_phase,
+                            toggle_game_over_visibility,
                         ),
                         (
                             handle_station_button_press,
@@ -249,6 +260,10 @@ impl Plugin for ClientAppPlugin {
                         (
                             register_hideable_elements,
                             sync_complexity_hiding,
+                        ),
+                        (
+                            handle_help_button_press,
+                            handle_help_overlay_dismiss,
                         ),
                     ),
                 );
@@ -287,6 +302,7 @@ fn setup_lobby_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             ..default()
         },
         BackgroundColor(Color::srgba(0.04, 0.047, 0.063, 1.0)),
+        Visibility::Hidden,
     ))
     .with_children(|root| {
         // ── Crew header ──────────────────────────────────────────────
@@ -502,6 +518,39 @@ fn setup_lobby_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             });
         });
     });
+
+    // ── Game-over overlay ──────────────────────────────────────────────
+    commands.spawn((
+        GameOverScreen,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(16.0),
+            padding: UiRect::all(Val::Px(24.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
+        Visibility::Hidden,
+    ))
+    .with_children(|overlay| {
+        overlay.spawn((
+            Text::new("GAME OVER"),
+            TextFont { font: chakra.clone(), font_size: 28.0, ..default() },
+            TextColor(COL_AMBER),
+        ));
+        overlay.spawn((
+            GameOverReasonText,
+            Text::new(""),
+            TextFont { font: mono.clone(), font_size: 14.0, ..default() },
+            TextColor(COL_TEXT),
+        ));
+    });
 }
 
 fn detect_initial_orientation(
@@ -565,6 +614,24 @@ fn toggle_lobby_visibility_on_phase(
     let in_lobby = state.phase == GamePhase::Lobby;
     for mut vis in roots.iter_mut() {
         *vis = if in_lobby { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
+fn toggle_game_over_visibility(
+    state: Res<LobbyState>,
+    mut screens: Query<&mut Visibility, With<GameOverScreen>>,
+    mut reason_texts: Query<&mut Text, With<GameOverReasonText>>,
+) {
+    let is_game_over = state.phase == GamePhase::GameOver;
+    for mut vis in screens.iter_mut() {
+        *vis = if is_game_over { Visibility::Visible } else { Visibility::Hidden };
+    }
+    if is_game_over {
+        if let Some(reason) = &state.game_over_reason {
+            for mut text in reason_texts.iter_mut() {
+                text.0 = reason.clone();
+            }
+        }
     }
 }
 

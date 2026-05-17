@@ -1,29 +1,18 @@
 //! Client-side Repair Panel plugin.
 //!
-//! Owns all Repair console UI: breakdown label, shape-match buttons, three
-//! team status rows, and the `RepairIconLabel` update for consoles that need
-//! to show a decoy-repair icon.
-//!
-//! Extracted from `client/app.rs` as part of the "Client split" series.
+//! Owns all Repair console UI: team status rows and console dispatch buttons.
 //! Compiled only when the `client` Cargo feature is enabled.
 
 use bevy::prelude::*;
 
-use crate::client_app::{RepairIconLabel, OutboundClientMessage};
+use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
-use crate::messages::{ClientMessage, Console, GamePhase, Shape};
+use crate::messages::{ClientMessage, Console, GamePhase};
 
 // ── Pure visibility helper ────────────────────────────────────────────
 
 /// Decide whether the repair panel should be visible.
-///
-/// Rules:
-/// 1. Game phase must be `InProgress`.
-/// 2. The local player must hold `Console::Repair`.
-/// 3. If holding **one console only**, show automatically.
-/// 4. If holding **multiple consoles**, show only when `ActiveConsole`
-///    is explicitly set to `Repair`.
 pub fn repair_panel_visible(
     lobby: &LobbyState,
     token: &str,
@@ -46,23 +35,9 @@ pub fn repair_panel_visible(
 
 // ── Marker components ────────────────────────────────────────────────
 
-/// Marks the root of the repair console UI; shown only when the local
-/// player holds `Console::Repair` and the phase is InProgress.
+/// Marks the root of the repair console UI.
 #[derive(Component)]
 pub struct RepairPanel;
-
-/// Marks the text label that shows the current breakdown or "All Systems Nominal".
-#[derive(Component)]
-struct RepairBreakdownLabel;
-
-/// Marks a shape button on the Repair console. Carries the shape it fires.
-#[derive(Component)]
-struct RepairShapeButton(Shape);
-
-/// Marks the container for the three shape buttons, so its children can be
-/// disabled/enabled together.
-#[derive(Component)]
-struct RepairShapeButtonRoot;
 
 /// Marks a team row container (index 0, 1, or 2).
 #[derive(Component)]
@@ -77,6 +52,10 @@ struct RepairTeamFill(usize);
 #[derive(Component)]
 struct RepairTeamStatusText(usize);
 
+/// Marks a console dispatch button. Carries the target console.
+#[derive(Component)]
+struct DispatchButton(Console);
+
 // ── Plugin ───────────────────────────────────────────────────────────
 
 /// Plugin that owns all Repair console UI and systems.
@@ -89,8 +68,7 @@ impl Plugin for RepairPanelPlugin {
             .add_systems(Update, (
                 toggle_repair_panel_visibility,
                 refresh_repair_panel,
-                handle_repair_shape_button_press,
-                refresh_repair_icon,
+                handle_dispatch_button_press,
             ));
     }
 }
@@ -123,30 +101,22 @@ fn setup_repair_ui(mut commands: Commands) {
                 TextColor(Color::srgb(0.3, 1.0, 0.5)),
             ));
 
-            // Breakdown row
+            // Console dispatch buttons
             panel.spawn((
-                RepairBreakdownLabel,
-                Text::new("All Systems Nominal"),
-                TextFont { font_size: 16.0, ..default() },
-                TextColor(Color::srgb(0.8, 0.8, 0.3)),
-            ));
-
-            // Shape buttons row
-            panel.spawn((
-                RepairShapeButtonRoot,
                 Node {
                     flex_direction: FlexDirection::Row,
                     column_gap: Val::Px(8.0),
                     ..default()
                 },
             )).with_children(|row| {
-                for (shape, label) in [
-                    (Shape::Square, "SQUARE"),
-                    (Shape::Triangle, "TRIANGLE"),
-                    (Shape::Circle, "CIRCLE"),
+                for (console, label) in [
+                    (Console::Helm, "HELM"),
+                    (Console::Tactical, "TACTICAL"),
+                    (Console::Power, "POWER"),
+                    (Console::Shields, "SHIELDS"),
                 ] {
                     row.spawn((
-                        RepairShapeButton(shape),
+                        DispatchButton(console),
                         Button,
                         Node {
                             padding: UiRect::axes(Val::Px(16.0), Val::Px(12.0)),
@@ -177,7 +147,6 @@ fn setup_repair_ui(mut commands: Commands) {
                     },
                     BackgroundColor(Color::srgb(0.05, 0.10, 0.20)),
                 )).with_children(|row| {
-                    // Progress bar fill
                     row.spawn((
                         RepairTeamFill(i),
                         Node {
@@ -190,7 +159,6 @@ fn setup_repair_ui(mut commands: Commands) {
                         },
                         BackgroundColor(Color::srgb(0.10, 0.20, 0.60)),
                     ));
-                    // Status text
                     row.spawn((
                         RepairTeamStatusText(i),
                         Text::new("Idle"),
@@ -225,111 +193,80 @@ fn toggle_repair_panel_visibility(
     }
 }
 
-/// Refresh the repair panel: breakdown text, shape button states, team status.
+/// Refresh the repair panel: team status bars and text.
 fn refresh_repair_panel(
     sim: Res<ClientSimState>,
-    mut breakdown_label: Query<&mut Text, (With<RepairBreakdownLabel>, Without<RepairTeamStatusText>)>,
-    mut shape_btn_bg: Query<(&mut BackgroundColor, &RepairShapeButton), Without<RepairTeamFill>>,
-    mut team_fill: Query<(&mut Node, &mut BackgroundColor, &RepairTeamFill), Without<RepairShapeButton>>,
-    mut team_status: Query<(&mut Text, &mut TextColor, &RepairTeamStatusText), Without<RepairBreakdownLabel>>,
+    mut team_fill: Query<(&mut Node, &mut BackgroundColor, &RepairTeamFill), Without<DispatchButton>>,
+    mut team_status: Query<(&mut Text, &mut TextColor, &RepairTeamStatusText)>,
 ) {
     if !sim.is_changed() {
         return;
     }
 
-    // Update breakdown label
-    for mut text in breakdown_label.iter_mut() {
-        **text = match &sim.current_breakdown {
-            Some((console, shape)) => format!("{} — {:?}", console.display_name(), shape),
-            None => "All Systems Nominal".to_string(),
-        };
-    }
-
-    // Determine if all three teams are busy (no Idle slot)
+    // Determine if all teams are busy
     let all_busy = sim.repair_teams.iter().all(|t| !matches!(t, crate::messages::TeamSlot::Idle));
+    let _ = all_busy; // Used for button dimming if needed in future
 
-    // Update shape button backgrounds based on busy state
-    for (mut bg, _) in shape_btn_bg.iter_mut() {
-        *bg = if all_busy {
-            BackgroundColor(Color::srgb(0.08, 0.12, 0.10))
-        } else {
-            BackgroundColor(Color::srgb(0.15, 0.35, 0.20))
-        };
-    }
-
-    // Update team progress bars (width + color) and status text
+    // Update team progress bars and status text
     for (mut node, mut fill_bg, fill) in team_fill.iter_mut() {
         let idx = fill.0;
-        if idx >= sim.repair_teams.len() {
-            continue;
-        }
-        let slot = &sim.repair_teams[idx];
+        let slot = sim.repair_teams.get(idx);
         let (pct, color) = match slot {
-            crate::messages::TeamSlot::Idle => (0.0, Color::srgb(0.10, 0.20, 0.60)),
-            crate::messages::TeamSlot::Repairing { progress } => {
-                ((progress * 100.0).clamp(0.0, 100.0), Color::srgb(0.10, 0.70, 0.20))
+            None | Some(crate::messages::TeamSlot::Idle) => {
+                (0.0, Color::srgb(0.10, 0.20, 0.60))
             }
-            crate::messages::TeamSlot::Cooldown { progress } => {
-                ((progress * 100.0).clamp(0.0, 100.0), Color::srgb(0.70, 0.15, 0.15))
+            Some(crate::messages::TeamSlot::Travelling { elapsed, .. }) => {
+                let pct = (elapsed / 5.0 * 100.0).clamp(0.0, 100.0);
+                (pct, Color::srgb(0.60, 0.60, 0.10))
+            }
+            Some(crate::messages::TeamSlot::Repairing { elapsed, .. }) => {
+                // Show elapsed time as a rough progress indicator (max 50s for full console)
+                let pct = (elapsed / 50.0 * 100.0).clamp(0.0, 100.0);
+                (pct, Color::srgb(0.10, 0.70, 0.20))
+            }
+            Some(crate::messages::TeamSlot::Returning { elapsed }) => {
+                let pct = (elapsed / 5.0 * 100.0).clamp(0.0, 100.0);
+                (pct, Color::srgb(0.30, 0.30, 0.80))
             }
         };
         node.width = Val::Percent(pct);
         fill_bg.0 = color;
     }
 
-    // Update team status text
     for (mut text, mut color, status) in team_status.iter_mut() {
         let idx = status.0;
-        if idx >= sim.repair_teams.len() {
-            continue;
-        }
-        let slot = &sim.repair_teams[idx];
+        let slot = sim.repair_teams.get(idx);
         match slot {
-            crate::messages::TeamSlot::Idle => {
+            None | Some(crate::messages::TeamSlot::Idle) => {
                 **text = "Idle".to_string();
                 *color = TextColor(Color::srgb(0.5, 0.7, 1.0));
             }
-            crate::messages::TeamSlot::Repairing { progress } => {
-                **text = format!("Repairing {:.0}%", progress * 100.0);
+            Some(crate::messages::TeamSlot::Travelling { console, .. }) => {
+                **text = format!("→ {}", console.display_name());
+                *color = TextColor(Color::srgb(1.0, 0.9, 0.3));
+            }
+            Some(crate::messages::TeamSlot::Repairing { console, .. }) => {
+                **text = format!("Repairing {}", console.display_name());
                 *color = TextColor(Color::srgb(0.3, 1.0, 0.3));
             }
-            crate::messages::TeamSlot::Cooldown { progress } => {
-                **text = format!("Cooldown {:.0}%", (1.0 - progress) * 100.0);
-                *color = TextColor(Color::srgb(1.0, 0.4, 0.4));
+            Some(crate::messages::TeamSlot::Returning { .. }) => {
+                **text = "Returning".to_string();
+                *color = TextColor(Color::srgb(0.5, 0.5, 1.0));
             }
         }
     }
 }
 
-/// Handle shape button presses on the Repair console.
-fn handle_repair_shape_button_press(
-    interactions: Query<(&Interaction, &RepairShapeButton), Changed<Interaction>>,
+/// Handle console dispatch button presses.
+fn handle_dispatch_button_press(
+    interactions: Query<(&Interaction, &DispatchButton), Changed<Interaction>>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
-    for (interaction, shape_btn) in interactions.iter() {
+    for (interaction, btn) in interactions.iter() {
         if *interaction != Interaction::Pressed {
             continue;
         }
-        outbound.write(OutboundClientMessage(ClientMessage::Repair { shape: shape_btn.0 }));
-    }
-}
-
-/// Update repair icon label on every frame where `ClientSimState.repair_icon` changes.
-fn refresh_repair_icon(
-    sim: Res<ClientSimState>,
-    mut labels: Query<&mut Text, With<RepairIconLabel>>,
-) {
-    if !sim.is_changed() {
-        return;
-    }
-    let text = match sim.repair_icon {
-        Some(Shape::Square) => "■ REPAIR",
-        Some(Shape::Triangle) => "▲ REPAIR",
-        Some(Shape::Circle) => "● REPAIR",
-        None => "",
-    };
-    for mut label in labels.iter_mut() {
-        **label = text.to_string();
+        outbound.write(OutboundClientMessage(ClientMessage::DispatchRepairTeam { console: btn.0.clone() }));
     }
 }
 

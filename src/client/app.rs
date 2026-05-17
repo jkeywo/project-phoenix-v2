@@ -1215,8 +1215,6 @@ fn setup_sensors_ui(mut commands: Commands) {
             TextFont { font_size: 32.0, ..default() },
             TextColor(Color::srgb(0.8, 0.8, 1.0)),
         ));
-        // Repair icon label — shows when a breakdown or decoy icon
-        // targets this console.
         panel.spawn((
             RepairIconLabel,
             Text::new(""),
@@ -1702,8 +1700,9 @@ fn handle_repair_button_press(
 ) {
     for (interaction, _bg) in interactions.iter_mut() {
         if *interaction == Interaction::Pressed {
-            // Suppress if already repairing or under penalty cooldown.
-            if sim.repair_in_progress || sim.repair_penalty {
+            // Suppress if all teams are busy.
+            let all_busy = sim.repair_teams.iter().all(|t| !matches!(t, crate::messages::TeamSlot::Idle));
+            if all_busy {
                 continue;
             }
             outbound.write(OutboundClientMessage(crate::client_sim::repair_message()));
@@ -1712,37 +1711,24 @@ fn handle_repair_button_press(
 }
 
 fn refresh_repair_button(
-    time: Res<Time>,
     sim: Res<ClientSimState>,
     mut button: Query<&mut BackgroundColor, (With<RepairButton>, Without<RepairButtonLabel>)>,
     mut label: Query<(&mut Text, &mut TextColor), With<RepairButtonLabel>>,
 ) {
-    // Always update while penalized (drives flash animation); otherwise
-    // skip when nothing has changed to avoid unnecessary UI work.
-    if !sim.is_changed() && !sim.repair_penalty {
+    if !sim.is_changed() {
         return;
     }
+    let any_active = sim.repair_teams.iter().any(|t| !matches!(t, crate::messages::TeamSlot::Idle));
     for mut bg in button.iter_mut() {
-        *bg = if sim.repair_penalty {
-            // Flash between bright red and dark red at ~3 Hz.
-            let flash = (time.elapsed_secs() * 3.0).floor() as i32 % 2 == 0;
-            if flash {
-                BackgroundColor(Color::srgb(0.70, 0.05, 0.05))
-            } else {
-                BackgroundColor(Color::srgb(0.20, 0.02, 0.02))
-            }
-        } else if sim.repair_in_progress {
+        *bg = if any_active {
             BackgroundColor(Color::srgb(0.05, 0.30, 0.05))
         } else {
             BackgroundColor(Color::srgb(0.13, 0.27, 0.13))
         };
     }
     for (mut text, mut color) in label.iter_mut() {
-        if sim.repair_penalty {
-            **text = format!("COOLDOWN {:.0}s", sim.repair_cooldown_secs);
-            *color = TextColor(Color::srgb(1.0, 0.3, 0.3));
-        } else if sim.repair_in_progress {
-            **text = format!("REPAIRING {:.0}s", sim.repair_cooldown_secs);
+        if any_active {
+            **text = "TEAMS DISPATCHED".to_string();
             *color = TextColor(Color::srgb(0.5, 1.0, 0.5));
         } else {
             **text = "REPAIR".to_string();

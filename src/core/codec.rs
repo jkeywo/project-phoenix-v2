@@ -518,23 +518,23 @@ mod tests {
     }
 
     #[test]
-    fn client_repair_with_shape_round_trips() {
-        for shape in &[Shape::Square, Shape::Triangle, Shape::Circle] {
-            let msg = ClientMessage::Repair { shape: *shape };
-            assert_client_roundtrip(&JsonCodec, msg.clone());
-            assert_client_roundtrip(&PrettyJsonCodec, msg);
-        }
+    fn client_dispatch_repair_team_round_trips() {
+        use crate::messages::Console;
+        let msg = ClientMessage::DispatchRepairTeam { console: Console::Helm };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_repair_state_round_trips() {
-        use crate::messages::{Console, Shape, TeamSlot};
+        use crate::messages::{Console, TeamSlot};
         let msg = ServerMessage::RepairState {
-            remaining_cooldown_secs: 12.5,
-            in_progress: true,
-            penalty: false,
-            teams: [TeamSlot::Idle, TeamSlot::Repairing { progress: 0.3 }, TeamSlot::Cooldown { progress: 0.5 }],
-            current_breakdown: Some((Console::Helm, Shape::Triangle)),
+            teams: vec![
+                TeamSlot::Idle,
+                TeamSlot::Travelling { console: Console::Helm, elapsed: 2.5 },
+                TeamSlot::Repairing { console: Console::Tactical, elapsed: 1.0 },
+                TeamSlot::Returning { elapsed: 3.0 },
+            ],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -694,21 +694,6 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
-    #[test]
-    fn server_show_repair_icon_round_trips() {
-        for shape in &[Shape::Square, Shape::Triangle, Shape::Circle] {
-            let msg = ServerMessage::ShowRepairIcon { shape: *shape };
-            assert_server_roundtrip(&JsonCodec, msg.clone());
-            assert_server_roundtrip(&PrettyJsonCodec, msg);
-        }
-    }
-
-    #[test]
-    fn server_clear_repair_icon_round_trips() {
-        let msg = ServerMessage::ClearRepairIcon;
-        assert_server_roundtrip(&JsonCodec, msg.clone());
-        assert_server_roundtrip(&PrettyJsonCodec, msg);
-    }
 
     #[test]
     fn server_modifier_added_console_source_round_trips() {

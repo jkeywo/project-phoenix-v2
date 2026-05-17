@@ -8,7 +8,7 @@
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 
-use crate::messages::{ClientMessage, Console, ServerMessage, Shape, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
+use crate::messages::{ClientMessage, Console, ServerMessage, TeamSlot, ViewDirection, ViewMode, WorldData, PhaserMode, ShieldFacingStatus, TorpedoTube, ModifierSlot, ModifierSource};
 use crate::entity_tags::EntityTag;
 use crate::radar_config::RadarConfig;
 use crate::radar::{ScienceRadarView, compute_science_radar_view};
@@ -153,13 +153,6 @@ pub struct ClientSimState {
     /// Static world snapshot replayed on `WorldSetup` and on `Welcome`
     /// (when the server includes it). Used by the helm radar.
     pub world: WorldData,
-    /// Seconds remaining on the active repair action (if `repair_in_progress`)
-    /// or penalty cooldown (if `repair_penalty`).
-    pub repair_cooldown_secs: f32,
-    /// True while this console is performing an authorized repair.
-    pub repair_in_progress: bool,
-    /// True while this player has an unauthorized-repair penalty cooldown.
-    pub repair_penalty: bool,
     /// Current phaser firing mode.
     pub phaser_mode: PhaserMode,
     /// UUID of the last asteroid hit by a phaser shot (cleared on new shot).
@@ -199,16 +192,10 @@ pub struct ClientSimState {
     /// Active modifier table: maps `(source, slot)` → bonus value.
     /// Updated by `ModifierAdded` and `ModifierRemoved` messages. Cleared on `Welcome`.
     pub modifiers: HashMap<(ModifierSource, ModifierSlot), f32>,
-    /// The shape of the repair icon currently shown on this player's console.
-    /// `None` means no icon is shown (no breakdown involving this console and
-    /// no decoy). Updated by `ShowRepairIcon` / `ClearRepairIcon` messages.
-    pub repair_icon: Option<Shape>,
     /// Latest PowerState from the Power console's dedicated 10Hz broadcast.
     pub power_state_payload: Option<(u8, u8, u8, f32, bool)>,
-    /// Current state of the three repair teams, updated by `RepairState` messages.
-    pub repair_teams: [TeamSlot; 3],
-    /// The current breakdown (console + shape) or `None` when queue is empty.
-    pub current_breakdown: Option<(Console, Shape)>,
+    /// Current state of the repair teams, updated by `RepairState` messages.
+    pub repair_teams: Vec<TeamSlot>,
     /// Current phaser emitter frequency as last set (0.0–1.0).
     /// Initialised to 0.5. Updated by `ComplexityChanged` indirectly via
     /// the Science phaser-frequency sub-panel.
@@ -223,9 +210,6 @@ impl Default for ClientSimState {
     fn default() -> Self {
         Self {
             world: WorldData::default(),
-            repair_cooldown_secs: 0.0,
-            repair_in_progress: false,
-            repair_penalty: false,
             phaser_mode: PhaserMode::Auto,
             last_phaser_target: None,
             science_target_suggestion: None,
@@ -242,10 +226,8 @@ impl Default for ClientSimState {
             aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
-            repair_icon: None,
             power_state_payload: None,
-            repair_teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
-            current_breakdown: None,
+            repair_teams: Vec::new(),
             phaser_frequency: 0.5,
             frequency_hint: None,
         }
@@ -271,12 +253,8 @@ impl ClientSimState {
                 *self = Self::default();
                 self.world = preserved_world;
                 // frequency_hint is reset to None by Default.
-            }            ServerMessage::RepairState { remaining_cooldown_secs, in_progress, penalty, teams, current_breakdown } => {
-                self.repair_cooldown_secs = *remaining_cooldown_secs;
-                self.repair_in_progress = *in_progress;
-                self.repair_penalty = *penalty;
-                self.repair_teams = *teams;
-                self.current_breakdown = current_breakdown.clone();
+            }            ServerMessage::RepairState { teams } => {
+                self.repair_teams = teams.clone();
             }
             ServerMessage::PhaserFired { target_uuid, .. } => {
                 self.last_phaser_target = Some(target_uuid.clone());
@@ -320,12 +298,6 @@ impl ClientSimState {
             ServerMessage::ModifierRemoved { source, slot } => {
                 self.modifiers.remove(&(source.clone(), slot.clone()));
             }
-            ServerMessage::ShowRepairIcon { shape } => {
-                self.repair_icon = Some(*shape);
-            }
-            ServerMessage::ClearRepairIcon => {
-                self.repair_icon = None;
-            }
             ServerMessage::PowerState { helm, weapons, sensors, battery_charge, locked } => {
                 self.power_state_payload = Some((*helm, *weapons, *sensors, *battery_charge, *locked));
             }
@@ -367,9 +339,10 @@ pub fn on_screen_message() -> ClientMessage {
     ClientMessage::SetView { mode: ViewMode::Radar }
 }
 
-/// `ClientMessage` for the Repair button: sends a repair request to the server.
+/// `ClientMessage` for dispatching a repair team to the Helm console.
+/// The actual console target is selected by the UI layer.
 pub fn repair_message() -> ClientMessage {
-    ClientMessage::Repair { shape: Shape::Triangle }
+    ClientMessage::DispatchRepairTeam { console: Console::Helm }
 }
 
 /// `ClientMessage` to fire a torpedo from the given tube with an optional homing target.
@@ -612,8 +585,7 @@ mod tests {
     #[test]
     fn welcome_resets_sim_state_but_preserves_world_when_present() {
         let mut s = ClientSimState::default();
-        s.repair_cooldown_secs = 5.0;
-        s.repair_in_progress = true;
+        s.phaser_frequency = 0.8; // set something non-default to verify reset
         let world = WorldData {
             entities: vec![EntitySnapshot::asteroid("c", 1.0, 2.0, 0.5)],
         };
@@ -627,8 +599,6 @@ mod tests {
             ship_stations: crate::stations_config::ShipStations::default(),
         });
         // Console-specific state must reset to defaults.
-        assert!(!s.repair_in_progress);
-        assert_eq!(s.repair_cooldown_secs, 0.0);
         assert_eq!(s.world, world, "world from Welcome must be retained");
     }
 
@@ -656,8 +626,6 @@ mod tests {
             world: WorldData {
                 entities: vec![EntitySnapshot::asteroid("e", 0.0, 0.0, 1.0)],
             },
-            repair_cooldown_secs: 2.5,
-            repair_in_progress: true,
             ..Default::default()
         };
         let before = s.clone();
@@ -1642,57 +1610,48 @@ mod tests {
         assert_eq!(s.power_state_payload, None, "power_state_payload cleared on Welcome");
     }
 
-    // ── RepairState teams + current_breakdown ──────────────────────────
+    // ── RepairState teams ──────────────────────────────────────────────
 
     #[test]
-    fn repair_state_updates_teams_and_current_breakdown() {
+    fn repair_state_updates_teams() {
         let mut s = ClientSimState::default();
-        assert_eq!(s.repair_teams, [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle]);
-        assert_eq!(s.current_breakdown, None);
+        assert!(s.repair_teams.is_empty());
 
         s.apply(&ServerMessage::RepairState {
-            remaining_cooldown_secs: 0.0,
-            in_progress: true,
-            penalty: false,
-            teams: [TeamSlot::Repairing { progress: 0.4 }, TeamSlot::Idle, TeamSlot::Cooldown { progress: 0.2 }],
-            current_breakdown: Some((Console::Helm, Shape::Square)),
+            teams: vec![
+                TeamSlot::Travelling { console: Console::Helm, elapsed: 2.0 },
+                TeamSlot::Idle,
+            ],
         });
 
-        assert_eq!(s.repair_teams[0], TeamSlot::Repairing { progress: 0.4 });
-        assert!(matches!(s.repair_teams[1], TeamSlot::Idle));
-        assert_eq!(s.current_breakdown, Some((Console::Helm, Shape::Square)));
+        assert_eq!(s.repair_teams.len(), 2);
+        assert!(matches!(&s.repair_teams[0], TeamSlot::Travelling { console: Console::Helm, .. }));
+        assert!(matches!(&s.repair_teams[1], TeamSlot::Idle));
     }
 
     #[test]
-    fn repair_state_clears_current_breakdown_when_queue_empty() {
+    fn repair_state_all_idle_teams() {
         let mut s = ClientSimState::default();
         s.apply(&ServerMessage::RepairState {
-            remaining_cooldown_secs: 0.0,
-            in_progress: false,
-            penalty: false,
-            teams: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
-            current_breakdown: None,
+            teams: vec![TeamSlot::Idle, TeamSlot::Idle],
         });
-        assert_eq!(s.current_breakdown, None);
         assert!(s.repair_teams.iter().all(|t| matches!(t, TeamSlot::Idle)));
     }
 
     #[test]
-    fn welcome_resets_repair_teams_and_current_breakdown() {
+    fn welcome_resets_repair_teams() {
         let mut s = ClientSimState::default();
         s.apply(&ServerMessage::RepairState {
-            remaining_cooldown_secs: 5.0,
-            in_progress: true,
-            penalty: false,
-            teams: [TeamSlot::Repairing { progress: 0.5 }, TeamSlot::Cooldown { progress: 0.3 }, TeamSlot::Idle],
-            current_breakdown: Some((Console::Tactical, Shape::Circle)),
+            teams: vec![
+                TeamSlot::Repairing { console: Console::Tactical, elapsed: 1.5 },
+                TeamSlot::Returning { elapsed: 2.0 },
+            ],
         });
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
         });
-        assert_eq!(s.repair_teams, [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle]);
-        assert_eq!(s.current_breakdown, None);
+        assert!(s.repair_teams.is_empty(), "Welcome should reset repair_teams to empty");
     }
 
     // ── Power helper functions ──────────────────────────────────────────

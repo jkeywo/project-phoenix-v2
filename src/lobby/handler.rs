@@ -270,7 +270,7 @@ pub fn process_message(
                 }));
             }
         }
-        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::SetPhaserFrequency { .. } | ClientMessage::Repair { .. } | ClientMessage::SetScienceTarget { .. } | ClientMessage::SetSensorsTarget { .. } | ClientMessage::StartImpulseCharge | ClientMessage::CancelImpulse | ClientMessage::FireTorpedo { .. } | ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. } | ClientMessage::Hail { .. } | ClientMessage::SelectCommsMessage { .. } | ClientMessage::RespondToMessage { .. } | ClientMessage::ClearComms | ClientMessage::SetShieldFocus { .. } => {}
+        ClientMessage::ToggleRedAlert | ClientMessage::HelmInput { .. } | ClientMessage::SetView { .. } | ClientMessage::SetTarget { .. } | ClientMessage::FirePhaser | ClientMessage::SetPhaserMode { .. } | ClientMessage::SetPhaserFrequency { .. } | ClientMessage::DispatchRepairTeam { .. } | ClientMessage::SetScienceTarget { .. } | ClientMessage::SetSensorsTarget { .. } | ClientMessage::StartImpulseCharge | ClientMessage::CancelImpulse | ClientMessage::FireTorpedo { .. } | ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. } | ClientMessage::Hail { .. } | ClientMessage::SelectCommsMessage { .. } | ClientMessage::RespondToMessage { .. } | ClientMessage::ClearComms | ClientMessage::SetShieldFocus { .. } => {}
     }
 
     LobbyHandlerResult { new_phase, outbound }

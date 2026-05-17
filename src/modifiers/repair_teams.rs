@@ -1,342 +1,326 @@
-use crate::messages::TeamSlot;
+use crate::damage::ConsoleHull;
+use crate::messages::{Console, TeamSlot};
 
-const REPAIR_DURATION: f32 = 30.0;
-const COOLDOWN_DURATION: f32 = 10.0;
+/// Seconds a team spends travelling to a console (or returning from one).
+const TRAVEL_DURATION: f32 = 5.0;
+/// HP restored per second while the team is at the console.
+const REPAIR_RATE_HP_PER_SEC: f32 = 0.5; // 1 HP per 2 seconds
 
+/// Pure state machine for all repair teams on the ship.
+///
+/// Teams are identified by slot index. The number of teams is set at
+/// construction time from the ship config (`repair_team_count`).
 #[derive(Debug, Clone)]
 pub struct RepairTeams {
-    slots: [TeamSlot; 3],
+    slots: Vec<TeamSlot>,
 }
 
 impl RepairTeams {
-    pub fn new() -> Self {
+    /// Create a new `RepairTeams` with `count` teams, all idle.
+    pub fn new(count: usize) -> Self {
         Self {
-            slots: [TeamSlot::Idle, TeamSlot::Idle, TeamSlot::Idle],
+            slots: vec![TeamSlot::Idle; count],
         }
     }
 
-    pub fn slots(&self) -> &[TeamSlot; 3] {
+    /// Borrow the full slot slice.
+    pub fn slots(&self) -> &[TeamSlot] {
         &self.slots
     }
 
-    /// Returns the lowest-indexed idle team, or `None` if all are busy.
+    /// Returns the index of the lowest-numbered idle team, or `None` if all are busy.
     pub fn lowest_free_team(&self) -> Option<usize> {
         self.slots.iter().position(|s| matches!(s, TeamSlot::Idle))
     }
 
-    /// Move a team to `Repairing { progress: 0.0 }`.
-    /// No-op if the slot is not `Idle` (in-progress repairs are never interrupted).
-    pub fn dispatch(&mut self, team_idx: usize) {
+    /// Dispatch the team at `team_idx` to `console`.
+    ///
+    /// Transitions `Idle → Travelling { console, elapsed: 0.0 }`.
+    /// No-op if the slot is not `Idle` (in-progress teams cannot be redirected).
+    pub fn dispatch(&mut self, team_idx: usize, console: Console) {
         if let Some(slot) = self.slots.get_mut(team_idx) {
             if matches!(slot, TeamSlot::Idle) {
-                *slot = TeamSlot::Repairing { progress: 0.0 };
-            }
-        }
-    }
-
-    /// Move a team to `Cooldown { progress: 1.0 }`.
-    /// No-op if the slot is not `Idle`.
-    pub fn penalise(&mut self, team_idx: usize) {
-        if let Some(slot) = self.slots.get_mut(team_idx) {
-            if matches!(slot, TeamSlot::Idle) {
-                *slot = TeamSlot::Cooldown { progress: 1.0 };
+                *slot = TeamSlot::Travelling { console, elapsed: 0.0 };
             }
         }
     }
 
     /// Advance all active timers by `dt` seconds.
     ///
-    /// - `Repairing` advances toward 1.0 over 30s of cumulative `dt`.
-    /// - `Cooldown` drains toward 0.0 over 10s of cumulative `dt`.
-    /// - Teams that finish repairing return to `Idle`.
-    /// - Teams that finish cooling down return to `Idle`.
-    ///
-    /// Returns the set (as a sorted `Vec`) of team indices whose repair
-    /// **completed** during this tick, so the caller can credit HP.
-    pub fn tick(&mut self, dt: f32) -> Vec<usize> {
-        let mut completed = Vec::new();
-        for (i, slot) in self.slots.iter_mut().enumerate() {
+    /// - `Travelling` advances its `elapsed` toward `TRAVEL_DURATION` (5s), then
+    ///   transitions to `Repairing { elapsed: 0.0 }`. If the target console is
+    ///   already at full HP on arrival, the team skips straight to `Returning`.
+    /// - `Repairing` calls `hull.restore(console, dt * REPAIR_RATE_HP_PER_SEC)` each
+    ///   tick. Once the console is at full HP, the team transitions to `Returning`.
+    /// - `Returning` advances its `elapsed` toward `TRAVEL_DURATION` (5s), then
+    ///   transitions to `Idle`.
+    pub fn tick(&mut self, dt: f32, hull: &mut ConsoleHull) {
+        for slot in self.slots.iter_mut() {
             match slot {
-                TeamSlot::Repairing { progress } => {
-                    *progress += dt / REPAIR_DURATION;
-                    if *progress >= 1.0 {
-                        *slot = TeamSlot::Idle;
-                        completed.push(i);
+                TeamSlot::Travelling { console, elapsed } => {
+                    *elapsed += dt;
+                    if *elapsed >= TRAVEL_DURATION {
+                        let console = console.clone();
+                        // Check if console is already at full HP.
+                        let is_full = hull.is_at_max(&console);
+                        if is_full {
+                            *slot = TeamSlot::Returning { elapsed: 0.0 };
+                        } else {
+                            *slot = TeamSlot::Repairing { console, elapsed: 0.0 };
+                        }
                     }
                 }
-                TeamSlot::Cooldown { progress } => {
-                    *progress -= dt / COOLDOWN_DURATION;
-                    if *progress <= 0.0 {
+                TeamSlot::Repairing { console, elapsed } => {
+                    let hp_to_restore = dt * REPAIR_RATE_HP_PER_SEC;
+                    hull.restore(console.clone(), hp_to_restore);
+                    *elapsed += dt;
+                    // Transition to Returning when the console is fully repaired.
+                    if hull.is_at_max(console) {
+                        *slot = TeamSlot::Returning { elapsed: 0.0 };
+                    }
+                }
+                TeamSlot::Returning { elapsed } => {
+                    *elapsed += dt;
+                    if *elapsed >= TRAVEL_DURATION {
                         *slot = TeamSlot::Idle;
                     }
                 }
                 TeamSlot::Idle => {}
             }
         }
-        completed
     }
 }
 
 impl Default for RepairTeams {
     fn default() -> Self {
-        Self::new()
+        Self::new(2)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::Console;
 
-    const EPSILON: f32 = 1e-6;
-
-    fn approx_eq(a: f32, b: f32) -> bool {
-        (a - b).abs() < EPSILON
+    fn hull_with_helm(max_hp: f32) -> ConsoleHull {
+        ConsoleHull::from_config(&[(Console::Helm, max_hp)])
     }
 
-    /// Helper to extract progress from a Repairing slot.
-    fn repairing_progress(teams: &RepairTeams, idx: usize) -> f32 {
-        match teams.slots[idx] {
-            TeamSlot::Repairing { progress } => progress,
-            _ => panic!("slot {idx} is not Repairing"),
+    fn hull_full() -> ConsoleHull {
+        hull_with_helm(25.0)
+    }
+
+    fn hull_damaged(current: f32) -> ConsoleHull {
+        let mut h = ConsoleHull::from_config(&[(Console::Helm, 25.0)]);
+        // Damage it down to `current` by applying the difference.
+        let dmg = 25.0 - current;
+        if dmg > 0.0 {
+            let mut rng = rand::rng();
+            h.apply_damage(dmg, &mut rng);
         }
+        h
     }
 
-    /// Helper to extract progress from a Cooldown slot.
-    fn cooldown_progress(teams: &RepairTeams, idx: usize) -> f32 {
-        match teams.slots[idx] {
-            TeamSlot::Cooldown { progress } => progress,
-            _ => panic!("slot {idx} is not Cooldown"),
-        }
-    }
-
-    // ── Default state ────────────────────────────────────────────────────
+    // ── Default state ─────────────────────────────────────────────────────────
 
     #[test]
-    fn new_repair_teams_all_idle() {
-        let teams = RepairTeams::new();
-        assert!(teams.slots.iter().all(|s| matches!(s, TeamSlot::Idle)));
-        assert_eq!(teams.slots.len(), 3);
-
-        let teams_default: RepairTeams = Default::default();
-        assert!(teams_default.slots.iter().all(|s| matches!(s, TeamSlot::Idle)));
+    fn new_teams_all_idle() {
+        let teams = RepairTeams::new(3);
+        assert_eq!(teams.slots().len(), 3);
+        assert!(teams.slots().iter().all(|s| matches!(s, TeamSlot::Idle)));
     }
 
-    // ── lowest_free_team ─────────────────────────────────────────────────
+    #[test]
+    fn default_has_two_teams() {
+        let teams = RepairTeams::default();
+        assert_eq!(teams.slots().len(), 2);
+        assert!(teams.slots().iter().all(|s| matches!(s, TeamSlot::Idle)));
+    }
+
+    // ── lowest_free_team ──────────────────────────────────────────────────────
 
     #[test]
     fn lowest_free_team_returns_zero_when_all_idle() {
-        let teams = RepairTeams::new();
+        let teams = RepairTeams::new(2);
         assert_eq!(teams.lowest_free_team(), Some(0));
     }
 
     #[test]
     fn lowest_free_team_skips_busy_teams() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
+        let mut teams = RepairTeams::new(2);
+        teams.dispatch(0, Console::Helm);
         assert_eq!(teams.lowest_free_team(), Some(1));
     }
 
     #[test]
     fn lowest_free_team_returns_none_when_all_busy() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.dispatch(1);
-        teams.dispatch(2);
+        let mut teams = RepairTeams::new(2);
+        teams.dispatch(0, Console::Helm);
+        teams.dispatch(1, Console::Tactical);
         assert_eq!(teams.lowest_free_team(), None);
     }
 
-    #[test]
-    fn lowest_free_team_skips_cooldown_team() {
-        let mut teams = RepairTeams::new();
-        teams.penalise(0);
-        assert_eq!(teams.lowest_free_team(), Some(1));
-    }
-
-    // ── dispatch ─────────────────────────────────────────────────────────
+    // ── dispatch ──────────────────────────────────────────────────────────────
 
     #[test]
-    fn dispatch_moves_idle_team_to_repairing_with_zero_progress() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        assert!(matches!(teams.slots[0], TeamSlot::Repairing { .. }));
-        assert!(approx_eq(repairing_progress(&teams, 0), 0.0));
+    fn dispatch_idle_team_enters_travelling() {
+        let mut teams = RepairTeams::new(2);
+        teams.dispatch(0, Console::Helm);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, elapsed } if *elapsed == 0.0));
     }
 
     #[test]
-    fn dispatch_on_non_idle_team_is_no_op() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0); // now Repairing
-        teams.dispatch(0); // should be no-op
-        assert!(matches!(teams.slots[0], TeamSlot::Repairing { .. }));
-        assert!(approx_eq(repairing_progress(&teams, 0), 0.0));
+    fn dispatch_non_idle_team_is_noop() {
+        let mut teams = RepairTeams::new(2);
+        teams.dispatch(0, Console::Helm);
+        // Try to redirect — should be ignored
+        teams.dispatch(0, Console::Tactical);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, .. }));
+    }
+
+    // ── Travelling → Repairing ────────────────────────────────────────────────
+
+    #[test]
+    fn travelling_transitions_to_repairing_after_5s() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(20.0); // not at max
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { console: Console::Helm, .. }));
     }
 
     #[test]
-    fn dispatch_on_cooldown_team_is_no_op() {
-        let mut teams = RepairTeams::new();
-        teams.penalise(0);
-        teams.dispatch(0); // should be no-op — team is in cooldown, not idle
-        assert!(matches!(teams.slots[0], TeamSlot::Cooldown { .. }));
-    }
-
-    // ── penalise ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn penalise_moves_idle_team_to_cooldown_with_full_progress() {
-        let mut teams = RepairTeams::new();
-        teams.penalise(0);
-        assert!(matches!(teams.slots[0], TeamSlot::Cooldown { .. }));
-        assert!(approx_eq(cooldown_progress(&teams, 0), 1.0));
+    fn travelling_does_not_transition_before_5s() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(20.0);
+        teams.dispatch(0, Console::Helm);
+        teams.tick(4.9, &mut hull);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { .. }));
     }
 
     #[test]
-    fn penalise_on_non_idle_team_is_no_op() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.penalise(0); // should be no-op — team is repairing, not idle
-        assert!(matches!(teams.slots[0], TeamSlot::Repairing { .. }));
+    fn team_arrives_at_full_hp_console_enters_returning() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_full(); // console already at full HP
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
     }
 
-    // ── tick — repair progression ────────────────────────────────────────
+    // ── Repairing → HP restoration ────────────────────────────────────────────
 
     #[test]
-    fn tick_advances_repair_progress_by_dt_over_30s() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.tick(15.0);
-        assert!(approx_eq(repairing_progress(&teams, 0), 0.5));
-    }
-
-    #[test]
-    fn tick_completes_repair_and_returns_team_index() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        let completed = teams.tick(30.0);
-        assert!(matches!(teams.slots[0], TeamSlot::Idle));
-        assert_eq!(completed, vec![0]);
+    fn repairing_restores_hp_at_correct_rate() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(0.0); // 0 HP
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull); // travel
+        // Now repairing; restore for 2s should give 1 HP
+        teams.tick(2.0, &mut hull);
+        let hp = hull.current_for(Console::Helm).unwrap();
+        assert!((hp - 1.0).abs() < 1e-4, "expected 1 HP after 2s repair, got {hp}");
     }
 
     #[test]
-    fn tick_partial_then_full_completes_repair() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.tick(15.0);
-        let completed = teams.tick(15.0);
-        assert!(matches!(teams.slots[0], TeamSlot::Idle));
-        assert_eq!(completed, vec![0]);
+    fn repairing_transitions_to_returning_when_console_full() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(24.9); // almost full
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull); // travel
+        // One tick of 1s restores 0.5 HP — enough to max at 25
+        teams.tick(1.0, &mut hull);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
+    }
+
+    // ── Returning → Idle ──────────────────────────────────────────────────────
+
+    #[test]
+    fn returning_transitions_to_idle_after_5s() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_full();
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull); // travel (arrives full → Returning)
+        teams.tick(5.0, &mut hull); // return
+        assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
     }
 
     #[test]
-    fn multiple_ticks_accumulate_toward_completion() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        for _ in 0..29 {
-            let completed = teams.tick(1.0);
-            assert!(completed.is_empty(), "repair should not complete early");
-        }
-        let completed = teams.tick(1.0);
-        assert_eq!(completed, vec![0]);
-        assert!(matches!(teams.slots[0], TeamSlot::Idle));
+    fn returning_does_not_complete_before_5s() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_full();
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull); // travel → Returning
+        teams.tick(4.9, &mut hull); // not yet idle
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
+    }
+
+    // ── Full lifecycle ────────────────────────────────────────────────────────
+
+    #[test]
+    fn full_lifecycle_travel_repair_return_idle() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(0.0); // fully damaged
+        teams.dispatch(0, Console::Helm);
+
+        // Travelling
+        teams.tick(5.0, &mut hull);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
+
+        // Repairing until full (25 HP at 0.5 HP/s = 50s)
+        teams.tick(50.0, &mut hull);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
+
+        // Returning
+        teams.tick(5.0, &mut hull);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
+    }
+
+    // ── Multiple teams independence ───────────────────────────────────────────
+
+    #[test]
+    fn two_teams_operate_independently() {
+        let mut hull = ConsoleHull::from_config(&[
+            (Console::Helm, 25.0),
+            (Console::Tactical, 25.0),
+        ]);
+        // Damage both consoles
+        let mut rng = rand::rng();
+        hull.apply_damage(10.0, &mut rng);
+        hull.apply_damage(10.0, &mut rng);
+
+        let mut teams = RepairTeams::new(2);
+        teams.dispatch(0, Console::Helm);
+        teams.dispatch(1, Console::Tactical);
+
+        // Both should be Travelling
+        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, .. }));
+        assert!(matches!(&teams.slots()[1], TeamSlot::Travelling { console: Console::Tactical, .. }));
+
+        // After 5s both transition
+        teams.tick(5.0, &mut hull);
+        let s0 = &teams.slots()[0];
+        let s1 = &teams.slots()[1];
+        assert!(matches!(s0, TeamSlot::Repairing { console: Console::Helm, .. }) || matches!(s0, TeamSlot::Returning { .. }));
+        assert!(matches!(s1, TeamSlot::Repairing { console: Console::Tactical, .. }) || matches!(s1, TeamSlot::Returning { .. }));
     }
 
     #[test]
-    fn tick_past_completion_does_not_overflow() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        let completed = teams.tick(60.0);
-        assert_eq!(completed, vec![0]);
-        assert!(matches!(teams.slots[0], TeamSlot::Idle));
-    }
-
-    // ── tick — cooldown drain ────────────────────────────────────────────
-
-    #[test]
-    fn tick_drains_cooldown_progress_by_dt_over_10s() {
-        let mut teams = RepairTeams::new();
-        teams.penalise(0);
-        teams.tick(5.0);
-        assert!(approx_eq(cooldown_progress(&teams, 0), 0.5));
+    fn non_idle_team_cannot_be_redirected_while_travelling() {
+        let mut teams = RepairTeams::new(2);
+        teams.dispatch(0, Console::Helm);
+        teams.dispatch(0, Console::Tactical); // should be ignored
+        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, .. }));
     }
 
     #[test]
-    fn tick_completes_cooldown_and_returns_to_idle() {
-        let mut teams = RepairTeams::new();
-        teams.penalise(0);
-        let completed = teams.tick(10.0);
-        assert!(matches!(teams.slots[0], TeamSlot::Idle));
-        assert!(completed.is_empty(), "cooldown completion should not return index");
-    }
-
-    #[test]
-    fn tick_past_cooldown_completion_does_not_underflow() {
-        let mut teams = RepairTeams::new();
-        teams.penalise(0);
-        teams.tick(20.0);
-        assert!(matches!(teams.slots[0], TeamSlot::Idle));
-    }
-
-    // ── Mixed-state independence ─────────────────────────────────────────
-
-    #[test]
-    fn two_teams_can_repair_independently() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.dispatch(1);
-        teams.tick(15.0);
-        assert!(approx_eq(repairing_progress(&teams, 0), 0.5));
-        assert!(approx_eq(repairing_progress(&teams, 1), 0.5));
-    }
-
-    #[test]
-    fn one_team_repairing_another_on_cooldown_tick_independently() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0); // Repairing
-        teams.penalise(1); // Cooldown
-        teams.tick(5.0);
-        assert!(approx_eq(repairing_progress(&teams, 0), 5.0 / 30.0));
-        assert!(approx_eq(cooldown_progress(&teams, 1), 1.0 - 5.0 / 10.0));
-    }
-
-    #[test]
-    fn idle_team_stays_idle_after_tick() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.tick(15.0);
-        assert!(matches!(teams.slots[1], TeamSlot::Idle));
-        assert!(matches!(teams.slots[2], TeamSlot::Idle));
-    }
-
-    #[test]
-    fn staggered_repair_teams_complete_independently() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.tick(5.0);
-        teams.dispatch(1);
-        teams.tick(25.0); // team 0 had 30s total, completes; team 1 had 25s
-        assert!(matches!(teams.slots[0], TeamSlot::Idle));
-        assert!(matches!(teams.slots[1], TeamSlot::Repairing { .. }));
-        let completed = teams.tick(5.0); // team 1 completes now
-        assert_eq!(completed, vec![1]);
-    }
-
-    #[test]
-    fn multiple_teams_can_complete_in_same_tick() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.dispatch(1);
-        let completed = teams.tick(30.0);
-        assert_eq!(completed, vec![0, 1]);
-        assert!(matches!(teams.slots[0], TeamSlot::Idle));
-        assert!(matches!(teams.slots[1], TeamSlot::Idle));
-    }
-
-    #[test]
-    fn team_that_completes_repair_can_be_dispatched_again() {
-        let mut teams = RepairTeams::new();
-        teams.dispatch(0);
-        teams.tick(30.0);
-        // team 0 is now idle; we can dispatch again
-        teams.dispatch(0);
-        assert!(matches!(teams.slots[0], TeamSlot::Repairing { .. }));
+    fn team_after_returning_can_be_dispatched_again() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_full();
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull); // travel → Returning (full HP)
+        teams.tick(5.0, &mut hull); // → Idle
+        assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
+        teams.dispatch(0, Console::Helm);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { .. }));
     }
 }

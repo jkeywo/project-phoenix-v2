@@ -112,8 +112,6 @@ impl LobbyState {
             | ServerMessage::ModifierAdded { .. }
             | ServerMessage::ModifierRemoved { .. }
             | ServerMessage::AsteroidSpawned { .. }
-            | ServerMessage::ShowRepairIcon { .. }
-            | ServerMessage::ClearRepairIcon
             | ServerMessage::PowerState { .. }
             | ServerMessage::EntitySpawned { .. }
             | ServerMessage::EntityDespawned { .. }

@@ -145,6 +145,14 @@ impl ConsoleHull {
         }
         None
     }
+
+    /// Returns `true` if the given console is at its maximum HP (or not tracked).
+    pub fn is_at_max(&self, console: &Console) -> bool {
+        match self.entries.iter().find(|(c, _, _)| c == console) {
+            Some((_, cur, max)) => *cur >= *max,
+            None => true, // not tracked → treat as full
+        }
+    }
 }
 
 

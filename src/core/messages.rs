@@ -102,11 +102,15 @@ pub enum Shape {
 }
 
 /// The state of a single repair team, broadcast as part of `RepairState`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum TeamSlot {
     Idle,
-    Repairing { progress: f32 },
-    Cooldown { progress: f32 },
+    /// Team is en route to the target console. `elapsed` counts up toward 5s.
+    Travelling { console: Console, elapsed: f32 },
+    /// Team is at the console performing repairs. `elapsed` counts HP restored.
+    Repairing { console: Console, elapsed: f32 },
+    /// Team has finished and is returning to engineering. `elapsed` counts up toward 5s.
+    Returning { elapsed: f32 },
 }
 
 impl Default for TeamSlot {
@@ -488,7 +492,9 @@ pub enum ClientMessage {
     SetSensorsTarget { uuid: String },
     FirePhaser,
     SetPhaserMode { mode: PhaserMode },
-    Repair { shape: Shape },
+    /// Dispatch a repair team to the named console.
+    /// The server assigns the lowest-indexed idle team.
+    DispatchRepairTeam { console: Console },
     /// Fire a torpedo from the specified tube. `target_uuid` is optional homing target.
     FireTorpedo { tube: TorpedoTube, target_uuid: Option<String> },
     /// Increase power allocation for a console. Validated server-side:
@@ -577,15 +583,10 @@ pub enum ServerMessage {
     PhaserFired { bank: PhaserBank, target_uuid: String },
     /// Sent at 10 Hz to each console player.  Carries the remaining cooldown
     /// (penalty or repair) in seconds, whether a repair action is currently
-    /// in progress, whether the last cooldown was a penalty, the current
-    /// team slot statuses, and the current breakdown (console + shape) or
-    /// `None` when the queue is empty.
+    /// Sent at 10 Hz to the Repair console holder. Contains the current
+    /// state of all repair teams.
     RepairState {
-        remaining_cooldown_secs: f32,
-        in_progress: bool,
-        penalty: bool,
-        teams: [TeamSlot; 3],
-        current_breakdown: Option<(Console, Shape)>,
+        teams: Vec<TeamSlot>,
     },
     /// Sent at 10 Hz (or on change) to all players. Contains HP and online
     /// status for every shield facing.
@@ -609,11 +610,6 @@ pub enum ServerMessage {
         max_hp: i32,
         current_hp: i32,
     },
-    /// Sent to a specific console holder to show a repair icon with the
-    /// given shape. Indistinguishable from a decoy icon on the wire.
-    ShowRepairIcon { shape: Shape },
-    /// Sent to a specific console holder to clear their repair icon.
-    ClearRepairIcon,
     /// Sent at 10 Hz to the Power console holder only. Carries the current
     /// power allocation levels, battery charge fraction, and whether the
     /// system is locked (exhaustion state).

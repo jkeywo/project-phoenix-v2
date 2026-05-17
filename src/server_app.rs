@@ -31,8 +31,8 @@ pub use crate::weapons_plugin::{
 };
 
 pub use crate::repair_plugin::{
-    ShipRepairTeams, RepairIconState, BreakdownQueueResource,
-    repair_state_broadcaster, REPAIR_TEAM_HP,
+    ShipRepairTeams, BreakdownQueueResource,
+    repair_state_broadcaster,
 };
 
 pub use crate::power_plugin::{
@@ -1811,11 +1811,10 @@ fn test_app() -> App {
         assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t2"));
     }
 
-    // â"€â"€ Repair helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    // -- Repair helpers --------------------------------------------------
 
-    /// Set up a game with a captain, repair player, and a single breakdown
-    /// with a known shape (Triangle) at the front. HP = 90.
-    fn start_game_with_repair_shape(app: &mut App, shape: Shape) {
+    /// Set up a game with a captain and repair player.
+    fn start_game_with_repair(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);
         push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
@@ -1826,209 +1825,68 @@ fn test_app() -> App {
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
-
-        // Apply 10 damage so HP = 90.
-        {
-            let mut rng = rand::rng();
-            app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(10.0, &mut rng);
-        }
-
-        // Push a single breakdown with the requested shape and Repair console.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bd.queue.push_front(crate::breakdown::BreakdownEntry {
-                console: Console::Repair,
-                shape,
-            });
-        }
     }
 
-    /// Helpers to check RepairTeams team state.
-    fn team_is_repairing(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Repairing { .. })
-    }
-
-    fn team_is_cooldown(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Cooldown { .. })
+    fn team_is_travelling(teams: &ShipRepairTeams, idx: usize) -> bool {
+        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Travelling { .. })
     }
 
     fn team_is_idle(teams: &ShipRepairTeams, idx: usize) -> bool {
         matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Idle)
     }
 
-    // -- Shape-matching repair tests --------------------------------------
+    // -- Repair dispatch tests --------------------------------------
 
-    /// Non-Repair console holder sending `Repair { shape }` is ignored.
     #[test]
     fn non_repair_sender_is_ignored() {
         let mut app = test_app();
-        start_game_with_repair_shape(&mut app, Shape::Triangle);
-
-        // Captain (not Repair holder) presses a shape.
-        push(&mut app, "captain", ClientMessage::Repair { shape: Shape::Triangle });
+        start_game_with_repair(&mut app);
+        push(&mut app, "captain", ClientMessage::DispatchRepairTeam { console: Console::Helm });
         tick(&mut app);
-
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_idle(&teams, 0), "team 0 should remain idle after non-Repair press");
-        assert!(team_is_idle(&teams, 1), "team 1 should remain idle");
-        assert!(team_is_idle(&teams, 2), "team 2 should remain idle");
+        assert!(team_is_idle(&teams, 0), "team 0 should remain idle after non-Repair dispatch");
     }
 
-    /// Correct shape dispatches a team and pops the queue.
     #[test]
-    fn correct_shape_dispatches_team_and_pops_queue() {
+    fn repair_holder_can_dispatch_team() {
         let mut app = test_app();
-        start_game_with_repair_shape(&mut app, Shape::Triangle);
-
-        // Repair holder presses the matching shape.
-        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
+        start_game_with_repair(&mut app);
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
         tick(&mut app);
-
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_repairing(&teams, 0), "team 0 should be repairing after correct shape press");
-        // Queue should be empty after pop.
-        assert!(app.world().resource::<BreakdownQueueResource>().queue.is_empty(),
-            "breakdown queue should be empty after correct shape repair");
+        assert!(team_is_travelling(&teams, 0), "team 0 should be travelling after dispatch");
     }
 
-    /// Wrong shape penalises the lowest free team and leaves queue intact.
     #[test]
-    fn wrong_shape_penalises_team_and_leaves_queue() {
+    fn all_busy_teams_ignore_further_dispatches() {
         let mut app = test_app();
-        start_game_with_repair_shape(&mut app, Shape::Triangle);
-
-        // Repair holder presses the WRONG shape (Square, not Triangle).
-        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Square });
+        start_game_with_repair(&mut app);
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
         tick(&mut app);
-
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Tactical });
+        tick(&mut app);
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Power });
+        tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_cooldown(&teams, 0), "team 0 should be on cooldown after wrong shape press");
-        // Queue should still have the breakdown.
-        assert_eq!(app.world().resource::<BreakdownQueueResource>().queue.len(), 1,
-            "breakdown queue should be unchanged after wrong shape press");
+        assert!(team_is_travelling(&teams, 0));
+        assert!(team_is_travelling(&teams, 1));
     }
 
-    /// All-busy teams: no free team ? further presses are ignored.
     #[test]
-    fn all_busy_teams_ignore_further_presses() {
+    fn repair_state_broadcast_after_dispatch() {
         let mut app = test_app();
-        start_game_with_repair_shape(&mut app, Shape::Triangle);
-
-        // First press: correct shape, dispatches team 0.
-        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
-        tick(&mut app);
-        assert!(team_is_repairing(&app.world().resource::<ShipRepairTeams>(), 0));
-
-        // Push another breakdown.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            use crate::breakdown::BreakdownEntry;
-            bd.queue.push_back(BreakdownEntry { console: Console::Repair, shape: Shape::Circle });
-        }
-
-        // Manually dispatch teams 1 and 2 so all three are busy.
-        app.world_mut().resource_mut::<ShipRepairTeams>().0.dispatch(1);
-        app.world_mut().resource_mut::<ShipRepairTeams>().0.dispatch(2);
-
-        // Third press should be ignored (no free team).
-        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Circle });
-        tick(&mut app);
-
-        let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_repairing(&teams, 0));
-        assert!(team_is_repairing(&teams, 1));
-        assert!(team_is_repairing(&teams, 2));
-        // Queue should still have the second breakdown.
-        assert_eq!(app.world().resource::<BreakdownQueueResource>().queue.len(), 1,
-            "breakdown queue should remain unchanged when all teams are busy");
-    }
-
-    /// Empty-queue press penalises the lowest free team.
-    #[test]
-    fn empty_queue_press_penalises_team() {
-        let mut app = test_app();
-        start_game_with_repair_shape(&mut app, Shape::Triangle);
-
-        // Pop the queue so it's empty.
-        app.world_mut().resource_mut::<BreakdownQueueResource>().queue.pop_front();
-        assert!(app.world().resource::<BreakdownQueueResource>().queue.is_empty());
-
-        // Repair holder presses any shape.
-        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
-        tick(&mut app);
-
-        let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_cooldown(&teams, 0), "team 0 should be on cooldown after empty-queue press");
-    }
-
-    /// Repair team tick restores HP on completion.
-    ///
-    /// We test this by manually running the equivalent of `tick_repair_teams`
-    /// system logic: advance the team to completion, then verify HP restoration.
-    #[test]
-    fn repair_team_completion_restores_hp() {
-        let mut app = test_app();
-        start_game_with_repair_shape(&mut app, Shape::Triangle);
-
-        fn near(a: f32, b: f32) -> bool { (a - b).abs() < 1e-6 }
-
-        let initial_hp = app.world().resource::<ShipHullIntegrity>().0.total_current(); // 90
-
-        // Dispatch team 0 via correct shape press.
-        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
-        tick(&mut app);
-        assert!(team_is_repairing(&app.world().resource::<ShipRepairTeams>(), 0));
-
-        // Advance team 0 to completion via the team's own tick method.
-        let completed = app.world_mut().resource_mut::<ShipRepairTeams>().0.tick(30.0);
-        assert_eq!(completed, vec![0], "team 0 should complete after 30s");
-
-        // Manually apply HP as the system would: for each completed team, restore HP.
-        // Use restore_any_damaged because ConsoleHull distributes damage randomly.
-        for _ in completed {
-            app.world_mut().resource_mut::<ShipHullIntegrity>().0.restore_any_damaged(REPAIR_TEAM_HP);
-        }
-
-        let hp_after = app.world().resource::<ShipHullIntegrity>().0.total_current();
-        assert!(near(hp_after, initial_hp + REPAIR_TEAM_HP),
-            "HP should increase by {} after repair team completion", REPAIR_TEAM_HP);
-    }
-
-    /// RepairState broadcast shows in_progress when team is repairing.
-    #[test]
-    fn repair_state_shows_in_progress() {
-        let mut app = test_app();
-        start_game_with_repair_shape(&mut app, Shape::Triangle);
-
-        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Triangle });
+        start_game_with_repair(&mut app);
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
         let out = tick(&mut app);
-
         let repair_state = out.iter().find(|m| {
-            matches!(&m.msg, ServerMessage::RepairState { in_progress: true, .. })
+            matches!(&m.msg, ServerMessage::RepairState { teams } if
+                teams.iter().any(|t| matches!(t, crate::messages::TeamSlot::Travelling { .. })))
                 && matches!(&m.target, Target::Token(t) if t == "eng")
         });
         assert!(repair_state.is_some(),
-            "RepairState with in_progress=true should be broadcast to repair console");
+            "RepairState with Travelling team should be broadcast to repair console");
     }
 
-    /// RepairState broadcast shows penalty when team is on cooldown.
-    #[test]
-    fn repair_state_shows_penalty() {
-        let mut app = test_app();
-        start_game_with_repair_shape(&mut app, Shape::Triangle);
-
-        // Press wrong shape to penalise team 0.
-        push(&mut app, "eng", ClientMessage::Repair { shape: Shape::Square });
-        let out = tick(&mut app);
-
-        // The penalty RepairState is broadcast to all consoles.
-        let penalty_msg = out.iter().find(|m| {
-            matches!(&m.msg, ServerMessage::RepairState { penalty: true, .. })
-                && matches!(&m.target, Target::Token(t) if t == "eng")
-        });
-        assert!(penalty_msg.is_some(),
-            "RepairState with penalty=true should be broadcast after wrong shape press");
-    }
 
     // â"€â"€ SetPhaserMode tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
@@ -2413,184 +2271,6 @@ fn test_app() -> App {
         }).expect("expected SimState");
         assert!(near(snap.hull_integrity, 97.0), "hull should be 100 - 3 = 97 with halved collision damage");
     }
-    // -- Repair icon broadcast tests ----------------------------------------
-
-    /// Register captain, repair, helm, tactical, and power players, then start
-    /// the game. Returns the repair console token.
-    fn start_game_with_repair_basic(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
-        tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
-        tick(app);
-        push(app, "eng", ClientMessage::Identify { token: "eng".into(), name: "Bob".into() });
-        tick(app);
-        push(app, "eng", ClientMessage::SelectStation { station: "Repair".into() });
-        tick(app);
-        push(app, "helm", ClientMessage::Identify { token: "helm".into(), name: "Hikaru".into() });
-        tick(app);
-        push(app, "helm", ClientMessage::SelectStation { station: "Helm".into() });
-        tick(app);
-        push(app, "tac", ClientMessage::Identify { token: "tac".into(), name: "Chekov".into() });
-        tick(app);
-        push(app, "tac", ClientMessage::SelectStation { station: "Tactical".into() });
-        tick(app);
-        push(app, "power", ClientMessage::Identify { token: "power".into(), name: "Monty".into() });
-        tick(app);
-        push(app, "power", ClientMessage::SelectStation { station: "Power".into() });
-        tick(app);
-        push(app, "captain", ClientMessage::StartGame);
-        let _ = tick(app);
-    }
-
-    /// Find the last ShowRepairIcon targeted to a given console's holder.
-    fn last_icon_for(out: &[OutboundMessage], token: &str) -> Option<Shape> {
-        out.iter().rev().find_map(|m| {
-            if let Target::Token(t) = &m.target {
-                if t == token {
-                    if let ServerMessage::ShowRepairIcon { shape } = &m.msg {
-                        return Some(*shape);
-                    }
-                }
-            }
-            None
-        })
-    }
-
-    /// Check if ClearRepairIcon was sent to a given token.
-    fn has_clear_for(out: &[OutboundMessage], token: &str) -> bool {
-        out.iter().any(|m| {
-            matches!(&m.target, Target::Token(t) if t == token) &&
-            matches!(&m.msg, ServerMessage::ClearRepairIcon)
-        })
-    }
-
-    #[test]
-    fn push_assigns_real_icon_to_damaged_console() {
-        let mut app = test_app();
-        start_game_with_repair_basic(&mut app);
-
-        // Push a breakdown for Repair console.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bd.queue.push_front(crate::breakdown::BreakdownEntry {
-                console: Console::Repair,
-                shape: Shape::Triangle,
-            });
-        }
-
-        let out = tick(&mut app);
-
-        let icon = last_icon_for(&out, "eng");
-        assert_eq!(icon, Some(Shape::Triangle), "Repair holder should receive ShowRepairIcon with Triangle");
-    }
-
-    #[test]
-    fn push_assigns_decoy_to_undamaged_console() {
-        let mut app = test_app();
-        start_game_with_repair_basic(&mut app);
-
-        // Push a breakdown for Repair console only.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bd.queue.push_front(crate::breakdown::BreakdownEntry {
-                console: Console::Repair,
-                shape: Shape::Triangle,
-            });
-        }
-
-        let out = tick(&mut app);
-
-        // Some undamaged console should also get ShowRepairIcon.
-        let decoy_tokens = ["helm", "tac", "power", "captain"];
-        let has_decoy = decoy_tokens.iter().any(|t| last_icon_for(&out, t).is_some());
-        assert!(has_decoy, "at least one undamaged console should receive a decoy ShowRepairIcon");
-    }
-
-    #[test]
-    fn pop_clears_real_icon() {
-        let mut app = test_app();
-        start_game_with_repair_basic(&mut app);
-
-        // Push then pop a breakdown for Repair.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bd.queue.push_front(crate::breakdown::BreakdownEntry {
-                console: Console::Repair,
-                shape: Shape::Square,
-            });
-        }
-        let _ = tick(&mut app); // first tick sends ShowRepairIcon
-
-        // Pop the breakdown.
-        app.world_mut().resource_mut::<BreakdownQueueResource>().queue.pop_front();
-        let out = tick(&mut app);
-
-        assert!(has_clear_for(&out, "eng"), "Repair holder should receive ClearRepairIcon after pop");
-    }
-
-    #[test]
-    fn old_decoy_cleared_before_new_decoy_assigned() {
-        let mut app = test_app();
-        start_game_with_repair_basic(&mut app);
-        use rand::SeedableRng;
-
-        // Manually set previous state: Repair has a real icon (Square),
-        // Helm was the decoy (Triangle). Damaged = {Repair}.
-        {
-            let state = &mut app.world_mut().resource_mut::<RepairIconState>();
-            state.last_icons.clear();
-            state.last_icons.insert(Console::Repair, Shape::Square);
-            state.last_icons.insert(Console::Helm, Shape::Triangle);
-            state.rng = rand::rngs::SmallRng::seed_from_u64(0);
-        }
-
-        // Current queue: Repair (Square) only.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bd.queue.push_front(crate::breakdown::BreakdownEntry {
-                console: Console::Repair,
-                shape: Shape::Square,
-            });
-        }
-
-        // Undamaged pool = {CaptainChair, Helm, Tactical, Power}.
-        // Push breaks for ALL of these EXCEPT CaptainChair and Helm.
-        // That leaves {CaptainChair, Helm} as undamaged ? 2 items.
-        // The RNG (seed 0, random_range(0..2)) picks either CaptainChair or Helm.
-        let others: Vec<Console> = crate::breakdown::ALL_CONSOLES.iter()
-            .filter(|c| **c != Console::Repair && **c != Console::CaptainChair && **c != Console::Helm)
-            .cloned()
-            .collect();
-        for c in &others {
-            app.world_mut().resource_mut::<BreakdownQueueResource>().queue.push_front(
-                crate::breakdown::BreakdownEntry { console: c.clone(), shape: Shape::Circle },
-            );
-        }
-
-        let out = tick(&mut app);
-        let state = app.world().resource::<RepairIconState>();
-
-        // The RNG picked one of {CaptainChair, Helm}. There are two possibilities:
-        // - RNG picks CaptainChair ? Helm loses decoy ? ClearRepairIcon for Helm
-        // - RNG picks Helm ? Helm stays decoy ? no change
-        //
-        // Check POSTCONDITION state instead of outbound messages:
-        // 1. If RNG picked CaptainChair: Helm is NOT in last_icons (cleared)
-        // 2. If RNG picked Helm: Helm IS in last_icons (still decoy)
-        // Both cases: CaptainChair should be in last_icons (it's either decoy or a
-        // new damaged console... wait, CaptainChair isn't in others. It's undamaged.
-        // So if CaptainChair IS in last_icons, it means it was picked as decoy.
-        // If not, it means Helm was picked as decoy.
-        let helm_in_state = state.last_icons.contains_key(&Console::Helm);
-        let captain_in_state = state.last_icons.contains_key(&Console::CaptainChair);
-        // One of them should be the decoy.
-        assert!(helm_in_state || captain_in_state, "either Helm (old decoy) or Captain (new decoy) should be in state");
-        // If Captain is the new decoy, Helm was cleared ? ClearRepairIcon to helm.
-        if captain_in_state && !helm_in_state {
-            assert!(has_clear_for(&out, "helm"), "Helm should receive ClearRepairIcon when replaced as decoy");
-        }
-    }
-
 
     #[test]
     fn drain_sim_outbox_directly() {
@@ -2612,62 +2292,6 @@ fn test_app() -> App {
         assert_eq!(len_after, 0, "SimOutbox should be empty after drain, was {} before drain", len_before + 1);
     }
 
-    #[test]
-    fn empty_queue_clears_all_icons() {
-        let mut app = test_app();
-        start_game_with_repair_basic(&mut app);
-
-        // Push a single breakdown.
-        {
-            let mut bd = app.world_mut().resource_mut::<BreakdownQueueResource>();
-            bd.queue.push_front(crate::breakdown::BreakdownEntry {
-                console: Console::Repair,
-                shape: Shape::Square,
-            });
-        }
-        let _ = tick(&mut app); // first tick sends icons
-
-        // Pop queue to empty.
-        app.world_mut().resource_mut::<BreakdownQueueResource>().queue.pop_front();
-        assert!(app.world().resource::<BreakdownQueueResource>().queue.is_empty());
-        let out = tick(&mut app);
-
-        // The previously damaged console should be cleared.
-        assert!(has_clear_for(&out, "eng"), "Repair holder should be cleared when queue empties");
-
-        // No ShowRepairIcon should be sent at all when queue is empty.
-        let any_show = out.iter().any(|m| matches!(&m.msg, ServerMessage::ShowRepairIcon { .. }));
-        assert!(!any_show, "no ShowRepairIcon should be sent when queue is empty");
-    }
-
-    #[test]
-    fn no_undamaged_consoles_shows_no_decoy() {
-        let mut app = test_app();
-        start_game_with_repair_basic(&mut app);
-
-        // Fill all 5 ALL_CONSOLES with breakdowns (CaptainChair, Helm, Tactical, Repair, Power)
-        for console in &crate::breakdown::ALL_CONSOLES {
-            app.world_mut().resource_mut::<BreakdownQueueResource>().queue.push_back(
-                crate::breakdown::BreakdownEntry {
-                    console: console.clone(),
-                    shape: Shape::Square,
-                }
-            );
-        }
-
-        let out = tick(&mut app);
-
-        // Each damaged console should get a ShowRepairIcon.
-        assert!(last_icon_for(&out, "captain").is_some(), "Captain should receive ShowRepairIcon");
-        assert!(last_icon_for(&out, "eng").is_some(), "Repair should receive ShowRepairIcon");
-        assert!(last_icon_for(&out, "helm").is_some(), "Helm should receive ShowRepairIcon");
-        assert!(last_icon_for(&out, "tac").is_some(), "Tactical should receive ShowRepairIcon");
-        assert!(last_icon_for(&out, "power").is_some(), "Power should receive ShowRepairIcon");
-
-        // No extra icons beyond the 5 damaged consoles: verify last_icons size.
-        let state = app.world().resource::<RepairIconState>();
-        assert_eq!(state.last_icons.len(), 5, "only 5 damaged consoles should have icons, no decoy");
-    }
 
     // -- Power system integration tests --------------------------------------
 

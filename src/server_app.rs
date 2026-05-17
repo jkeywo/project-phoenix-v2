@@ -222,7 +222,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             };
 
             // Extract all resource data (borrows are confined to this block).
-            let (hull_current, power_levels, flags, helm_range_mult, charge_progress,
+            let (hull_current, console_hull, power_levels, flags, helm_range_mult, charge_progress,
                  ship_x, ship_z, ship_yaw, ship_red_alert, ship_view_mode) = {
                 let ship = world.resource::<ShipState>();
                 let hull = world.resource::<ShipHullIntegrity>();
@@ -235,8 +235,16 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     .unwrap_or((2, 2, 2));
                 let flags = modifiers.flags();
                 let helm_range_mult = modifiers.get(&ModifierSlot::RadarRange);
+                let console_hull: Vec<crate::messages::ConsoleHullStatus> = hull.0.entries()
+                    .iter()
+                    .map(|(c, cur, max)| crate::messages::ConsoleHullStatus {
+                        console: c.clone(),
+                        current: *cur,
+                        max_hp: *max,
+                    })
+                    .collect();
                 (
-                    hull.0.total_current(), power_levels, flags, helm_range_mult,
+                    hull.0.total_current(), console_hull, power_levels, flags, helm_range_mult,
                     impulse.0.charge_progress,
                     ship.x, ship.z, ship.yaw, ship.red_alert(), ship.view_mode.clone(),
                 )
@@ -256,6 +264,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 ship_z,
                 ship_yaw,
                 hull_integrity: hull_current,
+                console_hull,
                 power_levels,
                 flags,
                 entity_states,

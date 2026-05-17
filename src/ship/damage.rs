@@ -74,29 +74,51 @@ impl ConsoleHull {
         }
     }
 
-    /// Apply `amount` of damage distributed randomly across consoles above 0 HP.
-    ///
-    /// Damage spills to further random consoles when one is exhausted. Consoles
-    /// already at 0 HP are never targeted.
+    /// Apply `amount` of damage distributed across consoles above 0 HP, weighted
+    /// by their remaining HP (a console with more HP is proportionally more likely
+    /// to absorb the next hit). Damage spills to further weighted selections when
+    /// a console is exhausted. Consoles already at 0 HP are never targeted.
     pub fn apply_damage(&mut self, mut amount: f32, rng: &mut impl Rng) {
         while amount > 0.0 {
-            // Collect indices of consoles above 0 HP.
-            let available: Vec<usize> = self
-                .entries
-                .iter()
-                .enumerate()
-                .filter(|(_, (_, cur, _))| *cur > 0.0)
-                .map(|(i, _)| i)
-                .collect();
-            if available.is_empty() {
+            let total: f32 = self.entries.iter()
+                .filter(|(_, cur, _)| *cur > 0.0)
+                .map(|(_, cur, _)| *cur)
+                .sum();
+            if total == 0.0 {
                 break;
             }
-            let idx = available[rng.random_range(0..available.len())];
+            // Weighted selection: generate r in [0, total), subtract each
+            // console's HP in order; choose the first one that drives r negative.
+            let mut r = rng.random::<f32>() * total;
+            let mut chosen = None;
+            for (i, (_, cur, _)) in self.entries.iter().enumerate() {
+                if *cur <= 0.0 {
+                    continue;
+                }
+                r -= cur;
+                if r < 0.0 {
+                    chosen = Some(i);
+                    break;
+                }
+            }
+            // Float-precision safety: fall back to the last available console.
+            let idx = chosen.unwrap_or_else(|| {
+                self.entries.iter().enumerate()
+                    .filter(|(_, (_, cur, _))| *cur > 0.0)
+                    .last()
+                    .unwrap()
+                    .0
+            });
             let (_, cur, _) = &mut self.entries[idx];
             let absorbed = amount.min(*cur);
             *cur -= absorbed;
             amount -= absorbed;
         }
+    }
+
+    /// Read-only view of all `(console, current_hp, max_hp)` entries.
+    pub fn entries(&self) -> &[(Console, f32, f32)] {
+        &self.entries
     }
 
     /// Restore `amount` HP to a specific console, clamped to its max.
@@ -448,6 +470,29 @@ mod tests {
     }
 
     // Cycle 9: restore on unknown console is a no-op
+    #[test]
+    fn weighted_selection_favours_higher_hp_console() {
+        // Tactical has 99× more HP than Helm, so it should absorb ~99% of hits.
+        let mut hull = ConsoleHull::from_config(&[
+            (Console::Helm, 1.0),
+            (Console::Tactical, 99.0),
+        ]);
+        let mut rng = rand::rng();
+        let mut tactical_hits = 0u32;
+        let trials = 10_000;
+        for _ in 0..trials {
+            let before_tactical = hull.current_for(Console::Tactical).unwrap();
+            hull.apply_damage(0.001, &mut rng); // tiny damage to record which was chosen
+            let after_tactical = hull.current_for(Console::Tactical).unwrap();
+            if after_tactical < before_tactical {
+                tactical_hits += 1;
+            }
+        }
+        // Expect ~99% of hits on Tactical; allow generous margin due to HP drift.
+        let fraction = tactical_hits as f32 / trials as f32;
+        assert!(fraction > 0.90, "Tactical should absorb >90% of hits, got {:.1}%", fraction * 100.0);
+    }
+
     #[test]
     fn restore_on_unknown_console_is_noop() {
         let mut hull = four_console_hull();

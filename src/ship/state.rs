@@ -62,6 +62,7 @@ impl ShipState {
             entity_states,
             radar_state,
             impulse_charge_progress,
+            console_hull: vec![],
         }
     }
 }

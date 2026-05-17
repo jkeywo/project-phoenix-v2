@@ -55,6 +55,14 @@ impl std::hash::Hash for ModifierSource {
     }
 }
 
+/// Per-console hull integrity snapshot broadcast in `SimSnapshot`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConsoleHullStatus {
+    pub console: Console,
+    pub current: f32,
+    pub max_hp: f32,
+}
+
 /// A serialisable snapshot of a single shield facing for broadcasting.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ShieldFacingStatus {
@@ -302,6 +310,9 @@ pub struct SimSnapshot {
     /// Current radar configuration ranges.
     #[serde(default)]
     pub radar_state: RadarStateSnapshot,
+    /// Per-console hull integrity. Empty when the ship has no per-console hull config.
+    #[serde(default)]
+    pub console_hull: Vec<ConsoleHullStatus>,
 }
 
 fn default_power_levels() -> (u8, u8, u8) {

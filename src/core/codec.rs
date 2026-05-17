@@ -238,6 +238,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -259,6 +260,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -280,6 +282,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -301,6 +304,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -322,6 +326,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -943,6 +948,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -962,6 +968,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         // Encoding then decoding should preserve (2, 2, 2) for power_levels.
@@ -1095,6 +1102,7 @@ mod tests {
                 }],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1121,6 +1129,7 @@ mod tests {
                 }],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1145,6 +1154,7 @@ mod tests {
                     science_system_map: 600.0,
                 },
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1186,6 +1196,7 @@ mod tests {
                     science_system_map: 500.0,
                 },
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1513,6 +1524,7 @@ mod tests {
                 }],
                 radar_state: crate::messages::RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                console_hull: vec![],
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

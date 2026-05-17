@@ -1285,19 +1285,27 @@ fn rebuild_tab_bar(
     mut commands: Commands,
     lobby: Res<LobbyState>,
     token: Res<LocalPlayerToken>,
-    active: Res<ActiveConsole>,
+    mut active: ResMut<ActiveConsole>,
     tab_root_q: Query<Entity, With<TabBarRoot>>,
     mut tab_vis_q: Query<&mut Visibility, With<TabBarRoot>>,
     children_q: Query<&Children>,
 ) {
+    let view = LobbyView::new(&lobby, &token.0);
+    let my_consoles = view.my_consoles();
+
+    // If the player dropped the console they had selected, reset to auto-mode
+    // so the remaining panel(s) are shown correctly.
+    if let Some(c) = active.0.clone() {
+        if !my_consoles.contains(&c) {
+            active.0 = None;
+        }
+    }
+
     if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
         return;
     }
 
     let Ok(root) = tab_root_q.single() else { return };
-
-    let view = LobbyView::new(&lobby, &token.0);
-    let my_consoles = view.my_consoles();
     let in_game = lobby.phase == GamePhase::InProgress;
     let show_tabs = in_game && my_consoles.len() >= 2;
     let use_initials = my_consoles.len() >= 5;

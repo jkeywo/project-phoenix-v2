@@ -205,12 +205,27 @@ fn forward_local_token(mut token: ResMut<LocalPlayerToken>) {
 }
 
 /// Pulls the active-console override from the thread-local slot (set by the
-/// JS tab bar or swipe gesture) into Bevy's `ActiveConsole` resource each frame.
-/// Empty string means "auto" mode (no override), which is mapped to `None`.
+/// JS swipe gesture or game-start auto-select) into Bevy's `ActiveConsole`
+/// resource, **but only when the JS value has changed**.
+///
+/// Using `Local<String>` to track the last value seen means that if JS hasn't
+/// changed `ACTIVE_CONSOLE` since the previous frame, any Bevy-side change
+/// (e.g. from `handle_tab_button_press`) is left untouched. Without this
+/// guard, `forward_active_console` would overwrite Bevy tab-button presses
+/// every frame with the stale JS value.
 #[cfg(target_arch = "wasm32")]
-fn forward_active_console(mut active: ResMut<ActiveConsole>) {
+fn forward_active_console(
+    mut active: ResMut<ActiveConsole>,
+    mut last_js_value: Local<String>,
+) {
     ACTIVE_CONSOLE.with(|c| {
-        let latest = c.borrow();
+        let latest = c.borrow().clone();
+        if latest == *last_js_value {
+            // JS hasn't changed the value — leave ActiveConsole alone so
+            // Bevy-side tab button presses (handle_tab_button_press) persist.
+            return;
+        }
+        *last_js_value = latest.clone();
         if latest.is_empty() {
             if active.0.is_some() {
                 active.0 = None;

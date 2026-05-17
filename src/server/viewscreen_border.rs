@@ -62,9 +62,10 @@ use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 use js_sys::Date;
 
 use crate::console_ai_plugin::ConsoleComplexityState;
-use crate::lobby::Sessions;
-use crate::messages::GamePhase;
+use crate::lobby::{OutboundMessage, Sessions};
+use crate::messages::{GamePhase, ServerMessage};
 use crate::ship_state::ShipState;
+use crate::sim_sets::SimSet;
 use crate::simulation::ShipHullIntegrity;
 use crate::stations_config::{ShipStations, StationDef};
 
@@ -96,6 +97,11 @@ const MIN_INTENSITY: f32 = 0.55;
 
 /// Vignette intensity at the crest of the sine pulse.
 const MAX_INTENSITY: f32 = 1.0;
+
+// ── Shield flash constants ────────────────────────────────────────────
+
+/// Rate at which shield-hit flash decays per second (1.0 → 0.0 in 0.3 s).
+const FLASH_DECAY_RATE: f32 = 1.0 / 0.3;
 
 // ── HUD constants ────────────────────────────────────────────────────
 
@@ -177,6 +183,17 @@ pub struct ViewscreenAssets {
 /// so `drive_vignette_intensity` can mutate its uniform without a query.
 #[derive(Resource, Debug, Clone)]
 struct VignetteMaterialHandle(Handle<RedAlertVignetteMaterial>);
+
+/// Tracks the shield-hit white flash overlay on the viewscreen.
+///
+/// `intensity` is set by [`process_shield_flash`] when a `DamageTaken`
+/// with `shield > 0` arrives, then decayed toward zero by
+/// [`drive_vignette_intensity`] at [`FLASH_DECAY_RATE`] per second.
+#[derive(Resource, Default)]
+pub struct ShieldFlashState {
+    /// Current flash intensity (0.0 = no flash, 1.0 = full white).
+    pub intensity: f32,
+}
 
 // ── Marker components ────────────────────────────────────────────────
 
@@ -306,13 +323,15 @@ enum LobbyHudValue {
 pub struct RedAlertVignetteMaterial {
     #[uniform(0)]
     pub intensity: f32,
+    /// Flash intensity (0–1) for shield-hit white overlay.
+    /// Set by the shield-flash system, decayed each frame.
+    #[uniform(0)]
+    pub flash_intensity: f32,
     /// Padding — keeps the uniform block 16-byte aligned on downlevel WebGL2.
     #[uniform(0)]
     _pad0: f32,
     #[uniform(0)]
     _pad1: f32,
-    #[uniform(0)]
-    _pad2: f32,
 }
 
 impl UiMaterial for RedAlertVignetteMaterial {
@@ -330,13 +349,15 @@ pub struct ViewscreenBorderPlugin;
 impl Plugin for ViewscreenBorderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiMaterialPlugin::<RedAlertVignetteMaterial>::default())
+            .init_resource::<ShieldFlashState>()
             .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup, attach_initial_strip, spawn_lobby_screen).chain())
             .add_systems(
                 Update,
                 (
                     sync_hud_strips_to_phase,
                     swap_border_textures,
-                    drive_vignette_intensity,
+                    process_shield_flash.after(SimSet::Broadcast),
+                    drive_vignette_intensity.after(process_shield_flash),
                     update_hud,
                     update_lobby_hud,
                     toggle_lobby_screen_visibility,
@@ -383,7 +404,7 @@ fn spawn_border_on_startup(
     assets: Res<ViewscreenAssets>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
 ) {
-    let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0, _pad0: 0.0, _pad1: 0.0, _pad2: 0.0 });
+    let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0, flash_intensity: 0.0, _pad0: 0.0, _pad1: 0.0 });
     commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
     spawn_border_frame(&mut commands, &assets, vignette);
 }
@@ -454,6 +475,9 @@ fn sync_hud_strips_to_phase(
                 }
             }
         }
+        GamePhase::GameOver => {
+            // Keep the current HUD strip visible during game-over.
+        }
     }
 }
 
@@ -478,17 +502,43 @@ fn swap_border_textures(
     }
 }
 
+/// Reads [`OutboundMessage`] for [`ServerMessage::DamageTaken`] with
+/// `shield > 0` and sets [`ShieldFlashState::intensity`] scaled linearly
+/// over 0–30 HP absorbed (full white at 30+).
+///
+/// Runs after `SimSet::Broadcast` so the outbox has been drained into
+/// `OutboundMessage` messages and is safe to read.
+fn process_shield_flash(
+    mut outbound: MessageReader<OutboundMessage>,
+    mut flash: ResMut<ShieldFlashState>,
+) {
+    for msg in outbound.read() {
+        if let ServerMessage::DamageTaken { shield, .. } = &msg.msg {
+            if *shield > 0.0 {
+                flash.intensity = (*shield / 30.0).min(1.0);
+            }
+        }
+    }
+}
+
 /// Per-frame system that drives the vignette material's `intensity`
-/// uniform via the pure [`pulse_intensity`] helper.
+/// uniform via the pure [`pulse_intensity`] helper, and decays the
+/// shield-hit white flash toward zero.
 fn drive_vignette_intensity(
     time: Res<Time>,
     ship: Option<Res<ShipState>>,
     handle: Option<Res<VignetteMaterialHandle>>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
+    mut flash: ResMut<ShieldFlashState>,
 ) {
     let Some(ship) = ship else { return };
     let Some(handle) = handle else { return };
     let Some(material) = materials.get_mut(&handle.0) else { return };
+
+    // Decay flash intensity toward zero.
+    flash.intensity = (flash.intensity - time.delta_secs() * FLASH_DECAY_RATE).max(0.0);
+    material.flash_intensity = flash.intensity;
+
     material.intensity = pulse_intensity(
         time.elapsed_secs(),
         ship.red_alert(),
@@ -1341,6 +1391,7 @@ fn toggle_lobby_screen_visibility(
     let target = match state.get() {
         GamePhase::Lobby => Visibility::Visible,
         GamePhase::InProgress => Visibility::Hidden,
+        GamePhase::GameOver => Visibility::Hidden,
     };
     for mut vis in screen_q.iter_mut() {
         *vis = target;

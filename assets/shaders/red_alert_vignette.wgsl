@@ -23,9 +23,9 @@
 
 struct RedAlertVignetteMaterial {
     intensity: f32,
+    flash_intensity: f32,
     _pad0: f32,
     _pad1: f32,
-    _pad2: f32,
 };
 
 @group(0) @binding(0)
@@ -59,12 +59,14 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     // the inset box-shadow's tight 60px spread). Lives in the inner ~8%.
     let core = (1.0 - smooth_band(0.0, 0.08, inset)) * 0.85;
 
-    // Combine and apply the master intensity uniform. Cap the alpha at
-    // 1.0 so a steady-on glow doesn't over-saturate at the corners.
-    let alpha = clamp(max(outer, core) * material.intensity, 0.0, 1.0);
-
-    // Slight orange-shifted red — same hue family as the CSS overlay
-    // (`rgba(255, 30, 30, ...)` and `rgba(255, 0, 0, ...)`).
-    let colour = vec3<f32>(1.0, 0.12, 0.12);
-    return vec4<f32>(colour * alpha, alpha);
+    // Flash white overlay — additive on top of the vignette.
+    // Driven by `material.flash_intensity` (set by the shield-hit
+    // flash system).  Coexists with the red-alert vignette; when
+    // flash_intensity > 0 the colour shifts from red toward white.
+    let flash_alpha = material.flash_intensity;
+    let vignette_alpha = clamp(max(outer, core) * material.intensity, 0.0, 1.0);
+    let total_alpha = clamp(vignette_alpha + flash_alpha, 0.0, 1.0);
+    let white_contribution = flash_alpha / max(total_alpha, 0.001);
+    let colour = mix(vec3<f32>(1.0, 0.12, 0.12), vec3<f32>(1.0), white_contribution);
+    return vec4<f32>(colour * total_alpha, total_alpha);
 }

@@ -27,10 +27,10 @@ pub struct StationDef {
 pub fn default_complexity_presets() -> HashMap<Console, Vec<String>> {
     let mut m = HashMap::new();
     for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Power, Console::Comms] {
-        m.insert(c.clone(), vec!["Low".into(), "Full".into()]);
+        m.insert(c.clone(), vec!["Low".into(), "Std".into()]);
     }
     for c in &[Console::Sensors, Console::Shields, Console::Navigation] {
-        m.insert(c.clone(), vec!["Full".into()]);
+        m.insert(c.clone(), vec!["Std".into()]);
     }
     m
 }
@@ -328,4 +328,28 @@ pub fn all_stations_filled(
 
 /// Maps session token → station name.  A token absent from this map is a
 /// spectator.
-pub type StationAssignments = HashMap<String, String>;
+pub type StationAssignments = HashMap<String, String>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── default_complexity_presets uses "Std" not "Full" (issue #303) ────────
+
+    #[test]
+    fn default_complexity_presets_advertises_std_not_full() {
+        let presets = default_complexity_presets();
+        for (console, names) in &presets {
+            assert!(
+                !names.iter().any(|n| n == "Full"),
+                "console {:?} still advertises 'Full' preset — should be 'Std'",
+                console
+            );
+            assert!(
+                names.iter().any(|n| n == "Std"),
+                "console {:?} is missing 'Std' preset",
+                console
+            );
+        }
+    }
+}

@@ -343,47 +343,47 @@ consoles = ["Sensors"]
 "#
     }
 
-    // ── Full preset name ─────────────────────────────────────────────────────
+    // ── Std preset name (issue #303: TOML files declare "Std", not "Full") ──
 
     #[test]
-    fn default_complexity_presets_uses_full_not_std() {
+    fn default_complexity_presets_uses_std_not_full() {
         let presets = default_complexity_presets();
         for (console, names) in &presets {
             assert!(
-                !names.iter().any(|n| n == "Std"),
-                "console {:?} still has 'Std' preset — should be 'Full'",
+                !names.iter().any(|n| n == "Full"),
+                "console {:?} still advertises 'Full' preset — should be 'Std'",
                 console
             );
             assert!(
-                names.iter().any(|n| n == "Full"),
-                "console {:?} missing 'Full' preset",
+                names.iter().any(|n| n == "Std"),
+                "console {:?} is missing 'Std' preset",
                 console
             );
         }
     }
 
     #[test]
-    fn default_complexity_presets_sensors_only_full() {
+    fn default_complexity_presets_sensors_only_std() {
         let presets = default_complexity_presets();
         let got = presets.get(&Console::Sensors).expect("Sensors should have presets");
         assert_eq!(got.len(), 1, "Sensors should have exactly one preset");
-        assert_eq!(got[0], "Full", "Sensors preset should be 'Full'");
+        assert_eq!(got[0], "Std", "Sensors preset should be 'Std'");
     }
 
     #[test]
-    fn default_complexity_presets_shields_only_full() {
+    fn default_complexity_presets_shields_only_std() {
         let presets = default_complexity_presets();
         let got = presets.get(&Console::Shields).expect("Shields should have presets");
         assert_eq!(got.len(), 1, "Shields should have exactly one preset");
-        assert_eq!(got[0], "Full", "Shields preset should be 'Full'");
+        assert_eq!(got[0], "Std", "Shields preset should be 'Std'");
     }
 
     #[test]
-    fn default_complexity_presets_navigation_only_full() {
+    fn default_complexity_presets_navigation_only_std() {
         let presets = default_complexity_presets();
         let got = presets.get(&Console::Navigation).expect("Navigation should have presets");
         assert_eq!(got.len(), 1, "Navigation should have exactly one preset");
-        assert_eq!(got[0], "Full", "Navigation preset should be 'Full'");
+        assert_eq!(got[0], "Std", "Navigation preset should be 'Std'");
     }
 
     // ── short_code field ─────────────────────────────────────────────────────

@@ -1105,15 +1105,15 @@ tags = ["player"]
     fn set_complexity_last_write_wins() {
         let mut sessions = sessions_with("t1", "Alice");
         pm_stations("t1", &ClientMessage::SelectStation { station: "Captain".into() }, &mut sessions, GamePhase::Lobby, None);
-        // Send Low, then Full. The last ComplexityChanged should carry "Full".
+        // Send Low, then Std. The last ComplexityChanged should carry "Std".
         let _ = pm_stations("t1", &ClientMessage::SetComplexity { console: Console::Helm, preset_name: "Low".into() }, &mut sessions, GamePhase::Lobby, None);
-        let result = pm_stations("t1", &ClientMessage::SetComplexity { console: Console::Helm, preset_name: "Full".into() }, &mut sessions, GamePhase::Lobby, None);
-        // Should have exactly one ComplexityChanged with "Full"
+        let result = pm_stations("t1", &ClientMessage::SetComplexity { console: Console::Helm, preset_name: "Std".into() }, &mut sessions, GamePhase::Lobby, None);
+        // Should have exactly one ComplexityChanged with "Std"
         let changes: Vec<_> = result.outbound.iter().filter_map(|(_, m)| match m {
             ServerMessage::ComplexityChanged { console: Console::Helm, preset_name } => Some(preset_name.as_str()),
             _ => None,
         }).collect();
-        assert_eq!(changes, vec!["Full"], "last write must win — only 'Full' should be broadcast");
+        assert_eq!(changes, vec!["Std"], "last write must win — only 'Std' should be broadcast");
     }
 
     #[test]

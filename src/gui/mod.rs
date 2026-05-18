@@ -29,6 +29,7 @@ pub use progress::{
 };
 pub use light::{FlickerLight, FlickerLightConfig, FlickerLightMarker, FlickerLightState, effective_interval};
 pub use readout::{TextReadout, TextReadoutMarker, ReadoutValue};
+pub use radio::{RadioGroup, RadioGroupMarker, RadioMember, RadioSelected, RadioButtonConfig, next_radio_selection};
 
 mod foundation;
 pub mod button;
@@ -38,6 +39,7 @@ pub mod panel;
 pub mod progress;
 pub mod light;
 pub mod readout;
+pub mod radio;
 
 // ── Root plugin ───────────────────────────────────────────────────────────────
 
@@ -54,6 +56,7 @@ impl Plugin for GuiPlugin {
            .add_plugins(panel::GuiPanelPlugin)
            .add_plugins(progress::GuiProgressPlugin)
            .add_plugins(light::GuiLightPlugin)
-           .add_plugins(readout::GuiReadoutPlugin);
+           .add_plugins(readout::GuiReadoutPlugin)
+           .add_plugins(radio::GuiRadioPlugin);
     }
 }

@@ -27,6 +27,7 @@ pub use progress::{
     ProgressBar, ProgressBarMarker, ProgressBarVariant, ProgressValue,
     SegmentCount, filled_segments,
 };
+pub use light::{FlickerLight, FlickerLightConfig, FlickerLightMarker, FlickerLightState, effective_interval};
 
 mod foundation;
 pub mod button;
@@ -34,6 +35,7 @@ pub mod joystick;
 pub mod radar;
 pub mod panel;
 pub mod progress;
+pub mod light;
 
 // ── Root plugin ───────────────────────────────────────────────────────────────
 
@@ -48,6 +50,7 @@ impl Plugin for GuiPlugin {
            .add_plugins(joystick::GuiJoystickPlugin)
            .add_plugins(radar::GuiRadarPlugin)
            .add_plugins(panel::GuiPanelPlugin)
-           .add_plugins(progress::GuiProgressPlugin);
+           .add_plugins(progress::GuiProgressPlugin)
+           .add_plugins(light::GuiLightPlugin);
     }
 }

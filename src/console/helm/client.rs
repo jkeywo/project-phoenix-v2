@@ -237,17 +237,26 @@ fn bridge_client_sim_to_radar_entities(
             continue; // unknown type
         };
 
+        let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
+        let default_color = match layer {
+            RadarLayer::Ship => Color::srgb(0.95, 0.95, 1.0),
+            RadarLayer::Asteroid => Color::srgb(0.85, 0.75, 0.45),
+            RadarLayer::Station => Color::srgb(0.3, 0.8, 0.6),
+            RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
+            RadarLayer::Planet => Color::srgb(0.0, 0.6, 1.0),
+            RadarLayer::Star => Color::srgb(1.0, 0.85, 0.3),
+        };
+        let shape = if has_tag("ship") {
+            RadarShape::Triangle
+        } else if has_tag("station") {
+            RadarShape::Square
+        } else {
+            RadarShape::Dot
+        };
         let appearance = RadarAppearance {
-            color: match layer {
-                RadarLayer::Ship => Color::srgb(0.95, 0.95, 1.0),
-                RadarLayer::Asteroid => Color::srgb(0.85, 0.75, 0.45),
-                RadarLayer::Station => Color::srgb(0.3, 0.8, 0.6),
-                RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
-                RadarLayer::Planet => Color::srgb(0.0, 0.6, 1.0),
-                RadarLayer::Star => Color::srgb(1.0, 0.85, 0.3),
-            },
-            radius: (snapshot.radius_or_zero() * 4.0).max(2.0),
-            shape: RadarShape::Dot,
+            color: colour.unwrap_or(default_color),
+            radius: snapshot.radius_or_zero().max(2.0),
+            shape,
         };
 
         if let Some(existing) = radar.blips.get(uuid) {

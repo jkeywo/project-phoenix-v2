@@ -9,6 +9,10 @@ shape = "Capsule"
 radius = 3.0
 length = 7.0
 
+[radar_appearance]
+colour = [0.8, 0.3, 0.1]
+radius = 7.0
+
 [behaviour]
 initial_state = "patrolling"
 

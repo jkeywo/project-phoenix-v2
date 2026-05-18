@@ -1244,6 +1244,7 @@ mod tests {
             sensors_console: None,
             shields_console: None,
             station: None,
+            radar_appearance: None,
         };
 
         let mut commands = app.world_mut().commands();

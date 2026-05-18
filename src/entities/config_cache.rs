@@ -604,28 +604,7 @@ mod tests {
     // ── Helper for tests ───────────────────────────────────────────────────────
     
     fn default_entity_config() -> EntityConfig {
-        EntityConfig {
-            tags: vec![],
-            hull: None,
-            collider: None,
-            appearance: None,
-            helm_console: None,
-            weapons_console: None,
-            engineering_console: None,
-            captain_console: None,
-            power: None,
-            science_console: None,
-            sensors_console: None,
-            shields_console: None,
-            star: None,
-            planet: None,
-            asteroid_field: None,
-            shape: None,
-            effects: None,
-            station: None,
-            faction: None,
-            behaviour: None,
-        }
+        EntityConfig::default()
     }
     
     // ── Integration Tests ──────────────────────────────────────────────────────

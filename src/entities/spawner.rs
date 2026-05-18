@@ -64,6 +64,10 @@ pub struct FactionComponent(pub uuid::Uuid);
 #[derive(Component, Clone, Debug)]
 pub struct WeaponsConsoleSection(pub crate::entity_config::WeaponsConsoleConfig);
 
+/// Present when the EntityConfig had a [radar_appearance] section.
+#[derive(Component, Clone, Debug)]
+pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfig);
+
 /// Hull tracker attached to any entity (NPC ship, asteroid) that carries a
 /// `[hull]` section in its TOML config. For NPC ships the HP is placed in a
 /// single `CaptainChair` console slot; asteroids use the same single-slot
@@ -168,6 +172,11 @@ pub fn spawn_entity(
     // Tags — mirror TOML tags onto the entity for snapshot builders.
     if !config.tags.is_empty() {
         entity_commands.insert(EntityTagsSection(config.tags.clone()));
+    }
+
+    // Radar appearance section
+    if let Some(radar_appearance) = &config.radar_appearance {
+        entity_commands.insert(RadarAppearanceSection(radar_appearance.clone()));
     }
 
     // Faction — attach a FactionComponent so the AI can read faction from ECS.
@@ -344,6 +353,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -383,6 +393,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -424,6 +435,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -470,6 +482,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -508,6 +521,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -571,6 +585,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -612,6 +627,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -647,6 +663,7 @@ mod tests {
             effects: None,
             station: None,
             behaviour: None,
+            radar_appearance: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -740,6 +757,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -790,6 +808,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -831,6 +850,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -871,6 +891,7 @@ mod tests {
             station: None,
             faction: None,
             behaviour: None,
+            radar_appearance: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);

@@ -11,3 +11,7 @@ tags = ["planet", "habitable"]
 shape = "Ball"
 radius = 20.0
 length = 0.0
+
+[radar_appearance]
+colour = [0.0, 0.6, 1.0]
+radius = 20.0

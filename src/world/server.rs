@@ -185,6 +185,7 @@ fn setup_world_hardcoded(
         station: None,
         faction: None,
         behaviour: None,
+        radar_appearance: None,
     };
     let ship_uuid = crate::entity_loader::assign_uuid();
     let ship_entity = crate::entity_spawner::spawn_entity(

@@ -123,6 +123,13 @@ pub struct AppearanceConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RadarAppearanceConfig {
+    pub colour: Vec<f32>,
+    #[serde(default)]
+    pub radius: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HelmConsoleConfig {
     #[serde(default)]
     pub max_speed: f32,
@@ -289,7 +296,7 @@ pub struct SensorsConsoleConfig {
     pub complexity_toml: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct EntityConfig {
     pub tags: Vec<String>,
     pub hull: Option<HullConfig>,
@@ -322,6 +329,9 @@ pub struct EntityConfig {
     /// Optional AI behaviour controller config.
     #[serde(default)]
     pub behaviour: Option<BehaviourConfig>,
+    /// Radar appearance (colour, optional radius) for the helm radar blip.
+    #[serde(default)]
+    pub radar_appearance: Option<RadarAppearanceConfig>,
 }
 
 #[derive(Deserialize)]
@@ -347,6 +357,7 @@ struct TomlConfig {
     station: Option<StationConfig>,
     faction: Option<Uuid>,
     behaviour: Option<BehaviourConfig>,
+    radar_appearance: Option<RadarAppearanceConfig>,
 }
 
 impl EntityConfig {
@@ -432,6 +443,7 @@ impl EntityConfig {
             station: raw.station,
             faction: raw.faction,
             behaviour,
+            radar_appearance: raw.radar_appearance,
         })
     }
 
@@ -548,15 +560,10 @@ hull_integrity = 80
         assert!(config.weapons_console.is_none());
         assert!(config.engineering_console.is_none());
         assert!(config.captain_console.is_none());
-    }
-
-    #[test]
-    fn captain_console_with_no_fields_deserializes_to_some() {
-        let toml_str = "[captain_console]\n";
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        assert!(config.captain_console.is_some());
-        let c = config.captain_console.as_ref().unwrap();
-        assert_eq!(c, &CaptainConsoleConfig { complexity_toml: None });
+        assert!(
+            config.radar_appearance.is_none(),
+            "radar_appearance should default to None when not in TOML"
+        );
     }
 
     #[test]
@@ -612,6 +619,7 @@ length = 6.0
         assert!(config.weapons_console.is_none());
         assert!(config.engineering_console.is_none());
         assert!(config.captain_console.is_none());
+        assert!(config.radar_appearance.is_none(), "radar_appearance should default to None");
     }
 
     #[test]

@@ -20,7 +20,7 @@ use bevy_rapier3d::prelude::ReadRapierContext;
 use crate::impulse::ImpulseState;
 use crate::modifiers::ShipModifiers;
 use crate::messages::ModifierSlot;
-use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, EntityTagsSection};
+use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, EntityTagsSection, RadarAppearanceSection};
 use std::collections::HashMap;
 
 // â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -605,13 +605,13 @@ fn broadcast_world_setup_on_start(
 fn reconcile_runtime_entities(
     mut registry: ResMut<TrackedEntities>,
     mut world: ResMut<WorldResource>,
-    query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform, Option<&RegionShapeSection>, Option<&EntityTagsSection>), Without<Asteroid>>,
+    query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform, Option<&RegionShapeSection>, Option<&EntityTagsSection>, Option<&RadarAppearanceSection>), Without<Asteroid>>,
     mut outbox: ResMut<SimOutbox>,
 ) {
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _, _, _)| (u.0.clone(), e))
         .collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
@@ -630,7 +630,7 @@ fn reconcile_runtime_entities(
     if !registry.seeded {
         for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-            if let Ok((_, _, id, transform, region_shape, entity_tags)) = query.get(*entity) {
+            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance)) = query.get(*entity) {
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
@@ -645,6 +645,14 @@ fn reconcile_runtime_entities(
                 if let Some(shape) = region_shape {
                     snapshot.shape = Some(shape_to_wire(shape));
                 }
+                if let Some(ra) = radar_appearance {
+                    if ra.0.colour.len() >= 3 {
+                        snapshot.colour = Some([ra.0.colour[0], ra.0.colour[1], ra.0.colour[2]]);
+                    }
+                    if let Some(r) = ra.0.radius {
+                        snapshot.radius = Some(r);
+                    }
+                }
                 world.0.entities.push(snapshot);
             }
         }
@@ -655,7 +663,7 @@ fn reconcile_runtime_entities(
     // Emit EntitySpawned for new entities.
     for (uuid, entity) in &current {
         if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, transform, region_shape, entity_tags)) = query.get(*entity) {
+            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance)) = query.get(*entity) {
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
@@ -669,6 +677,14 @@ fn reconcile_runtime_entities(
                 };
                 if let Some(shape) = region_shape {
                     snapshot.shape = Some(shape_to_wire(shape));
+                }
+                if let Some(ra) = radar_appearance {
+                    if ra.0.colour.len() >= 3 {
+                        snapshot.colour = Some([ra.0.colour[0], ra.0.colour[1], ra.0.colour[2]]);
+                    }
+                    if let Some(r) = ra.0.radius {
+                        snapshot.radius = Some(r);
+                    }
                 }
                 world.0.entities.push(snapshot.clone());
                 outbox.0.push((Target::All, ServerMessage::EntitySpawned { snapshot }));

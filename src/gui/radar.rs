@@ -38,6 +38,10 @@ pub struct RadarFilter(pub HashSet<RadarLayer>);
 pub enum RadarShape {
     Dot,
     Triangle,
+    /// Diamond outline (use for stations or special markers).
+    Diamond,
+    /// Square outline (square bounding-box, axis-aligned in radar space).
+    Square,
     Ring,
     Icon(Handle<Image>),
 }
@@ -250,6 +254,26 @@ fn draw_generic_radars(
                 }
                 RadarShape::Ring => {
                     gizmos.circle_2d(draw_pos, r, appearance.color);
+                }
+                RadarShape::Square => {
+                    let top    = draw_pos + Vec2::new(0.0,  r);
+                    let right  = draw_pos + Vec2::new( r, 0.0);
+                    let bot    = draw_pos + Vec2::new(0.0, -r);
+                    let left   = draw_pos + Vec2::new(-r, 0.0);
+                    gizmos.line_2d(top, right, appearance.color);
+                    gizmos.line_2d(right, bot, appearance.color);
+                    gizmos.line_2d(bot, left, appearance.color);
+                    gizmos.line_2d(left, top, appearance.color);
+                }
+                RadarShape::Diamond => {
+                    let top   = draw_pos + Vec2::new(0.0,  r);
+                    let right = draw_pos + Vec2::new( r, 0.0);
+                    let bot   = draw_pos + Vec2::new(0.0, -r);
+                    let left  = draw_pos + Vec2::new(-r, 0.0);
+                    gizmos.line_2d(top, right, appearance.color);
+                    gizmos.line_2d(right, bot, appearance.color);
+                    gizmos.line_2d(bot, left, appearance.color);
+                    gizmos.line_2d(left, top, appearance.color);
                 }
                 RadarShape::Triangle => {
                     let nose  = draw_pos + Vec2::new(0.0, r);

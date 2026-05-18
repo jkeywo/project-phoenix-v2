@@ -26,6 +26,23 @@ pub struct LastHelmInput {
 #[derive(Resource, Clone)]
 pub struct ShipPhysicsConfigResource(pub crate::ship_physics::ShipPhysicsConfig);
 
+/// Runtime impulse drive config, loaded from `[helm_console]` in the entity TOML.
+/// Charge duration and speed multiplier can be overridden per ship.
+#[derive(Resource, Clone)]
+pub struct ImpulseConfigResource {
+    pub charge_duration: f32,
+    pub speed_multiplier: f32,
+}
+
+impl Default for ImpulseConfigResource {
+    fn default() -> Self {
+        Self {
+            charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
+            speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+        }
+    }
+}
+
 // ── Plugin ─────────────────────────────────────────────────────────────────
 
 pub struct ShipPlugin;
@@ -37,10 +54,12 @@ impl Plugin for ShipPlugin {
             TimerMode::Repeating,
         )))
         .init_resource::<LastHelmInput>()
+        .init_resource::<ImpulseConfigResource>()
         .add_systems(
             Update,
             (
                 process_helm_inputs.in_set(crate::sim_sets::SimSet::Physics),
+                tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
                 sync_ship_position.in_set(crate::sim_sets::SimSet::Physics),
                 handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
             )
@@ -152,6 +171,14 @@ pub fn handle_impulse_messages(
             _ => {}
         }
     }
+}
+
+fn tick_impulse(
+    time: Res<Time>,
+    mut impulse: ResMut<ShipImpulse>,
+    config: Res<ImpulseConfigResource>,
+) {
+    impulse.0.tick(time.delta_secs(), config.charge_duration);
 }
 
 fn is_inside_blocks_impulse(
@@ -350,7 +377,7 @@ mod tests {
         {
             let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
             imp.0.start_charge();
-            imp.0.tick(IMPULSE_CHARGE_DURATION);
+            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
         }
         assert!(
             app.world().resource::<ShipImpulse>().0.is_active(),

@@ -139,6 +139,22 @@ pub struct HelmConsoleConfig {
     /// Path to a complexity TOML file for this console.
     #[serde(default)]
     pub complexity_toml: Option<String>,
+    /// Total time in seconds to fully charge the impulse drive.
+    /// Defaults to `IMPULSE_CHARGE_DURATION` (3.0 s) when absent.
+    #[serde(default = "default_impulse_charge_duration")]
+    pub impulse_charge_duration: f32,
+    /// Speed multiplier applied when impulse drive is active.
+    /// Defaults to `IMPULSE_SPEED_MULTIPLIER` (10.0) when absent.
+    #[serde(default = "default_impulse_speed_multiplier")]
+    pub impulse_speed_multiplier: f32,
+}
+
+fn default_impulse_charge_duration() -> f32 {
+    crate::impulse::IMPULSE_CHARGE_DURATION
+}
+
+fn default_impulse_speed_multiplier() -> f32 {
+    crate::impulse::IMPULSE_SPEED_MULTIPLIER
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1045,7 +1045,7 @@ mod tests {
         use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION};
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION / 2.0);
+        s.tick(IMPULSE_CHARGE_DURATION / 2.0, IMPULSE_CHARGE_DURATION);
         assert!(cancel_impulse_button_visible(&s));
     }
 
@@ -1054,7 +1054,7 @@ mod tests {
         use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION};
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION);
+        s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
         assert!(cancel_impulse_button_visible(&s));
     }
 
@@ -1063,7 +1063,7 @@ mod tests {
         use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION};
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION / 2.0);
+        s.tick(IMPULSE_CHARGE_DURATION / 2.0, IMPULSE_CHARGE_DURATION);
         assert_eq!(press_cancel_impulse_button(&s), Some(ClientMessage::CancelImpulse));
     }
 

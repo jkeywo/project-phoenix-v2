@@ -309,7 +309,7 @@ mod tests {
     fn impulse_button_press_noop_when_active() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION);
+        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION, crate::impulse::IMPULSE_CHARGE_DURATION);
         assert_eq!(press_impulse_button(&s), None);
     }
 
@@ -317,7 +317,7 @@ mod tests {
     fn impulse_button_shows_charge_progress() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION / 2.0);
+        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION / 2.0, crate::impulse::IMPULSE_CHARGE_DURATION);
         match impulse_button_view(&s) {
             ImpulseButtonView::Charging { progress } => {
                 assert!((progress - 0.5).abs() < 0.01);
@@ -330,7 +330,7 @@ mod tests {
     fn impulse_button_active_when_fully_charged() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION);
+        s.tick(crate::impulse::IMPULSE_CHARGE_DURATION, crate::impulse::IMPULSE_CHARGE_DURATION);
         assert_eq!(impulse_button_view(&s), ImpulseButtonView::Active);
     }
 }

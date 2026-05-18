@@ -51,10 +51,12 @@ impl ImpulseState {
 
     /// Advance the impulse drive by `dt` seconds.
     /// When charge reaches 1.0, transitions to Active.
-    pub fn tick(&mut self, dt: f32) {
+    /// `charge_duration` is the total time in seconds to fully charge.
+    pub fn tick(&mut self, dt: f32, charge_duration: f32) {
         if self.phase == ImpulsePhase::Charging {
+            let duration = if charge_duration > 0.0 { charge_duration } else { IMPULSE_CHARGE_DURATION };
             self.charge_progress =
-                (self.charge_progress + dt / IMPULSE_CHARGE_DURATION).min(1.0);
+                (self.charge_progress + dt / duration).min(1.0);
             if self.charge_progress >= 1.0 {
                 self.phase = ImpulsePhase::Active;
             }
@@ -69,13 +71,14 @@ impl ImpulseState {
     /// Apply impulse modifiers to physics inputs.
     ///
     /// During impulse:
-    /// - `max_speed` is multiplied by `IMPULSE_SPEED_MULTIPLIER`
+    /// - `max_speed` is multiplied by `speed_multiplier`
     /// - `steering` input is forced to 0.0 (ignored)
     ///
     /// Returns `(effective_max_speed, effective_steering)`.
-    pub fn apply_to_physics(&self, base_max_speed: f32, steering: f32) -> (f32, f32) {
+    pub fn apply_to_physics(&self, base_max_speed: f32, steering: f32, speed_multiplier: f32) -> (f32, f32) {
         if self.is_active() {
-            (base_max_speed * IMPULSE_SPEED_MULTIPLIER, 0.0)
+            let mult = if speed_multiplier > 0.0 { speed_multiplier } else { IMPULSE_SPEED_MULTIPLIER };
+            (base_max_speed * mult, 0.0)
         } else {
             (base_max_speed, steering)
         }
@@ -99,7 +102,7 @@ mod tests {
     fn start_charge_is_noop_when_already_charging() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(1.0); // partial progress
+        s.tick(1.0, IMPULSE_CHARGE_DURATION); // partial progress
         let progress_before = s.charge_progress;
         s.start_charge(); // should not reset progress
         assert_eq!(s.phase, ImpulsePhase::Charging);
@@ -110,7 +113,7 @@ mod tests {
     fn start_charge_is_noop_when_active() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION); // fully charged → Active
+        s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION); // fully charged → Active
         assert!(s.is_active());
         s.start_charge(); // should stay Active
         assert_eq!(s.phase, ImpulsePhase::Active);
@@ -120,7 +123,7 @@ mod tests {
     fn cancel_charge_returns_to_idle_and_resets_progress() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(1.0);
+        s.tick(1.0, IMPULSE_CHARGE_DURATION);
         s.cancel_charge();
         assert_eq!(s.phase, ImpulsePhase::Idle);
         assert!((s.charge_progress).abs() < f32::EPSILON);
@@ -130,7 +133,7 @@ mod tests {
     fn cancel_from_active_returns_to_idle() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION);
+        s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
         assert!(s.is_active());
         s.cancel_charge();
         assert_eq!(s.phase, ImpulsePhase::Idle);
@@ -141,7 +144,7 @@ mod tests {
     #[test]
     fn tick_while_idle_does_nothing() {
         let mut s = ImpulseState::new();
-        s.tick(10.0);
+        s.tick(10.0, IMPULSE_CHARGE_DURATION);
         assert_eq!(s.phase, ImpulsePhase::Idle);
         assert!((s.charge_progress).abs() < f32::EPSILON);
     }
@@ -150,7 +153,7 @@ mod tests {
     fn tick_advances_charge_progress() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION / 2.0);
+        s.tick(IMPULSE_CHARGE_DURATION / 2.0, IMPULSE_CHARGE_DURATION);
         assert!((s.charge_progress - 0.5).abs() < 0.001);
         assert_eq!(s.phase, ImpulsePhase::Charging);
     }
@@ -159,7 +162,7 @@ mod tests {
     fn tick_to_full_charge_transitions_to_active() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION);
+        s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
         assert_eq!(s.phase, ImpulsePhase::Active);
         assert!((s.charge_progress - 1.0).abs() < f32::EPSILON);
         assert!(s.is_active());
@@ -169,8 +172,20 @@ mod tests {
     fn charge_progress_capped_at_one() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION * 5.0);
+        s.tick(IMPULSE_CHARGE_DURATION * 5.0, IMPULSE_CHARGE_DURATION);
         assert!((s.charge_progress - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn custom_charge_duration_charges_at_configured_rate() {
+        let custom_duration = 6.0; // twice the default
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        s.tick(3.0, custom_duration); // half of custom duration → 50%
+        assert!((s.charge_progress - 0.5).abs() < 0.001);
+        assert_eq!(s.phase, ImpulsePhase::Charging);
+        s.tick(3.0, custom_duration); // full custom duration → Active
+        assert_eq!(s.phase, ImpulsePhase::Active);
     }
 
     // --- physics modifiers ---
@@ -178,7 +193,7 @@ mod tests {
     #[test]
     fn apply_to_physics_returns_base_values_when_idle() {
         let s = ImpulseState::new();
-        let (max_speed, steering) = s.apply_to_physics(25.0, 0.8);
+        let (max_speed, steering) = s.apply_to_physics(25.0, 0.8, IMPULSE_SPEED_MULTIPLIER);
         assert!((max_speed - 25.0).abs() < f32::EPSILON);
         assert!((steering - 0.8).abs() < f32::EPSILON);
     }
@@ -187,8 +202,8 @@ mod tests {
     fn apply_to_physics_returns_base_values_when_charging() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(1.0);
-        let (max_speed, steering) = s.apply_to_physics(25.0, 0.8);
+        s.tick(1.0, IMPULSE_CHARGE_DURATION);
+        let (max_speed, steering) = s.apply_to_physics(25.0, 0.8, IMPULSE_SPEED_MULTIPLIER);
         assert!((max_speed - 25.0).abs() < f32::EPSILON);
         assert!((steering - 0.8).abs() < f32::EPSILON);
     }
@@ -197,8 +212,8 @@ mod tests {
     fn active_impulse_applies_10x_speed_multiplier() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION);
-        let (max_speed, _) = s.apply_to_physics(25.0, 0.0);
+        s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        let (max_speed, _) = s.apply_to_physics(25.0, 0.0, IMPULSE_SPEED_MULTIPLIER);
         assert!((max_speed - 25.0 * IMPULSE_SPEED_MULTIPLIER).abs() < f32::EPSILON);
     }
 
@@ -206,8 +221,18 @@ mod tests {
     fn active_impulse_zeroes_steering_input() {
         let mut s = ImpulseState::new();
         s.start_charge();
-        s.tick(IMPULSE_CHARGE_DURATION);
-        let (_, steering) = s.apply_to_physics(25.0, 0.9);
+        s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        let (_, steering) = s.apply_to_physics(25.0, 0.9, IMPULSE_SPEED_MULTIPLIER);
         assert!((steering).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn custom_speed_multiplier_applied_when_active() {
+        let custom_mult = 5.0;
+        let mut s = ImpulseState::new();
+        s.start_charge();
+        s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        let (max_speed, _) = s.apply_to_physics(25.0, 0.0, custom_mult);
+        assert!((max_speed - 25.0 * custom_mult).abs() < f32::EPSILON);
     }
 }

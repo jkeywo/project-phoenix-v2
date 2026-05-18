@@ -608,7 +608,7 @@ mod tests {
     fn set_impulse_active(app: &mut App) {
         let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
         imp.0.start_charge();
-        imp.0.tick(IMPULSE_CHARGE_DURATION);
+        imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
     }
 
     fn assert_impulse_phase(app: &App, expected: ImpulsePhase) {

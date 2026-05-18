@@ -12,6 +12,7 @@ use crate::region_plugin::{RegionEntered, RegionExited, RegionMembership};
 use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
 use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
 use crate::simulation::ShipImpulse;
+use crate::ship_plugin::ImpulseConfigResource;
 
 /// Single owner of `ShipModifiers` lifecycle.
 ///
@@ -146,16 +147,16 @@ pub fn apply_region_effects(
 ///
 /// When the impulse drive is active (`ImpulsePhase::Active`) it registers a
 /// `MaxSpeed` modifier with `ModifierSource::ImpulseDrive` and a bonus that
-/// yields `IMPULSE_SPEED_MULTIPLIER` × max speed.
+/// yields `speed_multiplier` × max speed.
 ///
 /// When the drive is idle or charging the modifier is removed, so any
 /// previously applied impulse effect is cleaned up.
-pub fn apply_impulse_to(modifiers: &mut ShipModifiers, impulse: &ImpulseState) {
+pub fn apply_impulse_to(modifiers: &mut ShipModifiers, impulse: &ImpulseState, speed_multiplier: f32) {
     if impulse.is_active() {
         modifiers.add_or_update(Modifier {
             source: ModifierSource::ImpulseDrive,
             slot: ModifierSlot::MaxSpeed,
-            bonus: IMPULSE_SPEED_MULTIPLIER - 1.0,
+            bonus: speed_multiplier - 1.0,
         });
     } else {
         modifiers.remove(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed);
@@ -172,12 +173,17 @@ pub fn apply_impulse_to(modifiers: &mut ShipModifiers, impulse: &ImpulseState) {
 pub fn translate_impulse_modifiers(
     impulse: Res<ShipImpulse>,
     mut modifiers: ResMut<ShipModifiers>,
+    impulse_config: Option<Res<ImpulseConfigResource>>,
     mut prev_phase: Local<Option<ImpulsePhase>>,
 ) {
     let current = impulse.0.phase;
     if Some(current) != *prev_phase {
         *prev_phase = Some(current);
-        apply_impulse_to(&mut modifiers, &impulse.0);
+        let speed_multiplier = impulse_config
+            .as_deref()
+            .map(|c| c.speed_multiplier)
+            .unwrap_or(IMPULSE_SPEED_MULTIPLIER);
+        apply_impulse_to(&mut modifiers, &impulse.0, speed_multiplier);
     }
 }
 
@@ -381,7 +387,7 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
     fn impulse_idle_does_not_write_modifier() {
         let mut mods = ShipModifiers::new();
         let impulse = ImpulseState::new();
-        apply_impulse_to(&mut mods, &impulse);
+        apply_impulse_to(&mut mods, &impulse, IMPULSE_SPEED_MULTIPLIER);
         assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
     }
 
@@ -390,8 +396,8 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
         let mut mods = ShipModifiers::new();
         let mut impulse = ImpulseState::new();
         impulse.start_charge();
-        impulse.tick(1.0);
-        apply_impulse_to(&mut mods, &impulse);
+        impulse.tick(1.0, IMPULSE_CHARGE_DURATION);
+        apply_impulse_to(&mut mods, &impulse, IMPULSE_SPEED_MULTIPLIER);
         assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
     }
 
@@ -400,9 +406,9 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
         let mut mods = ShipModifiers::new();
         let mut impulse = ImpulseState::new();
         impulse.start_charge();
-        impulse.tick(IMPULSE_CHARGE_DURATION);
+        impulse.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
         assert!(impulse.is_active());
-        apply_impulse_to(&mut mods, &impulse);
+        apply_impulse_to(&mut mods, &impulse, IMPULSE_SPEED_MULTIPLIER);
         let expected = 1.0 + (IMPULSE_SPEED_MULTIPLIER - 1.0);
         assert!((mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6);
     }
@@ -412,8 +418,8 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
         let mut mods = ShipModifiers::new();
         let mut impulse = ImpulseState::new();
         impulse.start_charge();
-        impulse.tick(IMPULSE_CHARGE_DURATION);
-        apply_impulse_to(&mut mods, &impulse);
+        impulse.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        apply_impulse_to(&mut mods, &impulse, IMPULSE_SPEED_MULTIPLIER);
         // Verify source identity by clearing the ImpulseDrive source
         mods.clear_source(&ModifierSource::ImpulseDrive);
         assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
@@ -425,12 +431,12 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
         let mut impulse = ImpulseState::new();
         // Activate impulse
         impulse.start_charge();
-        impulse.tick(IMPULSE_CHARGE_DURATION);
-        apply_impulse_to(&mut mods, &impulse);
+        impulse.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        apply_impulse_to(&mut mods, &impulse, IMPULSE_SPEED_MULTIPLIER);
         assert!((mods.get(&ModifierSlot::MaxSpeed) - IMPULSE_SPEED_MULTIPLIER).abs() < 1e-6);
         // Cancel impulse
         impulse.cancel_charge();
-        apply_impulse_to(&mut mods, &impulse);
+        apply_impulse_to(&mut mods, &impulse, IMPULSE_SPEED_MULTIPLIER);
         assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
     }
 
@@ -439,8 +445,8 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
         let mut mods = ShipModifiers::new();
         let mut impulse = ImpulseState::new();
         impulse.start_charge();
-        impulse.tick(IMPULSE_CHARGE_DURATION);
-        apply_impulse_to(&mut mods, &impulse);
+        impulse.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        apply_impulse_to(&mut mods, &impulse, IMPULSE_SPEED_MULTIPLIER);
         assert!((mods.get(&ModifierSlot::MaxSpeed) - IMPULSE_SPEED_MULTIPLIER).abs() < 1e-6);
         assert_eq!(mods.get(&ModifierSlot::MaxYawRate), 1.0);
         assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);

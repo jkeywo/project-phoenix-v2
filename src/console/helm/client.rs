@@ -79,7 +79,7 @@ pub const HELM_PAD_SIZE: f32 = 200.0;
 pub const COMPASS_RADAR_DIAMETER: f32 = 280.0;
 
 /// Radar range in world units for the helm generic radar.
-pub const HELM_RADAR_RANGE: f32 = 100.0;
+pub const HELM_RADAR_RANGE: f32 = 500.0;
 
 /// Convert ship yaw (radians, CCW from +Z) to a 3-digit heading string
 /// (degrees, 0–360, 0 = ship-forward = "north" on the compass).

@@ -112,6 +112,7 @@ pub fn project_radar_entity(
     center_z: f32,
     yaw: f32,
     range: f32,
+    entity_radius: f32,
     orientation: &OrientationMode,
 ) -> Option<(f32, f32)> {
     if range <= 0.0 {
@@ -119,7 +120,8 @@ pub fn project_radar_entity(
     }
     let dx = entity_x - center_x;
     let dz = entity_z - center_z;
-    if dx * dx + dz * dz > range * range {
+    let effective_range = range + entity_radius.max(0.0);
+    if dx * dx + dz * dz > effective_range * effective_range {
         return None;
     }
     let effective_yaw = match orientation {
@@ -235,12 +237,19 @@ fn draw_generic_radars(
                 center.world_z,
                 center.yaw,
                 widget.range,
+                appearance.radius,
                 &widget.orientation,
             ) else {
                 continue;
             };
 
-            let draw_pos = widget_centre + Vec2::new(nx * radius, ny * radius);
+            // Clip blip to the radar circle boundary.
+            let draw_offset = Vec2::new(nx * radius, ny * radius);
+            let draw_pos = if draw_offset.length() > radius {
+                widget_centre + draw_offset.normalize_or_zero() * radius
+            } else {
+                widget_centre + draw_offset
+            };
             let r = appearance.radius.max(1.0);
 
             match &appearance.shape {
@@ -373,7 +382,7 @@ mod tests {
 
     #[test]
     fn center_entity_projects_to_zero() {
-        let result = project_radar_entity(0.0, 0.0, 0.0, 0.0, 0.0, 100.0, &OrientationMode::ShipRelative);
+        let result = project_radar_entity(0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::ShipRelative);
         let (x, y) = result.unwrap();
         assert!((x).abs() < 1e-5);
         assert!((y).abs() < 1e-5);
@@ -381,13 +390,13 @@ mod tests {
 
     #[test]
     fn entity_beyond_range_returns_none() {
-        let result = project_radar_entity(200.0, 0.0, 0.0, 0.0, 0.0, 100.0, &OrientationMode::ShipRelative);
+        let result = project_radar_entity(200.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::ShipRelative);
         assert!(result.is_none());
     }
 
     #[test]
     fn zero_range_returns_none_safely() {
-        let result = project_radar_entity(10.0, 0.0, 0.0, 0.0, 0.0, 0.0, &OrientationMode::ShipRelative);
+        let result = project_radar_entity(10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &OrientationMode::ShipRelative);
         assert!(result.is_none());
     }
 
@@ -395,7 +404,7 @@ mod tests {
     fn ship_relative_yaw_zero_ahead_entity_gives_positive_y() {
         // At yaw=0: forward = (sin(0), -cos(0)) = (0,-1) in XZ.
         // Entity at dz=-100 (ahead) → radar_y = dx*sin(0) - dz*cos(0) = 0 - (-100)*1 = +1.0
-        let result = project_radar_entity(0.0, -100.0, 0.0, 0.0, 0.0, 100.0, &OrientationMode::ShipRelative);
+        let result = project_radar_entity(0.0, -100.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::ShipRelative);
         let (_, y) = result.unwrap();
         assert!((y - 1.0).abs() < 1e-5, "expected radar_y=1.0, got {y}");
     }
@@ -403,10 +412,10 @@ mod tests {
     #[test]
     fn world_fixed_ignores_yaw() {
         let yaw = std::f32::consts::FRAC_PI_2; // 90 degrees
-        let ship_relative = project_radar_entity(50.0, 0.0, 0.0, 0.0, yaw, 100.0, &OrientationMode::ShipRelative);
-        let world_fixed   = project_radar_entity(50.0, 0.0, 0.0, 0.0, yaw, 100.0, &OrientationMode::WorldFixed);
+        let ship_relative = project_radar_entity(50.0, 0.0, 0.0, 0.0, yaw, 100.0, 0.0, &OrientationMode::ShipRelative);
+        let world_fixed   = project_radar_entity(50.0, 0.0, 0.0, 0.0, yaw, 100.0, 0.0, &OrientationMode::WorldFixed);
         // WorldFixed should give the same as ShipRelative at yaw=0
-        let world_fixed_0 = project_radar_entity(50.0, 0.0, 0.0, 0.0, 0.0, 100.0, &OrientationMode::ShipRelative);
+        let world_fixed_0 = project_radar_entity(50.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::ShipRelative);
         assert_ne!(ship_relative, world_fixed, "ship_relative should differ from world_fixed at non-zero yaw");
         assert_eq!(world_fixed, world_fixed_0, "world_fixed should equal ship_relative@yaw=0");
     }
@@ -414,7 +423,21 @@ mod tests {
     #[test]
     fn entity_at_range_boundary_is_included() {
         // Exactly at range (dx=100, dz=0, range=100): dx²+dz² = 10000 = range²  → included.
-        let result = project_radar_entity(100.0, 0.0, 0.0, 0.0, 0.0, 100.0, &OrientationMode::WorldFixed);
+        let result = project_radar_entity(100.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::WorldFixed);
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn entity_radius_extends_detection_range() {
+        // Entity center at 120 units, range=100, entity_radius=25 → 120 <= 125 → included.
+        let result = project_radar_entity(120.0, 0.0, 0.0, 0.0, 0.0, 100.0, 25.0, &OrientationMode::WorldFixed);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn entity_radius_does_not_include_fully_out_of_range() {
+        // Entity center at 200 units, range=100, entity_radius=25 → 200 > 125 → excluded.
+        let result = project_radar_entity(200.0, 0.0, 0.0, 0.0, 0.0, 100.0, 25.0, &OrientationMode::WorldFixed);
+        assert!(result.is_none());
     }
 }

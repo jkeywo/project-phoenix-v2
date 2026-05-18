@@ -13,9 +13,14 @@ pub use button::{
     ButtonPressed, ButtonSize, ClickSound, GuiButtonMarker, UiSounds,
     WidgetActivated, WidgetDeactivated, resolve_click_sound, setup_ui_sounds,
 };
+pub use joystick::{
+    normalize_joystick, GenericJoystick, GenericJoystickPad, GenericJoystickKnob,
+    JoystickDragState, JoystickMoved, JoystickResendTimer,
+};
 
 mod foundation;
 pub mod button;
+pub mod joystick;
 
 // ── Root plugin ───────────────────────────────────────────────────────────────
 
@@ -26,6 +31,7 @@ pub struct GuiPlugin;
 impl Plugin for GuiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, resolve_visuals_system)
-           .add_plugins(button::GuiButtonPlugin);
+           .add_plugins(button::GuiButtonPlugin)
+           .add_plugins(joystick::GuiJoystickPlugin);
     }
 }

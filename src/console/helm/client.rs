@@ -229,6 +229,10 @@ fn bridge_client_sim_to_radar_entities(
             RadarLayer::Station
         } else if has_tag("missile") || has_tag("torpedo") {
             RadarLayer::Missile
+        } else if has_tag("planet") {
+            RadarLayer::Planet
+        } else if has_tag("star") {
+            RadarLayer::Star
         } else {
             continue; // unknown type
         };
@@ -239,6 +243,8 @@ fn bridge_client_sim_to_radar_entities(
                 RadarLayer::Asteroid => Color::srgb(0.85, 0.75, 0.45),
                 RadarLayer::Station => Color::srgb(0.3, 0.8, 0.6),
                 RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
+                RadarLayer::Planet => Color::srgb(0.0, 0.6, 1.0),
+                RadarLayer::Star => Color::srgb(1.0, 0.85, 0.3),
             },
             radius: (snapshot.radius_or_zero() * 4.0).max(2.0),
             shape: RadarShape::Dot,
@@ -316,6 +322,7 @@ fn spawn_phone_helm_ui(
     let radar_filter = RadarFilter(std::collections::HashSet::from([
         RadarLayer::Ship, RadarLayer::Asteroid,
         RadarLayer::Station, RadarLayer::Missile,
+        RadarLayer::Planet, RadarLayer::Star,
     ]));
     let radar = crate::gui::GenericRadar::spawn(
         &mut commands, COMPASS_RADAR_DIAMETER, HELM_RADAR_RANGE,

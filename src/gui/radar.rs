@@ -18,6 +18,8 @@ pub enum RadarLayer {
     Asteroid,
     Station,
     Missile,
+    Planet,
+    Star,
 }
 
 /// Opts a game-world entity into the radar.  The widget draws only entities
@@ -297,6 +299,8 @@ mod tests {
         s.insert(RadarLayer::Asteroid);
         s.insert(RadarLayer::Station);
         s.insert(RadarLayer::Missile);
+        s.insert(RadarLayer::Planet);
+        s.insert(RadarLayer::Star);
         RadarFilter(s)
     }
 

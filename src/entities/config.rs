@@ -1205,7 +1205,7 @@ hull_integrity = 100
     // the build fails if a referenced template is missing or malformed.
 
     #[test]
-    fn star_sun_template_parses_with_star_section() {
+    fn star_sun_template_parses_with_star_and_collider_section() {
         let toml_str = include_str!("../../assets/entities/star_sun.toml");
         let config = EntityConfig::from_toml(toml_str).expect("star_sun.toml must parse");
         let star = config.star.as_ref().expect("star_sun.toml must have [star]");
@@ -1215,15 +1215,21 @@ hull_integrity = 100
         assert_eq!(star.light_range, Some(5000.0));
         assert_eq!(star.light_intensity, Some(150000.0));
         assert_eq!(star.light_colour, Some(vec![1.0, 0.95, 0.85]));
+        let collider = config.collider.as_ref().expect("star_sun.toml must have [collider]");
+        assert_eq!(collider.shape, ColliderShape::Ball);
+        assert!((collider.radius - 50.0).abs() < 1e-6);
     }
 
     #[test]
-    fn planet_earth_template_parses_with_planet_section() {
+    fn planet_earth_template_parses_with_planet_and_collider_section() {
         let toml_str = include_str!("../../assets/entities/planet_earth.toml");
         let config = EntityConfig::from_toml(toml_str).expect("planet_earth.toml must parse");
         let planet = config.planet.as_ref().expect("planet_earth.toml must have [planet]");
         assert_eq!(planet.name, "Earth");
         assert!((planet.radius - 20.0).abs() < 1e-6);
+        let collider = config.collider.as_ref().expect("planet_earth.toml must have [collider]");
+        assert_eq!(collider.shape, ColliderShape::Ball);
+        assert!((collider.radius - 20.0).abs() < 1e-6);
     }
 
     #[test]

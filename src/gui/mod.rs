@@ -22,11 +22,13 @@ pub use radar::{
     RadarFilter, RadarLayer, RadarShape, OrientationMode,
     is_on_radar, project_radar_entity,
 };
+pub use panel::{GuiPanel, GuiPanelMarker, PanelSize, lerp_size};
 
 mod foundation;
 pub mod button;
 pub mod joystick;
 pub mod radar;
+pub mod panel;
 
 // ── Root plugin ───────────────────────────────────────────────────────────────
 
@@ -39,6 +41,7 @@ impl Plugin for GuiPlugin {
         app.add_systems(Update, resolve_visuals_system)
            .add_plugins(button::GuiButtonPlugin)
            .add_plugins(joystick::GuiJoystickPlugin)
-           .add_plugins(radar::GuiRadarPlugin);
+           .add_plugins(radar::GuiRadarPlugin)
+           .add_plugins(panel::GuiPanelPlugin);
     }
 }

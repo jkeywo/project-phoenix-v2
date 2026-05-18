@@ -28,6 +28,7 @@ pub use progress::{
     SegmentCount, filled_segments,
 };
 pub use light::{FlickerLight, FlickerLightConfig, FlickerLightMarker, FlickerLightState, effective_interval};
+pub use readout::{TextReadout, TextReadoutMarker, ReadoutValue};
 
 mod foundation;
 pub mod button;
@@ -36,6 +37,7 @@ pub mod radar;
 pub mod panel;
 pub mod progress;
 pub mod light;
+pub mod readout;
 
 // ── Root plugin ───────────────────────────────────────────────────────────────
 
@@ -51,6 +53,7 @@ impl Plugin for GuiPlugin {
            .add_plugins(radar::GuiRadarPlugin)
            .add_plugins(panel::GuiPanelPlugin)
            .add_plugins(progress::GuiProgressPlugin)
-           .add_plugins(light::GuiLightPlugin);
+           .add_plugins(light::GuiLightPlugin)
+           .add_plugins(readout::GuiReadoutPlugin);
     }
 }

@@ -153,14 +153,13 @@ fn spawn_generic_joystick(
         }
     });
 
-    // Attach pointer observers for drag handling + fallback release
+    // Attach pointer observers for drag handling
     commands
         .entity(pad)
         .observe(on_joystick_drag_start)
         .observe(on_joystick_drag)
         .observe(on_joystick_drag_end)
-        .observe(on_joystick_cancel)
-        .observe(on_joystick_pointer_up);
+        .observe(on_joystick_cancel);
 
     pad
 }
@@ -222,21 +221,6 @@ fn on_joystick_cancel(
     let entity = trigger.event().entity;
     if let Ok(mut state) = pads.get_mut(entity) {
         release_joystick(&mut state, entity, &mut commands);
-    }
-}
-
-/// Fallback: if `Pointer<Up>` fires while the joystick is still active (e.g.
-/// on touch devices where `DragEnd` may not always fire), release it.
-fn on_joystick_pointer_up(
-    trigger: On<Pointer<Up>>,
-    mut pads: Query<&mut JoystickDragState, With<GenericJoystickPad>>,
-    mut commands: Commands,
-) {
-    let entity = trigger.event().entity;
-    if let Ok(mut state) = pads.get_mut(entity) {
-        if state.active {
-            release_joystick(&mut state, entity, &mut commands);
-        }
     }
 }
 

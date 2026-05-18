@@ -6,3 +6,8 @@ radius = 20.0
 colour = [0.0, 0.5, 1.0]
 position = [200.0, 0.0, 200.0]
 tags = ["planet", "habitable"]
+
+[collider]
+shape = "Ball"
+radius = 20.0
+length = 0.0

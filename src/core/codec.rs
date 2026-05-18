@@ -233,7 +233,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
@@ -256,7 +255,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
@@ -279,7 +277,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 100.0,
             power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
@@ -302,7 +299,6 @@ mod tests {
                 ship_z: -8.25,
                 ship_yaw: 1.5707,
                 forward_speed: 0.0,
-                hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
@@ -316,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn sim_snapshot_carries_hull_integrity() {
+    fn sim_snapshot_round_trips_without_hull_integrity() {
         let msg = ServerMessage::SimState {
             snapshot: SimSnapshot {
                 red_alert: false,
@@ -325,7 +321,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 75.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
@@ -942,7 +937,6 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 80.0,
                 power_levels: (4, 2, 1),
                 flags: vec![],
                 entity_states: vec![],
@@ -963,7 +957,6 @@ mod tests {
                 view_mode: ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
@@ -1095,7 +1088,6 @@ mod tests {
                 view_mode: ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![EntityStateSnapshot {
@@ -1123,7 +1115,6 @@ mod tests {
                 view_mode: ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![EntityStateSnapshot {
@@ -1151,7 +1142,6 @@ mod tests {
                 view_mode: ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 100.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
@@ -1177,7 +1167,6 @@ mod tests {
                 view_mode: ViewMode::Radar,
                 ship_x: 10.0, ship_z: -20.0, ship_yaw: 1.0,
                 forward_speed: 0.0,
-                hull_integrity: 75.0,
                 power_levels: (3, 2, 1),
                 flags: vec![crate::flag_kind::FlagKind::SensorBlind],
                 entity_states: vec![
@@ -1515,7 +1504,6 @@ mod tests {
                 view_mode: crate::messages::ViewMode::default(),
                 ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
                 forward_speed: 0.0,
-                hull_integrity: 1.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![crate::messages::EntityStateSnapshot {

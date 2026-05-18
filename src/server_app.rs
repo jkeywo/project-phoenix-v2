@@ -155,7 +155,12 @@ pub fn add_simulation_plugins(app: &mut App) {
             .add_plugins(crate::science_plugin::SciencePlugin)
             .add_message::<AsteroidDestroyedVfx>()
             .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(Console::Helm, 100.0)])))
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])))
             .insert_resource(ShipShields(ShieldSystem::default()))
             .insert_resource(ShipImpulse(ImpulseState::new()))
             .init_resource::<WorldResource>()
@@ -249,7 +254,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             };
 
             // Extract all resource data (borrows are confined to this block).
-            let (hull_current, console_hull, power_levels, flags, helm_range_mult, charge_progress,
+            let (console_hull, power_levels, flags, helm_range_mult, charge_progress,
                  ship_x, ship_z, ship_yaw, ship_forward_speed, ship_red_alert, ship_view_mode) = {
                 let ship = world.resource::<ShipState>();
                 let hull = world.resource::<ShipHullIntegrity>();
@@ -271,7 +276,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     })
                     .collect();
                 (
-                    hull.0.total_current(), console_hull, power_levels, flags, helm_range_mult,
+                    console_hull, power_levels, flags, helm_range_mult,
                     impulse.0.charge_progress,
                     ship.x, ship.z, ship.yaw, ship.forward_speed, ship.red_alert(), ship.view_mode.clone(),
                 )
@@ -291,7 +296,6 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 ship_z,
                 ship_yaw,
                 forward_speed: ship_forward_speed,
-                hull_integrity: hull_current,
                 console_hull,
                 power_levels,
                 flags,
@@ -837,7 +841,12 @@ fn spawn_game_start_entities(
                 let team_count = if hc.repair_team_count > 0 { hc.repair_team_count as usize } else { 2 };
                 commands.insert_resource(ShipRepairTeams(crate::repair_teams::RepairTeams::new(team_count)));
             } else {
-                commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(Console::Helm, 100.0)])));
+                commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                    (Console::Helm, 25.0),
+                    (Console::Tactical, 25.0),
+                    (Console::Power, 25.0),
+                    (Console::Shields, 25.0),
+                ])));
             }
 
             // Apply shield focus config from TOML if present
@@ -886,9 +895,9 @@ fn spawn_game_start_entities(
                     multipliers.insert(Console::Tactical, pm);
                 }
             }
-            if let Some(sc) = &config.science_console {
+            if let Some(sc) = &config.sensors_console {
                 if let Some(pm) = sc.power_multipliers {
-                    // science_console power drives the Sensors radar range multiplier
+                    // sensors_console power drives the Sensors radar range multiplier
                     multipliers.insert(Console::Sensors, pm);
                 }
             }
@@ -1405,7 +1414,8 @@ fn test_app() -> App {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
             _ => None,
         }).expect("expected a SimState broadcast");
-        assert!((snap.hull_integrity - 100.0).abs() < 1e-6);
+        let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
+        assert!((total - 100.0).abs() < 1e-6);
     }
 
     #[test]
@@ -1426,7 +1436,8 @@ fn test_app() -> App {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
             _ => None,
         }).expect("expected a SimState broadcast");
-        assert!((snap.hull_integrity - 90.0).abs() < 1e-6);
+        let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
+        assert!((total - 90.0).abs() < 1e-6);
     }
 
     // â"€â"€ SetTarget / TargetLock tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -2292,7 +2303,8 @@ fn test_app() -> App {
             ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
             _ => None,
         }).expect("expected SimState");
-        assert!(near(snap.hull_integrity, 97.0), "hull should be 100 - 3 = 97 with halved collision damage");
+        let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
+        assert!(near(total, 97.0), "hull should be 100 - 3 = 97 with halved collision damage");
     }
 
     #[test]

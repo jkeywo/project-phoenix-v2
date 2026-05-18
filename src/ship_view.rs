@@ -70,7 +70,13 @@ impl ShipView {
                 self.forward_speed = snapshot.forward_speed;
                 self.power_levels = snapshot.power_levels;
                 self.impulse_charge_progress = snapshot.impulse_charge_progress;
-                self.hull_fraction = (snapshot.hull_integrity / 100.0).clamp(0.0, 1.0);
+                let total_max: f32 = snapshot.console_hull.iter().map(|c| c.max_hp).sum();
+                let total_cur: f32 = snapshot.console_hull.iter().map(|c| c.current).sum();
+                self.hull_fraction = if total_max > 0.0 {
+                    (total_cur / total_max).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
                 self.console_hull = snapshot.console_hull.clone();
             }
             ServerMessage::Welcome { .. } => {
@@ -196,7 +202,6 @@ mod tests {
             ship_z: 0.0,
             ship_yaw: 0.0,
             forward_speed: 0.0,
-            hull_integrity: 100.0,
             power_levels: (2, 2, 2),
             impulse_charge_progress: 0.0,
             flags: vec![],

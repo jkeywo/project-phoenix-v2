@@ -13,9 +13,9 @@ A browser-based spaceship bridge simulator. One browser tab shows a shared 3D vi
 - **PRD #66:** [Weapons & Engineering Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/66) — Phasers, hull integrity, breakdown queue, repair loop
 - **PRD #115:** [Native PC Server](https://github.com/jkeywo/project-phoenix-v2/issues/115) — PRD itself closed; deployment slices #135–#141 are on hold and not yet built
 - **PRD #117:** [Modifier System](https://github.com/jkeywo/project-phoenix-v2/issues/117) — Pure `modifiers.rs` cache + `ModifierAdded`/`ModifierRemoved` wire
-- **PRD #118:** [Repair + Power Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/118) — Renamed `Engineering` → `Repair`, added `Power`, shape-matching repair with three teams, 6+2 power allocation
+- **PRD #118:** [Repair + Power Consoles](https://github.com/jkeywo/project-phoenix-v2/issues/118) — Renamed `Engineering` → `Repair`, added `Power`, three-team dispatch repair (travel → repair → return) with per-console hull, 6+2 power allocation
 - **PRD #120:** [Station-Based Lobby & Crew Assignment](https://github.com/jkeywo/project-phoenix-v2/issues/120) — Per-station picking, auto-shuffle, spectator FIFO. `SelectStation`/`ReleaseStation`/`StationAssigned` wire
-- **PRD #153:** [Region Entities, Component-Driven Spawning & Modifier Flags](https://github.com/jkeywo/project-phoenix-v2/issues/153) — Single `[[entity]]` pipeline, six region effects, `f32` hull, `FlagKind`, unified `EntitySnapshot` wire
+- **PRD #153:** [Region Entities, Component-Driven Spawning & Modifier Flags](https://github.com/jkeywo/project-phoenix-v2/issues/153) — Single `[[entity]]` pipeline, six region effects, per-console hull, `FlagKind`, unified `EntitySnapshot` wire
 - **PRD #154:** [Console Complexity: UI Hiding + AI Automation](https://github.com/jkeywo/project-phoenix-v2/issues/154) — Per-console `Low`/`Full` presets, hide UI + server-side `console_ai` to operate hidden controls
 - **PRD #180:** [Viewscreen Frame](https://github.com/jkeywo/project-phoenix-v2/issues/180) — Bevy UI border, `RedAlertVignetteMaterial`, designation + HEADING / HULL / CONDITION HUD
 - **PRD #187:** [Phone Console HUD — Diegetic Bezel Frame](https://github.com/jkeywo/project-phoenix-v2/issues/187) — `phone_border/` plugin: bezel wraps every console; full helm + captain chrome
@@ -26,7 +26,7 @@ A browser-based spaceship bridge simulator. One browser tab shows a shared 3D vi
 **Open PRDs (planned work):**
 - **PRD #116:** [Save/Load Game Sessions](https://github.com/jkeywo/project-phoenix-v2/issues/116) — `localStorage`-backed save slots, periodic + lifecycle saves, version-gated load. Introduces `save.rs` (the *second* sanctioned `serde_json` surface).
 
-**Current state:** Nine consoles in the wire types (`CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms`). The old `Science` console was split into `Sensors` (long-range radar + target suggestion), `Shields` (four-quadrant shield focus), and `Navigation` (system chart + impulse cancel); `Comms` handles contacts, messages, and objectives. Players join *stations* (bundles of one or more consoles defined per player count in `player_ship.toml`), not individual consoles. Full simulation: ship physics loaded from TOML, grid-based streaming asteroid field, phaser banks (port/starboard), torpedoes, four-quadrant shields, impulse drive, hull damage, shape-matching repair with three teams, 6+2 power allocation driving cross-system modifiers, region effects (damage zones, slow zones, comms/sensor jammers), per-console complexity presets with server-side AI to operate hidden controls, TOML-driven scenario engine with objectives and NPC AI patrols. Viewscreen and phone consoles both have diegetic bezel frames with red-alert vignette + HUD. Swipe-anywhere console switching with tab initials on overflow. Data-driven entities, maps, and scenarios loaded from TOML via `assets/`. Client is a full Bevy/WASM app. See **[wiki/](./wiki/)** for the deeper map of the codebase.
+**Current state:** Nine consoles in the wire types (`CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms`). The old `Science` console was split into `Sensors` (long-range radar + target suggestion), `Shields` (four-quadrant shield focus), and `Navigation` (system chart + impulse cancel); `Comms` handles contacts, messages, and objectives. Players join *stations* (bundles of one or more consoles defined per player count in `player_ship.toml`), not individual consoles. Full simulation: ship physics loaded from TOML, grid-based streaming asteroid field, phaser banks (port/starboard), torpedoes, four-quadrant shields, impulse drive, per-console hull damage, three-team dispatch repair (travel → repair → return), 6+2 power allocation driving cross-system modifiers, region effects (damage zones, slow zones, comms/sensor jammers), per-console complexity presets with server-side AI to operate hidden controls, TOML-driven scenario engine with objectives and NPC AI patrols. Viewscreen and phone consoles both have diegetic bezel frames with red-alert vignette + HUD. Swipe-anywhere console switching with tab initials on overflow. Data-driven entities, maps, and scenarios loaded from TOML via `assets/`. Client is a full Bevy/WASM app. See **[wiki/](./wiki/)** for the deeper map of the codebase.
 
 ---
 
@@ -166,7 +166,7 @@ src/
   modifiers/
     cache.rs          — Pure ShipModifiers multiplier table + flag set.
     breakdown.rs      — BreakdownQueue FIFO + breakdowns_from_damage(). No Bevy.
-    repair_teams.rs   — Pure three-team shape-matching repair dispatch (PRD #118).
+    repair_teams.rs   — Pure three-team dispatch repair: travel → repair → return (PRD #118).
     power_system.rs   — Pure 6+2 power allocation, battery, exhaustion lock (PRD #118).
     coordination.rs   — Region modifier registration / removal helpers.
   asteroids/
@@ -332,7 +332,7 @@ Console input handlers use `.in_set(SimSet::Input)`, physics uses `SimSet::Physi
 - **Captain:** toggles Red Alert via `ToggleRedAlert`; changes view via `SetView`
 - **Helm:** sends `HelmInput { thrust, steering }` at 10Hz; can push radar to viewscreen via `SetView { Radar }`; triggers impulse via `StartImpulseCharge`
 - **Tactical:** sends `SetTarget { uuid }` to lock a target; sends `FirePhaser` (in range + forward arc); fires torpedoes via `FireTorpedo { tube, target_uuid }`; sets `SetPhaserMode { Auto | Manual }`
-- **Repair:** sends `Repair { shape }` — must match the head of `BreakdownQueue`; dispatched to one of three repair teams (`repair_teams.rs`); wrong shape, wrong console, or no free team incurs a penalty cooldown
+- **Repair:** sends `DispatchRepairTeam { team_idx, console }` to assign one of three teams to repair a damaged console. Each team cycles Idle → Travelling (5s) → Repairing (0.5 HP/s) → Returning (5s). Receives `RepairState` at 10Hz with per-team status
 - **Power:** sends `IncreasePower { console }` / `DecreasePower { console }` distributing 6 base + up to 2 battery points across `Helm` / `Tactical` / `Sensors`; battery exhaustion locks all to level 1 until recharged
 - **Sensors:** `SetScienceTarget { uuid }` for advisory target hand-off; long-range radar overlay; pushes `SensorsRadar` view mode
 - **Shields:** four-quadrant shield status and focus mechanic
@@ -345,8 +345,8 @@ Console input handlers use `.in_set(SimSet::Input)`, physics uses `SimSet::Physi
   - Applies to ship's Rapier rigid body as direct velocity
   - Region containment runs each tick; entry/exit fires `RegionEntered`/`RegionExited` events that register/remove modifiers and `FlagKind` flags via `ShipModifiers`
   - Asteroid lifecycle: `update_asteroid_window` (PRD #191) tracks player grid cell, despawns cells outside `despawn_cells`, evaluates fresh density in cells entering `spawn_cells`; broadcasts `EntitySpawned` / `AsteroidDestroyed`
-  - Damage from collisions and `damage_zone` regions both call the shared `apply_hull_damage` helper → `f32` hull → `breakdowns_from_damage()` → `BreakdownQueue::push_random()` (each breakdown gets a random `Shape`)
-  - Every 100ms: broadcasts `SimState` (red alert, `f32` hull, `power_levels`, `flags`, `entity_states`, `radar_state`); sends `WeaponsUpdate` to Tactical; sends `RepairState` (teams + current breakdown shape) to Repair; sends `PowerState` to Power; emits `ModifierAdded` / `ModifierRemoved` deltas
+  - Damage from collisions and `damage_zone` regions both call the shared `apply_hull_damage` helper → distributes HP loss across per-console hull slots (`ConsoleHull`); when any slot hits 0 the console is offline until repaired
+  - Every 100ms: broadcasts `SimState` (red alert, `console_hull`, `power_levels`, `flags`, `entity_states`, `radar_state`); sends `WeaponsUpdate` to Tactical; sends `RepairState` (per-team status) to Repair; sends `PowerState` to Power; emits `ModifierAdded` / `ModifierRemoved` deltas
 - **Renderer:** 3D camera follows ship; `viewscreen_border.rs` wraps the viewscreen with a Bevy UI bezel + red-alert vignette + designation/HEADING/HULL/CONDITION HUD; phaser beams drawn when active (`beam_render.rs`); phone clients render their own bezel via `phone_border/`
 
 ### 3. Disconnection / Reconnection
@@ -454,7 +454,7 @@ Player-centred ring-buffer grid (PRD #191). The world is divided into `resolutio
 - **CaptainChair:** Red Alert toggle (exclusive). Only captain can `StartGame` and `ToggleRedAlert`. View selector (Fore/Aft/Port/Starboard or Radar).
 - **Helm:** Thrust + steering joystick. Sends `HelmInput` at 10Hz while active. Ship only moves when Helm is occupied. Displays radar overlay and "On Screen" button to push radar to the viewscreen. Triggers impulse charge via `StartImpulseCharge`.
 - **Tactical:** Target lock (`SetTarget`), fire phasers (`FirePhaser`), set phaser mode (`SetPhaserMode { Auto | Manual }`), fire torpedoes (`FireTorpedo { tube, target_uuid }`). Receives `WeaponsUpdate` at 10Hz with lock status, fire readiness, cooldown, torpedo magazine, and per-tube reload state. Beam events (`BeamStarted`, `BeamEnded`, `PhaserFired`) and torpedo events (`TorpedoLaunched`, `TorpedoDestroyed`) broadcast to all.
-- **Repair:** Shape-matching repair via `Repair { shape: Shape }` — shape must match the head of `BreakdownQueue`. Three repair teams accept dispatched work in parallel (`repair_teams.rs`); wrong shape, wrong console, or no free team incurs a penalty cooldown. `ShowRepairIcon` / `ClearRepairIcon` broadcasts add decoy shapes to the puzzle. Receives `RepairState` at 10Hz with team statuses + current breakdown shape.
+- **Repair:** Dispatch repair via `DispatchRepairTeam { team_idx, console }`. Three repair teams run in parallel; each cycles Idle → Travelling (5s) → Repairing (0.5 HP/s until target slot is full) → Returning (5s) → Idle. Receives `RepairState` at 10Hz with per-team phase + current target.
 - **Power:** Distributes 6 base + up to 2 battery points across `Helm`, `Tactical`, `Sensors` via `IncreasePower { console }` / `DecreasePower { console }`. Levels register modifiers on each console's relevant slots through `power_system.rs`. Battery exhaustion locks all consoles to level 1 until recharged to an emergency threshold. Receives `PowerState` at 10Hz; broadcast `power_levels` rides on `SimSnapshot`.
 - **Sensors:** Long-range radar overlay, advisory target suggestion (`SetScienceTarget`). Pushes `SensorsRadar` view mode to the viewscreen.
 - **Shields:** Four-quadrant shield status and focus mechanic.
@@ -480,7 +480,7 @@ Tests live inline with modules (`#[cfg(test)] mod tests`).
 - **`asteroid_window.rs`** — Player grid-cell math, slot index wrapping, `eval_on_player_move` (despawn list + spawn list), large-jump fallback
 - **`ship_state.rs`** — Red alert toggle, snapshot generation
 - **`radar.rs`** — project_to_radar (yaw rotation, range cull), project_asteroid, radar_dots iterator, is_fire_ready (range + arc gates)
-- **`damage.rs`** — collision_damage formula (zero speed, max speed, mid speed, clamp), `f32` HullIntegrity (apply/restore/floor/ceiling), shared `apply_hull_damage` helper returns expected breakdowns
+- **`damage.rs`** — collision_damage formula (zero speed, max speed, mid speed, clamp); per-console `ConsoleHull` aggregator (apply_damage distributes across slots, restore, total_current/total_max)
 - **`breakdown.rs`** — BreakdownQueue push/pop/front (with random `Shape`), no-repeat picker, breakdowns_from_damage bucket math (float input)
 - **`modifiers/repair_teams`** — Dispatch to free slot, no-free-slot returns penalty, cooldown tick, wrong-shape penalty
 - **`modifiers/cache`** — Bonus aggregation formula (`s ≥ 0` → `1+s`; `s < 0` → `1/(1+|s|)`), per-source removal, flag set OR-aggregation across sources, `RegionEffect { uuid }` source identity

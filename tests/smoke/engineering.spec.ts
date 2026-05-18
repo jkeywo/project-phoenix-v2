@@ -1,4 +1,7 @@
-// Issue #70 — Smoke test: Engineering console receives hull_integrity in SimState.
+// Issue #70 — Smoke test: Per-console hull integrity in SimState.
+//
+// SimSnapshot no longer carries a flat hull_integrity; it carries
+// console_hull: Vec<ConsoleHullStatus { console, current, max_hp }>.
 
 import { test, expect } from './fixtures';
 import { readHostPeerId, createTestClient } from './fixtures';
@@ -38,25 +41,34 @@ async function startGameWithEngineering(context: BrowserContext) {
   return { captain, engineer };
 }
 
-test('Engineering player receives hull_integrity in SimState after game start', async ({ context }) => {
+test('Engineering player receives console_hull in SimState after game start', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
   const simState = await engineer.waitForMessage('SimState', 2_000) as any;
-  const snap = simState.data.snapshot;
+  const hull = simState.data.snapshot.console_hull;
 
-  expect(typeof snap.hull_integrity).toBe('number');
-  expect(snap.hull_integrity).toBeGreaterThanOrEqual(0);
-  expect(snap.hull_integrity).toBeLessThanOrEqual(100);
+  expect(Array.isArray(hull)).toBe(true);
+  expect(hull.length).toBeGreaterThanOrEqual(1);
+  for (const entry of hull) {
+    expect(typeof entry.console).toBe('string');
+    expect(typeof entry.current).toBe('number');
+    expect(typeof entry.max_hp).toBe('number');
+    expect(entry.current).toBeGreaterThanOrEqual(0);
+    expect(entry.current).toBeLessThanOrEqual(entry.max_hp);
+  }
 
   await captain.close();
   await engineer.close();
 });
 
-test('hull_integrity starts at 100 in first SimState', async ({ context }) => {
+test('total hull starts at 100 in first SimState', async ({ context }) => {
   const { captain, engineer } = await startGameWithEngineering(context);
 
   const simState = await engineer.waitForMessage('SimState', 2_000) as any;
-  expect(simState.data.snapshot.hull_integrity).toBe(100);
+  const hull = simState.data.snapshot.console_hull;
+  const total = hull.reduce((sum: number, e: any) => sum + e.current, 0);
+
+  expect(total).toBe(100);
 
   await captain.close();
   await engineer.close();

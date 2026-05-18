@@ -120,6 +120,10 @@ pub mod debug_overlay {
 #[cfg(feature = "client")]
 pub mod client;
 
+// Generic GUI widget library — client only.
+#[cfg(feature = "client")]
+pub mod gui;
+
 // Backwards-compat flat modules for client.
 #[cfg(feature = "client")]
 pub mod client_app {

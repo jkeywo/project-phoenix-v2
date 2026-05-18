@@ -59,6 +59,11 @@ pub struct EntityTagsSection(pub Vec<String>);
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct FactionComponent(pub uuid::Uuid);
 
+/// Present when the EntityConfig has a `[weapons_console]` section.
+/// The AI tick reads this component to determine weapons range and phaser readiness.
+#[derive(Component, Clone, Debug)]
+pub struct WeaponsConsoleSection(pub crate::entity_config::WeaponsConsoleConfig);
+
 /// Hull tracker attached to any entity (NPC ship, asteroid) that carries a
 /// `[hull]` section in its TOML config. For NPC ships the HP is placed in a
 /// single `CaptainChair` console slot; asteroids use the same single-slot
@@ -168,6 +173,11 @@ pub fn spawn_entity(
     // Faction — attach a FactionComponent so the AI can read faction from ECS.
     if let Some(faction_uuid) = config.faction {
         entity_commands.insert(FactionComponent(faction_uuid));
+    }
+
+    // WeaponsConsole — attach a WeaponsConsoleSection so the AI can read weapons config from ECS.
+    if let Some(wc) = &config.weapons_console {
+        entity_commands.insert(WeaponsConsoleSection(wc.clone()));
     }
 
     // Hull — attach an EntityConsoleHull component if the config has hull data.

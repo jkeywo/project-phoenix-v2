@@ -17,10 +17,16 @@ pub use joystick::{
     normalize_joystick, GenericJoystick, GenericJoystickPad, GenericJoystickKnob,
     JoystickDragState, JoystickMoved, JoystickResendTimer,
 };
+pub use radar::{
+    GenericRadar, GenericRadarWidget, OnRadar, RadarAppearance, RadarCenter,
+    RadarFilter, RadarLayer, RadarShape, OrientationMode,
+    is_on_radar, project_radar_entity,
+};
 
 mod foundation;
 pub mod button;
 pub mod joystick;
+pub mod radar;
 
 // ── Root plugin ───────────────────────────────────────────────────────────────
 
@@ -32,6 +38,7 @@ impl Plugin for GuiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, resolve_visuals_system)
            .add_plugins(button::GuiButtonPlugin)
-           .add_plugins(joystick::GuiJoystickPlugin);
+           .add_plugins(joystick::GuiJoystickPlugin)
+           .add_plugins(radar::GuiRadarPlugin);
     }
 }

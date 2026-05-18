@@ -141,18 +141,6 @@ pub fn resolve_visuals_system(
     }
 }
 
-// ── Plugin ────────────────────────────────────────────────────────────────────
-
-/// Root plugin for the gui widget library.  Add it once to the `App`; all
-/// widget sub-plugins depend on it.
-pub struct GuiPlugin;
-
-impl Plugin for GuiPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, resolve_visuals_system);
-    }
-}
-
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

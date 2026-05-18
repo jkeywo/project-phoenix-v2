@@ -51,8 +51,9 @@ impl CommsInbox {
 
     /// Orphan all messages owned by `scenario_id`.
     ///
-    /// Orphaned messages have `is_orphaned = true` and their response list is
-    /// cleared (responses disabled). Returns the number of messages affected.
+    /// Orphaned messages have `is_orphaned = true`, their response list is
+    /// cleared (responses disabled), and their subject is set to
+    /// "Transmission ended". Returns the number of messages affected.
     pub fn unload_scenario(&mut self, scenario_id: &str) -> usize {
         let mut count = 0;
         for rec in self.records.iter_mut() {
@@ -60,6 +61,7 @@ impl CommsInbox {
                 rec.message.is_orphaned = true;
                 rec.message.responses.clear();
                 rec.message.selected_response = None;
+                rec.message.subject = "Transmission ended".to_string();
                 count += 1;
                 self.dirty = true;
             }
@@ -192,6 +194,7 @@ mod tests {
         let m1 = msgs.iter().find(|m| m.id == "m1").unwrap();
         assert!(m1.is_orphaned);
         assert!(m1.responses.is_empty());
+        assert_eq!(m1.subject, "Transmission ended", "orphaned message subject must be 'Transmission ended'");
         // scenario-2 message untouched
         let m2 = msgs.iter().find(|m| m.id == "m2").unwrap();
         assert!(!m2.is_orphaned);

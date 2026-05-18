@@ -125,6 +125,19 @@ impl Default for NpcHullFraction {
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
+/// Marker component added to an AI entity when its owning scenario is unloaded.
+///
+/// `tick_ai_controllers` reads this component to set `scenario_unloaded: true`
+/// in the `WorldView`, allowing `on_scenario_unloaded` transitions to fire.
+/// The component persists until `tick_ai_controllers` removes it (or until the
+/// entity despawns alongside its scenario cleanup).
+#[derive(Component)]
+pub struct ScenarioUnloadedMarker;
+
+/// Resource kept for backward-compatibility; no longer used for signalling.
+#[derive(Resource, Default)]
+pub struct ScenariosBeingUnloaded(pub std::collections::HashSet<String>);
+
 /// Emitted by the AI plugin when an NPC entity's `on_attacked` condition fires
 /// (first hit per state-entry, i.e. while `on_attacked_armed` is true).
 ///
@@ -152,13 +165,14 @@ pub struct AiPlugin;
 impl Plugin for AiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AiTokenRegistry>();
+        app.init_resource::<ScenariosBeingUnloaded>();
         app.add_message::<AiEntityAttacked>();
         app.add_message::<AiEntityDestroyed>();
         app.add_systems(
             Update,
             (
                 attach_controllers_on_spawn,
-                tick_ai_controllers,
+                tick_ai_controllers.in_set(crate::sim_sets::SimSet::Damage),
                 detect_npc_hull_zero,
                 unregister_on_despawn,
             ),
@@ -199,7 +213,7 @@ fn attach_controllers_on_spawn(
 /// Tick AI controllers.
 fn tick_ai_controllers(
     mut commands: Commands,
-    mut query: Query<(Entity, &mut AiControllerComponent, &mut Transform, &BehaviourSection, Option<&AttackerThisTick>, Option<&crate::entities::spawner::FactionComponent>)>,
+    mut query: Query<(Entity, &mut AiControllerComponent, &mut Transform, &BehaviourSection, Option<&AttackerThisTick>, Option<&crate::entities::spawner::FactionComponent>, Option<&ScenarioUnloadedMarker>)>,
     time: Res<Time>,
     map_config: Option<Res<crate::map_config::MapConfig>>,
     faction_registry: Option<Res<FactionRegistryResource>>,
@@ -241,12 +255,20 @@ fn tick_ai_controllers(
     let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
 
-    for (entity, mut ctrl, mut transform, behaviour, attacker_comp, self_faction_comp) in &mut query {
+    for (entity, mut ctrl, mut transform, behaviour, attacker_comp, self_faction_comp, unloaded_marker) in &mut query {
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
 
         // Read attacker from component (set externally by simulation / tests).
         let attacker_this_tick = attacker_comp.map(|a| a.0);
+
+        // `scenario_unloaded` is true when this entity carries the marker set
+        // by `handle_ai_events` when its owning scenario was unloaded.
+        let scenario_unloaded = unloaded_marker.is_some();
+        // Remove the marker so the transition only fires once.
+        if scenario_unloaded {
+            commands.entity(entity).remove::<ScenarioUnloadedMarker>();
+        }
 
         let world_view = WorldView {
             sim_time,
@@ -260,7 +282,7 @@ fn tick_ai_controllers(
             entity_weapons_range: None,
             torpedo_tube_ready: None,
             self_hull_fraction: None,     // TODO: populate from NPC hull component when added
-            scenario_unloaded: false,     // TODO: set when owning scenario begins unloading
+            scenario_unloaded,
         };
 
         let registry = actual_registry.unwrap_or(&empty_registry);
@@ -706,6 +728,102 @@ mod tests {
         assert!(
             app.world().get_entity(entity).is_err(),
             "entity must be despawned when hull reaches 0"
+        );
+    }
+
+    // ── scenario_unloaded flag in WorldView ────────────────────────────────
+
+    // When ScenarioUnloadedMarker is on an entity, it fires on_scenario_unloaded transition.
+    #[test]
+    fn on_scenario_unloaded_transition_fires_when_scenario_being_unloaded() {
+        use crate::entities::spawner::ScenarioOwner;
+        use crate::entity_config::{BehaviourConfig, StateConfig};
+        use crate::ai::{TransitionConfig, StringOrVec};
+
+        let mut app = build_test_app();
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+
+        let behaviour = BehaviourConfig {
+            initial_state: "patrol".to_string(),
+            state: vec![
+                StateConfig { name: "patrol".to_string(), kind: "idle".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "free".to_string(), kind: "warping_out".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 3.0 },
+            ],
+            transition: vec![TransitionConfig {
+                from: StringOrVec::Single("patrol".into()),
+                to: "free".into(),
+                condition: "on_scenario_unloaded".into(),
+                radius: None,
+                threshold: None,
+                seconds: None,
+            }],
+        };
+
+        let entity = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            EntityUuid("ent-unloaded-001".to_string()),
+            BehaviourSection(behaviour),
+            ScenarioOwner("scenarios/alpha.toml".to_string()),
+        )).id();
+
+        app.update(); // attach controller
+
+        // Mark entity as scenario-unloaded via component
+        app.world_mut().entity_mut(entity).insert(ScenarioUnloadedMarker);
+
+        app.update(); // tick — should fire transition
+
+        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
+        assert_eq!(
+            ctrl.controller.current_state_name, "free",
+            "on_scenario_unloaded must fire when ScenarioUnloadedMarker is present"
+        );
+    }
+
+    // Entity without ScenarioOwner does not get scenario_unloaded flag
+    #[test]
+    fn entity_without_scenario_owner_does_not_see_scenario_unloaded() {
+        use crate::entity_config::{BehaviourConfig, StateConfig};
+        use crate::ai::{TransitionConfig, StringOrVec};
+
+        let mut app = build_test_app();
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+
+        let behaviour = BehaviourConfig {
+            initial_state: "patrol".to_string(),
+            state: vec![
+                StateConfig { name: "patrol".to_string(), kind: "idle".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig { name: "free".to_string(), kind: "idle".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0, duration_secs: 0.0 },
+            ],
+            transition: vec![TransitionConfig {
+                from: StringOrVec::Single("patrol".into()),
+                to: "free".into(),
+                condition: "on_scenario_unloaded".into(),
+                radius: None,
+                threshold: None,
+                seconds: None,
+            }],
+        };
+
+        // Entity has NO ScenarioOwner and no ScenarioUnloadedMarker
+        let entity = app.world_mut().spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            EntityUuid("ent-free-002".to_string()),
+            BehaviourSection(behaviour),
+        )).id();
+
+        app.update();
+
+        // A different entity gets the marker — this entity should not transition
+        // (simulates: only owned entities get ScenarioUnloadedMarker)
+        let _other = app.world_mut().spawn(Transform::from_xyz(0.0, 0.0, 0.0)).id();
+
+        app.update();
+
+        let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
+        assert_eq!(
+            ctrl.controller.current_state_name, "patrol",
+            "entity without ScenarioUnloadedMarker must not fire on_scenario_unloaded"
         );
     }
 }

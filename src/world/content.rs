@@ -59,6 +59,11 @@ pub enum TriggerAction {
     /// Load and activate a new scenario from `path`. Parameters (`$name`) are
     /// substituted before dispatch.
     LoadScenario { path: String },
+    /// Unload an active scenario identified by `path`. On execution:
+    /// (1) AI entities carrying `ScenarioOwner(path)` receive `on_scenario_unloaded`,
+    /// (2) comms messages owned by the scenario are orphaned,
+    /// (3) the scenario is removed from the active map. Owned entities persist.
+    UnloadScenario { path: String },
     /// Add a new mission objective owned by the current scenario.
     AddObjective { id: String, text: String, mandatory: bool },
     /// Mark an active objective as completed.
@@ -134,12 +139,16 @@ pub struct TriggerState {
     pub trigger: Trigger,
     /// Whether this trigger has already fired (single-shot semantics).
     pub fired: bool,
+    /// Path of the scenario that owns this trigger (e.g. `"scenarios/alpha.toml"`).
+    pub scenario_path: String,
 }
 
 /// Result of evaluating triggers against a batch of world events.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FiredTrigger {
     pub actions: Vec<TriggerAction>,
+    /// Path of the scenario that owned the trigger that fired.
+    pub scenario_path: String,
 }
 
 /// Evaluate all triggers in `states` against the given `events`.
@@ -173,7 +182,7 @@ pub fn evaluate_triggers(
                 .iter()
                 .map(|a| substitute_action(a, name_to_uuid))
                 .collect();
-            results.push(FiredTrigger { actions });
+            results.push(FiredTrigger { actions, scenario_path: state.scenario_path.clone() });
         }
     }
 
@@ -212,6 +221,10 @@ fn substitute_action(
         TriggerAction::LoadScenario { path } => {
             let resolved = substitute_params(path, name_to_uuid);
             TriggerAction::LoadScenario { path: resolved }
+        }
+        TriggerAction::UnloadScenario { path } => {
+            let resolved = substitute_params(path, name_to_uuid);
+            TriggerAction::UnloadScenario { path: resolved }
         }
         // Objective, AI-state, modifier, and flag actions carry no path parameters — pass through unchanged.
         TriggerAction::AddObjective { .. }
@@ -450,6 +463,12 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                     "Action 'load_scenario' requires a 'path' field".to_string()
                 })?;
                 TriggerAction::LoadScenario { path }
+            }
+            "unload_scenario" => {
+                let path = raw_action.path.clone().ok_or_else(|| {
+                    "Action 'unload_scenario' requires a 'path' field".to_string()
+                })?;
+                TriggerAction::UnloadScenario { path }
             }
             "add_objective" => {
                 let id = raw_action.id.clone().ok_or_else(|| {
@@ -775,12 +794,72 @@ pub fn resolve_positions(
 
 /// Create a `Vec<TriggerState>` from a parsed `ScenarioConfig`, with all triggers unfired.
 /// Call this when a scenario is first activated to get its mutable runtime state.
-pub fn trigger_states_from_config(config: &ScenarioConfig) -> Vec<TriggerState> {
+pub fn trigger_states_from_config(config: &ScenarioConfig, scenario_path: &str) -> Vec<TriggerState> {
     config
         .triggers
         .iter()
-        .map(|t| TriggerState { trigger: t.clone(), fired: false })
+        .map(|t| TriggerState { trigger: t.clone(), fired: false, scenario_path: scenario_path.to_string() })
         .collect()
+}
+
+// ── ScenarioManager ────────────────────────────────────────────────────────
+
+/// Per-path runtime state for one active scenario.
+#[derive(Clone, Debug, Default)]
+pub struct ScenarioRuntime {
+    /// Mutable per-trigger runtime state (fired flag).
+    pub trigger_states: Vec<TriggerState>,
+    /// Mutable per-template runtime state (fired flag).
+    pub comms_template_states: Vec<CommsTemplateState>,
+    /// Active in-flight dialogues keyed by CommsMessage id.
+    pub active_dialogues: HashMap<String, ActiveDialogue>,
+    /// Named-spawn → UUID mapping (populated from ScenarioConfig).
+    pub name_to_uuid: HashMap<String, String>,
+    /// Hailable contacts derived from scenario spawns.
+    pub contacts: Vec<crate::messages::CommsContact>,
+}
+
+/// Additive multi-scenario registry.
+///
+/// Scenarios are keyed by their path string. Loading the same path twice is a
+/// no-op. Unloading a path removes it from the map and triggers cleanup of
+/// comms and objectives in the associated resources.
+#[derive(Default)]
+pub struct ScenarioManager {
+    /// Active scenarios keyed by scenario path.
+    pub scenarios: HashMap<String, ScenarioRuntime>,
+}
+
+impl ScenarioManager {
+    /// Load a scenario if not already active. Returns `true` if newly inserted, `false` if already present.
+    pub fn load_scenario(&mut self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        if self.scenarios.contains_key(&path) {
+            return false;
+        }
+        self.scenarios.insert(path, ScenarioRuntime::default());
+        true
+    }
+
+    /// Unload a scenario. Returns the removed `ScenarioRuntime` if it was present, or `None`.
+    pub fn unload_scenario(&mut self, path: &str) -> Option<ScenarioRuntime> {
+        self.scenarios.remove(path)
+    }
+
+    /// Returns `true` if the scenario at `path` is currently active.
+    pub fn is_active(&self, path: &str) -> bool {
+        self.scenarios.contains_key(path)
+    }
+
+    /// Number of currently active scenarios.
+    pub fn len(&self) -> usize {
+        self.scenarios.len()
+    }
+
+    /// `true` if no scenarios are active.
+    pub fn is_empty(&self) -> bool {
+        self.scenarios.is_empty()
+    }
 }
 
 // ── Comms dialogue types ───────────────────────────────────────────────────
@@ -824,6 +903,8 @@ pub struct ActiveDialogue {
     pub message_id: String,
     /// The current dialogue node being presented.
     pub current_node: CommsDialogueNode,
+    /// Path of the scenario that owns this dialogue (for scoping inbox/objectives).
+    pub scenario_path: String,
 }
 
 /// Runtime state for one comms template — tracks whether it has already fired.
@@ -831,6 +912,8 @@ pub struct ActiveDialogue {
 pub struct CommsTemplateState {
     pub template: CommsTemplate,
     pub fired: bool,
+    /// Path of the scenario that owns this template.
+    pub scenario_path: String,
 }
 
 /// A comms template that fired in response to world events.
@@ -840,14 +923,16 @@ pub struct FiredCommsTemplate {
     pub from: String,
     /// The root dialogue node to inject into the inbox.
     pub node: CommsDialogueNode,
+    /// Path of the scenario that owns this template.
+    pub scenario_path: String,
 }
 
 /// Create a `Vec<CommsTemplateState>` from a parsed `ScenarioConfig`.
-pub fn comms_template_states_from_config(config: &ScenarioConfig) -> Vec<CommsTemplateState> {
+pub fn comms_template_states_from_config(config: &ScenarioConfig, scenario_path: &str) -> Vec<CommsTemplateState> {
     config
         .comms
         .iter()
-        .map(|t| CommsTemplateState { template: t.clone(), fired: false })
+        .map(|t| CommsTemplateState { template: t.clone(), fired: false, scenario_path: scenario_path.to_string() })
         .collect()
 }
 
@@ -878,6 +963,7 @@ pub fn evaluate_comms_templates(
             results.push(FiredCommsTemplate {
                 from: state.template.from.clone(),
                 node: state.template.node.clone(),
+                scenario_path: state.scenario_path.clone(),
             });
         }
     }
@@ -1324,7 +1410,7 @@ path = "scenarios/reinforcements.toml"
             condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
             actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Destroyed { uuid: station_uuid.clone() }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
@@ -1346,7 +1432,7 @@ path = "scenarios/reinforcements.toml"
             condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
             actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Destroyed { uuid: "uuid-beta".to_string() }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
@@ -1364,7 +1450,7 @@ path = "scenarios/reinforcements.toml"
             condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
             actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Destroyed { uuid: "uuid-alpha".to_string() }];
 
@@ -1385,7 +1471,7 @@ path = "scenarios/reinforcements.toml"
             condition: TriggerCondition::OnTimer { after_secs: 10.0 },
             actions: vec![TriggerAction::LoadScenario { path: "scenarios/late.toml".to_string() }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         // Below threshold — no fire.
         let events_before = vec![WorldEvent::TimerElapsed { elapsed_secs: 9.99 }];
@@ -1408,7 +1494,7 @@ path = "scenarios/reinforcements.toml"
             condition: TriggerCondition::OnAttacked { entity_name: "convoy".to_string() },
             actions: vec![TriggerAction::LoadScenario { path: "scenarios/reinforcements.toml".to_string() }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Attacked {
             uuid: "uuid-convoy".to_string(),
@@ -1428,7 +1514,7 @@ path = "scenarios/reinforcements.toml"
             condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
             actions: vec![TriggerAction::LoadScenario { path: "scenarios/$station_alpha.toml".to_string() }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Destroyed { uuid: "uuid-abc-123".to_string() }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
@@ -1478,8 +1564,8 @@ path = "scenarios/follow_on.toml"
             actions: vec![TriggerAction::LoadScenario { path: "scenarios/b.toml".to_string() }],
         };
         let mut states = vec![
-            TriggerState { trigger: trigger_a, fired: false },
-            TriggerState { trigger: trigger_b, fired: false },
+            TriggerState { trigger: trigger_a, fired: false, scenario_path: "test".to_string() },
+            TriggerState { trigger: trigger_b, fired: false, scenario_path: "test".to_string() },
         ];
 
         let events = vec![WorldEvent::Destroyed { uuid: "uuid-a".to_string() }];
@@ -1501,7 +1587,7 @@ path = "scenarios/follow_on.toml"
             condition: TriggerCondition::OnDestroyed { entity_name: "ghost".to_string() },
             actions: vec![TriggerAction::LoadScenario { path: "scenarios/ghost.toml".to_string() }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Destroyed { uuid: "some-uuid".to_string() }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
@@ -1522,7 +1608,7 @@ type = "load_scenario"
 path = "scenarios/next.toml"
 "#;
         let config = parse_scenario(toml).unwrap();
-        let states = trigger_states_from_config(&config);
+        let states = trigger_states_from_config(&config, "test");
         assert_eq!(states.len(), 1);
         assert!(!states[0].fired);
     }
@@ -1633,7 +1719,7 @@ id = "obj-2"
                 mandatory: true,
             }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
         let events = vec![WorldEvent::TimerElapsed { elapsed_secs: 5.0 }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
 
@@ -1688,7 +1774,7 @@ id = "obj-2"
                 mandatory: false,
             }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Hailed { target_uuid: "uuid-alpha".to_string() }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
@@ -1706,7 +1792,7 @@ id = "obj-2"
             condition: TriggerCondition::OnHailed { entity_name: "station_alpha".to_string() },
             actions: vec![],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Hailed { target_uuid: "uuid-other".to_string() }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
@@ -1925,6 +2011,7 @@ text = "Fuel cells"
         let dialogues = vec![ActiveDialogue {
             message_id: "msg-1".to_string(),
             current_node: node,
+            scenario_path: "test".to_string(),
         }];
 
         let result = process_response(&dialogues, "msg-1", 0).unwrap();
@@ -1960,6 +2047,7 @@ text = "Fuel cells"
         let dialogues = vec![ActiveDialogue {
             message_id: "msg-1".to_string(),
             current_node: node,
+            scenario_path: "test".to_string(),
         }];
 
         let result = process_response(&dialogues, "msg-1", 0).unwrap();
@@ -1986,6 +2074,7 @@ text = "Fuel cells"
         let dialogues = vec![ActiveDialogue {
             message_id: "msg-1".to_string(),
             current_node: node,
+            scenario_path: "test".to_string(),
         }];
 
         let result = process_response(&dialogues, "msg-1", 99);
@@ -2004,6 +2093,7 @@ text = "Fuel cells"
         let dialogues = vec![ActiveDialogue {
             message_id: "msg-1".to_string(),
             current_node: node,
+            scenario_path: "test".to_string(),
         }];
 
         let result = process_response(&dialogues, "msg-1", 0).unwrap();
@@ -2024,7 +2114,7 @@ text = "Fuel cells"
                 responses: vec![],
             },
         };
-        let mut states = vec![CommsTemplateState { template, fired: false }];
+        let mut states = vec![CommsTemplateState { template, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Attacked {
             uuid: "uuid-convoy".to_string(),
@@ -2047,7 +2137,7 @@ text = "Fuel cells"
             trigger: TriggerCondition::OnAttacked { entity_name: "convoy".to_string() },
             node: CommsDialogueNode { body: "Help!".to_string(), responses: vec![] },
         };
-        let mut states = vec![CommsTemplateState { template, fired: false }];
+        let mut states = vec![CommsTemplateState { template, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Attacked {
             uuid: "uuid-convoy".to_string(),
@@ -2070,7 +2160,7 @@ text = "Fuel cells"
             trigger: TriggerCondition::OnAttacked { entity_name: "convoy".to_string() },
             node: CommsDialogueNode { body: "Help!".to_string(), responses: vec![] },
         };
-        let mut states = vec![CommsTemplateState { template, fired: false }];
+        let mut states = vec![CommsTemplateState { template, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Attacked {
             uuid: "uuid-other".to_string(),
@@ -2197,7 +2287,7 @@ entity = "raider"
                 target: Some("player_ship".to_string()),
             }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
         let events = vec![WorldEvent::TimerElapsed { elapsed_secs: 5.0 }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
 
@@ -2226,7 +2316,7 @@ entity = "raider"
                 target: None,
             }],
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
         let events = vec![WorldEvent::Attacked {
             uuid: "uuid-raider".to_string(),
@@ -2384,7 +2474,7 @@ kind = "CommsJammed"
             condition: TriggerCondition::OnTimer { after_secs: 0.0 },
             actions: actions.clone(),
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
         let events = vec![WorldEvent::TimerElapsed { elapsed_secs: 1.0 }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
 
@@ -2645,10 +2735,113 @@ slot = "RepairTeams"
             condition: TriggerCondition::OnTimer { after_secs: 0.0 },
             actions: actions.clone(),
         };
-        let mut states = vec![TriggerState { trigger, fired: false }];
+        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
         let events = vec![WorldEvent::TimerElapsed { elapsed_secs: 1.0 }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].actions, actions);
+    }
+
+    // ── Cycle 36: unload_scenario TOML parse ────────────────────────────────
+
+    // Cycle 36a: unload_scenario parses from TOML to TriggerAction::UnloadScenario
+    #[test]
+    fn parse_unload_scenario_action() {
+        let toml = r#"
+[[spawn]]
+name = "station_alpha"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "station_alpha"
+
+[[trigger.action]]
+type = "unload_scenario"
+path = "scenarios/phase1.toml"
+"#;
+        let config = parse_scenario(toml).unwrap();
+        assert_eq!(config.triggers.len(), 1);
+        assert_eq!(config.triggers[0].actions.len(), 1);
+        assert_eq!(
+            config.triggers[0].actions[0],
+            TriggerAction::UnloadScenario { path: "scenarios/phase1.toml".to_string() }
+        );
+    }
+
+    // Cycle 36b: unload_scenario requires path field
+    #[test]
+    fn parse_unload_scenario_requires_path() {
+        let toml = r#"
+[[spawn]]
+name = "e"
+entity_path = "entities/station.toml"
+position = [0.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "e"
+
+[[trigger.action]]
+type = "unload_scenario"
+"#;
+        let result = parse_scenario(toml);
+        assert!(result.is_err(), "unload_scenario without path should fail");
+        assert!(result.unwrap_err().contains("path"), "error should mention 'path'");
+    }
+
+    // ── Cycle 37: ScenarioManager additive load ──────────────────────────────
+
+    // Cycle 37a: loading a new scenario inserts it into the map
+    #[test]
+    fn load_scenario_inserts_new_path() {
+        let mut mgr = ScenarioManager::default();
+        let inserted = mgr.load_scenario("scenarios/phase1.toml");
+        assert!(inserted, "first load should return true");
+        assert_eq!(mgr.len(), 1);
+        assert!(mgr.is_active("scenarios/phase1.toml"));
+    }
+
+    // Cycle 37b: loading the same path twice is a no-op
+    #[test]
+    fn load_scenario_second_time_is_noop() {
+        let mut mgr = ScenarioManager::default();
+        mgr.load_scenario("scenarios/phase1.toml");
+        let inserted = mgr.load_scenario("scenarios/phase1.toml");
+        assert!(!inserted, "second load should return false");
+        assert_eq!(mgr.len(), 1, "map size must not grow");
+    }
+
+    // Cycle 37c: loading two different paths results in both being active
+    #[test]
+    fn load_two_different_scenarios_both_active() {
+        let mut mgr = ScenarioManager::default();
+        mgr.load_scenario("scenarios/a.toml");
+        mgr.load_scenario("scenarios/b.toml");
+        assert_eq!(mgr.len(), 2);
+        assert!(mgr.is_active("scenarios/a.toml"));
+        assert!(mgr.is_active("scenarios/b.toml"));
+    }
+
+    // Cycle 37d: unloading removes the scenario and returns its runtime
+    #[test]
+    fn unload_scenario_removes_from_map() {
+        let mut mgr = ScenarioManager::default();
+        mgr.load_scenario("scenarios/a.toml");
+        mgr.load_scenario("scenarios/b.toml");
+        let removed = mgr.unload_scenario("scenarios/a.toml");
+        assert!(removed.is_some(), "should return the removed runtime");
+        assert_eq!(mgr.len(), 1);
+        assert!(!mgr.is_active("scenarios/a.toml"));
+        assert!(mgr.is_active("scenarios/b.toml"), "b must remain active");
+    }
+
+    // Cycle 37e: unloading a non-active path returns None
+    #[test]
+    fn unload_nonexistent_scenario_returns_none() {
+        let mut mgr = ScenarioManager::default();
+        let removed = mgr.unload_scenario("scenarios/ghost.toml");
+        assert!(removed.is_none());
     }
 }

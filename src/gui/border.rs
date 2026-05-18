@@ -231,8 +231,8 @@ impl GuiBorderWidget {
 fn update_border_textures(
     intensity: Option<Res<RedAlertIntensity>>,
     assets: Option<Res<BorderAssets>>,
-    mut corners: Query<(&CornerSlot, &mut ImageNode)>,
-    mut edges: Query<(&EdgeSlot, &mut ImageNode)>,
+    mut corners: Query<(&CornerSlot, &mut ImageNode), Without<EdgeSlot>>,
+    mut edges: Query<(&EdgeSlot, &mut ImageNode), Without<CornerSlot>>,
 ) {
     let Some(intensity) = intensity else { return };
     let Some(assets) = assets else { return };

@@ -54,6 +54,11 @@ pub struct BehaviourSection(pub crate::entity_config::BehaviourConfig);
 #[derive(Component, Clone, Debug)]
 pub struct EntityTagsSection(pub Vec<String>);
 
+/// Present when the EntityConfig has a `faction` UUID.
+/// The AI tick reads this component to determine `self_faction` and enemy evaluation.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct FactionComponent(pub uuid::Uuid);
+
 // ── Spawner ────────────────────────────────────────────────────────
 
 /// Spawn an entity from a resolved EntityConfig.
@@ -139,6 +144,11 @@ pub fn spawn_entity(
     // Tags — mirror TOML tags onto the entity for snapshot builders.
     if !config.tags.is_empty() {
         entity_commands.insert(EntityTagsSection(config.tags.clone()));
+    }
+
+    // Faction — attach a FactionComponent so the AI can read faction from ECS.
+    if let Some(faction_uuid) = config.faction {
+        entity_commands.insert(FactionComponent(faction_uuid));
     }
 
     entity_commands.id()
@@ -549,6 +559,49 @@ mod tests {
         let world = app.world_mut();
         assert!(world.get::<RegionShapeSection>(spawned).is_some(), "should have RegionShapeSection");
         assert!(world.get::<RegionEffectsSection>(spawned).is_none(), "should NOT have RegionEffectsSection");
+    }
+
+    #[test]
+    fn spawn_entity_with_faction_uuid_has_faction_component() {
+        let mut app = test_app();
+        let faction_id = uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
+        let config = EntityConfig {
+            tags: vec![],
+            faction: Some(faction_id),
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            science_console: None,
+            sensors_console: None,
+            shields_console: None,
+            star: None,
+            planet: None,
+            asteroid_field: None,
+            shape: None,
+            effects: None,
+            station: None,
+            behaviour: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+        let world = app.world_mut();
+        let comp = world.get::<FactionComponent>(spawned).expect("should have FactionComponent");
+        assert_eq!(comp.0, faction_id);
+    }
+
+    #[test]
+    fn spawn_entity_without_faction_has_no_faction_component() {
+        let mut app = test_app();
+        let config = EntityConfig::from_toml("").unwrap();
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+        let world = app.world_mut();
+        assert!(world.get::<FactionComponent>(spawned).is_none(), "should NOT have FactionComponent");
     }
 
     #[test]

@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use crate::ai::{AiController, AiTickOutput, WorldView, WorldEntity};
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
 
-#[cfg(target_arch = "wasm32")]
 use crate::config_cache::FactionRegistryResource;
 
 // ── AiTokenRegistry ───────────────────────────────────────────────────────────
@@ -200,12 +199,11 @@ fn attach_controllers_on_spawn(
 /// Tick AI controllers.
 fn tick_ai_controllers(
     mut commands: Commands,
-    mut query: Query<(Entity, &mut AiControllerComponent, &mut Transform, &BehaviourSection, Option<&AttackerThisTick>)>,
+    mut query: Query<(Entity, &mut AiControllerComponent, &mut Transform, &BehaviourSection, Option<&AttackerThisTick>, Option<&crate::entities::spawner::FactionComponent>)>,
     time: Res<Time>,
     map_config: Option<Res<crate::map_config::MapConfig>>,
-    #[cfg(target_arch = "wasm32")]
     faction_registry: Option<Res<FactionRegistryResource>>,
-    entity_query: Query<(&EntityUuid, &Transform), Without<AiControllerComponent>>,
+    entity_query: Query<(&EntityUuid, &Transform, Option<&crate::entities::spawner::FactionComponent>), Without<AiControllerComponent>>,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
 ) {
 
@@ -224,12 +222,12 @@ fn tick_ai_controllers(
         HashMap::new()
     };
 
-    // Collect world entities from all non-AI entities (approximate: no faction yet)
-    let world_entities: Vec<WorldEntity> = entity_query.iter().map(|(uid, t)| {
+    // Collect world entities from all non-AI entities, including faction if present.
+    let world_entities: Vec<WorldEntity> = entity_query.iter().map(|(uid, t, faction_comp)| {
         WorldEntity {
             uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
             position: [t.translation.x, t.translation.y, t.translation.z],
-            faction: None,
+            faction: faction_comp.map(|f| f.0),
             shields: None,
             hull_fraction: None,
             yaw: None,
@@ -237,16 +235,13 @@ fn tick_ai_controllers(
     }).collect();
 
     let empty_registry = crate::faction::FactionRegistry::new();
-    #[cfg(target_arch = "wasm32")]
     let actual_registry: Option<&crate::faction::FactionRegistry> =
         faction_registry.as_ref().map(|r| &r.0);
-    #[cfg(not(target_arch = "wasm32"))]
-    let actual_registry: Option<&crate::faction::FactionRegistry> = None;
 
     let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
 
-    for (entity, mut ctrl, mut transform, behaviour, attacker_comp) in &mut query {
+    for (entity, mut ctrl, mut transform, behaviour, attacker_comp, self_faction_comp) in &mut query {
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
 
@@ -260,7 +255,7 @@ fn tick_ai_controllers(
             anchors: anchors.clone(),
             entities: world_entities.clone(),
             attacker_this_tick,
-            self_faction: None,       // TODO: populate from entity config faction field
+            self_faction: self_faction_comp.map(|f| f.0),
             entity_phaser_ready: false,
             entity_weapons_range: None,
             torpedo_tube_ready: None,

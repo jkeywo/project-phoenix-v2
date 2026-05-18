@@ -26,6 +26,9 @@ use {
     wasm_bindgen::prelude::*,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::prelude::Resource;
+
 // ── Pure helpers (native + wasm) ─────────────────────────────────────────────
 
 /// Collect template paths nested inside an `EntityConfig` that the preload
@@ -464,11 +467,18 @@ impl std::ops::Deref for WorldContentResource {
 }
 
 /// Newtype wrapper so `FactionRegistry` can be inserted as a Bevy Resource.
-#[cfg(target_arch = "wasm32")]
 #[derive(Resource)]
 pub struct FactionRegistryResource(pub crate::faction::FactionRegistry);
 
 #[cfg(target_arch = "wasm32")]
+impl std::ops::Deref for FactionRegistryResource {
+    type Target = crate::faction::FactionRegistry;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl std::ops::Deref for FactionRegistryResource {
     type Target = crate::faction::FactionRegistry;
     fn deref(&self) -> &Self::Target {
@@ -570,7 +580,18 @@ pub fn wasm_load_faction(_path: String, _toml_str: String) -> Result<JsValue, Js
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_faction_registry() -> crate::faction::FactionRegistry {
-    crate::faction::FactionRegistry::new()
+    let mut registry = crate::faction::FactionRegistry::new();
+    for toml_str in &[
+        include_str!("../../assets/factions/federation.toml"),
+        include_str!("../../assets/factions/pirate.toml"),
+        include_str!("../../assets/factions/harrow.toml"),
+        include_str!("../../assets/factions/requiem.toml"),
+    ] {
+        if let Ok(config) = crate::faction::parse_faction_config(toml_str) {
+            registry.insert(config);
+        }
+    }
+    registry
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────────

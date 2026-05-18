@@ -479,7 +479,7 @@ mod tests {
             tags: vec!["region".to_string(), "nebula".to_string()],
             shape: Some(RegionShape::Sphere { radius: 150.0 }),
             effects: Some(crate::region_effects::RegionEffectsConfig {
-                comms_jam: Some(crate::region_effects::CommsJamEffect {}),
+                comms_jammed: Some(crate::region_effects::CommsJamEffect {}),
                 sensor_blind: Some(crate::region_effects::SensorBlindEffect {}),
                 ..Default::default()
             }),

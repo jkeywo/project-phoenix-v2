@@ -14,7 +14,8 @@ pub enum RegionEffectKind {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DamageZoneEffect {
-    pub dps: f32,
+    #[serde(alias = "dps")]
+    pub damage_per_second: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -28,7 +29,8 @@ pub struct BlocksImpulseEffect {}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RadarDampeningEffect {
-    pub multiplier: f32,
+    #[serde(alias = "multiplier")]
+    pub range_modifier: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -50,8 +52,8 @@ pub struct RegionEffectsConfig {
     pub blocks_impulse: Option<BlocksImpulseEffect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radar_dampening: Option<RadarDampeningEffect>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub comms_jam: Option<CommsJamEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "comms_jam")]
+    pub comms_jammed: Option<CommsJamEffect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensor_blind: Option<SensorBlindEffect>,
 }
@@ -63,7 +65,7 @@ impl RegionEffectsConfig {
             && self.slow_zone.is_none()
             && self.blocks_impulse.is_none()
             && self.radar_dampening.is_none()
-            && self.comms_jam.is_none()
+            && self.comms_jammed.is_none()
             && self.sensor_blind.is_none()
     }
 
@@ -71,7 +73,7 @@ impl RegionEffectsConfig {
     pub fn to_kinds(&self) -> Vec<RegionEffectKind> {
         let mut kinds = Vec::new();
         if let Some(z) = &self.damage_zone {
-            kinds.push(RegionEffectKind::DamageZone { dps: z.dps });
+            kinds.push(RegionEffectKind::DamageZone { dps: z.damage_per_second });
         }
         if let Some(z) = &self.slow_zone {
             kinds.push(RegionEffectKind::SlowZone {
@@ -83,9 +85,9 @@ impl RegionEffectsConfig {
             kinds.push(RegionEffectKind::BlocksImpulse);
         }
         if let Some(r) = &self.radar_dampening {
-            kinds.push(RegionEffectKind::RadarDampening { multiplier: r.multiplier });
+            kinds.push(RegionEffectKind::RadarDampening { multiplier: r.range_modifier });
         }
-        if self.comms_jam.is_some() {
+        if self.comms_jammed.is_some() {
             kinds.push(RegionEffectKind::CommsJam);
         }
         if self.sensor_blind.is_some() {
@@ -110,6 +112,7 @@ mod tests {
         round_trip(RegionEffectKind::DamageZone { dps: 15.0 });
     }
 
+
     #[test]
     fn serde_round_trip_slow_zone() {
         round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(0.5), yaw_rate_modifier: Some(-0.3) });
@@ -127,6 +130,7 @@ mod tests {
     fn serde_round_trip_radar_dampening() {
         round_trip(RegionEffectKind::RadarDampening { multiplier: 0.3 });
     }
+
 
     #[test]
     fn serde_round_trip_comms_jam() {
@@ -150,6 +154,7 @@ mod tests {
         round_trip(RegionEffectKind::RadarDampening { multiplier: 0.0 });
     }
 
+
     // ── RegionEffectsConfig tests ─────────────────────────────────
 
     #[test]
@@ -162,7 +167,7 @@ mod tests {
     #[test]
     fn effects_config_damage_zone() {
         let cfg = RegionEffectsConfig {
-            damage_zone: Some(DamageZoneEffect { dps: 15.0 }),
+            damage_zone: Some(DamageZoneEffect { damage_per_second: 15.0 }),
             ..Default::default()
         };
         assert!(!cfg.is_empty());
@@ -174,11 +179,11 @@ mod tests {
     #[test]
     fn effects_config_to_kinds_aggregates_all() {
         let cfg = RegionEffectsConfig {
-            damage_zone: Some(DamageZoneEffect { dps: 10.0 }),
+            damage_zone: Some(DamageZoneEffect { damage_per_second: 10.0 }),
             slow_zone: Some(SlowZoneEffect { thrust_modifier: Some(0.5), yaw_rate_modifier: Some(-0.3) }),
             blocks_impulse: Some(BlocksImpulseEffect {}),
-            radar_dampening: Some(RadarDampeningEffect { multiplier: 0.3 }),
-            comms_jam: Some(CommsJamEffect {}),
+            radar_dampening: Some(RadarDampeningEffect { range_modifier: 0.3 }),
+            comms_jammed: Some(CommsJamEffect {}),
             sensor_blind: Some(SensorBlindEffect {}),
         };
         let kinds = cfg.to_kinds();
@@ -190,7 +195,7 @@ mod tests {
         let toml_str = r#"
 [effects]
 [effects.damage_zone]
-dps = 15.0
+damage_per_second = 15.0
 "#;
         #[derive(Deserialize)]
         struct Wrap {
@@ -198,11 +203,40 @@ dps = 15.0
         }
         let wrap: Wrap = toml::from_str(toml_str).unwrap();
         assert!(!wrap.effects.is_empty());
-        assert_eq!(wrap.effects.damage_zone.unwrap().dps, 15.0);
+        assert_eq!(wrap.effects.damage_zone.unwrap().damage_per_second, 15.0);
     }
 
     #[test]
-    fn effects_config_toml_round_trip_comms_jam() {
+    fn effects_config_toml_old_dps_key_still_parses_via_alias() {
+        let toml_str = r#"
+[effects]
+[effects.damage_zone]
+dps = 8.0
+"#;
+        #[derive(Deserialize)]
+        struct Wrap {
+            effects: RegionEffectsConfig,
+        }
+        let wrap: Wrap = toml::from_str(toml_str).unwrap();
+        assert_eq!(wrap.effects.damage_zone.unwrap().damage_per_second, 8.0);
+    }
+
+    #[test]
+    fn effects_config_toml_round_trip_comms_jammed() {
+        let toml_str = r#"
+[effects]
+[effects.comms_jammed]
+"#;
+        #[derive(Deserialize)]
+        struct Wrap {
+            effects: RegionEffectsConfig,
+        }
+        let wrap: Wrap = toml::from_str(toml_str).unwrap();
+        assert!(wrap.effects.comms_jammed.is_some());
+    }
+
+    #[test]
+    fn effects_config_toml_old_comms_jam_key_still_parses_via_alias() {
         let toml_str = r#"
 [effects]
 [effects.comms_jam]
@@ -212,6 +246,36 @@ dps = 15.0
             effects: RegionEffectsConfig,
         }
         let wrap: Wrap = toml::from_str(toml_str).unwrap();
-        assert!(wrap.effects.comms_jam.is_some());
+        assert!(wrap.effects.comms_jammed.is_some());
+    }
+
+    #[test]
+    fn effects_config_toml_range_modifier_key_parses() {
+        let toml_str = r#"
+[effects]
+[effects.radar_dampening]
+range_modifier = 0.4
+"#;
+        #[derive(Deserialize)]
+        struct Wrap {
+            effects: RegionEffectsConfig,
+        }
+        let wrap: Wrap = toml::from_str(toml_str).unwrap();
+        assert_eq!(wrap.effects.radar_dampening.unwrap().range_modifier, 0.4);
+    }
+
+    #[test]
+    fn effects_config_toml_old_multiplier_key_still_parses_via_alias() {
+        let toml_str = r#"
+[effects]
+[effects.radar_dampening]
+multiplier = 0.4
+"#;
+        #[derive(Deserialize)]
+        struct Wrap {
+            effects: RegionEffectsConfig,
+        }
+        let wrap: Wrap = toml::from_str(toml_str).unwrap();
+        assert_eq!(wrap.effects.radar_dampening.unwrap().range_modifier, 0.4);
     }
 }

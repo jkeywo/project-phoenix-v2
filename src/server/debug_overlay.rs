@@ -60,11 +60,11 @@ fn draw_region_wireframes(
             RegionShape::Sphere { radius } => {
                 draw_sphere_wireframe(&mut gizmos, origin, *radius);
             }
-            RegionShape::Box { half_extents } => {
+            RegionShape::Box { half_extents, .. } => {
                 draw_box_wireframe(&mut gizmos, origin, *half_extents);
             }
-            RegionShape::Cylinder { radius, half_height } => {
-                draw_cylinder_wireframe(&mut gizmos, origin, *radius, *half_height);
+            RegionShape::Torus { inner_radius, outer_radius } => {
+                draw_torus_wireframe(&mut gizmos, origin, *inner_radius, *outer_radius);
             }
         }
     }
@@ -113,24 +113,19 @@ fn draw_box_wireframe(gizmos: &mut Gizmos, origin: Vec3, half_extents: [f32; 3])
     }
 }
 
-fn draw_cylinder_wireframe(gizmos: &mut Gizmos, origin: Vec3, radius: f32, half_height: f32) {
+fn draw_torus_wireframe(gizmos: &mut Gizmos, origin: Vec3, inner_radius: f32, outer_radius: f32) {
     let color = Color::srgba(0.0, 1.0, 0.3, 0.6);
-    let top = origin + Vec3::Y * half_height;
-    let bottom = origin - Vec3::Y * half_height;
+    // Draw two horizontal circles representing the inner and outer edges of the torus
     gizmos.circle(
-        Isometry3d::new(top, Quat::IDENTITY),
-        radius,
+        Isometry3d::new(origin, Quat::IDENTITY),
+        inner_radius,
         color,
     );
     gizmos.circle(
-        Isometry3d::new(bottom, Quat::IDENTITY),
-        radius,
+        Isometry3d::new(origin, Quat::IDENTITY),
+        outer_radius,
         color,
     );
-    for angle in [0.0, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, 3.0 * std::f32::consts::FRAC_PI_2] {
-        let offset = Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius);
-        gizmos.line(bottom + offset, top + offset, color);
-    }
 }
 
 #[cfg(test)]

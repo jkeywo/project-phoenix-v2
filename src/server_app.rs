@@ -597,7 +597,7 @@ fn reconcile_runtime_entities(
         match &shape.0 {
             RegionShape::Sphere { .. } => "sphere",
             RegionShape::Box { .. } => "box",
-            RegionShape::Cylinder { .. } => "cylinder",
+            RegionShape::Torus { .. } => "torus",
         }.to_string()
     }
 

@@ -1007,22 +1007,22 @@ half_extents = [50.0, 30.0, 40.0]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let shape = config.shape.expect("shape must be Some");
-        assert_eq!(shape, crate::region_shape::RegionShape::Box { half_extents: [50.0, 30.0, 40.0] });
+        assert_eq!(shape, crate::region_shape::RegionShape::Box { half_extents: [50.0, 30.0, 40.0], yaw: 0.0 });
     }
 
     #[test]
-    fn region_shape_cylinder_parses_from_toml() {
+    fn region_shape_torus_parses_from_toml() {
         let toml_str = r##"
 tags = ["region", "test"]
 
 [shape]
-type = "cylinder"
-radius = 80.0
-half_height = 50.0
+type = "torus"
+inner_radius = 50.0
+outer_radius = 80.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let shape = config.shape.expect("shape must be Some");
-        assert_eq!(shape, crate::region_shape::RegionShape::Cylinder { radius: 80.0, half_height: 50.0 });
+        assert_eq!(shape, crate::region_shape::RegionShape::Torus { inner_radius: 50.0, outer_radius: 80.0 });
     }
 
     #[test]
@@ -1035,13 +1035,13 @@ type = "sphere"
 radius = 150.0
 
 [effects]
-[effects.comms_jam]
+[effects.comms_jammed]
 [effects.sensor_blind]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         assert!(config.shape.is_some());
         let effects = config.effects.expect("effects must be Some");
-        assert!(effects.comms_jam.is_some());
+        assert!(effects.comms_jammed.is_some());
         assert!(effects.sensor_blind.is_some());
     }
 
@@ -1051,7 +1051,7 @@ radius = 150.0
 tags = ["region"]
 
 [effects]
-[effects.comms_jam]
+[effects.comms_jammed]
 "##;
         let result = EntityConfig::from_toml(toml_str);
         assert!(result.is_err(), "region entity with effects but no shape should error");

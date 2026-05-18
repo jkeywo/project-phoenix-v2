@@ -7,4 +7,4 @@ radius = 120.0
 [effects]
 
 [effects.damage_zone]
-dps = 8.0
+damage_per_second = 8.0

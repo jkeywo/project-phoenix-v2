@@ -494,7 +494,7 @@ mod tests {
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
-                damage_zone: Some(DamageZoneEffect { dps }),
+                damage_zone: Some(DamageZoneEffect { damage_per_second: dps }),
                 ..Default::default()
             }),
             hull: None,
@@ -684,7 +684,7 @@ mod tests {
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
-                radar_dampening: Some(RadarDampeningEffect { multiplier }),
+                radar_dampening: Some(RadarDampeningEffect { range_modifier: multiplier }),
                 ..Default::default()
             }),
             hull: None,
@@ -1016,7 +1016,7 @@ mod tests {
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
-                comms_jam: Some(CommsJamEffect {}),
+                comms_jammed: Some(CommsJamEffect {}),
                 ..Default::default()
             }),
             hull: None, collider: None, appearance: None,

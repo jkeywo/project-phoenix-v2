@@ -354,11 +354,12 @@ fn tick_active_beam(
     mut cooldown: ResMut<PhaserCooldown>,
     ship: Res<ShipState>,
     mut world: ResMut<WorldResource>,
-    mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut EntityConsoleHull)>,
+    mut hull_query: Query<(Entity, Option<&AsteroidUuid>, Option<&crate::entity_spawner::EntityUuid>, &mut EntityConsoleHull)>,
     mut commands: Commands,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
+    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
 ) {
 
     let dt = time.delta_secs();
@@ -393,19 +394,32 @@ fn tick_active_beam(
     if damage_to_apply > 0 {
         beam.damage_accumulator -= damage_to_apply as f32;
 
-        let mut destroyed = false;
-        for (entity, uuid_comp, mut hull_comp) in asteroid_query.iter_mut() {
-            if uuid_comp.0 == target_uuid {
-                let mut rng = rand::rng();
-                hull_comp.0.apply_damage(damage_to_apply as f32, &mut rng);
-                if hull_comp.0.is_destroyed() {
-                    destroyed = true;
-                    commands.entity(entity).despawn();
+        let mut asteroid_destroyed = false;
+        let mut npc_destroyed = false;
+
+        for (entity, asteroid_uuid, entity_uuid, mut hull_comp) in hull_query.iter_mut() {
+            // Match by whichever UUID component is present
+            let uuid_matches = asteroid_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str())
+                || entity_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str());
+            if !uuid_matches {
+                continue;
+            }
+
+            let is_asteroid = asteroid_uuid.is_some();
+            let mut rng = rand::rng();
+            hull_comp.0.apply_damage(damage_to_apply as f32, &mut rng);
+
+            if hull_comp.0.is_destroyed() {
+                commands.entity(entity).despawn();
+                if is_asteroid {
+                    asteroid_destroyed = true;
+                } else {
+                    npc_destroyed = true;
                 }
             }
         }
 
-        if destroyed {
+        if asteroid_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
             vfx_events.write(AsteroidDestroyedVfx { x: info.x(), z: info.z() });
 
@@ -415,6 +429,21 @@ fn tick_active_beam(
             cooldown.start();
 
             outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
+            commands.trigger(BeamEndedEvent { target_uuid });
+            return;
+        }
+
+        if npc_destroyed {
+            // Non-asteroid entity destroyed
+            world.0.entities.retain(|a| a.uuid != target_uuid);
+            destroyed_events.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: target_uuid.clone() });
+            outbox.0.push((Target::All, ServerMessage::EntityDespawned { uuid: target_uuid.clone() }));
+
+            beam.target_uuid = None;
+            beam.remaining_secs = 0.0;
+            beam.damage_accumulator = 0.0;
+            cooldown.start();
+
             commands.trigger(BeamEndedEvent { target_uuid });
             return;
         }
@@ -512,6 +541,7 @@ mod tests {
             .init_resource::<WeaponsTarget>()
             .init_resource::<ActiveBeam>()
             .add_message::<AsteroidDestroyedVfx>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
             .init_resource::<PhaserCooldown>()
             .init_resource::<CurrentPhaserMode>()
             .insert_resource(ShipModifiers::new())
@@ -1149,5 +1179,126 @@ mod tests {
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
         assert!((freq - 0.0).abs() < 1e-5, "frequency below 0.0 should clamp to 0.0, got {freq}");
+    }
+
+    // ── NPC / station phaser damage (issue #311) ──────────────────────────
+
+    fn setup_npc_world(app: &mut App, npc_x: f32, npc_z: f32) {
+        app.world_mut().insert_resource(WorldResource(crate::messages::WorldData {
+            entities: vec![crate::messages::EntitySnapshot {
+                uuid: "npc-1".into(),
+                position: Some([npc_x, 0.0, npc_z]),
+                tags: vec!["ship".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+    }
+
+    fn spawn_npc_entity(app: &mut App, npc_x: f32, npc_z: f32, max_hp: f32) -> bevy::ecs::entity::Entity {
+        app.world_mut().spawn((
+            crate::entity_spawner::EntityUuid("npc-1".into()),
+            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])),
+            Transform::from_xyz(npc_x, 0.0, npc_z),
+        )).id()
+    }
+
+    // ── Cycle 1: phaser beam reduces NPC hull ─────────────────────────────
+
+    #[test]
+    fn phaser_beam_damages_npc_entity_hull() {
+        let mut app = test_app();
+        setup_npc_world(&mut app, 0.0, -20.0);
+        start_game_with_weapons(&mut app);
+
+        let npc_entity = spawn_npc_entity(&mut app, 0.0, -20.0, 30.0);
+
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
+        tick(&mut app);
+        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        tick(&mut app);
+
+        // Accumulate damage but don't destroy
+        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 10.0;
+        app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
+        tick(&mut app);
+
+        let hp = app.world().get::<EntityConsoleHull>(npc_entity)
+            .expect("NPC entity should still exist")
+            .0.total_current();
+        assert!(hp < 30.0, "NPC hull should be reduced after phaser hit, got {hp}");
+    }
+
+    // ── Cycle 2: NPC at 0 HP is despawned and EntityDespawned broadcast ──
+
+    #[test]
+    fn phaser_beam_destroys_npc_entity_when_hull_reaches_zero() {
+        let mut app = test_app();
+        setup_npc_world(&mut app, 0.0, -20.0);
+        start_game_with_weapons(&mut app);
+
+        let npc_entity = spawn_npc_entity(&mut app, 0.0, -20.0, 30.0);
+
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
+        tick(&mut app);
+        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        tick(&mut app);
+
+        // Force lethal damage
+        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 30.0;
+        app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
+        let out = tick(&mut app);
+
+        // ECS entity despawned
+        assert!(
+            app.world().get::<EntityConsoleHull>(npc_entity).is_none(),
+            "NPC entity should be despawned after hull reaches 0"
+        );
+
+        // EntityDespawned wire message broadcast to all
+        let despawned_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::EntityDespawned { uuid } if uuid == "npc-1"));
+        assert!(despawned_msg.is_some(), "expected EntityDespawned {{ uuid: npc-1 }} broadcast");
+
+        // BeamEnded sent
+        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded after NPC destruction");
+
+        // Beam cleared, cooldown started
+        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none());
+        assert!(app.world().resource::<PhaserCooldown>().is_active());
+    }
+
+    // ── Cycle 3: AiEntityDestroyed message written on NPC destruction ─────
+
+    #[test]
+    fn phaser_beam_emits_ai_entity_destroyed_on_npc_kill() {
+        #[derive(Resource, Default)]
+        struct DestroyedBox(Vec<crate::ai_plugin::AiEntityDestroyed>);
+
+        let mut app = test_app();
+        app.init_resource::<DestroyedBox>();
+        app.add_systems(bevy::app::Update, |mut r: bevy::ecs::prelude::MessageReader<crate::ai_plugin::AiEntityDestroyed>, mut b: bevy::ecs::prelude::ResMut<DestroyedBox>| {
+            for ev in r.read() { b.0.push(ev.clone()); }
+        });
+
+        setup_npc_world(&mut app, 0.0, -20.0);
+        start_game_with_weapons(&mut app);
+        spawn_npc_entity(&mut app, 0.0, -20.0, 30.0);
+
+        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
+        tick(&mut app);
+        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        tick(&mut app);
+
+        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 30.0;
+        app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
+        tick(&mut app);
+        tick(&mut app); // second tick allows PostUpdate-equivalent collector to drain the message
+
+        let destroyed_events = app.world().resource::<DestroyedBox>();
+        assert!(
+            destroyed_events.0.iter().any(|e| e.entity_uuid == "npc-1"),
+            "AiEntityDestroyed must be emitted with entity_uuid 'npc-1' so on_destroyed triggers fire"
+        );
     }
 }

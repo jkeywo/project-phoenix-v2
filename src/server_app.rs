@@ -1006,6 +1006,7 @@ fn test_app() -> App {
         .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
         .init_resource::<SimOutbox>()
         .init_resource::<Outbox>()
+        .add_message::<crate::ai_plugin::AiEntityDestroyed>()
         .add_plugins(crate::captain_plugin::CaptainPlugin)
         .add_plugins(crate::weapons_plugin::WeaponsPlugin)
         .add_plugins(crate::repair_plugin::RepairPlugin)

@@ -49,19 +49,19 @@ pub fn repair_state_broadcaster() -> SimBroadcaster {
 
 // ── Systems ───────────────────────────────────────────────────────────────────
 
-/// Handle `DispatchRepairTeam { console }` messages from the Repair console.
+/// Handle `DispatchRepairTeam { team_idx, console }` messages from the Repair console.
 ///
 /// Validates: game is in-progress, sender holds `Console::Repair`.
-/// - If no free team exists: message ignored.
-/// - Otherwise: dispatch the lowest-numbered free team to the named console.
+/// Dispatches the named team (by index) to the target console, respecting
+/// redirect/recall rules in `RepairTeams::dispatch`.
 pub fn handle_dispatch_repair_team(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     mut teams: ResMut<ShipRepairTeams>,
 ) {
     for ev in reader.read() {
-        let target_console = match &ev.msg {
-            ClientMessage::DispatchRepairTeam { console } => console.clone(),
+        let (team_idx, target_console) = match &ev.msg {
+            ClientMessage::DispatchRepairTeam { team_idx, console } => (*team_idx as usize, console.clone()),
             _ => continue,
         };
         // Only the Repair console holder may dispatch teams.
@@ -71,10 +71,6 @@ pub fn handle_dispatch_repair_team(
         if ev.token.as_str() != repair_token {
             continue;
         }
-        // Must have a free team.
-        let Some(team_idx) = teams.0.lowest_free_team() else {
-            continue;
-        };
         teams.0.dispatch(team_idx, target_console);
     }
 }
@@ -183,7 +179,7 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
 
-        push(&mut app, "captain", ClientMessage::DispatchRepairTeam { console: Console::Helm });
+        push(&mut app, "captain", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
         tick(&mut app);
 
         let teams = app.world().resource::<ShipRepairTeams>();
@@ -196,32 +192,32 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
 
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
         tick(&mut app);
 
         let teams = app.world().resource::<ShipRepairTeams>();
         assert!(team_is_travelling(&teams, 0), "team 0 should be travelling after dispatch");
     }
 
-    /// When all teams are busy, further dispatches are ignored.
+    /// When team is busy, dispatching to a different console redirects it.
     #[test]
     fn all_busy_teams_ignore_further_dispatches() {
         let mut app = test_app();
         start_game(&mut app);
 
         // Dispatch both teams (default is 2).
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
         tick(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Tactical });
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 1, console: Console::Tactical });
         tick(&mut app);
 
-        // Third dispatch — no free team.
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Power });
+        // Redirect team 0 to Power (different console) — now team 0 is Returning with queue
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Power });
         tick(&mut app);
 
         let teams = app.world().resource::<ShipRepairTeams>();
-        // Both teams still busy (Travelling), third dispatch was a no-op.
-        assert!(team_is_travelling(&teams, 0));
+        // team 0 should be Returning (redirected), team 1 still Travelling
+        assert!(matches!(&teams.0.slots()[0], crate::messages::TeamSlot::Returning { .. }));
         assert!(team_is_travelling(&teams, 1));
     }
 
@@ -231,7 +227,7 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
 
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
         let out1 = tick(&mut app);
         let out2 = tick(&mut app);
 

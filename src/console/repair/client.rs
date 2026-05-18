@@ -192,6 +192,9 @@ fn refresh_repair_panel(
         status: String,
         status_color: Color,
         is_idle: bool,
+        /// The console this team is currently targeting (Travelling or Repairing).
+        /// Used to highlight the active dispatch button.
+        active_console: Option<Console>,
     }
 
     let rows: Vec<RowData> = sim.repair_teams.iter().map(|slot| {
@@ -202,6 +205,7 @@ fn refresh_repair_panel(
                 status: "Idle".into(),
                 status_color: Color::srgb(0.5, 0.7, 1.0),
                 is_idle: true,
+                active_console: None,
             },
             TeamSlot::Travelling { console, elapsed } => RowData {
                 pct: (elapsed / 5.0 * 100.0).clamp(0.0, 100.0),
@@ -209,6 +213,7 @@ fn refresh_repair_panel(
                 status: format!("→ {}", console.display_name()),
                 status_color: Color::srgb(1.0, 0.9, 0.3),
                 is_idle: false,
+                active_console: Some(console.clone()),
             },
             TeamSlot::Repairing { console, elapsed } => RowData {
                 pct: (elapsed / 50.0 * 100.0).clamp(0.0, 100.0),
@@ -216,21 +221,27 @@ fn refresh_repair_panel(
                 status: format!("Repairing {}", console.display_name()),
                 status_color: Color::srgb(0.3, 1.0, 0.3),
                 is_idle: false,
+                active_console: Some(console.clone()),
             },
-            TeamSlot::Returning { elapsed } => RowData {
-                pct: (elapsed / 5.0 * 100.0).clamp(0.0, 100.0),
+            TeamSlot::Returning { remaining, queued } => RowData {
+                pct: (remaining / 5.0 * 100.0).clamp(0.0, 100.0),
                 bar_color: Color::srgb(0.30, 0.30, 0.80),
-                status: "Returning".into(),
+                status: if let Some(c) = queued {
+                    format!("Returning → {}", c.display_name())
+                } else {
+                    "Returning".into()
+                },
                 status_color: Color::srgb(0.5, 0.5, 1.0),
                 is_idle: false,
+                active_console: queued.clone(),
             },
         }
     }).collect();
 
     let btn_bg = Color::srgb(0.10, 0.25, 0.15);
-    let btn_disabled_bg = Color::srgb(0.05, 0.12, 0.08);
+    let btn_active_bg = Color::srgb(0.20, 0.55, 0.30);
     let btn_text = Color::srgb(0.5, 1.0, 0.7);
-    let btn_text_disabled = Color::srgb(0.3, 0.5, 0.3);
+    let btn_text_active = Color::srgb(1.0, 1.0, 1.0);
 
     commands.entity(container_entity).with_children(|parent| {
         for (i, row) in rows.iter().enumerate() {
@@ -283,15 +294,16 @@ fn refresh_repair_panel(
                     },
                 ));
 
-                // Four targeting buttons (disabled when team is not Idle)
+                // Dispatch buttons — always enabled; active console is highlighted
                 for (console, label) in [
                     (Console::Helm, "HELM"),
                     (Console::Tactical, "TACTICAL"),
                     (Console::Power, "POWER"),
                     (Console::Shields, "SHIELDS"),
                 ] {
-                    let bg = if row.is_idle { btn_bg } else { btn_disabled_bg };
-                    let fg = if row.is_idle { btn_text } else { btn_text_disabled };
+                    let is_active = row.active_console.as_ref() == Some(&console);
+                    let bg = if is_active { btn_active_bg } else { btn_bg };
+                    let fg = if is_active { btn_text_active } else { btn_text };
                     rc.spawn((
                         DispatchButton { console, team_idx: i },
                         Button,
@@ -314,21 +326,16 @@ fn refresh_repair_panel(
 }
 
 /// Handle console dispatch button presses.
-/// Only dispatches when the associated team is Idle.
+/// Sends `DispatchRepairTeam` for any team state — the server handles redirect/recall logic.
 fn handle_dispatch_button_press(
     interactions: Query<(&Interaction, &DispatchButton), Changed<Interaction>>,
-    sim: Res<ClientSimState>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     for (interaction, btn) in interactions.iter() {
         if *interaction != Interaction::Pressed {
             continue;
         }
-        // Only dispatch if the team is idle
-        if !sim.repair_teams.get(btn.team_idx).map_or(false, |t| matches!(t, TeamSlot::Idle)) {
-            continue;
-        }
-        outbound.write(OutboundClientMessage(ClientMessage::DispatchRepairTeam { console: btn.console.clone() }));
+        outbound.write(OutboundClientMessage(ClientMessage::DispatchRepairTeam { team_idx: btn.team_idx as u8, console: btn.console.clone() }));
     }
 }
 

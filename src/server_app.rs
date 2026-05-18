@@ -1832,7 +1832,7 @@ fn test_app() -> App {
     fn non_repair_sender_is_ignored() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
-        push(&mut app, "captain", ClientMessage::DispatchRepairTeam { console: Console::Helm });
+        push(&mut app, "captain", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
         tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
         assert!(team_is_idle(&teams, 0), "team 0 should remain idle after non-Repair dispatch");
@@ -1842,7 +1842,7 @@ fn test_app() -> App {
     fn repair_holder_can_dispatch_team() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
         tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
         assert!(team_is_travelling(&teams, 0), "team 0 should be travelling after dispatch");
@@ -1852,14 +1852,15 @@ fn test_app() -> App {
     fn all_busy_teams_ignore_further_dispatches() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
         tick(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Tactical });
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 1, console: Console::Tactical });
         tick(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Power });
+        // Redirect team 0 (different console → Returning)
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Power });
         tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_travelling(&teams, 0));
+        assert!(matches!(&teams.0.slots()[0], crate::messages::TeamSlot::Returning { .. }));
         assert!(team_is_travelling(&teams, 1));
     }
 
@@ -1867,7 +1868,7 @@ fn test_app() -> App {
     fn repair_state_broadcast_after_dispatch() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { console: Console::Helm });
+        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
         let out = tick(&mut app);
         let repair_state = out.iter().find(|m| {
             matches!(&m.msg, ServerMessage::RepairState { teams } if

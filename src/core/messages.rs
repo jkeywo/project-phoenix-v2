@@ -108,8 +108,10 @@ pub enum TeamSlot {
     Travelling { console: Console, elapsed: f32 },
     /// Team is at the console performing repairs. `elapsed` counts HP restored.
     Repairing { console: Console, elapsed: f32 },
-    /// Team has finished and is returning to engineering. `elapsed` counts up toward 5s.
-    Returning { elapsed: f32 },
+    /// Team has finished and is returning to engineering.
+    /// `remaining` counts down from 5s. `queued` holds the next console to
+    /// dispatch to automatically on arrival (if any).
+    Returning { remaining: f32, queued: Option<Console> },
 }
 
 impl Default for TeamSlot {
@@ -504,9 +506,9 @@ pub enum ClientMessage {
     SetSensorsTarget { uuid: String },
     FirePhaser,
     SetPhaserMode { mode: PhaserMode },
-    /// Dispatch a repair team to the named console.
-    /// The server assigns the lowest-indexed idle team.
-    DispatchRepairTeam { console: Console },
+    /// Dispatch a specific repair team (by index) to the named console.
+    /// Supports redirect and recall (see PRD #305).
+    DispatchRepairTeam { team_idx: u8, console: Console },
     /// Fire a torpedo from the specified tube. `target_uuid` is optional homing target.
     FireTorpedo { tube: TorpedoTube, target_uuid: Option<String> },
     /// Increase power allocation for a console. Validated server-side:

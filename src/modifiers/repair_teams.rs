@@ -35,12 +35,32 @@ impl RepairTeams {
 
     /// Dispatch the team at `team_idx` to `console`.
     ///
-    /// Transitions `Idle → Travelling { console, elapsed: 0.0 }`.
-    /// No-op if the slot is not `Idle` (in-progress teams cannot be redirected).
-    pub fn dispatch(&mut self, team_idx: usize, console: Console) {
-        if let Some(slot) = self.slots.get_mut(team_idx) {
-            if matches!(slot, TeamSlot::Idle) {
-                *slot = TeamSlot::Travelling { console, elapsed: 0.0 };
+    /// Transition rules:
+    /// - `Idle` → `Travelling { console, elapsed: 0.0 }`.
+    /// - `Travelling { elapsed: t }` to a **different** console (redirect):
+    ///   → `Returning { remaining: t, queued: Some(console) }`.
+    /// - `Travelling { elapsed: t }` to the **same** console (recall):
+    ///   → `Returning { remaining: t, queued: None }`.
+    /// - `Repairing` to any console (redirect): `remaining = TRAVEL_DURATION`, queued.
+    /// - `Repairing` to same console (recall): `remaining = TRAVEL_DURATION`, no queue.
+    /// - `Returning` with a queued console: replace the queued console.
+    /// - `Returning` with no queue: add the console as queued (or clear if same).
+    pub fn dispatch(&mut self, team_idx: usize, new_console: Console) {
+        let Some(slot) = self.slots.get_mut(team_idx) else { return };
+        match slot.clone() {
+            TeamSlot::Idle => {
+                *slot = TeamSlot::Travelling { console: new_console, elapsed: 0.0 };
+            }
+            TeamSlot::Travelling { console: current, elapsed } => {
+                let queued = if new_console == current { None } else { Some(new_console) };
+                *slot = TeamSlot::Returning { remaining: elapsed, queued };
+            }
+            TeamSlot::Repairing { console: current, .. } => {
+                let queued = if new_console == current { None } else { Some(new_console) };
+                *slot = TeamSlot::Returning { remaining: TRAVEL_DURATION, queued };
+            }
+            TeamSlot::Returning { remaining, .. } => {
+                *slot = TeamSlot::Returning { remaining, queued: Some(new_console) };
             }
         }
     }
@@ -52,8 +72,9 @@ impl RepairTeams {
     ///   already at full HP on arrival, the team skips straight to `Returning`.
     /// - `Repairing` calls `hull.restore(console, dt * REPAIR_RATE_HP_PER_SEC)` each
     ///   tick. Once the console is at full HP, the team transitions to `Returning`.
-    /// - `Returning` advances its `elapsed` toward `TRAVEL_DURATION` (5s), then
-    ///   transitions to `Idle`.
+    /// - `Returning` decrements `remaining` toward 0. On completion:
+    ///   - If `queued = Some(c)`: auto-dispatch to `Travelling { console: c, elapsed: 0 }`.
+    ///   - If `queued = None`: → `Idle`.
     pub fn tick(&mut self, dt: f32, hull: &mut ConsoleHull) {
         for slot in self.slots.iter_mut() {
             match slot {
@@ -61,10 +82,9 @@ impl RepairTeams {
                     *elapsed += dt;
                     if *elapsed >= TRAVEL_DURATION {
                         let console = console.clone();
-                        // Check if console is already at full HP.
                         let is_full = hull.is_at_max(&console);
                         if is_full {
-                            *slot = TeamSlot::Returning { elapsed: 0.0 };
+                            *slot = TeamSlot::Returning { remaining: 0.0, queued: None };
                         } else {
                             *slot = TeamSlot::Repairing { console, elapsed: 0.0 };
                         }
@@ -74,15 +94,18 @@ impl RepairTeams {
                     let hp_to_restore = dt * REPAIR_RATE_HP_PER_SEC;
                     hull.restore(console.clone(), hp_to_restore);
                     *elapsed += dt;
-                    // Transition to Returning when the console is fully repaired.
                     if hull.is_at_max(console) {
-                        *slot = TeamSlot::Returning { elapsed: 0.0 };
+                        *slot = TeamSlot::Returning { remaining: TRAVEL_DURATION, queued: None };
                     }
                 }
-                TeamSlot::Returning { elapsed } => {
-                    *elapsed += dt;
-                    if *elapsed >= TRAVEL_DURATION {
-                        *slot = TeamSlot::Idle;
+                TeamSlot::Returning { remaining, queued } => {
+                    *remaining -= dt;
+                    if *remaining <= 0.0 {
+                        if let Some(c) = queued.take() {
+                            *slot = TeamSlot::Travelling { console: c, elapsed: 0.0 };
+                        } else {
+                            *slot = TeamSlot::Idle;
+                        }
                     }
                 }
                 TeamSlot::Idle => {}
@@ -171,11 +194,14 @@ mod tests {
 
     #[test]
     fn dispatch_non_idle_team_is_noop() {
+        // Old behavior: dispatch to non-idle was a no-op.
+        // New behavior: dispatching to a *different* console redirects (tested below).
+        // This test verifies dispatching to the SAME console (recall) sets Returning.
         let mut teams = RepairTeams::new(2);
         teams.dispatch(0, Console::Helm);
-        // Try to redirect — should be ignored
-        teams.dispatch(0, Console::Tactical);
-        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, .. }));
+        // Recall (same console)
+        teams.dispatch(0, Console::Helm);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { queued: None, .. }));
     }
 
     // ── Travelling → Repairing ────────────────────────────────────────────────
@@ -207,8 +233,6 @@ mod tests {
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
     }
 
-    // ── Repairing → HP restoration ────────────────────────────────────────────
-
     #[test]
     fn repairing_restores_hp_at_correct_rate() {
         let mut teams = RepairTeams::new(1);
@@ -239,18 +263,20 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_full();
         teams.dispatch(0, Console::Helm);
-        teams.tick(5.0, &mut hull); // travel (arrives full → Returning)
-        teams.tick(5.0, &mut hull); // return
+        teams.tick(5.0, &mut hull); // travel (arrives full → Returning with remaining=0)
+        // remaining is already 0 from arriving at full hp; tick 0.1 to trigger idle
+        teams.tick(0.1, &mut hull);
         assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
     }
 
     #[test]
-    fn returning_does_not_complete_before_5s() {
+    fn returning_does_not_complete_before_remaining_expires() {
         let mut teams = RepairTeams::new(1);
-        let mut hull = hull_full();
+        let mut hull = hull_damaged(24.9); // not full
         teams.dispatch(0, Console::Helm);
-        teams.tick(5.0, &mut hull); // travel → Returning
-        teams.tick(4.9, &mut hull); // not yet idle
+        teams.tick(5.0, &mut hull); // travel → Repairing
+        teams.tick(1.0, &mut hull); // repair → full → Returning { remaining: 5.0 }
+        teams.tick(4.9, &mut hull); // remaining not yet expired
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
     }
 
@@ -270,8 +296,8 @@ mod tests {
         teams.tick(50.0, &mut hull);
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
 
-        // Returning
-        teams.tick(5.0, &mut hull);
+        // Returning (remaining starts at TRAVEL_DURATION = 5s)
+        teams.tick(5.1, &mut hull);
         assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
     }
 
@@ -306,10 +332,11 @@ mod tests {
 
     #[test]
     fn non_idle_team_cannot_be_redirected_while_travelling() {
+        // Redirect while Travelling to a DIFFERENT console → Returning with queued
         let mut teams = RepairTeams::new(2);
         teams.dispatch(0, Console::Helm);
-        teams.dispatch(0, Console::Tactical); // should be ignored
-        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, .. }));
+        teams.dispatch(0, Console::Tactical); // redirect to different console
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { queued: Some(Console::Tactical), .. }));
     }
 
     #[test]
@@ -317,10 +344,106 @@ mod tests {
         let mut teams = RepairTeams::new(1);
         let mut hull = hull_full();
         teams.dispatch(0, Console::Helm);
-        teams.tick(5.0, &mut hull); // travel → Returning (full HP)
-        teams.tick(5.0, &mut hull); // → Idle
+        teams.tick(5.0, &mut hull); // travel → Returning (remaining=0, full HP)
+        teams.tick(0.1, &mut hull); // → Idle
         assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
         teams.dispatch(0, Console::Helm);
         assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { .. }));
+    }
+
+    // ── Redirect / Recall new behaviors ──────────────────────────────────────
+
+    #[test]
+    fn redirect_mid_travel_sets_remaining_equal_to_elapsed() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(10.0);
+        teams.dispatch(0, Console::Helm);
+        // Advance 2s into travel
+        teams.tick(2.0, &mut hull);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { elapsed, .. } if (*elapsed - 2.0).abs() < 1e-4));
+        // Redirect to a different console
+        teams.dispatch(0, Console::Tactical);
+        // remaining should equal the elapsed (2.0)
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { remaining, queued: Some(Console::Tactical) } if (*remaining - 2.0).abs() < 1e-4));
+    }
+
+    #[test]
+    fn recall_mid_travel_sets_returning_no_queue() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(10.0);
+        teams.dispatch(0, Console::Helm);
+        teams.tick(3.0, &mut hull);
+        teams.dispatch(0, Console::Helm); // same console = recall
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { queued: None, .. }));
+    }
+
+    #[test]
+    fn redirect_while_repairing_sets_returning_with_travel_duration() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(0.0);
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull); // travel → Repairing
+        assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
+        teams.dispatch(0, Console::Tactical);
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { remaining, queued: Some(Console::Tactical) } if (*remaining - 5.0).abs() < 1e-4));
+    }
+
+    #[test]
+    fn recall_while_repairing_sets_returning_no_queue() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(0.0);
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull); // travel → Repairing
+        teams.dispatch(0, Console::Helm); // recall
+        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { queued: None, .. }));
+    }
+
+    #[test]
+    fn partial_hp_restored_before_recall_is_preserved() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(0.0); // 0 HP
+        teams.dispatch(0, Console::Helm);
+        teams.tick(5.0, &mut hull); // travel → Repairing
+        teams.tick(2.0, &mut hull); // restore 1 HP
+        let hp_before_recall = hull.current_for(Console::Helm).unwrap();
+        assert!((hp_before_recall - 1.0).abs() < 1e-4);
+        teams.dispatch(0, Console::Helm); // recall
+        // HP should not have changed
+        let hp_after_recall = hull.current_for(Console::Helm).unwrap();
+        assert!((hp_after_recall - hp_before_recall).abs() < 1e-4);
+    }
+
+    #[test]
+    fn returning_with_queue_auto_dispatches_on_completion() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(10.0);
+        teams.dispatch(0, Console::Helm);
+        teams.tick(2.0, &mut hull); // elapsed=2
+        teams.dispatch(0, Console::Tactical); // redirect → Returning { remaining:2, queued:Tactical }
+        teams.tick(2.1, &mut hull); // remaining expires → auto-dispatch to Tactical
+        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Tactical, elapsed } if *elapsed < 1e-3));
+    }
+
+    #[test]
+    fn returning_with_no_queue_becomes_idle_on_completion() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_damaged(10.0);
+        teams.dispatch(0, Console::Helm);
+        teams.tick(2.0, &mut hull);
+        teams.dispatch(0, Console::Helm); // recall → Returning { remaining:2, queued:None }
+        teams.tick(2.1, &mut hull); // expires → Idle
+        assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
+    }
+
+    #[test]
+    fn dispatching_team_0_does_not_affect_team_1() {
+        let mut teams = RepairTeams::new(2);
+        let mut hull = hull_damaged(10.0);
+        teams.dispatch(0, Console::Helm);
+        // team 1 remains Idle
+        assert!(matches!(&teams.slots()[1], TeamSlot::Idle));
+        // redirect team 0
+        teams.dispatch(0, Console::Tactical);
+        assert!(matches!(&teams.slots()[1], TeamSlot::Idle), "team 1 should be unaffected");
     }
 }

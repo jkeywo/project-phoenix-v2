@@ -370,7 +370,7 @@ pub fn on_screen_message() -> ClientMessage {
 /// `ClientMessage` for dispatching a repair team to the Helm console.
 /// The actual console target is selected by the UI layer.
 pub fn repair_message() -> ClientMessage {
-    ClientMessage::DispatchRepairTeam { console: Console::Helm }
+    ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm }
 }
 
 /// `ClientMessage` to fire a torpedo from the given tube with an optional homing target.
@@ -1718,7 +1718,7 @@ mod tests {
         s.apply(&ServerMessage::RepairState {
             teams: vec![
                 TeamSlot::Repairing { console: Console::Tactical, elapsed: 1.5 },
-                TeamSlot::Returning { elapsed: 2.0 },
+                TeamSlot::Returning { remaining: 2.0, queued: None },
             ],
         });
         s.apply(&ServerMessage::Welcome {

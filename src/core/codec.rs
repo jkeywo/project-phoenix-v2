@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn client_dispatch_repair_team_round_trips() {
         use crate::messages::Console;
-        let msg = ClientMessage::DispatchRepairTeam { console: Console::Helm };
+        let msg = ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -537,7 +537,7 @@ mod tests {
                 TeamSlot::Idle,
                 TeamSlot::Travelling { console: Console::Helm, elapsed: 2.5 },
                 TeamSlot::Repairing { console: Console::Tactical, elapsed: 1.0 },
-                TeamSlot::Returning { elapsed: 3.0 },
+                TeamSlot::Returning { remaining: 3.0, queued: None },
             ],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

@@ -2,7 +2,7 @@ tags = ["ship", "npc", "comms_contact"]
 faction = "dddddddd-4444-4444-8444-dddddddddddd"
 
 [hull]
-hull_integrity = 40.0
+captain_chair = 40.0
 
 [collider]
 shape = "Capsule"

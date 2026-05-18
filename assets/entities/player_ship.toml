@@ -70,6 +70,8 @@ max_speed = 50.0
 acceleration = 16.7
 deceleration = 50.0
 max_yaw_rate = 1.5708
+impulse_charge_duration = 3.0
+impulse_speed_multiplier = 10.0
 
 [navigation_console]
 

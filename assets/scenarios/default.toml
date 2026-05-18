@@ -4,6 +4,11 @@
 # from the Comms console; hailing triggers a greeting with two response
 # branches.  Choosing "We are on a survey mission" adds an optional objective;
 # choosing "We require docking clearance" adds a mandatory docking objective.
+#
+# When the raider is first attacked, an automatic distress call is broadcast
+# to the crew (no player response required) and the patrol scenario loads,
+# spawning reinforcement raiders.  Starbase Alpha has a parallel distress
+# trigger that fires its own broadcast on first attack.
 
 [[spawn]]
 name        = "raider"
@@ -20,6 +25,16 @@ entity    = "raider"
   text      = "Pirate raider eliminated."
   mandatory = false
 
+# When the raider is attacked for the first time, automatically broadcast a
+# distress call and chain-load the patrol (reinforcements) scenario.
+[[trigger]]
+condition = "on_attacked"
+entity    = "raider"
+
+  [[trigger.action]]
+  type = "load_scenario"
+  path = "assets/scenarios/patrol.toml"
+
 # ── Static entities ────────────────────────────────────────────────────────
 
 [[spawn]]
@@ -28,6 +43,20 @@ entity_path = "assets/entities/station_outpost.toml"
 anchor     = "starbase_alpha"
 
 # ── Comms templates ────────────────────────────────────────────────────────
+
+# Automatic distress call broadcast when the raider is first attacked.
+[[comms]]
+from    = "raider"
+trigger = "on_attacked"
+entity  = "raider"
+message = "MAYDAY MAYDAY — Pirate raider calling for backup. USS Phoenix has engaged. All units converge on our position!"
+
+# Automatic distress call broadcast from Starbase Alpha when the station is first attacked.
+[[comms]]
+from    = "Starbase Alpha"
+trigger = "on_attacked"
+entity  = "Starbase Alpha"
+message = "Starbase Alpha to all vessels — we are under attack! Requesting immediate assistance!"
 
 [[comms]]
 from    = "Starbase Alpha"

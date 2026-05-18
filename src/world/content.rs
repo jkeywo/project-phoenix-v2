@@ -2563,12 +2563,16 @@ kind = "UnknownFlag"
     fn default_scenario_has_starbase_alpha_comms_with_responses_and_actions() {
         let toml_str = include_str!("../../assets/scenarios/default.toml");
         let config = parse_scenario(toml_str).expect("default.toml must parse");
-        let tmpl = config.comms.iter().find(|c| c.from == "Starbase Alpha");
-        assert!(tmpl.is_some(), "default scenario must have a comms template from 'Starbase Alpha'");
+        // Find the on_hailed template specifically (there is also an on_attacked distress template).
+        let tmpl = config.comms.iter().find(|c| {
+            c.from == "Starbase Alpha"
+                && matches!(&c.trigger, TriggerCondition::OnHailed { .. })
+        });
+        assert!(tmpl.is_some(), "default scenario must have an on_hailed comms template from 'Starbase Alpha'");
         let tmpl = tmpl.unwrap();
         assert!(
             !tmpl.node.responses.is_empty(),
-            "Starbase Alpha comms must have at least one response"
+            "Starbase Alpha on_hailed comms must have at least one response"
         );
         let has_add_objective = tmpl.node.responses.iter().any(|r| {
             r.actions.iter().any(|a| matches!(a, TriggerAction::AddObjective { .. }))
@@ -2843,5 +2847,118 @@ type = "unload_scenario"
         let mut mgr = ScenarioManager::default();
         let removed = mgr.unload_scenario("scenarios/ghost.toml");
         assert!(removed.is_none());
+    }
+
+    // ── default.toml integration tests ────────────────────────────────────────
+
+    /// The default scenario file parses without error.
+    #[test]
+    fn default_scenario_parses_without_error() {
+        let toml = include_str!("../../assets/scenarios/default.toml");
+        let result = parse_scenario(toml);
+        assert!(result.is_ok(), "default.toml must parse without error: {:?}", result.err());
+    }
+
+    /// default.toml must declare an `on_attacked` trigger on the raider that
+    /// chains `load_scenario` to `assets/scenarios/patrol.toml`.
+    #[test]
+    fn default_scenario_raider_on_attacked_trigger_loads_patrol_scenario() {
+        let toml = include_str!("../../assets/scenarios/default.toml");
+        let config = parse_scenario(toml).expect("default.toml must parse");
+
+        let attacked_trigger = config.triggers.iter().find(|t| {
+            matches!(&t.condition, TriggerCondition::OnAttacked { entity_name } if entity_name == "raider")
+        });
+        assert!(
+            attacked_trigger.is_some(),
+            "default.toml must have an on_attacked trigger for the raider"
+        );
+
+        let has_load_patrol = attacked_trigger.unwrap().actions.iter().any(|a| {
+            matches!(a, TriggerAction::LoadScenario { path } if path == "assets/scenarios/patrol.toml")
+        });
+        assert!(has_load_patrol, "raider on_attacked trigger must include load_scenario for patrol.toml");
+    }
+
+    /// default.toml must declare an `on_attacked` comms template on the raider
+    /// that broadcasts a distress message with no player response options.
+    #[test]
+    fn default_scenario_raider_on_attacked_comms_is_broadcast_distress() {
+        let toml = include_str!("../../assets/scenarios/default.toml");
+        let config = parse_scenario(toml).expect("default.toml must parse");
+
+        let raider_distress = config.comms.iter().find(|c| {
+            c.from == "raider"
+                && matches!(&c.trigger, TriggerCondition::OnAttacked { entity_name } if entity_name == "raider")
+        });
+        assert!(
+            raider_distress.is_some(),
+            "default.toml must have an on_attacked comms template from the raider"
+        );
+        let template = raider_distress.unwrap();
+        assert!(
+            template.node.responses.is_empty(),
+            "raider distress comms must have no player responses (broadcast-only)"
+        );
+        assert!(
+            !template.node.body.is_empty(),
+            "raider distress comms must have a non-empty message body"
+        );
+    }
+
+    /// default.toml must declare an `on_attacked` comms template for Starbase Alpha.
+    #[test]
+    fn default_scenario_starbase_on_attacked_comms_is_broadcast_distress() {
+        let toml = include_str!("../../assets/scenarios/default.toml");
+        let config = parse_scenario(toml).expect("default.toml must parse");
+
+        let station_distress = config.comms.iter().find(|c| {
+            c.from == "Starbase Alpha"
+                && matches!(&c.trigger, TriggerCondition::OnAttacked { entity_name } if entity_name == "Starbase Alpha")
+        });
+        assert!(
+            station_distress.is_some(),
+            "default.toml must have an on_attacked comms template from Starbase Alpha"
+        );
+        let template = station_distress.unwrap();
+        assert!(
+            template.node.responses.is_empty(),
+            "Starbase Alpha distress comms must have no player responses (broadcast-only)"
+        );
+    }
+
+    /// The `evaluate_triggers` + `evaluate_comms_templates` functions both fire
+    /// their respective entries when an `on_attacked` world event matches.
+    #[test]
+    fn default_scenario_on_attacked_fires_both_trigger_and_comms_template() {
+        let toml = include_str!("../../assets/scenarios/default.toml");
+        let config = parse_scenario(toml).expect("default.toml must parse");
+
+        // Build trigger and comms template states from the parsed config.
+        let mut trigger_states = trigger_states_from_config(&config, "assets/scenarios/default.toml");
+        let mut comms_states = comms_template_states_from_config(&config, "assets/scenarios/default.toml");
+
+        let raider_uuid = config.name_to_uuid.get("raider").expect("raider spawn must exist").clone();
+        let name_to_uuid = config.name_to_uuid.clone();
+
+        let world_events = vec![WorldEvent::Attacked {
+            uuid: raider_uuid.clone(),
+            attacker_uuid: "player-ship".to_string(),
+        }];
+
+        let fired_triggers = evaluate_triggers(&mut trigger_states, &world_events, &name_to_uuid);
+        let fired_comms = evaluate_comms_templates(&mut comms_states, &world_events, &name_to_uuid);
+
+        // The on_attacked trigger (load_scenario) must fire.
+        let has_load_patrol = fired_triggers.iter().any(|ft| {
+            ft.actions.iter().any(|a| {
+                matches!(a, TriggerAction::LoadScenario { path } if path == "assets/scenarios/patrol.toml")
+            })
+        });
+        assert!(has_load_patrol, "on_attacked trigger must produce LoadScenario action for patrol.toml");
+
+        // The raider on_attacked comms template must fire.
+        let raider_comms = fired_comms.iter().any(|fc| fc.from == "raider");
+        assert!(raider_comms, "on_attacked comms template from raider must fire");
     }
 }

@@ -657,6 +657,44 @@ fn handle_ai_events(
     }
 
     let name_to_uuid = runtime.name_to_uuid.clone();
+
+    // Auto-fire comms templates that match the world events (e.g. on_attacked distress calls).
+    // These are injected without any player hailing — they are broadcast messages.
+    let fired_comms = evaluate_comms_templates(
+        &mut runtime.comms_template_states,
+        &world_events,
+        &name_to_uuid,
+    );
+    for fc in fired_comms {
+        let msg_id = uuid::Uuid::new_v4().to_string();
+        let sender_name = fc.from.clone();
+        let sender_uuid = name_to_uuid
+            .get(&fc.from)
+            .cloned()
+            .unwrap_or_else(|| fc.from.clone());
+        let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
+        let msg = crate::messages::CommsMessage {
+            id: msg_id.clone(),
+            sender_uuid,
+            sender_name,
+            subject: fc.node.body.chars().take(40).collect(),
+            body: fc.node.body.clone(),
+            responses,
+            selected_response: None,
+            is_read: false,
+            is_orphaned: false,
+        };
+        inbox.0.inject(msg, &fc.scenario_path);
+        runtime.active_dialogues.insert(
+            msg_id,
+            ActiveDialogue {
+                message_id: String::new(),
+                current_node: fc.node.clone(),
+                scenario_path: fc.scenario_path.clone(),
+            },
+        );
+    }
+
     let fired = evaluate_triggers(&mut runtime.trigger_states, &world_events, &name_to_uuid);
 
     for ft in fired {
@@ -1603,6 +1641,104 @@ position    = [100.0, 0.0, 200.0]
             app.world().get::<ScenarioOwner>(unowned).is_some(),
             "ScenarioOwner on entities owned by other scenarios must be preserved"
         );
+    }
+
+    // ── on_attacked comms template auto-injection tests ───────────────────────
+
+    /// When an entity is attacked, comms templates with `on_attacked` condition
+    /// must fire automatically (no player hailing required) and inject a message
+    /// into the CommsInbox.
+    #[test]
+    fn on_attacked_comms_template_auto_injects_into_inbox() {
+        use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerCondition};
+
+        let mut app = ai_trigger_test_app();
+
+        let raider_uuid = "raider-uuid-auto-001";
+        let attacker_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000001").unwrap();
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert("raider".to_string(), raider_uuid.to_string());
+            runtime.comms_template_states = vec![CommsTemplateState {
+                template: CommsTemplate {
+                    from: "raider".to_string(),
+                    trigger: TriggerCondition::OnAttacked {
+                        entity_name: "raider".to_string(),
+                    },
+                    node: CommsDialogueNode {
+                        body: "Mayday! We are under attack!".to_string(),
+                        responses: vec![],
+                    },
+                },
+                fired: false,
+                scenario_path: "default".to_string(),
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityAttacked>>()
+            .write(AiEntityAttacked {
+                entity_uuid: raider_uuid.to_string(),
+                attacker_uuid,
+            });
+
+        app.update();
+
+        let inbox = &app.world().resource::<CommsInboxRes>().0;
+        let messages = inbox.messages();
+        assert_eq!(messages.len(), 1, "on_attacked comms template must auto-inject one message");
+        assert_eq!(messages[0].body, "Mayday! We are under attack!");
+        assert_eq!(messages[0].responses.len(), 0, "broadcast message should have no responses");
+    }
+
+    /// A comms template with `on_attacked` must fire only once (single-shot).
+    #[test]
+    fn on_attacked_comms_template_fires_only_once() {
+        use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerCondition};
+
+        let mut app = ai_trigger_test_app();
+
+        let raider_uuid = "raider-uuid-once-002";
+        let attacker_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000002").unwrap();
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert("raider".to_string(), raider_uuid.to_string());
+            runtime.comms_template_states = vec![CommsTemplateState {
+                template: CommsTemplate {
+                    from: "raider".to_string(),
+                    trigger: TriggerCondition::OnAttacked {
+                        entity_name: "raider".to_string(),
+                    },
+                    node: CommsDialogueNode {
+                        body: "Distress signal transmitted.".to_string(),
+                        responses: vec![],
+                    },
+                },
+                fired: false,
+                scenario_path: "default".to_string(),
+            }];
+        }
+
+        // First attack
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityAttacked>>()
+            .write(AiEntityAttacked {
+                entity_uuid: raider_uuid.to_string(),
+                attacker_uuid,
+            });
+        app.update();
+
+        // Second attack
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityAttacked>>()
+            .write(AiEntityAttacked {
+                entity_uuid: raider_uuid.to_string(),
+                attacker_uuid,
+            });
+        app.update();
+
+        let inbox = &app.world().resource::<CommsInboxRes>().0;
+        assert_eq!(inbox.messages().len(), 1, "on_attacked comms template must fire only once");
     }
 
     // AC4: UnloadScenario trigger adds ScenarioUnloadedMarker to AI entities

@@ -23,12 +23,17 @@ pub use radar::{
     is_on_radar, project_radar_entity,
 };
 pub use panel::{GuiPanel, GuiPanelMarker, PanelSize, lerp_size};
+pub use progress::{
+    ProgressBar, ProgressBarMarker, ProgressBarVariant, ProgressValue,
+    SegmentCount, filled_segments,
+};
 
 mod foundation;
 pub mod button;
 pub mod joystick;
 pub mod radar;
 pub mod panel;
+pub mod progress;
 
 // ── Root plugin ───────────────────────────────────────────────────────────────
 
@@ -42,6 +47,7 @@ impl Plugin for GuiPlugin {
            .add_plugins(button::GuiButtonPlugin)
            .add_plugins(joystick::GuiJoystickPlugin)
            .add_plugins(radar::GuiRadarPlugin)
-           .add_plugins(panel::GuiPanelPlugin);
+           .add_plugins(panel::GuiPanelPlugin)
+           .add_plugins(progress::GuiProgressPlugin);
     }
 }

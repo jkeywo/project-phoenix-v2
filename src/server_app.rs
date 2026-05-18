@@ -205,8 +205,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             // Build per-tick entity state from live ECS first (before any resource
             // borrows, so world.query() can get the exclusive access it needs).
             let entity_states: Vec<crate::messages::EntityStateSnapshot> = {
-                let mut query = world.query::<(&Transform, &AsteroidUuid, Option<&crate::entity_spawner::EntityConsoleHull>)>();
-                query.iter(world)
+                // Asteroids carry AsteroidUuid.
+                let mut asteroid_query = world.query::<(&Transform, &AsteroidUuid, Option<&crate::entity_spawner::EntityConsoleHull>)>();
+                let asteroid_states: Vec<_> = asteroid_query.iter(world)
                     .map(|(transform, uuid, hull_comp)| {
                         let hull_fraction = hull_comp.map(|h| {
                             let max = h.0.total_max();
@@ -222,7 +223,29 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                             warp_out_remaining_secs: None,
                         }
                     })
-                    .collect()
+                    .collect();
+
+                // Non-asteroid entities (NPCs, stations) carry EntityUuid.
+                let mut npc_query = world.query_filtered::<(&Transform, &EntityUuid, Option<&crate::entity_spawner::EntityConsoleHull>), Without<Asteroid>>();
+                let npc_states: Vec<_> = npc_query.iter(world)
+                    .map(|(transform, uuid, hull_comp)| {
+                        let hull_fraction = hull_comp.map(|h| {
+                            let max = h.0.total_max();
+                            if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+                        });
+                        crate::messages::EntityStateSnapshot {
+                            uuid: uuid.0.clone(),
+                            position: Some([transform.translation.x, transform.translation.y, transform.translation.z]),
+                            yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                            hull_fraction,
+                            flags: vec![],
+                            shields: None,
+                            warp_out_remaining_secs: None,
+                        }
+                    })
+                    .collect();
+
+                asteroid_states.into_iter().chain(npc_states).collect()
             };
 
             // Extract all resource data (borrows are confined to this block).

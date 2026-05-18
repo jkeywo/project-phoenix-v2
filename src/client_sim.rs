@@ -373,6 +373,14 @@ pub fn repair_message() -> ClientMessage {
     ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm }
 }
 
+/// `ClientMessage` to dispatch the repair team at `team_idx` to the given `console`.
+///
+/// The server handles redirect/recall logic: sending the same console as the team's
+/// current target triggers a recall; sending a different console triggers a redirect.
+pub fn dispatch_repair_team_message(team_idx: u8, console: Console) -> ClientMessage {
+    ClientMessage::DispatchRepairTeam { team_idx, console }
+}
+
 /// `ClientMessage` to fire a torpedo from the given tube with an optional homing target.
 pub fn fire_torpedo_message(tube: TorpedoTube, target_uuid: Option<String>) -> ClientMessage {
     ClientMessage::FireTorpedo { tube, target_uuid }

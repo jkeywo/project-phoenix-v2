@@ -33,6 +33,69 @@ pub fn repair_panel_visible(
     }
 }
 
+// ── Pure row-data derivation ─────────────────────────────────────────
+
+/// Data derived from a single [`TeamSlot`] that drives one team-row in the UI.
+///
+/// Extracted as a pure function so it can be unit-tested without Bevy.
+pub struct RowData {
+    /// Fill percentage for the progress bar (0–100).
+    pub pct: f32,
+    /// Whether the bar fills (true) or drains (false).
+    ///
+    /// - Travelling / Repairing → fills.
+    /// - Returning → drains.
+    pub fills: bool,
+    /// Human-readable status label.
+    pub status: String,
+    /// Whether this team slot is `Idle`.
+    pub is_idle: bool,
+    /// Console the team is currently heading toward or working at (used to
+    /// highlight the matching dispatch button).
+    pub active_console: Option<Console>,
+}
+
+const TRAVEL_DURATION_SECS: f32 = 5.0;
+const REPAIR_DURATION_SECS: f32 = 50.0;
+
+/// Derive [`RowData`] from a single `TeamSlot`.
+pub fn row_data_for_slot(slot: &TeamSlot) -> RowData {
+    match slot {
+        TeamSlot::Idle => RowData {
+            pct: 0.0,
+            fills: true,
+            status: "Idle".into(),
+            is_idle: true,
+            active_console: None,
+        },
+        TeamSlot::Travelling { console, elapsed } => RowData {
+            pct: (elapsed / TRAVEL_DURATION_SECS * 100.0).clamp(0.0, 100.0),
+            fills: true,
+            status: format!("→ {}", console.display_name()),
+            is_idle: false,
+            active_console: Some(console.clone()),
+        },
+        TeamSlot::Repairing { console, elapsed } => RowData {
+            pct: (elapsed / REPAIR_DURATION_SECS * 100.0).clamp(0.0, 100.0),
+            fills: true,
+            status: format!("Repairing {}", console.display_name()),
+            is_idle: false,
+            active_console: Some(console.clone()),
+        },
+        TeamSlot::Returning { remaining, queued } => RowData {
+            pct: (remaining / TRAVEL_DURATION_SECS * 100.0).clamp(0.0, 100.0),
+            fills: false,
+            status: if let Some(c) = queued {
+                format!("Returning → {}", c.display_name())
+            } else {
+                "Returning".into()
+            },
+            is_idle: false,
+            active_console: queued.clone(),
+        },
+    }
+}
+
 // ── Marker components ────────────────────────────────────────────────
 
 /// Marks the root of the repair console UI.
@@ -185,57 +248,28 @@ fn refresh_repair_panel(
         return;
     };
 
-    // Pre-compute team row data to avoid borrowing sim inside with_children
-    struct RowData {
-        pct: f32,
+    // Pre-compute team row data via the pure `row_data_for_slot` function.
+    struct RenderRow {
+        data: RowData,
         bar_color: Color,
-        status: String,
         status_color: Color,
-        is_idle: bool,
-        /// The console this team is currently targeting (Travelling or Repairing).
-        /// Used to highlight the active dispatch button.
-        active_console: Option<Console>,
     }
 
-    let rows: Vec<RowData> = sim.repair_teams.iter().map(|slot| {
-        match slot {
-            TeamSlot::Idle => RowData {
-                pct: 0.0,
-                bar_color: Color::srgb(0.10, 0.20, 0.60),
-                status: "Idle".into(),
-                status_color: Color::srgb(0.5, 0.7, 1.0),
-                is_idle: true,
-                active_console: None,
-            },
-            TeamSlot::Travelling { console, elapsed } => RowData {
-                pct: (elapsed / 5.0 * 100.0).clamp(0.0, 100.0),
-                bar_color: Color::srgb(0.60, 0.60, 0.10),
-                status: format!("→ {}", console.display_name()),
-                status_color: Color::srgb(1.0, 0.9, 0.3),
-                is_idle: false,
-                active_console: Some(console.clone()),
-            },
-            TeamSlot::Repairing { console, elapsed } => RowData {
-                pct: (elapsed / 50.0 * 100.0).clamp(0.0, 100.0),
-                bar_color: Color::srgb(0.10, 0.70, 0.20),
-                status: format!("Repairing {}", console.display_name()),
-                status_color: Color::srgb(0.3, 1.0, 0.3),
-                is_idle: false,
-                active_console: Some(console.clone()),
-            },
-            TeamSlot::Returning { remaining, queued } => RowData {
-                pct: (remaining / 5.0 * 100.0).clamp(0.0, 100.0),
-                bar_color: Color::srgb(0.30, 0.30, 0.80),
-                status: if let Some(c) = queued {
-                    format!("Returning → {}", c.display_name())
-                } else {
-                    "Returning".into()
-                },
-                status_color: Color::srgb(0.5, 0.5, 1.0),
-                is_idle: false,
-                active_console: queued.clone(),
-            },
-        }
+    let rows: Vec<RenderRow> = sim.repair_teams.iter().map(|slot| {
+        let data = row_data_for_slot(slot);
+        let (bar_color, status_color) = if data.is_idle {
+            (Color::srgb(0.10, 0.20, 0.60), Color::srgb(0.5, 0.7, 1.0))
+        } else if data.fills {
+            // Travelling or Repairing — use warm colours
+            match slot {
+                TeamSlot::Repairing { .. } => (Color::srgb(0.10, 0.70, 0.20), Color::srgb(0.3, 1.0, 0.3)),
+                _ => (Color::srgb(0.60, 0.60, 0.10), Color::srgb(1.0, 0.9, 0.3)),
+            }
+        } else {
+            // Returning
+            (Color::srgb(0.30, 0.30, 0.80), Color::srgb(0.5, 0.5, 1.0))
+        };
+        RenderRow { data, bar_color, status_color }
     }).collect();
 
     let btn_bg = Color::srgb(0.10, 0.25, 0.15);
@@ -248,78 +282,88 @@ fn refresh_repair_panel(
             parent.spawn((
                 RepairTeamRow(i),
                 Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
+                    flex_direction: FlexDirection::Column,
                     width: Val::Percent(100.0),
-                    height: Val::Px(64.0),
-                    column_gap: Val::Px(8.0),
                     padding: UiRect::all(Val::Px(4.0)),
+                    row_gap: Val::Px(4.0),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.05, 0.10, 0.20)),
             )).with_children(|rc| {
-                // Progress bar
-                rc.spawn((
-                    Node {
-                        width: Val::Percent(30.0),
-                        height: Val::Percent(100.0),
-                        position_type: PositionType::Relative,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.02, 0.05, 0.10)),
-                )).with_children(|bar_container| {
-                    bar_container.spawn((
-                        RepairTeamFill(i),
+                // Top row: progress bar + status label
+                rc.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    width: Val::Percent(100.0),
+                    height: Val::Px(32.0),
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                }).with_children(|top| {
+                    // Progress bar
+                    top.spawn((
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            top: Val::Px(0.0),
-                            width: Val::Percent(row.pct),
+                            width: Val::Percent(50.0),
                             height: Val::Percent(100.0),
+                            position_type: PositionType::Relative,
                             ..default()
                         },
-                        BackgroundColor(row.bar_color),
+                        BackgroundColor(Color::srgb(0.02, 0.05, 0.10)),
+                    )).with_children(|bar_container| {
+                        bar_container.spawn((
+                            RepairTeamFill(i),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(0.0),
+                                top: Val::Px(0.0),
+                                width: Val::Percent(row.data.pct),
+                                height: Val::Percent(100.0),
+                                ..default()
+                            },
+                            BackgroundColor(row.bar_color),
+                        ));
+                    });
+
+                    // Status label
+                    top.spawn((
+                        RepairTeamStatusText(i),
+                        Text::new(row.data.status.as_str()),
+                        TextFont { font_size: 14.0, ..default() },
+                        TextColor(row.status_color),
                     ));
                 });
 
-                // Status label
-                rc.spawn((
-                    RepairTeamStatusText(i),
-                    Text::new(row.status.as_str()),
-                    TextFont { font_size: 14.0, ..default() },
-                    TextColor(row.status_color),
-                    Node {
-                        width: Val::Percent(18.0),
-                        ..default()
-                    },
-                ));
-
-                // Dispatch buttons — always enabled; active console is highlighted
-                for (console, label) in [
-                    (Console::Helm, "HELM"),
-                    (Console::Tactical, "TACTICAL"),
-                    (Console::Power, "POWER"),
-                    (Console::Shields, "SHIELDS"),
-                ] {
-                    let is_active = row.active_console.as_ref() == Some(&console);
-                    let bg = if is_active { btn_active_bg } else { btn_bg };
-                    let fg = if is_active { btn_text_active } else { btn_text };
-                    rc.spawn((
-                        DispatchButton { console, team_idx: i },
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
-                            ..default()
-                        },
-                        BackgroundColor(bg),
-                    )).with_children(|btn| {
-                        btn.spawn((
-                            Text::new(label),
-                            TextFont { font_size: 12.0, ..default() },
-                            TextColor(fg),
-                        ));
-                    });
-                }
+                // Bottom row: dispatch buttons
+                rc.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                }).with_children(|bottom| {
+                    for (console, label) in [
+                        (Console::Helm, "HELM"),
+                        (Console::Tactical, "TACTICAL"),
+                        (Console::Power, "POWER"),
+                        (Console::Shields, "SHIELDS"),
+                    ] {
+                        let is_active = row.data.active_console.as_ref() == Some(&console);
+                        let bg = if is_active { btn_active_bg } else { btn_bg };
+                        let fg = if is_active { btn_text_active } else { btn_text };
+                        bottom.spawn((
+                            DispatchButton { console, team_idx: i },
+                            Button,
+                            Node {
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
+                                ..default()
+                            },
+                            BackgroundColor(bg),
+                        )).with_children(|btn| {
+                            btn.spawn((
+                                Text::new(label),
+                                TextFont { font_size: 12.0, ..default() },
+                                TextColor(fg),
+                            ));
+                        });
+                    }
+                });
             });
         }
     });
@@ -335,7 +379,7 @@ fn handle_dispatch_button_press(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        outbound.write(OutboundClientMessage(ClientMessage::DispatchRepairTeam { team_idx: btn.team_idx as u8, console: btn.console.clone() }));
+        outbound.write(OutboundClientMessage(crate::client_sim::dispatch_repair_team_message(btn.team_idx as u8, btn.console.clone())));
     }
 }
 
@@ -455,5 +499,107 @@ mod tests {
         });
         let active = ActiveConsole::default(); // None → auto → count != 1
         assert!(!repair_panel_visible(&lobby, "tok", &active));
+    }
+
+    // ── row_data_for_slot ────────────────────────────────────────────
+
+    #[test]
+    fn idle_slot_has_zero_pct_and_no_active_console() {
+        let d = row_data_for_slot(&TeamSlot::Idle);
+        assert_eq!(d.pct, 0.0);
+        assert!(d.is_idle);
+        assert!(d.active_console.is_none());
+        assert!(d.fills);
+        assert_eq!(d.status, "Idle");
+    }
+
+    #[test]
+    fn travelling_fills_bar_and_reports_active_console() {
+        let d = row_data_for_slot(&TeamSlot::Travelling {
+            console: Console::Helm,
+            elapsed: 2.5,
+        });
+        // 2.5 / 5.0 * 100 = 50 %
+        assert!((d.pct - 50.0).abs() < 0.01, "pct should be 50, got {}", d.pct);
+        assert!(d.fills, "Travelling should fill the bar");
+        assert!(!d.is_idle);
+        assert_eq!(d.active_console, Some(Console::Helm));
+        assert!(d.status.contains("Helm"), "status should mention Helm, got '{}'", d.status);
+    }
+
+    #[test]
+    fn travelling_pct_clamped_to_100() {
+        let d = row_data_for_slot(&TeamSlot::Travelling {
+            console: Console::Tactical,
+            elapsed: 999.0,
+        });
+        assert_eq!(d.pct, 100.0);
+    }
+
+    #[test]
+    fn repairing_fills_bar_and_reports_active_console() {
+        let d = row_data_for_slot(&TeamSlot::Repairing {
+            console: Console::Tactical,
+            elapsed: 25.0,
+        });
+        // 25 / 50 * 100 = 50 %
+        assert!((d.pct - 50.0).abs() < 0.01, "pct should be 50, got {}", d.pct);
+        assert!(d.fills, "Repairing should fill the bar");
+        assert!(!d.is_idle);
+        assert_eq!(d.active_console, Some(Console::Tactical));
+        assert!(d.status.contains("Tactical"), "status should mention Tactical");
+    }
+
+    #[test]
+    fn returning_drains_bar_and_no_queue_means_no_active_console() {
+        let d = row_data_for_slot(&TeamSlot::Returning {
+            remaining: 2.5,
+            queued: None,
+        });
+        // 2.5 / 5.0 * 100 = 50 % — but bar drains, so pct represents how much remains
+        assert!((d.pct - 50.0).abs() < 0.01, "pct should be 50, got {}", d.pct);
+        assert!(!d.fills, "Returning should drain the bar");
+        assert!(!d.is_idle);
+        assert!(d.active_console.is_none());
+        assert_eq!(d.status, "Returning");
+    }
+
+    #[test]
+    fn returning_with_queue_shows_destination_and_highlights_queued_console() {
+        let d = row_data_for_slot(&TeamSlot::Returning {
+            remaining: 1.0,
+            queued: Some(Console::Power),
+        });
+        assert!(!d.fills);
+        assert_eq!(d.active_console, Some(Console::Power));
+        assert!(d.status.contains("Power"), "status should show queued destination");
+    }
+
+    #[test]
+    fn returning_pct_clamped_at_zero_when_remaining_is_zero() {
+        let d = row_data_for_slot(&TeamSlot::Returning {
+            remaining: 0.0,
+            queued: None,
+        });
+        assert_eq!(d.pct, 0.0);
+    }
+
+    // ── dispatch_repair_team_message builder ─────────────────────────
+
+    #[test]
+    fn dispatch_repair_team_message_encodes_team_and_console() {
+        let msg = crate::client_sim::dispatch_repair_team_message(1, Console::Shields);
+        assert!(
+            matches!(msg, ClientMessage::DispatchRepairTeam { team_idx: 1, console: Console::Shields }),
+            "unexpected message: {:?}", msg
+        );
+    }
+
+    #[test]
+    fn dispatch_repair_team_message_team_zero_helm() {
+        let msg = crate::client_sim::dispatch_repair_team_message(0, Console::Helm);
+        assert!(
+            matches!(msg, ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm }),
+        );
     }
 }

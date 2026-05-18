@@ -91,8 +91,8 @@ impl GenericJoystick {
     pub fn spawn(
         commands: &mut Commands,
         size: f32,
-        bg_image: Handle<Image>,
-        knob_image: Handle<Image>,
+        bg_image: Option<Handle<Image>>,
+        knob_image: Option<Handle<Image>>,
         state_visuals: StateVisuals,
     ) -> Entity {
         spawn_generic_joystick(commands, size, bg_image, knob_image, state_visuals)
@@ -102,39 +102,41 @@ impl GenericJoystick {
 fn spawn_generic_joystick(
     commands: &mut Commands,
     size: f32,
-    bg_image: Handle<Image>,
-    knob_image: Handle<Image>,
+    bg_image: Option<Handle<Image>>,
+    knob_image: Option<Handle<Image>>,
     state_visuals: StateVisuals,
 ) -> Entity {
     let radius = size / 2.0;
-    let knob_half = size * 0.12; // knob radius ≈ 12% of pad diameter
+    let knob_half = size * 0.12;
 
-    let pad = commands
-        .spawn((
-            GenericJoystickPad { pad_radius: radius },
-            Button,
-            Node {
-                width: Val::Px(size),
-                height: Val::Px(size),
-                position_type: PositionType::Relative,
-                ..default()
-            },
-            ImageNode::new(bg_image),
-            BackgroundColor(state_visuals.idle.color),
-            state_visuals,
-            WidgetState::default(),
-            Interaction::default(),
-            JoystickDragState::default(),
-            JoystickResendTimer {
-                timer: Timer::from_seconds(0.1, TimerMode::Repeating),
-            },
-        ))
+    let mut pad = commands.spawn((
+        GenericJoystickPad { pad_radius: radius },
+        Button,
+        Node {
+            width: Val::Px(size),
+            height: Val::Px(size),
+            position_type: PositionType::Relative,
+            ..default()
+        },
+        BackgroundColor(state_visuals.idle.color),
+        state_visuals,
+        WidgetState::default(),
+        Interaction::default(),
+        JoystickDragState::default(),
+        JoystickResendTimer {
+            timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+        },
+    ));
+    if let Some(bg) = bg_image {
+        pad.insert(ImageNode::new(bg));
+    }
+    let pad = pad
         .observe(|_: On<JoystickMoved>| {})
         .id();
 
     // Knob child
     commands.entity(pad).with_children(|parent| {
-        parent.spawn((
+        let mut knob = parent.spawn((
             GenericJoystickKnob { half_size: knob_half },
             Node {
                 position_type: PositionType::Absolute,
@@ -144,8 +146,10 @@ fn spawn_generic_joystick(
                 height: Val::Px(knob_half * 2.0),
                 ..default()
             },
-            ImageNode::new(knob_image),
         ));
+        if let Some(knob_img) = knob_image {
+            knob.insert(ImageNode::new(knob_img));
+        }
     });
 
     // Attach pointer observers for drag handling

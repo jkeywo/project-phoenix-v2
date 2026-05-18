@@ -12,6 +12,7 @@ pub use foundation::{
 pub use button::{
     ButtonPressed, ButtonSize, ClickSound, GuiButtonMarker, UiSounds,
     WidgetActivated, WidgetDeactivated, resolve_click_sound, setup_ui_sounds,
+    spawn_gui_button,
 };
 pub use joystick::{
     normalize_joystick, GenericJoystick, GenericJoystickPad, GenericJoystickKnob,

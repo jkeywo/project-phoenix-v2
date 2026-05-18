@@ -1,8 +1,19 @@
 // Issues #58 + #59 — Smoke tests: SimState broadcast and HelmInput physics.
 
+import fs from 'fs';
+import path from 'path';
 import { test, expect, type TestClient } from './fixtures';
 import { readHostPeerId, createTestClient } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
+
+// Read impulse_charge_duration from the ship TOML so the test timeout is
+// derived from the configured value rather than a hardcoded constant.
+const shipToml = fs.readFileSync(
+  path.resolve(__dirname, '../../assets/entities/player_ship.toml'),
+  'utf-8',
+);
+const chargeMatch = shipToml.match(/impulse_charge_duration\s*=\s*([0-9.]+)/);
+const IMPULSE_CHARGE_DURATION_S = chargeMatch ? parseFloat(chargeMatch[1]) : 3.0;
 
 async function waitForStation(client: { page: import('@playwright/test').Page; token: string }, timeout = 5_000) {
   await client.page.waitForFunction(
@@ -60,6 +71,43 @@ test('SimState is broadcast to all clients within 2 s of game start', async ({ c
     expect(typeof snap.radar_state.science_long_range).toBe('number');
     expect(typeof snap.radar_state.science_system_map).toBe('number');
   }
+
+  await captain.close();
+  await helm.close();
+});
+
+test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', async ({ context }) => {
+  const { captain, helm } = await startGame(context);
+
+  // Wait for the first SimState to confirm simulation is running
+  await helm.waitForMessage('SimState', 2_000);
+
+  // Send the impulse charge command
+  await helm.send('StartImpulseCharge');
+
+  // Wait up to 2× the TOML-configured charge duration for a SimState showing
+  // impulse_charge_progress has reached 1.0 (headroom for CI latency).
+  const chargeTimeoutMs = IMPULSE_CHARGE_DURATION_S * 2 * 1000;
+  await helm.page.waitForFunction(
+    () => {
+      const msgs: any[] = (window as any).__messages;
+      return msgs.some(
+        (m) =>
+          m.type === 'SimState' &&
+          m.data.snapshot.impulse_charge_progress >= 1.0,
+      );
+    },
+    { timeout: chargeTimeoutMs },
+  );
+
+  const charged = await helm.page.evaluate(() => {
+    const msgs: any[] = (window as any).__messages;
+    return msgs.filter(
+      (m) => m.type === 'SimState' && m.data.snapshot.impulse_charge_progress >= 1.0,
+    ).length;
+  });
+
+  expect(charged).toBeGreaterThan(0);
 
   await captain.close();
   await helm.close();

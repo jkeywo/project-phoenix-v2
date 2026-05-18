@@ -26,8 +26,11 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
 
-      - name: Run unit tests
+      - name: Run unit tests (server)
         run: cargo test
+
+      - name: Run unit tests (client feature)
+        run: cargo test --features client
 
   # ── WASM build ────────────────────────────────────────────────────────────────
   build:

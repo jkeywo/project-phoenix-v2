@@ -29,6 +29,10 @@ beam_duration_secs = 4.0
 cooldown_secs = 5.0
 beam_color = [1.0, 0.1, 0.1, 1.0]
 
+[radar_appearance]
+colour = [1.0, 0.2, 0.2]
+radius = 4.0
+
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 
 [behaviour]

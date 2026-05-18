@@ -5,3 +5,7 @@ name = "Axiom Station"
 shape = "torus"
 radius = 18.0
 hull_integrity = 200.0
+
+[radar_appearance]
+colour = [0.3, 0.8, 0.6]
+radius = 18.0

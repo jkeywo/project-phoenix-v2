@@ -51,13 +51,6 @@ pub struct Asteroid;
 #[derive(Component, Clone)]
 pub struct AsteroidUuid(pub String);
 
-/// Tracks remaining HP for an asteroid entity (max and current = 30).
-#[derive(Component)]
-pub struct AsteroidDamage {
-    pub max_hp: i32,
-    pub current_hp: i32,
-}
-
 // â"€â"€ Resources â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
@@ -212,10 +205,13 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             // Build per-tick entity state from live ECS first (before any resource
             // borrows, so world.query() can get the exclusive access it needs).
             let entity_states: Vec<crate::messages::EntityStateSnapshot> = {
-                let mut query = world.query::<(&Transform, &AsteroidUuid, Option<&AsteroidDamage>)>();
+                let mut query = world.query::<(&Transform, &AsteroidUuid, Option<&crate::entity_spawner::EntityConsoleHull>)>();
                 query.iter(world)
-                    .map(|(transform, uuid, damage)| {
-                        let hull_fraction = damage.map(|d| d.current_hp as f32 / d.max_hp as f32);
+                    .map(|(transform, uuid, hull_comp)| {
+                        let hull_fraction = hull_comp.map(|h| {
+                            let max = h.0.total_max();
+                            if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+                        });
                         crate::messages::EntityStateSnapshot {
                             uuid: uuid.0.clone(),
                             position: Some([transform.translation.x, transform.translation.y, transform.translation.z]),
@@ -1425,7 +1421,7 @@ fn test_app() -> App {
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("target-uuid".into()),
-            AsteroidDamage { max_hp: 30, current_hp: 30 },
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
             Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
         )).id()
     }
@@ -1649,7 +1645,7 @@ fn test_app() -> App {
         let asteroid_entity = app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("target-uuid".into()),
-            AsteroidDamage { max_hp: 30, current_hp: 30 },
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
         )).id();
 
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
@@ -1696,7 +1692,7 @@ fn test_app() -> App {
             "cooldown should start after beam end");
 
         // The entity should be despawned.
-        assert!(app.world().get::<AsteroidDamage>(asteroid_entity).is_none(),
+        assert!(app.world().get::<crate::entity_spawner::EntityConsoleHull>(asteroid_entity).is_none(),
             "asteroid entity should be despawned");
     }
 
@@ -1745,7 +1741,7 @@ fn test_app() -> App {
         let asteroid_entity = app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("target-uuid".into()),
-            AsteroidDamage { max_hp: 30, current_hp: 30 },
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
         )).id();
 
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
@@ -1758,10 +1754,10 @@ fn test_app() -> App {
         app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
         let _ = tick(&mut app);
 
-        let hp = app.world().get::<AsteroidDamage>(asteroid_entity)
-            .map(|d| d.current_hp);
+        let hp = app.world().get::<crate::entity_spawner::EntityConsoleHull>(asteroid_entity)
+            .map(|h| h.0.total_current());
         assert!(
-            hp.is_some() && hp.unwrap() < 30,
+            hp.is_some() && hp.unwrap() < 30.0,
             "asteroid should retain damage after sever (no refund), hp={:?}",
             hp
         );
@@ -2644,7 +2640,7 @@ fn test_app() -> App {
             crate::entity_spawner::EntityUuid("asteroid-1".into()),
             Asteroid,
             AsteroidUuid("asteroid-1".into()),
-            AsteroidDamage { max_hp: 30, current_hp: 30 },
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
             Transform::default(),
         ));
 

@@ -18,7 +18,8 @@ use crate::simulation::SimOutbox;
 use crate::messages::ServerMessage;
 use crate::ship_state::ShipState;
 
-pub use crate::simulation::{Asteroid, AsteroidUuid, AsteroidDamage};
+pub use crate::simulation::{Asteroid, AsteroidUuid};
+pub use crate::entity_spawner::EntityConsoleHull;
 
 // ── Resources ────────────────────────────────────────────────────────────
 
@@ -86,11 +87,11 @@ pub fn check_destroyed_asteroids(
     mut commands: Commands,
     mut window: ResMut<AsteroidWindow>,
     mut entity_map: ResMut<AsteroidEntityMap>,
-    asteroid_query: Query<(Entity, &Transform, &AsteroidUuid, &AsteroidDamage)>,
+    asteroid_query: Query<(Entity, &Transform, &AsteroidUuid, &EntityConsoleHull)>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    for (entity, transform, uuid, damage) in asteroid_query.iter() {
-        if damage.current_hp > 0 {
+    for (entity, transform, uuid, hull_comp) in asteroid_query.iter() {
+        if !hull_comp.0.is_destroyed() {
             continue;
         }
         let (cell_gx, cell_gz) = compute_player_grid_cell(
@@ -268,13 +269,16 @@ fn try_spawn_cell(
     ) else { return };
 
     let uuid = uuid::Uuid::new_v4().to_string();
-    let max_hp = 30i32;
-    let current_hp = 30i32;
+    let max_hp = 30.0f32;
+
+    let asteroid_hull = EntityConsoleHull(
+        crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])
+    );
 
     let entity = commands.spawn((
         Asteroid,
         AsteroidUuid(uuid.clone()),
-        AsteroidDamage { max_hp, current_hp },
+        asteroid_hull,
         Transform::from_xyz(spawn.x, spawn.y, spawn.z),
         bevy_rapier3d::prelude::Collider::ball(2.0),
         bevy_rapier3d::prelude::RigidBody::Fixed,
@@ -283,8 +287,8 @@ fn try_spawn_cell(
     window.slots[slot_z][slot_x] = Some(AsteroidData {
         uuid: uuid.clone(),
         config_path: spawn.config_path.clone(),
-        hp: current_hp,
-        max_hp,
+        hp: max_hp as i32,
+        max_hp: max_hp as i32,
         y: spawn.y,
     });
     entity_map.0.insert(uuid.clone(), entity);
@@ -295,8 +299,8 @@ fn try_spawn_cell(
         y: spawn.y,
         z: spawn.z,
         config_path: spawn.config_path,
-        max_hp,
-        current_hp,
+        max_hp: max_hp as i32,
+        current_hp: max_hp as i32,
     }));
 }
 

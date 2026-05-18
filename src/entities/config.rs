@@ -87,10 +87,14 @@ pub struct ConsoleHullEntry {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct HullConfig {
-    /// Legacy single-value hull integrity (kept for backward compat with NPC configs).
+    /// Legacy single-value hull integrity (kept for backward compat with station/asteroid configs).
     #[serde(default)]
     pub hull_integrity: f32,
-    /// Per-console hull entries. When present, replaces the single `hull_integrity` value.
+    /// HP for the single CaptainChair console slot (used by NPC ships).
+    /// Takes precedence over `hull_integrity` when present.
+    #[serde(default)]
+    pub captain_chair: Option<f32>,
+    /// Per-console hull entries. When present, replaces the single-value fields.
     #[serde(default)]
     pub console_hull: Vec<ConsoleHullEntry>,
     /// Number of repair teams available to this ship (default 0 = legacy).
@@ -1424,7 +1428,10 @@ target_speed = 0.5
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         assert!(config.hull.is_some(), "pirate_raider must have a [hull] section");
         let hull = config.hull.as_ref().unwrap();
-        assert!(hull.hull_integrity > 0.0, "hull_integrity must be positive");
+        assert!(
+            hull.captain_chair.map_or(false, |hp| hp > 0.0),
+            "pirate_raider [hull] must have a positive captain_chair value"
+        );
     }
 
     #[test]

@@ -4,7 +4,8 @@ use crate::lobby::{InboundMessage, OutboundMessage, Target, Sessions, WorldResou
 use crate::messages::{
     ClientMessage, Console, ModifierSlot, ServerMessage,
 };
-use crate::simulation::{Ship, Asteroid, AsteroidUuid, AsteroidDamage, SimOutbox};
+use crate::simulation::{Ship, Asteroid, AsteroidUuid, SimOutbox};
+use crate::entity_spawner::EntityConsoleHull;
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
 use crate::messages::TorpedoTube as MsgTorpedoTube;
 use crate::ship_state::ShipState;
@@ -353,7 +354,7 @@ fn tick_active_beam(
     mut cooldown: ResMut<PhaserCooldown>,
     ship: Res<ShipState>,
     mut world: ResMut<WorldResource>,
-    mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut AsteroidDamage)>,
+    mut asteroid_query: Query<(Entity, &AsteroidUuid, &mut EntityConsoleHull)>,
     mut commands: Commands,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
@@ -393,10 +394,11 @@ fn tick_active_beam(
         beam.damage_accumulator -= damage_to_apply as f32;
 
         let mut destroyed = false;
-        for (entity, uuid_comp, mut dmg) in asteroid_query.iter_mut() {
+        for (entity, uuid_comp, mut hull_comp) in asteroid_query.iter_mut() {
             if uuid_comp.0 == target_uuid {
-                dmg.current_hp = (dmg.current_hp - damage_to_apply).max(0);
-                if dmg.current_hp == 0 {
+                let mut rng = rand::rng();
+                hull_comp.0.apply_damage(damage_to_apply as f32, &mut rng);
+                if hull_comp.0.is_destroyed() {
                     destroyed = true;
                     commands.entity(entity).despawn();
                 }
@@ -565,7 +567,7 @@ mod tests {
         app.world_mut().spawn((
             crate::simulation::Asteroid,
             crate::simulation::AsteroidUuid("target-uuid".into()),
-            crate::simulation::AsteroidDamage { max_hp: 30, current_hp: 30 },
+            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
             Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
         )).id()
     }
@@ -762,7 +764,7 @@ mod tests {
         let asteroid_entity = app.world_mut().spawn((
             crate::simulation::Asteroid,
             crate::simulation::AsteroidUuid("target-uuid".into()),
-            crate::simulation::AsteroidDamage { max_hp: 30, current_hp: 30 },
+            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
         )).id();
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
@@ -799,7 +801,7 @@ mod tests {
         assert!(app.world().resource::<PhaserCooldown>().is_active(),
             "cooldown should start after beam end");
 
-        assert!(app.world().get::<crate::simulation::AsteroidDamage>(asteroid_entity).is_none(),
+        assert!(app.world().get::<EntityConsoleHull>(asteroid_entity).is_none(),
             "asteroid entity should be despawned");
     }
 
@@ -843,7 +845,7 @@ mod tests {
         let asteroid_entity = app.world_mut().spawn((
             crate::simulation::Asteroid,
             crate::simulation::AsteroidUuid("target-uuid".into()),
-            crate::simulation::AsteroidDamage { max_hp: 30, current_hp: 30 },
+            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
         )).id();
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
@@ -853,10 +855,10 @@ mod tests {
         app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
         let _ = tick(&mut app);
 
-        let hp = app.world().get::<crate::simulation::AsteroidDamage>(asteroid_entity)
-            .map(|d| d.current_hp);
+        let hp = app.world().get::<EntityConsoleHull>(asteroid_entity)
+            .map(|h| h.0.total_current());
         assert!(
-            hp.is_some() && hp.unwrap() < 30,
+            hp.is_some() && hp.unwrap() < 30.0,
             "asteroid should retain damage after sever (no refund), hp={:?}",
             hp
         );

@@ -7,9 +7,9 @@ radius = 220.0
 [effects]
 
 [effects.damage_zone]
-dps = 3.0
+damage_per_second = 3.0
 
 [effects.radar_dampening]
-multiplier = 0.4
+range_modifier = 0.4
 
 [effects.sensor_blind]

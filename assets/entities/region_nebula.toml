@@ -5,5 +5,5 @@ type = "sphere"
 radius = 150.0
 
 [effects]
-[effects.comms_jam]
+[effects.comms_jammed]
 [effects.sensor_blind]

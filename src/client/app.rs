@@ -1601,6 +1601,7 @@ fn sync_complexity_hiding(
 /// - `CommsPanelPlugin`        — comms console (placeholder)
 pub fn add_client_plugins(app: &mut App) {
     app.add_plugins(ClientAppPlugin)
+        .add_plugins(crate::gui::GuiPlugin)
         .add_plugins(crate::ship_view::ShipViewPlugin)
         .add_plugins(crate::phone_border::PhoneBorderPlugin)
         .add_plugins(crate::captain_panel::CaptainPanelPlugin)

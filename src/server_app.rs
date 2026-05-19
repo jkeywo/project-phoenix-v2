@@ -162,6 +162,7 @@ pub fn add_simulation_plugins(app: &mut App) {
             ])))
             .insert_resource(ShipShields(ShieldSystem::default()))
             .insert_resource(ShipImpulse(ImpulseState::new()))
+            .insert_resource(crate::config_cache::FactionRegistryResource(crate::config_cache::get_faction_registry()))
             .init_resource::<WorldResource>()
             .init_resource::<WorldSetupBroadcast>()
             .init_resource::<CollisionCooldown>()

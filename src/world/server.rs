@@ -1465,6 +1465,7 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::ai_plugin::AiPlugin)
+            .insert_resource(crate::config_cache::FactionRegistryResource(crate::config_cache::get_faction_registry()))
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()

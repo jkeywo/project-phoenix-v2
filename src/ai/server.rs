@@ -272,7 +272,7 @@ fn tick_ai_controllers(
     )>,
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    faction_registry: Option<Res<FactionRegistryResource>>,
+    faction_registry: Res<FactionRegistryResource>,
     entity_query: Query<(&EntityUuid, &Transform, Option<&crate::entities::spawner::FactionComponent>), Without<AiControllerComponent>>,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
     mut inbound: MessageWriter<crate::lobby::InboundMessage>,
@@ -297,10 +297,6 @@ fn tick_ai_controllers(
             yaw: None,
         }
     }).collect();
-
-    let empty_registry = crate::faction::FactionRegistry::new();
-    let actual_registry: Option<&crate::faction::FactionRegistry> =
-        faction_registry.as_ref().map(|r| &r.0);
 
     let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
@@ -355,7 +351,7 @@ fn tick_ai_controllers(
             scenario_unloaded,
         };
 
-        let registry = actual_registry.unwrap_or(&empty_registry);
+        let registry = &faction_registry.0;
         let output: AiTickOutput = crate::ai::tick(&ctrl.controller, &world_view, &behaviour.0, registry);
 
         // Emit AiEntityAttacked when the on_attacked condition just fired.
@@ -787,6 +783,7 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(AiPlugin)
+            .insert_resource(FactionRegistryResource(crate::config_cache::get_faction_registry()))
             .init_resource::<AttackedBox>()
             .init_resource::<DestroyedBox>()
             .add_systems(PostUpdate, (collect_attacked, collect_destroyed));
@@ -1567,5 +1564,35 @@ mod tests {
 
         let ps = app.world().get::<EntityPhaserState>(attacker).unwrap();
         assert!(ps.beam_active, "beam MUST activate when target is in range and forward arc");
+    }
+
+    // ── PRD #307: FactionRegistryResource must be accessible as Res (not Option) ──
+
+    /// A minimal system that takes `Res<FactionRegistryResource>` (non-Option).
+    /// If the resource is not present, Bevy panics with a missing-resource error.
+    /// This test verifies that `build_test_app` — which calls `insert_faction_registry`
+    /// via the unconditional path — makes the resource available on native.
+    fn read_faction_registry_system(reg: Res<FactionRegistryResource>) {
+        // Just accessing it is enough — the test verifies the resource exists.
+        let _ = &reg.0;
+    }
+
+    #[test]
+    fn faction_registry_resource_is_present_on_native() {
+        let mut app = build_test_app();
+        // The resource must already be present (inserted unconditionally).
+        assert!(
+            app.world().get_resource::<FactionRegistryResource>().is_some(),
+            "FactionRegistryResource must be present on native without WASM preload"
+        );
+    }
+
+    #[test]
+    fn faction_registry_resource_accessible_as_res_not_option() {
+        let mut app = build_test_app();
+        // Add a system that takes Res<> (not Option<Res<>>). If the resource is
+        // absent Bevy panics; the test passes only when the resource is present.
+        app.add_systems(bevy::app::Update, read_faction_registry_system);
+        app.update(); // Must not panic
     }
 }

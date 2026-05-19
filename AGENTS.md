@@ -180,14 +180,22 @@ src/
   entities/
     config.rs         — TOML entity config types (EntityConfig, asteroid/ship/station/region fields).
     map_config.rs     — Legacy TOML map-half parser (anchors, asteroid fields, entity instances). One half of `WorldConfig` pending the type-level merger (PRD #337).
-    config_cache.rs   — ConfigCachePlugin: preloads world + entity TOML via JS fetch on WASM. Exposes `wasm_load_world` (JS-facing single entry point) which internally still calls `wasm_load_map` + `wasm_load_world_content` (PRD #337).
+    config_cache.rs   — ConfigCachePlugin: preloads world + entity TOML via JS fetch on WASM. Exposes `wasm_load_world` as a JS-facing single entry point: PRD #338 slice 1 made it a *real* loader — it parses the world TOML once via `world::config::parse_world` into the new unified `WorldConfig` thread-local, then (transitionally) drives `parse_map_config` + `parse_scenario` to populate `MAP_CONFIG` / `WORLD_CONTENT_CONFIG` for callers that haven't migrated yet. Path queueing is deduped via `queue_and_fire`.
     tags.rs           — String-tag helpers for tags=[...] lookups.
     spawner.rs        — Entity spawning from EntityConfig (ECS + wire snapshot).
     loader.rs         — World/entity loading pipeline.
     entity_override.rs — Per-instance entity field overrides (from world TOML).
   world/
     server.rs         — WorldPlugin: world-file loading, entity lifecycle, trigger evaluation,
-                        objective tracking, WorldSetup broadcast.
+                        objective tracking, WorldSetup broadcast. Owns `insert_world_config_resource`
+                        and `spawn_world_entities` (PRD #338 slice 1 — asteroid-field entities flow
+                        through the unified `WorldConfig` pipeline; other immediate entities still
+                        flow through `server_app::setup_world_from_config` with a mirror skip guard).
+    config.rs         — Pure single-pass parser (`parse_world` → `WorldConfig`) for the unified
+                        world TOML (PRD #337/#338 slice 1). Owns anchors (normalised `[f32;3]`)
+                        and `[[entity]]` instances. Helpers `entity_template_paths` (dedup queue)
+                        and `partition_immediate_entities` (asteroid-field vs. other routing).
+                        No Bevy systems, no serde_json — only `toml::from_str`.
     content.rs        — Pure types: `ScenarioConfig` (the trigger/comms/named-spawn half), `WorldConfig` (currently a thin wrapper over `MapConfig`+`ScenarioConfig` — PRD #337 collapses them), `ScenarioManager`, position resolution.
   ai/
     server.rs         — Bevy plugin: NPC patrol loop, input injection via InboundMessage.
@@ -397,7 +405,8 @@ Console input handlers use `.in_set(SimSet::Input)`, physics uses `SimSet::Physi
 | `entities/tags` | String-tag helpers | No |
 | `entities/spawner` | ECS entity spawning from EntityConfig | Yes |
 | `entities/loader` | Scenario/entity loading pipeline | Yes |
-| `world/server` | WorldPlugin: world-file loading, triggers, objectives, WorldSetup broadcast | Yes |
+| `world/server` | WorldPlugin: world-file loading, triggers, objectives, WorldSetup broadcast. Owns `insert_world_config_resource` + `spawn_world_entities` (PRD #338 slice 1) | Yes |
+| `world/config` | Pure single-pass `parse_world` → `WorldConfig`; `entity_template_paths`, `partition_immediate_entities` helpers (PRD #337/#338 slice 1) | No |
 | `world/content` | WorldContentResource, WorldContentRuntime | No |
 | `ai/server` | Bevy plugin: NPC patrol + input injection | Yes |
 | `ai/core` | Pure AI state machine | No |

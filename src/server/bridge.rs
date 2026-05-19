@@ -266,13 +266,15 @@ pub fn wasm_load_world_content(path: String, toml_str: String) -> Result<JsValue
 /// global config, immediate entity instances) and the scenario (named spawns,
 /// triggers, comms templates).
 ///
-/// Internally calls both `wasm_load_map` and `wasm_load_world_content` on the
-/// same TOML string. Either half failing surfaces as `Err`.
+/// Delegates to `config_cache::wasm_load_world`, which performs the unified
+/// `parse_world` pass into the new `WORLD_CONFIG` thread-local and
+/// (transitionally) also populates the legacy `MAP_CONFIG` /
+/// `WORLD_CONTENT_CONFIG` storages for callers that have not yet migrated
+/// (PRD #337/#338 slice 1).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    crate::config_cache::wasm_load_map(toml_str.clone())?;
-    crate::config_cache::wasm_load_world_content(path, toml_str)
+    crate::config_cache::wasm_load_world(path, toml_str)
 }
 
 /// Return the `default_scenario` path from the loaded map config, or `undefined`.

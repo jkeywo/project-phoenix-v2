@@ -83,6 +83,13 @@ thread_local! {
 
     /// The loaded ScenarioConfig, if any. Set by wasm_load_world_content.
     static WORLD_CONTENT_CONFIG: RefCell<Option<ScenarioConfig>> = const { RefCell::new(None) };
+
+    /// The loaded unified `WorldConfig` (PRD #337/#338 slice 1).
+    /// Set by `wasm_load_world` from a single-pass parse of the world TOML.
+    /// Coexists with `MAP_CONFIG` and `WORLD_CONTENT_CONFIG` during the
+    /// merger transition; later slices collapse the three storages into one.
+    static WORLD_CONFIG: RefCell<Option<crate::world::config::WorldConfig>> =
+        const { RefCell::new(None) };
 }
 
 // ── Public WASM API ──────────────────────────────────────────────────────────
@@ -350,6 +357,57 @@ pub fn wasm_get_world_content_path() -> Option<String> {
     })
 }
 
+/// Unified world loader (PRD #337/#338 slice 1).
+///
+/// Parses the world TOML into a `WorldConfig` via `parse_world` and stores it
+/// in the `WORLD_CONFIG` thread-local. Also drives the legacy
+/// `parse_map_config` and `parse_scenario` parses to populate `MAP_CONFIG`
+/// and `WORLD_CONTENT_CONFIG`, so callers that still read from the legacy
+/// storages (asteroid_field spawner, scenario triggers, comms) keep working
+/// during the transition. Entity template paths discovered via the new
+/// `WorldConfig` are queued via the JS preload callback.
+///
+/// Replaces the old shim in `server/bridge.rs` that simply forwarded to the
+/// two pre-existing WASM exports.
+#[cfg(target_arch = "wasm32")]
+pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    // 1. New unified parse → WorldConfig.
+    let world_config = crate::world::config::parse_world(&toml_str).map_err(|e| {
+        web_sys::console::error_1(&JsValue::from_str(&format!(
+            "Failed to parse world TOML at {}: {}",
+            path, e
+        )));
+        JsValue::from_str(&format!("World parse error at {}: {}", path, e))
+    })?;
+
+    // Queue entity template paths discovered by the new pipeline.
+    let entity_paths = crate::world::config::entity_template_paths(&world_config);
+
+    WORLD_CONFIG.with(|slot| {
+        *slot.borrow_mut() = Some(world_config);
+    });
+
+    for p in entity_paths {
+        queue_and_fire(p);
+    }
+
+    // 2. Legacy parses (transitional — populate MAP_CONFIG and
+    //    WORLD_CONTENT_CONFIG so untouched callers keep functioning).
+    //    These reuse the existing wasm_load_map / wasm_load_world_content
+    //    bodies, which also queue any paths the legacy pipeline knows about
+    //    (e.g. asteroid type paths from typed [[asteroid_field]] blocks and
+    //    scenario [[spawn]] entity paths). Path queueing is idempotent via
+    //    queue_and_fire's pending-set check.
+    wasm_load_map(toml_str.clone())?;
+    wasm_load_world_content(path, toml_str)
+}
+
+/// Get a clone of the loaded unified `WorldConfig`, if any.
+#[cfg(target_arch = "wasm32")]
+pub fn get_world_config() -> Option<crate::world::config::WorldConfig> {
+    WORLD_CONFIG.with(|slot| slot.borrow().clone())
+}
+
 /// Load a faction TOML string and insert it into the faction registry.
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsValue> {
@@ -570,6 +628,16 @@ pub fn get_world_content_config() -> Option<crate::world::content::ScenarioConfi
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_get_world_content_path() -> Option<String> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn wasm_load_world(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
+    Ok(JsValue::from_bool(true))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_world_config() -> Option<crate::world::config::WorldConfig> {
     None
 }
 

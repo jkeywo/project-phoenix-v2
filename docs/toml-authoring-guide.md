@@ -43,13 +43,24 @@ is not supported.
 **Location:** `assets/worlds/*.toml` (e.g. `assets/worlds/default.toml`,
 `assets/worlds/patrol.toml`).
 
-**Parser:** internally split across two files pending PRD #337:
-`src/entities/map_config.rs` reads the map half (`[global]`, `[anchors]`,
-`[[entity]]`); `src/world/content.rs` reads the scenario half (`title`,
+**Parser:** internally split across three files pending PRD #337's full
+type-level merger: `src/world/config.rs` (added in PRD #338 slice 1) is the
+new single-pass parser — it produces the unified `WorldConfig` carrying the
+normalised anchor table and the `[[entity]]` list, and is the source of
+truth for the unified pipeline. `src/entities/map_config.rs` still reads the
+map half (`[global]`, `[anchors]`, `[[entity]]`) into the legacy `MapConfig`
+shape; `src/world/content.rs` still reads the scenario half (`title`,
 `description`, `[[spawn]]`, `[[trigger]]`, `[[comms]]`). The JS loader
-(`wasm_load_world` in `src/server/bridge.rs`) hands the same TOML to both
-parsers; each silently ignores the other's sections. PRD #337 will collapse
-these into one `WorldConfig` struct and one `[[entity]]` block.
+(`wasm_load_world` in `src/server/bridge.rs`) calls
+`world::config::parse_world` once to populate the new `WorldConfig`
+thread-local, then transitionally also drives the two legacy parsers to
+populate `MAP_CONFIG` / `WORLD_CONTENT_CONFIG` for callers that haven't
+migrated yet. Each parser silently ignores the other's sections.
+Asteroid-field `[[entity]]` instances spawn via `world::server::spawn_world_entities`
+(reads the new `WorldConfig` resource); all other immediate-spawn `[[entity]]`
+instances continue to spawn via `server_app::setup_world_from_config`, with
+mirror skip guards on both sides preventing double-spawn. PRD #337 will
+collapse the three storages into one.
 
 ### Top-level fields
 

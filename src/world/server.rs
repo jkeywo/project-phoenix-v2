@@ -74,7 +74,12 @@ impl Plugin for WorldPlugin {
             .init_resource::<ScenarioManagerRes>()
             .add_systems(
                 Startup,
-                (spawn_scenario_entities, init_scenario_runtime),
+                (
+                    insert_world_config_resource,
+                    spawn_world_entities,
+                    spawn_scenario_entities,
+                    init_scenario_runtime,
+                ).chain(),
             )
             .add_systems(
                 OnEnter(crate::messages::GamePhase::InProgress),
@@ -91,6 +96,76 @@ impl Plugin for WorldPlugin {
                 ).chain(),
             )
             .add_systems(Update, handle_ai_events.in_set(crate::sim_sets::SimSet::Physics));
+    }
+}
+
+/// Startup system: copy the unified `WorldConfig` from the WASM-side
+/// thread-local cache into a Bevy `Resource` so downstream systems
+/// (`spawn_world_entities`, `ai::server::tick_ai_controllers`) can read it
+/// via `Res<WorldConfig>` (PRD #337/#338 slice 1).
+///
+/// On native (no WASM bridge) `get_world_config()` returns `None` and this
+/// system is a no-op; the legacy `MapConfig`-based fallbacks remain in place.
+fn insert_world_config_resource(mut commands: Commands) {
+    if let Some(world_config) = crate::config_cache::get_world_config() {
+        commands.insert_resource(world_config);
+    }
+}
+
+/// Startup system: spawn `[[entity]]` instances whose resolved template is an
+/// asteroid-field (i.e. the resolved `EntityConfig` has an `[asteroid_field]`
+/// section). These flow through the new unified `WorldConfig` pipeline
+/// introduced in PRD #337/#338 slice 1.
+///
+/// Non-asteroid-field immediate-spawn entries continue to flow through the
+/// legacy `setup_world_from_config` in `server_app.rs`; that function carries
+/// the mirror-image skip guard so an entry can only be spawned by one of the
+/// two paths.
+fn spawn_world_entities(
+    mut commands: Commands,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+) {
+    let Some(world_config) = world_config else {
+        return; // No unified WorldConfig (native tests, hardcoded fallback).
+    };
+    let config_cache = crate::config_cache::get_config_cache();
+
+    let (fields, _others) = crate::world::config::partition_immediate_entities(
+        world_config.as_ref(),
+        |path| {
+            config_cache
+                .get(path)
+                .and_then(|c| c.asteroid_field.as_ref())
+                .is_some()
+        },
+    );
+
+    for entity_inst in fields {
+        let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {
+            Ok(c) => c,
+            Err(e) => {
+                bevy::log::error!(
+                    "spawn_world_entities: failed to resolve '{}': {}",
+                    entity_inst.template_path, e
+                );
+                continue;
+            }
+        };
+
+        let uuid = crate::entity_loader::assign_uuid();
+        let pos = if entity_inst.position.len() >= 3 {
+            Vec3::new(entity_inst.position[0], entity_inst.position[1], entity_inst.position[2])
+        } else {
+            Vec3::ZERO
+        };
+
+        crate::entity_spawner::spawn_entity(
+            &mut commands,
+            &config,
+            pos,
+            uuid,
+            entity_inst.id.clone(),
+        );
     }
 }
 

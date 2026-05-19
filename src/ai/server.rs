@@ -7,6 +7,22 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+/// Build the AI anchor lookup table from the unified `WorldConfig` (PRD #337).
+///
+/// `WorldConfig.anchors()` already returns `HashMap<String, [f32; 3]>` with
+/// 2-element anchors widened to 3 components at parse time, so the AI tick
+/// just needs a clone.
+///
+/// This is the slice-1 anchor source. The old `MapConfig::anchors` reader
+/// remains only as a transitional fallback for callers that haven't been
+/// updated yet (PRD #338 lockstep audit confirms ai/server is the only
+/// non-loader, non-world-plugin reader).
+pub fn anchors_from_world_config(
+    world: &crate::world::config::WorldConfig,
+) -> HashMap<String, [f32; 3]> {
+    world.anchors().clone()
+}
+
 use crate::ai::{AiController, AiTickOutput, WorldView, WorldEntity};
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
 
@@ -258,6 +274,7 @@ fn tick_ai_controllers(
         Option<&EntityPhaserState>,
     )>,
     time: Res<Time>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     map_config: Option<Res<crate::map_config::MapConfig>>,
     faction_registry: Option<Res<FactionRegistryResource>>,
     entity_query: Query<(&EntityUuid, &Transform, Option<&crate::entities::spawner::FactionComponent>), Without<AiControllerComponent>>,
@@ -266,8 +283,15 @@ fn tick_ai_controllers(
     registry_res: Res<AiTokenRegistry>,
 ) {
 
-    // Build anchor map once (shared across all controllers this tick)
-    let anchors: HashMap<String, [f32; 3]> = if let Some(ref mc) = map_config {
+    // Build anchor map once (shared across all controllers this tick).
+    //
+    // Slice 1 of PRD #337/#338: prefer the unified `WorldConfig` resource;
+    // fall back to legacy `MapConfig::anchors` only when the world loader
+    // hasn't populated `WorldConfig` yet (e.g. in tests that drive the AI
+    // system without going through `wasm_load_world`).
+    let anchors: HashMap<String, [f32; 3]> = if let Some(ref wc) = world_config {
+        anchors_from_world_config(wc.as_ref())
+    } else if let Some(ref mc) = map_config {
         mc.anchors.iter().filter_map(|(name, pos)| {
             if pos.len() >= 3 {
                 Some((name.clone(), [pos[0], pos[1], pos[2]]))
@@ -654,6 +678,26 @@ fn unregister_on_despawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── anchors_from_world_config (PRD #337/#338 slice 1) ────────────────
+
+    #[test]
+    fn anchors_from_world_config_clones_anchor_table() {
+        let mut world = crate::world::config::WorldConfig::default();
+        world.anchors.insert("alpha".to_string(), [10.0, 0.0, 20.0]);
+        world.anchors.insert("beta".to_string(), [-5.0, 1.5, 30.0]);
+
+        let anchors = anchors_from_world_config(&world);
+        assert_eq!(anchors.len(), 2);
+        assert_eq!(anchors.get("alpha"), Some(&[10.0, 0.0, 20.0]));
+        assert_eq!(anchors.get("beta"), Some(&[-5.0, 1.5, 30.0]));
+    }
+
+    #[test]
+    fn anchors_from_world_config_returns_empty_when_no_anchors() {
+        let world = crate::world::config::WorldConfig::default();
+        assert!(anchors_from_world_config(&world).is_empty());
+    }
 
     // ── AiTokenRegistry unit tests ────────────────────────────────────────
 

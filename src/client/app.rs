@@ -200,15 +200,6 @@ pub struct ComplexityPopupConfirm;
 pub struct ComplexityDropdownRoot;
 
 
-/// Marks the root node of the console tab bar, shown when the local player
-/// holds 2+ consoles while in-game.
-#[derive(Component)]
-pub struct TabBarRoot;
-
-/// Marks a single tab button in the tab bar; carries the console it selects.
-#[derive(Component)]
-struct TabButton(Console);
-
 /// Marks a UI element that can be hidden by complexity preset `hidden_elements`.
 /// The string name must match an entry in the complexity TOML for this console.
 #[derive(Component)]
@@ -234,7 +225,7 @@ impl Plugin for ClientAppPlugin {
             .init_resource::<LandscapeMode>()
             .add_message::<InboundServerMessage>()
             .add_message::<OutboundClientMessage>()
-            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_helm_ui, setup_tab_bar_ui))
+            .add_systems(Startup, (setup_lobby_ui, detect_initial_orientation, setup_helm_ui))
                 .add_systems(
                     Update,
                     (
@@ -261,10 +252,6 @@ impl Plugin for ClientAppPlugin {
                             refresh_repair_button,
                         ),
 
-                        (
-                            rebuild_tab_bar,
-                            handle_tab_button_press,
-                        ),
                         (
                             refresh_complexity_ui,
                             handle_complexity_preset_press,
@@ -1382,124 +1369,6 @@ fn handle_complexity_popup_confirm(
             outbound.write(OutboundClientMessage(
                 client_complexity::set_complexity_message(Console::Tactical, "Low"),
             ));
-        }
-    }
-}
-
-// ── Tab Bar ────────────────────────────────────────────────────────
-
-fn setup_tab_bar_ui(mut commands: Commands) {
-    commands.spawn((
-        TabBarRoot,
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(0.0),
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            height: Val::Px(44.0),
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(4.0),
-            padding: UiRect::all(Val::Px(4.0)),
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.05, 0.05, 0.15, 0.92)),
-        Visibility::Hidden,
-    ));
-}
-
-/// Rebuilds the tab bar whenever the lobby / active-console state changes.
-/// Spawns one button child per console in the local player's bundle.
-fn rebuild_tab_bar(
-    mut commands: Commands,
-    lobby: Res<LobbyState>,
-    token: Res<LocalPlayerToken>,
-    mut active: ResMut<ActiveConsole>,
-    tab_root_q: Query<Entity, With<TabBarRoot>>,
-    mut tab_vis_q: Query<&mut Visibility, With<TabBarRoot>>,
-    children_q: Query<&Children>,
-) {
-    let view = LobbyView::new(&lobby, &token.0);
-    let my_consoles = view.my_consoles();
-
-    // If the player dropped the console they had selected, reset to auto-mode
-    // so the remaining panel(s) are shown correctly.
-    if let Some(c) = active.0.clone() {
-        if !my_consoles.contains(&c) {
-            active.0 = None;
-        }
-    }
-
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
-
-    let Ok(root) = tab_root_q.single() else { return };
-    let in_game = lobby.phase == GamePhase::InProgress;
-    let show_tabs = in_game && my_consoles.len() >= 2;
-    let use_initials = my_consoles.len() >= 5;
-
-    // Show/hide the bar.
-    if let Ok(mut vis) = tab_vis_q.single_mut() {
-        *vis = if show_tabs { Visibility::Visible } else { Visibility::Hidden };
-    }
-
-    // Rebuild children.
-    if let Ok(children) = children_q.get(root) {
-        for child in children.iter() {
-            commands.entity(child).despawn();
-        }
-    }
-
-    if !show_tabs {
-        return;
-    }
-
-    commands.entity(root).with_children(|parent| {
-        for console in my_consoles {
-            let is_active = active.0.as_ref() == Some(console);
-            let bg = if is_active {
-                Color::srgb(0.20, 0.40, 0.80)
-            } else {
-                Color::srgb(0.10, 0.15, 0.30)
-            };
-            let padding = if use_initials {
-                UiRect::axes(Val::Px(6.0), Val::Px(6.0))
-            } else {
-                UiRect::axes(Val::Px(14.0), Val::Px(6.0))
-            };
-            let mut btn = parent.spawn((
-                Node {
-                    padding,
-                    ..default()
-                },
-                BackgroundColor(bg),
-            ));
-            btn.insert((Button, TabButton(console.clone())));
-            btn.with_children(|inner| {
-                inner.spawn((
-                    Text::new(if use_initials { console.initial() } else { console.display_name() }),
-                    TextFont { font_size: 14.0, ..default() },
-                    TextColor(Color::WHITE),
-                ));
-            });
-        }
-    });
-}
-
-/// Handles tab button presses by updating `ActiveConsole` directly (bypasses
-/// JS `wasm_client_set_active_console` — the Bevy resource is the source of
-/// truth; the bridge forwards the JS value only when JS calls that function).
-fn handle_tab_button_press(
-    mut interactions: Query<
-        (&Interaction, &TabButton),
-        (Changed<Interaction>, With<Button>),
-    >,
-    mut active: ResMut<ActiveConsole>,
-) {
-    for (interaction, TabButton(console)) in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            active.0 = Some(console.clone());
         }
     }
 }

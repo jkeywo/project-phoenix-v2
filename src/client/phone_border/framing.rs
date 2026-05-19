@@ -277,11 +277,10 @@ fn reparent_panels_into_bezel(
     shields: Query<Entity, With<crate::shields_panel::ShieldsPanel>>,
     navigation: Query<Entity, With<crate::navigation_panel::NavigationPanel>>,
     weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
-    tab_bar: Query<Entity, With<crate::client_app::TabBarRoot>>,
     mut reparented: Local<HashSet<Entity>>,
 ) {
     let Ok(target) = content_area.single() else { return };
-    for entity in lobby.iter().chain(captain.iter()).chain(helm.iter()).chain(sensors.iter()).chain(shields.iter()).chain(navigation.iter()).chain(weapons.iter()).chain(tab_bar.iter()) {
+    for entity in lobby.iter().chain(captain.iter()).chain(helm.iter()).chain(sensors.iter()).chain(shields.iter()).chain(navigation.iter()).chain(weapons.iter()) {
         if reparented.insert(entity) {
             commands.entity(entity).set_parent_in_place(target);
         }

@@ -43,24 +43,16 @@ is not supported.
 **Location:** `assets/worlds/*.toml` (e.g. `assets/worlds/default.toml`,
 `assets/worlds/patrol.toml`).
 
-**Parser:** internally split across three files pending PRD #337's full
-type-level merger: `src/world/config.rs` (added in PRD #338 slice 1) is the
-new single-pass parser — it produces the unified `WorldConfig` carrying the
-normalised anchor table and the `[[entity]]` list, and is the source of
-truth for the unified pipeline. `src/entities/map_config.rs` still reads the
-map half (`[global]`, `[anchors]`, `[[entity]]`) into the legacy `MapConfig`
-shape; `src/world/content.rs` still reads the scenario half (`title`,
-`description`, `[[spawn]]`, `[[trigger]]`, `[[comms]]`). The JS loader
-(`wasm_load_world` in `src/server/bridge.rs`) calls
-`world::config::parse_world` once to populate the new `WorldConfig`
-thread-local, then transitionally also drives the two legacy parsers to
-populate `MAP_CONFIG` / `WORLD_CONTENT_CONFIG` for callers that haven't
-migrated yet. Each parser silently ignores the other's sections.
-Asteroid-field `[[entity]]` instances spawn via `world::server::spawn_world_entities`
-(reads the new `WorldConfig` resource); all other immediate-spawn `[[entity]]`
-instances continue to spawn via `server_app::setup_world_from_config`, with
-mirror skip guards on both sides preventing double-spawn. PRD #337 will
-collapse the three storages into one.
+**Parser:** `src/world/config.rs` owns the entire world schema. `parse_world`
+is a single-pass deserializer that produces a `WorldConfig` carrying the
+normalised anchor table, the `[[entity]]` list, `[[trigger]]` blocks, and
+`[[comms]]` templates. The JS-facing loader is `wasm_load_world` in
+`src/server/bridge.rs`, which delegates to `entities::config_cache` to
+populate the `WORLD_CONFIG` thread-local. The Bevy startup chain
+(`insert_world_config_resource → spawn_world_entities → init_world_runtime
+→ setup_fallback_world`) consumes it. Asteroid-field and named `[[entity]]`
+instances spawn via `world::server::spawn_world_entities`; anonymous
+non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 
 ### Top-level fields
 
@@ -70,11 +62,9 @@ collapse the three storages into one.
 | `description` | string | `""` | Lobby display body. |
 | `[global]` | table | `{ seed = 42 }` | Global generation params. |
 | `[anchors]` | table | `{}` | Named `[x,y,z]` waypoints referenced by `[[entity]] anchor = "..."` and AI patrols. |
-| `[[entity]]` | array of tables | `[]` | Entity instances spawned into the world. Named entries (with `name = "..."`) are trigger / comms eligible. |
-| `[[spawn]]` | array of tables | `[]` | **Removed** for shipped NPCs / stations (PRD #337 slices 2 + 3). Three region `[[spawn]]`s remain pending slice 5; preserved-but-unloadable BTF content (`before_the_fire.toml`, `btf_*.toml`) still uses the legacy shape — see `wiki/log.md:396`. |
+| `[[entity]]` | array of tables | `[]` | Entity instances spawned into the world. Single block type for all spawnables; named entries (with `name = "..."`) are trigger / comms eligible. |
 | `[[trigger]]` | array of tables | `[]` | World-event handlers (see §1.5). |
 | `[[comms]]` | array of tables | `[]` | Comms dialogue templates (see §1.6). |
-| `[[star]]`, `[[planet]]`, `[[asteroid_field]]` | array | `[]` | **Legacy shorthand.** Not used in shipped worlds; prefer `[[entity]]` with a `template_path`. PRD #337 will remove these. |
 
 ### `[global]`
 
@@ -94,64 +84,46 @@ starbase_alpha = [500.0, 0.0, 0.0]
 patrol_alpha   = [300.0, 0.0, -300.0]
 ```
 
-### `[[entity]]` (map-half)
+### `[[entity]]`
 
-A single entity instance for static world layout. An `[[entity]]` block
-becomes trigger- and comms-eligible when it carries a `name` field — PRD
-#337/#339 slice 2 collapsed the old `[[spawn]]`-only naming path so a
-single block can describe both static layout and trigger-eligible entities.
+A single entity instance. Anonymous entries are static world layout;
+entries carrying a `name` field become trigger- and comms-eligible (the
+unified pipeline assigns them a stable UUID and registers `name → uuid`
+for trigger/comms/`relative_to` lookups).
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `template_path` | string | **required** | Path to entity template (e.g. `"assets/entities/star_sun.toml"`). |
 | `id` | string | none | Stable instance ID for cross-reference. |
-| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers, comms, and `relative_to` lookups resolve names through this map (PRD #339). |
-| `position` | `[f32; 3]` | `[0,0,0]` | World position. Mutually exclusive with `anchor`. When `anchor` is supplied, `position` is ignored (and should be omitted). |
-| `anchor` | string | none | Named entry from `[anchors]`. PRD #337 slice 3 added anchor support to `[[entity]]`; named NPCs (e.g. `raider_alpha`) use this in preference to inlining anchor coordinates. The unified pipeline resolves the anchor → `[x,y,z]` at spawn time. |
+| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers, comms, and `relative_to` lookups resolve names through this map. |
+| `position` | `[f32; 3]` | `[0,0,0]` | World position. |
+| `anchor` | string | none | Named entry from `[anchors]`; resolved to `[x,y,z]` at spawn time. |
+| `relative_to` | string | none | Another named `[[entity]]` to position relative to. Used with `offset`. The referenced entity must use `anchor` or `position` (not another `relative_to`). |
+| `offset` | `[f32; 3]` | `[0,0,0]` | Offset added to the `relative_to` entity's resolved position. |
 | `spawn_on` | `"immediate"` \| `"game_start"` | `"immediate"` | `"immediate"` spawns at world load (lobby phase); `"game_start"` spawns when phase enters `InProgress`. |
 | `overrides` | inline table | none | TOML overrides merged on top of the template (per-instance field tweaks). |
+
+Position precedence (when more than one is supplied): `relative_to` >
+`anchor` > `position` > origin.
 
 ```toml
 [[entity]]
 template_path = "assets/entities/station_outpost.toml"
-name          = "Starbase Alpha"   # trigger / comms-eligible
+name          = "starbase_alpha"        # trigger / comms-eligible
 position      = [500.0, 0.0, 0.0]
 
-# NPC positioned at a named anchor (PRD #337 slice 3)
+# NPC positioned at a named anchor
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
 anchor        = "patrol_alpha"
+
+# Entity positioned relative to another named entity
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+relative_to   = "starbase_alpha"
+offset        = [10.0, 0.0, -5.0]
 ```
-
-### `[[spawn]]` (legacy — removed for shipped NPCs / stations)
-
-> **Status:** PRD #337 slices 2 + 3 collapsed `[[spawn]]` into
-> `[[entity]] name = "..."`. Slice 2 (PRD #339) migrated stations
-> (`Starbase Alpha`, `earth`); slice 3 migrated the patrol-raider NPC in
-> both `default.toml` and `patrol.toml`. **No shipped NPC or station now
-> uses `[[spawn]]`.** Three `[[spawn]]` blocks remain in shipped TOMLs:
-> all three are region instances (`kaleth_nebula`, `asteroid_belt_zone` in
-> `before_the_fire.toml`; `aphelion_radiation_zone` in
-> `btf_aphelion_protocol.toml`) deferred to PRD #337 slice 5. A further
-> six `[[spawn]]` blocks live in the preserved-but-unloadable BTF authored
-> content (`wiki/log.md:396`). New worlds must use `[[entity]] name = "..."`.
-
-A named, UUID-assigned entity instance. Eligible for trigger and comms
-references via its `name`.
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `name` | string | **required** | Stable identifier referenced by triggers, comms, and `relative_to`. |
-| `entity_path` | string | **required** | Path to entity template TOML. |
-| `position` | `[f32; 3]` | — | Absolute world position. |
-| `anchor` | string | — | Anchor name from `[anchors]`. |
-| `relative_to` | string | — | Another `[[spawn]]` name to position relative to. |
-| `offset` | `[f32; 3]` | `[0,0,0]` | Used with `relative_to`. |
-
-Exactly one of `position`, `anchor`, or `relative_to` must be supplied per
-spawn. Each spawn is assigned a UUID at parse time; `name → uuid` is stored
-in the parsed config.
 
 ### 1.5 `[[trigger]]`
 
@@ -273,8 +245,7 @@ message = "USS Phoenix, this is Starbase Alpha. Please state your business."
 appearance, consoles, AI behaviour, region effects, etc. Templates are
 referenced from world files by `[[entity]] template_path = ...`. Trigger-
 and comms-eligible instances additionally carry a `name = "..."` on the
-same `[[entity]]` block (legacy `[[spawn]] entity_path = ...` remains only
-in unmigrated preserved content — see §1.4).
+same `[[entity]]` block.
 
 **Location:** `assets/entities/*.toml`.
 

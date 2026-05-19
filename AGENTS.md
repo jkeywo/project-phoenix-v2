@@ -249,7 +249,7 @@ src/
   lib.rs              — Module declarations + feature gates + backward-compat re-exports.
 
 assets/
-  worlds/default.toml           — Default world: anchors, [[entity]] instances, named [[spawn]]s, [[trigger]]s, [[comms]].
+  worlds/default.toml           — Default world: anchors, named + anonymous [[entity]] instances, [[trigger]]s, [[comms]].
   worlds/patrol.toml            — Patrol world: three-anchor raider patrol with on-destroyed objective.
   entities/asteroid_*.toml      — Asteroid variants (large, small, cosmetic).
   entities/player_ship.toml     — Ship config: helm_console physics, phaser banks, torpedo tubes, shields, impulse, [stations].

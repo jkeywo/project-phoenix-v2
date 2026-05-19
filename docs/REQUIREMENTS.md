@@ -135,9 +135,10 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 - Every spawned entity has a server-assigned UUID; an optional human-readable `id` from the instance is also passed through to wire snapshots.
 
 ### World TOML
-- A world TOML (`assets/worlds/*.toml`) is the single content file for a session. It declares the global `seed`, named `[anchors]`, a list of `[[entity]]` instances (anonymous entries are static layout; entries carrying a `name` field are UUID-assigned and trigger/comms-eligible — PRD #339 slice 2), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries. Legacy `[[spawn]]` blocks remain during the PRD #337 transition for the patrol-NPC entries still pending migration in slice 3.
-- Internally the parser is moving toward a single-pass `parse_world` → unified `WorldConfig` (PRD #337/#338 slice 1 + #339 slice 2). The legacy `MapConfig` / `ScenarioConfig` two-pass split still runs for sections not yet folded into the unified pipeline; named `[[entity]]` entries flow through `spawn_world_entities`, while anonymous entries continue through `setup_world_from_config`.
-- Named spawn anchors are declared at the top of the world file and referenced by name from `[[spawn]]` entries' `anchor = "..."` field; positions never need to be hardcoded in scripts. Anchor lookup on `[[entity]]` is pending a later slice of PRD #337 — for now, named `[[entity]]` entries inline their position.
+- A world TOML (`assets/worlds/*.toml`) is the single content file for a session. It declares the global `seed`, named `[anchors]`, a list of `[[entity]]` instances (anonymous entries are static layout; entries carrying a `name` field are UUID-assigned and trigger/comms-eligible), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries.
+- Single-pass parser: `parse_world` in `src/world/config.rs` consumes the whole file in one deserialization and produces a `WorldConfig`. The unified `[[entity]]` block is the only spawn surface; there are no `[[spawn]]`, `[[star]]`, `[[planet]]`, or `[[asteroid_field]]` blocks (PRD #337 closed).
+- Loader: a single JS-facing entry point `wasm_load_world` populates the `WORLD_CONFIG` thread-local; the Bevy startup chain (`insert_world_config_resource → spawn_world_entities → init_world_runtime → setup_fallback_world`) consumes it. The fallback only runs when no `WorldConfig` resource is present.
+- Each `[[entity]]` may declare its position via `position = [x,y,z]`, `anchor = "name"` (resolved from `[anchors]`), or `relative_to = "other_named_entity"` + `offset = [x,y,z]`. Precedence: `relative_to` > `anchor` > `position` > origin. `relative_to` references must point at a named entity that uses anchor/inline position (not another `relative_to`).
 - A single global seed drives all deterministic generation; per-field index offsets prevent reshuffling when one field's config changes.
 - World chaining is **not supported.** Each session loads exactly one world file at startup and runs it to completion.
 
@@ -209,10 +210,10 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 
 Scenario-applied modifiers and flags have `ModifierSource::Scenario { id, tag }`; the `(id, tag)` pair is the identity key for replacement and removal.
 
-### Spawn entries
-- `[[spawn]] template = "…" position = anchor_name | [x,y,z] | entity_relative` plus optional `name`, `shape`, `[spawn.overrides]`.
-- Region instances additionally require a `shape` block.
-- Spawn `name` is resolved to UUID by the scenario engine; scripts reference entities via `$param_name`, never raw UUIDs.
+### Entity entries
+- `[[entity]] template_path = "…"` plus optional `id`, `name`, position (`position = [x,y,z]` | `anchor = "anchor_name"` | `relative_to = "named_entity" + offset = [x,y,z]`), `spawn_on = "immediate" | "game_start"`, and `[entity.overrides]`.
+- Region instances additionally require a `shape` block in the entity template.
+- Entity `name` is registered to a stable UUID by `spawn_world_entities`; scripts reference entities via `$param_name`, never raw UUIDs.
 
 ### Default content
 - A canonical default scenario (Starbase Alpha) spawns a raider and a station. The station can be hailed (short inline branching dialogue). When the **raider** is attacked, an `on_attacked` trigger fires a broadcast comms message (no player interaction required) and `load_scenario` chains to the patrol scenario, which spawns reinforcements. The station has a parallel `on_attacked` trigger with its own distress broadcast.
@@ -671,7 +672,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 ## Configuration & Authoring
 
 ### World TOML (`assets/worlds/default.toml`)
-- `seed` (global) plus a list of `[anchors]`, a list of `[[entity]]` instances (the map half: immediate or game-start spawn, optional `overrides`), a list of named `[[spawn]]` entries (the scenario half: anchor/relative_to/absolute positioning, UUID-assigned, trigger/comms-eligible), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries. PRD #337 will collapse `[[entity]]` and `[[spawn]]` into one block type.
+- `seed` (global) plus `[anchors]`, `[[entity]]` instances (template_path + optional name/anchor/relative_to+offset/position/spawn_on/overrides), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries. Single block type for all spawnables (PRD #337).
 
 ### Entity TOML (`assets/entities/*.toml`)
 - Component-bag: each `[section]` present produces a Bevy component on the spawned entity.
@@ -694,8 +695,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 ### World TOML (`assets/worlds/*.toml`)
 - `title`, `description` — lobby display.
 - `preload = [...]` — entity paths to fetch before spawning begins.
-- `[[entity]] template_path, id?, position, spawn_on (immediate | game_start), [entity.overrides]` — static layout instances.
-- `[[spawn]] template, position (anchor name | absolute | entity-relative), id?, shape?, [spawn.overrides]` — named, trigger-eligible spawns.
+- `[[entity]] template_path, id?, name?, position | anchor | (relative_to + offset), spawn_on (immediate | game_start), [entity.overrides]` — single block type for all world spawnables. Named entries are UUID-assigned and trigger/comms-eligible; anonymous entries are static layout.
 - `[[trigger]] condition, entity?, actions`.
 - `[[comms]] from, message, trigger, [[comms.responses]] text, actions` with inline `follow_up` branching.
 - `[[objective]] id, text, optional`.

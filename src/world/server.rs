@@ -172,6 +172,10 @@ pub fn spawn_immediate_entities_internal(
         },
     );
 
+    // Pre-resolve named-entity positions so `relative_to` references can be
+    // looked up during spawn (PRD #337).
+    let named_positions = crate::world::config::build_named_entity_positions(world_config);
+
     let mut spawned = Vec::with_capacity(fields.len() + named.len());
 
     // Asteroid-field entries get a fresh UUID (they have no name to anchor to).
@@ -187,7 +191,7 @@ pub fn spawn_immediate_entities_internal(
             }
         };
         let uuid = crate::entity_loader::assign_uuid();
-        let pos = match resolve_position(entity_inst, &world_config.anchors) {
+        let pos = match resolve_position(entity_inst, &world_config.anchors, &named_positions) {
             Ok(p) => p,
             Err(e) => {
                 bevy::log::error!("spawn_world_entities: {e}");
@@ -230,7 +234,7 @@ pub fn spawn_immediate_entities_internal(
                 continue;
             }
         };
-        let pos = match resolve_position(entity_inst, &world_config.anchors) {
+        let pos = match resolve_position(entity_inst, &world_config.anchors, &named_positions) {
             Ok(p) => p,
             Err(e) => {
                 bevy::log::error!("spawn_world_entities: named entity '{name}': {e}");
@@ -259,8 +263,13 @@ pub fn spawn_immediate_entities_internal(
 fn resolve_position(
     entity_inst: &crate::world::config::WorldEntity,
     anchors: &HashMap<String, [f32; 3]>,
+    entities_by_name: &HashMap<String, [f32; 3]>,
 ) -> Result<Vec3, String> {
-    let pos = crate::world::config::resolve_entity_position(entity_inst, anchors)?;
+    let pos = crate::world::config::resolve_entity_position_with(
+        entity_inst,
+        anchors,
+        entities_by_name,
+    )?;
     Ok(Vec3::new(pos[0], pos[1], pos[2]))
 }
 

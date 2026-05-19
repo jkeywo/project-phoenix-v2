@@ -50,25 +50,23 @@ position = [300.0, 0.0, -200.0]
 
 # ── Named entities (trigger / comms-eligible) ────────────────────────────────
 #
-# PRD #337/#339 slice 2: `[[entity]] name = "..."` replaces the legacy
-# `[[spawn]]` block. The unified pipeline assigns a UUID at spawn time and
-# registers it in `WorldConfig.name_to_uuid` so triggers and comms can
-# resolve the name. Anchors aren't yet resolved by the unified `[[entity]]`
-# block — positions are inlined here (anchor `starbase_alpha = [500, 0, 0]`).
+# `[[entity]] name = "..."` is the unified spawn surface (PRD #337). The
+# pipeline assigns a UUID at spawn time and registers it in
+# `WorldConfig.name_to_uuid` so triggers, comms, and `relative_to` lookups
+# can resolve the name. Position may be supplied via inline `position`,
+# `anchor = "..."` (resolved from `[anchors]`), or
+# `relative_to = "..." + offset = [x,y,z]` (relative to another named entity).
 
 [[entity]]
 template_path = "assets/entities/station_outpost.toml"
 name = "Starbase Alpha"
-position = [500.0, 0.0, 0.0]
+anchor = "starbase_alpha"
 
 # ── Named NPC entities (trigger-eligible) ─────────────────────────────────────
 #
-# PRD #337 slice 3: the patrol raider migrated from `[[spawn]]` to a named
-# `[[entity]]` with `anchor = "patrol_alpha"`. The unified pipeline assigns
-# a UUID at spawn time, registers `raider_alpha` → uuid in
-# `WorldConfig.name_to_uuid`, and `spawn_world_entities` wires the AI
-# components (BehaviourSection, FactionComponent) via the shared
-# `spawn_entity` helper.
+# The patrol raider is positioned at the `patrol_alpha` anchor;
+# `spawn_world_entities` wires the AI components (BehaviourSection,
+# FactionComponent) via the shared `spawn_entity` helper.
 
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"

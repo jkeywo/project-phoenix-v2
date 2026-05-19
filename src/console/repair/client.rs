@@ -391,7 +391,7 @@ fn handle_dispatch_button_press(
 mod tests {
     use super::*;
     use crate::client_lobby::{ActiveConsole, LobbyState};
-    use crate::messages::{Console, GamePhase, Player};
+    use crate::messages::{ClientMessage, Console, GamePhase, Player};
     use std::collections::HashMap;
 
     fn lobby_with_repair_player(token: &str, phase: GamePhase) -> LobbyState {

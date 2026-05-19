@@ -57,6 +57,17 @@ pub struct WorldEntity {
     /// spawn time.
     #[serde(default)]
     pub anchor: Option<String>,
+    /// Named reference to another `[[entity]]` (by `name`) whose resolved
+    /// position this entity is positioned relative to. Combined with
+    /// `offset`. Resolved by `resolve_entity_position_with` at spawn time
+    /// after sibling positions are known. Takes precedence over `anchor` /
+    /// `position` when set.
+    #[serde(default)]
+    pub relative_to: Option<String>,
+    /// Offset [x, y, z] added to the `relative_to` entity's resolved position.
+    /// Ignored unless `relative_to` is set. Missing components default to 0.
+    #[serde(default)]
+    pub offset: Vec<f32>,
     /// When this entity should be spawned.
     #[serde(default)]
     pub spawn_on: WorldEntitySpawnOn,
@@ -579,10 +590,67 @@ where
 /// PRD #337 slice 3: lifts anchor positioning from the scenario half into
 /// the unified `[[entity]]` pipeline so NPCs can be migrated off
 /// `[[spawn]]`. Pure function — tested without Bevy.
+/// Build a map of `name → resolved_position` for every named `[[entity]]`
+/// instance in the world, used as the lookup table for `relative_to`
+/// references during spawning.
+///
+/// Named entities are resolved using anchor/inline `position` only (NOT
+/// `relative_to`), which means relative-to-relative chains are not supported.
+/// This is intentional: it keeps resolution single-pass and avoids cycle
+/// detection complexity for a feature whose primary use is "spawn an enemy
+/// 10 units off this landmark".
+///
+/// Resolution failures (missing anchor) are silently skipped — the affected
+/// entity will produce its own error when its position is resolved at spawn
+/// time, so this helper doesn't need to duplicate error reporting.
+pub fn build_named_entity_positions(world: &WorldConfig) -> HashMap<String, [f32; 3]> {
+    let mut out = HashMap::new();
+    for ent in &world.entities {
+        let Some(name) = ent.name.as_ref() else { continue };
+        // Skip entities whose own position is relative_to-based — their
+        // position isn't valid as a base for further relative_to lookups.
+        if ent.relative_to.is_some() {
+            continue;
+        }
+        if let Ok(pos) = resolve_entity_position(ent, &world.anchors) {
+            out.insert(name.clone(), pos);
+        }
+    }
+    out
+}
+
 pub fn resolve_entity_position(
     entity_inst: &crate::world::config::WorldEntity,
     anchors: &HashMap<String, [f32; 3]>,
 ) -> Result<[f32; 3], String> {
+    resolve_entity_position_with(entity_inst, anchors, &HashMap::new())
+}
+
+/// Extended position resolver supporting `relative_to`+`offset`.
+///
+/// `entities_by_name` maps already-resolved named entity positions; callers
+/// performing two-pass spawning populate it with results from the first pass.
+/// Resolution precedence: `relative_to` → `anchor` → inline `position` →
+/// origin. A `relative_to` that doesn't appear in `entities_by_name` (forward
+/// reference or typo) is an error.
+pub fn resolve_entity_position_with(
+    entity_inst: &crate::world::config::WorldEntity,
+    anchors: &HashMap<String, [f32; 3]>,
+    entities_by_name: &HashMap<String, [f32; 3]>,
+) -> Result<[f32; 3], String> {
+    if let Some(name) = entity_inst.relative_to.as_ref() {
+        let base = entities_by_name.get(name).ok_or_else(|| {
+            format!(
+                "Entity (template '{}') references unknown relative_to entity '{}' \
+                 (must be a previously-declared named entity in the same world)",
+                entity_inst.template_path, name
+            )
+        })?;
+        let ox = entity_inst.offset.first().copied().unwrap_or(0.0);
+        let oy = entity_inst.offset.get(1).copied().unwrap_or(0.0);
+        let oz = entity_inst.offset.get(2).copied().unwrap_or(0.0);
+        return Ok([base[0] + ox, base[1] + oy, base[2] + oz]);
+    }
     if let Some(name) = entity_inst.anchor.as_ref() {
         let pos = anchors.get(name).ok_or_else(|| {
             format!(
@@ -931,6 +999,91 @@ anchor = "patrol_alpha"
         let anchors = anchor_table(&[("a", [1.0, 2.0, 3.0])]);
         let pos = resolve_entity_position(&entity, &anchors).unwrap();
         assert_eq!(pos, [1.0, 2.0, 3.0]);
+    }
+
+    // ── relative_to + offset (PRD #337 — closing AC) ──────────────────────
+
+    fn resolved_table(entries: &[(&str, [f32; 3])]) -> HashMap<String, [f32; 3]> {
+        entries
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), *v))
+            .collect()
+    }
+
+    #[test]
+    fn resolve_entity_position_relative_to_adds_offset_to_referenced_entity() {
+        let entity = WorldEntity {
+            template_path: "assets/entities/pirate_raider.toml".into(),
+            relative_to: Some("starbase_alpha".into()),
+            offset: vec![10.0, 0.0, -5.0],
+            ..Default::default()
+        };
+        let resolved = resolved_table(&[("starbase_alpha", [100.0, 0.0, 200.0])]);
+        let pos = resolve_entity_position_with(&entity, &HashMap::new(), &resolved).unwrap();
+        assert_eq!(pos, [110.0, 0.0, 195.0]);
+    }
+
+    #[test]
+    fn resolve_entity_position_relative_to_with_missing_offset_uses_zero() {
+        let entity = WorldEntity {
+            template_path: "x.toml".into(),
+            relative_to: Some("origin".into()),
+            ..Default::default()
+        };
+        let resolved = resolved_table(&[("origin", [5.0, 6.0, 7.0])]);
+        let pos = resolve_entity_position_with(&entity, &HashMap::new(), &resolved).unwrap();
+        assert_eq!(pos, [5.0, 6.0, 7.0]);
+    }
+
+    #[test]
+    fn resolve_entity_position_relative_to_errors_on_unknown_reference() {
+        let entity = WorldEntity {
+            template_path: "x.toml".into(),
+            relative_to: Some("ghost".into()),
+            ..Default::default()
+        };
+        let err = resolve_entity_position_with(&entity, &HashMap::new(), &HashMap::new())
+            .unwrap_err();
+        assert!(
+            err.contains("ghost") && err.contains("relative_to"),
+            "error must mention missing reference and relative_to: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_entity_position_relative_to_wins_over_anchor_and_position() {
+        let entity = WorldEntity {
+            template_path: "x.toml".into(),
+            anchor: Some("a".into()),
+            position: vec![999.0, 999.0, 999.0],
+            relative_to: Some("base".into()),
+            offset: vec![1.0, 1.0, 1.0],
+            ..Default::default()
+        };
+        let anchors = anchor_table(&[("a", [50.0, 50.0, 50.0])]);
+        let resolved = resolved_table(&[("base", [10.0, 0.0, 0.0])]);
+        let pos = resolve_entity_position_with(&entity, &anchors, &resolved).unwrap();
+        assert_eq!(pos, [11.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn parse_world_accepts_relative_to_and_offset_on_entity() {
+        let toml = r#"
+[[entity]]
+template_path = "assets/entities/starbase_alpha.toml"
+name          = "starbase_alpha"
+position      = [100.0, 0.0, 200.0]
+
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+relative_to   = "starbase_alpha"
+offset        = [10.0, 0.0, -5.0]
+"#;
+        let world = parse_world(toml).expect("parse");
+        assert_eq!(world.entities.len(), 2);
+        let raider = &world.entities[1];
+        assert_eq!(raider.relative_to.as_deref(), Some("starbase_alpha"));
+        assert_eq!(raider.offset, vec![10.0, 0.0, -5.0]);
     }
 
     #[test]

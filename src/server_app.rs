@@ -726,6 +726,10 @@ fn setup_world(
 
     let config_cache = crate::config_cache::get_config_cache();
 
+    // Pre-resolve named-entity positions so anonymous entries using
+    // `relative_to` can be positioned (PRD #337).
+    let named_positions = crate::world::config::build_named_entity_positions(&world_config);
+
     for entity_inst in &world_config.entities {
         if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::Immediate {
             continue;
@@ -759,14 +763,16 @@ fn setup_world(
         };
 
         let uuid = crate::entity_loader::assign_uuid();
-        let pos = if entity_inst.position.len() >= 3 {
-            Vec3::new(
-                entity_inst.position[0],
-                entity_inst.position[1],
-                entity_inst.position[2],
-            )
-        } else {
-            Vec3::ZERO
+        let pos = match crate::world::config::resolve_entity_position_with(
+            entity_inst,
+            &world_config.anchors,
+            &named_positions,
+        ) {
+            Ok(p) => Vec3::new(p[0], p[1], p[2]),
+            Err(e) => {
+                bevy::log::error!("setup_world: {e}");
+                continue;
+            }
         };
 
         crate::entity_spawner::spawn_entity(

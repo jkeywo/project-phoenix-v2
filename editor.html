@@ -6,6 +6,13 @@
   <title>Scenario Editor</title>
   <link rel="stylesheet" href="editor/style.css">
   <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "smol-toml": "https://esm.sh/smol-toml@1.6.1"
+    }
+  }
+  </script>
   <script type="module">
     import { parse, stringify } from 'https://esm.sh/smol-toml@1.3.1';
     window.tomlParse = parse;
@@ -13,6 +20,39 @@
   </script>
 </head>
 <body>
+  <!-- V2: Browser not supported banner -->
+  <div id="browser-not-supported" class="v2-banner v2-banner-error hidden">
+    <strong>Browser not supported.</strong> The Scenario Editor requires the File System Access API, which is only available in Chromium-based browsers (Chrome, Edge, Opera). Use a supported browser to edit files.
+  </div>
+
+  <!-- V2: Root picker -->
+  <div id="root-picker" class="v2-splash hidden">
+    <h1>Project Phoenix — Scenario Editor</h1>
+    <p>Select your project root folder to enable editing of world and entity files.</p>
+    <button id="pickRootBtn">Pick Project Root…</button>
+  </div>
+
+  <!-- V2: Editor workspace -->
+  <div id="v2-editor" class="hidden">
+    <div class="v2-root-status">
+      <span id="v2-root-label"></span>
+      <button id="v2-change-root-btn">Change root</button>
+    </div>
+    <div class="v2-mode-switcher">
+      <button class="v2-mode-tab active" data-mode="Scenario">Scenario</button>
+      <button class="v2-mode-tab" data-mode="Entity">Entity</button>
+      <button class="v2-mode-tab" data-mode="Definitions">Definitions</button>
+    </div>
+    <div class="v2-toolbar">
+      <button id="v2-open-btn">Open File…</button>
+      <button id="v2-save-btn">Save</button>
+      <span id="v2-status"></span>
+    </div>
+    <div class="v2-workspace">
+      <textarea id="v2-file-content" class="v2-editor-textarea" spellcheck="false" placeholder="Open a TOML file to edit…"></textarea>
+    </div>
+  </div>
+
   <div id="app">
     <!-- Toolbar -->
     <div id="toolbar">
@@ -178,6 +218,7 @@
   </div>
 
   <!-- Scripts -->
+  <script type="module" src="editor/app-v2.js"></script>
   <script type="module" src="editor/app.js"></script>
 </body>
 </html>

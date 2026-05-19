@@ -1,0 +1,65 @@
+const DEFAULT_MODES = ['Scenario', 'Entity', 'Definitions'];
+
+export class ModeShell {
+  constructor(modes = DEFAULT_MODES) {
+    this._modes = [...modes];
+    this._currentMode = modes[0];
+    this._openFiles = {};
+    this._dirtyFiles = {};
+
+    for (const mode of modes) {
+      this._openFiles[mode] = [];
+      this._dirtyFiles[mode] = {};
+    }
+  }
+
+  getCurrentMode() {
+    return this._currentMode;
+  }
+
+  getModes() {
+    return [...this._modes];
+  }
+
+  switchMode(mode) {
+    if (!this._modes.includes(mode)) {
+      return false;
+    }
+    this._currentMode = mode;
+    return true;
+  }
+
+  getOpenFiles(mode) {
+    return this._openFiles[mode];
+  }
+
+  setOpenFiles(mode, files) {
+    if (!this._openFiles[mode]) {
+      return;
+    }
+    this._openFiles[mode] = [...files];
+  }
+
+  isDirty(mode, filePath) {
+    if (!this._dirtyFiles[mode]) return false;
+    return !!this._dirtyFiles[mode][filePath];
+  }
+
+  markDirty(mode, filePath, dirty) {
+    if (!this._dirtyFiles[mode]) return;
+    if (dirty) {
+      this._dirtyFiles[mode][filePath] = true;
+    } else {
+      delete this._dirtyFiles[mode][filePath];
+    }
+  }
+
+  hasAnyDirty() {
+    for (const mode of this._modes) {
+      if (Object.keys(this._dirtyFiles[mode]).length > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+}

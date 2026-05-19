@@ -262,6 +262,19 @@ pub fn wasm_load_world_content(path: String, toml_str: String) -> Result<JsValue
     crate::config_cache::wasm_load_world_content(path, toml_str)
 }
 
+/// Unified world loader: a single TOML file containing both the map (anchors,
+/// global config, immediate entity instances) and the scenario (named spawns,
+/// triggers, comms templates).
+///
+/// Internally calls both `wasm_load_map` and `wasm_load_world_content` on the
+/// same TOML string. Either half failing surfaces as `Err`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValue> {
+    crate::config_cache::wasm_load_map(toml_str.clone())?;
+    crate::config_cache::wasm_load_world_content(path, toml_str)
+}
+
 /// Return the `default_scenario` path from the loaded map config, or `undefined`.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]

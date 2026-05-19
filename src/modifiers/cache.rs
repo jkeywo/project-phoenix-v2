@@ -384,7 +384,7 @@ fn format_source(source: &ModifierSource) -> String {
         ModifierSource::Console(c) => format!("Console({c:?})"),
         ModifierSource::ImpulseDrive => "ImpulseDrive".to_string(),
         ModifierSource::RegionEffect { uuid } => format!("Region({})", &uuid.to_string()[..8]),
-        ModifierSource::Scenario { id, tag } => format!("Scenario({id}/{tag})"),
+        ModifierSource::World { id, tag } => format!("World({id}/{tag})"),
     }
 }
 

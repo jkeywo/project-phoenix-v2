@@ -1,32 +1,32 @@
-# The Aphelion Protocol — Finale
+﻿# The Aphelion Protocol ΓÇö Finale
 #
 # Loaded when Ironveil is destroyed OR after the 600 s fallback timer.
 # The Kobayashi Maru: two possible responses, both end with the ship destroyed.
 # The choice is between saving people now (Shield Containment) and potentially
 # saving more later (Fight and Broadcast).
 #
-# Option 1 — Shield Containment (always available):
+# Option 1 ΓÇö Shield Containment (always available):
 #   Engineering routes all power to shields; Helm positions Ardent between
 #   Ashrender and the station; Science tunes shields to Ashrender's resonance
 #   frequency. Ardent absorbs the discharge and is destroyed. Station saved.
 #
-# Option 2 — Fight and Broadcast (unlocked by completing a path):
+# Option 2 ΓÇö Fight and Broadcast (unlocked by completing a path):
 #   Ardent holds off escalating Harrow reinforcement waves while a contact
 #   transmits something that may shape the war to come. The longer the crew
 #   survives, the better the outcome. Ardent is eventually destroyed.
 #   What is being broadcast depends on which path the crew chose:
 #     Path A (path_a_chosen): Dr. Sol Varen transmits a peace record to
-#       Alliance Command — more systems receive it the longer Ardent holds.
+#       Alliance Command ΓÇö more systems receive it the longer Ardent holds.
 #     Path B (path_b_chosen): Dr. Myst broadcasts resonance data that will
-#       degrade the weapon's effectiveness — fewer casualties in the war.
+#       degrade the weapon's effectiveness ΓÇö fewer casualties in the war.
 #     Path C (path_c_chosen): Ardent itself broadcasts the Harrow manifest
-#       on open channels — more factions receive the evidence, narrowing
+#       on open channels ΓÇö more factions receive the evidence, narrowing
 #       Harrow's political cover for starting the war.
 #
 # Broadcast tier flags (set as waves are cleared):
 #   broadcast_tier_1    Wave 1 cleared (minimal reach)
 #   broadcast_tier_2    Wave 2 cleared (significant reach)
-#   broadcast_tier_3    Wave 3 cleared (maximum reach — rare)
+#   broadcast_tier_3    Wave 3 cleared (maximum reach ΓÇö rare)
 #
 # Requires: Draft 10 (Region entities) for radiation zone spawn.
 #           Schema additions: spawn_entity action, on_all_destroyed condition,
@@ -38,14 +38,14 @@ preload = [
     "assets/entities/ship_harrow_warhawk.toml",
 ]
 
-# ── SPAWN RADIATION ZONE CENTRED ON ASHRENDER ─────────────────────────────────
+# ΓöÇΓöÇ SPAWN RADIATION ZONE CENTRED ON ASHRENDER ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[spawn]]
 entity = "assets/entities/region_radiation_zone.toml"
 position = [620.0, 0.0, -380.0]
 name = "aphelion_radiation_zone"
 
-# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OBJECTIVES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "respond_to_the_protocol"
@@ -57,12 +57,12 @@ id = "protect_axiom_station"
 text = "Protect Axiom Station from the weapon discharge."
 auto_add = true
 
-# ── OPENING COMMS ─────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OPENING COMMS ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[comms]]
 id = "aphelion_warning"
 from = "I.V. Ashrender"
-subject = "WARNING — APHELION PROTOCOL ACTIVE"
+subject = "WARNING ΓÇö APHELION PROTOCOL ACTIVE"
 message = "APHELION PROTOCOL IS NOW ACTIVE. Target: Axiom Station. Secondary: Kaleth Prime. Discharge in twenty minutes."
 trigger = "on_load"
 
@@ -73,7 +73,7 @@ subject = "URGENT"
 message = "Ardent, we are reading a weapons charge on I.V. Ashrender. You are authorised to use all necessary force. Stop that weapon."
 trigger = "on_load"
 
-# ── TRIGGERS — CHOICE PRESENTATION (flag-gated) ───────────────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö CHOICE PRESENTATION (flag-gated) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 #
 # Four on_load triggers, one per flag state, push the appropriate strategy
 # choice comms. Each choice comms presents two responses: containment (always)
@@ -99,7 +99,7 @@ condition = "on_load"
 flag_not_set = "path_chosen"
 actions = [{ push_comms = "strategy_choice_no_path" }]
 
-# Strategy choice — no path completed (containment only)
+# Strategy choice ΓÇö no path completed (containment only)
 [[comms]]
 id = "strategy_choice_no_path"
 from = "Captain's Chair"
@@ -116,7 +116,7 @@ actions = [
     { add_objective = "containment_tuning" },
 ]
 
-# Strategy choice — Path A (Dr. Sol's broadcast)
+# Strategy choice ΓÇö Path A (Dr. Sol's broadcast)
 [[comms]]
 id = "strategy_choice_path_a"
 from = "Captain's Chair"
@@ -142,7 +142,7 @@ actions = [
     { spawn_entity = "assets/entities/ship_harrow_patrol.toml", position = [400.0, 0.0, -600.0], name = "wave_1_patrol_a" },
 ]
 
-# Strategy choice — Path B (Dr. Myst's resonance data)
+# Strategy choice ΓÇö Path B (Dr. Myst's resonance data)
 [[comms]]
 id = "strategy_choice_path_b"
 from = "Captain's Chair"
@@ -168,7 +168,7 @@ actions = [
     { spawn_entity = "assets/entities/ship_harrow_patrol.toml", position = [400.0, 0.0, -600.0], name = "wave_1_patrol_a" },
 ]
 
-# Strategy choice — Path C (manifest broadcast)
+# Strategy choice ΓÇö Path C (manifest broadcast)
 [[comms]]
 id = "strategy_choice_path_c"
 from = "Captain's Chair"
@@ -194,7 +194,7 @@ actions = [
     { spawn_entity = "assets/entities/ship_harrow_patrol.toml", position = [400.0, 0.0, -600.0], name = "wave_1_patrol_a" },
 ]
 
-# ── SHIELD CONTAINMENT PATH ───────────────────────────────────────────────────
+# ΓöÇΓöÇ SHIELD CONTAINMENT PATH ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "containment_position"
@@ -215,9 +215,9 @@ auto_add = false
 id = "containment_briefing"
 from = "Engineering"
 subject = "Power Routing"
-message = "Understood. Routing everything to shields. Weapons, impulse, and life support will degrade. Science — we need that frequency now."
+message = "Understood. Routing everything to shields. Weapons, impulse, and life support will degrade. Science ΓÇö we need that frequency now."
 
-# Containment: ship destroyed → station saved → war begins
+# Containment: ship destroyed ΓåÆ station saved ΓåÆ war begins
 [[trigger]]
 condition = "on_player_destroyed"
 flag_is_set = "containment_active"
@@ -241,16 +241,16 @@ actions = [
 [[comms]]
 id = "war_begins_containment"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
-message = "Axiom Station is intact. Ardent is gone. The Council has confirmed a state of conflict. Whatever you did out there — we saw it."
+subject = "State of Conflict ΓÇö Alliance Wide"
+message = "Axiom Station is intact. Ardent is gone. The Council has confirmed a state of conflict. Whatever you did out there ΓÇö we saw it."
 
 [[comms]]
 id = "war_begins_containment_with_rescue"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
-message = "Axiom Station is intact. Ardent is gone — but the engineers they pulled from that belt made it count. The Council has confirmed a state of conflict."
+subject = "State of Conflict ΓÇö Alliance Wide"
+message = "Axiom Station is intact. Ardent is gone ΓÇö but the engineers they pulled from that belt made it count. The Council has confirmed a state of conflict."
 
-# ── BROADCAST PATH — WAVE SYSTEM ──────────────────────────────────────────────
+# ΓöÇΓöÇ BROADCAST PATH ΓÇö WAVE SYSTEM ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "broadcast_hold"
@@ -261,13 +261,13 @@ auto_add = false
 id = "broadcast_briefing_a"
 from = "Dr. Sol Varen"
 subject = "Beginning Transmission"
-message = "I'm on the channel. Broadcasting the peace record to every Alliance relay I can reach. Hold them off, Ardent — every second matters."
+message = "I'm on the channel. Broadcasting the peace record to every Alliance relay I can reach. Hold them off, Ardent ΓÇö every second matters."
 
 [[comms]]
 id = "broadcast_briefing_b"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Beginning Transmission"
-message = "Transmitting resonance degradation data to every research station in the sector. Hold them off — the more time I have, the better the countermeasures."
+message = "Transmitting resonance degradation data to every research station in the sector. Hold them off ΓÇö the more time I have, the better the countermeasures."
 
 [[comms]]
 id = "broadcast_briefing_c"
@@ -275,7 +275,7 @@ from = "Tactical"
 subject = "Broadcast Active"
 message = "Manifest on all open channels. Harrow will respond fast. Every wave we hold off is another system that receives the evidence."
 
-# Wave 1 cleared — set tier 1, spawn wave 2
+# Wave 1 cleared ΓÇö set tier 1, spawn wave 2
 [[trigger]]
 condition = "on_all_destroyed"
 entities = ["wave_1_patrol_a"]
@@ -291,9 +291,9 @@ actions = [
 id = "wave_1_cleared"
 from = "Tactical"
 subject = "Wave Clear"
-message = "First wave down. Signal is reaching the inner systems. More inbound — bearing 220."
+message = "First wave down. Signal is reaching the inner systems. More inbound ΓÇö bearing 220."
 
-# Wave 2 cleared — set tier 2, spawn wave 3
+# Wave 2 cleared ΓÇö set tier 2, spawn wave 3
 [[trigger]]
 condition = "on_all_destroyed"
 entities = ["wave_2_patrol_a", "wave_2_patrol_b"]
@@ -308,9 +308,9 @@ actions = [
 id = "wave_2_cleared"
 from = "Tactical"
 subject = "Wave Clear"
-message = "Second wave down. Signal is past the relay stations — it's in the deep net now. Warhawk on approach."
+message = "Second wave down. Signal is past the relay stations ΓÇö it's in the deep net now. Warhawk on approach."
 
-# Wave 3 cleared — set tier 3
+# Wave 3 cleared ΓÇö set tier 3
 [[trigger]]
 condition = "on_all_destroyed"
 entities = ["wave_3_warhawk"]
@@ -324,9 +324,9 @@ actions = [
 id = "wave_3_cleared"
 from = "Science"
 subject = "Broadcast Complete"
-message = "Signal confirmed at Alliance Command. It's done, Ardent. Whatever comes next — they know."
+message = "Signal confirmed at Alliance Command. It's done, Ardent. Whatever comes next ΓÇö they know."
 
-# ── BROADCAST OUTCOMES — SHIP DESTROYED (flag-gated by path + tier) ───────────
+# ΓöÇΓöÇ BROADCAST OUTCOMES ΓÇö SHIP DESTROYED (flag-gated by path + tier) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 #
 # Triggers fire on on_player_destroyed. The highest tier flag wins; the engine
 # should evaluate these in order (tier_3 first). Path-specific text describes
@@ -367,19 +367,19 @@ actions = [
 [[comms]]
 id = "war_begins_a_tier3"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
+subject = "State of Conflict ΓÇö Alliance Wide"
 message = "Ardent is gone. Dr. Varen's peace record reached every Alliance world. When the history is written, people will know there was another way. The Council has confirmed a state of conflict."
 
 [[comms]]
 id = "war_begins_a_tier2"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
+subject = "State of Conflict ΓÇö Alliance Wide"
 message = "Ardent is gone. Dr. Varen's record reached the inner systems before the channel was jammed. Not everyone heard it. But enough did. The Council has confirmed a state of conflict."
 
 [[comms]]
 id = "war_begins_a_tier1"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
+subject = "State of Conflict ΓÇö Alliance Wide"
 message = "Ardent is gone. Dr. Varen's transmission reached a handful of relay stations before Harrow cut it. Some will remember. The Council has confirmed a state of conflict."
 
 # Path B outcomes
@@ -417,19 +417,19 @@ actions = [
 [[comms]]
 id = "war_begins_b_tier3"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
+subject = "State of Conflict ΓÇö Alliance Wide"
 message = "Ardent is gone. Dr. Myst's resonance data reached every research station in the sector. The war will be shorter for it. The Council has confirmed a state of conflict."
 
 [[comms]]
 id = "war_begins_b_tier2"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
+subject = "State of Conflict ΓÇö Alliance Wide"
 message = "Ardent is gone. Dr. Myst's data reached most of the sector's research network. Alliance weapons engineers have what they need. The Council has confirmed a state of conflict."
 
 [[comms]]
 id = "war_begins_b_tier1"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
+subject = "State of Conflict ΓÇö Alliance Wide"
 message = "Ardent is gone. Dr. Myst's data made it to a few stations before the channel died. It's a start. The Council has confirmed a state of conflict."
 
 # Path C outcomes
@@ -467,22 +467,22 @@ actions = [
 [[comms]]
 id = "war_begins_c_tier3"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
+subject = "State of Conflict ΓÇö Alliance Wide"
 message = "Ardent is gone. The manifest reached Alliance Command and twenty neutral worlds. House Harrow is already facing censure votes in the Conclave. The Council has confirmed a state of conflict."
 
 [[comms]]
 id = "war_begins_c_tier2"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
-message = "Ardent is gone. The manifest reached the inner systems — Harrow's story about a provocation is falling apart. The Council has confirmed a state of conflict."
+subject = "State of Conflict ΓÇö Alliance Wide"
+message = "Ardent is gone. The manifest reached the inner systems ΓÇö Harrow's story about a provocation is falling apart. The Council has confirmed a state of conflict."
 
 [[comms]]
 id = "war_begins_c_tier1"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
+subject = "State of Conflict ΓÇö Alliance Wide"
 message = "Ardent is gone. The manifest reached a handful of systems before Harrow jammed the channel. Some will ask questions. The Council has confirmed a state of conflict."
 
-# ── TRIGGER — WEAPON FIRES (Ashrender survives full charge, no response) ──────
+# ΓöÇΓöÇ TRIGGER ΓÇö WEAPON FIRES (Ashrender survives full charge, no response) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_timer"
@@ -498,8 +498,8 @@ actions = [
 [[comms]]
 id = "weapon_fired"
 from = "I.V. Ashrender"
-subject = "APHELION — DISCHARGE COMPLETE"
-message = "Axiom Station — direct hit. Kaleth Prime — secondary discharge confirmed. The Accord is over."
+subject = "APHELION ΓÇö DISCHARGE COMPLETE"
+message = "Axiom Station ΓÇö direct hit. Kaleth Prime ΓÇö secondary discharge confirmed. The Accord is over."
 
 [[comms.responses]]
 text = "[No response]"
@@ -508,5 +508,5 @@ follow_up = "war_begins_no_response"
 [[comms]]
 id = "war_begins_no_response"
 from = "Starcorp Command"
-subject = "State of Conflict — Alliance Wide"
-message = "The Alliance Council has confirmed a state of conflict with the Imperium. All vessels: defensive posture authorised. Ardent — whatever happened out there, we needed you."
+subject = "State of Conflict ΓÇö Alliance Wide"
+message = "The Alliance Council has confirmed a state of conflict with the Imperium. All vessels: defensive posture authorised. Ardent ΓÇö whatever happened out there, we needed you."

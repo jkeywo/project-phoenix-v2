@@ -24,10 +24,10 @@ pub enum ModifierSource {
     Console(Console),
     ImpulseDrive,
     RegionEffect { uuid: Uuid },
-    /// A modifier applied by a scenario trigger. The `(id, tag)` pair is the
-    /// identity key: two applications with the same pair replace each other
-    /// via add-or-update semantics.
-    Scenario { id: String, tag: String },
+    /// A modifier applied by a world trigger (formerly "scenario"). The
+    /// `(id, tag)` pair is the identity key: two applications with the same
+    /// pair replace each other via add-or-update semantics.
+    World { id: String, tag: String },
 }
 
 impl Eq for ModifierSource {}
@@ -46,7 +46,7 @@ impl std::hash::Hash for ModifierSource {
                 2u8.hash(state);
                 uuid.hash(state);
             }
-            ModifierSource::Scenario { id, tag } => {
+            ModifierSource::World { id, tag } => {
                 3u8.hash(state);
                 id.hash(state);
                 tag.hash(state);

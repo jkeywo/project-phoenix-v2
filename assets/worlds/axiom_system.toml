@@ -1,4 +1,4 @@
-default_scenario = "assets/scenarios/before_the_fire.toml"
+﻿default_scenario = "assets/scenarios/before_the_fire.toml"
 
 [global]
 seed = 137

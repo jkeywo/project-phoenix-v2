@@ -11,13 +11,27 @@
 import { test, expect } from './fixtures';
 import { readHostPeerId, createTestClient, createServerPage } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
 
-// Custom scenario: raider spawned 20 units in front of the ship simulation
-// origin (0, 0, 0).  The player ship entity is placed at (150, 0, 0) in the
-// map TOML but the ShipState simulation always starts at (0, 0, 0); range
-// checks in handle_set_target use ShipState, so the raider must be near the
-// simulation origin, not the entity spawn position.
-const CLOSE_RAIDER_SCENARIO = `
+// Load the real default world and append a close-range raider spawn so that
+// the test's SetTarget call passes the in-range gate. The unified world TOML
+// must contain BOTH the map half (anchors, [[entity]], asteroid fields) and
+// the scenario half (named [[spawn]] entries), so we cannot stub it with a
+// scenario fragment alone. We also strip the default `raider` spawn (which
+// is positioned at the far patrol anchor) so there is exactly one raider for
+// the test to target.
+const REAL_WORLD = fs.readFileSync(
+  path.join(__dirname, '../../assets/worlds/default.toml'),
+  'utf-8',
+);
+const WORLD_WITHOUT_FAR_RAIDER = REAL_WORLD.replace(
+  /\[\[spawn\]\]\s*\nname\s*=\s*"raider"[\s\S]*?(?=\n\[\[|$)/,
+  '',
+);
+const CLOSE_RAIDER_WORLD = WORLD_WITHOUT_FAR_RAIDER + `
+
+# Smoke-test override: a raider 20 units in front of the simulation origin.
 [[spawn]]
 name        = "raider"
 entity_path = "assets/entities/pirate_raider.toml"
@@ -38,14 +52,10 @@ async function waitForStation(
 }
 
 async function startGameWithTactical(context: BrowserContext) {
-  // Intercept the default scenario with our close-raider variant.
-  await context.route('**/assets/scenarios/default.toml', (route) =>
-    route.fulfill({ contentType: 'text/plain', body: CLOSE_RAIDER_SCENARIO }),
-  );
-  // Stub out the patrol scenario (loaded as an extra_scenario by the map) so
-  // a second raider doesn't spawn far away and cause SetTarget to reject by range.
-  await context.route('**/assets/scenarios/patrol.toml', (route) =>
-    route.fulfill({ contentType: 'text/plain', body: '# empty\n' }),
+  // Intercept the unified world TOML with our close-raider variant (real
+  // world content + appended close-range raider spawn).
+  await context.route('**/assets/worlds/default.toml', (route) =>
+    route.fulfill({ contentType: 'text/plain', body: CLOSE_RAIDER_WORLD }),
   );
 
   const serverPage = await context.newPage();

@@ -134,10 +134,12 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 - Player ship spawns via `[[entity]]` with `spawn_on = "game_start"` — ship does not exist during the lobby phase.
 - Every spawned entity has a server-assigned UUID; an optional human-readable `id` from the instance is also passed through to wire snapshots.
 
-### Map TOML
-- A map TOML is a list of `[[entity]]` instances plus a `default_scenario` reference, an optional `extra_scenarios = [...]` list of additional scenario paths to preload alongside the default at startup (e.g. `assets/maps/default.toml:2`), and a top-level `seed`.
-- Named spawn anchors are declared on the map and referenced by name from scenario spawn entries; positions never need to be hardcoded in scripts.
+### World TOML
+- A world TOML (`assets/worlds/*.toml`) is the single content file for a session. It declares the global `seed`, named `[anchors]`, a list of `[[entity]]` instances (the "map half"), named `[[spawn]]` entries (the "scenario half" — UUID-assigned, trigger/comms-eligible), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries.
+- Internally the parser is split into two passes (`MapConfig` reads `[anchors]`/`[[entity]]`/`[global]`; `ScenarioConfig` reads `[[spawn]]`/`[[trigger]]`/`[[comms]]`/`title`/`description`); the two-block schema and the two-type split are tracked by PRD #337 for full unification into one `[[entity]]` block and one `WorldConfig` struct.
+- Named spawn anchors are declared at the top of the world file and referenced by name from `[[spawn]]` entries' `anchor = "..."` field; positions never need to be hardcoded in scripts.
 - A single global seed drives all deterministic generation; per-field index offsets prevent reshuffling when one field's config changes.
+- Scenario chaining (`load_scenario` / `unload_scenario` actions) is **not supported.** Each session loads exactly one world file at startup and runs it to completion.
 
 ### Asteroids and asteroid fields
 - An asteroid field is an entity with inner radius, outer radius, density, and a list of gameplay/cosmetic asteroid type paths.
@@ -180,17 +182,14 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 
 ---
 
-## Scenarios & Triggers
+## World Files & Triggers
 
-### Scenario engine
-- Scenarios are TOML files in `assets/scenarios/`, fetched at runtime by JS and passed into Rust via `wasm_load_scenario(path, toml_str)` (WASM) or read from disk (native).
-- A scenario can spawn entities, react to trigger conditions, fire actions, manage objectives, and script comms exchanges.
-- **Loading is additive.** `load_scenario` does not unload any existing scenario. Multiple scenarios can be active simultaneously, each with their own entities, triggers, objectives, and comms. Objectives from all active scenarios appear together on the captain's panel.
-- **Scenario identity is its file path.** The path string is the stable runtime key. A `load_scenario` with a path that is already active is a no-op (not a second instance). Active scenarios are tracked in a `HashMap<path, ScenarioRuntime>`.
-- **Entity ownership.** Every entity spawned by a scenario carries a `ScenarioOwner(path)` component. This is the sole mechanism for tracking which entities belong to which scenario.
-- **Explicit unloading.** `unload_scenario` is a separate trigger action. On execution: all AI entities owned by the scenario receive an `on_scenario_unloaded` transition **immediately** (before any other cleanup), comms messages owned by the scenario are marked orphaned ("transmission ended", responses disabled), then the scenario is removed from the active map. Owned entities are **not** despawned — they persist and continue acting normally. They lose their `ScenarioOwner` component and become self-directed.
-- The default scenario is always loaded at startup; it carries the fixed world furniture for the session.
-- Scenario triggers fire only the first time their condition is met per scenario lifetime (single-shot).
+### World engine
+- World files are TOMLs in `assets/worlds/`, fetched at runtime by JS and passed into Rust via a single `wasm_load_world(path, toml_str)` call (WASM) or read from disk (native).
+- A world file can spawn entities, react to trigger conditions, fire actions, manage objectives, and script comms exchanges — all the things the old separate "scenario" file used to do, plus the static layout (anchors, entity instances) the old separate "map" file used to do.
+- **One world per session.** Scenario chaining is removed. The `LoadScenario` / `UnloadScenario` trigger actions no longer exist. The world file loaded at startup is the only world for that session.
+- World triggers fire only the first time their condition is met per session (single-shot).
+- Internally `ScenarioManager`, `ScenarioOwner`, and the `scenario_path` field on triggers/comms/dialogues survive as plumbing for `CommsInbox::unload_scenario` and `ObjectiveManager::unload_scenario` cleanup paths — they are not exposed to TOML authors. PRD #337 will delete these and the multi-scenario `HashMap<path, …>` layering throughout the runtime.
 
 ### Trigger conditions
 - `on_attacked` — fires when the named entity is attacked.
@@ -673,8 +672,8 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 
 ## Configuration & Authoring
 
-### Map TOML (`assets/maps/default.toml`)
-- `seed` (global) plus `default_scenario` plus optional `extra_scenarios = [...]` (additional scenario paths preloaded alongside the default at startup) plus a list of `[[entity]]` instances and named map anchors.
+### World TOML (`assets/worlds/default.toml`)
+- `seed` (global) plus a list of `[anchors]`, a list of `[[entity]]` instances (the map half: immediate or game-start spawn, optional `overrides`), a list of named `[[spawn]]` entries (the scenario half: anchor/relative_to/absolute positioning, UUID-assigned, trigger/comms-eligible), `[[trigger]]` reactions, `[[comms]]` dialogue templates, and `[[objective]]` entries. PRD #337 will collapse `[[entity]]` and `[[spawn]]` into one block type.
 
 ### Entity TOML (`assets/entities/*.toml`)
 - Component-bag: each `[section]` present produces a Bevy component on the spawned entity.
@@ -694,9 +693,11 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 - Region effects: `[effects.blocks_impulse] / [effects.radar_dampening] / [effects.damage_zone] / [effects.slow_zone] / [effects.comms_jammed] / [effects.sensor_blind]` per template.
 - Stations: `[stations] min_players, max_players, [[stations.config]] player_count, [[stations.config.station]] name, description, consoles, next?, previous?`.
 
-### Scenario TOML (`assets/scenarios/*.toml`)
+### World TOML (`assets/worlds/*.toml`)
+- `title`, `description` — lobby display.
 - `preload = [...]` — entity paths to fetch before spawning begins.
-- `[[spawn]] template, position (anchor name | absolute | entity-relative), id?, shape?, [spawn.overrides]`.
+- `[[entity]] template_path, id?, position, spawn_on (immediate | game_start), [entity.overrides]` — static layout instances.
+- `[[spawn]] template, position (anchor name | absolute | entity-relative), id?, shape?, [spawn.overrides]` — named, trigger-eligible spawns.
 - `[[trigger]] condition, entity?, actions`.
 - `[[comms]] from, message, trigger, [[comms.responses]] text, actions` with inline `follow_up` branching.
 - `[[objective]] id, text, optional`.
@@ -708,11 +709,11 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 - `uuid`, `name`, `enemies = [<faction_uuid>, ...]`.
 
 ### Loading flow
-- Browser: JS fetches the map TOML, calls `wasm_load_map`, drains the config-request callback for entity/scenario/faction TOML files, then calls `wasm_init` when `wasm_load_config` returns `Ok(true)`.
+- Browser: JS fetches the world TOML, calls `wasm_load_world(path, toml_str)` (a single call that internally hands the same TOML to both the map and scenario parsers — see PRD #337), drains the config-request callback for entity/faction TOML files, then calls `wasm_init` when `wasm_load_config` returns `Ok(true)`.
 - Native: synchronous `std::fs` reads inside `native_config_loader` populate the config cache before the Bevy app starts.
 
 ### Static assets
-- `assets/maps/`, `assets/entities/`, `assets/scenarios/`, `assets/factions/`, `assets/complexity/`, `assets/viewscreen/` (border PNGs), `assets/fonts/` (Chakra Petch, JetBrains Mono), `assets/shaders/` (WGSL).
+- `assets/worlds/`, `assets/entities/`, `assets/factions/`, `assets/complexity/`, `assets/viewscreen/` (border PNGs), `assets/fonts/` (Chakra Petch, JetBrains Mono), `assets/shaders/` (WGSL).
 - Trunk `<link data-trunk rel="copy-dir" .../>` directives copy these into `dist/` for both `trunk serve` and `trunk build --release`.
 
 ---

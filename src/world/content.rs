@@ -56,15 +56,7 @@ pub enum TriggerCondition {
 /// An action to execute when a trigger fires.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TriggerAction {
-    /// Load and activate a new scenario from `path`. Parameters (`$name`) are
-    /// substituted before dispatch.
-    LoadScenario { path: String },
-    /// Unload an active scenario identified by `path`. On execution:
-    /// (1) AI entities carrying `ScenarioOwner(path)` receive `on_scenario_unloaded`,
-    /// (2) comms messages owned by the scenario are orphaned,
-    /// (3) the scenario is removed from the active map. Owned entities persist.
-    UnloadScenario { path: String },
-    /// Add a new mission objective owned by the current scenario.
+    /// Add a new mission objective owned by the current world.
     AddObjective { id: String, text: String, mandatory: bool },
     /// Mark an active objective as completed.
     CompleteObjective { id: String },
@@ -87,11 +79,11 @@ pub enum TriggerAction {
     /// Apply a float modifier to the target entity's `ShipModifiers`.
     ///
     /// - `entity`: spawn name resolved to UUID at runtime.
-    /// - `tag`: identity tag; paired with the scenario ID forms `ModifierSource::Scenario { id, tag }`.
+    /// - `tag`: identity tag; paired with the world ID forms `ModifierSource::World { id, tag }`.
     /// - `slot`: which `ModifierSlot` to modify.
     /// - `bonus`: additive bonus (positive = buff, negative = debuff).
     ApplyModifier { entity: String, tag: String, slot: crate::messages::ModifierSlot, bonus: f32 },
-    /// Remove a float modifier previously applied by this scenario+tag pair.
+    /// Remove a float modifier previously applied by this world+tag pair.
     ///
     /// - `entity`: spawn name resolved to UUID at runtime.
     /// - `tag`: identity tag matching the one used in `ApplyModifier`.
@@ -100,10 +92,10 @@ pub enum TriggerAction {
     /// Set a boolean flag on the target entity's `ShipModifiers`.
     ///
     /// - `entity`: spawn name resolved to UUID at runtime.
-    /// - `tag`: identity tag; paired with the scenario ID forms `ModifierSource::Scenario { id, tag }`.
+    /// - `tag`: identity tag; paired with the world ID forms `ModifierSource::World { id, tag }`.
     /// - `kind`: which `FlagKind` to set.
     ApplyFlag { entity: String, tag: String, kind: crate::flag_kind::FlagKind },
-    /// Clear a boolean flag previously set by this scenario+tag pair.
+    /// Clear a boolean flag previously set by this world+tag pair.
     ///
     /// - `entity`: spawn name resolved to UUID at runtime.
     /// - `tag`: identity tag matching the one used in `ApplyFlag`.
@@ -112,11 +104,11 @@ pub enum TriggerAction {
     /// Apply an integer modifier to the target entity's `ShipModifiers`.
     ///
     /// - `entity`: spawn name resolved to UUID at runtime.
-    /// - `tag`: identity tag; paired with the scenario ID forms `ModifierSource::Scenario { id, tag }`.
+    /// - `tag`: identity tag; paired with the world ID forms `ModifierSource::World { id, tag }`.
     /// - `slot`: which `IntModifierSlot` to modify.
     /// - `bonus`: additive integer bonus.
     ApplyIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot, bonus: i32 },
-    /// Remove an integer modifier previously applied by this scenario+tag pair.
+    /// Remove an integer modifier previously applied by this world+tag pair.
     ///
     /// - `entity`: spawn name resolved to UUID at runtime.
     /// - `tag`: identity tag matching the one used in `ApplyIntModifier`.
@@ -215,18 +207,10 @@ fn condition_matches(
 /// Substitute `$name` parameters in an action using `name_to_uuid`.
 fn substitute_action(
     action: &TriggerAction,
-    name_to_uuid: &HashMap<String, String>,
+    _name_to_uuid: &HashMap<String, String>,
 ) -> TriggerAction {
+    // No actions currently carry path parameters — all are pass-through.
     match action {
-        TriggerAction::LoadScenario { path } => {
-            let resolved = substitute_params(path, name_to_uuid);
-            TriggerAction::LoadScenario { path: resolved }
-        }
-        TriggerAction::UnloadScenario { path } => {
-            let resolved = substitute_params(path, name_to_uuid);
-            TriggerAction::UnloadScenario { path: resolved }
-        }
-        // Objective, AI-state, modifier, and flag actions carry no path parameters — pass through unchanged.
         TriggerAction::AddObjective { .. }
         | TriggerAction::CompleteObjective { .. }
         | TriggerAction::FailObjective { .. }
@@ -243,6 +227,7 @@ fn substitute_action(
 
 /// Replace `$name` tokens in a string with their UUID values from `name_to_uuid`.
 /// Tokens that have no matching entry are left unchanged.
+#[allow(dead_code)]
 fn substitute_params(s: &str, name_to_uuid: &HashMap<String, String>) -> String {
     let mut result = s.to_string();
     for (name, uuid) in name_to_uuid {
@@ -287,7 +272,7 @@ struct RawActionEntry {
     /// Used by `set_ai_state`: optional spawn entity name to write into blackboard `target`.
     #[serde(default)]
     target: Option<String>,
-    /// Used by modifier/flag actions: identity tag for `ModifierSource::Scenario`.
+    /// Used by modifier/flag actions: identity tag for `ModifierSource::World`.
     #[serde(default)]
     tag: Option<String>,
     /// Used by `apply_modifier` / `remove_modifier`: which `ModifierSlot` to affect.
@@ -458,18 +443,6 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
     let mut actions = Vec::new();
     for raw_action in raw_actions {
         let action = match raw_action.kind.as_str() {
-            "load_scenario" => {
-                let path = raw_action.path.clone().ok_or_else(|| {
-                    "Action 'load_scenario' requires a 'path' field".to_string()
-                })?;
-                TriggerAction::LoadScenario { path }
-            }
-            "unload_scenario" => {
-                let path = raw_action.path.clone().ok_or_else(|| {
-                    "Action 'unload_scenario' requires a 'path' field".to_string()
-                })?;
-                TriggerAction::UnloadScenario { path }
-            }
             "add_objective" => {
                 let id = raw_action.id.clone().ok_or_else(|| {
                     "Action 'add_objective' requires an 'id' field".to_string()
@@ -611,6 +584,41 @@ fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<Comms
         responses.push(CommsResponse { text: raw_resp.text.clone(), actions, follow_up });
     }
     Ok(responses)
+}
+
+/// A loaded world configuration — partial merger, see PRD #337.
+///
+/// **State of the merger:** Step 1 of merging map and scenario into a single
+/// world concept. The TOML files (`assets/worlds/*.toml`), the WASM loader
+/// entry point (`wasm_load_world`), and the asset directory have been unified.
+/// However, the underlying Rust types `MapConfig` and `ScenarioConfig` have
+/// NOT yet been collapsed — they remain distinct, and `parse_world` runs both
+/// parsers over the same TOML (each silently ignores fields the other owns).
+///
+/// Likewise, the spawn pipeline still has three paths
+/// (`setup_world_from_config` for map `[[entity]]` blocks,
+/// `spawn_scenario_entities` for `[[spawn]]` blocks, and `setup_world_hardcoded`
+/// for the no-world fallback), and `ScenarioManager` plus `ScenarioOwner`
+/// remain in the runtime even though scenario layering (`LoadScenario` /
+/// `UnloadScenario` actions) has been removed from the trigger language.
+///
+/// See PRD #337 for the remaining work: unify `[[entity]]` and `[[spawn]]`
+/// into one block, collapse `MapConfig` + `ScenarioConfig` into one struct,
+/// collapse the three spawn paths into one, delete `ScenarioManager` and
+/// `ScenarioOwner`, and delete the legacy `[[star]]`/`[[planet]]`/
+/// `[[asteroid_field]]` shorthand parsing.
+pub struct WorldConfig {
+    pub map: crate::map_config::MapConfig,
+    pub scenario: ScenarioConfig,
+}
+
+/// Parse a unified world TOML, running both the map and scenario parsers
+/// over the same string. See `WorldConfig` for why this still calls two
+/// parsers (PRD #337).
+pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
+    let map = crate::map_config::parse_and_validate_map_config(toml_str)?;
+    let scenario = parse_scenario(toml_str)?;
+    Ok(WorldConfig { map, scenario })
 }
 
 /// Parse a scenario TOML string into a `ScenarioConfig`.
@@ -1339,8 +1347,9 @@ condition = "on_destroyed"
 entity = "station_alpha"
 
 [[trigger.action]]
-type = "load_scenario"
-path = "scenarios/phase2.toml"
+type = "add_objective"
+id = "scenarios/phase2.toml"
+text = "scenarios/phase2.toml"
 "#;
         let config = parse_scenario(toml).unwrap();
         assert_eq!(config.triggers.len(), 1);
@@ -1351,7 +1360,7 @@ path = "scenarios/phase2.toml"
         assert_eq!(config.triggers[0].actions.len(), 1);
         assert_eq!(
             config.triggers[0].actions[0],
-            TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }
+            TriggerAction::AddObjective { id: "scenarios/phase2.toml".to_string(), text: "scenarios/phase2.toml".to_string(), mandatory: false }
         );
     }
 
@@ -1364,8 +1373,9 @@ condition = "on_timer"
 after_secs = 30.0
 
 [[trigger.action]]
-type = "load_scenario"
-path = "scenarios/timeout.toml"
+type = "add_objective"
+id = "scenarios/timeout.toml"
+text = "scenarios/timeout.toml"
 "#;
         let config = parse_scenario(toml).unwrap();
         assert_eq!(config.triggers.len(), 1);
@@ -1389,8 +1399,9 @@ condition = "on_attacked"
 entity = "convoy"
 
 [[trigger.action]]
-type = "load_scenario"
-path = "scenarios/reinforcements.toml"
+type = "add_objective"
+id = "scenarios/reinforcements.toml"
+text = "scenarios/reinforcements.toml"
 "#;
         let config = parse_scenario(toml).unwrap();
         assert_eq!(
@@ -1408,7 +1419,7 @@ path = "scenarios/reinforcements.toml"
 
         let trigger = Trigger {
             condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
+            actions: vec![TriggerAction::AddObjective { id: "scenarios/phase2.toml".to_string(), text: "scenarios/phase2.toml".to_string(), mandatory: false }],
         };
         let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
@@ -1418,7 +1429,7 @@ path = "scenarios/reinforcements.toml"
         assert_eq!(fired.len(), 1);
         assert_eq!(
             fired[0].actions[0],
-            TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }
+            TriggerAction::AddObjective { id: "scenarios/phase2.toml".to_string(), text: "scenarios/phase2.toml".to_string(), mandatory: false }
         );
     }
 
@@ -1430,7 +1441,7 @@ path = "scenarios/reinforcements.toml"
 
         let trigger = Trigger {
             condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
+            actions: vec![TriggerAction::AddObjective { id: "scenarios/phase2.toml".to_string(), text: "scenarios/phase2.toml".to_string(), mandatory: false }],
         };
         let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
@@ -1448,7 +1459,7 @@ path = "scenarios/reinforcements.toml"
 
         let trigger = Trigger {
             condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
+            actions: vec![TriggerAction::AddObjective { id: "scenarios/phase2.toml".to_string(), text: "scenarios/phase2.toml".to_string(), mandatory: false }],
         };
         let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
@@ -1469,7 +1480,7 @@ path = "scenarios/reinforcements.toml"
         let name_to_uuid = HashMap::new();
         let trigger = Trigger {
             condition: TriggerCondition::OnTimer { after_secs: 10.0 },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/late.toml".to_string() }],
+            actions: vec![TriggerAction::AddObjective { id: "scenarios/late.toml".to_string(), text: "scenarios/late.toml".to_string(), mandatory: false }],
         };
         let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
@@ -1492,7 +1503,7 @@ path = "scenarios/reinforcements.toml"
 
         let trigger = Trigger {
             condition: TriggerCondition::OnAttacked { entity_name: "convoy".to_string() },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/reinforcements.toml".to_string() }],
+            actions: vec![TriggerAction::AddObjective { id: "scenarios/reinforcements.toml".to_string(), text: "scenarios/reinforcements.toml".to_string(), mandatory: false }],
         };
         let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
@@ -1502,28 +1513,6 @@ path = "scenarios/reinforcements.toml"
         }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
-    }
-
-    // Cycle 16: parameter substitution in load_scenario path
-    #[test]
-    fn load_scenario_path_substitutes_entity_name_params() {
-        let mut name_to_uuid = HashMap::new();
-        name_to_uuid.insert("station_alpha".to_string(), "uuid-abc-123".to_string());
-
-        let trigger = Trigger {
-            condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/$station_alpha.toml".to_string() }],
-        };
-        let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
-
-        let events = vec![WorldEvent::Destroyed { uuid: "uuid-abc-123".to_string() }];
-        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
-
-        assert_eq!(fired.len(), 1);
-        assert_eq!(
-            fired[0].actions[0],
-            TriggerAction::LoadScenario { path: "scenarios/uuid-abc-123.toml".to_string() }
-        );
     }
 
     // Cycle 17: scenario with mixed spawns and triggers parses correctly
@@ -1540,8 +1529,9 @@ condition = "on_destroyed"
 entity = "station_bravo"
 
 [[trigger.action]]
-type = "load_scenario"
-path = "scenarios/follow_on.toml"
+type = "add_objective"
+id = "scenarios/follow_on.toml"
+text = "scenarios/follow_on.toml"
 "#;
         let config = parse_scenario(toml).unwrap();
         assert_eq!(config.spawns.len(), 1);
@@ -1557,11 +1547,11 @@ path = "scenarios/follow_on.toml"
 
         let trigger_a = Trigger {
             condition: TriggerCondition::OnDestroyed { entity_name: "station_a".to_string() },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/a.toml".to_string() }],
+            actions: vec![TriggerAction::AddObjective { id: "scenarios/a.toml".to_string(), text: "scenarios/a.toml".to_string(), mandatory: false }],
         };
         let trigger_b = Trigger {
             condition: TriggerCondition::OnDestroyed { entity_name: "station_b".to_string() },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/b.toml".to_string() }],
+            actions: vec![TriggerAction::AddObjective { id: "scenarios/b.toml".to_string(), text: "scenarios/b.toml".to_string(), mandatory: false }],
         };
         let mut states = vec![
             TriggerState { trigger: trigger_a, fired: false, scenario_path: "test".to_string() },
@@ -1574,7 +1564,7 @@ path = "scenarios/follow_on.toml"
         assert_eq!(fired.len(), 1);
         assert_eq!(
             fired[0].actions[0],
-            TriggerAction::LoadScenario { path: "scenarios/a.toml".to_string() }
+            TriggerAction::AddObjective { id: "scenarios/a.toml".to_string(), text: "scenarios/a.toml".to_string(), mandatory: false }
         );
     }
 
@@ -1585,7 +1575,7 @@ path = "scenarios/follow_on.toml"
 
         let trigger = Trigger {
             condition: TriggerCondition::OnDestroyed { entity_name: "ghost".to_string() },
-            actions: vec![TriggerAction::LoadScenario { path: "scenarios/ghost.toml".to_string() }],
+            actions: vec![TriggerAction::AddObjective { id: "scenarios/ghost.toml".to_string(), text: "scenarios/ghost.toml".to_string(), mandatory: false }],
         };
         let mut states = vec![TriggerState { trigger, fired: false, scenario_path: "test".to_string() }];
 
@@ -1604,8 +1594,9 @@ condition = "on_timer"
 after_secs = 5.0
 
 [[trigger.action]]
-type = "load_scenario"
-path = "scenarios/next.toml"
+type = "add_objective"
+id = "scenarios/next.toml"
+text = "scenarios/next.toml"
 "#;
         let config = parse_scenario(toml).unwrap();
         let states = trigger_states_from_config(&config, "test");
@@ -2547,13 +2538,13 @@ kind = "UnknownFlag"
 
     #[test]
     fn default_scenario_toml_parses_without_error() {
-        let toml_str = include_str!("../../assets/scenarios/default.toml");
+        let toml_str = include_str!("../../assets/worlds/default.toml");
         parse_scenario(toml_str).expect("default.toml must parse");
     }
 
     #[test]
     fn default_scenario_has_starbase_alpha_spawn() {
-        let toml_str = include_str!("../../assets/scenarios/default.toml");
+        let toml_str = include_str!("../../assets/worlds/default.toml");
         let config = parse_scenario(toml_str).expect("default.toml must parse");
         let starbase = config.spawns.iter().find(|s| s.name == "Starbase Alpha");
         assert!(starbase.is_some(), "default scenario must have a spawn named 'Starbase Alpha'");
@@ -2561,7 +2552,7 @@ kind = "UnknownFlag"
 
     #[test]
     fn default_scenario_has_starbase_alpha_comms_with_responses_and_actions() {
-        let toml_str = include_str!("../../assets/scenarios/default.toml");
+        let toml_str = include_str!("../../assets/worlds/default.toml");
         let config = parse_scenario(toml_str).expect("default.toml must parse");
         // Find the on_hailed template specifically (there is also an on_attacked distress template).
         let tmpl = config.comms.iter().find(|c| {
@@ -2584,13 +2575,13 @@ kind = "UnknownFlag"
 
     #[test]
     fn patrol_scenario_toml_parses_without_error() {
-        let toml_str = include_str!("../../assets/scenarios/patrol.toml");
+        let toml_str = include_str!("../../assets/worlds/patrol.toml");
         parse_scenario(toml_str).expect("patrol.toml must parse");
     }
 
     #[test]
     fn patrol_scenario_has_one_named_raider_spawn() {
-        let toml_str = include_str!("../../assets/scenarios/patrol.toml");
+        let toml_str = include_str!("../../assets/worlds/patrol.toml");
         let config = parse_scenario(toml_str).expect("patrol.toml must parse");
         let raider = config.spawns.iter().find(|s| s.name == "raider");
         assert!(raider.is_some(), "patrol scenario must have a spawn named 'raider'");
@@ -2604,7 +2595,7 @@ kind = "UnknownFlag"
 
     #[test]
     fn patrol_scenario_has_on_entity_destroyed_trigger_with_add_objective() {
-        let toml_str = include_str!("../../assets/scenarios/patrol.toml");
+        let toml_str = include_str!("../../assets/worlds/patrol.toml");
         let config = parse_scenario(toml_str).expect("patrol.toml must parse");
         let has_destroyed_trigger = config.triggers.iter().any(|t| {
             matches!(&t.condition, TriggerCondition::OnDestroyed { .. })
@@ -2746,55 +2737,6 @@ slot = "RepairTeams"
         assert_eq!(fired[0].actions, actions);
     }
 
-    // ── Cycle 36: unload_scenario TOML parse ────────────────────────────────
-
-    // Cycle 36a: unload_scenario parses from TOML to TriggerAction::UnloadScenario
-    #[test]
-    fn parse_unload_scenario_action() {
-        let toml = r#"
-[[spawn]]
-name = "station_alpha"
-entity_path = "entities/station.toml"
-position = [0.0, 0.0, 0.0]
-
-[[trigger]]
-condition = "on_destroyed"
-entity = "station_alpha"
-
-[[trigger.action]]
-type = "unload_scenario"
-path = "scenarios/phase1.toml"
-"#;
-        let config = parse_scenario(toml).unwrap();
-        assert_eq!(config.triggers.len(), 1);
-        assert_eq!(config.triggers[0].actions.len(), 1);
-        assert_eq!(
-            config.triggers[0].actions[0],
-            TriggerAction::UnloadScenario { path: "scenarios/phase1.toml".to_string() }
-        );
-    }
-
-    // Cycle 36b: unload_scenario requires path field
-    #[test]
-    fn parse_unload_scenario_requires_path() {
-        let toml = r#"
-[[spawn]]
-name = "e"
-entity_path = "entities/station.toml"
-position = [0.0, 0.0, 0.0]
-
-[[trigger]]
-condition = "on_destroyed"
-entity = "e"
-
-[[trigger.action]]
-type = "unload_scenario"
-"#;
-        let result = parse_scenario(toml);
-        assert!(result.is_err(), "unload_scenario without path should fail");
-        assert!(result.unwrap_err().contains("path"), "error should mention 'path'");
-    }
-
     // ── Cycle 37: ScenarioManager additive load ──────────────────────────────
 
     // Cycle 37a: loading a new scenario inserts it into the map
@@ -2854,37 +2796,16 @@ type = "unload_scenario"
     /// The default scenario file parses without error.
     #[test]
     fn default_scenario_parses_without_error() {
-        let toml = include_str!("../../assets/scenarios/default.toml");
+        let toml = include_str!("../../assets/worlds/default.toml");
         let result = parse_scenario(toml);
         assert!(result.is_ok(), "default.toml must parse without error: {:?}", result.err());
-    }
-
-    /// default.toml must declare an `on_attacked` trigger on the raider that
-    /// chains `load_scenario` to `assets/scenarios/patrol.toml`.
-    #[test]
-    fn default_scenario_raider_on_attacked_trigger_loads_patrol_scenario() {
-        let toml = include_str!("../../assets/scenarios/default.toml");
-        let config = parse_scenario(toml).expect("default.toml must parse");
-
-        let attacked_trigger = config.triggers.iter().find(|t| {
-            matches!(&t.condition, TriggerCondition::OnAttacked { entity_name } if entity_name == "raider")
-        });
-        assert!(
-            attacked_trigger.is_some(),
-            "default.toml must have an on_attacked trigger for the raider"
-        );
-
-        let has_load_patrol = attacked_trigger.unwrap().actions.iter().any(|a| {
-            matches!(a, TriggerAction::LoadScenario { path } if path == "assets/scenarios/patrol.toml")
-        });
-        assert!(has_load_patrol, "raider on_attacked trigger must include load_scenario for patrol.toml");
     }
 
     /// default.toml must declare an `on_attacked` comms template on the raider
     /// that broadcasts a distress message with no player response options.
     #[test]
     fn default_scenario_raider_on_attacked_comms_is_broadcast_distress() {
-        let toml = include_str!("../../assets/scenarios/default.toml");
+        let toml = include_str!("../../assets/worlds/default.toml");
         let config = parse_scenario(toml).expect("default.toml must parse");
 
         let raider_distress = config.comms.iter().find(|c| {
@@ -2909,7 +2830,7 @@ type = "unload_scenario"
     /// default.toml must declare an `on_attacked` comms template for Starbase Alpha.
     #[test]
     fn default_scenario_starbase_on_attacked_comms_is_broadcast_distress() {
-        let toml = include_str!("../../assets/scenarios/default.toml");
+        let toml = include_str!("../../assets/worlds/default.toml");
         let config = parse_scenario(toml).expect("default.toml must parse");
 
         let station_distress = config.comms.iter().find(|c| {
@@ -2930,13 +2851,11 @@ type = "unload_scenario"
     /// The `evaluate_triggers` + `evaluate_comms_templates` functions both fire
     /// their respective entries when an `on_attacked` world event matches.
     #[test]
-    fn default_scenario_on_attacked_fires_both_trigger_and_comms_template() {
-        let toml = include_str!("../../assets/scenarios/default.toml");
+    fn default_scenario_on_attacked_fires_comms_template() {
+        let toml = include_str!("../../assets/worlds/default.toml");
         let config = parse_scenario(toml).expect("default.toml must parse");
 
-        // Build trigger and comms template states from the parsed config.
-        let mut trigger_states = trigger_states_from_config(&config, "assets/scenarios/default.toml");
-        let mut comms_states = comms_template_states_from_config(&config, "assets/scenarios/default.toml");
+        let mut comms_states = comms_template_states_from_config(&config, "assets/worlds/default.toml");
 
         let raider_uuid = config.name_to_uuid.get("raider").expect("raider spawn must exist").clone();
         let name_to_uuid = config.name_to_uuid.clone();
@@ -2946,16 +2865,7 @@ type = "unload_scenario"
             attacker_uuid: "player-ship".to_string(),
         }];
 
-        let fired_triggers = evaluate_triggers(&mut trigger_states, &world_events, &name_to_uuid);
         let fired_comms = evaluate_comms_templates(&mut comms_states, &world_events, &name_to_uuid);
-
-        // The on_attacked trigger (load_scenario) must fire.
-        let has_load_patrol = fired_triggers.iter().any(|ft| {
-            ft.actions.iter().any(|a| {
-                matches!(a, TriggerAction::LoadScenario { path } if path == "assets/scenarios/patrol.toml")
-            })
-        });
-        assert!(has_load_patrol, "on_attacked trigger must produce LoadScenario action for patrol.toml");
 
         // The raider on_attacked comms template must fire.
         let raider_comms = fired_comms.iter().any(|fc| fc.from == "raider");

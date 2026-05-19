@@ -727,11 +727,11 @@ mod tests {
     }
 
     #[test]
-    fn server_modifier_scenario_source_round_trips() {
-        // ModifierAdded with Scenario source
+    fn server_modifier_world_source_round_trips() {
+        // ModifierAdded with World source
         let msg = ServerMessage::ModifierAdded {
-            source: crate::messages::ModifierSource::Scenario {
-                id: "before_the_fire".into(),
+            source: crate::messages::ModifierSource::World {
+                id: "default".into(),
                 tag: "speed_boost".into(),
             },
             slot: crate::messages::ModifierSlot::MaxSpeed,
@@ -740,10 +740,10 @@ mod tests {
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
 
-        // ModifierRemoved with Scenario source
+        // ModifierRemoved with World source
         let msg = ServerMessage::ModifierRemoved {
-            source: crate::messages::ModifierSource::Scenario {
-                id: "before_the_fire".into(),
+            source: crate::messages::ModifierSource::World {
+                id: "default".into(),
                 tag: "speed_boost".into(),
             },
             slot: crate::messages::ModifierSlot::MaxSpeed,
@@ -753,14 +753,14 @@ mod tests {
     }
 
     #[test]
-    fn modifier_source_scenario_hash_and_eq() {
+    fn modifier_source_world_hash_and_eq() {
         use std::collections::HashSet;
         use crate::messages::ModifierSource;
 
-        let a = ModifierSource::Scenario { id: "s1".into(), tag: "t1".into() };
-        let b = ModifierSource::Scenario { id: "s1".into(), tag: "t1".into() };
-        let c = ModifierSource::Scenario { id: "s1".into(), tag: "t2".into() };
-        let d = ModifierSource::Scenario { id: "s2".into(), tag: "t1".into() };
+        let a = ModifierSource::World { id: "s1".into(), tag: "t1".into() };
+        let b = ModifierSource::World { id: "s1".into(), tag: "t1".into() };
+        let c = ModifierSource::World { id: "s1".into(), tag: "t2".into() };
+        let d = ModifierSource::World { id: "s2".into(), tag: "t1".into() };
 
         // Same (id, tag) → equal
         assert_eq!(a, b);

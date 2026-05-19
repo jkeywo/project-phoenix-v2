@@ -1,4 +1,4 @@
-# Path B — The Scholar
+﻿# Path B ΓÇö The Scholar
 #
 # Loaded when the crew commits to working with Dr. Myst (gateway in
 # before_the_fire.toml). Contact: Dr. Myst. Reveals the weapon's resonance
@@ -23,7 +23,7 @@ id = "working_with_myst"
 text = "Continue working with Dr. Myst at the Research Outpost."
 auto_add = false
 
-# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OBJECTIVES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "analyze_resonance"
@@ -34,13 +34,13 @@ auto_add = true
 id = "locate_signal_source"
 text = "Identify the vessel responsible for the resonance signature."
 
-# ── COMMS DIALOGUE ────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ COMMS DIALOGUE ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[comms]]
 id = "myst_intro"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Anomalous Readings"
-message = "Ardent — I've been tracking a resonance signature from grid 62-Theta. It matches nothing in our database. It's not natural."
+message = "Ardent ΓÇö I've been tracking a resonance signature from grid 62-Theta. It matches nothing in our database. It's not natural."
 trigger = "on_load"
 
 [[comms.responses]]
@@ -53,7 +53,7 @@ follow_up = "myst_effect"
 
 [[comms]]
 id = "myst_source"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Re: Signal Source"
 message = "My best triangulation puts the source at the Kaleth Nebula's edge. Something large is in there, and it's charging."
 
@@ -67,15 +67,15 @@ follow_up = "myst_weapon_type"
 
 [[comms]]
 id = "myst_frequency"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Resonance Data Packet"
 message = "Transmitting now. Science console should be able to tune to it for a clean lock even through the nebula interference."
 
 [[comms]]
 id = "myst_weapon_type"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Re: Weapon Type"
-message = "Stellar resonance class. If it fires at full charge, it won't just destroy the station — it'll create a persistent quantum interference zone. Unnavigable. For decades."
+message = "Stellar resonance class. If it fires at full charge, it won't just destroy the station ΓÇö it'll create a persistent quantum interference zone. Unnavigable. For decades."
 
 [[comms.responses]]
 text = "How long do we have before full charge?"
@@ -83,9 +83,9 @@ follow_up = "myst_timeline"
 
 [[comms]]
 id = "myst_timeline"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Re: Weapon Timeline"
-message = "At current charge rate — maybe twenty minutes. There's also something else. The signal has a sub-harmonic I've never seen. Like a whisper underneath it."
+message = "At current charge rate ΓÇö maybe twenty minutes. There's also something else. The signal has a sub-harmonic I've never seen. Like a whisper underneath it."
 
 [[comms.responses]]
 text = "What kind of whisper?"
@@ -93,7 +93,7 @@ follow_up = "myst_whisper"
 
 [[comms]]
 id = "myst_whisper"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Re: Sub-harmonic"
 message = "It distorts subspace. A sustained discharge would leave that region permanently contested. I don't think that's a side effect. I think that's the point."
 
@@ -103,7 +103,7 @@ follow_up = "myst_neutral_zone"
 
 [[comms]]
 id = "myst_neutral_zone"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Re: Sub-harmonic"
 message = "Yes. They don't want to win the war. They want to redraw the map."
 
@@ -113,13 +113,13 @@ follow_up = "myst_singularity"
 
 [[comms]]
 id = "myst_singularity"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Re: The Outer Signal"
-message = "There's a coherent signal from the outer system. Not Harrow, not Alliance. Whatever it is, it's watching. I'd give anything to chase it right now — but the weapon has to come first."
+message = "There's a coherent signal from the outer system. Not Harrow, not Alliance. Whatever it is, it's watching. I'd give anything to chase it right now ΓÇö but the weapon has to come first."
 
 [[comms]]
 id = "myst_effect"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Re: Resonance Effects"
 message = "It distorts subspace. Sensors become unreliable within a significant radius. A sustained discharge would make that region of space permanently contested."
 
@@ -127,7 +127,7 @@ message = "It distorts subspace. Sensors become unreliable within a significant 
 text = "Can you locate the source precisely?"
 follow_up = "myst_source"
 
-# ── TRIGGER — SIGNAL SOURCE CONFIRMED WHEN ENTERING NEBULA ───────────────────
+# ΓöÇΓöÇ TRIGGER ΓÇö SIGNAL SOURCE CONFIRMED WHEN ENTERING NEBULA ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_entered_region"
@@ -139,9 +139,9 @@ actions = [
 
 [[comms]]
 id = "myst_confirmed"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Source Confirmed"
-message = "That's it. The Harrow vessel in there — it's already charging. Science has the lock. You have to stop it."
+message = "That's it. The Harrow vessel in there ΓÇö it's already charging. Science has the lock. You have to stop it."
 
 [[trigger]]
 condition = "on_destroyed"

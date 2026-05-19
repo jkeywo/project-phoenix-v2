@@ -183,14 +183,14 @@ src/
     shape.rs          — RegionShape types (Sphere, Box, Torus)
   entities/
     config.rs         — TOML entity config types
-    map_config.rs     — TOML map config (anchors, fields, default scenario)
+    map_config.rs     — legacy map-half parser (anchors, fields, entity instances) — PRD #337 merges with ScenarioConfig
     config_cache.rs   — Bevy plugin: preloads TOML configs via JS fetch on WASM
     tags.rs           — string-tag helpers for entity configs
     spawner.rs        — entity spawning from EntityConfig
-    loader.rs         — scenario/entity loader
+    loader.rs         — world/entity loader
   world/
-    server.rs         — WorldPlugin: scenario loading, entity lifecycle, region triggers
-    content.rs        — WorldContentResource, WorldContentRuntime
+    server.rs         — WorldPlugin: world-file loading, entity lifecycle, region triggers
+    content.rs        — ScenarioConfig (scenario-half types), WorldConfig (thin wrapper, PRD #337), WorldContentRuntime
   ai/
     server.rs         — AI Bevy plugin: patrol + NPC input injection
     core.rs           — pure AI state machine
@@ -229,8 +229,7 @@ src/
   client_complexity.rs — pure client complexity preset state (Bevy-free)
 
 assets/
-  maps/default.toml             — default map config
-  scenarios/*.toml              — TOML scenario files (default, patrol, before_the_fire, …)
+  worlds/*.toml                 — unified world files (default, patrol) — one TOML per session
   entities/*.toml               — asteroid, ship, region entity configs
   factions/*.toml               — AI faction definitions
   complexity/*.toml             — per-console complexity presets (Low / Full)

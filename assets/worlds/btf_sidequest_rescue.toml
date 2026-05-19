@@ -1,4 +1,4 @@
-# Side Quest — Asteroid Belt Rescue
+﻿# Side Quest ΓÇö Asteroid Belt Rescue
 #
 # Loaded when the crew enters the asteroid_belt_zone region (before
 # aphelion_triggered). A Requiem-registered engineering crew has struck
@@ -13,7 +13,7 @@
 # Flags set here:
 #   engineers_rescued   set on successful rescue
 
-# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OBJECTIVES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "reach_stranded_crew"
@@ -24,12 +24,12 @@ auto_add = true
 id = "engineers_aboard"
 text = "Engineers recovered. 4th repair team active."
 
-# ── OPENING COMMS ─────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OPENING COMMS ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[comms]]
 id = "rescue_distress"
-from = "Unknown Vessel — Automated Beacon"
-subject = "DISTRESS — Life Support Critical"
+from = "Unknown Vessel ΓÇö Automated Beacon"
+subject = "DISTRESS ΓÇö Life Support Critical"
 message = "MAYDAY. Engineering vessel Bright Shore, grid 14-Delta. Hull breach. Life support at eleven percent. Crew of four. Please respond."
 trigger = "on_load"
 
@@ -39,11 +39,11 @@ follow_up = "rescue_ack"
 
 [[comms]]
 id = "rescue_ack"
-from = "Bright Shore — Engineer Vasque"
+from = "Bright Shore ΓÇö Engineer Vasque"
 subject = "Re: Distress"
-message = "Ardent — thank you. Impulse is out, we can't manoeuvre. Watch the rocks. We'll keep the beacon on."
+message = "Ardent ΓÇö thank you. Impulse is out, we can't manoeuvre. Watch the rocks. We'll keep the beacon on."
 
-# ── TIMER — LIFE SUPPORT COUNTDOWN ───────────────────────────────────────────
+# ΓöÇΓöÇ TIMER ΓÇö LIFE SUPPORT COUNTDOWN ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_timer"
@@ -56,11 +56,11 @@ actions = [
 
 [[comms]]
 id = "rescue_too_late"
-from = "Bright Shore — Automated Beacon"
+from = "Bright Shore ΓÇö Automated Beacon"
 subject = "Signal Lost"
 message = "Bright Shore beacon has ceased transmission. [SIGNAL LOST]"
 
-# ── TRIGGER — RESCUE COMPLETE ─────────────────────────────────────────────────
+# ΓöÇΓöÇ TRIGGER ΓÇö RESCUE COMPLETE ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 #
 # Fires when the player ship reaches within docking range of the Bright Shore.
 # Requires: on_docked or on_in_range trigger type (new per PRD #119).
@@ -82,9 +82,9 @@ actions = [
 id = "rescue_success"
 from = "Engineer Vasque"
 subject = "Aboard Ardent"
-message = "Vasque here, four crew aboard. We owe you our lives. Point us at whatever needs fixing — we know our way around an engine room."
+message = "Vasque here, four crew aboard. We owe you our lives. Point us at whatever needs fixing ΓÇö we know our way around an engine room."
 
-# ── SPAWN — BRIGHT SHORE ──────────────────────────────────────────────────────
+# ΓöÇΓöÇ SPAWN ΓÇö BRIGHT SHORE ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 #
 # Small stationary vessel inside the belt. No behaviour (drifting, unpowered).
 

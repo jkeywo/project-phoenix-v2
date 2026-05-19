@@ -20,13 +20,13 @@ A browser-based spaceship bridge simulator. One browser tab shows a shared 3D vi
 - **PRD #180:** [Viewscreen Frame](https://github.com/jkeywo/project-phoenix-v2/issues/180) — Bevy UI border, `RedAlertVignetteMaterial`, designation + HEADING / HULL / CONDITION HUD
 - **PRD #187:** [Phone Console HUD — Diegetic Bezel Frame](https://github.com/jkeywo/project-phoenix-v2/issues/187) — `phone_border/` plugin: bezel wraps every console; full helm + captain chrome
 - **PRD #191:** [Grid-Based Asteroid Lifecycle with Deterministic Ring Buffer Window](https://github.com/jkeywo/project-phoenix-v2/issues/191) — `asteroids/window.rs`, player-centred grid, destroyed asteroids respawn on return
-- **PRD #119:** [Space Stations, Scenario Engine & Comms Console](https://github.com/jkeywo/project-phoenix-v2/issues/119) — TOML scenarios with triggers/actions/objectives, station entities, `Console::Comms`. `WorldPlugin` owns loading; `assets/scenarios/` holds content files.
+- **PRD #119:** [Space Stations, Scenario Engine & Comms Console](https://github.com/jkeywo/project-phoenix-v2/issues/119) — TOML world files with triggers/actions/objectives, station entities, `Console::Comms`. `WorldPlugin` owns loading; `assets/worlds/` holds content files.
 - **PRD #142 (partial):** [AI and Behaviour System](https://github.com/jkeywo/project-phoenix-v2/issues/142) — `src/ai/` plugin: data-driven patrol NPCs injecting inputs via the same message path as players; `assets/factions/` for faction configs.
 
 **Open PRDs (planned work):**
 - **PRD #116:** [Save/Load Game Sessions](https://github.com/jkeywo/project-phoenix-v2/issues/116) — `localStorage`-backed save slots, periodic + lifecycle saves, version-gated load. Introduces `save.rs` (the *second* sanctioned `serde_json` surface).
 
-**Current state:** Nine consoles in the wire types (`CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms`). The old `Science` console was split into `Sensors` (long-range radar + target suggestion), `Shields` (four-quadrant shield focus), and `Navigation` (system chart + impulse cancel); `Comms` handles contacts, messages, and objectives. Players join *stations* (bundles of one or more consoles defined per player count in `player_ship.toml`), not individual consoles. Full simulation: ship physics loaded from TOML, grid-based streaming asteroid field, phaser banks (port/starboard), torpedoes, four-quadrant shields, impulse drive, per-console hull damage, three-team dispatch repair (travel → repair → return), 6+2 power allocation driving cross-system modifiers, region effects (damage zones, slow zones, comms/sensor jammers), per-console complexity presets with server-side AI to operate hidden controls, TOML-driven scenario engine with objectives and NPC AI patrols. Viewscreen and phone consoles both have diegetic bezel frames with red-alert vignette + HUD. Swipe-anywhere console switching with tab initials on overflow. Data-driven entities, maps, and scenarios loaded from TOML via `assets/`. Client is a full Bevy/WASM app. See **[wiki/](./wiki/)** for the deeper map of the codebase.
+**Current state:** Nine consoles in the wire types (`CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms`). The old `Science` console was split into `Sensors` (long-range radar + target suggestion), `Shields` (four-quadrant shield focus), and `Navigation` (system chart + impulse cancel); `Comms` handles contacts, messages, and objectives. Players join *stations* (bundles of one or more consoles defined per player count in `player_ship.toml`), not individual consoles. Full simulation: ship physics loaded from TOML, grid-based streaming asteroid field, phaser banks (port/starboard), torpedoes, four-quadrant shields, impulse drive, per-console hull damage, three-team dispatch repair (travel → repair → return), 6+2 power allocation driving cross-system modifiers, region effects (damage zones, slow zones, comms/sensor jammers), per-console complexity presets with server-side AI to operate hidden controls, TOML-driven world engine with objectives and NPC AI patrols. Viewscreen and phone consoles both have diegetic bezel frames with red-alert vignette + HUD. Swipe-anywhere console switching with tab initials on overflow. Data-driven entities and worlds loaded from TOML via `assets/`. Client is a full Bevy/WASM app. See **[wiki/](./wiki/)** for the deeper map of the codebase.
 
 ---
 
@@ -179,16 +179,16 @@ src/
     shape.rs          — RegionShape types (Sphere, Box, Torus, all in XZ plane).
   entities/
     config.rs         — TOML entity config types (EntityConfig, asteroid/ship/station/region fields).
-    map_config.rs     — TOML map config: spawn anchors, asteroid fields, default scenario reference.
-    config_cache.rs   — ConfigCachePlugin: preloads map + entity TOML via JS fetch on WASM.
+    map_config.rs     — Legacy TOML map-half parser (anchors, asteroid fields, entity instances). One half of `WorldConfig` pending the type-level merger (PRD #337).
+    config_cache.rs   — ConfigCachePlugin: preloads world + entity TOML via JS fetch on WASM. Exposes `wasm_load_world` (JS-facing single entry point) which internally still calls `wasm_load_map` + `wasm_load_world_content` (PRD #337).
     tags.rs           — String-tag helpers for tags=[...] lookups.
     spawner.rs        — Entity spawning from EntityConfig (ECS + wire snapshot).
-    loader.rs         — Scenario/entity loading pipeline.
-    entity_override.rs — Per-instance entity field overrides (from scenario TOML).
+    loader.rs         — World/entity loading pipeline.
+    entity_override.rs — Per-instance entity field overrides (from world TOML).
   world/
-    server.rs         — WorldPlugin: scenario loading, entity lifecycle, trigger evaluation,
+    server.rs         — WorldPlugin: world-file loading, entity lifecycle, trigger evaluation,
                         objective tracking, WorldSetup broadcast.
-    content.rs        — WorldContentResource, WorldContentRuntime types.
+    content.rs        — Pure types: `ScenarioConfig` (the trigger/comms/named-spawn half), `WorldConfig` (currently a thin wrapper over `MapConfig`+`ScenarioConfig` — PRD #337 collapses them), `ScenarioManager`, position resolution.
   ai/
     server.rs         — Bevy plugin: NPC patrol loop, input injection via InboundMessage.
     core.rs           — Pure AI state machine (patrol, idle, attack states).
@@ -234,8 +234,8 @@ src/
   lib.rs              — Module declarations + feature gates + backward-compat re-exports.
 
 assets/
-  maps/default.toml             — Default map: anchors, asteroid fields, default scenario path.
-  scenarios/*.toml              — Scenario content files (default, patrol, before_the_fire, …).
+  worlds/default.toml           — Default world: anchors, [[entity]] instances, named [[spawn]]s, [[trigger]]s, [[comms]].
+  worlds/patrol.toml            — Patrol world: three-anchor raider patrol with on-destroyed objective.
   entities/asteroid_*.toml      — Asteroid variants (large, small, cosmetic).
   entities/player_ship.toml     — Ship config: helm_console physics, phaser banks, torpedo tubes, shields, impulse, [stations].
   entities/pirate_raider.toml   — NPC raider entity config.
@@ -397,7 +397,7 @@ Console input handlers use `.in_set(SimSet::Input)`, physics uses `SimSet::Physi
 | `entities/tags` | String-tag helpers | No |
 | `entities/spawner` | ECS entity spawning from EntityConfig | Yes |
 | `entities/loader` | Scenario/entity loading pipeline | Yes |
-| `world/server` | WorldPlugin: scenarios, triggers, objectives, WorldSetup broadcast | Yes |
+| `world/server` | WorldPlugin: world-file loading, triggers, objectives, WorldSetup broadcast | Yes |
 | `world/content` | WorldContentResource, WorldContentRuntime | No |
 | `ai/server` | Bevy plugin: NPC patrol + input injection | Yes |
 | `ai/core` | Pure AI state machine | No |

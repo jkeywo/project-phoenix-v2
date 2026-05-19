@@ -1,0 +1,109 @@
+# Default World: Starbase Alpha + initial raider patrol
+#
+# A "world" file unifies what was previously split between a `map` (anchors,
+# global config, entity instances) and a `scenario` (named spawns, triggers,
+# comms templates). One file, one fetch, one parse.
+#
+# Sections:
+#   [global]    — seed, world-level constants
+#   [anchors]   — named positions for [[spawn]] entries to reference
+#   [[entity]]  — direct entity instances (Immediate or GameStart spawn)
+#   [[spawn]]   — named, trigger-eligible spawns positioned by anchor/relative
+#   [[trigger]] — world event reactions (on_destroyed, on_attacked, on_timer)
+#   [[comms]]   — comms dialogue templates keyed by trigger condition
+
+[global]
+seed = 42
+
+[anchors]
+starbase_alpha = [500.0, 0.0, 0.0]
+patrol_alpha   = [300.0, 0.0, -300.0]
+patrol_beta    = [-300.0, 0.0, -200.0]
+patrol_gamma   = [0.0, 0.0, -500.0]
+
+# ── Static map entities ───────────────────────────────────────────────────────
+
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+id = "earth"
+position = [200.0, 0.0, 200.0]
+
+[[entity]]
+template_path = "assets/entities/asteroid_field_main.toml"
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+id = "player-ship"
+position = [150.0, 0.0, 0.0]
+spawn_on = "game_start"
+
+[[entity]]
+template_path = "assets/entities/region_nebula.toml"
+id = "nebula-1"
+position = [300.0, 0.0, -200.0]
+
+# ── Named spawns (trigger-eligible) ───────────────────────────────────────────
+
+[[spawn]]
+name        = "raider"
+entity_path = "assets/entities/pirate_raider.toml"
+anchor      = "patrol_alpha"
+
+[[spawn]]
+name        = "Starbase Alpha"
+entity_path = "assets/entities/station_outpost.toml"
+anchor      = "starbase_alpha"
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-raider-destroyed"
+  text      = "Pirate raider eliminated."
+  mandatory = false
+
+# ── Comms templates ──────────────────────────────────────────────────────────
+
+# Automatic distress call broadcast when the raider is first attacked.
+[[comms]]
+from    = "raider"
+trigger = "on_attacked"
+entity  = "raider"
+message = "MAYDAY MAYDAY — Pirate raider calling for backup. USS Phoenix has engaged. All units converge on our position!"
+
+# Automatic distress call broadcast from Starbase Alpha when the station is first attacked.
+[[comms]]
+from    = "Starbase Alpha"
+trigger = "on_attacked"
+entity  = "Starbase Alpha"
+message = "Starbase Alpha to all vessels — we are under attack! Requesting immediate assistance!"
+
+[[comms]]
+from    = "Starbase Alpha"
+trigger = "on_hailed"
+entity  = "Starbase Alpha"
+message = "USS Phoenix, this is Starbase Alpha. Please state your business."
+
+  [[comms.response]]
+  text = "We are on a survey mission."
+    [[comms.response.action]]
+    type = "add_objective"
+    id   = "obj-survey"
+    text = "Complete the survey in this sector."
+
+  [[comms.response]]
+  text = "We require docking clearance."
+    [[comms.response.action]]
+    type      = "add_objective"
+    id        = "obj-dock"
+    text      = "Dock at Starbase Alpha."
+    mandatory = true

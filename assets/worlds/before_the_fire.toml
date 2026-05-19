@@ -1,4 +1,4 @@
-# "Before the Fire" — Axiom System, T−35
+﻿# "Before the Fire" ΓÇö Axiom System, TΓêÆ35
 #
 # Main scenario file. Loaded at map start; never unloaded.
 # Owns all spawned entities. Branches load sub-scenarios via load_scenario.
@@ -25,8 +25,8 @@
 #   aphelion_triggered  set here when weapon arming begins
 #
 # Requires: PRD #119 (Scenario Engine, Station entities, Comms console)
-#           PRD #142 (AI and Behaviour — already landed)
-#           Draft 10 (Region entities — already landed)
+#           PRD #142 (AI and Behaviour ΓÇö already landed)
+#           Draft 10 (Region entities ΓÇö already landed)
 
 preload = [
     "assets/entities/station_axiom.toml",
@@ -38,7 +38,7 @@ preload = [
     "assets/entities/region_asteroid_belt.toml",
 ]
 
-# ── SPAWNS ────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ SPAWNS ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[spawn]]
 entity = "assets/entities/station_axiom.toml"
@@ -75,7 +75,7 @@ entity = "assets/entities/region_asteroid_belt.toml"
 position = [-60.0, 0.0, 200.0]
 name = "asteroid_belt_zone"
 
-# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OBJECTIVES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "reach_the_system"
@@ -91,12 +91,12 @@ auto_add = true
 id = "identify_the_threat"
 text = "Identify the source of the hostile activity."
 
-# ── OPENING COMMS ─────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OPENING COMMS ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[comms]]
 id = "starcorp_orders"
 from = "Starcorp Command"
-subject = "Deployment Orders — Axiom System"
+subject = "Deployment Orders ΓÇö Axiom System"
 message = "Ardent, proceed to Axiom. Harrow ships are ignoring docking protocols. The Accord talks are at risk. Find out what's happening."
 trigger = "on_load"
 
@@ -104,7 +104,7 @@ trigger = "on_load"
 id = "axiom_hail"
 from = "Axiom Station"
 subject = "Please respond"
-message = "A.E.V. Ardent — are you receiving? A Harrow vessel is holding station without clearance. We need you here."
+message = "A.E.V. Ardent ΓÇö are you receiving? A Harrow vessel is holding station without clearance. We need you here."
 trigger = "on_load"
 
 [[comms.responses]]
@@ -125,9 +125,9 @@ message = "Understood. Administrator Chen will meet you on approach. Thank you, 
 id = "axiom_hail_hold"
 from = "Axiom Station"
 subject = "Re: Please respond"
-message = "Confirmed. We'll maintain protocols. Please hurry — the talks cannot be delayed."
+message = "Confirmed. We'll maintain protocols. Please hurry ΓÇö the talks cannot be delayed."
 
-# ── TRIGGERS — PATH A GATEWAY (Axiom Station / Diplomat) ─────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö PATH A GATEWAY (Axiom Station / Diplomat) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_hailed"
@@ -152,9 +152,9 @@ actions = [{ push_comms = "lockout_axiom_from_c" }]
 
 [[comms]]
 id = "gateway_axiom"
-from = "Axiom Station — Adm. Chen"
+from = "Axiom Station ΓÇö Adm. Chen"
 subject = "Situation Report"
-message = "Ardent — our lead negotiator, Dr. Sol Varen, hasn't reported in. That Harrow vessel is refusing contact. We need you here."
+message = "Ardent ΓÇö our lead negotiator, Dr. Sol Varen, hasn't reported in. That Harrow vessel is refusing contact. We need you here."
 
 [[comms.responses]]
 text = "Understood. We'll work with you to find Dr. Varen."
@@ -167,17 +167,17 @@ text = "Stand by. We need to assess the full situation first."
 
 [[comms]]
 id = "lockout_axiom_from_b"
-from = "Axiom Station — Adm. Chen"
+from = "Axiom Station ΓÇö Adm. Chen"
 subject = "Unable to Assist"
 message = "We've been asked to route all contacts through the Research Outpost during the resonance analysis. Dr. Myst has the lead on this."
 
 [[comms]]
 id = "lockout_axiom_from_c"
-from = "Axiom Station — Adm. Chen"
+from = "Axiom Station ΓÇö Adm. Chen"
 subject = "Emergency Protocols Active"
 message = "All non-essential comms suspended system-wide. Red alert protocols are in effect."
 
-# ── TRIGGERS — PATH B GATEWAY (Research Outpost / Scholar) ───────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö PATH B GATEWAY (Research Outpost / Scholar) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_hailed"
@@ -202,9 +202,9 @@ actions = [{ push_comms = "lockout_outpost_from_c" }]
 
 [[comms]]
 id = "gateway_outpost"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Anomalous Readings"
-message = "Ardent — I'm tracking an energy signature from the Kaleth Nebula. It matches nothing in the database and it's building. I need your Science console on this."
+message = "Ardent ΓÇö I'm tracking an energy signature from the Kaleth Nebula. It matches nothing in the database and it's building. I need your Science console on this."
 
 [[comms.responses]]
 text = "We're with you, Doctor. Send us what you have."
@@ -217,17 +217,17 @@ text = "Stand by. We're still assessing the situation."
 
 [[comms]]
 id = "lockout_outpost_from_a"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Unable to Assist"
-message = "Administrator Chen has requested Alliance contacts go through the Station during the talks. I'm sorry, Ardent — her authority here."
+message = "Administrator Chen has requested Alliance contacts go through the Station during the talks. I'm sorry, Ardent ΓÇö her authority here."
 
 [[comms]]
 id = "lockout_outpost_from_c"
-from = "Research Outpost — Dr. Myst"
+from = "Research Outpost ΓÇö Dr. Myst"
 subject = "Emergency Protocols Active"
-message = "I'm evacuating non-essential personnel. I can't assist right now — good luck out there."
+message = "I'm evacuating non-essential personnel. I can't assist right now ΓÇö good luck out there."
 
-# ── TRIGGERS — PATH C GATEWAY (Combat / Soldier) ──────────────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö PATH C GATEWAY (Combat / Soldier) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_attacked"
@@ -253,9 +253,9 @@ actions = [
 id = "harrow_hostile"
 from = "I.V. Ironveil"
 subject = "Incoming Transmission"
-message = "Alliance vessel — you are in restricted Imperium space. Withdraw or be destroyed."
+message = "Alliance vessel ΓÇö you are in restricted Imperium space. Withdraw or be destroyed."
 
-# ── TRIGGERS — IRONVEIL ENCOUNTER ─────────────────────────────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö IRONVEIL ENCOUNTER ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 #
 # Ironveil breaks patience and forces pursuit at 90 s if the crew hasn't
 # committed to a path. After this the crew is de-facto in combat (Path C
@@ -280,7 +280,7 @@ actions = [
 id = "ironveil_breaks_patience"
 from = "I.V. Ironveil"
 subject = "Transmission"
-message = "Alliance vessel — your time is up. Withdraw immediately or face the consequences."
+message = "Alliance vessel ΓÇö your time is up. Withdraw immediately or face the consequences."
 
 [[trigger]]
 condition = "on_hailed"
@@ -298,7 +298,7 @@ from = "I.V. Ironveil"
 subject = "Transmission"
 message = "This channel is closed, Alliance. You have ten seconds to change your heading."
 
-# ── TRIGGERS — WEAPON ARMING ─────────────────────────────────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö WEAPON ARMING ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_destroyed"
@@ -332,7 +332,7 @@ from = "I.V. Ashrender"
 subject = "Incoming Transmission"
 message = "The window for negotiation is closed. Initiating the Protocol."
 
-# ── TRIGGERS — REGION ENTRY ───────────────────────────────────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö REGION ENTRY ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_entered_region"
@@ -355,7 +355,7 @@ actions = [
     { load_scenario = "assets/scenarios/btf_sidequest_rescue.toml" },
 ]
 
-# ── TRIGGERS — REQUIEM COURIER ────────────────────────────────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö REQUIEM COURIER ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_hailed"
@@ -365,7 +365,7 @@ actions = [
     { load_scenario = "assets/scenarios/btf_sidequest_courier.toml" },
 ]
 
-# ── TRIGGERS — AXIOM STATION DESTROYED ───────────────────────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö AXIOM STATION DESTROYED ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_destroyed"
@@ -378,4 +378,4 @@ actions = [
 id = "axiom_lost"
 from = "Starcorp Command"
 subject = "Loss of Contact"
-message = "We've lost contact with Axiom Station. Whatever you did, Ardent — we saw it."
+message = "We've lost contact with Axiom Station. Whatever you did, Ardent ΓÇö we saw it."

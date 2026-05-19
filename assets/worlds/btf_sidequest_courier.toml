@@ -1,4 +1,4 @@
-# Side Quest — The Requiem Courier
+﻿# Side Quest ΓÇö The Requiem Courier
 #
 # Loaded when the crew hails the Requiem courier (before aphelion_triggered).
 # The courier is running black-market medical supplies to the Research Outpost,
@@ -10,20 +10,20 @@
 # Flags set here:
 #   courier_allowed   set if the crew lets the shipment through
 
-# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OBJECTIVES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "courier_decision"
 text = "Decide what to do about the Requiem courier's contraband shipment."
 auto_add = true
 
-# ── OPENING COMMS ─────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OPENING COMMS ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[comms]]
 id = "courier_intro"
 from = "Requiem Courier"
 subject = "Private Channel"
-message = "Ardent, I'll be brief. I'm carrying medical supplies for the Research Outpost — the Station has them embargoed. People there are running low. I just need to pass."
+message = "Ardent, I'll be brief. I'm carrying medical supplies for the Research Outpost ΓÇö the Station has them embargoed. People there are running low. I just need to pass."
 trigger = "on_load"
 
 [[comms.responses]]
@@ -38,7 +38,7 @@ follow_up = "courier_blocked"
 id = "courier_supplies_detail"
 from = "Requiem Courier"
 subject = "Re: Supplies"
-message = "Broad-spectrum antivirals, bone-knit compounds. Nothing tactical. The Outpost has a team doing field work — they picked something up in the nebula. They need this."
+message = "Broad-spectrum antivirals, bone-knit compounds. Nothing tactical. The Outpost has a team doing field work ΓÇö they picked something up in the nebula. They need this."
 
 [[comms.responses]]
 text = "Go ahead. We didn't see you."
@@ -62,7 +62,7 @@ actions = [
 id = "courier_blocked"
 from = "Requiem Courier"
 subject = "Re: Embargo"
-message = "Understood. Rerouting now. For what it's worth — Administrator Chen's politics and those researchers' health are two different things."
+message = "Understood. Rerouting now. For what it's worth ΓÇö Administrator Chen's politics and those researchers' health are two different things."
 actions = [
     { complete_objective = "courier_decision" },
 ]

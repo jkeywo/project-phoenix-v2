@@ -2,7 +2,7 @@
 //
 // Verifies the WorldPlugin bootstrap path: map config → default_scenario →
 // entity spawn pipeline. After game start the station entity declared in
-// assets/scenarios/default.toml ("Starbase Alpha", tag: "station") must
+// assets/worlds/default.toml ("Starbase Alpha", tag: "station") must
 // appear in the WorldSetup entity list.
 
 import { test, expect } from './fixtures';
@@ -42,7 +42,7 @@ test('default scenario: Starbase Alpha appears in WorldSetup after game start', 
   const worldSetupMsg = await helm.waitForMessage('WorldSetup', 5_000) as any;
   const entities: any[] = worldSetupMsg?.data?.world?.entities ?? [];
 
-  // Starbase Alpha (tag: "station") must appear from assets/scenarios/default.toml spawn.
+  // Starbase Alpha (tag: "station") must appear from assets/worlds/default.toml spawn.
   const starbase = entities.find(
     (e: any) => Array.isArray(e.tags) && e.tags.includes('station'),
   );

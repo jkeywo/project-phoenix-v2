@@ -9,7 +9,7 @@ regenerated when the Rust types change.
 
 **File groups:**
 
-1. [Maps](#1-maps) — `assets/maps/*.toml`
+1. [Worlds](#1-worlds) — `assets/worlds/*.toml`
 2. [Entity templates](#2-entity-templates) — `assets/entities/*.toml`
    - [Ships (player + NPC)](#22-ships)
    - [Stations](#23-stations)
@@ -18,10 +18,9 @@ regenerated when the Rust types change.
    - [Stars](#26-stars)
    - [Planets](#27-planets)
    - [Regions](#28-regions)
-3. [Scenarios](#3-scenarios) — `assets/scenarios/*.toml`
-4. [Factions](#4-factions) — `assets/factions/*.toml`
-5. [Complexity presets](#5-complexity-presets) — `assets/complexity/*.toml`
-6. [Cross-cutting sub-schemas](#6-cross-cutting-sub-schemas) — radar, behaviour, stations block
+3. [Factions](#3-factions) — `assets/factions/*.toml`
+4. [Complexity presets](#4-complexity-presets) — `assets/complexity/*.toml`
+5. [Cross-cutting sub-schemas](#5-cross-cutting-sub-schemas) — radar, behaviour, stations block
 
 Conventions:
 
@@ -34,27 +33,37 @@ Conventions:
 
 ---
 
-## 1. Maps
+## 1. Worlds
 
-**Purpose:** describe a sector — anchors, the universe of entity instances,
-and which scenarios are available.
+**Purpose:** the single content file for a session — anchors, the static layout
+of entity instances, named trigger-eligible spawns, world-event triggers, comms
+dialogues, and objectives. One world per session; chaining (`load_scenario`)
+is not supported.
 
-**Location:** `assets/maps/*.toml` (e.g. `assets/maps/default.toml`).
+**Location:** `assets/worlds/*.toml` (e.g. `assets/worlds/default.toml`,
+`assets/worlds/patrol.toml`).
 
-**Parser:** `src/entities/map_config.rs` → `MapConfig` /
-`parse_and_validate_map_config`. Loaded by `entities/config_cache.rs` and
-consumed by `WorldPlugin` in `src/world/server.rs`.
+**Parser:** internally split across two files pending PRD #337:
+`src/entities/map_config.rs` reads the map half (`[global]`, `[anchors]`,
+`[[entity]]`); `src/world/content.rs` reads the scenario half (`title`,
+`description`, `[[spawn]]`, `[[trigger]]`, `[[comms]]`). The JS loader
+(`wasm_load_world` in `src/server/bridge.rs`) hands the same TOML to both
+parsers; each silently ignores the other's sections. PRD #337 will collapse
+these into one `WorldConfig` struct and one `[[entity]]` block.
 
 ### Top-level fields
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `default_scenario` | string | none | Scenario TOML to auto-load on world bootstrap. |
-| `extra_scenarios` | array of strings | `[]` | Scenarios available but not auto-loaded. |
+| `title` | string | `""` | Lobby display title. |
+| `description` | string | `""` | Lobby display body. |
 | `[global]` | table | `{ seed = 42 }` | Global generation params. |
-| `[anchors]` | table | `{}` | Named `[x,y,z]` waypoints referenced by scenarios and AI patrols. |
-| `[[entity]]` | array of tables | `[]` | Entity instances spawned into the map. |
-| `[[star]]`, `[[planet]]`, `[[asteroid_field]]` | array | `[]` | **Legacy.** Prefer `[[entity]]` with a `template_path`. |
+| `[anchors]` | table | `{}` | Named `[x,y,z]` waypoints referenced by `[[spawn]]` entries and AI patrols. |
+| `[[entity]]` | array of tables | `[]` | Map-half: entity instances spawned into the world. Not eligible for triggers/comms. |
+| `[[spawn]]` | array of tables | `[]` | Scenario-half: named, UUID-assigned entity instances eligible for triggers and comms. |
+| `[[trigger]]` | array of tables | `[]` | World-event handlers (see §1.5). |
+| `[[comms]]` | array of tables | `[]` | Comms dialogue templates (see §1.6). |
+| `[[star]]`, `[[planet]]`, `[[asteroid_field]]` | array | `[]` | **Legacy shorthand.** Not used in shipped worlds; prefer `[[entity]]` with a `template_path`. PRD #337 will remove these. |
 
 ### `[global]`
 
@@ -64,8 +73,8 @@ consumed by `WorldPlugin` in `src/world/server.rs`.
 
 ### `[anchors]`
 
-A flat table of `name = [x, y, z]`. Used by scenario `anchor =` references and
-by AI `waypoints = [...]` lists.
+A flat table of `name = [x, y, z]`. Used by `[[spawn]]` `anchor =` references
+and by AI `waypoints = [...]` lists.
 
 ```toml
 [anchors]
@@ -73,9 +82,10 @@ starbase_alpha = [500.0, 0.0, 0.0]
 patrol_alpha   = [300.0, 0.0, -300.0]
 ```
 
-### `[[entity]]`
+### `[[entity]]` (map-half)
 
-A single entity instance, referencing an entity template TOML.
+A single entity instance for static world layout. Not referenced by triggers
+or comms — use `[[spawn]]` for that.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
@@ -85,11 +95,81 @@ A single entity instance, referencing an entity template TOML.
 | `spawn_on` | `"immediate"` \| `"game_start"` | `"immediate"` | `"immediate"` spawns at world load (lobby phase); `"game_start"` spawns when phase enters `InProgress`. |
 | `overrides` | inline table | none | TOML overrides merged on top of the template (per-instance field tweaks). |
 
-### Example — `assets/maps/default.toml`
+### `[[spawn]]` (scenario-half)
+
+A named, UUID-assigned entity instance. Eligible for trigger and comms
+references via its `name`.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `name` | string | **required** | Stable identifier referenced by triggers, comms, and `relative_to`. |
+| `entity_path` | string | **required** | Path to entity template TOML. |
+| `position` | `[f32; 3]` | — | Absolute world position. |
+| `anchor` | string | — | Anchor name from `[anchors]`. |
+| `relative_to` | string | — | Another `[[spawn]]` name to position relative to. |
+| `offset` | `[f32; 3]` | `[0,0,0]` | Used with `relative_to`. |
+
+Exactly one of `position`, `anchor`, or `relative_to` must be supplied per
+spawn. Each spawn is assigned a UUID at parse time; `name → uuid` is stored
+in the parsed config.
+
+### 1.5 `[[trigger]]`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `condition` | string | **required** | One of `on_destroyed`, `on_attacked`, `on_timer`, `on_hailed`. |
+| `entity` | string | depends | Required for entity-based conditions; references a `[[spawn]]` `name`. |
+| `after_secs` | f32 | depends | Required for `on_timer`. |
+| `[[trigger.action]]` | array | `[]` | Actions to fire (in order). |
+
+Triggers are single-shot: each fires at most once per session.
+
+#### `[[trigger.action]]` types
+
+Every action has a `type` field. Additional fields vary:
+
+| `type` | Required fields | Optional | Notes |
+|---|---|---|---|
+| `add_objective` | `id`, `text` | `mandatory` (default `false`) | Add to the objectives list. |
+| `complete_objective` | `id` | — | Mark complete. |
+| `fail_objective` | `id` | — | Mark failed. |
+| `set_ai_state` | `entity`, `state` | `target` | Force-set an AI controller's state. `target` may name another spawn whose UUID becomes the AI's target. |
+| `apply_modifier` | `entity`, `tag`, `slot`, `bonus` | — | Add a modifier. `slot` ∈ {`MaxSpeed`, `MaxYawRate`, `RadarRange`, `PhaserDamage`, `HullDamageTaken`, `RepairRate`}. |
+| `remove_modifier` | `entity`, `tag`, `slot` | — | Remove by `(tag, slot)`. |
+| `apply_int_modifier` | `entity`, `tag`, `slot`, `int_bonus` | — | `slot` ∈ {`RepairTeams`}. |
+| `remove_int_modifier` | `entity`, `tag`, `slot` | — | |
+| `apply_flag` | `entity`, `tag`, `kind` (→ `flag_kind`) | — | `kind` ∈ {`CommsJammed`, `SensorBlind`}. |
+| `remove_flag` | `entity`, `tag`, `kind` | — | |
+| `game_over` | — | `message` | End the game with an optional message. |
+
+**Removed actions** (no longer supported): `load_scenario`, `unload_scenario` —
+each session loads exactly one world TOML and runs it to completion.
+
+### 1.6 `[[comms]]`
+
+A comms template — a top-level message and a tree of player response choices.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `from` | string | **required** | `[[spawn]]` `name` whose UUID is the sender. |
+| `trigger` | `"on_hailed"` \| `"on_destroyed"` \| `"on_attacked"` | **required** | When to deliver this message. |
+| `entity` | string | depends | The `[[spawn]]` whose event triggers delivery (typically the same as `from`). |
+| `message` | string | **required** | The root message body. |
+| `[[comms.response]]` | array | `[]` | Player response options. |
+
+#### `[[comms.response]]`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `text` | string | **required** | Display text on the response button. |
+| `[[comms.response.action]]` | array | `[]` | Same shape as `[[trigger.action]]`. |
+| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, response... }` block presented after this choice. |
+
+### Example — `assets/worlds/default.toml`
 
 ```toml
-default_scenario = "assets/scenarios/default.toml"
-extra_scenarios  = ["assets/scenarios/patrol.toml"]
+title = "Default Patrol"
+description = "Pirate raider patrol around Starbase Alpha."
 
 [global]
 seed = 42
@@ -98,6 +178,7 @@ seed = 42
 starbase_alpha = [500.0, 0.0, 0.0]
 patrol_alpha   = [300.0, 0.0, -300.0]
 
+# Static map-half layout (not trigger-eligible)
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
 position = [0.0, 0.0, 0.0]
@@ -107,6 +188,40 @@ template_path = "assets/entities/player_ship.toml"
 id = "player-ship"
 position = [150.0, 0.0, 0.0]
 spawn_on = "game_start"
+
+# Named scenario-half spawns (trigger/comms-eligible)
+[[spawn]]
+name        = "raider"
+entity_path = "assets/entities/pirate_raider.toml"
+anchor      = "patrol_alpha"
+
+[[spawn]]
+name        = "Starbase Alpha"
+entity_path = "assets/entities/station_outpost.toml"
+anchor      = "starbase_alpha"
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "raider_killed"
+  text = "Pirate raider destroyed."
+
+[[comms]]
+from    = "Starbase Alpha"
+trigger = "on_hailed"
+entity  = "Starbase Alpha"
+message = "USS Phoenix, this is Starbase Alpha. Please state your business."
+
+  [[comms.response]]
+  text = "We require docking clearance."
+    [[comms.response.action]]
+    type      = "add_objective"
+    id        = "obj-dock"
+    text      = "Dock at Starbase Alpha."
+    mandatory = true
 ```
 
 ---
@@ -115,8 +230,9 @@ spawn_on = "game_start"
 
 **Purpose:** describe what *one kind of thing* is — its hull, collider,
 appearance, consoles, AI behaviour, region effects, etc. Templates are
-referenced by maps (`[[entity]] template_path = ...`) and by scenarios
-(`[[spawn]] entity_path = ...`).
+referenced from world files by `[[entity]] template_path = ...` (static
+instances) or by `[[spawn]] entity_path = ...` (named, trigger-eligible
+instances).
 
 **Location:** `assets/entities/*.toml`.
 
@@ -557,132 +673,7 @@ radius = 150.0
 
 ---
 
-## 3. Scenarios
-
-**Purpose:** declarative content — spawn instances, triggers, comms
-dialogues, objectives. Scenarios are stackable: load one, then chain-load
-another via a `load_scenario` trigger action.
-
-**Location:** `assets/scenarios/*.toml`.
-
-**Parser:** `src/world/content.rs` → `parse_scenario`.
-
-### Top-level fields
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `title` | string | `""` | Display title in the lobby. |
-| `description` | string | `""` | Display body. |
-| `[[spawn]]` | array | `[]` | Entity instances. |
-| `[[trigger]]` | array | `[]` | World-event handlers. |
-| `[[comms]]` | array | `[]` | Comms dialogue templates. |
-
-### `[[spawn]]`
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `name` | string | **required** | Stable identifier referenced by triggers, comms, and `relative_to`. |
-| `entity_path` | string | **required** | Path to entity template TOML. |
-| `position` | `[f32; 3]` | — | Absolute world position. |
-| `anchor` | string | — | Anchor name from the map's `[anchors]`. |
-| `relative_to` | string | — | Another spawn name to position relative to. |
-| `offset` | `[f32; 3]` | `[0,0,0]` | Used with `relative_to`. |
-
-Exactly one of `position`, `anchor`, or `relative_to` must be supplied per
-spawn. Each spawn is assigned a UUID at parse time; `name → uuid` is stored
-in the `ScenarioConfig`.
-
-### `[[trigger]]`
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `condition` | string | **required** | One of `on_destroyed`, `on_attacked`, `on_timer`, `on_hailed`. |
-| `entity` | string | depends | Required for entity-based conditions; references a spawn `name`. |
-| `after_secs` | f32 | depends | Required for `on_timer`. |
-| `[[trigger.action]]` | array | `[]` | Actions to fire (in order). |
-
-Triggers are single-shot: each fires at most once.
-
-#### `[[trigger.action]]` types
-
-Every action has a `type` field. Additional fields vary:
-
-| `type` | Required fields | Optional | Notes |
-|---|---|---|---|
-| `load_scenario` | `path` | — | Load another scenario TOML. |
-| `unload_scenario` | `path` | — | Unload by path. |
-| `add_objective` | `id`, `text` | `mandatory` (default `false`) | Add to the objectives list. |
-| `complete_objective` | `id` | — | Mark complete. |
-| `fail_objective` | `id` | — | Mark failed. |
-| `set_ai_state` | `entity`, `state` | `target` | Force-set an AI controller's state. `target` may name another spawn whose UUID becomes the AI's target. |
-| `apply_modifier` | `entity`, `tag`, `slot`, `bonus` | — | Add a modifier. `slot` ∈ {`MaxSpeed`, `MaxYawRate`, `RadarRange`, `PhaserDamage`, `HullDamageTaken`, `RepairRate`}. |
-| `remove_modifier` | `entity`, `tag`, `slot` | — | Remove by `(tag, slot)`. |
-| `apply_int_modifier` | `entity`, `tag`, `slot`, `int_bonus` | — | `slot` ∈ {`RepairTeams`}. |
-| `remove_int_modifier` | `entity`, `tag`, `slot` | — | |
-| `apply_flag` | `entity`, `tag`, `kind` (→ `flag_kind`) | — | `kind` ∈ {`CommsJammed`, `SensorBlind`}. |
-| `remove_flag` | `entity`, `tag`, `kind` | — | |
-| `game_over` | — | `message` | End the game with an optional message. |
-
-### `[[comms]]`
-
-A comms template — a top-level message and a tree of player response
-choices.
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `from` | string | **required** | Spawn `name` whose UUID is the sender. |
-| `trigger` | `"on_hailed"` \| `"on_destroyed"` \| `"on_attacked"` | **required** | When to deliver this message. |
-| `entity` | string | depends | The spawn whose event triggers delivery (typically the same as `from`). |
-| `message` | string | **required** | The root message body. |
-| `[[comms.response]]` | array | `[]` | Player response options. |
-
-#### `[[comms.response]]`
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `text` | string | **required** | Display text on the response button. |
-| `[[comms.response.action]]` | array | `[]` | Same shape as `[[trigger.action]]`. |
-| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, response... }` block presented after this choice. |
-
-### Example — `assets/scenarios/default.toml`
-
-```toml
-[[spawn]]
-name        = "raider"
-entity_path = "assets/entities/pirate_raider.toml"
-anchor      = "patrol_alpha"
-
-[[spawn]]
-name        = "Starbase Alpha"
-entity_path = "assets/entities/station_outpost.toml"
-anchor      = "starbase_alpha"
-
-[[trigger]]
-condition = "on_attacked"
-entity    = "raider"
-
-  [[trigger.action]]
-  type = "load_scenario"
-  path = "assets/scenarios/patrol.toml"
-
-[[comms]]
-from    = "Starbase Alpha"
-trigger = "on_hailed"
-entity  = "Starbase Alpha"
-message = "USS Phoenix, this is Starbase Alpha. Please state your business."
-
-  [[comms.response]]
-  text = "We require docking clearance."
-    [[comms.response.action]]
-    type      = "add_objective"
-    id        = "obj-dock"
-    text      = "Dock at Starbase Alpha."
-    mandatory = true
-```
-
----
-
-## 4. Factions
+## 3. Factions
 
 **Purpose:** name + UUID + enemy list. Used by AI hostility checks.
 
@@ -709,7 +700,7 @@ enemies = ["bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"]
 
 ---
 
-## 5. Complexity presets
+## 4. Complexity presets
 
 **Purpose:** define UI complexity levels per console — what's hidden, what's
 delegated to an AI partner, and how the AI should be tuned.
@@ -764,7 +755,7 @@ hidden_elements = []
 
 ---
 
-## 6. Cross-cutting sub-schemas
+## 5. Cross-cutting sub-schemas
 
 These appear inside multiple file types.
 

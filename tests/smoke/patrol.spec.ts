@@ -1,9 +1,9 @@
-// Issue #210 — Smoke test: patrol scenario loads and raider entity spawns.
+// Issue #210 — Smoke test: patrol world loads and raider entity spawns.
 //
-// Intercepts the default scenario fetch so the server loads patrol.toml
-// instead of the production default scenario.  After game start the raider
-// entity (tags: ["ship","npc","enemy"]) must appear in the WorldSetup entity
-// list, confirming that the pirate_raider.toml → patrol.toml → entity-spawn
+// Intercepts the default world fetch so the server loads worlds/patrol.toml
+// instead of the production default world. After game start the raider entity
+// (tags: ["ship","npc","enemy"]) must appear in the WorldSetup entity list,
+// confirming that the pirate_raider.toml → patrol.toml → entity-spawn
 // pipeline is wired end-to-end.
 
 import { test, expect } from './fixtures';
@@ -13,13 +13,13 @@ import path from 'path';
 
 // Read patrol.toml from the source tree at test-collection time.
 const PATROL_TOML = fs.readFileSync(
-  path.join(__dirname, '../../assets/scenarios/patrol.toml'),
+  path.join(__dirname, '../../assets/worlds/patrol.toml'),
   'utf-8',
 );
 
 test('patrol scenario: raider entity appears in WorldSetup after game start', async ({ context }) => {
-  // Intercept the default scenario fetch and serve patrol.toml instead.
-  await context.route('**/assets/scenarios/default.toml', (route) =>
+  // Intercept the default world fetch and serve patrol.toml instead.
+  await context.route('**/assets/worlds/default.toml', (route) =>
     route.fulfill({ contentType: 'text/plain', body: PATROL_TOML }),
   );
 

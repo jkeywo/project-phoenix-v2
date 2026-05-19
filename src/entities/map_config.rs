@@ -785,12 +785,12 @@ extra_scenarios = ["assets/scenarios/patrol.toml"]
     }
 
     #[test]
-    fn default_map_toml_references_patrol_scenario() {
-        let toml_str = include_str!("../../assets/maps/default.toml");
-        let config = parse_map_config(toml_str).unwrap();
-        assert!(
-            config.extra_scenarios.iter().any(|s| s.contains("patrol")),
-            "default.toml must reference patrol.toml in extra_scenarios"
-        );
+    fn default_world_toml_parses_as_map_config() {
+        // The unified world TOML must parse cleanly via the map-half loader,
+        // silently ignoring the scenario sections it doesn't understand.
+        let toml_str = include_str!("../../assets/worlds/default.toml");
+        let config = parse_map_config(toml_str).expect("world TOML must parse as MapConfig");
+        assert!(!config.anchors.is_empty(), "world TOML must declare anchors");
+        assert!(!config.entities.is_empty(), "world TOML must declare [[entity]] instances");
     }
 }

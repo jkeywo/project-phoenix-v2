@@ -1,4 +1,4 @@
-# Path C — The Soldier
+﻿# Path C ΓÇö The Soldier
 #
 # Loaded when Ironveil attacks the crew or the crew attacks Ironveil.
 # Reveals decrypted Harrow operational orders naming the weapon's targets.
@@ -17,7 +17,7 @@ actions = [
     { push_comms = "lockout_outpost_from_c" },
 ]
 
-# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OBJECTIVES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "repel_ironveil"
@@ -28,7 +28,7 @@ auto_add = true
 id = "decrypt_manifest"
 text = "Recover and transmit the Harrow operational orders."
 
-# ── OPENING COMMS ─────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OPENING COMMS ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[comms]]
 id = "ironveil_attack_warning"
@@ -50,7 +50,7 @@ from = "Tactical"
 subject = "Re: Evasive"
 message = "They're pursuing. Ironveil is not standing down. Engagement is unavoidable."
 
-# ── TRIGGERS — MANIFEST RECOVERED WHEN IRONVEIL DESTROYED ────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö MANIFEST RECOVERED WHEN IRONVEIL DESTROYED ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_destroyed"
@@ -73,7 +73,7 @@ follow_up = "manifest_contents"
 [[comms]]
 id = "manifest_contents"
 from = "Science"
-subject = "Harrow Operational Orders — APHELION"
+subject = "Harrow Operational Orders ΓÇö APHELION"
 message = "Targets: Axiom Station (primary), Kaleth Prime (secondary). Authorization: House Harrow High Command. Execute on confirmation from Ashrender."
 
 [[comms.responses]]
@@ -108,7 +108,7 @@ follow_up = "manifest_broadcast_option"
 id = "manifest_broadcast_option"
 from = "Starcorp Command"
 subject = "Re: Broadcast Option"
-message = "Understood. If it comes to that — get it out on all channels. Make Harrow answer for every name on that list."
+message = "Understood. If it comes to that ΓÇö get it out on all channels. Make Harrow answer for every name on that list."
 
 [[trigger]]
 condition = "on_destroyed"

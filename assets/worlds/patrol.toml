@@ -1,0 +1,50 @@
+# Patrol World
+#
+# A standalone world: a single pirate raider patrols three waypoints. Destroying
+# the raider completes a mission objective. No stations, no comms, just combat
+# practice.
+#
+# Anchors are inlined here (this world does not share state with default.toml).
+
+[global]
+seed = 42
+
+[anchors]
+patrol_alpha = [300.0, 0.0, -300.0]
+patrol_beta  = [-300.0, 0.0, -200.0]
+patrol_gamma = [0.0, 0.0, -500.0]
+
+# ── Static map entities ───────────────────────────────────────────────────────
+
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/asteroid_field_main.toml"
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+id = "player-ship"
+position = [0.0, 0.0, 0.0]
+spawn_on = "game_start"
+
+# ── Named spawns ──────────────────────────────────────────────────────────────
+
+[[spawn]]
+name        = "raider"
+entity_path = "assets/entities/pirate_raider.toml"
+anchor      = "patrol_alpha"
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-raider-destroyed"
+  text      = "Pirate raider eliminated."
+  mandatory = false

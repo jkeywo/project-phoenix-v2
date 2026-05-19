@@ -1207,7 +1207,7 @@ hull_integrity = 100
         assert_eq!(config.tags, vec!["full"]);
     }
 
-    // ── Shipped template TOML files referenced by assets/maps/default.toml ──
+    // ── Shipped template TOML files referenced by assets/worlds/default.toml ──
     //
     // These tests embed each template at compile time via include_str! so
     // the build fails if a referenced template is missing or malformed.

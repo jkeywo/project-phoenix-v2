@@ -1,4 +1,4 @@
-# Path A — The Diplomat
+﻿# Path A ΓÇö The Diplomat
 #
 # Loaded when the crew commits to working with Administrator Chen (gateway in
 # before_the_fire.toml). Contact: Administrator Chen. Reveals that Dr. Sol
@@ -26,11 +26,11 @@ auto_add = false
 
 [[comms]]
 id = "chen_sol_detail"
-from = "Axiom Station — Adm. Chen"
-subject = "Dr. Varen — What We Know"
+from = "Axiom Station ΓÇö Adm. Chen"
+subject = "Dr. Varen ΓÇö What We Know"
 message = "Sol was heading to grid 18-Kappa when contact cut out. That's Ironveil's patrol zone. I think they're holding her aboard. I can't prove it."
 
-# Ironveil-specific hail handler for Path A — Sol-specific denial dialogue
+# Ironveil-specific hail handler for Path A ΓÇö Sol-specific denial dialogue
 [[trigger]]
 condition = "on_hailed"
 entity = "ironveil"
@@ -46,7 +46,7 @@ from = "I.V. Ironveil"
 subject = "Transmission"
 message = "There is no Alliance personnel aboard this vessel. You are trespassing. Ten seconds to change your heading."
 
-# ── OBJECTIVES ────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ OBJECTIVES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[objective]]
 id = "locate_sol"
@@ -57,11 +57,11 @@ auto_add = true
 id = "document_incursion"
 text = "Transmit evidence of the Harrow incursion to Starcorp Command."
 
-# ── COMMS DIALOGUE ────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ COMMS DIALOGUE ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[comms]]
 id = "chen_intro"
-from = "Axiom Station — Adm. Chen"
+from = "Axiom Station ΓÇö Adm. Chen"
 subject = "Situation Report"
 message = "Our lead negotiator, Dr. Sol Varen, has not reported in for six hours. The Harrow patrol refused our docking request and is not responding."
 
@@ -75,9 +75,9 @@ follow_up = "chen_harrow_demands"
 
 [[comms]]
 id = "chen_sol_location"
-from = "Axiom Station — Adm. Chen"
+from = "Axiom Station ΓÇö Adm. Chen"
 subject = "Re: Dr. Varen"
-message = "Last contact was near grid 18-Kappa — that's where Ironveil is holding. I think they have Sol aboard. We can't prove it, but I know it."
+message = "Last contact was near grid 18-Kappa ΓÇö that's where Ironveil is holding. I think they have Sol aboard. We can't prove it, but I know it."
 
 [[comms.responses]]
 text = "We'll hail Ironveil and demand Dr. Varen's release."
@@ -85,13 +85,13 @@ follow_up = "chen_sol_demand_sent"
 
 [[comms]]
 id = "chen_sol_demand_sent"
-from = "Axiom Station — Adm. Chen"
+from = "Axiom Station ΓÇö Adm. Chen"
 subject = "Re: Dr. Varen"
-message = "Thank you, Ardent. Whatever happens — the talks needed someone who believed they could work."
+message = "Thank you, Ardent. Whatever happens ΓÇö the talks needed someone who believed they could work."
 
 [[comms]]
 id = "chen_harrow_demands"
-from = "Axiom Station — Adm. Chen"
+from = "Axiom Station ΓÇö Adm. Chen"
 subject = "Re: Harrow Demands"
 message = "No demands. That's what worries me. They're not here to negotiate. They're waiting for something."
 
@@ -101,11 +101,11 @@ follow_up = "chen_waiting_ack"
 
 [[comms]]
 id = "chen_waiting_ack"
-from = "Axiom Station — Adm. Chen"
+from = "Axiom Station ΓÇö Adm. Chen"
 subject = "Re: Harrow Demands"
 message = "Be careful, Ardent. The Imperium doesn't send warhawks to wait."
 
-# ── TRIGGERS — SOL FREED WHEN IRONVEIL IS DESTROYED ──────────────────────────
+# ΓöÇΓöÇ TRIGGERS ΓÇö SOL FREED WHEN IRONVEIL IS DESTROYED ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 [[trigger]]
 condition = "on_destroyed"
@@ -120,7 +120,7 @@ actions = [
 id = "sol_freed"
 from = "Dr. Sol Varen"
 subject = "Rescue Confirmed"
-message = "This is Sol Varen — I'm aboard an escape pod. They have a weapon on that second ship. I heard the order. They're going to fire on the station."
+message = "This is Sol Varen ΓÇö I'm aboard an escape pod. They have a weapon on that second ship. I heard the order. They're going to fire on the station."
 
 [[comms.responses]]
 text = "Dr. Varen, get clear. We'll handle Ashrender."
@@ -130,4 +130,4 @@ follow_up = "sol_broadcast_offer"
 id = "sol_broadcast_offer"
 from = "Dr. Sol Varen"
 subject = "Re: Ashrender"
-message = "I have thirty years of peace negotiations on this chip. If the worst happens — I can get it out. Every relay in range. Just give me time."
+message = "I have thirty years of peace negotiations on this chip. If the worst happens ΓÇö I can get it out. Every relay in range. Just give me time."

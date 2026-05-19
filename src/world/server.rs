@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use crate::damage::ConsoleHull;
 use crate::simulation::{Ship, ShipHullIntegrity};
-use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::comms_inbox::CommsInbox;
@@ -464,24 +463,6 @@ fn handle_respond_to_message(
                 TriggerAction::FailObjective { id } => {
                     objectives.0.fail(id);
                 }
-                TriggerAction::LoadScenario { path } => {
-                    scenario_mgr.0.load_scenario(path.clone());
-                }
-                TriggerAction::UnloadScenario { path } => {
-                    if let Some(_removed) = scenario_mgr.0.unload_scenario(path) {
-                        inbox.0.unload_scenario(path);
-                        objectives.0.unload_scenario(path);
-                        // Add ScenarioUnloadedMarker to AI entities owned by this scenario
-                        // so tick_ai_controllers fires on_scenario_unloaded transitions.
-                        for (entity, owner) in scenario_owner_query.iter() {
-                            if &owner.0 == path {
-                                commands.entity(entity)
-                                    .insert(crate::ai_plugin::ScenarioUnloadedMarker)
-                                    .remove::<ScenarioOwner>();
-                            }
-                        }
-                    }
-                }
                 TriggerAction::SetAiState { .. } => {
                     // SetAiState is handled by the AI-event trigger system, not
                     // the comms response path. No-op here.
@@ -746,25 +727,6 @@ fn handle_ai_events(
                         break;
                     }
                 }
-                TriggerAction::LoadScenario { path } => {
-                    scenario_mgr.0.load_scenario(path.clone());
-                }
-                TriggerAction::UnloadScenario { path } => {
-                    if let Some(_removed) = scenario_mgr.0.unload_scenario(path) {
-                        inbox.0.unload_scenario(path);
-                        objectives.0.unload_scenario(path);
-                        // Add ScenarioUnloadedMarker to AI entities owned by this scenario
-                        // so tick_ai_controllers fires on_scenario_unloaded transitions.
-                        // Also remove ScenarioOwner so future queries skip these entities.
-                        for (entity, owner) in scenario_owner_query.iter() {
-                            if &owner.0 == path {
-                                commands.entity(entity)
-                                    .insert(crate::ai_plugin::ScenarioUnloadedMarker)
-                                    .remove::<ScenarioOwner>();
-                            }
-                        }
-                    }
-                }
                 TriggerAction::ApplyModifier { entity, tag, slot, bonus } => {
                     if name_to_uuid.get(entity).is_none() {
                         bevy::log::warn!(
@@ -774,7 +736,7 @@ fn handle_ai_events(
                     }
                     if let Some(ref mut mods) = modifiers {
                         mods.add_or_update(crate::modifiers::Modifier {
-                            source: crate::messages::ModifierSource::Scenario {
+                            source: crate::messages::ModifierSource::World {
                                 id: ft.scenario_path.clone(),
                                 tag: tag.clone(),
                             },
@@ -792,7 +754,7 @@ fn handle_ai_events(
                     }
                     if let Some(ref mut mods) = modifiers {
                         mods.remove(
-                            &crate::messages::ModifierSource::Scenario {
+                            &crate::messages::ModifierSource::World {
                                 id: ft.scenario_path.clone(),
                                 tag: tag.clone(),
                             },
@@ -809,7 +771,7 @@ fn handle_ai_events(
                     }
                     if let Some(ref mut mods) = modifiers {
                         mods.add_flag(
-                            crate::messages::ModifierSource::Scenario {
+                            crate::messages::ModifierSource::World {
                                 id: ft.scenario_path.clone(),
                                 tag: tag.clone(),
                             },
@@ -826,7 +788,7 @@ fn handle_ai_events(
                     }
                     if let Some(ref mut mods) = modifiers {
                         mods.remove_flag(
-                            crate::messages::ModifierSource::Scenario {
+                            crate::messages::ModifierSource::World {
                                 id: ft.scenario_path.clone(),
                                 tag: tag.clone(),
                             },
@@ -843,7 +805,7 @@ fn handle_ai_events(
                     }
                     if let Some(ref mut mods) = modifiers {
                         mods.add_or_update_int(crate::modifiers::IntModifier {
-                            source: crate::messages::ModifierSource::Scenario {
+                            source: crate::messages::ModifierSource::World {
                                 id: ft.scenario_path.clone(),
                                 tag: tag.clone(),
                             },
@@ -861,7 +823,7 @@ fn handle_ai_events(
                     }
                     if let Some(ref mut mods) = modifiers {
                         mods.remove_int(
-                            &crate::messages::ModifierSource::Scenario {
+                            &crate::messages::ModifierSource::World {
                                 id: ft.scenario_path.clone(),
                                 tag: tag.clone(),
                             },
@@ -1464,186 +1426,6 @@ position    = [100.0, 0.0, 200.0]
         assert!(app.world().get::<ScenarioOwner>(entity).is_none());
     }
 
-    // ── ScenarioManager wiring integration tests ──────────────────────────────
-
-    // load_scenario action via handle_ai_events wires into ScenarioManagerRes
-    #[test]
-    fn load_scenario_trigger_action_inserts_into_scenario_manager() {
-        use crate::world::content::{Trigger, TriggerCondition};
-
-        let mut app = ai_trigger_test_app();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-
-        let npc_uuid = "npc-load-001";
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("npc".to_string(), npc_uuid.to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: Trigger {
-                    condition: TriggerCondition::OnDestroyed { entity_name: "npc".to_string() },
-                    actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
-                },
-                fired: false,
-                scenario_path: "test".to_string(),
-            }];
-        }
-
-        // Fire the trigger
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.to_string() });
-
-        app.update();
-
-        let mgr = &app.world().resource::<ScenarioManagerRes>().0;
-        assert!(mgr.is_active("scenarios/phase2.toml"), "load_scenario action must add path to ScenarioManager");
-    }
-
-    // load_scenario is additive — second firing is a no-op
-    #[test]
-    fn load_scenario_trigger_action_is_idempotent() {
-        use crate::world::content::{Trigger, TriggerCondition};
-
-        let mut app = ai_trigger_test_app();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-
-        // Pre-load the scenario
-        app.world_mut()
-            .resource_mut::<ScenarioManagerRes>()
-            .0.load_scenario("scenarios/phase2.toml");
-
-        let npc_uuid = "npc-load-002";
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("npc".to_string(), npc_uuid.to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: Trigger {
-                    condition: TriggerCondition::OnDestroyed { entity_name: "npc".to_string() },
-                    actions: vec![TriggerAction::LoadScenario { path: "scenarios/phase2.toml".to_string() }],
-                },
-                fired: false,
-                scenario_path: "test".to_string(),
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.to_string() });
-        app.update();
-
-        let mgr = &app.world().resource::<ScenarioManagerRes>().0;
-        assert_eq!(mgr.len(), 1, "duplicate load_scenario must not grow the map");
-    }
-
-    // unload_scenario trigger action removes scenario and orphans comms messages
-    #[test]
-    fn unload_scenario_trigger_action_orphans_comms_and_removes_from_manager() {
-        use crate::world::content::{Trigger, TriggerCondition};
-
-        let mut app = ai_trigger_test_app();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-
-        // Pre-load the scenario
-        app.world_mut()
-            .resource_mut::<ScenarioManagerRes>()
-            .0.load_scenario("scenarios/alpha.toml");
-
-        // Inject a comms message owned by scenarios/alpha.toml
-        let msg = crate::messages::CommsMessage {
-            id: "msg-001".to_string(),
-            sender_uuid: "npc-001".to_string(),
-            sender_name: "NPC".to_string(),
-            subject: "Hello".to_string(),
-            body: "Hello crew".to_string(),
-            responses: vec![],
-            selected_response: None,
-            is_read: false,
-            is_orphaned: false,
-        };
-        app.world_mut()
-            .resource_mut::<CommsInboxRes>()
-            .0.inject(msg, "scenarios/alpha.toml");
-
-        let npc_uuid = "npc-unload-001";
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("npc".to_string(), npc_uuid.to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: Trigger {
-                    condition: TriggerCondition::OnDestroyed { entity_name: "npc".to_string() },
-                    actions: vec![TriggerAction::UnloadScenario { path: "scenarios/alpha.toml".to_string() }],
-                },
-                fired: false,
-                scenario_path: "test".to_string(),
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.to_string() });
-        app.update();
-
-        let mgr = &app.world().resource::<ScenarioManagerRes>().0;
-        assert!(!mgr.is_active("scenarios/alpha.toml"), "scenario must be removed from manager after unload");
-
-        let inbox = &app.world().resource::<CommsInboxRes>().0;
-        let messages = inbox.messages();
-        assert_eq!(messages.len(), 1);
-        assert!(messages[0].is_orphaned, "comms message must be orphaned after scenario unload");
-        assert_eq!(messages[0].subject, "Transmission ended", "orphaned message subject must be 'Transmission ended'");
-    }
-
-    // AC6: ScenarioOwner component is removed from ECS entities when their scenario is unloaded
-    #[test]
-    fn unload_scenario_removes_scenario_owner_component_from_entities() {
-        use crate::world::content::{Trigger, TriggerCondition};
-
-        let mut app = ai_trigger_test_app();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-
-        app.world_mut()
-            .resource_mut::<ScenarioManagerRes>()
-            .0.load_scenario("scenarios/alpha.toml");
-
-        // Spawn two entities: one owned by alpha, one not
-        let owned = app.world_mut()
-            .spawn(ScenarioOwner("scenarios/alpha.toml".to_string()))
-            .id();
-        let unowned = app.world_mut()
-            .spawn(ScenarioOwner("scenarios/beta.toml".to_string()))
-            .id();
-
-        let npc_uuid = "npc-ac6-001";
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("npc".to_string(), npc_uuid.to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: Trigger {
-                    condition: TriggerCondition::OnDestroyed { entity_name: "npc".to_string() },
-                    actions: vec![TriggerAction::UnloadScenario { path: "scenarios/alpha.toml".to_string() }],
-                },
-                fired: false,
-                scenario_path: "test".to_string(),
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.to_string() });
-        app.update();
-
-        // Owned entity must have ScenarioOwner removed
-        assert!(
-            app.world().get::<ScenarioOwner>(owned).is_none(),
-            "ScenarioOwner must be removed from entities owned by the unloaded scenario"
-        );
-        // Unowned entity is unaffected
-        assert!(
-            app.world().get::<ScenarioOwner>(unowned).is_some(),
-            "ScenarioOwner on entities owned by other scenarios must be preserved"
-        );
-    }
-
     // ── on_attacked comms template auto-injection tests ───────────────────────
 
     /// When an entity is attacked, comms templates with `on_attacked` condition
@@ -1740,85 +1522,5 @@ position    = [100.0, 0.0, 200.0]
 
         let inbox = &app.world().resource::<CommsInboxRes>().0;
         assert_eq!(inbox.messages().len(), 1, "on_attacked comms template must fire only once");
-    }
-
-    // AC4: UnloadScenario trigger adds ScenarioUnloadedMarker to AI entities
-    // so tick_ai_controllers fires on_scenario_unloaded transitions.
-    #[test]
-    fn unload_scenario_populates_scenarios_being_unloaded_before_ai_tick() {
-        use crate::world::content::{Trigger, TriggerCondition};
-        use crate::entity_config::{BehaviourConfig, StateConfig};
-        use crate::ai_plugin::AiControllerComponent;
-        use crate::ai::{TransitionConfig, StringOrVec};
-
-        // ai_trigger_test_app already adds AiPlugin — use it directly
-        let mut app = ai_trigger_test_app();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-
-        app.world_mut()
-            .resource_mut::<ScenarioManagerRes>()
-            .0.load_scenario("scenarios/alpha.toml");
-
-        // Spawn a scenario-owned AI entity with on_scenario_unloaded transition
-        let behaviour = BehaviourConfig {
-            initial_state: "patrol".to_string(),
-            state: vec![
-                StateConfig { name: "patrol".to_string(), kind: "idle".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0, duration_secs: 0.0 },
-                StateConfig { name: "free".to_string(), kind: "warping_out".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.5, maintain_range: 0.0, duration_secs: 3.0 },
-            ],
-            transition: vec![TransitionConfig {
-                from: StringOrVec::Single("patrol".into()),
-                to: "free".into(),
-                condition: "on_scenario_unloaded".into(),
-                radius: None,
-                threshold: None,
-                seconds: None,
-            }],
-        };
-
-        let npc_entity = app.world_mut().spawn((
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            EntityUuid("npc-ac4-001".to_string()),
-            BehaviourSection(behaviour),
-            ScenarioOwner("scenarios/alpha.toml".to_string()),
-        )).id();
-
-        app.update(); // attach AI controller
-
-        // Verify controller was attached
-        assert!(app.world().get::<AiControllerComponent>(npc_entity).is_some(), "controller not attached after first update");
-
-        // Fire the UnloadScenario trigger
-        let trigger_npc_uuid = "npc-trigger-ac4";
-        {
-            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("trigger_npc".to_string(), trigger_npc_uuid.to_string());
-            runtime.trigger_states = vec![TriggerState {
-                trigger: Trigger {
-                    condition: TriggerCondition::OnDestroyed { entity_name: "trigger_npc".to_string() },
-                    actions: vec![TriggerAction::UnloadScenario { path: "scenarios/alpha.toml".to_string() }],
-                },
-                fired: false,
-                scenario_path: "test".to_string(),
-            }];
-        }
-
-        app.world_mut()
-            .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: trigger_npc_uuid.to_string() });
-        app.update(); // handle_ai_events fires trigger → inserts ScenarioUnloadedMarker (deferred)
-
-        // Check scenario was actually unloaded from manager
-        assert!(!app.world().resource::<ScenarioManagerRes>().0.is_active("scenarios/alpha.toml"),
-            "scenario should be unloaded from manager");
-
-        // ScenarioUnloadedMarker is added via deferred commands — flush with another update.
-        app.update(); // tick_ai_controllers sees ScenarioUnloadedMarker → fires transition
-
-        let ctrl = app.world().get::<AiControllerComponent>(npc_entity).unwrap();
-        assert_eq!(
-            ctrl.controller.current_state_name, "free",
-            "on_scenario_unloaded must fire on AI entity when its scenario is unloaded via trigger"
-        );
     }
 }

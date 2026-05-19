@@ -42,4 +42,5 @@ This is explicitly a PoC simplification. Draft 2 (Game Map) sketches a future wh
 ## Related
 
 - [Asteroid](./asteroid.md) · [Asteroid Field](../concepts/asteroid-field.md)
+- [WorldPlugin](../concepts/world-plugin.md) — owner of map + scenario load via the unified `assets/worlds/*.toml`
 - [Draft 2 — Game Map](../sources/design-02-game-map.md)

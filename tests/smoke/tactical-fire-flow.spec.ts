@@ -14,28 +14,27 @@ import type { BrowserContext } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Load the real default world and append a close-range raider spawn so that
-// the test's SetTarget call passes the in-range gate. The unified world TOML
-// must contain BOTH the map half (anchors, [[entity]], asteroid fields) and
-// the scenario half (named [[spawn]] entries), so we cannot stub it with a
-// scenario fragment alone. We also strip the default `raider` spawn (which
-// is positioned at the far patrol anchor) so there is exactly one raider for
-// the test to target.
+// Load the real default world and append a close-range raider entity so that
+// the test's SetTarget call passes the in-range gate. After PRD #337 the
+// unified `[[entity]]` block (with optional `name`) is the only spawn surface;
+// legacy `[[spawn]]` blocks are no longer parsed. We also strip the default
+// `raider_alpha` entity (positioned at the far patrol anchor) so there is
+// exactly one raider for the test to target.
 const REAL_WORLD = fs.readFileSync(
   path.join(__dirname, '../../assets/worlds/default.toml'),
   'utf-8',
 );
 const WORLD_WITHOUT_FAR_RAIDER = REAL_WORLD.replace(
-  /\[\[spawn\]\]\s*\nname\s*=\s*"raider"[\s\S]*?(?=\n\[\[|$)/,
+  /\[\[entity\]\]\s*\nname\s*=\s*"raider_alpha"[\s\S]*?(?=\n\[\[|$)/,
   '',
 );
 const CLOSE_RAIDER_WORLD = WORLD_WITHOUT_FAR_RAIDER + `
 
 # Smoke-test override: a raider 20 units in front of the simulation origin.
-[[spawn]]
-name        = "raider"
-entity_path = "assets/entities/pirate_raider.toml"
-position    = [0.0, 0.0, -20.0]
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+name          = "raider_alpha"
+position      = [0.0, 0.0, -20.0]
 `;
 
 async function waitForStation(

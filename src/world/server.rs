@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crate::damage::ConsoleHull;
 use crate::simulation::{Ship, ShipHullIntegrity};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::comms_inbox::CommsInbox;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
@@ -40,6 +40,9 @@ pub struct WorldContentRuntime {
     /// `broadcast_comms_state` knows to push a fresh snapshot even if the
     /// inbox itself hasn't changed.
     pub needs_broadcast: bool,
+    /// Paths of world TOML files already merged into this runtime, used to
+    /// de-duplicate `LoadScenario` actions (no-op if path already active).
+    pub loaded_scenario_paths: HashSet<String>,
 }
 
 /// Bevy resource wrapping the server-side comms inbox.
@@ -54,6 +57,14 @@ pub struct CommsInboxRes(pub CommsInbox);
 pub struct ObjectiveManagerRes(pub ObjectiveManager);
 
 
+/// Queue of world TOML paths to load additively into the live `WorldContentRuntime`.
+///
+/// When a `TriggerAction::LoadScenario { path }` fires, `handle_ai_events` pushes
+/// the path here. The `apply_pending_scenario_loads` system drains it each frame,
+/// parses the TOML, and merges the new triggers/comms into the runtime.
+#[derive(Resource, Default)]
+pub struct PendingScenarioLoad(pub Vec<String>);
+
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
@@ -61,6 +72,7 @@ impl Plugin for WorldPlugin {
         app.init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
+            .init_resource::<PendingScenarioLoad>()
             .add_systems(
                 Startup,
                 (
@@ -84,7 +96,8 @@ impl Plugin for WorldPlugin {
                     broadcast_objective_summary.in_set(crate::sim_sets::SimSet::Broadcast),
                 ).chain(),
             )
-            .add_systems(Update, handle_ai_events.in_set(crate::sim_sets::SimSet::Physics));
+            .add_systems(Update, handle_ai_events.in_set(crate::sim_sets::SimSet::Physics))
+            .add_systems(Update, apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics));
     }
 }
 
@@ -582,8 +595,9 @@ fn handle_respond_to_message(
                 | TriggerAction::RemoveFlag { .. }
                 | TriggerAction::ApplyIntModifier { .. }
                 | TriggerAction::RemoveIntModifier { .. }
-                | TriggerAction::GameOver { .. } => {
-                    // Modifier/flag/game-over actions are handled by the AI-event trigger
+                | TriggerAction::GameOver { .. }
+                | TriggerAction::LoadScenario { .. } => {
+                    // Modifier/flag/game-over/load-scenario actions are handled by the AI-event trigger
                     // or damage systems. No-op in the comms response path.
                 }
             }
@@ -728,6 +742,7 @@ fn handle_ai_events(
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut pending: Option<ResMut<PendingScenarioLoad>>,
 ) {
 
     let mut world_events: Vec<WorldEvent> = Vec::new();
@@ -945,6 +960,11 @@ fn handle_ai_events(
                         ns.set(GamePhase::GameOver);
                     }
                 }
+                TriggerAction::LoadScenario { path } => {
+                    if let Some(ref mut p) = pending {
+                        p.0.push(path.clone());
+                    }
+                }
             }
         }
     }
@@ -952,6 +972,96 @@ fn handle_ai_events(
 
 use crate::ai_plugin::AiControllerComponent;
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
+
+// ── Pending scenario load system ─────────────────────────────────────────────
+
+/// Bevy system: drain `PendingScenarioLoad` and merge each world TOML into the
+/// live `WorldContentRuntime` (trigger states + comms templates + contacts).
+///
+/// On WASM the TOML string is not available at runtime (JS pre-fetches only the
+/// initial world), so we push paths into the WASM-side pending-world queue and
+/// the implementation returns early until the JS bridge delivers the TOML via
+/// `wasm_push_world_toml`. On native targets `std::fs::read_to_string` is used.
+fn apply_pending_scenario_loads(
+    mut pending: ResMut<PendingScenarioLoad>,
+    mut runtime: ResMut<WorldContentRuntime>,
+) {
+    if pending.0.is_empty() {
+        return;
+    }
+
+    let paths: Vec<String> = pending.0.drain(..).collect();
+
+    for path in paths {
+        // De-duplicate: skip paths already merged.
+        if runtime.loaded_scenario_paths.contains(&path) {
+            continue;
+        }
+
+        let toml_str_opt = load_scenario_toml(&path);
+        match toml_str_opt {
+            None => {
+                // WASM: TOML not yet available; re-queue for the next frame.
+                pending.0.push(path);
+            }
+            Some(toml_str) => {
+                match crate::world::config::parse_world(&toml_str) {
+                    Err(e) => {
+                        bevy::log::error!("apply_pending_scenario_loads: failed to parse {}: {}", path, e);
+                        runtime.loaded_scenario_paths.insert(path);
+                    }
+                    Ok(scenario_config) => {
+                        // Merge trigger states (don't overwrite existing ones).
+                        let new_triggers = trigger_states_from_world(&scenario_config);
+                        runtime.trigger_states.extend(new_triggers);
+
+                        // Merge comms template states.
+                        let new_comms = comms_template_states_from_world(&scenario_config);
+                        runtime.comms_template_states.extend(new_comms);
+
+                        // Merge contacts (skip duplicates by uuid).
+                        for tmpl in &scenario_config.comms {
+                            let uuid = match runtime.name_to_uuid.get(&tmpl.from) {
+                                Some(u) => u.clone(),
+                                None => continue,
+                            };
+                            if !runtime.contacts.iter().any(|c: &crate::messages::CommsContact| c.uuid == uuid) {
+                                runtime.contacts.push(crate::messages::CommsContact {
+                                    uuid,
+                                    name: tmpl.from.clone(),
+                                });
+                            }
+                        }
+
+                        runtime.needs_broadcast = true;
+                        runtime.loaded_scenario_paths.insert(path);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Load a world TOML string for the given path.
+///
+/// - **Native**: uses `std::fs::read_to_string` (for tests and dev builds).
+/// - **WASM**: checks the pending world TOML queue populated by JS via
+///   `wasm_push_world_toml`; returns `None` if the fetch is not yet complete.
+fn load_scenario_toml(path: &str) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::fs::read_to_string(path).ok()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::config_cache::pop_pending_world_toml(path)
+            .or_else(|| {
+                // Fire a JS fetch request if we haven't already.
+                crate::config_cache::request_world_fetch(path.to_string());
+                None
+            })
+    }
+}
 
 #[cfg(test)]
 mod tests {

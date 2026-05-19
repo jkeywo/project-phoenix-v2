@@ -354,6 +354,21 @@ function startServer() {
   }
 
   set_message_callback(routeOutbound);
+
+  // Register the runtime world-fetch callback so LoadScenario triggers can
+  // additively load a world TOML (e.g. patrol.toml) during gameplay.
+  if (typeof wasmBindings.set_world_fetch_callback === 'function') {
+    wasmBindings.set_world_fetch_callback(function(path) {
+      fetch(path)
+        .then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(toml => { wasmBindings.wasm_push_world_toml(path, toml); })
+        .catch(err => {
+          console.error('[Phoenix] Failed to fetch world TOML at ' + path + ':', err);
+          // Push empty string so Rust stops re-requesting.
+          wasmBindings.wasm_push_world_toml(path, '');
+        });
+    });
+  }
   
   // Flush before wasm_init: App::run() in WASM unwinds the JS stack by
   // throwing, so any code after wasm_init() never executes.

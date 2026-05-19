@@ -84,6 +84,21 @@ thread_local! {
     /// were retired.
     static WORLD_CONFIG: RefCell<Option<crate::world::config::WorldConfig>> =
         const { RefCell::new(None) };
+
+    /// Queue of runtime-loaded world TOML strings pushed by JS via
+    /// `wasm_push_world_toml` in response to a `request_world_fetch` call.
+    /// Keyed by path so `pop_pending_world_toml` can retrieve by exact path.
+    static PENDING_WORLD_TOML: RefCell<HashMap<String, String>> =
+        RefCell::new(HashMap::new());
+
+    /// Optional JS callback for requesting a runtime world TOML fetch.
+    /// Set by `set_world_fetch_callback` from server.html.
+    static WORLD_FETCH_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// Set of paths already requested via `request_world_fetch` to avoid
+    /// duplicate JS fetch calls.
+    static WORLD_FETCH_REQUESTED: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
 }
 
 // ── Public WASM API ──────────────────────────────────────────────────────────
@@ -299,7 +314,53 @@ pub fn get_world_config() -> Option<crate::world::config::WorldConfig> {
     WORLD_CONFIG.with(|slot| slot.borrow().clone())
 }
 
-/// Load a faction TOML string and insert it into the faction registry.
+/// Register the JS callback used to request a runtime world TOML fetch.
+///
+/// server.html should call this once at startup with a function that accepts
+/// a path string, fetches the TOML, and delivers it via `wasm_push_world_toml`.
+#[cfg(target_arch = "wasm32")]
+pub fn set_world_fetch_callback(callback: Function) {
+    WORLD_FETCH_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Push a runtime-fetched world TOML into the pending queue.
+///
+/// Called by JS after it has fetched a world at a path that Rust requested
+/// via the world-fetch callback.
+#[cfg(target_arch = "wasm32")]
+pub fn wasm_push_world_toml(path: String, toml_str: String) {
+    PENDING_WORLD_TOML.with(|m| {
+        m.borrow_mut().insert(path, toml_str);
+    });
+}
+
+/// Take the TOML for a previously-requested world path, if available.
+///
+/// Returns `Some(toml)` and removes the entry; returns `None` if the JS fetch
+/// has not yet delivered the TOML.
+#[cfg(target_arch = "wasm32")]
+pub fn pop_pending_world_toml(path: &str) -> Option<String> {
+    PENDING_WORLD_TOML.with(|m| m.borrow_mut().remove(path))
+}
+
+/// Fire the JS world-fetch callback for `path` if not already requested.
+#[cfg(target_arch = "wasm32")]
+pub fn request_world_fetch(path: String) {
+    let already = WORLD_FETCH_REQUESTED.with(|s| s.borrow().contains(&path));
+    if already {
+        return;
+    }
+    WORLD_FETCH_REQUESTED.with(|s| s.borrow_mut().insert(path.clone()));
+    WORLD_FETCH_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&path));
+        }
+    });
+}
+
+
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsValue> {
     match crate::faction::parse_faction_config(&toml_str) {
@@ -444,6 +505,12 @@ use wasm_bindgen::prelude::*;
 pub fn set_config_request_callback(_callback: JsValue) {}
 
 #[cfg(not(target_arch = "wasm32"))]
+pub fn set_world_fetch_callback(_callback: JsValue) {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn wasm_push_world_toml(_path: String, _toml_str: String) {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_load_config(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
     Ok(JsValue::from_bool(false))
 }
@@ -477,6 +544,12 @@ pub fn wasm_load_world(_path: String, _toml_str: String) -> Result<JsValue, JsVa
 pub fn get_world_config() -> Option<crate::world::config::WorldConfig> {
     None
 }
+
+// Native no-ops for the runtime world-fetch helpers (native uses std::fs directly).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pop_pending_world_toml(_path: &str) -> Option<String> { None }
+#[cfg(not(target_arch = "wasm32"))]
+pub fn request_world_fetch(_path: String) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_load_faction(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {

@@ -525,6 +525,60 @@ mod tests {
         assert!(process_response(&dialogues, "msg-1", 99).is_none());
     }
 
+    // ── LoadScenario action ───────────────────────────────────────────────
+
+    #[test]
+    fn on_attacked_trigger_with_load_scenario_produces_load_scenario_action() {
+        // PRD #316: raider on_attacked trigger should chain to patrol scenario.
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnAttacked { entity_name: "raider_alpha".into() },
+                actions: vec![TriggerAction::LoadScenario {
+                    path: "assets/worlds/patrol.toml".into(),
+                }],
+            },
+            fired: false,
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("raider_alpha".into(), "uuid-r".into());
+        let events = vec![WorldEvent::Attacked {
+            uuid: "uuid-r".into(),
+            attacker_uuid: "uuid-p".into(),
+        }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+        assert!(
+            fired[0].actions.iter().any(|a| matches!(
+                a,
+                TriggerAction::LoadScenario { path } if path == "assets/worlds/patrol.toml"
+            )),
+            "fired trigger must include a LoadScenario action for patrol.toml"
+        );
+    }
+
+    #[test]
+    fn default_world_on_attacked_trigger_fires_load_scenario_for_patrol() {
+        // PRD #316: the raider on_attacked trigger in default.toml must chain
+        // to assets/worlds/patrol.toml via a LoadScenario action.
+        let toml = include_str!("../../assets/worlds/default.toml");
+        let world = crate::world::config::parse_world(toml).expect("default.toml must parse");
+        let mut states = trigger_states_from_world(&world);
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("raider_alpha".into(), "uuid-r".into());
+        let events = vec![WorldEvent::Attacked {
+            uuid: "uuid-r".into(),
+            attacker_uuid: "uuid-p".into(),
+        }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert!(
+            fired.iter().flat_map(|f| f.actions.iter()).any(|a| matches!(
+                a,
+                TriggerAction::LoadScenario { path } if path == "assets/worlds/patrol.toml"
+            )),
+            "default.toml raider on_attacked trigger must include LoadScenario for patrol.toml"
+        );
+    }
+
     // ── Shipped-world integration ─────────────────────────────────────────
 
     #[test]

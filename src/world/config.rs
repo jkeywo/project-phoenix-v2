@@ -117,6 +117,8 @@ struct RawActionEntry {
     flag_kind: Option<String>,
     #[serde(default)]
     message: Option<String>,
+    #[serde(default)]
+    load_scenario: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -190,6 +192,8 @@ pub enum TriggerAction {
     ApplyIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot, bonus: i32 },
     RemoveIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot },
     GameOver { message: Option<String> },
+    /// Load a new scenario, replacing the current world.
+    LoadScenario { path: String },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -328,6 +332,9 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                 }
             }
             "game_over" => TriggerAction::GameOver { message: raw_action.message.clone() },
+            "load_scenario" => TriggerAction::LoadScenario {
+                path: raw_action.load_scenario.clone().ok_or_else(|| "Action 'load_scenario' requires a 'load_scenario' field".to_string())?,
+            },
             other => return Err(format!("Unknown trigger action '{}'", other)),
         };
         actions.push(action);
@@ -1226,7 +1233,7 @@ condition = "on_zombie"
     fn parse_world_default_toml_loads_triggers_and_comms() {
         let toml = include_str!("../../assets/worlds/default.toml");
         let cfg = parse_world(toml).expect("default.toml must parse");
-        assert_eq!(cfg.triggers.len(), 1, "default.toml has 1 [[trigger]]");
+        assert_eq!(cfg.triggers.len(), 2, "default.toml has 2 [[trigger]]s");
         assert_eq!(cfg.comms.len(), 3, "default.toml has 3 [[comms]] templates");
     }
 

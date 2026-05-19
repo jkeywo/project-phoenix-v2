@@ -259,6 +259,26 @@ pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValu
     crate::config_cache::wasm_load_world(path, toml_str)
 }
 
+/// Register the JS callback used by Rust to request a runtime world TOML fetch.
+///
+/// The callback signature is: `callback(path: string)`. When called, JS must
+/// fetch the TOML at `path` and deliver it via `wasm_push_world_toml`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_world_fetch_callback(callback: js_sys::Function) {
+    crate::config_cache::set_world_fetch_callback(callback);
+}
+
+/// Deliver a runtime-fetched world TOML to the Rust side.
+///
+/// Called by JS after fetching a world path that Rust requested via the
+/// `set_world_fetch_callback` callback.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_push_world_toml(path: String, toml_str: String) {
+    crate::config_cache::wasm_push_world_toml(path, toml_str);
+}
+
 // ── Bevy bridge systems ────────────────────────────────────────────────────
 
 /// Drains the inbound queue each frame and injects messages into Bevy.

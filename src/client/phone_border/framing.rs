@@ -27,7 +27,8 @@ use crate::ship_view::ShipView;
 
 // ── Resources ────────────────────────────────────────────────────────
 
-/// Holds non-border phone assets: compass ring, needle, tab corner, fonts.
+/// Holds non-border phone assets: compass ring, needle, tab corner, fonts,
+/// plus console-panel widget textures (buttons, panels, joysticks, radar, etc.).
 /// Border textures (corners + edges) now live in `BorderAssets`.
 #[derive(Resource, Debug, Clone)]
 pub struct PhoneAssets {
@@ -36,6 +37,39 @@ pub struct PhoneAssets {
     pub tab_corner: Handle<Image>,
     pub font_display: Handle<Font>,
     pub font_mono: Handle<Font>,
+    // ── gui/ button-normal ──
+    pub btn_normal_idle: Handle<Image>,
+    pub btn_normal_hover: Handle<Image>,
+    pub btn_normal_active: Handle<Image>,
+    pub btn_normal_press: Handle<Image>,
+    // ── gui/ button-small ──
+    pub btn_small_idle: Handle<Image>,
+    pub btn_small_hover: Handle<Image>,
+    pub btn_small_active: Handle<Image>,
+    pub btn_small_press: Handle<Image>,
+    // ── helm_console/ ──
+    pub helm_panel_bg: Handle<Image>,
+    pub impulse_ready: Handle<Image>,
+    pub impulse_idle: Handle<Image>,
+    pub impulse_hover: Handle<Image>,
+    pub impulse_active: Handle<Image>,
+    pub impulse_press: Handle<Image>,
+    pub joystick_knob_idle: Handle<Image>,
+    pub joystick_knob_hover: Handle<Image>,
+    pub joystick_knob_active: Handle<Image>,
+    pub joystick_knob_press: Handle<Image>,
+    pub joystick_pad_idle: Handle<Image>,
+    pub joystick_pad_active: Handle<Image>,
+    pub radar_bg: Handle<Image>,
+    pub radar_surround: Handle<Image>,
+    // ── captain_console/ ──
+    pub captain_panel_bg: Handle<Image>,
+    pub red_alert_idle: Handle<Image>,
+    pub red_alert_hover: Handle<Image>,
+    pub red_alert_active: Handle<Image>,
+    pub red_alert_press: Handle<Image>,
+    pub red_alert_armed: Handle<Image>,
+    pub inset_card: Handle<Image>,
 }
 
 /// Auto-detected device orientation, updated each frame from the window
@@ -109,6 +143,39 @@ fn load_phone_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
         tab_corner: asset_server.load("phone_border/tab-corner.png"),
         font_display: asset_server.load("fonts/ChakraPetch-SemiBold.ttf"),
         font_mono: asset_server.load("fonts/JetBrainsMono-Regular.ttf"),
+        // ── gui/ button-normal ──
+        btn_normal_idle: asset_server.load("gui/button-normal-idle.png"),
+        btn_normal_hover: asset_server.load("gui/button-normal-hover.png"),
+        btn_normal_active: asset_server.load("gui/button-normal-active.png"),
+        btn_normal_press: asset_server.load("gui/button-normal-press.png"),
+        // ── gui/ button-small ──
+        btn_small_idle: asset_server.load("gui/button-small-idle.png"),
+        btn_small_hover: asset_server.load("gui/button-small-hover.png"),
+        btn_small_active: asset_server.load("gui/button-small-active.png"),
+        btn_small_press: asset_server.load("gui/button-small-press.png"),
+        // ── helm_console/ ──
+        helm_panel_bg: asset_server.load("helm_console/panel-bg.png"),
+        impulse_ready: asset_server.load("helm_console/impulse-ready.png"),
+        impulse_idle: asset_server.load("helm_console/impulse-idle.png"),
+        impulse_hover: asset_server.load("helm_console/impulse-hover.png"),
+        impulse_active: asset_server.load("helm_console/impulse-active.png"),
+        impulse_press: asset_server.load("helm_console/impulse-press.png"),
+        joystick_knob_idle: asset_server.load("helm_console/joystick-knob-idle.png"),
+        joystick_knob_hover: asset_server.load("helm_console/joystick-knob-hover.png"),
+        joystick_knob_active: asset_server.load("helm_console/joystick-knob-active.png"),
+        joystick_knob_press: asset_server.load("helm_console/joystick-knob-press.png"),
+        joystick_pad_idle: asset_server.load("helm_console/joystick-pad-idle.png"),
+        joystick_pad_active: asset_server.load("helm_console/joystick-pad-active.png"),
+        radar_bg: asset_server.load("helm_console/radar-bg.png"),
+        radar_surround: asset_server.load("helm_console/radar-surround.png"),
+        // ── captain_console/ ──
+        captain_panel_bg: asset_server.load("captain_console/panel-bg.png"),
+        red_alert_idle: asset_server.load("captain_console/red-alert-idle.png"),
+        red_alert_hover: asset_server.load("captain_console/red-alert-hover.png"),
+        red_alert_active: asset_server.load("captain_console/red-alert-active.png"),
+        red_alert_press: asset_server.load("captain_console/red-alert-press.png"),
+        red_alert_armed: asset_server.load("captain_console/red-alert-armed.png"),
+        inset_card: asset_server.load("captain_console/inset-card.png"),
     };
     commands.insert_resource(phone);
 

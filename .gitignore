@@ -6,6 +6,7 @@ dist
 .obsidian
 .claude
 .sandcastle
+.planning
 
 node_modules
 

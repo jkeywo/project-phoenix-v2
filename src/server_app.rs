@@ -728,19 +728,25 @@ fn setup_world_from_config(
 ) {
     // -- Spawn immediate entities from entity instances ------------
     //
-    // PRD #337/#338 slice 1: asteroid-field templates now flow through the
-    // unified pipeline in `world::server::spawn_world_entities`. Skip them
-    // here so the same instance isn't spawned twice. The classifier mirrors
+    // PRD #337/#338 slice 1 + #339 slice 2: both asteroid-field templates
+    // and any [[entity]] carrying a `name` flow through the unified
+    // `world::server::spawn_world_entities`. Skip them here so the same
+    // instance isn't spawned twice. The classifier is shared with
     // `partition_immediate_entities` over in `world::config`.
     for entity_inst in &map_config.entities {
         if entity_inst.spawn_on != crate::map_config::EntityInstanceSpawnOn::Immediate {
             continue;
         }
-        let is_asteroid_field = config_cache
-            .get(&entity_inst.template_path)
-            .and_then(|c| c.asteroid_field.as_ref())
-            .is_some();
-        if is_asteroid_field {
+        let is_unified = crate::world::config::is_owned_by_unified_pipeline(
+            entity_inst,
+            |path| {
+                config_cache
+                    .get(path)
+                    .and_then(|c| c.asteroid_field.as_ref())
+                    .is_some()
+            },
+        );
+        if is_unified {
             continue;
         }
         spawn_entity_instance(&mut commands, &map_config, &config_cache, entity_inst);

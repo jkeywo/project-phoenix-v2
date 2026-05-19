@@ -50,6 +50,10 @@ pub struct WorldConfig {
     pub global: GlobalConfig,
     pub anchors: HashMap<String, [f32; 3]>,
     pub entities: Vec<EntityInstance>,
+    /// Map of `name → uuid` for entities spawned via `[[entity]] name = "..."`.
+    /// Populated by `spawn_world_entities` (PRD #337/#339 slice 2); read by
+    /// trigger and comms lookup paths that resolve a name to a live UUID.
+    pub name_to_uuid: HashMap<String, String>,
 }
 
 impl WorldConfig {
@@ -96,7 +100,55 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         global: raw.global,
         anchors,
         entities: raw.entities,
+        name_to_uuid: HashMap::new(),
     })
+}
+
+/// Build a `name → uuid` map for the named entries in an `[[entity]]` slice.
+///
+/// PRD #337/#339 slice 2: anonymous `[[entity]]` instances stay unaddressable;
+/// `[[entity]]` instances carrying a `name` field become trigger- and
+/// comms-eligible. The UUID generator is supplied by the caller so this
+/// helper stays a pure function (tests pass a counter; production passes
+/// `|| Uuid::new_v4().to_string()`).
+pub fn assign_named_entity_uuids<F>(
+    entities: &[EntityInstance],
+    mut gen_uuid: F,
+) -> HashMap<String, String>
+where
+    F: FnMut() -> String,
+{
+    let mut out = HashMap::new();
+    for entity in entities {
+        if let Some(name) = entity.name.as_ref() {
+            out.insert(name.clone(), gen_uuid());
+        }
+    }
+    out
+}
+
+/// Predicate: is this `[[entity]]` instance owned by the unified pipeline
+/// (`spawn_world_entities`), rather than the legacy
+/// `setup_world_from_config` path?
+///
+/// PRD #337 routes two kinds of entries through the unified pipeline:
+/// * **Slice 1**: any entry whose resolved template is an asteroid field.
+/// * **Slice 2**: any entry carrying a `name` field — the unified pipeline
+///   assigns the UUID so `name → uuid` is single-sourced.
+///
+/// Both call sites (legacy + unified) call this helper with the same
+/// `is_asteroid_field` lookup to guarantee no entry is spawned twice.
+pub fn is_owned_by_unified_pipeline<F>(
+    entity_inst: &EntityInstance,
+    is_asteroid_field: F,
+) -> bool
+where
+    F: Fn(&str) -> bool,
+{
+    if entity_inst.name.is_some() {
+        return true;
+    }
+    is_asteroid_field(&entity_inst.template_path)
 }
 
 /// Collect the deduplicated entity template paths referenced by a `WorldConfig`.
@@ -151,6 +203,46 @@ where
         }
     }
     (fields, others)
+}
+
+/// Three-way partition of immediate `[[entity]]` instances.
+///
+/// PRD #339 slice 2: the unified pipeline owns BOTH asteroid-field templates
+/// AND any entry carrying a `name` field (so the entity that triggers / comms
+/// resolve through `name → uuid` is actually spawned with that UUID). The
+/// legacy `setup_world_from_config` path only spawns the third bucket
+/// (anonymous non-asteroid entries).
+///
+/// Returns `(asteroid_fields, named_non_asteroid, anonymous_non_asteroid)`.
+/// `GameStart` entries are returned in none of the three buckets.
+pub fn partition_immediate_entities_three_way<F>(
+    world: &WorldConfig,
+    is_asteroid_field: F,
+) -> (
+    Vec<&crate::map_config::EntityInstance>,
+    Vec<&crate::map_config::EntityInstance>,
+    Vec<&crate::map_config::EntityInstance>,
+)
+where
+    F: Fn(&str) -> bool,
+{
+    use crate::map_config::EntityInstanceSpawnOn;
+    let mut fields = Vec::new();
+    let mut named = Vec::new();
+    let mut anon = Vec::new();
+    for ent in &world.entities {
+        if ent.spawn_on != EntityInstanceSpawnOn::Immediate {
+            continue;
+        }
+        if is_asteroid_field(&ent.template_path) {
+            fields.push(ent);
+        } else if ent.name.is_some() {
+            named.push(ent);
+        } else {
+            anon.push(ent);
+        }
+    }
+    (fields, named, anon)
 }
 
 // ── Unit Tests ─────────────────────────────────────────────────────────────
@@ -232,6 +324,140 @@ position = [0.0, 0.0, 0.0]
     }
 
     #[test]
+    fn world_config_default_has_empty_name_to_uuid() {
+        // PRD #337/#339 slice 2: the unified WorldConfig owns the
+        // `name → uuid` map that `spawn_world_entities` populates and
+        // trigger/comms lookup reads. Starts empty.
+        let cfg = WorldConfig::default();
+        assert!(cfg.name_to_uuid.is_empty());
+        assert_eq!(cfg.name_to_uuid.len(), 0);
+    }
+
+    #[test]
+    fn assign_named_entity_uuids_collects_named_only_with_stable_uuids() {
+        // PRD #337/#339 slice 2: a pure helper builds the `name → uuid`
+        // map from a slice of EntityInstance. Anonymous entries are skipped;
+        // a caller-supplied generator yields the UUIDs (so tests can be
+        // deterministic without dragging real RNG in).
+        let entities = vec![
+            EntityInstance {
+                template_path: "assets/entities/station_outpost.toml".into(),
+                name: Some("starbase_alpha".into()),
+                ..Default::default()
+            },
+            EntityInstance {
+                template_path: "assets/entities/star_sun.toml".into(),
+                name: None,
+                ..Default::default()
+            },
+            EntityInstance {
+                template_path: "assets/entities/planet_earth.toml".into(),
+                name: Some("earth".into()),
+                ..Default::default()
+            },
+        ];
+        let mut counter = 0u32;
+        let map = assign_named_entity_uuids(&entities, || {
+            counter += 1;
+            format!("uuid-{counter}")
+        });
+        assert_eq!(map.len(), 2, "only named entities get a uuid");
+        assert_eq!(map.get("starbase_alpha").map(String::as_str), Some("uuid-1"));
+        assert_eq!(map.get("earth").map(String::as_str), Some("uuid-2"));
+    }
+
+    #[test]
+    fn is_owned_by_unified_pipeline_routes_asteroid_fields_and_named_entries() {
+        // PRD #337/#339 slice 2: the legacy `setup_world_from_config` path
+        // must skip both asteroid-field templates (slice 1) AND any entry
+        // carrying a `name` field (slice 2 — owned by `spawn_world_entities`).
+        let asteroid = EntityInstance {
+            template_path: "assets/entities/asteroid_field_dense.toml".into(),
+            ..Default::default()
+        };
+        let named = EntityInstance {
+            template_path: "assets/entities/station_outpost.toml".into(),
+            name: Some("starbase_alpha".into()),
+            ..Default::default()
+        };
+        let anon = EntityInstance {
+            template_path: "assets/entities/star_sun.toml".into(),
+            ..Default::default()
+        };
+
+        let is_field = |p: &str| p.contains("asteroid_field");
+        assert!(is_owned_by_unified_pipeline(&asteroid, is_field));
+        assert!(is_owned_by_unified_pipeline(&named, is_field));
+        assert!(
+            !is_owned_by_unified_pipeline(&anon, is_field),
+            "anonymous non-asteroid entries stay on the legacy path"
+        );
+    }
+
+    #[test]
+    fn partition_immediate_entities_three_buckets_separates_fields_named_anonymous() {
+        // PRD #339 slice 2: named non-asteroid entries are owned by the
+        // unified pipeline (and must be spawned by it). The partition
+        // helper now produces three buckets so `spawn_world_entities` can
+        // iterate both fields AND named entries while
+        // `setup_world_from_config` keeps anonymous ones.
+        let mut cfg = WorldConfig::default();
+        cfg.entities.push(EntityInstance {
+            template_path: "assets/entities/asteroid_field_main.toml".into(),
+            ..Default::default()
+        });
+        cfg.entities.push(EntityInstance {
+            template_path: "assets/entities/station_outpost.toml".into(),
+            name: Some("starbase_alpha".into()),
+            ..Default::default()
+        });
+        cfg.entities.push(EntityInstance {
+            template_path: "assets/entities/star_sun.toml".into(),
+            ..Default::default()
+        });
+        // game_start entries are in no bucket
+        cfg.entities.push(EntityInstance {
+            template_path: "assets/entities/player_ship.toml".into(),
+            spawn_on: crate::map_config::EntityInstanceSpawnOn::GameStart,
+            ..Default::default()
+        });
+
+        let is_field = |p: &str| p.contains("asteroid_field");
+        let (fields, named, anon) =
+            partition_immediate_entities_three_way(&cfg, is_field);
+
+        assert_eq!(fields.len(), 1);
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].name.as_deref(), Some("starbase_alpha"));
+        assert_eq!(anon.len(), 1);
+        assert_eq!(anon[0].template_path, "assets/entities/star_sun.toml");
+    }
+
+    #[test]
+    fn parse_world_entity_accepts_optional_name_field() {
+        // PRD #337/#339 slice 2: named [[entity]] blocks become the unified
+        // replacement for [[spawn]] — they get a UUID at spawn time and
+        // become eligible for trigger / comms lookups.
+        let toml = r#"
+[[entity]]
+template_path = "assets/entities/station_outpost.toml"
+name = "Starbase Alpha"
+position = [500.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+position = [0.0, 0.0, 0.0]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.entities.len(), 2);
+        assert_eq!(cfg.entities[0].name.as_deref(), Some("Starbase Alpha"));
+        assert_eq!(
+            cfg.entities[1].name, None,
+            "entity without a name field must deserialize as None"
+        );
+    }
+
+    #[test]
     fn parse_world_entity_spawn_on_game_start_recognised() {
         let toml = r#"
 [[entity]]
@@ -287,11 +513,13 @@ message = "Mayday"
         // Anchors declared in default.toml.
         assert!(cfg.anchors.contains_key("starbase_alpha"));
         assert!(cfg.anchors.contains_key("patrol_alpha"));
-        // [[entity]] blocks: star, planet, asteroid_field, player_ship, region_nebula.
+        // [[entity]] blocks: star, planet (named "earth"), asteroid_field,
+        // player_ship, region_nebula, Starbase Alpha (named, was [[spawn]]
+        // — migrated in PRD #339 slice 2).
         assert_eq!(
             cfg.entities.len(),
-            5,
-            "default.toml must contain 5 [[entity]] blocks"
+            6,
+            "default.toml must contain 6 [[entity]] blocks"
         );
         // Asteroid field must be present so spawn_world_entities can route it.
         assert!(
@@ -299,6 +527,15 @@ message = "Mayday"
                 .iter()
                 .any(|e| e.template_path.contains("asteroid_field")),
             "asteroid_field [[entity]] must be visible to the unified pipeline"
+        );
+        // PRD #339 slice 2: named entries are now [[entity]] with `name`.
+        assert!(
+            cfg.entities.iter().any(|e| e.name.as_deref() == Some("Starbase Alpha")),
+            "Starbase Alpha must be a named [[entity]] after slice 2 migration"
+        );
+        assert!(
+            cfg.entities.iter().any(|e| e.name.as_deref() == Some("earth")),
+            "earth must carry a `name` field after slice 2 migration"
         );
     }
 

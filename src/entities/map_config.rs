@@ -179,6 +179,12 @@ pub struct EntityInstance {
     /// Optional human-readable identifier for this instance.
     #[serde(default)]
     pub id: Option<String>,
+    /// Optional named identity for the entity. When present, the entity
+    /// becomes trigger- and comms-eligible: `spawn_world_entities` assigns
+    /// it a stable UUID and registers `name → uuid` in `WorldConfig.name_to_uuid`
+    /// (PRD #337/#339 slice 2). Replaces the legacy `[[spawn]] name = ...`.
+    #[serde(default)]
+    pub name: Option<String>,
     /// World-space position [x, y, z].
     #[serde(default)]
     pub position: Vec<f32>,

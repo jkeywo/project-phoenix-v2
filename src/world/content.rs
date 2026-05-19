@@ -2543,11 +2543,18 @@ kind = "UnknownFlag"
     }
 
     #[test]
-    fn default_scenario_has_starbase_alpha_spawn() {
+    fn default_scenario_no_longer_has_starbase_alpha_spawn() {
+        // PRD #339 slice 2: Starbase Alpha migrated from `[[spawn]]` to
+        // `[[entity]] name = "Starbase Alpha"`. The legacy scenario parser
+        // must no longer see it as a spawn; the unified [[entity]] pipeline
+        // (see world::config tests) owns the name → uuid registration.
         let toml_str = include_str!("../../assets/worlds/default.toml");
         let config = parse_scenario(toml_str).expect("default.toml must parse");
         let starbase = config.spawns.iter().find(|s| s.name == "Starbase Alpha");
-        assert!(starbase.is_some(), "default scenario must have a spawn named 'Starbase Alpha'");
+        assert!(
+            starbase.is_none(),
+            "Starbase Alpha must no longer be a [[spawn]] — it's a named [[entity]] now"
+        );
     }
 
     #[test]

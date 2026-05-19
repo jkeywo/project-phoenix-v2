@@ -30,6 +30,7 @@ position = [0.0, 0.0, 0.0]
 [[entity]]
 template_path = "assets/entities/planet_earth.toml"
 id = "earth"
+name = "earth"
 position = [200.0, 0.0, 200.0]
 
 [[entity]]
@@ -47,17 +48,29 @@ template_path = "assets/entities/region_nebula.toml"
 id = "nebula-1"
 position = [300.0, 0.0, -200.0]
 
+# ── Named entities (trigger / comms-eligible) ────────────────────────────────
+#
+# PRD #337/#339 slice 2: `[[entity]] name = "..."` replaces the legacy
+# `[[spawn]]` block. The unified pipeline assigns a UUID at spawn time and
+# registers it in `WorldConfig.name_to_uuid` so triggers and comms can
+# resolve the name. Anchors aren't yet resolved by the unified `[[entity]]`
+# block — positions are inlined here (anchor `starbase_alpha = [500, 0, 0]`).
+
+[[entity]]
+template_path = "assets/entities/station_outpost.toml"
+name = "Starbase Alpha"
+position = [500.0, 0.0, 0.0]
+
 # ── Named spawns (trigger-eligible) ───────────────────────────────────────────
+#
+# Patrol-world NPCs continue to flow through `[[spawn]]` for slice 2; the
+# anchor / relative_to / faction wiring moves to `[[entity]]` in a later
+# slice of PRD #337.
 
 [[spawn]]
 name        = "raider"
 entity_path = "assets/entities/pirate_raider.toml"
 anchor      = "patrol_alpha"
-
-[[spawn]]
-name        = "Starbase Alpha"
-entity_path = "assets/entities/station_outpost.toml"
-anchor      = "starbase_alpha"
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 

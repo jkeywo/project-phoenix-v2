@@ -112,26 +112,68 @@ fn insert_world_config_resource(mut commands: Commands) {
     }
 }
 
-/// Startup system: spawn `[[entity]]` instances whose resolved template is an
-/// asteroid-field (i.e. the resolved `EntityConfig` has an `[asteroid_field]`
-/// section). These flow through the new unified `WorldConfig` pipeline
-/// introduced in PRD #337/#338 slice 1.
+/// Startup system: spawn `[[entity]]` instances owned by the unified
+/// `WorldConfig` pipeline.
 ///
-/// Non-asteroid-field immediate-spawn entries continue to flow through the
-/// legacy `setup_world_from_config` in `server_app.rs`; that function carries
-/// the mirror-image skip guard so an entry can only be spawned by one of the
-/// two paths.
+/// PRD #337/#338 slice 1 + PRD #339 slice 2: the unified pipeline owns
+/// both asteroid-field templates AND any `[[entity]]` carrying a `name`
+/// field. The legacy `setup_world_from_config` in `server_app.rs` keeps
+/// anonymous non-asteroid entries; the shared `is_owned_by_unified_pipeline`
+/// helper guarantees no entry is spawned twice.
+///
+/// For named entries the UUID is read from `WorldConfig.name_to_uuid`
+/// (populated by an earlier assign-uuid pass in this same system), so the
+/// spawned `EntityUuid` component matches the UUID that trigger / comms
+/// lookups resolve to. For asteroid-field entries a fresh UUID is allocated.
 fn spawn_world_entities(
     mut commands: Commands,
-    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    world_config: Option<ResMut<crate::world::config::WorldConfig>>,
+    mut runtime: Option<ResMut<WorldContentRuntime>>,
 ) {
-    let Some(world_config) = world_config else {
+    let Some(mut world_config) = world_config else {
         return; // No unified WorldConfig (native tests, hardcoded fallback).
     };
-    let config_cache = crate::config_cache::get_config_cache();
 
-    let (fields, _others) = crate::world::config::partition_immediate_entities(
-        world_config.as_ref(),
+    // First pass (PRD #339 slice 2): assign UUIDs to every named [[entity]]
+    // entry and register them in `WorldConfig.name_to_uuid` (and mirror
+    // into `WorldContentRuntime.name_to_uuid` if present so trigger / comms
+    // lookup paths see the same names). This pass runs independently of
+    // template resolution so it works even when the config cache is empty
+    // (e.g. in unit tests).
+    let new_names = crate::world::config::assign_named_entity_uuids(
+        &world_config.entities,
+        crate::entity_loader::assign_uuid,
+    );
+    for (name, uuid) in &new_names {
+        world_config.name_to_uuid.insert(name.clone(), uuid.clone());
+    }
+    if let Some(runtime) = runtime.as_mut() {
+        for (name, uuid) in &new_names {
+            runtime.name_to_uuid.insert(name.clone(), uuid.clone());
+        }
+    }
+
+    let config_cache = crate::config_cache::get_config_cache();
+    let world_snapshot = world_config.clone();
+    let _spawned = spawn_immediate_entities_internal(&mut commands, &world_snapshot, &config_cache);
+}
+
+/// Spawn the unified-pipeline-owned immediate `[[entity]]` instances.
+///
+/// Returns the list of spawned `Entity` handles in spawn order
+/// (asteroid fields first, then named non-asteroid entries). Callers must
+/// flush commands (e.g. via `app.update()`) before querying components.
+///
+/// Extracted from `spawn_world_entities` so the spawn logic is testable
+/// on native: tests pass a fixture `ConfigCache` (plain `HashMap`) directly
+/// instead of relying on the WASM-only `CONFIG_CACHE` thread-local.
+pub fn spawn_immediate_entities_internal(
+    commands: &mut Commands,
+    world_config: &crate::world::config::WorldConfig,
+    config_cache: &crate::config_cache::ConfigCache,
+) -> Vec<Entity> {
+    let (fields, named, _anon) = crate::world::config::partition_immediate_entities_three_way(
+        world_config,
         |path| {
             config_cache
                 .get(path)
@@ -140,32 +182,81 @@ fn spawn_world_entities(
         },
     );
 
+    let mut spawned = Vec::with_capacity(fields.len() + named.len());
+
+    // Asteroid-field entries get a fresh UUID (they have no name to anchor to).
     for entity_inst in fields {
-        let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {
+        let config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
             Ok(c) => c,
             Err(e) => {
                 bevy::log::error!(
-                    "spawn_world_entities: failed to resolve '{}': {}",
+                    "spawn_world_entities: failed to resolve asteroid field '{}': {}",
                     entity_inst.template_path, e
                 );
                 continue;
             }
         };
-
         let uuid = crate::entity_loader::assign_uuid();
-        let pos = if entity_inst.position.len() >= 3 {
-            Vec3::new(entity_inst.position[0], entity_inst.position[1], entity_inst.position[2])
-        } else {
-            Vec3::ZERO
-        };
-
-        crate::entity_spawner::spawn_entity(
-            &mut commands,
+        let pos = instance_position(entity_inst);
+        let entity = crate::entity_spawner::spawn_entity(
+            commands,
             &config,
             pos,
             uuid,
             entity_inst.id.clone(),
         );
+        spawned.push(entity);
+    }
+
+    // Named non-asteroid entries MUST use the UUID already registered in
+    // `world_config.name_to_uuid` so triggers / comms resolve to a real
+    // entity. A missing registration is a programmer error — log and skip
+    // rather than allocate a fresh UUID (which would silently desync).
+    for entity_inst in named {
+        let name = entity_inst.name.as_ref().expect("partition guarantees Some");
+        let uuid = match world_config.name_to_uuid.get(name) {
+            Some(u) => u.clone(),
+            None => {
+                bevy::log::error!(
+                    "spawn_world_entities: named entity '{}' has no UUID in WorldConfig.name_to_uuid — skipping",
+                    name
+                );
+                continue;
+            }
+        };
+        let config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
+            Ok(c) => c,
+            Err(e) => {
+                bevy::log::error!(
+                    "spawn_world_entities: failed to resolve named entity '{}' ({}): {}",
+                    name, entity_inst.template_path, e
+                );
+                continue;
+            }
+        };
+        let pos = instance_position(entity_inst);
+        let entity = crate::entity_spawner::spawn_entity(
+            commands,
+            &config,
+            pos,
+            uuid,
+            entity_inst.id.clone(),
+        );
+        spawned.push(entity);
+    }
+
+    spawned
+}
+
+fn instance_position(entity_inst: &crate::map_config::EntityInstance) -> Vec3 {
+    if entity_inst.position.len() >= 3 {
+        Vec3::new(
+            entity_inst.position[0],
+            entity_inst.position[1],
+            entity_inst.position[2],
+        )
+    } else {
+        Vec3::ZERO
     }
 }
 
@@ -344,6 +435,50 @@ fn spawn_scenario_entities(mut commands: Commands) {
     }
 }
 
+/// Fold a parsed `ScenarioConfig` into a live `WorldContentRuntime`.
+///
+/// PRD #337/#339 slice 2: the unified `[[entity]]` pipeline runs first and
+/// may have already registered names in `runtime.name_to_uuid`. This helper
+/// merges the legacy scenario `name_to_uuid` in WITHOUT overwriting any
+/// existing entries — unified-pipeline registrations win, legacy fills gaps.
+/// Same merge policy applies to derived `contacts`.
+///
+/// Extracted as a pure helper so the merge semantics are testable on native
+/// (where `get_world_content_config()` always returns `None`).
+pub fn merge_scenario_into_runtime(
+    runtime: &mut WorldContentRuntime,
+    scenario_config: &crate::world::content::ScenarioConfig,
+    scenario_path: &str,
+) {
+    for (name, uuid) in &scenario_config.name_to_uuid {
+        runtime
+            .name_to_uuid
+            .entry(name.clone())
+            .or_insert_with(|| uuid.clone());
+    }
+    runtime.comms_template_states =
+        crate::world::content::comms_template_states_from_config(scenario_config, scenario_path);
+    runtime.trigger_states = trigger_states_from_config(scenario_config, scenario_path);
+
+    // Build contacts list using the merged runtime map so unified-pipeline
+    // UUIDs are picked up too.
+    let mut contacts: Vec<CommsContact> = Vec::new();
+    for tmpl in &scenario_config.comms {
+        let uuid = match runtime.name_to_uuid.get(&tmpl.from) {
+            Some(u) => u.clone(),
+            None => continue,
+        };
+        if !contacts.iter().any(|c: &CommsContact| c.uuid == uuid) {
+            contacts.push(CommsContact {
+                uuid,
+                name: tmpl.from.clone(),
+            });
+        }
+    }
+    runtime.contacts = contacts;
+    runtime.needs_broadcast = true;
+}
+
 /// Startup system: initialises `WorldContentRuntime`, `CommsInboxRes`, and
 /// `ObjectiveManagerRes` from the loaded `ScenarioConfig` (if any).
 /// Also populates `WorldResource` with scenario metadata (title, description).
@@ -362,30 +497,8 @@ fn init_scenario_runtime(
 
     world.0.scenario_title = scenario_config.title.clone();
     world.0.scenario_description = scenario_config.description.clone();
-    runtime.name_to_uuid = scenario_config.name_to_uuid.clone();
-    runtime.comms_template_states =
-        crate::world::content::comms_template_states_from_config(&scenario_config, &scenario_path);
-    runtime.trigger_states = trigger_states_from_config(&scenario_config, &scenario_path);
 
-    // Build contacts list from comms templates: any entity referenced as
-    // `from` in a comms template is a hailable contact (provided we have
-    // its UUID).
-    let mut contacts: Vec<CommsContact> = Vec::new();
-    for tmpl in &scenario_config.comms {
-        let uuid = match scenario_config.name_to_uuid.get(&tmpl.from) {
-            Some(u) => u.clone(),
-            None => continue,
-        };
-        // Avoid duplicates
-        if !contacts.iter().any(|c: &CommsContact| c.uuid == uuid) {
-            contacts.push(CommsContact {
-                uuid,
-                name: tmpl.from.clone(),
-            });
-        }
-    }
-    runtime.contacts = contacts;
-    runtime.needs_broadcast = true;
+    merge_scenario_into_runtime(&mut runtime, &scenario_config, &scenario_path);
 
     // Mark inbox dirty so the first InProgress broadcast fires even though
     // no messages have arrived yet.
@@ -1597,5 +1710,299 @@ position    = [100.0, 0.0, 200.0]
 
         let inbox = &app.world().resource::<CommsInboxRes>().0;
         assert_eq!(inbox.messages().len(), 1, "on_attacked comms template must fire only once");
+    }
+
+    // ── Unified [[entity]] name → uuid pipeline (PRD #337/#339 slice 2) ───────
+
+    #[test]
+    fn spawn_world_entities_populates_name_to_uuid_for_named_entity() {
+        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+
+        // Build a unified WorldConfig with one named entry (no template
+        // resolution needed — the helper that mutates `name_to_uuid` runs
+        // independently of the asteroid-field spawning path).
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg.entities.push(EntityInstance {
+            template_path: "assets/entities/station_outpost.toml".into(),
+            name: Some("starbase_alpha".into()),
+            position: vec![500.0, 0.0, 0.0],
+            ..Default::default()
+        });
+        world_cfg.entities.push(EntityInstance {
+            template_path: "assets/entities/star_sun.toml".into(),
+            name: None,
+            position: vec![0.0, 0.0, 0.0],
+            ..Default::default()
+        });
+
+        let mut app = App::new();
+        app.insert_resource(world_cfg);
+        app.add_systems(Update, spawn_world_entities);
+        app.update();
+
+        let cfg = app.world().resource::<UnifiedWorldConfig>();
+        assert_eq!(
+            cfg.name_to_uuid.len(),
+            1,
+            "only named [[entity]] entries get a uuid"
+        );
+        let uuid = cfg.name_to_uuid.get("starbase_alpha").expect("named entity must register");
+        assert!(!uuid.is_empty(), "registered uuid must be non-empty");
+    }
+
+    #[test]
+    fn spawn_world_entities_mirrors_names_into_world_content_runtime() {
+        // PRD #337/#339 slice 2: trigger / comms lookup paths read from
+        // `WorldContentRuntime.name_to_uuid`. The unified pipeline must
+        // mirror its registrations into that map so the lookup path stays
+        // a single source of truth during the transitional slices.
+        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg.entities.push(EntityInstance {
+            template_path: "assets/entities/station_outpost.toml".into(),
+            name: Some("earth".into()),
+            ..Default::default()
+        });
+
+        let mut app = App::new();
+        app.insert_resource(world_cfg);
+        app.init_resource::<WorldContentRuntime>();
+        // Pre-populate runtime with a legacy entry to prove merge (not overwrite).
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .name_to_uuid
+            .insert("legacy_spawn".into(), "legacy-uuid".into());
+
+        app.add_systems(Update, spawn_world_entities);
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.name_to_uuid.contains_key("earth"),
+            "unified pipeline must mirror named entries into runtime"
+        );
+        assert!(
+            runtime.name_to_uuid.contains_key("legacy_spawn"),
+            "pre-existing legacy entries must survive the mirror"
+        );
+    }
+
+    #[test]
+    fn merge_scenario_into_runtime_preserves_existing_name_to_uuid() {
+        // PRD #337/#339 slice 2: when the unified pipeline has already
+        // registered a name (e.g. "starbase_alpha" via [[entity]] name=..),
+        // folding the legacy ScenarioConfig in must NOT overwrite it. The
+        // unified pipeline is the source of truth; legacy entries only fill
+        // gaps. (Conflicting names mean the world TOML lists the same name
+        // in both `[[entity]]` and `[[spawn]]`, which the migration plan
+        // forbids — but unified wins so the spawned entity is reachable.)
+        use crate::world::content::parse_scenario;
+
+        let mut runtime = WorldContentRuntime::default();
+        runtime.name_to_uuid.insert("starbase_alpha".into(), "unified-uuid".into());
+
+        // Build a minimal ScenarioConfig by parsing an empty body and then
+        // pushing entries into `name_to_uuid` directly.
+        let mut scenario = parse_scenario("").expect("empty scenario must parse");
+        scenario.name_to_uuid.insert("starbase_alpha".into(), "legacy-uuid".into());
+        scenario.name_to_uuid.insert("legacy_only".into(), "legacy-only-uuid".into());
+
+        merge_scenario_into_runtime(&mut runtime, &scenario, "fixture");
+
+        assert_eq!(
+            runtime.name_to_uuid.get("starbase_alpha").map(String::as_str),
+            Some("unified-uuid"),
+            "unified-pipeline registration must win over legacy ScenarioConfig"
+        );
+        assert_eq!(
+            runtime.name_to_uuid.get("legacy_only").map(String::as_str),
+            Some("legacy-only-uuid"),
+            "names that exist only in the legacy ScenarioConfig still flow through"
+        );
+    }
+
+    #[test]
+    fn init_scenario_runtime_merges_rather_than_overwrites_existing_names() {
+        // PRD #337/#339 slice 2: `spawn_world_entities` runs before
+        // `init_scenario_runtime` and writes names from the unified
+        // [[entity]] pipeline into `WorldContentRuntime.name_to_uuid`.
+        // `init_scenario_runtime` (which folds the legacy ScenarioConfig
+        // `name_to_uuid` in) must NOT overwrite those — otherwise trigger
+        // and comms lookups for unified-pipeline names would silently
+        // disappear. Cover that with a direct mutation of the runtime
+        // map followed by an explicit `init_scenario_runtime` call.
+        //
+        // On native there's no preloaded scenario config so the system
+        // early-returns; that early-return is itself the safety net we
+        // want — verify any pre-existing entry survives.
+        let mut app = App::new();
+        app.init_resource::<WorldContentRuntime>();
+        app.init_resource::<CommsInboxRes>();
+        app.insert_resource(WorldResource(crate::messages::WorldData::default()));
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .name_to_uuid
+            .insert("starbase_alpha".into(), "unified-uuid".into());
+
+        app.add_systems(Update, init_scenario_runtime);
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.name_to_uuid.get("starbase_alpha").map(String::as_str),
+            Some("unified-uuid"),
+            "init_scenario_runtime must preserve unified-pipeline registrations"
+        );
+    }
+
+    #[test]
+    fn spawn_immediate_entities_spawns_named_non_asteroid_with_registered_uuid() {
+        // PRD #339 slice 2 (rejection fix): named [[entity]] entries MUST be
+        // spawned as real Bevy entities — otherwise triggers / comms resolve
+        // to a UUID that has no Transform behind it. The spawned entity's
+        // `EntityUuid` component must equal the UUID already registered in
+        // `WorldConfig.name_to_uuid` for that name (single source of truth —
+        // no fresh UUID allocation inside the spawn loop).
+        use crate::entity_config::EntityConfig;
+        use crate::entity_spawner::EntityUuid;
+        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use std::collections::HashMap;
+
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg.entities.push(EntityInstance {
+            template_path: "fixture/station.toml".into(),
+            name: Some("starbase_alpha".into()),
+            position: vec![500.0, 0.0, 0.0],
+            ..Default::default()
+        });
+        // An anonymous entry must NOT be spawned by the unified pipeline
+        // (legacy `setup_world_from_config` owns it).
+        world_cfg.entities.push(EntityInstance {
+            template_path: "fixture/star.toml".into(),
+            position: vec![0.0, 0.0, 0.0],
+            ..Default::default()
+        });
+
+        // Pre-populate name_to_uuid as `spawn_world_entities`'s
+        // assign-uuid pass would have.
+        world_cfg
+            .name_to_uuid
+            .insert("starbase_alpha".into(), "stable-station-uuid".into());
+
+        // Build a fixture ConfigCache with the templates referenced above.
+        // Empty EntityConfig is sufficient — no asteroid_field section, so
+        // `is_owned_by_unified_pipeline` routes by `name.is_some()`.
+        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
+        cache.insert("fixture/station.toml".into(), EntityConfig::from_toml("").unwrap());
+        cache.insert("fixture/star.toml".into(), EntityConfig::from_toml("").unwrap());
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(world_cfg.clone());
+
+        let spawned: Vec<Entity> = {
+            let world_cfg = app.world().resource::<UnifiedWorldConfig>().clone();
+            let mut commands = app.world_mut().commands();
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache)
+        };
+        app.update();
+
+        // Exactly one entity from the unified pipeline.
+        assert_eq!(spawned.len(), 1, "only the named entry must be spawned");
+
+        // Its EntityUuid must equal the registered UUID — not a fresh one.
+        let uuid_component = app
+            .world()
+            .get::<EntityUuid>(spawned[0])
+            .expect("spawned entity must carry EntityUuid");
+        assert_eq!(
+            uuid_component.0, "stable-station-uuid",
+            "spawned entity's UUID must match the one in WorldConfig.name_to_uuid"
+        );
+
+        // And it must have a Transform at the configured position so
+        // trigger / comms position queries work.
+        let transform = app
+            .world()
+            .get::<Transform>(spawned[0])
+            .expect("spawned entity must have a Transform");
+        assert_eq!(transform.translation, Vec3::new(500.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn spawn_immediate_entities_spawns_default_world_starbase_and_earth() {
+        // PRD #339 slice 2 (rejection fix): with the shipped default.toml
+        // (Starbase Alpha + Earth as named [[entity]]), both must end up
+        // as real entities. Earth was anonymous in slice 1 and gained a
+        // `name` field in slice 2 — regression-guard it.
+        use crate::entity_config::EntityConfig;
+        use crate::entity_spawner::EntityUuid;
+        use crate::world::config::{parse_world, WorldConfig as UnifiedWorldConfig};
+        use std::collections::HashMap;
+
+        let toml = include_str!("../../assets/worlds/default.toml");
+        let mut world_cfg = parse_world(toml).expect("default.toml must parse");
+        // Mirror what the assign-uuid pass does.
+        let assigned = crate::world::config::assign_named_entity_uuids(
+            &world_cfg.entities,
+            crate::entity_loader::assign_uuid,
+        );
+        for (name, uuid) in &assigned {
+            world_cfg.name_to_uuid.insert(name.clone(), uuid.clone());
+        }
+
+        // Stub every template referenced in default.toml — empty
+        // EntityConfig is enough because we only check Transform + EntityUuid.
+        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
+        for ent in &world_cfg.entities {
+            cache
+                .entry(ent.template_path.clone())
+                .or_insert_with(|| EntityConfig::from_toml("").unwrap());
+        }
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(world_cfg.clone());
+
+        let spawned: Vec<Entity> = {
+            let mut commands = app.world_mut().commands();
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache)
+        };
+        app.update();
+
+        // Look up each spawned entity's UUID and bucket by registered name.
+        let mut spawned_uuids: Vec<String> = spawned
+            .iter()
+            .map(|e| {
+                app.world()
+                    .get::<EntityUuid>(*e)
+                    .expect("every spawned entity must carry EntityUuid")
+                    .0
+                    .clone()
+            })
+            .collect();
+        spawned_uuids.sort();
+
+        let starbase_uuid = world_cfg
+            .name_to_uuid
+            .get("Starbase Alpha")
+            .expect("Starbase Alpha must be registered");
+        let earth_uuid = world_cfg
+            .name_to_uuid
+            .get("earth")
+            .expect("earth must be registered");
+
+        assert!(
+            spawned_uuids.contains(starbase_uuid),
+            "Starbase Alpha must be spawned (uuid={starbase_uuid}, spawned={spawned_uuids:?})"
+        );
+        assert!(
+            spawned_uuids.contains(earth_uuid),
+            "Earth must be spawned (uuid={earth_uuid}, spawned={spawned_uuids:?})"
+        );
     }
 }

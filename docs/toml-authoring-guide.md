@@ -95,18 +95,34 @@ patrol_alpha   = [300.0, 0.0, -300.0]
 
 ### `[[entity]]` (map-half)
 
-A single entity instance for static world layout. Not referenced by triggers
-or comms — use `[[spawn]]` for that.
+A single entity instance for static world layout. An `[[entity]]` block
+becomes trigger- and comms-eligible when it carries a `name` field — PRD
+#337/#339 slice 2 collapsed the old `[[spawn]]`-only naming path so a
+single block can describe both static layout and trigger-eligible entities.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `template_path` | string | **required** | Path to entity template (e.g. `"assets/entities/star_sun.toml"`). |
 | `id` | string | none | Stable instance ID for cross-reference. |
-| `position` | `[f32; 3]` | `[0,0,0]` | World position. |
+| `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers, comms, and `relative_to` lookups resolve names through this map (PRD #339). |
+| `position` | `[f32; 3]` | `[0,0,0]` | World position. Anchor names are not yet resolved on `[[entity]]` — inline the coordinates from `[anchors]` until a later slice of PRD #337 adds anchor support here. |
 | `spawn_on` | `"immediate"` \| `"game_start"` | `"immediate"` | `"immediate"` spawns at world load (lobby phase); `"game_start"` spawns when phase enters `InProgress`. |
 | `overrides` | inline table | none | TOML overrides merged on top of the template (per-instance field tweaks). |
 
-### `[[spawn]]` (scenario-half)
+```toml
+[[entity]]
+template_path = "assets/entities/station_outpost.toml"
+name          = "Starbase Alpha"   # trigger / comms-eligible
+position      = [500.0, 0.0, 0.0]
+```
+
+### `[[spawn]]` (scenario-half — legacy, being removed)
+
+> **Status:** PRD #337 is collapsing `[[spawn]]` into `[[entity]] name = "..."`.
+> Slice 2 (PRD #339) migrated station entries (`Starbase Alpha`, `earth`);
+> slice 3 will migrate NPC patrol entries (`raider`). New worlds should
+> prefer `[[entity]] name = "..."`; only the patrol NPCs still use the
+> legacy block during the transition.
 
 A named, UUID-assigned entity instance. Eligible for trigger and comms
 references via its `name`.
@@ -189,7 +205,7 @@ seed = 42
 starbase_alpha = [500.0, 0.0, 0.0]
 patrol_alpha   = [300.0, 0.0, -300.0]
 
-# Static map-half layout (not trigger-eligible)
+# Static map-half layout (anonymous — not trigger-eligible)
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
 position = [0.0, 0.0, 0.0]
@@ -200,16 +216,17 @@ id = "player-ship"
 position = [150.0, 0.0, 0.0]
 spawn_on = "game_start"
 
-# Named scenario-half spawns (trigger/comms-eligible)
+# Named [[entity]] (trigger / comms-eligible — PRD #339 slice 2)
+[[entity]]
+template_path = "assets/entities/station_outpost.toml"
+name          = "Starbase Alpha"
+position      = [500.0, 0.0, 0.0]
+
+# Legacy named scenario-half spawn (patrol NPC, pending PRD #337 slice 3)
 [[spawn]]
 name        = "raider"
 entity_path = "assets/entities/pirate_raider.toml"
 anchor      = "patrol_alpha"
-
-[[spawn]]
-name        = "Starbase Alpha"
-entity_path = "assets/entities/station_outpost.toml"
-anchor      = "starbase_alpha"
 
 [[trigger]]
 condition = "on_destroyed"

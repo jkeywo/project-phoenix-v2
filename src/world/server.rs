@@ -65,6 +65,42 @@ pub struct ObjectiveManagerRes(pub ObjectiveManager);
 #[derive(Resource, Default)]
 pub struct PendingScenarioLoad(pub Vec<String>);
 
+/// Serialisable runtime snapshot for one additively-loaded sub-world.
+///
+/// Keyed by world TOML path in `WorldLayerMap`. Holds the trigger and comms
+/// states that were derived from the sub-world's `WorldConfig` at load time,
+/// enabling them to be cleanly removed when `UnloadWorld` fires.
+/// Also tracks ECS entity handles spawned from the sub-world's `[[entity]]`
+/// blocks so they can be despawned when `UnloadWorld` fires.
+#[derive(Clone, Debug, Default)]
+pub struct WorldRuntime {
+    pub trigger_states: Vec<TriggerState>,
+    pub comms_template_states: Vec<CommsTemplateState>,
+    /// ECS entity handles spawned when this layer was loaded.
+    pub spawned_entities: Vec<Entity>,
+}
+
+/// Map of `path → WorldRuntime` for sub-worlds loaded via `LoadWorld` / `extra_worlds`.
+///
+/// Each entry is keyed by the world TOML path so `UnloadWorld` can remove it by
+/// the same path. Stored as a Bevy `Resource`; an empty map is the initial state.
+#[derive(Resource, Default)]
+pub struct WorldLayerMap(pub HashMap<String, WorldRuntime>);
+
+/// Queue of `LoadWorld` / `UnloadWorld` actions to execute on the next frame.
+///
+/// `handle_ai_events` pushes path-keyed commands here; `apply_world_layer_changes`
+/// drains it and mutates `WorldLayerMap` + `WorldContentRuntime` accordingly.
+#[derive(Resource, Default)]
+pub struct PendingWorldLayerChanges(pub Vec<WorldLayerChange>);
+
+/// A single pending world-layer command.
+#[derive(Clone, Debug)]
+pub enum WorldLayerChange {
+    Load(String),
+    Unload(String),
+}
+
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
@@ -73,12 +109,15 @@ impl Plugin for WorldPlugin {
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<PendingScenarioLoad>()
+            .init_resource::<WorldLayerMap>()
+            .init_resource::<PendingWorldLayerChanges>()
             .add_systems(
                 Startup,
                 (
                     insert_world_config_resource,
                     spawn_world_entities,
                     init_world_runtime,
+                    load_extra_worlds,
                     setup_fallback_world.run_if(not(resource_exists::<crate::world::config::WorldConfig>)),
                 ).chain(),
             )
@@ -97,7 +136,8 @@ impl Plugin for WorldPlugin {
                 ).chain(),
             )
             .add_systems(Update, handle_ai_events.in_set(crate::sim_sets::SimSet::Physics))
-            .add_systems(Update, apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics));
+            .add_systems(Update, apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics))
+            .add_systems(Update, apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics));
     }
 }
 
@@ -442,6 +482,24 @@ fn init_world_runtime(
     inbox.0.mark_dirty();
 }
 
+/// Startup system: queue all `extra_worlds` paths from the loaded `WorldConfig`
+/// as `LoadWorld` commands so they are merged into the runtime on the first frame.
+///
+/// Runs after `init_world_runtime` in the Startup chain. Each path is pushed
+/// into `PendingWorldLayerChanges` rather than applied directly so the same
+/// `apply_world_layer_changes` path handles both startup and trigger-fired loads.
+fn load_extra_worlds(
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut pending: ResMut<PendingWorldLayerChanges>,
+) {
+    let Some(world_config) = world_config else {
+        return;
+    };
+    for path in &world_config.extra_worlds {
+        pending.0.push(WorldLayerChange::Load(path.clone()));
+    }
+}
+
 /// Re-mark the comms runtime dirty when the game enters InProgress.
 ///
 /// `init_world_runtime` marks the runtime dirty during Startup so the first
@@ -596,9 +654,12 @@ fn handle_respond_to_message(
                 | TriggerAction::ApplyIntModifier { .. }
                 | TriggerAction::RemoveIntModifier { .. }
                 | TriggerAction::GameOver { .. }
-                | TriggerAction::LoadScenario { .. } => {
-                    // Modifier/flag/game-over/load-scenario actions are handled by the AI-event trigger
-                    // or damage systems. No-op in the comms response path.
+                | TriggerAction::LoadScenario { .. }
+                | TriggerAction::LoadWorld { .. }
+                | TriggerAction::UnloadWorld { .. } => {
+                    // Modifier/flag/game-over/load-scenario/load-world/unload-world
+                    // actions are handled by the AI-event trigger or damage systems.
+                    // No-op in the comms response path.
                 }
             }
         }
@@ -743,6 +804,7 @@ fn handle_ai_events(
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
     mut pending: Option<ResMut<PendingScenarioLoad>>,
+    mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
 ) {
 
     let mut world_events: Vec<WorldEvent> = Vec::new();
@@ -965,6 +1027,16 @@ fn handle_ai_events(
                         p.0.push(path.clone());
                     }
                 }
+                TriggerAction::LoadWorld { path } => {
+                    if let Some(ref mut lc) = pending_layers {
+                        lc.0.push(WorldLayerChange::Load(path.clone()));
+                    }
+                }
+                TriggerAction::UnloadWorld { path } => {
+                    if let Some(ref mut lc) = pending_layers {
+                        lc.0.push(WorldLayerChange::Unload(path.clone()));
+                    }
+                }
             }
         }
     }
@@ -1037,6 +1109,209 @@ fn apply_pending_scenario_loads(
                         runtime.loaded_scenario_paths.insert(path);
                     }
                 }
+            }
+        }
+    }
+}
+
+// ── World layer system (LoadWorld / UnloadWorld) ──────────────────────────────
+
+/// Build a `ConfigCache` suitable for spawning entities from a world layer.
+///
+/// On WASM the global config cache (pre-loaded by the JS bridge) is returned
+/// unchanged.  On native the global cache is always empty (no WASM pre-load
+/// step), so we fall back to reading each template file from disk so that
+/// `spawn_immediate_entities_internal` can resolve them.
+fn build_layer_config_cache(
+    world_config: &crate::world::config::WorldConfig,
+) -> crate::config_cache::ConfigCache {
+    let mut cache = crate::config_cache::get_config_cache();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::entity_config::EntityConfig;
+        for entity in &world_config.entities {
+            if cache.contains_key(&entity.template_path) {
+                continue;
+            }
+            match std::fs::read_to_string(&entity.template_path) {
+                Ok(toml_str) => {
+                    if let Ok(cfg) = EntityConfig::from_toml(&toml_str) {
+                        cache.insert(entity.template_path.clone(), cfg);
+                    } else {
+                        bevy::log::warn!(
+                            "build_layer_config_cache: failed to parse '{}' — entity will be skipped",
+                            entity.template_path
+                        );
+                    }
+                }
+                Err(_) => {
+                    // Template not on disk (e.g. test fixture); skip silently.
+                    // spawn_immediate_entities_internal logs and continues for missing templates.
+                }
+            }
+        }
+    }
+
+    cache
+}
+
+/// Bevy system: drain `PendingWorldLayerChanges` and apply each `LoadWorld` or
+/// `UnloadWorld` command to `WorldLayerMap` and `WorldContentRuntime`.
+///
+/// `LoadWorld` parses the TOML, merges triggers/comms into the live runtime, and
+/// stores a `WorldRuntime` snapshot keyed by path so `UnloadWorld` can reverse it.
+///
+/// `UnloadWorld` removes the stored snapshot and retains only triggers/comms
+/// states that do not belong to the unloaded world (matched by pointer equality
+/// of the underlying `Trigger`/`CommsTemplate` clone identity — we use indices
+/// tracked in the snapshot length at load time).
+fn apply_world_layer_changes(
+    mut commands: Commands,
+    mut pending: ResMut<PendingWorldLayerChanges>,
+    mut layer_map: ResMut<WorldLayerMap>,
+    mut runtime: ResMut<WorldContentRuntime>,
+) {
+    if pending.0.is_empty() {
+        return;
+    }
+
+    let changes: Vec<WorldLayerChange> = pending.0.drain(..).collect();
+
+    for change in changes {
+        match change {
+            WorldLayerChange::Load(path) => {
+                if layer_map.0.contains_key(&path) {
+                    // Already loaded — de-duplicate, no-op.
+                    continue;
+                }
+                let toml_str_opt = load_scenario_toml(&path);
+                match toml_str_opt {
+                    None => {
+                        // WASM: re-queue until the fetch completes.
+                        pending.0.push(WorldLayerChange::Load(path));
+                    }
+                    Some(toml_str) => {
+                        match crate::world::config::parse_world(&toml_str) {
+                            Err(e) => {
+                                bevy::log::error!(
+                                    "apply_world_layer_changes: failed to parse {path}: {e}"
+                                );
+                                // Insert an empty entry so we don't retry a broken file.
+                                layer_map.0.insert(path, WorldRuntime::default());
+                            }
+                            Ok(mut scenario_config) => {
+                                let trigger_states =
+                                    trigger_states_from_world(&scenario_config);
+                                let comms_template_states =
+                                    comms_template_states_from_world(&scenario_config);
+
+                                // Merge into live runtime.
+                                runtime.trigger_states.extend(trigger_states.clone());
+                                runtime.comms_template_states.extend(comms_template_states.clone());
+
+                                // Assign UUIDs to named entities in this layer's config
+                                // and register them in the live runtime's name_to_uuid map.
+                                let new_names = crate::world::config::assign_named_entity_uuids(
+                                    &scenario_config.entities,
+                                    crate::entity_loader::assign_uuid,
+                                );
+                                for (name, uuid) in &new_names {
+                                    scenario_config.name_to_uuid.insert(name.clone(), uuid.clone());
+                                    runtime.name_to_uuid.insert(name.clone(), uuid.clone());
+                                }
+
+                                // Spawn the layer's [[entity]] blocks into the ECS.
+                                // On native the global config cache is always empty (no WASM
+                                // pre-load step), so we build a local cache by reading each
+                                // referenced template from disk.  WASM uses the pre-loaded
+                                // global cache as normal.
+                                let config_cache = build_layer_config_cache(&scenario_config);
+                                let spawned_entities = spawn_immediate_entities_internal(
+                                    &mut commands,
+                                    &scenario_config,
+                                    &config_cache,
+                                );
+
+                                // Merge contacts (skip duplicates by uuid).
+                                for tmpl in &scenario_config.comms {
+                                    let uuid = match runtime.name_to_uuid.get(&tmpl.from) {
+                                        Some(u) => u.clone(),
+                                        None => continue,
+                                    };
+                                    if !runtime
+                                        .contacts
+                                        .iter()
+                                        .any(|c: &crate::messages::CommsContact| c.uuid == uuid)
+                                    {
+                                        runtime.contacts.push(crate::messages::CommsContact {
+                                            uuid,
+                                            name: tmpl.from.clone(),
+                                        });
+                                    }
+                                }
+
+                                runtime.needs_broadcast = true;
+
+                                layer_map.0.insert(
+                                    path,
+                                    WorldRuntime {
+                                        trigger_states,
+                                        comms_template_states,
+                                        spawned_entities,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            WorldLayerChange::Unload(path) => {
+                let Some(layer) = layer_map.0.remove(&path) else {
+                    continue; // Not loaded — no-op.
+                };
+
+                // Despawn ECS entities that were spawned when this layer loaded.
+                for entity in &layer.spawned_entities {
+                    commands.entity(*entity).despawn();
+                }
+
+                // Remove trigger states belonging to this layer.
+                // We identify them by the condition+actions equality of the stored snapshot.
+                let removed_triggers: std::collections::HashSet<usize> = layer
+                    .trigger_states
+                    .iter()
+                    .filter_map(|ls| {
+                        runtime.trigger_states.iter().position(|rs| {
+                            rs.trigger == ls.trigger
+                        })
+                    })
+                    .collect();
+                let mut ti = 0usize;
+                runtime.trigger_states.retain(|_| {
+                    let keep = !removed_triggers.contains(&ti);
+                    ti += 1;
+                    keep
+                });
+
+                // Remove comms template states belonging to this layer.
+                let removed_comms: std::collections::HashSet<usize> = layer
+                    .comms_template_states
+                    .iter()
+                    .filter_map(|ls| {
+                        runtime.comms_template_states.iter().position(|rs| {
+                            rs.template == ls.template
+                        })
+                    })
+                    .collect();
+                let mut ci = 0usize;
+                runtime.comms_template_states.retain(|_| {
+                    let keep = !removed_comms.contains(&ci);
+                    ci += 1;
+                    keep
+                });
+
+                runtime.needs_broadcast = true;
             }
         }
     }
@@ -2096,6 +2371,402 @@ transition = []
         assert!(
             app.world().get::<BehaviourSection>(spawned[0]).is_some(),
             "NPC spawned through unified pipeline must carry BehaviourSection so AiPlugin can attach a controller"
+        );
+    }
+
+    // ── extra_worlds + LoadWorld / UnloadWorld (issue #352) ──────────────────
+
+    /// Helper: build an `App` with `WorldLayerMap`, `WorldContentRuntime`, and
+    /// the `apply_world_layer_changes` system wired in.  No LobbyPlugin needed.
+    fn layer_test_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<WorldLayerMap>()
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<PendingWorldLayerChanges>()
+            .add_systems(Update, apply_world_layer_changes);
+        app
+    }
+
+    /// `extra_worlds` on `WorldConfig` starts empty by default.
+    #[test]
+    fn world_config_extra_worlds_defaults_to_empty() {
+        let cfg = crate::world::config::WorldConfig::default();
+        assert!(cfg.extra_worlds.is_empty());
+    }
+
+    /// `load_extra_worlds` queues one `Load` command per `extra_worlds` entry.
+    #[test]
+    fn load_extra_worlds_startup_queues_pending_layer_changes() {
+        let mut app = App::new();
+        app.init_resource::<WorldLayerMap>()
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<PendingWorldLayerChanges>();
+
+        let mut world_cfg = crate::world::config::WorldConfig::default();
+        world_cfg.extra_worlds.push("assets/worlds/patrol.toml".into());
+        world_cfg.extra_worlds.push("assets/worlds/side.toml".into());
+        app.insert_resource(world_cfg);
+
+        app.add_systems(Startup, load_extra_worlds);
+        app.world_mut().run_schedule(Startup);
+
+        let pending = app.world().resource::<PendingWorldLayerChanges>();
+        assert_eq!(
+            pending.0.len(),
+            2,
+            "one Load command per extra_worlds entry"
+        );
+        assert!(
+            matches!(&pending.0[0], WorldLayerChange::Load(p) if p == "assets/worlds/patrol.toml")
+        );
+        assert!(
+            matches!(&pending.0[1], WorldLayerChange::Load(p) if p == "assets/worlds/side.toml")
+        );
+    }
+
+    /// `LoadWorld` action via trigger queues a `Load` command into `PendingWorldLayerChanges`.
+    #[test]
+    fn load_world_trigger_action_queues_pending_layer_change() {
+        let mut app = ai_trigger_test_app();
+        app.init_resource::<WorldLayerMap>()
+           .init_resource::<PendingWorldLayerChanges>();
+
+        let npc_uuid = "trigger-load-world-npc-001";
+        let attacker_uuid = uuid::Uuid::parse_str("dddddddd-0000-0000-0000-000000000001").unwrap();
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert("raider".into(), npc_uuid.into());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAttacked { entity_name: "raider".into() },
+                    actions: vec![TriggerAction::LoadWorld {
+                        path: "assets/worlds/patrol.toml".into(),
+                    }],
+                },
+                fired: false,
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityAttacked>>()
+            .write(AiEntityAttacked {
+                entity_uuid: npc_uuid.into(),
+                attacker_uuid,
+            });
+        app.update();
+
+        let pending = app.world().resource::<PendingWorldLayerChanges>();
+        assert_eq!(pending.0.len(), 1, "one Load must be queued");
+        assert!(
+            matches!(&pending.0[0], WorldLayerChange::Load(p) if p == "assets/worlds/patrol.toml")
+        );
+    }
+
+    /// `UnloadWorld` action via trigger queues an `Unload` command.
+    #[test]
+    fn unload_world_trigger_action_queues_pending_layer_change() {
+        let mut app = ai_trigger_test_app();
+        app.init_resource::<WorldLayerMap>()
+           .init_resource::<PendingWorldLayerChanges>();
+
+        let npc_uuid = "trigger-unload-world-npc-002";
+        let attacker_uuid = uuid::Uuid::parse_str("dddddddd-0000-0000-0000-000000000002").unwrap();
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert("raider".into(), npc_uuid.into());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAttacked { entity_name: "raider".into() },
+                    actions: vec![TriggerAction::UnloadWorld {
+                        path: "assets/worlds/patrol.toml".into(),
+                    }],
+                },
+                fired: false,
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityAttacked>>()
+            .write(AiEntityAttacked {
+                entity_uuid: npc_uuid.into(),
+                attacker_uuid,
+            });
+        app.update();
+
+        let pending = app.world().resource::<PendingWorldLayerChanges>();
+        assert_eq!(pending.0.len(), 1, "one Unload must be queued");
+        assert!(
+            matches!(&pending.0[0], WorldLayerChange::Unload(p) if p == "assets/worlds/patrol.toml")
+        );
+    }
+
+    /// `apply_world_layer_changes` with `LoadWorld(patrol.toml)` reads the TOML
+    /// on native, merges triggers into `WorldContentRuntime`, and registers the
+    /// layer in `WorldLayerMap`.
+    #[test]
+    fn load_world_action_merges_triggers_into_runtime() {
+        let mut app = layer_test_app();
+
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load("assets/worlds/patrol.toml".into()));
+
+        app.update();
+
+        let layer_map = app.world().resource::<WorldLayerMap>();
+        assert!(
+            layer_map.0.contains_key("assets/worlds/patrol.toml"),
+            "WorldLayerMap must contain the loaded path"
+        );
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            !runtime.trigger_states.is_empty(),
+            "trigger states must be merged into runtime"
+        );
+    }
+
+    /// A second `LoadWorld` for the same path is a no-op (de-duplicated).
+    #[test]
+    fn load_world_is_deduped_when_already_in_layer_map() {
+        let mut app = layer_test_app();
+
+        // Load once.
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load("assets/worlds/patrol.toml".into()));
+        app.update();
+
+        let trigger_count_after_first = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len();
+
+        // Load again — must not double-add.
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load("assets/worlds/patrol.toml".into()));
+        app.update();
+
+        let trigger_count_after_second = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len();
+
+        assert_eq!(
+            trigger_count_after_first, trigger_count_after_second,
+            "duplicate LoadWorld must not add duplicate trigger states"
+        );
+    }
+
+    /// `UnloadWorld` removes the triggers that were added by the matching `LoadWorld`.
+    #[test]
+    fn unload_world_removes_triggers_added_by_load_world() {
+        let mut app = layer_test_app();
+
+        // Load patrol.toml.
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load("assets/worlds/patrol.toml".into()));
+        app.update();
+
+        let trigger_count_loaded = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len();
+        assert!(trigger_count_loaded > 0, "patrol.toml must add at least one trigger");
+
+        // Unload it.
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload("assets/worlds/patrol.toml".into()));
+        app.update();
+
+        let trigger_count_unloaded = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len();
+
+        assert_eq!(
+            trigger_count_unloaded, 0,
+            "UnloadWorld must remove all triggers that were added by the LoadWorld"
+        );
+
+        let layer_map = app.world().resource::<WorldLayerMap>();
+        assert!(
+            !layer_map.0.contains_key("assets/worlds/patrol.toml"),
+            "WorldLayerMap must no longer contain the unloaded path"
+        );
+    }
+
+    /// `UnloadWorld` for a path that was never loaded is a silent no-op.
+    #[test]
+    fn unload_world_unknown_path_is_noop() {
+        let mut app = layer_test_app();
+
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload("assets/worlds/nonexistent.toml".into()));
+        app.update(); // must not panic
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(runtime.trigger_states.is_empty());
+    }
+
+    // ── Entity spawn / despawn via LoadWorld / UnloadWorld (issue #352) ───────
+
+    /// Write a minimal world TOML and a stub entity template to temp files,
+    /// return `(world_path, template_path)` as `String`s.
+    ///
+    /// The world has one named `[[entity]]` so we get a predictable spawn count
+    /// without relying on the shipped `patrol.toml` config-cache.
+    fn write_layer_entity_fixtures() -> (String, String) {
+        let tmp = std::env::temp_dir();
+        let template_path = tmp.join("layer_test_npc.toml");
+        let world_path = tmp.join("layer_test_world.toml");
+
+        // Minimal entity template — just enough to satisfy `EntityConfig::from_toml`.
+        std::fs::write(&template_path, "").expect("failed to write stub template");
+
+        let template_path_str = template_path.to_string_lossy().replace('\\', "/");
+
+        let world_toml = format!(
+            r#"
+[global]
+seed = 1
+
+[[entity]]
+template_path = "{template_path_str}"
+name = "layer_npc"
+position = [1.0, 0.0, 0.0]
+
+[[trigger]]
+condition = "on_destroyed"
+entity = "layer_npc"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-layer-npc"
+  text = "Destroyed."
+  mandatory = false
+"#,
+            template_path_str = template_path_str,
+        );
+
+        std::fs::write(&world_path, &world_toml).expect("failed to write layer world TOML");
+
+        (world_path.to_string_lossy().into_owned(), template_path.to_string_lossy().into_owned())
+    }
+
+    /// `LoadWorld` spawns the world's `[[entity]]` blocks into the ECS and
+    /// records them in `WorldLayerMap`.
+    #[test]
+    fn load_world_spawns_entities_into_ecs() {
+        let (world_path, _template_path) = write_layer_entity_fixtures();
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .init_resource::<WorldLayerMap>()
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<PendingWorldLayerChanges>()
+            .add_systems(Update, apply_world_layer_changes);
+
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load(world_path.clone()));
+
+        // First update: commands are queued by apply_world_layer_changes.
+        app.update();
+        // Second update: Bevy flushes deferred commands, entities become real.
+        app.update();
+
+        let layer_map = app.world().resource::<WorldLayerMap>();
+        let layer = layer_map
+            .0
+            .get(&world_path)
+            .expect("WorldLayerMap must contain the loaded path");
+
+        assert!(
+            !layer.spawned_entities.is_empty(),
+            "LoadWorld must record spawned entity handles in WorldLayerMap"
+        );
+
+        // Every recorded entity must actually exist in the ECS.
+        for &entity in &layer.spawned_entities {
+            assert!(
+                app.world().get_entity(entity).is_ok(),
+                "entity {entity:?} recorded in WorldLayerMap must exist in ECS after LoadWorld"
+            );
+        }
+    }
+
+    /// `UnloadWorld` despawns the ECS entities that were spawned by the
+    /// matching `LoadWorld`.
+    #[test]
+    fn unload_world_despawns_entities_from_ecs() {
+        let (world_path, _template_path) = write_layer_entity_fixtures();
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .init_resource::<WorldLayerMap>()
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<PendingWorldLayerChanges>()
+            .add_systems(Update, apply_world_layer_changes);
+
+        // Load first.
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load(world_path.clone()));
+        app.update();
+        app.update();
+
+        // Capture the spawned entity handles before unload.
+        let spawned_before: Vec<Entity> = app
+            .world()
+            .resource::<WorldLayerMap>()
+            .0
+            .get(&world_path)
+            .expect("must be loaded")
+            .spawned_entities
+            .clone();
+
+        assert!(
+            !spawned_before.is_empty(),
+            "precondition: LoadWorld must have spawned at least one entity"
+        );
+
+        // Now unload.
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload(world_path.clone()));
+        app.update();
+        app.update();
+
+        // Each entity spawned by LoadWorld must now be gone.
+        for entity in spawned_before {
+            assert!(
+                app.world().get_entity(entity).is_err(),
+                "entity {entity:?} must be despawned after UnloadWorld"
+            );
+        }
+
+        // WorldLayerMap entry must be removed.
+        assert!(
+            !app.world().resource::<WorldLayerMap>().0.contains_key(&world_path),
+            "WorldLayerMap must not contain the path after UnloadWorld"
         );
     }
 }

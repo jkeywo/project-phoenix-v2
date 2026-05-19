@@ -89,6 +89,111 @@ describe('world-toml', () => {
     });
   });
 
+  describe('extra_worlds field', () => {
+    it('parses extra_worlds as an array of strings', () => {
+      const toml = '[global]\nseed = 1\n[anchors]\nextra_worlds = ["assets/worlds/patrol.toml", "assets/worlds/side.toml"]\n';
+      // extra_worlds at top level, not inside anchors
+      const toml2 = '[global]\nseed = 1\n[anchors]\na = [0.0, 0.0, 0.0]\nextra_worlds = ["assets/worlds/patrol.toml"]\n';
+      const result = parseWorldToml(toml2);
+      // extra_worlds inside anchors section is not the right place — test top-level
+      const toml3 = 'extra_worlds = ["assets/worlds/patrol.toml"]\n[global]\nseed = 1\n[anchors]\na = [0.0,0.0,0.0]\n';
+      const result3 = parseWorldToml(toml3);
+      expect(Array.isArray(result3.extra_worlds)).toBe(true);
+      expect(result3.extra_worlds).toEqual(['assets/worlds/patrol.toml']);
+    });
+
+    it('extra_worlds round-trips through stringify → parse', () => {
+      const obj = {
+        extra_worlds: ['assets/worlds/patrol.toml', 'assets/worlds/side.toml'],
+        global: { seed: 42 },
+        anchors: { a: [0.0, 0.0, 0.0] },
+      };
+      const serialized = stringifyWorldToml(obj);
+      const reparsed = parseWorldToml(serialized);
+      expect(reparsed.extra_worlds).toEqual(obj.extra_worlds);
+    });
+
+    it('world without extra_worlds has no extra_worlds key', () => {
+      const text = readWorld('patrol.toml');
+      const parsed = parseWorldToml(text);
+      expect(parsed.extra_worlds).toBeUndefined();
+    });
+  });
+
+  describe('load_world / unload_world trigger actions', () => {
+    it('parses a load_world action with path', () => {
+      const toml = `
+[global]
+seed = 1
+[anchors]
+a = [0.0, 0.0, 0.0]
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+position = [0.0, 0.0, 0.0]
+[[trigger]]
+condition = "on_destroyed"
+entity = "raider_alpha"
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/patrol.toml"
+`;
+      const result = parseWorldToml(toml);
+      expect(result.trigger).toHaveLength(1);
+      expect(result.trigger[0].action).toHaveLength(1);
+      const action = result.trigger[0].action[0];
+      expect(action.type).toBe('load_world');
+      expect(action.path).toBe('assets/worlds/patrol.toml');
+    });
+
+    it('parses an unload_world action with path', () => {
+      const toml = `
+[global]
+seed = 1
+[anchors]
+a = [0.0, 0.0, 0.0]
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+position = [0.0, 0.0, 0.0]
+[[trigger]]
+condition = "on_timer"
+entity = "raider_alpha"
+  [[trigger.action]]
+  type = "unload_world"
+  path = "assets/worlds/patrol.toml"
+`;
+      const result = parseWorldToml(toml);
+      const action = result.trigger[0].action[0];
+      expect(action.type).toBe('unload_world');
+      expect(action.path).toBe('assets/worlds/patrol.toml');
+    });
+
+    it('load_world and unload_world actions round-trip', () => {
+      const obj = {
+        global: { seed: 1 },
+        anchors: { a: [0.0, 0.0, 0.0] },
+        entity: [{ template_path: 'assets/entities/star_sun.toml', position: [0.0, 0.0, 0.0] }],
+        trigger: [
+          {
+            condition: 'on_destroyed',
+            entity: 'raider_alpha',
+            action: [{ type: 'load_world', path: 'assets/worlds/patrol.toml' }],
+          },
+          {
+            condition: 'on_timer',
+            entity: 'raider_alpha',
+            action: [{ type: 'unload_world', path: 'assets/worlds/patrol.toml' }],
+          },
+        ],
+      };
+      const serialized = stringifyWorldToml(obj);
+      const reparsed = parseWorldToml(serialized);
+      expect(reparsed.trigger[0].action[0].type).toBe('load_world');
+      expect(reparsed.trigger[0].action[0].path).toBe('assets/worlds/patrol.toml');
+      expect(reparsed.trigger[1].action[0].type).toBe('unload_world');
+      expect(reparsed.trigger[1].action[0].path).toBe('assets/worlds/patrol.toml');
+    });
+  });
+
   describe('round-trip shipped worlds', () => {
     it('default.toml survives parse → stringify → parse with same structure', () => {
       const originalText = readWorld('default.toml');

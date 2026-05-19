@@ -676,6 +676,183 @@ form {
   font-size: 12px;
 }
 
+/* V2: Browser not supported banner */
+.v2-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 24px;
+  text-align: center;
+  font-size: 16px;
+  z-index: 9999;
+}
+
+.v2-banner-error {
+  background: #5a1a1a;
+  color: #ffcdd2;
+  border-bottom: 2px solid #f44336;
+}
+
+.v2-banner strong {
+  color: #fff;
+}
+
+/* V2: Splash / root picker */
+.v2-splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  text-align: center;
+  gap: 16px;
+}
+
+.v2-splash h1 {
+  font-size: 28px;
+  color: #e0e0e0;
+}
+
+.v2-splash p {
+  color: #888;
+  font-size: 16px;
+  max-width: 400px;
+}
+
+.v2-splash button {
+  padding: 12px 24px;
+  background: #007acc;
+  border: none;
+  color: white;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.v2-splash button:hover {
+  background: #005f9e;
+}
+
+/* V2: Editor workspace */
+#v2-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.v2-root-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  font-size: 12px;
+  color: #888;
+}
+
+.v2-root-status button {
+  background: #3c3c3c;
+  border: 1px solid #555;
+  color: #ccc;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.v2-root-status button:hover {
+  background: #505050;
+}
+
+.v2-mode-switcher {
+  display: flex;
+  border-bottom: 1px solid #333;
+  background: #252526;
+}
+
+.v2-mode-tab {
+  flex: 1;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.v2-mode-tab:hover {
+  color: #ccc;
+}
+
+.v2-mode-tab.active {
+  color: #e0e0e0;
+  border-bottom-color: #007acc;
+  background: #2d2d30;
+}
+
+.v2-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #333;
+}
+
+.v2-toolbar button {
+  padding: 6px 14px;
+  background: #3c3c3c;
+  border: 1px solid #555;
+  color: #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.v2-toolbar button:hover {
+  background: #505050;
+}
+
+#v2-status {
+  font-size: 12px;
+  color: #888;
+  margin-left: 12px;
+  flex: 1;
+}
+
+.v2-workspace {
+  flex: 1;
+  overflow: hidden;
+}
+
+.v2-editor-textarea {
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  background: #1a1a1a;
+  color: #ce9178;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 14px;
+  border: none;
+  resize: none;
+  outline: none;
+  tab-size: 4;
+  line-height: 1.5;
+}
+
+.v2-editor-textarea::placeholder {
+  color: #555;
+}
+
+/* V2: hidden utility */
+.hidden {
+  display: none !important;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

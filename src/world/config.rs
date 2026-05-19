@@ -119,6 +119,8 @@ struct RawActionEntry {
     message: Option<String>,
     #[serde(default)]
     load_scenario: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +163,9 @@ pub struct RawWorld {
     triggers: Vec<RawTriggerEntry>,
     #[serde(default, rename = "comms")]
     comms: Vec<RawCommsEntry>,
+    /// Paths to additional world TOML files to load additively at startup.
+    #[serde(default)]
+    pub extra_worlds: Vec<String>,
 }
 
 // ── Trigger / comms pure config types ──────────────────────────────────────
@@ -194,6 +199,10 @@ pub enum TriggerAction {
     GameOver { message: Option<String> },
     /// Load a new scenario, replacing the current world.
     LoadScenario { path: String },
+    /// Additively load a sub-world from `path` into the running world layer map.
+    LoadWorld { path: String },
+    /// Unload a previously loaded sub-world identified by `path`.
+    UnloadWorld { path: String },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -335,6 +344,12 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
             "load_scenario" => TriggerAction::LoadScenario {
                 path: raw_action.load_scenario.clone().ok_or_else(|| "Action 'load_scenario' requires a 'load_scenario' field".to_string())?,
             },
+            "load_world" => TriggerAction::LoadWorld {
+                path: raw_action.path.clone().ok_or_else(|| "Action 'load_world' requires a 'path' field".to_string())?,
+            },
+            "unload_world" => TriggerAction::UnloadWorld {
+                path: raw_action.path.clone().ok_or_else(|| "Action 'unload_world' requires a 'path' field".to_string())?,
+            },
             other => return Err(format!("Unknown trigger action '{}'", other)),
         };
         actions.push(action);
@@ -401,6 +416,9 @@ pub struct WorldConfig {
     /// Populated by `spawn_world_entities` (PRD #337/#339 slice 2); read by
     /// trigger and comms lookup paths that resolve a name to a live UUID.
     pub name_to_uuid: HashMap<String, String>,
+    /// Paths of additional world TOML files to load additively at startup
+    /// (issue #352 — `extra_worlds` field).
+    pub extra_worlds: Vec<String>,
 }
 
 impl WorldConfig {
@@ -471,6 +489,15 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         comms.push(CommsTemplate { from: raw_comms.from, trigger, node });
     }
 
+    // Validate extra_worlds: every entry must be a non-empty string.
+    for (i, path) in raw.extra_worlds.iter().enumerate() {
+        if path.trim().is_empty() {
+            return Err(format!(
+                "extra_worlds[{i}] is an empty string; all paths must be non-empty"
+            ));
+        }
+    }
+
     Ok(WorldConfig {
         global: raw.global,
         anchors,
@@ -478,6 +505,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         triggers,
         comms,
         name_to_uuid: HashMap::new(),
+        extra_worlds: raw.extra_worlds,
     })
 }
 
@@ -1442,6 +1470,137 @@ spawn_on = "game_start"
         let (fields, others) = partition_immediate_entities(&cfg, |_| true);
         assert!(fields.is_empty());
         assert!(others.is_empty());
+    }
+
+    // ── extra_worlds (issue #352) ─────────────────────────────────────────
+
+    #[test]
+    fn parse_world_extra_worlds_defaults_to_empty() {
+        let cfg = parse_world("").expect("empty TOML should parse");
+        assert!(cfg.extra_worlds.is_empty());
+    }
+
+    #[test]
+    fn parse_world_reads_extra_worlds_list() {
+        let toml = r#"
+extra_worlds = ["assets/worlds/patrol.toml", "assets/worlds/side_mission.toml"]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.extra_worlds.len(), 2);
+        assert_eq!(cfg.extra_worlds[0], "assets/worlds/patrol.toml");
+        assert_eq!(cfg.extra_worlds[1], "assets/worlds/side_mission.toml");
+    }
+
+    #[test]
+    fn parse_world_rejects_empty_string_in_extra_worlds() {
+        let toml = r#"
+extra_worlds = ["assets/worlds/patrol.toml", ""]
+"#;
+        let err = parse_world(toml).expect_err("empty path in extra_worlds must error");
+        assert!(
+            err.contains("extra_worlds"),
+            "error must mention extra_worlds: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_rejects_whitespace_only_string_in_extra_worlds() {
+        let toml = r#"
+extra_worlds = ["   "]
+"#;
+        let err = parse_world(toml).expect_err("whitespace-only path in extra_worlds must error");
+        assert!(
+            err.contains("extra_worlds"),
+            "error must mention extra_worlds: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_extra_worlds_round_trips_via_worldconfig() {
+        let toml = r#"
+extra_worlds = ["assets/worlds/patrol.toml"]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.extra_worlds, vec!["assets/worlds/patrol.toml".to_string()]);
+    }
+
+    // ── LoadWorld / UnloadWorld trigger actions (issue #352) ─────────────
+
+    #[test]
+    fn parse_world_load_world_action_parses() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 10.0
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/patrol.toml"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.triggers.len(), 1);
+        assert_eq!(cfg.triggers[0].actions.len(), 1);
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::LoadWorld { path } => {
+                assert_eq!(path, "assets/worlds/patrol.toml");
+            }
+            other => panic!("expected LoadWorld, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_unload_world_action_parses() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 20.0
+
+  [[trigger.action]]
+  type = "unload_world"
+  path = "assets/worlds/patrol.toml"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.triggers.len(), 1);
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::UnloadWorld { path } => {
+                assert_eq!(path, "assets/worlds/patrol.toml");
+            }
+            other => panic!("expected UnloadWorld, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_load_world_action_requires_path_field() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 10.0
+
+  [[trigger.action]]
+  type = "load_world"
+"#;
+        let err = parse_world(toml).expect_err("load_world without path must error");
+        assert!(
+            err.contains("load_world") && err.contains("path"),
+            "error must mention load_world and path: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_unload_world_action_requires_path_field() {
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 10.0
+
+  [[trigger.action]]
+  type = "unload_world"
+"#;
+        let err = parse_world(toml).expect_err("unload_world without path must error");
+        assert!(
+            err.contains("unload_world") && err.contains("path"),
+            "error must mention unload_world and path: {err}"
+        );
     }
 
     #[test]

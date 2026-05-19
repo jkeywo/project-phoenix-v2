@@ -71,6 +71,27 @@ jobs:
           path: dist/
           retention-days: 1
 
+  # ── Editor tests (Vitest) ─────────────────────────────────────────────────────
+  editor-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Run editor tests
+        run: npx vitest run
+
   # ── Smoke tests ───────────────────────────────────────────────────────────────
   smoke:
     needs: build

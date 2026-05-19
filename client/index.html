@@ -77,14 +77,14 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-50e3add6627eb091.js" crossorigin="anonymous" integrity="sha384-irepa004xcW0KMAdcB0ki4cW9874vwxgGC1w7UR35+1EwWjm1eNQ8DNTjQ3vnEsZ"><link rel="preload" href="./project-phoenix-50e3add6627eb091_bg.wasm" crossorigin="anonymous" integrity="sha384-ckP/5b6n2awX8ozUQqBwfXcXs+lPQWm2XZ+WBUGVCqxsl+waack59Hh6TmIWKH8N" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-c414e35ad399b466.js" crossorigin="anonymous" integrity="sha384-i3FstO5yXwjNxIWd1Oqll+bsA63VDj+Aa9Rh4ix8GiJM3WzQr3uXiLrL0NdNryXN"><link rel="preload" href="./project-phoenix-c414e35ad399b466_bg.wasm" crossorigin="anonymous" integrity="sha384-G6DkBBFL8OsCM000QAfzR9O/rIDFiruFSoatdRRCtf4W7vyx7NX6TIDCelKOkPhg" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-50e3add6627eb091.js';
-const wasm = await init({ module_or_path: './project-phoenix-50e3add6627eb091_bg.wasm' });
+import init, * as bindings from './project-phoenix-c414e35ad399b466.js';
+const wasm = await init({ module_or_path: './project-phoenix-c414e35ad399b466_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -93,6 +93,9 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
+  
+  
+  
   
   
   

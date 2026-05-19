@@ -6,10 +6,14 @@ export class ModeShell {
     this._currentMode = modes[0];
     this._openFiles = {};
     this._dirtyFiles = {};
+    this._activeFiles = {};
+    this._undoHistory = {};
 
     for (const mode of modes) {
       this._openFiles[mode] = [];
       this._dirtyFiles[mode] = {};
+      this._activeFiles[mode] = null;
+      this._undoHistory[mode] = {};
     }
   }
 
@@ -61,5 +65,28 @@ export class ModeShell {
       }
     }
     return false;
+  }
+
+  getActiveFile(mode) {
+    if (!this._modes.includes(mode)) return null;
+    return this._activeFiles[mode];
+  }
+
+  setActiveFile(mode, filePath) {
+    if (!this._modes.includes(mode)) return;
+    this._activeFiles[mode] = filePath;
+  }
+
+  getUndoHistory(mode, filePath) {
+    if (!this._undoHistory[mode]) return [];
+    return this._undoHistory[mode][filePath] || [];
+  }
+
+  pushUndoEntry(mode, filePath, entry) {
+    if (!this._undoHistory[mode]) return;
+    if (!this._undoHistory[mode][filePath]) {
+      this._undoHistory[mode][filePath] = [];
+    }
+    this._undoHistory[mode][filePath].push(entry);
   }
 }

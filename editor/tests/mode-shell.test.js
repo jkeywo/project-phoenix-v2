@@ -123,5 +123,132 @@ describe('mode-shell', () => {
       shell.markDirty('Entity', 'b.toml', true);
       expect(shell.hasAnyDirty()).toBe(true);
     });
+
+    it('dirty state persists across mode switches', () => {
+      const shell = new ModeShell();
+      shell.setOpenFiles('Scenario', ['a.toml']);
+      shell.markDirty('Scenario', 'a.toml', true);
+
+      shell.switchMode('Entity');
+      expect(shell.isDirty('Scenario', 'a.toml')).toBe(true);
+
+      shell.switchMode('Scenario');
+      expect(shell.isDirty('Scenario', 'a.toml')).toBe(true);
+    });
+  });
+
+  describe('active file per mode', () => {
+    it('starts with no active file', () => {
+      const shell = new ModeShell();
+      expect(shell.getActiveFile('Scenario')).toBeNull();
+    });
+
+    it('setActiveFile stores the active file for a mode', () => {
+      const shell = new ModeShell();
+      shell.setOpenFiles('Scenario', ['a.toml', 'b.toml']);
+      shell.setActiveFile('Scenario', 'a.toml');
+      expect(shell.getActiveFile('Scenario')).toBe('a.toml');
+    });
+
+    it('active file is independent per mode', () => {
+      const shell = new ModeShell();
+      shell.setOpenFiles('Scenario', ['a.toml']);
+      shell.setOpenFiles('Entity', ['b.toml']);
+      shell.setActiveFile('Scenario', 'a.toml');
+      shell.setActiveFile('Entity', 'b.toml');
+      expect(shell.getActiveFile('Scenario')).toBe('a.toml');
+      expect(shell.getActiveFile('Entity')).toBe('b.toml');
+    });
+
+    it('active file persists when switching away and back', () => {
+      const shell = new ModeShell();
+      shell.setOpenFiles('Scenario', ['a.toml']);
+      shell.setActiveFile('Scenario', 'a.toml');
+
+      shell.switchMode('Entity');
+      expect(shell.getActiveFile('Scenario')).toBe('a.toml');
+
+      shell.switchMode('Scenario');
+      expect(shell.getActiveFile('Scenario')).toBe('a.toml');
+    });
+
+    it('setActiveFile with invalid mode is silently ignored', () => {
+      const shell = new ModeShell();
+      shell.setActiveFile('NonExistent', 'file.toml');
+      expect(shell.getActiveFile('NonExistent')).toBeNull();
+    });
+  });
+
+  describe('undo history per file per mode', () => {
+    it('starts with empty undo history', () => {
+      const shell = new ModeShell();
+      expect(shell.getUndoHistory('Scenario', 'a.toml')).toEqual([]);
+    });
+
+    it('pushUndoEntry appends to history', () => {
+      const shell = new ModeShell();
+      shell.pushUndoEntry('Scenario', 'a.toml', { snapshot: 'v1' });
+      shell.pushUndoEntry('Scenario', 'a.toml', { snapshot: 'v2' });
+      expect(shell.getUndoHistory('Scenario', 'a.toml')).toEqual([
+        { snapshot: 'v1' },
+        { snapshot: 'v2' },
+      ]);
+    });
+
+    it('undo history is independent per file', () => {
+      const shell = new ModeShell();
+      shell.pushUndoEntry('Scenario', 'a.toml', { snapshot: 'a1' });
+      shell.pushUndoEntry('Scenario', 'b.toml', { snapshot: 'b1' });
+      expect(shell.getUndoHistory('Scenario', 'a.toml')).toEqual([{ snapshot: 'a1' }]);
+      expect(shell.getUndoHistory('Scenario', 'b.toml')).toEqual([{ snapshot: 'b1' }]);
+    });
+
+    it('undo history persists across mode switches', () => {
+      const shell = new ModeShell();
+      shell.pushUndoEntry('Scenario', 'a.toml', { snapshot: 'v1' });
+
+      shell.switchMode('Entity');
+      shell.pushUndoEntry('Entity', 'b.toml', { snapshot: 'e1' });
+
+      shell.switchMode('Scenario');
+      expect(shell.getUndoHistory('Scenario', 'a.toml')).toEqual([{ snapshot: 'v1' }]);
+    });
+
+    it('getUndoHistory for unknown mode returns empty array', () => {
+      const shell = new ModeShell();
+      expect(shell.getUndoHistory('NonExistent', 'x.toml')).toEqual([]);
+    });
+  });
+
+  describe('full persistence scenario (AC integration test)', () => {
+    it('open file A in Scenario → switch to Entity → open file B → switch back → file A is still open and active', () => {
+      const shell = new ModeShell();
+
+      // Open file A in Scenario Mode and mark it active
+      shell.setOpenFiles('Scenario', ['worlds/scenario-a.toml']);
+      shell.setActiveFile('Scenario', 'worlds/scenario-a.toml');
+      shell.markDirty('Scenario', 'worlds/scenario-a.toml', true);
+
+      // Switch to Entity Mode
+      shell.switchMode('Entity');
+      expect(shell.getCurrentMode()).toBe('Entity');
+
+      // Open file B in Entity Mode
+      shell.setOpenFiles('Entity', ['entities/entity-b.toml']);
+      shell.setActiveFile('Entity', 'entities/entity-b.toml');
+
+      // Switch back to Scenario Mode
+      shell.switchMode('Scenario');
+      expect(shell.getCurrentMode()).toBe('Scenario');
+
+      // File A is still open
+      expect(shell.getOpenFiles('Scenario')).toContain('worlds/scenario-a.toml');
+
+      // File A is still the active file
+      expect(shell.getActiveFile('Scenario')).toBe('worlds/scenario-a.toml');
+
+      // File A is still dirty
+      expect(shell.isDirty('Scenario', 'worlds/scenario-a.toml')).toBe(true);
+    });
   });
 });

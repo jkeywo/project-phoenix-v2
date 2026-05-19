@@ -257,9 +257,12 @@ fn rebuild_embedded_tab_bars(
     let my_consoles = view.my_consoles();
     let in_game = lobby.phase == GamePhase::InProgress;
     let show_tabs = in_game && my_consoles.len() >= 2;
-    let use_initials = my_consoles.len() >= 5;
 
-    for (tab_bar_entity, _embedded, mut vis) in tab_bars.iter_mut() {
+    for (tab_bar_entity, embedded, mut vis) in tab_bars.iter_mut() {
+        // Landscape (vertical tab strip) has room for full names regardless of
+        // count; only the portrait (horizontal) bar collapses to initials when
+        // there are too many tabs to fit.
+        let use_initials = !embedded.is_vertical && my_consoles.len() >= 5;
         // Despawn old tab-button children.
         commands.entity(tab_bar_entity).despawn_related::<Children>();
 

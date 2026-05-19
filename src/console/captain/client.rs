@@ -304,7 +304,18 @@ fn fill_captain_dirpad(commands: &mut Commands, container: Entity, assets: &Phon
 
 fn fill_captain_alert(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
     commands.entity(container).with_children(|parent| {
+        // Centering wrapper — keeps the button at its intrinsic size instead
+        // of stretching to fill the secondary slot.
         parent.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+        )).with_children(|center| {
+        center.spawn((
             RedAlertToggle,
             Button,
             ImageNode::new(assets.red_alert_idle.clone()),
@@ -319,6 +330,9 @@ fn fill_captain_alert(commands: &mut Commands, container: Entity, assets: &Phone
                 padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
                 column_gap: Val::Px(8.0),
                 align_items: AlignItems::Center,
+                flex_grow: 0.0,
+                flex_shrink: 0.0,
+                align_self: AlignSelf::Center,
                 ..default()
             },
             BackgroundColor(RA_BG_IDLE),
@@ -341,6 +355,7 @@ fn fill_captain_alert(commands: &mut Commands, container: Entity, assets: &Phone
                 },
                 TextColor(Color::srgb(0.93, 0.93, 1.0)),
             ));
+        });
         });
     });
 }

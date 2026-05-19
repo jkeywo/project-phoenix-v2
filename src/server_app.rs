@@ -825,6 +825,7 @@ fn spawn_starfield(
 fn spawn_game_start_entities(
     mut commands: Commands,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut ship_state: ResMut<crate::ship_state::ShipState>,
     mut has_spawned: Local<bool>,
 ) {
     if *has_spawned {
@@ -866,6 +867,12 @@ fn spawn_game_start_entities(
         if !ship_spawned && config.tags.iter().any(|t| t == "ship") {
             commands.entity(spawned).insert(Ship);
             ship_spawned = true;
+
+            // Seed authoritative ship position from the world TOML so that
+            // `sync_ship_position` (ShipState → Transform) doesn't snap the
+            // ship back to (0,0) on the first Physics tick.
+            ship_state.x = pos.x;
+            ship_state.z = pos.z;
 
             // Ship-specific resource setup
             if let Some(hc) = &config.hull {

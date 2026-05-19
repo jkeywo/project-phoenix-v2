@@ -117,6 +117,7 @@ pub fn spawn_gui_button(
     click_sound: Option<Handle<AudioSource>>,
 ) -> Entity {
     let initial_color = state_visuals.idle.color;
+    let initial_image = state_visuals.idle.image.clone();
     let mut builder = commands.spawn((
         GuiButtonMarker,
         Button,
@@ -126,6 +127,13 @@ pub fn spawn_gui_button(
         WidgetState::default(),
         Interaction::default(),
     ));
+    // `resolve_visuals_system` only updates an existing `ImageNode`; insert
+    // one at spawn time so the per-state image actually renders.  Buttons
+    // configured with color-only `Visual`s (no image handle) skip this and
+    // render via `BackgroundColor` alone.
+    if let Some(image) = initial_image {
+        builder.insert(ImageNode::new(image));
+    }
     if let Some(handle) = click_sound {
         builder.insert(ClickSound(handle));
     }

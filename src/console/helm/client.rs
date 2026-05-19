@@ -284,7 +284,7 @@ fn bridge_client_sim_to_radar_entities(
         if seen.contains(uuid) {
             true
         } else {
-            commands.entity(*entity).despawn();
+            commands.entity(*entity).despawn_related::<Children>();
             false
         }
     });
@@ -307,7 +307,7 @@ fn spawn_phone_helm_ui(
     let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn_related::<Children>();
     }
 
     commands.insert_resource(PhoneHelmSpawned);
@@ -538,13 +538,17 @@ fn respawn_helm_on_orientation_change(
     orientation: Res<DeviceOrientation>,
     panel: Query<Entity, With<HelmPanel>>,
     mut commands: Commands,
+    mut radar: ResMut<HelmRadarEntities>,
 ) {
     if !orientation.is_changed() {
         return;
     }
     for entity in panel.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn_related::<Children>();
     }
+    // Clear stale entity IDs so bridge systems don't command dead entities.
+    radar.center = None;
+    radar.blips.clear();
     commands.remove_resource::<PhoneHelmSpawned>();
 }
 

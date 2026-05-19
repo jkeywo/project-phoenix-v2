@@ -1,6 +1,7 @@
 import { getSpawns, getAnchors, getSpawnPosition, getSpawnName, getEntityPath, getRelativeInfo, setSpawnPosition } from './toml-utils.js';
 import { getColorForEntity } from './layers.js';
 import { loadEntityConfig, getEntityConfig } from './entity-cache.js';
+import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALLBACK } from './canvas-scenario.js';
 
 export class CanvasManager {
   constructor(layerManager, onSpawnSelect, onSpawnUpdate, onSpawnCreate, onSpawnDrag) {
@@ -153,29 +154,7 @@ export class CanvasManager {
 
       const spawns = getSpawns(layer);
       for (const spawn of spawns) {
-        const entConfig = spawn.entity_path || spawn.template_path
-          ? getEntityConfig(spawn.entity_path || spawn.template_path)
-          : null;
-
-        if (entConfig) {
-          if (!spawn.tags && entConfig.tags) spawn.tags = entConfig.tags;
-          if (!spawn.collider && entConfig.collider) spawn.collider = entConfig.collider;
-          if (!spawn.shape && entConfig.shape) spawn.shape = entConfig.shape;
-        }
-
         this.renderSpawn(spawn, layer, layerGroup, allAnchors);
-      }
-    }
-
-    // Re-apply selection highlight after rebuild
-    if (this.selectedSpawn) {
-      const group = this.spawnGroups.get(this.selectedSpawn.spawn);
-      if (group) {
-        const circle = group.find('Circle')[0];
-        if (circle) {
-          circle.stroke('#00ff00');
-          circle.strokeWidth(4);
-        }
       }
     }
 
@@ -187,17 +166,28 @@ export class CanvasManager {
     const name = getSpawnName(spawn);
     const pos = getSpawnPosition(spawn, allAnchors);
     const relative = getRelativeInfo(spawn);
-    const tags = spawn.tags || [];
-    const color = getColorForEntity(tags);
+
+    // Merge entity-template radar_appearance into spawn if present
+    const entConfig = spawn.entity_path || spawn.template_path
+      ? getEntityConfig(spawn.entity_path || spawn.template_path)
+      : null;
+    if (entConfig) {
+      if (!spawn.tags && entConfig.tags) spawn.tags = entConfig.tags;
+      if (!spawn.radar_appearance && entConfig.radar_appearance) spawn.radar_appearance = entConfig.radar_appearance;
+      if (!spawn.collider && entConfig.collider) spawn.collider = entConfig.collider;
+      if (!spawn.shape && entConfig.shape) spawn.shape = entConfig.shape;
+    }
 
     const canvasPos = this.worldToCanvas(pos.x, pos.z);
 
-    let radius = 12;
-    if (spawn.collider && spawn.collider.radius) {
-      radius = Math.max(8, Math.min(30, spawn.collider.radius));
-    } else if (spawn.shape && spawn.shape.radius) {
-      radius = Math.max(10, Math.min(50, spawn.shape.radius));
-    }
+    // Resolve appearance: use radar_appearance when present, X fallback otherwise
+    const appearance = resolveEntityAppearance(spawn, allAnchors);
+    const isSelected = this.selectedSpawn?.spawn === spawn;
+
+    // Determine canvas radius for label placement
+    const displayRadius = appearance.hasFallback
+      ? 10
+      : Math.max(4, Math.min(60, appearance.radius * 0.15 + 4));
 
     const group = new Konva.Group({
       x: canvasPos.x,
@@ -206,21 +196,17 @@ export class CanvasManager {
       name: 'spawnGroup'
     });
 
-    const circle = new Konva.Circle({
-      radius: radius,
-      fill: color,
-      stroke: '#ffffff',
-      strokeWidth: 2
-    });
+    // Draw the radar-appearance shape (Triangle / Square / Dot) or X fallback
+    drawEntityShape(group, Konva, appearance, isSelected);
 
-    group.add(circle);
-
-    if (spawn.shape) {
+    // Draw region area overlay when the entity has a geometric shape
+    if (!appearance.hasFallback && spawn.shape) {
+      const hexColour = colourToHex(appearance.colour);
       if (spawn.shape.type === 'sphere' && spawn.shape.radius) {
         const fillCircle = new Konva.Circle({
           radius: spawn.shape.radius,
-          fill: color + '33',
-          stroke: color,
+          fill: hexColour + '22',
+          stroke: hexColour,
           strokeWidth: 1
         });
         group.add(fillCircle);
@@ -230,8 +216,8 @@ export class CanvasManager {
         const ring = new Konva.Ring({
           innerRadius: innerR,
           outerRadius: outerR,
-          fill: color + '33',
-          stroke: color,
+          fill: hexColour + '22',
+          stroke: hexColour,
           strokeWidth: 1
         });
         group.add(ring);
@@ -240,7 +226,7 @@ export class CanvasManager {
 
     const label = new Konva.Text({
       x: -40,
-      y: radius + 4,
+      y: displayRadius + 4,
       text: name.length > 20 ? name.substring(0, 18) + '...' : name,
       fontSize: 10,
       fill: '#ffffff',
@@ -372,32 +358,13 @@ export class CanvasManager {
 
   selectSpawn(spawn, layer) {
     this.selectedSpawn = { spawn, layer };
-
-    for (const [s, group] of this.spawnGroups) {
-      const circle = group.find('Circle')[0];
-      if (s === spawn) {
-        circle.stroke('#00ff00');
-        circle.strokeWidth(4);
-      } else {
-        circle.stroke('#ffffff');
-        circle.strokeWidth(2);
-      }
-    }
-
+    this.renderAll();
     this.onSpawnSelect(spawn, layer);
   }
 
   deselectSpawn() {
     this.selectedSpawn = null;
-
-    for (const [spawn, group] of this.spawnGroups) {
-      const circle = group.find('Circle')[0];
-      if (circle) {
-        circle.stroke('#ffffff');
-        circle.strokeWidth(2);
-      }
-    }
-
+    this.renderAll();
     this.onSpawnSelect(null, null);
   }
 

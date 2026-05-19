@@ -242,7 +242,7 @@ fn refresh_repair_panel(
 
     // Despawn all existing team rows (handles count changes cleanly)
     for entity in existing_rows.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn_related::<Children>();
     }
 
     // Respawn team rows from current repair teams

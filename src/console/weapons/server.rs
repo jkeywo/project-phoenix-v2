@@ -8,6 +8,7 @@ use crate::simulation::{AsteroidUuid, SimOutbox};
 use crate::entity_spawner::EntityConsoleHull;
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
 use crate::messages::TorpedoTube as MsgTorpedoTube;
+use crate::ai_plugin::{AiTokenRegistry, AiControllerComponent, EntityPhaserState};
 use crate::ship_state::ShipState;
 use crate::radar::WEAPONS_RADAR_RANGE;
 
@@ -146,6 +147,7 @@ impl Plugin for WeaponsPlugin {
             .add_systems(Update, (
                 handle_set_target.in_set(crate::sim_sets::SimSet::Input),
                 handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
+                handle_fire_phaser_npc.in_set(crate::sim_sets::SimSet::Damage),
                 handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
                 handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
                 handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Input),
@@ -244,6 +246,157 @@ fn handle_fire_phaser(
         beam.bank = Some(next_bank);
 
         commands.trigger(BeamStartedEvent { target_uuid: target_uuid.clone() });
+    }
+}
+
+// ── NPC phaser constants ──────────────────────────────────────────────────────
+
+/// Default NPC beam duration in seconds.
+const NPC_BEAM_DURATION_SECS: f32 = 3.0;
+/// Default NPC beam damage per second.
+const NPC_BEAM_DAMAGE_PER_SEC: f32 = 5.0;
+
+/// Handles `FirePhaser` messages emitted by NPC AI controllers (tokens that
+/// start with `"ai:"`).  Uses the same range/arc guard (`is_fire_ready_with_range`)
+/// and the same `EntityConsoleHull::apply_damage` path as the player beam tick,
+/// ensuring a single canonical beam-activation path.
+fn handle_fire_phaser_npc(
+    time: Res<Time>,
+    mut commands: Commands,
+    registry: Option<Res<AiTokenRegistry>>,
+    mut inbound: MessageReader<InboundMessage>,
+    mut npc_query: Query<(
+        Entity,
+        &crate::entity_spawner::EntityUuid,
+        &Transform,
+        Option<&mut EntityPhaserState>,
+        Option<&crate::entity_spawner::WeaponsConsoleSection>,
+        Option<&AiControllerComponent>,
+    ), With<AiControllerComponent>>,
+    mut hull_query: Query<
+        (Entity, &crate::entity_spawner::EntityUuid, &Transform, &mut EntityConsoleHull),
+        Without<AiControllerComponent>,
+    >,
+    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+) {
+    let dt = time.delta_secs();
+
+    // If no AiTokenRegistry resource is present (e.g. in tests without AiPlugin), skip entirely.
+    let Some(registry) = registry else { return; };
+
+    // Collect FirePhaser orders for ai: tokens this tick.
+    let mut fire_orders: Vec<String> = Vec::new();
+    for ev in inbound.read() {
+        if !ev.token.starts_with("ai:") {
+            continue;
+        }
+        if matches!(ev.msg, ClientMessage::FirePhaser) {
+            fire_orders.push(ev.token.clone());
+        }
+    }
+
+    // Snapshot target positions for range/arc checks (avoids aliasing with mut hull_query).
+    let target_positions: Vec<(uuid::Uuid, f32, f32)> = hull_query
+        .iter()
+        .filter_map(|(_, uid, t, _)| {
+            uuid::Uuid::parse_str(&uid.0).ok()
+                .map(|u| (u, t.translation.x, t.translation.z))
+        })
+        .collect();
+
+    for (npc_entity, npc_uuid, transform, phaser_state_opt, weapons_section, ctrl_opt) in
+        npc_query.iter_mut()
+    {
+        let token = match registry.token_for_entity(&npc_uuid.0) {
+            Some(t) => t.to_string(),
+            None => continue,
+        };
+
+        // Ensure the entity has an EntityPhaserState component.
+        let phaser_state = match phaser_state_opt {
+            Some(ps) => ps.into_inner(),
+            None => {
+                commands.entity(npc_entity).insert(EntityPhaserState::default());
+                continue;
+            }
+        };
+
+        // Tick cooldown.
+        phaser_state.cooldown_remaining = (phaser_state.cooldown_remaining - dt).max(0.0);
+
+        let target_uuid: Option<uuid::Uuid> = ctrl_opt.and_then(|c| c.controller.blackboard.target);
+
+        let beam_range = weapons_section
+            .map(|wc| if wc.0.beam_range > 0.0 { wc.0.beam_range } else { 40.0 })
+            .unwrap_or(40.0);
+        let damage_per_sec = weapons_section
+            .map(|wc| if wc.0.beam_damage_per_sec > 0.0 { wc.0.beam_damage_per_sec } else { NPC_BEAM_DAMAGE_PER_SEC })
+            .unwrap_or(NPC_BEAM_DAMAGE_PER_SEC);
+        let beam_duration = weapons_section
+            .map(|wc| if wc.0.beam_duration_secs > 0.0 { wc.0.beam_duration_secs } else { NPC_BEAM_DURATION_SECS })
+            .unwrap_or(NPC_BEAM_DURATION_SECS);
+
+        let npc_x = transform.translation.x;
+        let npc_z = transform.translation.z;
+        let npc_yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
+
+        // Activate beam on FirePhaser order when ready and range/arc check passes.
+        if fire_orders.contains(&token) && phaser_state.is_ready() {
+            if let Some(t_uuid) = target_uuid {
+                let fire_ok = target_positions
+                    .iter()
+                    .find(|(u, _, _)| *u == t_uuid)
+                    .map(|(_, tx, tz)| {
+                        crate::radar::is_fire_ready_with_range(
+                            *tx, *tz, npc_x, npc_z, npc_yaw, beam_range,
+                        )
+                    })
+                    .unwrap_or(false);
+
+                if fire_ok {
+                    phaser_state.beam_active = true;
+                    phaser_state.beam_target = Some(t_uuid);
+                    phaser_state.beam_remaining_secs = beam_duration;
+                    commands.trigger(BeamStartedEvent { target_uuid: t_uuid.to_string() });
+                }
+            }
+        }
+
+        // Tick active beam.
+        if phaser_state.beam_active {
+            phaser_state.beam_remaining_secs = (phaser_state.beam_remaining_secs - dt).max(0.0);
+
+            if let Some(t_uuid) = phaser_state.beam_target {
+                let damage = damage_per_sec * dt;
+                let mut target_destroyed = false;
+                let target_uuid_str = t_uuid.to_string();
+                for (tgt_entity, tgt_uid, _tgt_transform, mut tgt_hull) in hull_query.iter_mut() {
+                    if tgt_uid.0 != target_uuid_str {
+                        continue;
+                    }
+                    let mut rng = rand::rng();
+                    tgt_hull.0.apply_damage(damage, &mut rng);
+                    if tgt_hull.0.is_destroyed() {
+                        target_destroyed = true;
+                        commands.entity(tgt_entity).despawn();
+                        destroyed_events
+                            .write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: tgt_uid.0.clone() });
+                    }
+                    break;
+                }
+                if target_destroyed || phaser_state.beam_remaining_secs <= 0.0 {
+                    let ended_uuid = t_uuid.to_string();
+                    phaser_state.beam_active = false;
+                    phaser_state.beam_target = None;
+                    phaser_state.beam_remaining_secs = 0.0;
+                    phaser_state.cooldown_remaining = beam_duration;
+                    commands.trigger(BeamEndedEvent { target_uuid: ended_uuid });
+                }
+            } else {
+                phaser_state.beam_active = false;
+                phaser_state.beam_remaining_secs = 0.0;
+            }
+        }
     }
 }
 
@@ -1299,6 +1452,261 @@ mod tests {
         assert!(
             destroyed_events.0.iter().any(|e| e.entity_uuid == "npc-1"),
             "AiEntityDestroyed must be emitted with entity_uuid 'npc-1' so on_destroyed triggers fire"
+        );
+    }
+
+    // ── NPC as shooter: handle_fire_phaser_npc ────────────────────────────
+
+    /// Set up `AiTokenRegistry`, an NPC entity with `AiControllerComponent` +
+    /// `EntityPhaserState`, and a target entity.
+    fn setup_npc_shooter(
+        app: &mut App,
+        npc_uuid: &str,
+        target_uuid: &str,
+        target_x: f32,
+        target_z: f32,
+    ) -> (bevy::ecs::entity::Entity, bevy::ecs::entity::Entity) {
+        use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
+        use crate::ai::AiController;
+        use crate::entity_spawner::{EntityUuid, EntityConsoleHull};
+
+        // Register the AI token.
+        {
+            let mut reg = app.world_mut().resource_mut::<AiTokenRegistry>();
+            reg.register(npc_uuid);
+        }
+
+        // Build a minimal AiController with the target on its blackboard.
+        let target_as_uuid = uuid::Uuid::parse_str(target_uuid).ok();
+        let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+        ctrl.blackboard.target = target_as_uuid;
+
+        // Spawn NPC entity facing toward negative-Z (yaw = 0 → forward = -Z).
+        let npc_entity = app.world_mut().spawn((
+            EntityUuid(npc_uuid.to_string()),
+            AiControllerComponent {
+                controller: ctrl,
+                entity_uuid: npc_uuid.to_string(),
+            },
+            EntityPhaserState::default(),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        )).id();
+
+        // Spawn target entity.
+        let target_entity = app.world_mut().spawn((
+            EntityUuid(target_uuid.to_string()),
+            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[
+                (crate::messages::Console::CaptainChair, 50.0),
+            ])),
+            Transform::from_xyz(target_x, 0.0, target_z),
+        )).id();
+
+        (npc_entity, target_entity)
+    }
+
+    #[test]
+    fn npc_fire_phaser_activates_entity_phaser_state() {
+        // NPC entity at origin, target directly ahead (negative-Z), within beam range.
+        // Sending a FirePhaser InboundMessage for the NPC's ai: token should set
+        // `EntityPhaserState::beam_active = true` after one update.
+        use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+
+        let npc_uuid = "00000000-0000-0000-0000-000000000001";
+        let target_uuid = "00000000-0000-0000-0000-000000000002";
+
+        let (npc_entity, _target_entity) =
+            setup_npc_shooter(&mut app, npc_uuid, target_uuid, 0.0, -20.0);
+
+        // Send FirePhaser as the NPC's synthetic token.
+        let ai_token = format!("ai:{}", npc_uuid);
+        push(&mut app, &ai_token, ClientMessage::FirePhaser);
+        app.update();
+
+        let phaser_state = app
+            .world()
+            .get::<EntityPhaserState>(npc_entity)
+            .expect("NPC entity must have EntityPhaserState");
+        assert!(
+            phaser_state.beam_active,
+            "EntityPhaserState::beam_active should be true after NPC fires phaser via ai: token"
+        );
+    }
+
+    #[test]
+    fn npc_beam_tick_applies_damage_to_target_hull() {
+        // With an active NPC beam, each tick of handle_fire_phaser_npc reduces
+        // the target's EntityConsoleHull.
+        use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
+        use crate::entity_spawner::EntityConsoleHull;
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+
+        let npc_uuid = "00000000-0000-0000-0000-000000000003";
+        let target_uuid_str = "00000000-0000-0000-0000-000000000004";
+
+        let (npc_entity, target_entity) =
+            setup_npc_shooter(&mut app, npc_uuid, target_uuid_str, 0.0, -10.0);
+
+        // Activate the beam directly (no FirePhaser required for this test).
+        let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();
+        {
+            let mut ps = app.world_mut().get_mut::<EntityPhaserState>(npc_entity).unwrap();
+            ps.beam_active = true;
+            ps.beam_target = Some(target_uuid_parsed);
+            ps.beam_remaining_secs = 10.0;
+        }
+
+        let hp_before = app.world().get::<EntityConsoleHull>(target_entity).unwrap().0.total_current();
+
+        // Run several ticks so damage accumulates.
+        for _ in 0..10 {
+            app.update();
+        }
+
+        let hp_after = app.world().get::<EntityConsoleHull>(target_entity).unwrap().0.total_current();
+        assert!(hp_after < hp_before, "target hull must decrease as NPC beam ticks (before={hp_before}, after={hp_after})");
+    }
+
+    #[test]
+    fn npc_beam_cooldown_starts_after_beam_expires() {
+        // When an NPC's beam_remaining_secs reaches zero, cooldown_remaining must
+        // be set to a positive value and beam_active must become false.
+        use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
+        use crate::entity_spawner::EntityConsoleHull;
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+
+        let npc_uuid = "00000000-0000-0000-0000-000000000005";
+        let target_uuid_str = "00000000-0000-0000-0000-000000000006";
+
+        let (npc_entity, _target_entity) =
+            setup_npc_shooter(&mut app, npc_uuid, target_uuid_str, 0.0, -10.0);
+
+        let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();
+        {
+            let mut ps = app.world_mut().get_mut::<EntityPhaserState>(npc_entity).unwrap();
+            ps.beam_active = true;
+            ps.beam_target = Some(target_uuid_parsed);
+            ps.beam_remaining_secs = 0.001; // expires on first tick
+        }
+
+        app.update(); // beam expires
+        app.update(); // cooldown ticked
+
+        let ps = app.world().get::<EntityPhaserState>(npc_entity).unwrap();
+        assert!(!ps.beam_active, "beam_active must be false after beam expires");
+        assert!(ps.cooldown_remaining > 0.0, "cooldown_remaining must be positive after beam ends, got {}", ps.cooldown_remaining);
+    }
+
+    // ── End-to-end: tick_ai_controllers → InboundMessage → handle_fire_phaser_npc ──
+
+    /// Build an app that includes BOTH `WeaponsPlugin` AND `AiPlugin` together
+    /// with all their required resources, so the full routing path can be tested:
+    /// `tick_ai_controllers` emits a `FirePhaser` `InboundMessage` which
+    /// `handle_fire_phaser_npc` picks up and converts into `EntityPhaserState::beam_active`.
+    fn combined_test_app() -> App {
+        use crate::ai_plugin::AiPlugin;
+        use crate::config_cache::FactionRegistryResource;
+
+        let mut app = test_app();
+        app.add_plugins(AiPlugin)
+            .insert_resource(FactionRegistryResource(crate::config_cache::get_faction_registry()));
+        app
+    }
+
+    #[test]
+    fn tick_ai_controllers_fire_phaser_routes_through_handle_fire_phaser_npc() {
+        // Full end-to-end test: an NPC in the `Attacking` state with a target
+        // directly in its forward arc and within beam range causes
+        // `tick_ai_controllers` to write a `FirePhaser` `InboundMessage`, which
+        // `handle_fire_phaser_npc` picks up and sets `EntityPhaserState::beam_active`.
+        use crate::ai_plugin::{AiPlugin, AiControllerComponent, EntityPhaserState};
+        use crate::entity_spawner::{EntityUuid, EntityConsoleHull, WeaponsConsoleSection};
+        use crate::entity_config::{BehaviourConfig, StateConfig};
+        use crate::damage::ConsoleHull;
+        use crate::messages::{GamePhase, Console};
+        use bevy::prelude::State;
+
+        let mut app = combined_test_app();
+
+        // Put the simulation in InProgress so tick_ai_controllers runs.
+        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+
+        let beam_range = 50.0_f32;
+        let npc_uuid_str = "ee000000-0000-0000-0000-000000000010";
+        let target_uuid_str = "ee000000-0000-0000-0000-000000000011";
+        let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();
+
+        // Behaviour: start directly in `attacking` state so FirePhaser is emitted
+        // on the very first tick when the target is in range.
+        let behaviour = BehaviourConfig {
+            initial_state: "attack".into(),
+            state: vec![StateConfig {
+                name: "attack".into(),
+                kind: "attacking".into(),
+                waypoints: vec![],
+                loop_path: false,
+                target_speed: 0.5,
+                maintain_range: 0.0,
+                duration_secs: 0.0,
+            }],
+            transition: vec![],
+        };
+
+        // Spawn NPC at origin, facing -Z (yaw = 0 → forward = -Z).
+        let npc_entity = app.world_mut().spawn((
+            crate::entity_spawner::BehaviourSection(behaviour),
+            EntityUuid(npc_uuid_str.to_string()),
+            EntityPhaserState::default(),
+            WeaponsConsoleSection(crate::entity_config::WeaponsConsoleConfig {
+                radar_range: 0.0,
+                target_range: 0.0,
+                fire_arc: 0.0,
+                beam_range,
+                beam_damage_per_sec: 5.0,
+                beam_duration_secs: 3.0,
+                cooldown_secs: 6.0,
+                beam_color: vec![],
+                power_multipliers: None,
+                complexity_toml: None,
+            }),
+            EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)])),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+        )).id();
+
+        // Spawn target directly ahead (-Z), well within beam range.
+        let _target = app.world_mut().spawn((
+            EntityUuid(target_uuid_str.to_string()),
+            EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 200.0)])),
+            Transform::from_xyz(0.0, 0.0, -10.0),
+        )).id();
+
+        // Tick 1: `attach_controllers_on_spawn` runs → AiControllerComponent attached
+        //         and token registered in AiTokenRegistry.
+        app.update();
+
+        // Set blackboard target so `tick_attacking` fires phasers.
+        {
+            let mut ctrl = app.world_mut().get_mut::<AiControllerComponent>(npc_entity).unwrap();
+            ctrl.controller.blackboard.target = Some(target_uuid_parsed);
+        }
+
+        // Tick 2: `tick_ai_controllers` emits FirePhaser InboundMessage.
+        // Tick 3: `handle_fire_phaser_npc` reads the message (messages are
+        //         available to readers on the tick after they are written).
+        app.update();
+        app.update();
+
+        let ps = app.world().get::<EntityPhaserState>(npc_entity)
+            .expect("NPC must still have EntityPhaserState");
+        assert!(
+            ps.beam_active,
+            "beam_active must be true after tick_ai_controllers → InboundMessage → handle_fire_phaser_npc routing"
         );
     }
 }

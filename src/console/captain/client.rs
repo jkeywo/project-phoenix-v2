@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 
+use crate::client::console_shell::ConsoleShell;
 use crate::client_app::{CaptainPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
+use crate::gui::{StateVisuals, Visual};
 use crate::messages::{ClientMessage, Console, GamePhase, ViewDirection, ViewMode};
-use crate::phone_border::framing::PhoneAssets;
+use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
 // ── Constants ──
@@ -21,12 +23,14 @@ const LED_SIZE: f32 = 8.0;
 const NEEDLE_SIZE: f32 = 64.0;
 
 /// Gap between the compass and the red alert toggle.
+#[allow(dead_code)]
 const COMPASS_TO_ALERT_GAP: f32 = 24.0;
 
 // ── Colours ──
 
 const DIR_BG_IDLE: Color = Color::srgb(0.12, 0.12, 0.26);
 const DIR_BG_ACTIVE: Color = Color::srgb(0.20, 0.28, 0.50);
+#[allow(dead_code)]
 const DIR_BORDER: Color = Color::srgba(0.55, 0.70, 1.0, 0.25);
 const LED_OFF: Color = Color::srgb(0.12, 0.12, 0.22);
 const LED_ON: Color = Color::srgb(0.2, 0.9, 0.2);
@@ -79,6 +83,7 @@ impl Plugin for CaptainPanelPlugin {
             rotate_needle_by_direction,
             handle_direction_press,
             handle_red_alert_press,
+            respawn_captain_on_orientation_change,
         ));
     }
 }
@@ -133,8 +138,10 @@ fn spawn_captain_ui(
     mut commands: Commands,
     assets: Option<Res<PhoneAssets>>,
     old_panel: Query<Entity, With<CaptainPanel>>,
+    orientation: Option<Res<DeviceOrientation>>,
 ) {
     let Some(assets) = assets else { return };
+    let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
         commands.entity(entity).despawn();
@@ -142,201 +149,202 @@ fn spawn_captain_ui(
 
     commands.insert_resource(CaptainPanelSpawned);
 
+    let shell = ConsoleShell::spawn(
+        &mut commands,
+        assets.captain_panel_bg.clone(),
+        is_landscape,
+        |commands: &mut Commands, primary: Entity| {
+            fill_captain_dirpad(commands, primary, &assets);
+        },
+        |commands: &mut Commands, secondary: Entity| {
+            fill_captain_alert(commands, secondary, &assets);
+        },
+        &assets,
+    );
+
+    commands.entity(shell.root).insert(CaptainPanel);
+}
+
+// ── Fill helpers ──
+
+fn fill_captain_dirpad(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
     let dial_radius = COMPASS_DIAMETER / 2.0;
     let btn_off = dial_radius - PAD_BTN_SIZE / 2.0 - 4.0;
 
-    commands
-        .spawn((
-            CaptainPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(44.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::FlexStart,
-                padding: UiRect::top(Val::Px(28.0)),
-                row_gap: Val::Px(COMPASS_TO_ALERT_GAP),
-                ..default()
-            },
-            Visibility::Hidden,
-        ))
-        .with_children(|root| {
-            // ── Header bar ────────────────────────────────────────────
-            root.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            }).with_children(|title_row| {
-                title_row.spawn((
-                    Text::new("Captain's Chair"),
-                    TextFont { font_size: 20.0, ..default() },
-                    TextColor(Color::srgb(0.3, 1.0, 0.8)),
-                ));
-                crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::CaptainChair, 14.0);
-            });
-            crate::client_elements::spawn_help_overlay(root, crate::client_elements::HelpPanel::CaptainChair);
+    // Column wrapper to center the compass dial in the primary slot
+    let col = commands.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        width: Val::Percent(100.0),
+        height: Val::Percent(100.0),
+        ..default()
+    }).id();
+    commands.entity(container).add_child(col);
 
-            // ── Compass dial ────────────────────────────────────────────
-            root.spawn((CompassDial, Node {
-                width: Val::Px(COMPASS_DIAMETER),
-                height: Val::Px(COMPASS_DIAMETER),
-                position_type: PositionType::Relative,
-                ..default()
-            })).with_children(|dial| {
-                // Compass ring image (background)
-                dial.spawn((
-                    ImageNode::new(assets.compass_ring.clone()),
-                    Node {
-                        width: Val::Px(COMPASS_DIAMETER),
-                        height: Val::Px(COMPASS_DIAMETER),
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(0.0),
-                        top: Val::Px(0.0),
-                        ..default()
-                    },
-                ));
-
-                // Cardinal letters
-                let cardinals = [
-                    ("F", 0.0, -dial_radius + 18.0),
-                    ("P", -dial_radius + 18.0, 0.0),
-                    ("S", dial_radius - 18.0, 0.0),
-                    ("A", 0.0, dial_radius - 18.0),
-                ];
-                for &(letter, lx, ly) in &cardinals {
-                    dial.spawn((
-                        Text::new(letter),
-                        TextFont {
-                            font: assets.font_mono.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgba(0.55, 0.70, 1.0, 0.9)),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(dial_radius + lx - 5.0),
-                            top: Val::Px(dial_radius + ly - 9.0),
-                            ..default()
-                        },
-                    ));
-                }
-
-                // Rotating needle
-                dial.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(dial_radius - NEEDLE_SIZE / 2.0),
-                        top: Val::Px(dial_radius - NEEDLE_SIZE / 2.0),
-                        width: Val::Px(NEEDLE_SIZE),
-                        height: Val::Px(NEEDLE_SIZE),
-                        ..default()
-                    },
-                ))
-                .with_children(|wrapper| {
-                    wrapper.spawn((
-                        CompassNeedle,
-                        ImageNode::new(assets.needle.clone()),
-                        Transform::default(),
-                        GlobalTransform::default(),
-                    ));
-                });
-
-                // Direction pad buttons at the 4 cardinal points
-                let buttons = [
-                    (ViewDirection::Fore, "▲", "FWD", 0.0, -btn_off),
-                    (ViewDirection::Port, "◄", "PORT", -btn_off, 0.0),
-                    (ViewDirection::Starboard, "►", "STBD", btn_off, 0.0),
-                    (ViewDirection::Aft, "▼", "AFT", 0.0, btn_off),
-                ];
-                for (dir, glyph, label, bx, by) in &buttons {
-                    spawn_dir_button(dial, dir.clone(), glyph, label, dial_radius + bx, dial_radius + by);
-                }
-            });
-
-            // ── Red Alert toggle ────────────────────────────────────────
-            root.spawn((
-                RedAlertToggle,
-                Button,
+    commands.entity(col).with_children(|dial| {
+        dial.spawn((CompassDial, Node {
+            width: Val::Px(COMPASS_DIAMETER),
+            height: Val::Px(COMPASS_DIAMETER),
+            position_type: PositionType::Relative,
+            ..default()
+        })).with_children(|dial| {
+            // Compass ring image (background)
+            dial.spawn((
+                ImageNode::new(assets.compass_ring.clone()),
                 Node {
-                    padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
-                    column_gap: Val::Px(8.0),
-                    align_items: AlignItems::Center,
+                    width: Val::Px(COMPASS_DIAMETER),
+                    height: Val::Px(COMPASS_DIAMETER),
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
                     ..default()
                 },
-                BackgroundColor(RA_BG_IDLE),
-            )).with_children(|btn| {
-                btn.spawn((
-                    ArmedGlow,
-                    Node {
-                        width: Val::Px(10.0),
-                        height: Val::Px(10.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(1.0, 0.2, 0.2, 0.0)),
-                ));
-                btn.spawn((
-                    Text::new("RED ALERT"),
+            ));
+
+            // Cardinal letters
+            let cardinals = [
+                ("F", 0.0, -dial_radius + 18.0),
+                ("P", -dial_radius + 18.0, 0.0),
+                ("S", dial_radius - 18.0, 0.0),
+                ("A", 0.0, dial_radius - 18.0),
+            ];
+            for &(letter, lx, ly) in &cardinals {
+                dial.spawn((
+                    Text::new(letter),
                     TextFont {
-                        font: assets.font_display.clone(),
-                        font_size: 14.0,
+                        font: assets.font_mono.clone(),
+                        font_size: 16.0,
                         ..default()
                     },
-                    TextColor(Color::srgb(0.93, 0.93, 1.0)),
+                    TextColor(Color::srgba(0.55, 0.70, 1.0, 0.9)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(dial_radius + lx - 5.0),
+                        top: Val::Px(dial_radius + ly - 9.0),
+                        ..default()
+                    },
+                ));
+            }
+
+            // Rotating needle
+            dial.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(dial_radius - NEEDLE_SIZE / 2.0),
+                    top: Val::Px(dial_radius - NEEDLE_SIZE / 2.0),
+                    width: Val::Px(NEEDLE_SIZE),
+                    height: Val::Px(NEEDLE_SIZE),
+                    ..default()
+                },
+            ))
+            .with_children(|wrapper| {
+                wrapper.spawn((
+                    CompassNeedle,
+                    ImageNode::new(assets.needle.clone()),
+                    Transform::default(),
+                    GlobalTransform::default(),
                 ));
             });
+
+            // Direction pad buttons at the 4 cardinal points
+            let buttons = [
+                (ViewDirection::Fore, "▲", "FWD", 0.0, -btn_off),
+                (ViewDirection::Port, "◄", "PORT", -btn_off, 0.0),
+                (ViewDirection::Starboard, "►", "STBD", btn_off, 0.0),
+                (ViewDirection::Aft, "▼", "AFT", 0.0, btn_off),
+            ];
+            for &(ref dir, glyph, label, bx, by) in &buttons {
+                dial.spawn((
+                    DirButton(dir.clone()),
+                    Button,
+                    ImageNode::new(assets.btn_small_idle.clone()),
+                    StateVisuals {
+                        idle: Visual { image: Some(assets.btn_small_idle.clone()), color: Color::NONE },
+                        hover: Visual { image: Some(assets.btn_small_hover.clone()), color: Color::NONE },
+                        active: Visual { image: Some(assets.btn_small_active.clone()), color: Color::NONE },
+                        press: Visual { image: Some(assets.btn_small_press.clone()), color: Color::NONE },
+                        disabled: Visual { image: None, color: Color::srgba(0.08, 0.08, 0.15, 0.5) },
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(dial_radius + bx),
+                        top: Val::Px(dial_radius + by),
+                        width: Val::Px(PAD_BTN_SIZE),
+                        height: Val::Px(PAD_BTN_SIZE),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                    BackgroundColor(DIR_BG_IDLE),
+                )).with_children(|btn| {
+                    btn.spawn((
+                        Text::new(glyph),
+                        TextFont { font_size: 18.0, ..default() },
+                        TextColor(GLYPH_COLOR),
+                    ));
+                    btn.spawn((
+                        Text::new(label),
+                        TextFont { font_size: 8.0, ..default() },
+                        TextColor(LABEL_COLOR),
+                    ));
+                    btn.spawn((
+                        DirLed,
+                        Node {
+                            width: Val::Px(LED_SIZE),
+                            height: Val::Px(LED_SIZE),
+                            ..default()
+                        },
+                        BackgroundColor(LED_OFF),
+                    ));
+                });
+            }
         });
+    });
 }
 
-fn spawn_dir_button(
-    parent: &mut ChildSpawnerCommands,
-    dir: ViewDirection,
-    glyph: &str,
-    label: &str,
-    left: f32,
-    top: f32,
-) {
-    parent.spawn((
-        DirButton(dir),
-        Button,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(left),
-            top: Val::Px(top),
-            width: Val::Px(PAD_BTN_SIZE),
-            height: Val::Px(PAD_BTN_SIZE),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            row_gap: Val::Px(2.0),
-            border: UiRect::all(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(DIR_BG_IDLE),
-        BorderColor::all(DIR_BORDER),
-    )).with_children(|btn| {
-        btn.spawn((
-            Text::new(glyph),
-            TextFont { font_size: 18.0, ..default() },
-            TextColor(GLYPH_COLOR),
-        ));
-        btn.spawn((
-            Text::new(label),
-            TextFont { font_size: 8.0, ..default() },
-            TextColor(LABEL_COLOR),
-        ));
-        btn.spawn((
-            DirLed,
+fn fill_captain_alert(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
+    commands.entity(container).with_children(|parent| {
+        parent.spawn((
+            RedAlertToggle,
+            Button,
+            ImageNode::new(assets.red_alert_idle.clone()),
+            StateVisuals {
+                idle: Visual { image: Some(assets.red_alert_idle.clone()), color: RA_BG_IDLE },
+                hover: Visual { image: Some(assets.red_alert_hover.clone()), color: RA_BG_IDLE },
+                active: Visual { image: Some(assets.red_alert_active.clone()), color: RA_BG_ACTIVE },
+                press: Visual { image: Some(assets.red_alert_press.clone()), color: RA_BG_IDLE },
+                disabled: Visual { image: None, color: Color::srgba(0.08, 0.08, 0.15, 0.5) },
+            },
             Node {
-                width: Val::Px(LED_SIZE),
-                height: Val::Px(LED_SIZE),
+                padding: UiRect::axes(Val::Px(20.0), Val::Px(12.0)),
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(LED_OFF),
-        ));
+            BackgroundColor(RA_BG_IDLE),
+        )).with_children(|btn| {
+            btn.spawn((
+                ArmedGlow,
+                Node {
+                    width: Val::Px(10.0),
+                    height: Val::Px(10.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(1.0, 0.2, 0.2, 0.0)),
+            ));
+            btn.spawn((
+                Text::new("RED ALERT"),
+                TextFont {
+                    font: assets.font_display.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.93, 0.93, 1.0)),
+            ));
+        });
     });
 }
 
@@ -447,6 +455,30 @@ fn handle_red_alert_press(
         if *interaction == Interaction::Pressed {
             outbound.write(OutboundClientMessage(ClientMessage::ToggleRedAlert));
         }
+    }
+}
+
+// ── Orientation respawn ──
+
+/// When `DeviceOrientation` changes, despawn the current `CaptainPanel` and
+/// remove the `CaptainPanelSpawned` resource so `spawn_captain_ui` respawns
+/// with the correct layout.
+fn respawn_captain_on_orientation_change(
+    orientation: Res<DeviceOrientation>,
+    mut last_orientation: Local<Option<DeviceOrientation>>,
+    panel: Query<Entity, With<CaptainPanel>>,
+    mut commands: Commands,
+) {
+    let Some(ref last) = *last_orientation else {
+        *last_orientation = Some(orientation.clone());
+        return;
+    };
+    if *orientation != *last {
+        *last_orientation = Some(orientation.clone());
+        for entity in panel.iter() {
+            commands.entity(entity).despawn();
+        }
+        commands.remove_resource::<CaptainPanelSpawned>();
     }
 }
 

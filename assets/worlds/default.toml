@@ -6,9 +6,9 @@
 #
 # Sections:
 #   [global]    — seed, world-level constants
-#   [anchors]   — named positions for [[spawn]] entries to reference
-#   [[entity]]  — direct entity instances (Immediate or GameStart spawn)
-#   [[spawn]]   — named, trigger-eligible spawns positioned by anchor/relative
+#   [anchors]   — named positions for [[entity]] entries to reference
+#   [[entity]]  — direct entity instances (Immediate or GameStart spawn);
+#                 named entries are trigger / comms eligible
 #   [[trigger]] — world event reactions (on_destroyed, on_attacked, on_timer)
 #   [[comms]]   — comms dialogue templates keyed by trigger condition
 
@@ -61,22 +61,25 @@ template_path = "assets/entities/station_outpost.toml"
 name = "Starbase Alpha"
 position = [500.0, 0.0, 0.0]
 
-# ── Named spawns (trigger-eligible) ───────────────────────────────────────────
+# ── Named NPC entities (trigger-eligible) ─────────────────────────────────────
 #
-# Patrol-world NPCs continue to flow through `[[spawn]]` for slice 2; the
-# anchor / relative_to / faction wiring moves to `[[entity]]` in a later
-# slice of PRD #337.
+# PRD #337 slice 3: the patrol raider migrated from `[[spawn]]` to a named
+# `[[entity]]` with `anchor = "patrol_alpha"`. The unified pipeline assigns
+# a UUID at spawn time, registers `raider_alpha` → uuid in
+# `WorldConfig.name_to_uuid`, and `spawn_world_entities` wires the AI
+# components (BehaviourSection, FactionComponent) via the shared
+# `spawn_entity` helper.
 
-[[spawn]]
-name        = "raider"
-entity_path = "assets/entities/pirate_raider.toml"
-anchor      = "patrol_alpha"
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+name          = "raider_alpha"
+anchor        = "patrol_alpha"
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 
 [[trigger]]
 condition = "on_destroyed"
-entity    = "raider"
+entity    = "raider_alpha"
 
   [[trigger.action]]
   type      = "add_objective"
@@ -88,9 +91,9 @@ entity    = "raider"
 
 # Automatic distress call broadcast when the raider is first attacked.
 [[comms]]
-from    = "raider"
+from    = "raider_alpha"
 trigger = "on_attacked"
-entity  = "raider"
+entity  = "raider_alpha"
 message = "MAYDAY MAYDAY — Pirate raider calling for backup. USS Phoenix has engaged. All units converge on our position!"
 
 # Automatic distress call broadcast from Starbase Alpha when the station is first attacked.

@@ -2586,19 +2586,16 @@ kind = "UnknownFlag"
         parse_scenario(toml_str).expect("patrol.toml must parse");
     }
 
-    #[test]
-    fn patrol_scenario_has_one_named_raider_spawn() {
-        let toml_str = include_str!("../../assets/worlds/patrol.toml");
-        let config = parse_scenario(toml_str).expect("patrol.toml must parse");
-        let raider = config.spawns.iter().find(|s| s.name == "raider");
-        assert!(raider.is_some(), "patrol scenario must have a spawn named 'raider'");
-        let raider = raider.unwrap();
-        assert!(
-            raider.entity_path.contains("pirate_raider"),
-            "raider spawn must reference pirate_raider template, got: {}",
-            raider.entity_path
-        );
-    }
+    // PRD #337 slice 3: the patrol raider migrated from `[[spawn]]` to
+    // `[[entity]] name = "raider_alpha"`. The presence + shape of the
+    // migrated entity is asserted by
+    // `world::config::parse_world_handles_shipped_patrol_toml_in_one_pass`,
+    // which reads the same TOML through the unified `parse_world` pipeline
+    // and verifies (a) `name = "raider_alpha"`, (b) `anchor = "patrol_alpha"`,
+    // (c) `template_path` references `pirate_raider`, and (d) no inline
+    // position. The legacy `parse_scenario` parser does not see
+    // `[[entity]]` blocks, so an equivalent assertion here would only
+    // duplicate work while testing the wrong parser.
 
     #[test]
     fn patrol_scenario_has_on_entity_destroyed_trigger_with_add_objective() {
@@ -2810,18 +2807,23 @@ slot = "RepairTeams"
 
     /// default.toml must declare an `on_attacked` comms template on the raider
     /// that broadcasts a distress message with no player response options.
+    ///
+    /// PRD #337 slice 3: the raider is now a named `[[entity]]` called
+    /// `raider_alpha`. The `[[comms]]` block still parses through
+    /// `parse_scenario` (only the spawn moved), so `from` / `entity` now
+    /// reference the new name.
     #[test]
     fn default_scenario_raider_on_attacked_comms_is_broadcast_distress() {
         let toml = include_str!("../../assets/worlds/default.toml");
         let config = parse_scenario(toml).expect("default.toml must parse");
 
         let raider_distress = config.comms.iter().find(|c| {
-            c.from == "raider"
-                && matches!(&c.trigger, TriggerCondition::OnAttacked { entity_name } if entity_name == "raider")
+            c.from == "raider_alpha"
+                && matches!(&c.trigger, TriggerCondition::OnAttacked { entity_name } if entity_name == "raider_alpha")
         });
         assert!(
             raider_distress.is_some(),
-            "default.toml must have an on_attacked comms template from the raider"
+            "default.toml must have an on_attacked comms template from raider_alpha"
         );
         let template = raider_distress.unwrap();
         assert!(
@@ -2857,6 +2859,11 @@ slot = "RepairTeams"
 
     /// The `evaluate_triggers` + `evaluate_comms_templates` functions both fire
     /// their respective entries when an `on_attacked` world event matches.
+    ///
+    /// PRD #337 slice 3: the raider is no longer in `[[spawn]]` (so the
+    /// legacy `parse_scenario` does not register it in `name_to_uuid`).
+    /// The `[[comms]]` block still parses; we inject a synthetic UUID
+    /// mapping for `raider_alpha` to drive the dispatcher.
     #[test]
     fn default_scenario_on_attacked_fires_comms_template() {
         let toml = include_str!("../../assets/worlds/default.toml");
@@ -2864,8 +2871,9 @@ slot = "RepairTeams"
 
         let mut comms_states = comms_template_states_from_config(&config, "assets/worlds/default.toml");
 
-        let raider_uuid = config.name_to_uuid.get("raider").expect("raider spawn must exist").clone();
-        let name_to_uuid = config.name_to_uuid.clone();
+        let raider_uuid = "raider-uuid-test".to_string();
+        let mut name_to_uuid = config.name_to_uuid.clone();
+        name_to_uuid.insert("raider_alpha".to_string(), raider_uuid.clone());
 
         let world_events = vec![WorldEvent::Attacked {
             uuid: raider_uuid.clone(),
@@ -2875,7 +2883,7 @@ slot = "RepairTeams"
         let fired_comms = evaluate_comms_templates(&mut comms_states, &world_events, &name_to_uuid);
 
         // The raider on_attacked comms template must fire.
-        let raider_comms = fired_comms.iter().any(|fc| fc.from == "raider");
-        assert!(raider_comms, "on_attacked comms template from raider must fire");
+        let raider_comms = fired_comms.iter().any(|fc| fc.from == "raider_alpha");
+        assert!(raider_comms, "on_attacked comms template from raider_alpha must fire");
     }
 }

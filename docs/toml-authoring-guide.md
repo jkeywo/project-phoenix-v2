@@ -69,9 +69,9 @@ collapse the three storages into one.
 | `title` | string | `""` | Lobby display title. |
 | `description` | string | `""` | Lobby display body. |
 | `[global]` | table | `{ seed = 42 }` | Global generation params. |
-| `[anchors]` | table | `{}` | Named `[x,y,z]` waypoints referenced by `[[spawn]]` entries and AI patrols. |
-| `[[entity]]` | array of tables | `[]` | Map-half: entity instances spawned into the world. Not eligible for triggers/comms. |
-| `[[spawn]]` | array of tables | `[]` | Scenario-half: named, UUID-assigned entity instances eligible for triggers and comms. |
+| `[anchors]` | table | `{}` | Named `[x,y,z]` waypoints referenced by `[[entity]] anchor = "..."` and AI patrols. |
+| `[[entity]]` | array of tables | `[]` | Entity instances spawned into the world. Named entries (with `name = "..."`) are trigger / comms eligible. |
+| `[[spawn]]` | array of tables | `[]` | **Removed** for shipped NPCs / stations (PRD #337 slices 2 + 3). Three region `[[spawn]]`s remain pending slice 5; preserved-but-unloadable BTF content (`before_the_fire.toml`, `btf_*.toml`) still uses the legacy shape — see `wiki/log.md:396`. |
 | `[[trigger]]` | array of tables | `[]` | World-event handlers (see §1.5). |
 | `[[comms]]` | array of tables | `[]` | Comms dialogue templates (see §1.6). |
 | `[[star]]`, `[[planet]]`, `[[asteroid_field]]` | array | `[]` | **Legacy shorthand.** Not used in shipped worlds; prefer `[[entity]]` with a `template_path`. PRD #337 will remove these. |
@@ -84,7 +84,8 @@ collapse the three storages into one.
 
 ### `[anchors]`
 
-A flat table of `name = [x, y, z]`. Used by `[[spawn]]` `anchor =` references
+A flat table of `name = [x, y, z]`. Used by `[[entity]] anchor = "..."`
+references
 and by AI `waypoints = [...]` lists.
 
 ```toml
@@ -105,7 +106,8 @@ single block can describe both static layout and trigger-eligible entities.
 | `template_path` | string | **required** | Path to entity template (e.g. `"assets/entities/star_sun.toml"`). |
 | `id` | string | none | Stable instance ID for cross-reference. |
 | `name` | string | none | When set, the unified pipeline assigns a UUID and registers `name → uuid` in `WorldConfig.name_to_uuid` and `WorldContentRuntime.name_to_uuid`. Triggers, comms, and `relative_to` lookups resolve names through this map (PRD #339). |
-| `position` | `[f32; 3]` | `[0,0,0]` | World position. Anchor names are not yet resolved on `[[entity]]` — inline the coordinates from `[anchors]` until a later slice of PRD #337 adds anchor support here. |
+| `position` | `[f32; 3]` | `[0,0,0]` | World position. Mutually exclusive with `anchor`. When `anchor` is supplied, `position` is ignored (and should be omitted). |
+| `anchor` | string | none | Named entry from `[anchors]`. PRD #337 slice 3 added anchor support to `[[entity]]`; named NPCs (e.g. `raider_alpha`) use this in preference to inlining anchor coordinates. The unified pipeline resolves the anchor → `[x,y,z]` at spawn time. |
 | `spawn_on` | `"immediate"` \| `"game_start"` | `"immediate"` | `"immediate"` spawns at world load (lobby phase); `"game_start"` spawns when phase enters `InProgress`. |
 | `overrides` | inline table | none | TOML overrides merged on top of the template (per-instance field tweaks). |
 
@@ -114,15 +116,26 @@ single block can describe both static layout and trigger-eligible entities.
 template_path = "assets/entities/station_outpost.toml"
 name          = "Starbase Alpha"   # trigger / comms-eligible
 position      = [500.0, 0.0, 0.0]
+
+# NPC positioned at a named anchor (PRD #337 slice 3)
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+name          = "raider_alpha"
+anchor        = "patrol_alpha"
 ```
 
-### `[[spawn]]` (scenario-half — legacy, being removed)
+### `[[spawn]]` (legacy — removed for shipped NPCs / stations)
 
-> **Status:** PRD #337 is collapsing `[[spawn]]` into `[[entity]] name = "..."`.
-> Slice 2 (PRD #339) migrated station entries (`Starbase Alpha`, `earth`);
-> slice 3 will migrate NPC patrol entries (`raider`). New worlds should
-> prefer `[[entity]] name = "..."`; only the patrol NPCs still use the
-> legacy block during the transition.
+> **Status:** PRD #337 slices 2 + 3 collapsed `[[spawn]]` into
+> `[[entity]] name = "..."`. Slice 2 (PRD #339) migrated stations
+> (`Starbase Alpha`, `earth`); slice 3 migrated the patrol-raider NPC in
+> both `default.toml` and `patrol.toml`. **No shipped NPC or station now
+> uses `[[spawn]]`.** Three `[[spawn]]` blocks remain in shipped TOMLs:
+> all three are region instances (`kaleth_nebula`, `asteroid_belt_zone` in
+> `before_the_fire.toml`; `aphelion_radiation_zone` in
+> `btf_aphelion_protocol.toml`) deferred to PRD #337 slice 5. A further
+> six `[[spawn]]` blocks live in the preserved-but-unloadable BTF authored
+> content (`wiki/log.md:396`). New worlds must use `[[entity]] name = "..."`.
 
 A named, UUID-assigned entity instance. Eligible for trigger and comms
 references via its `name`.
@@ -145,7 +158,7 @@ in the parsed config.
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `condition` | string | **required** | One of `on_destroyed`, `on_attacked`, `on_timer`, `on_hailed`. |
-| `entity` | string | depends | Required for entity-based conditions; references a `[[spawn]]` `name`. |
+| `entity` | string | depends | Required for entity-based conditions; references a named `[[entity]]` `name`. |
 | `after_secs` | f32 | depends | Required for `on_timer`. |
 | `[[trigger.action]]` | array | `[]` | Actions to fire (in order). |
 
@@ -178,9 +191,9 @@ A comms template — a top-level message and a tree of player response choices.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `from` | string | **required** | `[[spawn]]` `name` whose UUID is the sender. |
+| `from` | string | **required** | Named `[[entity]]` `name` whose UUID is the sender. |
 | `trigger` | `"on_hailed"` \| `"on_destroyed"` \| `"on_attacked"` | **required** | When to deliver this message. |
-| `entity` | string | depends | The `[[spawn]]` whose event triggers delivery (typically the same as `from`). |
+| `entity` | string | depends | The named `[[entity]]` whose event triggers delivery (typically the same as `from`). |
 | `message` | string | **required** | The root message body. |
 | `[[comms.response]]` | array | `[]` | Player response options. |
 
@@ -222,15 +235,15 @@ template_path = "assets/entities/station_outpost.toml"
 name          = "Starbase Alpha"
 position      = [500.0, 0.0, 0.0]
 
-# Legacy named scenario-half spawn (patrol NPC, pending PRD #337 slice 3)
-[[spawn]]
-name        = "raider"
-entity_path = "assets/entities/pirate_raider.toml"
-anchor      = "patrol_alpha"
+# Named NPC at an anchor (PRD #337 slice 3)
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+name          = "raider_alpha"
+anchor        = "patrol_alpha"
 
 [[trigger]]
 condition = "on_destroyed"
-entity    = "raider"
+entity    = "raider_alpha"
 
   [[trigger.action]]
   type = "add_objective"
@@ -258,9 +271,10 @@ message = "USS Phoenix, this is Starbase Alpha. Please state your business."
 
 **Purpose:** describe what *one kind of thing* is — its hull, collider,
 appearance, consoles, AI behaviour, region effects, etc. Templates are
-referenced from world files by `[[entity]] template_path = ...` (static
-instances) or by `[[spawn]] entity_path = ...` (named, trigger-eligible
-instances).
+referenced from world files by `[[entity]] template_path = ...`. Trigger-
+and comms-eligible instances additionally carry a `name = "..."` on the
+same `[[entity]]` block (legacy `[[spawn]] entity_path = ...` remains only
+in unmigrated preserved content — see §1.4).
 
 **Location:** `assets/entities/*.toml`.
 

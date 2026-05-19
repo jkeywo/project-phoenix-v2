@@ -188,6 +188,11 @@ pub struct EntityInstance {
     /// World-space position [x, y, z].
     #[serde(default)]
     pub position: Vec<f32>,
+    /// Named anchor reference (from `[anchors]` in the world TOML). Mutually
+    /// exclusive with `position`. Resolved by `resolve_entity_position` at
+    /// spawn time (PRD #337 slice 3 — replaces `[[spawn]] anchor = "..."`).
+    #[serde(default)]
+    pub anchor: Option<String>,
     /// When this entity should be spawned.
     #[serde(default)]
     pub spawn_on: EntityInstanceSpawnOn,

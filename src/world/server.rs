@@ -197,7 +197,13 @@ pub fn spawn_immediate_entities_internal(
             }
         };
         let uuid = crate::entity_loader::assign_uuid();
-        let pos = instance_position(entity_inst);
+        let pos = match resolve_position(entity_inst, &world_config.anchors) {
+            Ok(p) => p,
+            Err(e) => {
+                bevy::log::error!("spawn_world_entities: {e}");
+                continue;
+            }
+        };
         let entity = crate::entity_spawner::spawn_entity(
             commands,
             &config,
@@ -234,7 +240,13 @@ pub fn spawn_immediate_entities_internal(
                 continue;
             }
         };
-        let pos = instance_position(entity_inst);
+        let pos = match resolve_position(entity_inst, &world_config.anchors) {
+            Ok(p) => p,
+            Err(e) => {
+                bevy::log::error!("spawn_world_entities: named entity '{name}': {e}");
+                continue;
+            }
+        };
         let entity = crate::entity_spawner::spawn_entity(
             commands,
             &config,
@@ -248,6 +260,21 @@ pub fn spawn_immediate_entities_internal(
     spawned
 }
 
+/// Resolve an `[[entity]]` instance's spawn position via the pure
+/// `world::config::resolve_entity_position` helper, then widen to a Bevy `Vec3`.
+///
+/// Centralises position resolution for the unified pipeline so anchor-named
+/// entries (PRD #337 slice 3) share the same code path as inline-position
+/// entries.
+fn resolve_position(
+    entity_inst: &crate::map_config::EntityInstance,
+    anchors: &HashMap<String, [f32; 3]>,
+) -> Result<Vec3, String> {
+    let pos = crate::world::config::resolve_entity_position(entity_inst, anchors)?;
+    Ok(Vec3::new(pos[0], pos[1], pos[2]))
+}
+
+#[allow(dead_code)]
 fn instance_position(entity_inst: &crate::map_config::EntityInstance) -> Vec3 {
     if entity_inst.position.len() >= 3 {
         Vec3::new(
@@ -2003,6 +2030,120 @@ position    = [100.0, 0.0, 200.0]
         assert!(
             spawned_uuids.contains(earth_uuid),
             "Earth must be spawned (uuid={earth_uuid}, spawned={spawned_uuids:?})"
+        );
+    }
+
+    // ── PRD #337 slice 3: NPCs through unified pipeline ──────────────────
+
+    #[test]
+    fn spawn_immediate_entities_resolves_anchor_position_for_named_entry() {
+        // PRD #337 slice 3: a `[[entity]]` with `name = ...` AND
+        // `anchor = "..."` (no inline `position`) must be spawned at the
+        // anchor's coordinates. This is the migration path for the patrol
+        // raider NPC moving off `[[spawn]]`.
+        use crate::entity_config::EntityConfig;
+        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use std::collections::HashMap;
+
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg
+            .anchors
+            .insert("patrol_alpha".into(), [300.0, 0.0, -300.0]);
+        world_cfg.entities.push(EntityInstance {
+            template_path: "fixture/raider.toml".into(),
+            name: Some("raider_alpha".into()),
+            anchor: Some("patrol_alpha".into()),
+            ..Default::default()
+        });
+        world_cfg
+            .name_to_uuid
+            .insert("raider_alpha".into(), "raider-uuid-001".into());
+
+        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
+        cache.insert(
+            "fixture/raider.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(world_cfg.clone());
+
+        let spawned: Vec<Entity> = {
+            let mut commands = app.world_mut().commands();
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache)
+        };
+        app.update();
+
+        assert_eq!(spawned.len(), 1, "exactly one named entry must spawn");
+
+        let transform = app
+            .world()
+            .get::<Transform>(spawned[0])
+            .expect("spawned entity must have Transform");
+        assert_eq!(
+            transform.translation,
+            Vec3::new(300.0, 0.0, -300.0),
+            "named entity with anchor must be positioned at the anchor"
+        );
+    }
+
+    #[test]
+    fn spawn_immediate_entities_wires_behaviour_for_npc_with_anchor() {
+        // PRD #337 slice 3: a named [[entity]] whose template carries a
+        // [behaviour] block must end up with a BehaviourSection — the
+        // AiPlugin's `attach_controllers_on_spawn` system reads that to
+        // wire the AiController. This guarantees NPCs migrated from
+        // [[spawn]] to [[entity]] still get AI on spawn.
+        use crate::entity_config::EntityConfig;
+        use crate::entity_spawner::BehaviourSection;
+        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use std::collections::HashMap;
+
+        let raider_toml = r#"
+tags = ["ship","npc","enemy"]
+
+[behaviour]
+initial_state = "idle"
+state = []
+transition = []
+"#;
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg
+            .anchors
+            .insert("patrol_alpha".into(), [300.0, 0.0, -300.0]);
+        world_cfg.entities.push(EntityInstance {
+            template_path: "fixture/raider.toml".into(),
+            name: Some("raider_alpha".into()),
+            anchor: Some("patrol_alpha".into()),
+            ..Default::default()
+        });
+        world_cfg
+            .name_to_uuid
+            .insert("raider_alpha".into(), "raider-uuid-002".into());
+
+        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
+        cache.insert(
+            "fixture/raider.toml".into(),
+            EntityConfig::from_toml(raider_toml).unwrap(),
+        );
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(world_cfg.clone());
+
+        let spawned: Vec<Entity> = {
+            let mut commands = app.world_mut().commands();
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache)
+        };
+        app.update();
+
+        assert_eq!(spawned.len(), 1);
+        assert!(
+            app.world().get::<BehaviourSection>(spawned[0]).is_some(),
+            "NPC spawned through unified pipeline must carry BehaviourSection so AiPlugin can attach a controller"
         );
     }
 }

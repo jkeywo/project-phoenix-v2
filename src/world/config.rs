@@ -205,6 +205,44 @@ where
     (fields, others)
 }
 
+/// Resolve the spawn position of an `[[entity]]` instance against the
+/// world's anchor table.
+///
+/// Precedence:
+/// 1. `anchor = "name"` — look up the anchor; error if missing.
+/// 2. `position = [x, y, z]` — return as-is when length ≥ 3.
+/// 3. Neither — `[0, 0, 0]`.
+///
+/// `anchor` and `position` are not strictly mutually exclusive at parse
+/// time; when both are supplied the anchor wins (matches the legacy
+/// `[[spawn]]` semantics where anchor lookups happened first).
+///
+/// PRD #337 slice 3: lifts anchor positioning from the scenario half into
+/// the unified `[[entity]]` pipeline so NPCs can be migrated off
+/// `[[spawn]]`. Pure function — tested without Bevy.
+pub fn resolve_entity_position(
+    entity_inst: &crate::map_config::EntityInstance,
+    anchors: &HashMap<String, [f32; 3]>,
+) -> Result<[f32; 3], String> {
+    if let Some(name) = entity_inst.anchor.as_ref() {
+        let pos = anchors.get(name).ok_or_else(|| {
+            format!(
+                "Entity (template '{}') references unknown anchor '{}'",
+                entity_inst.template_path, name
+            )
+        })?;
+        return Ok(*pos);
+    }
+    if entity_inst.position.len() >= 3 {
+        return Ok([
+            entity_inst.position[0],
+            entity_inst.position[1],
+            entity_inst.position[2],
+        ]);
+    }
+    Ok([0.0, 0.0, 0.0])
+}
+
 /// Three-way partition of immediate `[[entity]]` instances.
 ///
 /// PRD #339 slice 2: the unified pipeline owns BOTH asteroid-field templates
@@ -458,6 +496,85 @@ position = [0.0, 0.0, 0.0]
     }
 
     #[test]
+    fn parse_world_entity_accepts_anchor_field() {
+        // PRD #337 slice 3: `[[entity]]` now supports `anchor = "..."` so NPC
+        // patrols (formerly `[[spawn]]`) can be migrated into the unified
+        // pipeline without inlining anchor coordinates.
+        let toml = r#"
+[anchors]
+patrol_alpha = [300.0, 0.0, -300.0]
+
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+name = "raider_alpha"
+anchor = "patrol_alpha"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.entities.len(), 1);
+        assert_eq!(cfg.entities[0].anchor.as_deref(), Some("patrol_alpha"));
+        assert!(
+            cfg.entities[0].position.is_empty(),
+            "no inline position when anchor is supplied"
+        );
+    }
+
+    // ── resolve_entity_position (PRD #337 slice 3) ────────────────────────
+
+    fn anchor_table(entries: &[(&str, [f32; 3])]) -> HashMap<String, [f32; 3]> {
+        entries
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), *v))
+            .collect()
+    }
+
+    #[test]
+    fn resolve_entity_position_uses_anchor_when_set() {
+        let entity = EntityInstance {
+            template_path: "assets/entities/pirate_raider.toml".into(),
+            anchor: Some("patrol_alpha".into()),
+            ..Default::default()
+        };
+        let anchors = anchor_table(&[("patrol_alpha", [300.0, 0.0, -300.0])]);
+        let pos = resolve_entity_position(&entity, &anchors).unwrap();
+        assert_eq!(pos, [300.0, 0.0, -300.0]);
+    }
+
+    #[test]
+    fn resolve_entity_position_falls_back_to_inline_position() {
+        let entity = EntityInstance {
+            template_path: "assets/entities/star_sun.toml".into(),
+            position: vec![10.0, 0.0, 20.0],
+            ..Default::default()
+        };
+        let pos = resolve_entity_position(&entity, &HashMap::new()).unwrap();
+        assert_eq!(pos, [10.0, 0.0, 20.0]);
+    }
+
+    #[test]
+    fn resolve_entity_position_errors_on_unknown_anchor() {
+        let entity = EntityInstance {
+            template_path: "assets/entities/pirate_raider.toml".into(),
+            anchor: Some("ghost".into()),
+            ..Default::default()
+        };
+        let err = resolve_entity_position(&entity, &HashMap::new()).unwrap_err();
+        assert!(err.contains("ghost"), "error must mention missing anchor: {err}");
+    }
+
+    #[test]
+    fn resolve_entity_position_anchor_wins_over_inline_position() {
+        let entity = EntityInstance {
+            template_path: "x.toml".into(),
+            anchor: Some("a".into()),
+            position: vec![999.0, 999.0, 999.0],
+            ..Default::default()
+        };
+        let anchors = anchor_table(&[("a", [1.0, 2.0, 3.0])]);
+        let pos = resolve_entity_position(&entity, &anchors).unwrap();
+        assert_eq!(pos, [1.0, 2.0, 3.0]);
+    }
+
+    #[test]
     fn parse_world_entity_spawn_on_game_start_recognised() {
         let toml = r#"
 [[entity]]
@@ -515,11 +632,12 @@ message = "Mayday"
         assert!(cfg.anchors.contains_key("patrol_alpha"));
         // [[entity]] blocks: star, planet (named "earth"), asteroid_field,
         // player_ship, region_nebula, Starbase Alpha (named, was [[spawn]]
-        // — migrated in PRD #339 slice 2).
+        // — migrated in PRD #339 slice 2), raider_alpha (named NPC, was
+        // [[spawn]] — migrated in PRD #337 slice 3).
         assert_eq!(
             cfg.entities.len(),
-            6,
-            "default.toml must contain 6 [[entity]] blocks"
+            7,
+            "default.toml must contain 7 [[entity]] blocks after raider migration"
         );
         // Asteroid field must be present so spawn_world_entities can route it.
         assert!(
@@ -537,6 +655,22 @@ message = "Mayday"
             cfg.entities.iter().any(|e| e.name.as_deref() == Some("earth")),
             "earth must carry a `name` field after slice 2 migration"
         );
+        // PRD #337 slice 3: the default-world raider migrated from
+        // [[spawn]] to a named [[entity]] with `anchor = "patrol_alpha"`.
+        let raider = cfg
+            .entities
+            .iter()
+            .find(|e| e.name.as_deref() == Some("raider_alpha"))
+            .expect("raider_alpha must be a named [[entity]] after slice 3 migration");
+        assert_eq!(
+            raider.anchor.as_deref(),
+            Some("patrol_alpha"),
+            "default-world raider must use anchor positioning"
+        );
+        assert!(
+            raider.position.is_empty(),
+            "default-world raider must have no inline position when anchor is supplied"
+        );
     }
 
     #[test]
@@ -544,17 +678,33 @@ message = "Mayday"
         let toml = include_str!("../../assets/worlds/patrol.toml");
         let cfg = parse_world(toml).expect("patrol.toml must parse via new pipeline");
         assert!(cfg.anchors.contains_key("patrol_alpha"));
-        // [[entity]] blocks: star, asteroid_field, player_ship.
+        // PRD #337 slice 3: the raider migrated from [[spawn]] to a named
+        // [[entity]] with `anchor = "patrol_alpha"`. Total [[entity]] blocks:
+        // star, asteroid_field, player_ship, raider_alpha.
         assert_eq!(
             cfg.entities.len(),
-            3,
-            "patrol.toml must contain 3 [[entity]] blocks"
+            4,
+            "patrol.toml must contain 4 [[entity]] blocks after raider migration"
         );
         assert!(
             cfg.entities
                 .iter()
                 .any(|e| e.template_path.contains("asteroid_field")),
             "asteroid_field [[entity]] must be visible to the unified pipeline"
+        );
+        let raider = cfg
+            .entities
+            .iter()
+            .find(|e| e.name.as_deref() == Some("raider_alpha"))
+            .expect("raider_alpha must be a named [[entity]] after slice 3 migration");
+        assert_eq!(
+            raider.anchor.as_deref(),
+            Some("patrol_alpha"),
+            "raider must use anchor positioning"
+        );
+        assert!(
+            raider.position.is_empty(),
+            "raider must have no inline position when anchor is supplied"
         );
     }
 

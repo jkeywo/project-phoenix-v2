@@ -139,7 +139,7 @@ fn spawn_captain_ui(
     let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn_related::<Children>();
     }
 
     commands.insert_resource(CaptainPanelSpawned);
@@ -469,7 +469,7 @@ fn respawn_captain_on_orientation_change(
         return;
     }
     for entity in panel.iter() {
-        commands.entity(entity).despawn();
+        commands.entity(entity).despawn_related::<Children>();
     }
     commands.remove_resource::<CaptainPanelSpawned>();
 }

@@ -536,21 +536,16 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
 /// with the correct layout.
 fn respawn_helm_on_orientation_change(
     orientation: Res<DeviceOrientation>,
-    mut last_orientation: Local<Option<DeviceOrientation>>,
     panel: Query<Entity, With<HelmPanel>>,
     mut commands: Commands,
 ) {
-    let Some(ref last) = *last_orientation else {
-        *last_orientation = Some(orientation.clone());
+    if !orientation.is_changed() {
         return;
-    };
-    if *orientation != *last {
-        *last_orientation = Some(orientation.clone());
-        for entity in panel.iter() {
-            commands.entity(entity).despawn();
-        }
-        commands.remove_resource::<PhoneHelmSpawned>();
     }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn();
+    }
+    commands.remove_resource::<PhoneHelmSpawned>();
 }
 
 // ── Tests ────────────────────────────────────────────────────────────

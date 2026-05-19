@@ -232,6 +232,8 @@ fn fill_captain_dirpad(commands: &mut Commands, container: Entity, assets: &Phon
                     height: Val::Px(NEEDLE_SIZE),
                     ..default()
                 },
+                Transform::default(),
+                GlobalTransform::default(),
             ))
             .with_children(|wrapper| {
                 wrapper.spawn((
@@ -460,21 +462,16 @@ fn handle_red_alert_press(
 /// with the correct layout.
 fn respawn_captain_on_orientation_change(
     orientation: Res<DeviceOrientation>,
-    mut last_orientation: Local<Option<DeviceOrientation>>,
     panel: Query<Entity, With<CaptainPanel>>,
     mut commands: Commands,
 ) {
-    let Some(ref last) = *last_orientation else {
-        *last_orientation = Some(orientation.clone());
+    if !orientation.is_changed() {
         return;
-    };
-    if *orientation != *last {
-        *last_orientation = Some(orientation.clone());
-        for entity in panel.iter() {
-            commands.entity(entity).despawn();
-        }
-        commands.remove_resource::<CaptainPanelSpawned>();
     }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn();
+    }
+    commands.remove_resource::<CaptainPanelSpawned>();
 }
 
 // ── Tests ──

@@ -14,8 +14,6 @@
 //! - Reparenting console panels into the safe content area
 //! - Detecting device orientation
 
-use std::collections::HashSet;
-
 use bevy::prelude::*;
 
 use crate::gui::{
@@ -258,15 +256,15 @@ fn spawn_bezel_on_startup(
     ));
 }
 
-/// Marker resource set once the reparenting has been done.
-#[derive(Resource, Default)]
-#[allow(dead_code)]
-struct PanelsReparented;
-
 /// Reparent existing console panel root entities into the bezel content
-/// area so they render inside the bezel frame. Runs once when the bezel
-/// is first spawned (detected by the presence of both `BorderContentArea`
-/// and panel roots that are not yet its children).
+/// area so they render inside the bezel frame.
+///
+/// Runs every frame but is effectively a no-op once all panels are parented.
+/// Rather than caching entity IDs in a `Local` set (which becomes stale when
+/// orientation changes force a full despawn+respawn of a panel), we check
+/// each panel's current parent every frame. If it is already `target`, we
+/// skip it — no command queued, minimal overhead.  This correctly handles
+/// respawned panels (new entity, no parent yet) without any bookkeeping.
 fn reparent_panels_into_bezel(
     mut commands: Commands,
     content_area: Query<Entity, With<BorderContentArea>>,
@@ -277,13 +275,15 @@ fn reparent_panels_into_bezel(
     shields: Query<Entity, With<crate::shields_panel::ShieldsPanel>>,
     navigation: Query<Entity, With<crate::navigation_panel::NavigationPanel>>,
     weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
-    mut reparented: Local<HashSet<Entity>>,
+    parents: Query<&ChildOf>,
 ) {
     let Ok(target) = content_area.single() else { return };
     for entity in lobby.iter().chain(captain.iter()).chain(helm.iter()).chain(sensors.iter()).chain(shields.iter()).chain(navigation.iter()).chain(weapons.iter()) {
-        if reparented.insert(entity) {
-            commands.entity(entity).set_parent_in_place(target);
+        // Skip if already a direct child of the content area.
+        if parents.get(entity).map(|p| p.parent() == target).unwrap_or(false) {
+            continue;
         }
+        commands.entity(entity).set_parent_in_place(target);
     }
 }
 

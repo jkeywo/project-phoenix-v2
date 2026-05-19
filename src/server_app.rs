@@ -6,7 +6,6 @@ use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target, WorldResou
 use rand::SeedableRng as _;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::shield::ShieldSystem;
-use crate::map_config::MapConfig;
 use crate::messages::{
     ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, ViewDirection,
 };
@@ -703,40 +702,37 @@ fn reconcile_runtime_entities(
     }
 }
 
-// â"€â"€ World Setup â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── World Setup ────────────────────────────────────────────────────────────
+//
+// Per PRD #341, asteroid-field entries and named `[[entity]]` instances are
+// owned by `world::server::spawn_world_entities`. This `setup_world` system
+// covers only:
+//   * spawning *anonymous* immediate `[[entity]]` instances (e.g. stars,
+//     planets) that aren't asteroid fields and don't carry a `name`.
+//   * the procedural starfield skybox.
+//
+// When no `WorldConfig` is loaded (native unit tests, hardcoded fallback)
+// this is a no-op; `world::server::setup_fallback_world` covers that case.
 fn setup_world(
-    commands: Commands,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<StandardMaterial>>,
-    world: ResMut<WorldResource>,
-) {
-    // Try to get the preloaded map config and config cache.
-    // Hardcoded fallback is handled by WorldPlugin (src/world/server.rs).
-    if let Some(map_config) = crate::config_cache::get_map_config() {
-        let config_cache = crate::config_cache::get_config_cache();
-        setup_world_from_config(commands, meshes, materials, world, map_config, config_cache);
-    }
-}
-
-fn setup_world_from_config(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     _world: ResMut<WorldResource>,
-    map_config: MapConfig,
-    config_cache: crate::config_cache::ConfigCache,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
-    // -- Spawn immediate entities from entity instances ------------
-    //
-    // PRD #337/#338 slice 1 + #339 slice 2: both asteroid-field templates
-    // and any [[entity]] carrying a `name` flow through the unified
-    // `world::server::spawn_world_entities`. Skip them here so the same
-    // instance isn't spawned twice. The classifier is shared with
-    // `partition_immediate_entities` over in `world::config`.
-    for entity_inst in &map_config.entities {
-        if entity_inst.spawn_on != crate::map_config::EntityInstanceSpawnOn::Immediate {
+    let Some(world_config) = world_config else {
+        return;
+    };
+
+    let config_cache = crate::config_cache::get_config_cache();
+
+    for entity_inst in &world_config.entities {
+        if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::Immediate {
             continue;
         }
+        // Asteroid-field entries and named entries are owned by the unified
+        // spawn pass in `world::server::spawn_world_entities`. Skip them to
+        // avoid double-spawning.
         let is_unified = crate::world::config::is_owned_by_unified_pipeline(
             entity_inst,
             |path| {
@@ -749,36 +745,41 @@ fn setup_world_from_config(
         if is_unified {
             continue;
         }
-        spawn_entity_instance(&mut commands, &map_config, &config_cache, entity_inst);
+
+        let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {
+            Ok(c) => c,
+            Err(e) => {
+                bevy::log::error!(
+                    "setup_world: failed to resolve entity '{}': {}",
+                    entity_inst.template_path,
+                    e
+                );
+                continue;
+            }
+        };
+
+        let uuid = crate::entity_loader::assign_uuid();
+        let pos = if entity_inst.position.len() >= 3 {
+            Vec3::new(
+                entity_inst.position[0],
+                entity_inst.position[1],
+                entity_inst.position[2],
+            )
+        } else {
+            Vec3::ZERO
+        };
+
+        crate::entity_spawner::spawn_entity(
+            &mut commands,
+            &config,
+            pos,
+            uuid,
+            entity_inst.id.clone(),
+        );
     }
 
     // -- Starfield skybox ------------------------------------------
     spawn_starfield(&mut commands, &mut meshes, &mut materials);
-}
-
-/// Spawn a single entity instance: resolve template, apply overrides, spawn.
-fn spawn_entity_instance(
-    commands: &mut Commands,
-    _map_config: &MapConfig,
-    config_cache: &crate::config_cache::ConfigCache,
-    entity_inst: &crate::map_config::EntityInstance,
-) {
-    let config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
-        Ok(c) => c,
-        Err(e) => {
-            bevy::log::error!("Failed to resolve entity '{}': {}", entity_inst.template_path, e);
-            return;
-        }
-    };
-
-    let uuid = crate::entity_loader::assign_uuid();
-    let pos = if entity_inst.position.len() >= 3 {
-        Vec3::new(entity_inst.position[0], entity_inst.position[1], entity_inst.position[2])
-    } else {
-        Vec3::ZERO
-    };
-
-    crate::entity_spawner::spawn_entity(commands, &config, pos, uuid, entity_inst.id.clone());
 }
 
 /// Spawn the procedural starfield skybox.
@@ -816,14 +817,14 @@ fn spawn_starfield(
 /// game transitions to InProgress. Registered in `OnEnter(GamePhase::InProgress)`.
 fn spawn_game_start_entities(
     mut commands: Commands,
-    map_config: Option<Res<MapConfig>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut has_spawned: Local<bool>,
 ) {
     if *has_spawned {
         return;
     }
 
-    let mc = match map_config.as_deref() {
+    let mc = match world_config.as_deref() {
         Some(mc) => mc,
         None => return,
     };
@@ -832,7 +833,7 @@ fn spawn_game_start_entities(
 
     let mut ship_spawned = false;
     for entity_inst in &mc.entities {
-        if entity_inst.spawn_on != crate::map_config::EntityInstanceSpawnOn::GameStart {
+        if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
             continue;
         }
         let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {

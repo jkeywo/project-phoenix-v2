@@ -1,16 +1,16 @@
-// Pure module: resolve an EntityInstance into a concrete EntityConfig.
+﻿// Pure module: resolve an WorldEntity into a concrete EntityConfig.
 // No Bevy dependency — fully unit-testable on native.
 
 use crate::entity_config::EntityConfig;
-use crate::map_config::EntityInstance;
+use crate::world::config::WorldEntity;
 
-/// Resolve an `EntityInstance` to a concrete `EntityConfig` by:
+/// Resolve an `WorldEntity` to a concrete `EntityConfig` by:
 /// 1. Looking up `entity_inst.template_path` in the config cache.
 /// 2. Optionally merging `entity_inst.overrides` on top of the template TOML.
 ///
 /// Returns `Err` if the template is not found in the cache.
 pub fn resolve_entity(
-    entity_inst: &EntityInstance,
+    entity_inst: &WorldEntity,
     config_cache: &crate::config_cache::ConfigCache,
 ) -> Result<EntityConfig, String> {
     let template = config_cache
@@ -56,7 +56,7 @@ mod tests {
     #[test]
     fn resolve_missing_template_returns_err() {
         let cache: HashMap<String, EntityConfig> = HashMap::new();
-        let inst = EntityInstance {
+        let inst = WorldEntity {
             template_path: "assets/entities/missing.toml".to_string(),
             ..Default::default()
         };
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn resolve_template_no_overrides_returns_clone() {
         let cache = make_cache("assets/entities/rock.toml", r#"tags = ["asteroid"]"#);
-        let inst = EntityInstance {
+        let inst = WorldEntity {
             template_path: "assets/entities/rock.toml".to_string(),
             overrides: None,
             ..Default::default()

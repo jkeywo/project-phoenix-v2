@@ -1,13 +1,15 @@
 ﻿// WASM/JS bridge for config preloading — all public functions are #[wasm_bindgen] exports.
 //
-// This module implements the preload sequence for map, entity, and complexity TOML files.
-// It uses thread-local storage to cache configs before the Bevy app is initialized.
+// This module implements the preload sequence for the unified world TOML,
+// entity templates, complexity TOML files, and faction TOML files. It uses
+// thread-local storage to cache configs before the Bevy app is initialised.
 //
 // Preload sequence:
 // 1. JS calls set_config_request_callback(cb)
-// 2. JS fetches the default map TOML
-// 3. JS calls wasm_load_map(toml_str) which parses and stores the map
-// 4. wasm_load_map fires the callback for each referenced entity path
+// 2. JS fetches the chosen world TOML
+// 3. JS calls wasm_load_world(path, toml_str) which parses it via the unified
+//    `world::config::parse_world` pass and stores the resulting `WorldConfig`
+// 4. wasm_load_world fires the callback for each referenced entity template path
 // 5. For each entity path, JS fetches the TOML and calls wasm_load_config(path, toml_str)
 // 6. wasm_load_config parses and caches the entity config; if any console config
 //    references a complexity_toml, that path is also queued for loading
@@ -17,8 +19,6 @@
 #[cfg(target_arch = "wasm32")]
 use {
     crate::entity_config::EntityConfig,
-    crate::map_config::MapConfig,
-    crate::world::content::ScenarioConfig,
     bevy::prelude::*,
     js_sys::Function,
     std::cell::RefCell,
@@ -55,18 +55,15 @@ pub fn nested_template_paths(config: &crate::entity_config::EntityConfig) -> Vec
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
-    /// The loaded MapConfig, if any. Set by wasm_load_map.
-    static MAP_CONFIG: RefCell<Option<MapConfig>> = const { RefCell::new(None) };
-    
     /// Cache of loaded entity configs by path.
     static CONFIG_CACHE: RefCell<HashMap<String, EntityConfig>> = RefCell::new(HashMap::new());
-    
+
     /// Queue of entity paths that need to be loaded.
     static PENDING_QUEUE: RefCell<VecDeque<String>> = RefCell::new(VecDeque::new());
-    
+
     /// Set of paths currently being fetched to prevent duplicates.
     static IN_FLIGHT: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
-    
+
     /// Cache of loaded complexity configs by path.
     static COMPLEXITY_CACHE: RefCell<Option<HashMap<String, crate::complexity::ComplexityConfig>>> =
         const { RefCell::new(None) };
@@ -81,13 +78,10 @@ thread_local! {
     /// Whether all pending configs have been loaded.
     static PRELOAD_COMPLETE: RefCell<bool> = const { RefCell::new(false) };
 
-    /// The loaded ScenarioConfig, if any. Set by wasm_load_world_content.
-    static WORLD_CONTENT_CONFIG: RefCell<Option<ScenarioConfig>> = const { RefCell::new(None) };
-
     /// The loaded unified `WorldConfig` (PRD #337/#338 slice 1).
     /// Set by `wasm_load_world` from a single-pass parse of the world TOML.
-    /// Coexists with `MAP_CONFIG` and `WORLD_CONTENT_CONFIG` during the
-    /// merger transition; later slices collapse the three storages into one.
+    /// Sole world storage after PRD #341 — the old per-half thread-locals
+    /// were retired.
     static WORLD_CONFIG: RefCell<Option<crate::world::config::WorldConfig>> =
         const { RefCell::new(None) };
 }
@@ -95,7 +89,7 @@ thread_local! {
 // ── Public WASM API ──────────────────────────────────────────────────────────
 
 /// Set the JavaScript callback for config fetch requests.
-/// This must be called before wasm_load_map or wasm_init.
+/// This must be called before wasm_load_world or wasm_init.
 ///
 /// The callback signature is: `callback(path: string)`
 #[cfg(target_arch = "wasm32")]
@@ -103,58 +97,6 @@ pub fn set_config_request_callback(callback: Function) {
     CONFIG_REQUEST_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
     });
-}
-
-/// Load a map TOML string, parse it, store it, and queue all referenced entity paths.
-///
-/// On success, fires the config request callback for each entity path referenced
-/// in the map's asteroid fields. Returns Ok(true).
-///
-/// On parse failure, logs the error and returns Err(JsValue) without crashing.
-#[cfg(target_arch = "wasm32")]
-pub fn wasm_load_map(toml_str: String) -> Result<JsValue, JsValue> {
-    match crate::map_config::parse_map_config(&toml_str) {
-        Ok(map_config) => {
-            // Store the map config
-            MAP_CONFIG.with(|slot| {
-                *slot.borrow_mut() = Some(map_config.clone());
-            });
-            
-            // Collect all unique entity paths from asteroid fields
-            // AND from entity instance templates (which may themselves reference
-            // asteroid type paths in their asteroid_field sections).
-            let mut entity_paths = HashSet::new();
-            
-            // 1. Collect from typed asteroid fields (legacy)
-            for field in &map_config.asteroid_fields {
-                for path in &field.asteroid_type_paths {
-                    entity_paths.insert(path.clone());
-                }
-                for path in &field.cosmetic_type_paths {
-                    entity_paths.insert(path.clone());
-                }
-            }
-            
-            // 2. Collect template paths from entity instances
-            for entity_inst in &map_config.entities {
-                entity_paths.insert(entity_inst.template_path.clone());
-            }
-            
-            // Queue all entity paths and fire callbacks
-            for path in &entity_paths {
-                queue_and_fire(path.clone());
-            }
-            
-            Ok(JsValue::TRUE)
-        }
-        Err(e) => {
-            web_sys::console::error_1(&JsValue::from_str(&format!(
-                "Failed to parse map TOML: {}",
-                e
-            )));
-            Err(JsValue::from_str(&format!("Map parse error: {}", e)))
-        }
-    }
 }
 
 /// Load an entity config from a TOML string and insert it into the cache.
@@ -316,62 +258,19 @@ pub fn wasm_is_preload_complete() -> bool {
     PRELOAD_COMPLETE.with(|flag| *flag.borrow())
 }
 
-/// Get the loaded MapConfig, if any.
-#[cfg(target_arch = "wasm32")]
-pub fn get_map_config() -> Option<MapConfig> {
-    MAP_CONFIG.with(|slot| slot.borrow().clone())
-}
-
-/// Load a world content TOML string, parse it, store it, and queue entity paths from spawns.
-///
-/// On success, returns `Ok(JsValue::TRUE)`.
-/// On parse failure, logs the error and returns `Err(JsValue)`.
-#[cfg(target_arch = "wasm32")]
-pub fn wasm_load_world_content(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    match crate::world::content::parse_scenario(&toml_str) {
-        Ok(scenario_config) => {
-            // Queue entity paths from scenario spawns so they are preloaded.
-            for spawn in &scenario_config.spawns {
-                queue_and_fire(spawn.entity_path.clone());
-            }
-            WORLD_CONTENT_CONFIG.with(|slot| {
-                *slot.borrow_mut() = Some(scenario_config);
-            });
-            Ok(JsValue::TRUE)
-        }
-        Err(e) => {
-            web_sys::console::error_1(&JsValue::from_str(&format!(
-                "Failed to parse world content TOML at {}: {}",
-                path, e
-            )));
-            Err(JsValue::from_str(&format!("World content parse error at {}: {}", path, e)))
-        }
-    }
-}
-
-/// Return the `default_scenario` path from the loaded map config, if any.
-#[cfg(target_arch = "wasm32")]
-pub fn wasm_get_world_content_path() -> Option<String> {
-    MAP_CONFIG.with(|slot| {
-        slot.borrow().as_ref().and_then(|m| m.default_scenario.clone())
-    })
-}
-
-/// Unified world loader (PRD #337/#338 slice 1).
+/// Unified world loader (PRD #337/#338 slice 1, PRD #341 slice 3).
 ///
 /// Parses the world TOML into a `WorldConfig` via `parse_world` and stores it
-/// in the `WORLD_CONFIG` thread-local. Also drives the legacy
-/// `parse_map_config` and `parse_scenario` parses to populate `MAP_CONFIG`
-/// and `WORLD_CONTENT_CONFIG`, so callers that still read from the legacy
-/// storages (asteroid_field spawner, scenario triggers, comms) keep working
-/// during the transition. Entity template paths discovered via the new
-/// `WorldConfig` are queued via the JS preload callback.
+/// in the `WORLD_CONFIG` thread-local. All entity template paths referenced
+/// by the world (asteroid-field instances, named [[entity]] instances, etc.)
+/// are queued via the JS preload callback so the runtime has every
+/// `EntityConfig` available before `wasm_init`.
 ///
-/// Replaces the old shim in `server/bridge.rs` that simply forwarded to the
-/// two pre-existing WASM exports.
+/// This is the sole world loader after PRD #341 — the legacy two-loader
+/// split (one per half of the world TOML) was retired together with the
+/// map/scenario config types.
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    // 1. New unified parse → WorldConfig.
     let world_config = crate::world::config::parse_world(&toml_str).map_err(|e| {
         web_sys::console::error_1(&JsValue::from_str(&format!(
             "Failed to parse world TOML at {}: {}",
@@ -380,7 +279,7 @@ pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValu
         JsValue::from_str(&format!("World parse error at {}: {}", path, e))
     })?;
 
-    // Queue entity template paths discovered by the new pipeline.
+    // Queue every entity template path discovered by the unified pipeline.
     let entity_paths = crate::world::config::entity_template_paths(&world_config);
 
     WORLD_CONFIG.with(|slot| {
@@ -391,15 +290,7 @@ pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValu
         queue_and_fire(p);
     }
 
-    // 2. Legacy parses (transitional — populate MAP_CONFIG and
-    //    WORLD_CONTENT_CONFIG so untouched callers keep functioning).
-    //    These reuse the existing wasm_load_map / wasm_load_world_content
-    //    bodies, which also queue any paths the legacy pipeline knows about
-    //    (e.g. asteroid type paths from typed [[asteroid_field]] blocks and
-    //    scenario [[spawn]] entity paths). Path queueing is idempotent via
-    //    queue_and_fire's pending-set check.
-    wasm_load_map(toml_str.clone())?;
-    wasm_load_world_content(path, toml_str)
+    Ok(JsValue::TRUE)
 }
 
 /// Get a clone of the loaded unified `WorldConfig`, if any.
@@ -432,12 +323,6 @@ pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsV
 #[cfg(target_arch = "wasm32")]
 pub fn get_faction_registry() -> crate::faction::FactionRegistry {
     FACTION_REGISTRY.with(|reg| reg.borrow().clone())
-}
-
-/// Get the loaded ScenarioConfig, if any.
-#[cfg(target_arch = "wasm32")]
-pub fn get_world_content_config() -> Option<ScenarioConfig> {
-    WORLD_CONTENT_CONFIG.with(|slot| slot.borrow().clone())
 }
 
 /// Get a reference to the config cache.
@@ -511,19 +396,6 @@ impl std::ops::Deref for ComplexityResources {
 #[cfg(not(target_arch = "wasm32"))]
 pub type ComplexityResources = std::collections::HashMap<String, crate::complexity::ComplexityConfig>;
 
-/// Newtype wrapper so `ScenarioConfig` can be inserted as a Bevy Resource.
-#[cfg(target_arch = "wasm32")]
-#[derive(Resource)]
-pub struct WorldContentResource(pub crate::world::content::ScenarioConfig);
-
-#[cfg(target_arch = "wasm32")]
-impl std::ops::Deref for WorldContentResource {
-    type Target = crate::world::content::ScenarioConfig;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 /// Newtype wrapper so `FactionRegistry` can be inserted as a Bevy Resource.
 #[derive(Resource)]
 pub struct FactionRegistryResource(pub crate::faction::FactionRegistry);
@@ -552,21 +424,11 @@ pub struct ConfigCachePlugin;
 #[cfg(target_arch = "wasm32")]
 impl Plugin for ConfigCachePlugin {
     fn build(&self, app: &mut App) {
-        // Insert the MapConfig resource if loaded
-        if let Some(map_config) = get_map_config() {
-            app.insert_resource(map_config);
-        }
-
         // Insert the ConfigCache resource
         app.insert_resource(get_config_cache());
 
         // Insert the ComplexityResources
         app.insert_resource(get_complexity_resources());
-
-        // Insert the ScenarioConfig if one was loaded
-        if let Some(scenario_config) = get_world_content_config() {
-            app.insert_resource(WorldContentResource(scenario_config));
-        }
 
         // Insert the FactionRegistry
         app.insert_resource(FactionRegistryResource(get_faction_registry()));
@@ -582,11 +444,6 @@ use wasm_bindgen::prelude::*;
 pub fn set_config_request_callback(_callback: JsValue) {}
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn wasm_load_map(_toml_str: String) -> Result<JsValue, JsValue> {
-    Ok(JsValue::from_bool(true))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_load_config(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
     Ok(JsValue::from_bool(false))
 }
@@ -594,11 +451,6 @@ pub fn wasm_load_config(_path: String, _toml_str: String) -> Result<JsValue, JsV
 #[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_is_preload_complete() -> bool {
     false
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn get_map_config() -> Option<crate::map_config::MapConfig> {
-    None
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -614,21 +466,6 @@ pub fn wasm_load_complexity(_path: String, _toml_str: String) -> Result<JsValue,
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_complexity_resources() -> ComplexityResources {
     ComplexityResources::new()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn wasm_load_world_content(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
-    Ok(JsValue::from_bool(false))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn get_world_content_config() -> Option<crate::world::content::ScenarioConfig> {
-    None
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub fn wasm_get_world_content_path() -> Option<String> {
-    None
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -676,33 +513,7 @@ mod tests {
     }
     
     // ── Integration Tests ──────────────────────────────────────────────────────
-    
-    #[test]
-    fn map_config_parsing_integration() {
-        let toml = r#"
-[global]
-seed = 42
 
-[[star]]
-name = "Sun"
-radius = 50.0
-colour = [1.0, 0.8, 0.0]
-position = [0.0, 0.0, 0.0]
-
-[[asteroid_field]]
-inner_radius = 100.0
-outer_radius = 200.0
-density = 0.005
-asteroid_type_paths = ["assets/entities/asteroid.toml"]
-"#;
-        let result = crate::map_config::parse_map_config(toml);
-        assert!(result.is_ok());
-        let map_config = result.unwrap();
-        assert_eq!(map_config.global.seed, 42);
-        assert_eq!(map_config.stars.len(), 1);
-        assert_eq!(map_config.asteroid_fields.len(), 1);
-    }
-    
     #[test]
     fn entity_config_parsing_integration() {
         let toml = r#"
@@ -920,38 +731,5 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         let mut pending = cache.all_pending();
         pending.sort();
         assert_eq!(pending, vec!["asteroid_cosmetic.toml", "asteroid_small.toml"]);
-    }
-
-    // ── wasm_load_world_content integration ────────────────────────────────────
-
-    #[test]
-    fn scenario_toml_round_trip_via_parse_scenario() {
-        let toml = r#"
-[[spawn]]
-name = "asteroid_alpha"
-entity_path = "entities/asteroid_large.toml"
-position = [100.0, 0.0, 200.0]
-"#;
-        let config = crate::world::content::parse_scenario(toml).expect("parse must succeed");
-        assert_eq!(config.spawns.len(), 1);
-        assert_eq!(config.spawns[0].name, "asteroid_alpha");
-        assert_eq!(config.spawns[0].entity_path, "entities/asteroid_large.toml");
-    }
-
-    #[test]
-    fn scenario_anchor_resolution_uses_map_anchors() {
-        use std::collections::HashMap;
-        let toml = r#"
-[[spawn]]
-name = "station"
-entity_path = "entities/station.toml"
-anchor = "alpha_point"
-"#;
-        let config = crate::world::content::parse_scenario(toml).expect("parse must succeed");
-        let mut anchors: HashMap<String, Vec<f32>> = HashMap::new();
-        anchors.insert("alpha_point".to_string(), vec![50.0, 0.0, 100.0]);
-        let resolved = crate::world::content::resolve_positions(&config, &anchors)
-            .expect("resolve must succeed");
-        assert_eq!(resolved[0].position, [50.0, 0.0, 100.0]);
     }
 }

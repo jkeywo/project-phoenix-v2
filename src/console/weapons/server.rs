@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 
-use crate::lobby::{InboundMessage, OutboundMessage, Target, Sessions, WorldResource};
+use crate::lobby::{InboundMessage, Target, Sessions, WorldResource};
 use crate::messages::{
     ClientMessage, Console, ModifierSlot, ServerMessage,
 };
-use crate::simulation::{Ship, Asteroid, AsteroidUuid, SimOutbox};
+use crate::simulation::{AsteroidUuid, SimOutbox};
 use crate::entity_spawner::EntityConsoleHull;
 use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
 use crate::messages::TorpedoTube as MsgTorpedoTube;
@@ -207,7 +207,7 @@ fn handle_fire_phaser(
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
-    mut outbox: ResMut<SimOutbox>,
+    _outbox: ResMut<SimOutbox>,
 ) {
     for ev in reader.read() {
         if !matches!(ev.msg, ClientMessage::FirePhaser) {

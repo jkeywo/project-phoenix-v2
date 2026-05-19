@@ -128,8 +128,11 @@ struct ConsoleHullBarBg;
 #[derive(Component)]
 struct ConsoleHullBarFill;
 
+#[allow(dead_code)]
 const HULL_BAR_BG: Color = Color::srgba(0.15, 0.15, 0.15, 0.85);
+#[allow(dead_code)]
 const HULL_BAR_FILL: Color = Color::srgb(0.2, 0.75, 0.3);
+#[allow(dead_code)]
 const HULL_BAR_FILL_LOW: Color = Color::srgb(0.85, 0.25, 0.15);
 
 #[cfg(feature = "client")]

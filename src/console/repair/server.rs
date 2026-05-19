@@ -4,7 +4,7 @@ use crate::lobby::{InboundMessage, Sessions};
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::messages::{ClientMessage, Console, ServerMessage};
 use crate::repair_teams::RepairTeams;
-use crate::simulation::{ShipHullIntegrity, SimOutbox};
+use crate::simulation::ShipHullIntegrity;
 use crate::modifiers::ShipModifiers;
 use crate::messages::ModifierSlot;
 
@@ -92,6 +92,7 @@ pub fn tick_repair_teams(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::simulation::SimOutbox;
     use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;

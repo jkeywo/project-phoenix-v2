@@ -76,8 +76,6 @@ Use these terms consistently across code, comments, PRs, and architecture discus
 
 **Entity Config** — a TOML file under `assets/entities/` describing one entity type's tags, geometry, physics, weapons, shields, and (planned) `on_attacked`/`on_destroyed` triggers. Loaded by `entity_config.rs` and surfaced as Bevy resources via `config_cache.rs`.
 
-**Map Config (legacy term)** — historically a TOML under `assets/maps/` defining named anchors, asteroid fields, and a `default_scenario` reference. As of world-merge step 1, this content lives inside a unified world file under `assets/worlds/`. The Rust type `MapConfig` and its parser still exist internally because the type-level merger is incomplete — tracked by PRD #337.
-
 ---
 
 ## Architecture

@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
-use crate::messages::{ClientMessage, Console, GamePhase, TeamSlot};
+use crate::messages::{Console, GamePhase, TeamSlot};
 
 // ── Pure visibility helper ────────────────────────────────────────────
 
@@ -109,10 +109,12 @@ struct RepairTeamRow(usize);
 
 /// Marks the progress-bar fill inside a team row.
 #[derive(Component)]
+#[allow(dead_code)]
 struct RepairTeamFill(usize);
 
 /// Marks the status text overlaid on a team row.
 #[derive(Component)]
+#[allow(dead_code)]
 struct RepairTeamStatusText(usize);
 
 /// Marks a console dispatch button. Carries the target console and team index.

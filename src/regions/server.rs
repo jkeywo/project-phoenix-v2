@@ -116,7 +116,7 @@ fn apply_damage_zone_damage(
     membership: Res<RegionMembership>,
     region_query: Query<&RegionEffectsSection>,
     ship_query: Query<Entity, With<Ship>>,
-    mut hull: Option<ResMut<ShipHullIntegrity>>,
+    hull: Option<ResMut<ShipHullIntegrity>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,

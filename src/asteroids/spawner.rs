@@ -1,7 +1,7 @@
-// Pure Rust module for generating asteroid positions in a donut-shaped field.
+﻿// Pure Rust module for generating asteroid positions in a donut-shaped field.
 // No Bevy, no physics engine — input → output design for isolated unit testing.
 
-use crate::map_config::GridConfig;
+use crate::entity_config::GridConfig;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;

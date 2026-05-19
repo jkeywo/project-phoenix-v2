@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde::de::Error as SerdeError;
 use uuid::Uuid;
-use crate::map_config::{StarConfig, PlanetConfig, AsteroidFieldConfig};
 use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectsConfig;
 
@@ -1483,3 +1482,120 @@ target_speed = 0.5
         assert!(conditions.contains(&"on_scenario_unloaded"), "must have on_scenario_unloaded transition");
     }
 }
+
+// ── Leaf scene-shape types moved from former entities/map_config.rs (PRD #341) ──
+// These describe entity-template physical/visual properties consumed by
+// EntityConfig (one-per-template) and by steroids::spawner. They are not
+// world-tree concerns and so live alongside the entity-template schema rather
+// than in world::config.
+
+/// Global configuration block (currently used only for the deterministic seed
+/// surfaced through WorldConfig).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct GlobalConfig {
+    /// Global seed for deterministic generation.
+    #[serde(default = "default_global_seed")]
+    pub seed: u64,
+}
+
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self { seed: 42 }
+    }
+}
+
+fn default_global_seed() -> u64 {
+    42
+}
+
+/// Configuration for a star entity.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct StarConfig {
+    #[serde(default)]
+    pub name: String,
+    pub radius: f32,
+    pub colour: Vec<f32>,
+    #[serde(default)]
+    pub position: Vec<f32>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub light_range: Option<f32>,
+    #[serde(default)]
+    pub light_intensity: Option<f32>,
+    #[serde(default)]
+    pub light_colour: Option<Vec<f32>>,
+}
+
+/// Configuration for a planet entity.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PlanetConfig {
+    #[serde(default)]
+    pub name: String,
+    pub radius: f32,
+    pub colour: Vec<f32>,
+    #[serde(default)]
+    pub position: Vec<f32>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// Configuration for the grid-based asteroid spawner.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct GridConfig {
+    pub resolution: f32,
+    #[serde(default = "default_fill_gameplay")]
+    pub fill_gameplay: f32,
+    #[serde(default = "default_fill_cosmetic")]
+    pub fill_cosmetic: f32,
+    #[serde(default)]
+    pub uniformity: f32,
+    #[serde(default = "default_noise_freq")]
+    pub noise_freq: f32,
+    #[serde(default = "default_noise_octaves")]
+    pub noise_octaves: u32,
+    #[serde(default = "default_density_noise_freq")]
+    pub density_noise_freq: f32,
+    #[serde(default = "default_density_noise_octaves")]
+    pub density_noise_octaves: u32,
+    #[serde(default)]
+    pub jitter: f32,
+    #[serde(default)]
+    pub cosmetic_y_offset: f32,
+    #[serde(default = "default_spawn_cells")]
+    pub spawn_cells: u32,
+    #[serde(default = "default_despawn_cells")]
+    pub despawn_cells: u32,
+}
+
+fn default_fill_gameplay() -> f32 { 0.4 }
+fn default_fill_cosmetic() -> f32 { 0.15 }
+fn default_noise_freq() -> f32 { 0.02 }
+fn default_noise_octaves() -> u32 { 3 }
+fn default_density_noise_freq() -> f32 { 0.01 }
+fn default_density_noise_octaves() -> u32 { 2 }
+fn default_spawn_cells() -> u32 { 10 }
+fn default_despawn_cells() -> u32 { 12 }
+
+/// Configuration for an asteroid field.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct AsteroidFieldConfig {
+    pub inner_radius: f32,
+    pub outer_radius: f32,
+    pub density: f32,
+    #[serde(default = "default_spawn_distance")]
+    pub spawn_distance: f32,
+    #[serde(default = "default_despawn_distance")]
+    pub despawn_distance: f32,
+    #[serde(default)]
+    pub asteroid_type_paths: Vec<String>,
+    #[serde(default)]
+    pub cosmetic_type_paths: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub grid: Option<GridConfig>,
+}
+
+fn default_spawn_distance() -> f32 { 150.0 }
+fn default_despawn_distance() -> f32 { 250.0 }

@@ -234,13 +234,6 @@ pub fn set_config_request_callback(callback: js_sys::Function) {
 /// Re-export config preload functions from config_cache module.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_load_map(toml_str: String) -> Result<JsValue, JsValue> {
-    crate::config_cache::wasm_load_map(toml_str)
-}
-
-/// Re-export config preload functions from config_cache module.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
 pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsValue> {
     crate::config_cache::wasm_load_config(path, toml_str)
 }
@@ -252,36 +245,18 @@ pub fn wasm_is_preload_complete() -> bool {
     crate::config_cache::wasm_is_preload_complete()
 }
 
-/// Called by JS with the path and TOML content of a world content file.
-///
-/// On success, parses and stores the world content; returns `Ok(JsValue::TRUE)`.
-/// On parse failure, returns `Err(JsValue)` with a human-readable error.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_load_world_content(path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    crate::config_cache::wasm_load_world_content(path, toml_str)
-}
-
-/// Unified world loader: a single TOML file containing both the map (anchors,
-/// global config, immediate entity instances) and the scenario (named spawns,
-/// triggers, comms templates).
+/// Unified world loader: a single TOML file containing anchors, immediate
+/// entity instances (asteroid fields, stations, NPCs, etc.), named [[entity]]
+/// instances for trigger / comms anchors, [[trigger]] blocks, and [[comms]]
+/// templates.
 ///
 /// Delegates to `config_cache::wasm_load_world`, which performs the unified
-/// `parse_world` pass into the new `WORLD_CONFIG` thread-local and
-/// (transitionally) also populates the legacy `MAP_CONFIG` /
-/// `WORLD_CONTENT_CONFIG` storages for callers that have not yet migrated
-/// (PRD #337/#338 slice 1).
+/// `parse_world` pass into the `WORLD_CONFIG` thread-local. After PRD #341
+/// this is the only world loader — the legacy two-loader split is gone.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_load_world(path: String, toml_str: String) -> Result<JsValue, JsValue> {
     crate::config_cache::wasm_load_world(path, toml_str)
-}
-
-/// Return the `default_scenario` path from the loaded map config, or `undefined`.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn wasm_get_world_content_path() -> Option<String> {
-    crate::config_cache::wasm_get_world_content_path()
 }
 
 // ── Bevy bridge systems ────────────────────────────────────────────────────

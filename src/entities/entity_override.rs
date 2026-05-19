@@ -1,4 +1,4 @@
-pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
+﻿pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
     match (template, override_) {
         (toml::Value::Table(t_table), toml::Value::Table(o_table)) => {
             let mut result = t_table.clone();
@@ -26,7 +26,7 @@ pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Valu
 /// * `behaviour.transition` arrays are **full-replacement** when the override
 ///   supplies one (this is the default for arrays in `merge_toml`).
 ///
-/// Call this instead of `merge_toml` when resolving `EntityInstance` overrides.
+/// Call this instead of `merge_toml` when resolving `WorldEntity` overrides.
 pub fn merge_entity_config_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
     let mut result = merge_toml(template, override_);
 

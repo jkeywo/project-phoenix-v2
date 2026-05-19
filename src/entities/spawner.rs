@@ -2,7 +2,7 @@
 use bevy_rapier3d::prelude::*;
 
 use crate::entity_config::EntityConfig;
-use crate::map_config::{StarConfig, PlanetConfig, AsteroidFieldConfig};
+use crate::entity_config::{StarConfig, PlanetConfig, AsteroidFieldConfig};
 use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectKind;
 
@@ -294,7 +294,7 @@ pub fn render_planet_sections(
 mod tests {
     use super::*;
     use crate::entity_config::*;
-    use crate::map_config::StarConfig;
+    use crate::entity_config::StarConfig;
 
     /// Helper: build a minimal Bevy app for spawning tests.
     fn test_app() -> App {
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn spawn_entity_with_asteroid_field_section() {
-        use crate::map_config::AsteroidFieldConfig;
+        use crate::entity_config::AsteroidFieldConfig;
         let mut app = test_app();
         let config = EntityConfig {
             tags: vec!["field".to_string()],

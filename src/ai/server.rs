@@ -1,4 +1,4 @@
-/// Bevy plugin: AI controller lifecycle — attaches `AiController` components
+﻿/// Bevy plugin: AI controller lifecycle — attaches `AiController` components
 /// to entities that declare a `[behaviour]` block, mints synthetic
 /// `ai:<entity_uuid>` session tokens, and ticks controllers during
 /// `InProgress` phase.
@@ -13,17 +13,14 @@ use std::collections::HashMap;
 /// 2-element anchors widened to 3 components at parse time, so the AI tick
 /// just needs a clone.
 ///
-/// This is the slice-1 anchor source. The old `MapConfig::anchors` reader
-/// remains only as a transitional fallback for callers that haven't been
-/// updated yet (PRD #338 lockstep audit confirms ai/server is the only
-/// non-loader, non-world-plugin reader).
+/// This is the sole anchor source after PRD #341.
 pub fn anchors_from_world_config(
     world: &crate::world::config::WorldConfig,
 ) -> HashMap<String, [f32; 3]> {
     world.anchors().clone()
 }
 
-use crate::ai::{AiController, AiTickOutput, WorldView, WorldEntity};
+use crate::ai::{AiController, AiTickOutput, WorldView, AiWorldEntity};
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
 
 use crate::config_cache::FactionRegistryResource;
@@ -275,7 +272,6 @@ fn tick_ai_controllers(
     )>,
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    map_config: Option<Res<crate::map_config::MapConfig>>,
     faction_registry: Option<Res<FactionRegistryResource>>,
     entity_query: Query<(&EntityUuid, &Transform, Option<&crate::entities::spawner::FactionComponent>), Without<AiControllerComponent>>,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
@@ -284,30 +280,15 @@ fn tick_ai_controllers(
 ) {
 
     // Build anchor map once (shared across all controllers this tick).
-    //
-    // Slice 1 of PRD #337/#338: prefer the unified `WorldConfig` resource;
-    // fall back to legacy `MapConfig::anchors` only when the world loader
-    // hasn't populated `WorldConfig` yet (e.g. in tests that drive the AI
-    // system without going through `wasm_load_world`).
     let anchors: HashMap<String, [f32; 3]> = if let Some(ref wc) = world_config {
         anchors_from_world_config(wc.as_ref())
-    } else if let Some(ref mc) = map_config {
-        mc.anchors.iter().filter_map(|(name, pos)| {
-            if pos.len() >= 3 {
-                Some((name.clone(), [pos[0], pos[1], pos[2]]))
-            } else if pos.len() == 2 {
-                Some((name.clone(), [pos[0], 0.0, pos[1]]))
-            } else {
-                None
-            }
-        }).collect()
     } else {
         HashMap::new()
     };
 
     // Collect world entities from all non-AI entities, including faction if present.
-    let world_entities: Vec<WorldEntity> = entity_query.iter().map(|(uid, t, faction_comp)| {
-        WorldEntity {
+    let world_entities: Vec<AiWorldEntity> = entity_query.iter().map(|(uid, t, faction_comp)| {
+        AiWorldEntity {
             uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
             position: [t.translation.x, t.translation.y, t.translation.z],
             faction: faction_comp.map(|f| f.0),

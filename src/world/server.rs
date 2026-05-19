@@ -1,10 +1,10 @@
-use bevy::prelude::*;
+﻿use bevy::prelude::*;
 use crate::damage::ConsoleHull;
 use crate::simulation::{Ship, ShipHullIntegrity};
 use std::collections::HashMap;
 
 use crate::comms_inbox::CommsInbox;
-use crate::entity_spawner::{spawn_entity, ScenarioOwner};
+use crate::entity_spawner::ScenarioOwner;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::simulation::SimOutbox;
 use crate::messages::{
@@ -12,19 +12,19 @@ use crate::messages::{
 };
 use crate::objectives::ObjectiveManager;
 use crate::world::content::{
-    ActiveDialogue, CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerAction,
-    TriggerState, WorldEvent, evaluate_comms_templates, evaluate_triggers,
-    trigger_states_from_config,
+    ActiveDialogue, CommsTemplateState, TriggerAction,
+    TriggerState, WorldEvent, comms_template_states_from_world, evaluate_comms_templates,
+    evaluate_triggers, trigger_states_from_world,
 };
 
 // ── Resources ──────────────────────────────────────────────────────────────
 
 /// Server-side runtime state for the currently active world content.
 ///
-/// Populated at `Startup` from `WorldContentResource` (which is itself populated
-/// by `ConfigCachePlugin` when `wasm_load_world_content` is called before
-/// `wasm_init`). When no world content is loaded all vecs/maps are empty and comms
-/// systems are no-ops.
+/// Populated at `Startup` from the unified `WorldConfig` resource (which is
+/// inserted by `insert_world_config_resource` when the JS bridge has called
+/// `wasm_load_world`). When no world is loaded all vecs/maps are empty and
+/// comms systems are no-ops.
 #[derive(Resource, Default)]
 pub struct WorldContentRuntime {
     /// Mutable per-trigger runtime state (fired flag).
@@ -33,11 +33,11 @@ pub struct WorldContentRuntime {
     pub comms_template_states: Vec<CommsTemplateState>,
     /// Active in-flight dialogues keyed by CommsMessage id.
     pub active_dialogues: HashMap<String, ActiveDialogue>,
-    /// Named-spawn → UUID mapping (populated from ScenarioConfig).
+    /// Named-entity → UUID mapping (populated from `WorldConfig.name_to_uuid`).
     pub name_to_uuid: HashMap<String, String>,
-    /// Hailable contacts derived from scenario spawns.
+    /// Hailable contacts derived from world comms templates.
     pub contacts: Vec<CommsContact>,
-    /// Set to `true` whenever contacts or other scenario-level data changes so
+    /// Set to `true` whenever contacts or other world-level data changes so
     /// `broadcast_comms_state` knows to push a fresh snapshot even if the
     /// inbox itself hasn't changed.
     pub needs_broadcast: bool,
@@ -54,31 +54,21 @@ pub struct CommsInboxRes(pub CommsInbox);
 #[derive(Resource, Default)]
 pub struct ObjectiveManagerRes(pub ObjectiveManager);
 
-/// Bevy resource wrapping the additive scenario manager.
-///
-/// Scenarios are keyed by their TOML path string. Loading is additive; the same
-/// path loaded twice is a no-op. Unloading removes the scenario and cleans up
-/// comms and objectives.
-#[derive(Resource, Default)]
-pub struct ScenarioManagerRes(pub crate::world::content::ScenarioManager);
-
 
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_world_hardcoded)
-            .init_resource::<WorldContentRuntime>()
+        app.init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
-            .init_resource::<ScenarioManagerRes>()
             .add_systems(
                 Startup,
                 (
                     insert_world_config_resource,
                     spawn_world_entities,
-                    spawn_scenario_entities,
-                    init_scenario_runtime,
+                    init_world_runtime,
+                    setup_fallback_world.run_if(not(resource_exists::<crate::world::config::WorldConfig>)),
                 ).chain(),
             )
             .add_systems(
@@ -102,10 +92,11 @@ impl Plugin for WorldPlugin {
 /// Startup system: copy the unified `WorldConfig` from the WASM-side
 /// thread-local cache into a Bevy `Resource` so downstream systems
 /// (`spawn_world_entities`, `ai::server::tick_ai_controllers`) can read it
-/// via `Res<WorldConfig>` (PRD #337/#338 slice 1).
+/// via `Res<WorldConfig>`.
 ///
 /// On native (no WASM bridge) `get_world_config()` returns `None` and this
-/// system is a no-op; the legacy `MapConfig`-based fallbacks remain in place.
+/// system is a no-op; `setup_fallback_world` handles that case via its
+/// `run_if(not(resource_exists::<WorldConfig>))` gate.
 fn insert_world_config_resource(mut commands: Commands) {
     if let Some(world_config) = crate::config_cache::get_world_config() {
         commands.insert_resource(world_config);
@@ -115,11 +106,11 @@ fn insert_world_config_resource(mut commands: Commands) {
 /// Startup system: spawn `[[entity]]` instances owned by the unified
 /// `WorldConfig` pipeline.
 ///
-/// PRD #337/#338 slice 1 + PRD #339 slice 2: the unified pipeline owns
-/// both asteroid-field templates AND any `[[entity]]` carrying a `name`
-/// field. The legacy `setup_world_from_config` in `server_app.rs` keeps
-/// anonymous non-asteroid entries; the shared `is_owned_by_unified_pipeline`
-/// helper guarantees no entry is spawned twice.
+/// The unified pipeline owns both asteroid-field templates AND any
+/// `[[entity]]` carrying a `name` field. The complementary `setup_world`
+/// in `server_app.rs` handles anonymous non-asteroid immediate entries
+/// (stars, planets); the shared `is_owned_by_unified_pipeline` helper
+/// guarantees no entry is spawned twice.
 ///
 /// For named entries the UUID is read from `WorldConfig.name_to_uuid`
 /// (populated by an earlier assign-uuid pass in this same system), so the
@@ -267,7 +258,7 @@ pub fn spawn_immediate_entities_internal(
 /// entries (PRD #337 slice 3) share the same code path as inline-position
 /// entries.
 fn resolve_position(
-    entity_inst: &crate::map_config::EntityInstance,
+    entity_inst: &crate::world::config::WorldEntity,
     anchors: &HashMap<String, [f32; 3]>,
 ) -> Result<Vec3, String> {
     let pos = crate::world::config::resolve_entity_position(entity_inst, anchors)?;
@@ -275,7 +266,7 @@ fn resolve_position(
 }
 
 #[allow(dead_code)]
-fn instance_position(entity_inst: &crate::map_config::EntityInstance) -> Vec3 {
+fn instance_position(entity_inst: &crate::world::config::WorldEntity) -> Vec3 {
     if entity_inst.position.len() >= 3 {
         Vec3::new(
             entity_inst.position[0],
@@ -288,37 +279,15 @@ fn instance_position(entity_inst: &crate::map_config::EntityInstance) -> Vec3 {
 }
 
 
-/// Bootstrap precedence: scenario → map-config → hardcoded.
-///
-/// Returns true when the hardcoded fallback should run (no preloaded configs).
-pub fn choose_bootstrap() -> bool {
-    if crate::config_cache::get_world_content_config().is_some() {
-        return false; // scenario-driven spawn handled by spawn_scenario_entities
-    }
-    if let Some(map) = crate::config_cache::get_map_config() {
-        if let Some(path) = map.default_scenario {
-            bevy::log::warn!(
-                "WorldPlugin: default scenario '{}' not preloaded — using hardcoded bootstrap",
-                path
-            );
-        }
-        return false; // map-config-driven setup handled by SimulationPlugin
-    }
-    true // pure fallback
-}
-
 /// Fallback world setup with hardcoded values for development/testing.
-/// Runs only when no map config and no scenario was preloaded.
-fn setup_world_hardcoded(
+/// Runs only when no `WorldConfig` resource was loaded (gated by the
+/// `WorldPlugin` `run_if` clause).
+fn setup_fallback_world(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     _world: ResMut<WorldResource>,
 ) {
-    if !choose_bootstrap() {
-        return;
-    }
-
     // ── Starfield skybox ───────────────────────────────────────────────────
     // Procedural points: many small unlit white spheres at radius ~2000
     // around the origin. Cheap and works on WebGL2.
@@ -350,8 +319,8 @@ fn setup_world_hardcoded(
 
     // Spawn ship via the generic entity spawner using a hardcoded EntityConfig
     // (mirrors assets/entities/player_ship.toml's collider). This is the
-    // no-MapConfig fallback path; the [[entity]]/spawn_game_start path is
-    // preferred and runs whenever MapConfig is loaded.
+    // no-WorldConfig fallback path; the [[entity]]/spawn_game_start path is
+    // preferred and runs whenever a WorldConfig is loaded.
     let ship_config = crate::entity_config::EntityConfig {
         tags: vec!["player".to_string(), "ship".to_string()],
         collider: Some(crate::entity_config::ColliderConfig {
@@ -395,102 +364,46 @@ fn setup_world_hardcoded(
 
 // ── Startup systems ─────────────────────────────────────────────────────────
 
-/// Startup system: resolves all scenario spawn positions and spawns each entity
-/// through the shared `spawn_entity` helper.
-fn spawn_scenario_entities(mut commands: Commands) {
-    let scenario_config = match crate::config_cache::get_world_content_config() {
-        Some(s) => s,
-        None => return, // No scenario loaded — nothing to do.
-    };
-
-    // Derive the scenario path from the map config's `default_scenario` field.
-    // Falls back to "default" when the path is unavailable (e.g. in native tests).
-    let scenario_path = crate::config_cache::wasm_get_world_content_path()
-        .unwrap_or_else(|| "default".to_string());
-
-    let map_config = crate::config_cache::get_map_config();
-    let anchors = map_config
-        .as_ref()
-        .map(|mc| mc.anchors.clone())
-        .unwrap_or_default();
-
-    let config_cache = crate::config_cache::get_config_cache();
-
-    let resolved = match crate::world::content::resolve_positions(&scenario_config, &anchors) {
-        Ok(r) => r,
-        Err(e) => {
-            bevy::log::error!("WorldPlugin: failed to resolve spawn positions: {e}");
-            return;
-        }
-    };
-
-    for spawn in &resolved {
-        let config = config_cache.get(&spawn.entity_path);
-
-        let Some(config) = config else {
-                bevy::log::warn!(
-                "WorldPlugin: no config found for entity path '{}' (spawn '{}') — skipping",
-                spawn.entity_path,
-                spawn.name
-            );
-            continue;
-        };
-
-        let position = Vec3::new(
-            spawn.position[0],
-            spawn.position[1],
-            spawn.position[2],
-        );
-
-        let entity = spawn_entity(
-            &mut commands,
-            config,
-            position,
-            spawn.uuid.clone(),
-            Some(spawn.name.clone()),
-        );
-        // Tag each spawned entity with the real scenario path so that unloading
-        // the scenario can target its entities for cleanup.
-        commands.entity(entity).insert(ScenarioOwner(scenario_path.clone()));
-
-        bevy::log::info!(
-            "WorldPlugin: spawned '{}' at {:?} uuid={}",
-            spawn.name,
-            spawn.position,
-            spawn.uuid
-        );
-    }
-}
-
-/// Fold a parsed `ScenarioConfig` into a live `WorldContentRuntime`.
+/// Startup system: initialise `WorldContentRuntime`, `CommsInboxRes`, and
+/// `WorldResource` from the loaded `WorldConfig` (if any).
 ///
-/// PRD #337/#339 slice 2: the unified `[[entity]]` pipeline runs first and
-/// may have already registered names in `runtime.name_to_uuid`. This helper
-/// merges the legacy scenario `name_to_uuid` in WITHOUT overwriting any
-/// existing entries — unified-pipeline registrations win, legacy fills gaps.
-/// Same merge policy applies to derived `contacts`.
-///
-/// Extracted as a pure helper so the merge semantics are testable on native
-/// (where `get_world_content_config()` always returns `None`).
-pub fn merge_scenario_into_runtime(
-    runtime: &mut WorldContentRuntime,
-    scenario_config: &crate::world::content::ScenarioConfig,
-    scenario_path: &str,
+/// This is the post-PRD-#341 sole runtime-init entry point: the legacy
+/// scenario / map split is gone. When no `WorldConfig`
+/// resource is present (native unit tests, fallback bootstrap) this is a
+/// no-op and downstream comms / trigger systems remain quiet.
+fn init_world_runtime(
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    mut runtime: ResMut<WorldContentRuntime>,
+    mut inbox: ResMut<CommsInboxRes>,
+    _world: ResMut<WorldResource>,
 ) {
-    for (name, uuid) in &scenario_config.name_to_uuid {
+    let Some(world_config) = world_config else {
+        return;
+    };
+
+    // `spawn_world_entities` ran earlier in the Startup chain and already
+    // populated `runtime.name_to_uuid` for named [[entity]] instances. Fold
+    // in any additional names from `WorldConfig.name_to_uuid` WITHOUT
+    // overwriting: existing entries win (single source of truth from the
+    // spawn pass).
+    for (name, uuid) in &world_config.name_to_uuid {
         runtime
             .name_to_uuid
             .entry(name.clone())
             .or_insert_with(|| uuid.clone());
     }
-    runtime.comms_template_states =
-        crate::world::content::comms_template_states_from_config(scenario_config, scenario_path);
-    runtime.trigger_states = trigger_states_from_config(scenario_config, scenario_path);
 
-    // Build contacts list using the merged runtime map so unified-pipeline
-    // UUIDs are picked up too.
+    // Derive trigger/comms runtime states straight from the parsed world.
+    // Use a stable scenario_path key — we no longer track per-file paths.
+    let scenario_path = "world";
+    runtime.trigger_states = trigger_states_from_world(&world_config, scenario_path);
+    runtime.comms_template_states =
+        comms_template_states_from_world(&world_config, scenario_path);
+
+    // Build the contact list from comms templates using the merged
+    // `runtime.name_to_uuid` so unified-pipeline UUIDs are picked up.
     let mut contacts: Vec<CommsContact> = Vec::new();
-    for tmpl in &scenario_config.comms {
+    for tmpl in &world_config.comms {
         let uuid = match runtime.name_to_uuid.get(&tmpl.from) {
             Some(u) => u.clone(),
             None => continue,
@@ -504,28 +417,6 @@ pub fn merge_scenario_into_runtime(
     }
     runtime.contacts = contacts;
     runtime.needs_broadcast = true;
-}
-
-/// Startup system: initialises `WorldContentRuntime`, `CommsInboxRes`, and
-/// `ObjectiveManagerRes` from the loaded `ScenarioConfig` (if any).
-/// Also populates `WorldResource` with scenario metadata (title, description).
-fn init_scenario_runtime(
-    mut runtime: ResMut<WorldContentRuntime>,
-    mut inbox: ResMut<CommsInboxRes>,
-    mut world: ResMut<WorldResource>,
-) {
-    let scenario_config = match crate::config_cache::get_world_content_config() {
-        Some(s) => s,
-        None => return,
-    };
-
-    let scenario_path = crate::config_cache::wasm_get_world_content_path()
-        .unwrap_or_else(|| "default".to_string());
-
-    world.0.scenario_title = scenario_config.title.clone();
-    world.0.scenario_description = scenario_config.description.clone();
-
-    merge_scenario_into_runtime(&mut runtime, &scenario_config, &scenario_path);
 
     // Mark inbox dirty so the first InProgress broadcast fires even though
     // no messages have arrived yet.
@@ -534,7 +425,7 @@ fn init_scenario_runtime(
 
 /// Re-mark the comms runtime dirty when the game enters InProgress.
 ///
-/// `init_scenario_runtime` marks the runtime dirty during Startup so the first
+/// `init_world_runtime` marks the runtime dirty during Startup so the first
 /// `broadcast_comms_state` fires. However, if no player holds the Comms console
 /// during Lobby, that broadcast clears the dirty flag without sending anything.
 /// This system ensures the flag is restored when InProgress begins, so the Comms
@@ -636,9 +527,8 @@ fn handle_respond_to_message(
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut objectives: ResMut<ObjectiveManagerRes>,
-    mut scenario_mgr: ResMut<ScenarioManagerRes>,
-    mut commands: Commands,
-    scenario_owner_query: Query<(Entity, &ScenarioOwner)>,
+    _commands: Commands,
+    _scenario_owner_query: Query<(Entity, &ScenarioOwner)>,
 ) {
     for ev in reader.read() {
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
@@ -828,9 +718,8 @@ fn handle_ai_events(
     mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut inbox: ResMut<CommsInboxRes>,
-    mut scenario_mgr: ResMut<ScenarioManagerRes>,
-    mut commands: Commands,
-    scenario_owner_query: Query<(Entity, &ScenarioOwner)>,
+    _commands: Commands,
+    _scenario_owner_query: Query<(Entity, &ScenarioOwner)>,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
     mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
@@ -1060,37 +949,62 @@ fn handle_ai_events(
     }
 }
 
-use crate::ai_plugin::{AiControllerComponent, AiEntityAttacked, AiEntityDestroyed};
+use crate::ai_plugin::AiControllerComponent;
 use crate::entity_spawner::{BehaviourSection, EntityUuid};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lobby::{LobbyPlugin, OutboundMessage};
+    use crate::ai_plugin::{AiEntityAttacked, AiEntityDestroyed};
+    use crate::lobby::{LobbyPlugin, OutboundMessage, WorldResource};
     use crate::messages::*;
-    use crate::world::content::{CommsResponse, CommsTemplateState, TriggerCondition, parse_scenario};
+    use crate::world::content::{CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition};
 
-    // ── Bootstrap selection tests ─────────────────────────────────────────────
+    // ── setup_fallback_world run-condition tests (PRD #341) ──────────────────
+    //
+    // The fallback system must run exactly when no `WorldConfig` resource is
+    // present (e.g. native unit tests, no WASM-loaded world). When a
+    // `WorldConfig` is loaded the fallback must be skipped — the
+    // `[[entity]]`-driven spawn path owns the ship via `spawn_game_start_entities`.
 
-    #[test]
-    fn choose_bootstrap_selects_hardcoded_when_nothing_is_preloaded() {
-        // In native (non-wasm) builds, get_map_config() and get_world_content_config()
-        // always return None, so choose_bootstrap() must return true (use fallback).
-        assert!(choose_bootstrap(), "hardcoded fallback should be selected when no configs preloaded");
+    /// Build the minimum app needed to run `WorldPlugin`'s Startup chain.
+    /// Excludes `LobbyPlugin` so we don't pull in extra systems we don't need.
+    fn fallback_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_resource::<WorldResource>()
+            .add_plugins(WorldPlugin);
+        app
     }
 
     #[test]
-    fn parse_scenario_with_spawn_entry_produces_expected_entity() {
-        let toml = r#"
-[[spawn]]
-name        = "Test Station"
-entity_path = "assets/entities/station_outpost.toml"
-position    = [100.0, 0.0, 200.0]
-"#;
-        let config = parse_scenario(toml).expect("fixture must parse");
-        assert_eq!(config.spawns.len(), 1);
-        assert_eq!(config.spawns[0].name, "Test Station");
-        assert_eq!(config.spawns[0].entity_path, "assets/entities/station_outpost.toml");
+    fn setup_fallback_world_runs_when_no_world_config_present() {
+        let mut app = fallback_test_app();
+        // Run only the Startup schedule — WorldPlugin's Update systems
+        // require message types we don't want to wire up here.
+        app.world_mut().run_schedule(Startup);
+        assert!(
+            app.world().get_resource::<ShipHullIntegrity>().is_some(),
+            "setup_fallback_world should have run and inserted ShipHullIntegrity \
+             when no WorldConfig is loaded"
+        );
+    }
+
+    #[test]
+    fn setup_fallback_world_is_skipped_when_world_config_present() {
+        let mut app = fallback_test_app();
+        // Insert a WorldConfig before Startup runs. The run_if gate must
+        // suppress setup_fallback_world.
+        app.world_mut()
+            .insert_resource(crate::world::config::WorldConfig::default());
+        app.world_mut().run_schedule(Startup);
+        assert!(
+            app.world().get_resource::<ShipHullIntegrity>().is_none(),
+            "setup_fallback_world should NOT have run when a WorldConfig is \
+             already loaded — the [[entity]] pipeline owns ship spawning"
+        );
     }
 
     // ── Test app ─────────────────────────────────────────────────────────────
@@ -1111,7 +1025,6 @@ position    = [100.0, 0.0, 200.0]
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
-            .init_resource::<ScenarioManagerRes>()
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
             .add_systems(
@@ -1445,7 +1358,6 @@ position    = [100.0, 0.0, 200.0]
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
-            .init_resource::<ScenarioManagerRes>()
             .init_resource::<SimOutbox>()
             .add_systems(Update, handle_ai_events);
         // Set phase to InProgress
@@ -1743,20 +1655,20 @@ position    = [100.0, 0.0, 200.0]
 
     #[test]
     fn spawn_world_entities_populates_name_to_uuid_for_named_entity() {
-        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
 
         // Build a unified WorldConfig with one named entry (no template
         // resolution needed — the helper that mutates `name_to_uuid` runs
         // independently of the asteroid-field spawning path).
         let mut world_cfg = UnifiedWorldConfig::default();
-        world_cfg.entities.push(EntityInstance {
+        world_cfg.entities.push(WorldEntity {
             template_path: "assets/entities/station_outpost.toml".into(),
             name: Some("starbase_alpha".into()),
             position: vec![500.0, 0.0, 0.0],
             ..Default::default()
         });
-        world_cfg.entities.push(EntityInstance {
+        world_cfg.entities.push(WorldEntity {
             template_path: "assets/entities/star_sun.toml".into(),
             name: None,
             position: vec![0.0, 0.0, 0.0],
@@ -1784,11 +1696,11 @@ position    = [100.0, 0.0, 200.0]
         // `WorldContentRuntime.name_to_uuid`. The unified pipeline must
         // mirror its registrations into that map so the lookup path stays
         // a single source of truth during the transitional slices.
-        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
 
         let mut world_cfg = UnifiedWorldConfig::default();
-        world_cfg.entities.push(EntityInstance {
+        world_cfg.entities.push(WorldEntity {
             template_path: "assets/entities/station_outpost.toml".into(),
             name: Some("earth".into()),
             ..Default::default()
@@ -1818,70 +1730,48 @@ position    = [100.0, 0.0, 200.0]
     }
 
     #[test]
-    fn merge_scenario_into_runtime_preserves_existing_name_to_uuid() {
-        // PRD #337/#339 slice 2: when the unified pipeline has already
-        // registered a name (e.g. "starbase_alpha" via [[entity]] name=..),
-        // folding the legacy ScenarioConfig in must NOT overwrite it. The
-        // unified pipeline is the source of truth; legacy entries only fill
-        // gaps. (Conflicting names mean the world TOML lists the same name
-        // in both `[[entity]]` and `[[spawn]]`, which the migration plan
-        // forbids — but unified wins so the spawned entity is reachable.)
-        use crate::world::content::parse_scenario;
+    fn init_world_runtime_preserves_existing_name_to_uuid() {
+        // PRD #341: `spawn_world_entities` runs before `init_world_runtime`
+        // and writes names from the unified [[entity]] pipeline into
+        // `WorldContentRuntime.name_to_uuid`. `init_world_runtime` (which
+        // folds `WorldConfig.name_to_uuid` in) must NOT overwrite those —
+        // otherwise trigger and comms lookups for unified-pipeline names
+        // would silently disappear.
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
 
-        let mut runtime = WorldContentRuntime::default();
-        runtime.name_to_uuid.insert("starbase_alpha".into(), "unified-uuid".into());
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg
+            .name_to_uuid
+            .insert("starbase_alpha".into(), "world-config-uuid".into());
+        world_cfg
+            .name_to_uuid
+            .insert("only_in_world".into(), "world-only-uuid".into());
 
-        // Build a minimal ScenarioConfig by parsing an empty body and then
-        // pushing entries into `name_to_uuid` directly.
-        let mut scenario = parse_scenario("").expect("empty scenario must parse");
-        scenario.name_to_uuid.insert("starbase_alpha".into(), "legacy-uuid".into());
-        scenario.name_to_uuid.insert("legacy_only".into(), "legacy-only-uuid".into());
-
-        merge_scenario_into_runtime(&mut runtime, &scenario, "fixture");
-
-        assert_eq!(
-            runtime.name_to_uuid.get("starbase_alpha").map(String::as_str),
-            Some("unified-uuid"),
-            "unified-pipeline registration must win over legacy ScenarioConfig"
-        );
-        assert_eq!(
-            runtime.name_to_uuid.get("legacy_only").map(String::as_str),
-            Some("legacy-only-uuid"),
-            "names that exist only in the legacy ScenarioConfig still flow through"
-        );
-    }
-
-    #[test]
-    fn init_scenario_runtime_merges_rather_than_overwrites_existing_names() {
-        // PRD #337/#339 slice 2: `spawn_world_entities` runs before
-        // `init_scenario_runtime` and writes names from the unified
-        // [[entity]] pipeline into `WorldContentRuntime.name_to_uuid`.
-        // `init_scenario_runtime` (which folds the legacy ScenarioConfig
-        // `name_to_uuid` in) must NOT overwrite those — otherwise trigger
-        // and comms lookups for unified-pipeline names would silently
-        // disappear. Cover that with a direct mutation of the runtime
-        // map followed by an explicit `init_scenario_runtime` call.
-        //
-        // On native there's no preloaded scenario config so the system
-        // early-returns; that early-return is itself the safety net we
-        // want — verify any pre-existing entry survives.
         let mut app = App::new();
         app.init_resource::<WorldContentRuntime>();
         app.init_resource::<CommsInboxRes>();
         app.insert_resource(WorldResource(crate::messages::WorldData::default()));
+        app.insert_resource(world_cfg);
+
+        // Pre-populate the runtime with a value that must survive the merge.
         app.world_mut()
             .resource_mut::<WorldContentRuntime>()
             .name_to_uuid
-            .insert("starbase_alpha".into(), "unified-uuid".into());
+            .insert("starbase_alpha".into(), "unified-pipeline-uuid".into());
 
-        app.add_systems(Update, init_scenario_runtime);
+        app.add_systems(Update, init_world_runtime);
         app.update();
 
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert_eq!(
             runtime.name_to_uuid.get("starbase_alpha").map(String::as_str),
-            Some("unified-uuid"),
-            "init_scenario_runtime must preserve unified-pipeline registrations"
+            Some("unified-pipeline-uuid"),
+            "init_world_runtime must preserve unified-pipeline registrations"
+        );
+        assert_eq!(
+            runtime.name_to_uuid.get("only_in_world").map(String::as_str),
+            Some("world-only-uuid"),
+            "names that exist only in WorldConfig.name_to_uuid still flow through"
         );
     }
 
@@ -1895,20 +1785,20 @@ position    = [100.0, 0.0, 200.0]
         // no fresh UUID allocation inside the spawn loop).
         use crate::entity_config::EntityConfig;
         use crate::entity_spawner::EntityUuid;
-        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use std::collections::HashMap;
 
         let mut world_cfg = UnifiedWorldConfig::default();
-        world_cfg.entities.push(EntityInstance {
+        world_cfg.entities.push(WorldEntity {
             template_path: "fixture/station.toml".into(),
             name: Some("starbase_alpha".into()),
             position: vec![500.0, 0.0, 0.0],
             ..Default::default()
         });
         // An anonymous entry must NOT be spawned by the unified pipeline
-        // (legacy `setup_world_from_config` owns it).
-        world_cfg.entities.push(EntityInstance {
+        // (the complementary `setup_world` in `server_app.rs` owns it).
+        world_cfg.entities.push(WorldEntity {
             template_path: "fixture/star.toml".into(),
             position: vec![0.0, 0.0, 0.0],
             ..Default::default()
@@ -2042,7 +1932,7 @@ position    = [100.0, 0.0, 200.0]
         // anchor's coordinates. This is the migration path for the patrol
         // raider NPC moving off `[[spawn]]`.
         use crate::entity_config::EntityConfig;
-        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use std::collections::HashMap;
 
@@ -2050,7 +1940,7 @@ position    = [100.0, 0.0, 200.0]
         world_cfg
             .anchors
             .insert("patrol_alpha".into(), [300.0, 0.0, -300.0]);
-        world_cfg.entities.push(EntityInstance {
+        world_cfg.entities.push(WorldEntity {
             template_path: "fixture/raider.toml".into(),
             name: Some("raider_alpha".into()),
             anchor: Some("patrol_alpha".into()),
@@ -2098,7 +1988,7 @@ position    = [100.0, 0.0, 200.0]
         // [[spawn]] to [[entity]] still get AI on spawn.
         use crate::entity_config::EntityConfig;
         use crate::entity_spawner::BehaviourSection;
-        use crate::map_config::EntityInstance;
+        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use std::collections::HashMap;
 
@@ -2114,7 +2004,7 @@ transition = []
         world_cfg
             .anchors
             .insert("patrol_alpha".into(), [300.0, 0.0, -300.0]);
-        world_cfg.entities.push(EntityInstance {
+        world_cfg.entities.push(WorldEntity {
             template_path: "fixture/raider.toml".into(),
             name: Some("raider_alpha".into()),
             anchor: Some("patrol_alpha".into()),

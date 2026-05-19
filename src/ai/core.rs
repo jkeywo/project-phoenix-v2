@@ -1,4 +1,4 @@
-/// Pure AI controller module — no Bevy imports.
+﻿/// Pure AI controller module — no Bevy imports.
 ///
 /// Owns the `AiController` struct, the fixed five-slot `Blackboard`,
 /// `AiInput`, `AiTickOutput`, the pure `tick` function, and the
@@ -212,7 +212,7 @@ impl AiController {
 
 /// A visible entity in the AI's world view.
 #[derive(Debug, Clone)]
-pub struct WorldEntity {
+pub struct AiWorldEntity {
     /// Stable UUID of the entity.
     pub uuid: Uuid,
     /// World-space position [x, y, z].
@@ -239,7 +239,7 @@ pub struct WorldView {
     /// Named map anchors: name → [x, y, z].
     pub anchors: std::collections::HashMap<String, [f32; 3]>,
     /// All other entities currently visible to this AI.
-    pub entities: Vec<WorldEntity>,
+    pub entities: Vec<AiWorldEntity>,
     /// UUID of an entity that attacked this entity during this tick, if any.
     pub attacker_this_tick: Option<Uuid>,
     /// Faction of this AI entity itself (used by `enemy_in_range`).
@@ -466,7 +466,7 @@ fn shield_facing_depleted(f: &ShieldFacingStatus) -> bool {
 ///   the facing quadrant's shield is depleted.
 fn should_fire_torpedo(
     world_view: &WorldView,
-    target: &WorldEntity,
+    target: &AiWorldEntity,
 ) -> bool {
     if world_view.torpedo_tube_ready.is_none() {
         return false;
@@ -923,9 +923,9 @@ mod tests {
         tick(controller, world, behaviour, registry)
     }
 
-    /// Construct a minimal `WorldEntity` with only required fields, rest defaulted.
-    fn make_world_entity(uuid: Uuid, position: [f32; 3], faction: Option<Uuid>) -> WorldEntity {
-        WorldEntity { uuid, position, faction, shields: None, hull_fraction: None, yaw: None }
+    /// Construct a minimal `AiWorldEntity` with only required fields, rest defaulted.
+    fn make_world_entity(uuid: Uuid, position: [f32; 3], faction: Option<Uuid>) -> AiWorldEntity {
+        AiWorldEntity { uuid, position, faction, shields: None, hull_fraction: None, yaw: None }
     }
     fn fed_uuid() -> Uuid { Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap() }
     fn pirate_uuid() -> Uuid { Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap() }
@@ -1417,7 +1417,7 @@ mod tests {
         // Add a hostile entity within range
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![WorldEntity { uuid: enemy_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: enemy_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1447,7 +1447,7 @@ mod tests {
         let registry = mutual_hostile_registry();
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![WorldEntity { uuid: pirate_id, position: [50.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: pirate_id, position: [50.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1478,7 +1478,7 @@ mod tests {
         // Friendly = same faction as self
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![WorldEntity { uuid: friendly_id, position: [50.0, 0.0, 0.0], faction: Some(fed_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: friendly_id, position: [50.0, 0.0, 0.0], faction: Some(fed_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1507,7 +1507,7 @@ mod tests {
         let registry = mutual_hostile_registry();
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![WorldEntity { uuid: pirate_id, position: [200.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: pirate_id, position: [200.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1553,7 +1553,7 @@ mod tests {
         let mut ctrl = pursuing_controller(Some(target_id), 0.8);
         ctrl.current_state_name = "chase".to_string();
         let world = WorldView {
-            entities: vec![WorldEntity { uuid: target_id, position: [100.0, 0.0, 0.0], faction: None, shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: target_id, position: [100.0, 0.0, 0.0], faction: None, shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let behaviour = chase_behaviour_with_target_destroyed_to_patrol();
@@ -1609,7 +1609,7 @@ mod tests {
         let world = WorldView {
             self_faction: Some(fed_uuid()),
             attacker_this_tick: Some(attacker_id),
-            entities: vec![WorldEntity { uuid: attacker_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: attacker_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1869,7 +1869,7 @@ mod tests {
         let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
         // AI at origin. Target at [0,0,-20] with yaw=PI (facing +Z).
         // AI is at +Z relative to target → AI is in the "Fore" quadrant → "Fore" shield depleted.
-        let target = WorldEntity {
+        let target = AiWorldEntity {
             uuid: target_id,
             position: [0.0, 0.0, -20.0],
             faction: None,
@@ -1898,7 +1898,7 @@ mod tests {
     fn tick_attacking_does_not_fire_torpedo_when_facing_shield_intact() {
         let target_id = Uuid::new_v4();
         let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
-        let target = WorldEntity {
+        let target = AiWorldEntity {
             uuid: target_id,
             position: [0.0, 0.0, -20.0],
             faction: None,
@@ -1927,7 +1927,7 @@ mod tests {
     fn tick_attacking_does_not_fire_torpedo_when_no_tube_ready() {
         let target_id = Uuid::new_v4();
         let ctrl = make_attacking_controller([0.0, 0.0, 0.0], 0.0, target_id);
-        let target = WorldEntity {
+        let target = AiWorldEntity {
             uuid: target_id,
             position: [0.0, 0.0, -20.0],
             faction: None,

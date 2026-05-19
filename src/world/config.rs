@@ -1,32 +1,141 @@
-// Unified world parser — single-pass deserialization for the merged
-// map/scenario world TOML (PRD #337, slice 1).
+﻿// Unified world parser — single-pass deserialization for the merged
+// map/scenario world TOML (PRD #337/#341).
 //
-// This module introduces a NEW `WorldConfig` type and `parse_world` function
-// that deserialize the entire world TOML in one parse pass into a `RawWorld`
-// and project it into typed fields.
+// This module owns the entire world TOML schema: anchors, `[[entity]]`
+// instances, `[[trigger]]` blocks, and `[[comms]]` templates. `parse_world`
+// produces a `WorldConfig` in one parse pass.
 //
-// During the merger transition (slices 1–4 of PRD #337) this type coexists
-// with the older `crate::world::content::WorldConfig` shim. Existing callers
-// keep using the old shim; new code routed through `wasm_load_world` reads
-// from this `WorldConfig`. After the merger completes, this becomes the only
-// `WorldConfig`.
-//
-// Slice 1 scope: anchors + `[[entity]]` blocks. Other sections (`[[spawn]]`,
-// `[[trigger]]`, `[[comms]]`) are intentionally ignored here — they continue
-// to flow through `parse_scenario` until later slices fold them in.
+// Pure module — no Bevy systems, only the `Resource` derive for the
+// `WorldConfig` type. Runtime types (`TriggerState`, `CommsTemplateState`,
+// `ActiveDialogue`, `WorldEvent`, etc.) live in `world::content` and import
+// the pure config types from here.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::map_config::{EntityInstance, GlobalConfig};
+use crate::entity_config::GlobalConfig;
+
+// ── World-tree entity instance types ───────────────────────────────────────
+
+/// When to spawn a `WorldEntity` declared in the world TOML.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldEntitySpawnOn {
+    /// Spawn immediately when the world is loaded (lobby phase).
+    Immediate,
+    /// Spawn when the game starts (in-progress phase).
+    GameStart,
+}
+
+impl Default for WorldEntitySpawnOn {
+    fn default() -> Self {
+        WorldEntitySpawnOn::Immediate
+    }
+}
+
+/// A concrete entity instance declared in the world TOML — a reference to an
+/// entity template (under `assets/entities/`) plus instance-level metadata
+/// (position / anchor, spawn timing, optional name for trigger/comms binding,
+/// inline overrides).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct WorldEntity {
+    /// Path to the entity template TOML (relative to assets/).
+    pub template_path: String,
+    /// Optional human-readable identifier for this instance.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Optional named identity for the entity. When present, the entity
+    /// becomes trigger- and comms-eligible: `spawn_world_entities` assigns
+    /// it a stable UUID and registers `name → uuid` in `WorldConfig.name_to_uuid`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// World-space position [x, y, z].
+    #[serde(default)]
+    pub position: Vec<f32>,
+    /// Named anchor reference (from `[anchors]` in the world TOML). Mutually
+    /// exclusive with `position`. Resolved by `resolve_entity_position` at
+    /// spawn time.
+    #[serde(default)]
+    pub anchor: Option<String>,
+    /// When this entity should be spawned.
+    #[serde(default)]
+    pub spawn_on: WorldEntitySpawnOn,
+    /// Optional inline TOML overrides merged on top of the template.
+    #[serde(default)]
+    pub overrides: Option<toml::Value>,
+}
 
 // ── TOML-facing raw types ──────────────────────────────────────────────────
 
+#[derive(Debug, Deserialize)]
+struct RawTriggerEntry {
+    condition: String,
+    #[serde(default)]
+    entity: Option<String>,
+    #[serde(default)]
+    after_secs: Option<f32>,
+    #[serde(default, rename = "action")]
+    actions: Vec<RawActionEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawActionEntry {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    mandatory: Option<bool>,
+    #[serde(default)]
+    entity: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    slot: Option<String>,
+    #[serde(default)]
+    bonus: Option<f32>,
+    #[serde(default)]
+    int_bonus: Option<i32>,
+    #[serde(default, rename = "kind")]
+    flag_kind: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCommsFollowUp {
+    message: String,
+    #[serde(default, rename = "response")]
+    responses: Vec<RawCommsResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCommsResponse {
+    text: String,
+    #[serde(default, rename = "action")]
+    actions: Vec<RawActionEntry>,
+    #[serde(default)]
+    follow_up: Option<RawCommsFollowUp>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawCommsEntry {
+    from: String,
+    message: String,
+    trigger: String,
+    #[serde(default)]
+    entity: Option<String>,
+    #[serde(default, rename = "response")]
+    responses: Vec<RawCommsResponse>,
+}
+
 /// Raw single-pass deserialization of a world TOML.
-///
-/// All fields are `serde(default)` so any partial subset of the schema
-/// parses cleanly (the legacy `[[spawn]]`, `[[trigger]]`, `[[comms]]`
-/// blocks are silently ignored at this layer).
 #[derive(Debug, Default, Deserialize)]
 pub struct RawWorld {
     #[serde(default)]
@@ -34,22 +143,242 @@ pub struct RawWorld {
     #[serde(default)]
     pub anchors: HashMap<String, Vec<f32>>,
     #[serde(default, rename = "entity")]
-    pub entities: Vec<EntityInstance>,
+    pub entities: Vec<WorldEntity>,
+    #[serde(default, rename = "trigger")]
+    triggers: Vec<RawTriggerEntry>,
+    #[serde(default, rename = "comms")]
+    comms: Vec<RawCommsEntry>,
+}
+
+// ── Trigger / comms pure config types ──────────────────────────────────────
+
+/// A condition that a trigger can check against incoming world events.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TriggerCondition {
+    /// Fires when the named entity (by name, resolved to UUID at runtime) is destroyed.
+    OnDestroyed { entity_name: String },
+    /// Fires when the named entity is attacked.
+    OnAttacked { entity_name: String },
+    /// Fires once when `elapsed_secs` crosses `after_secs`.
+    OnTimer { after_secs: f32 },
+    /// Fires when a `Hail` message arrives for the named entity.
+    OnHailed { entity_name: String },
+}
+
+/// An action to execute when a trigger fires.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TriggerAction {
+    AddObjective { id: String, text: String, mandatory: bool },
+    CompleteObjective { id: String },
+    FailObjective { id: String },
+    SetAiState { entity: String, state: String, target: Option<String> },
+    ApplyModifier { entity: String, tag: String, slot: crate::messages::ModifierSlot, bonus: f32 },
+    RemoveModifier { entity: String, tag: String, slot: crate::messages::ModifierSlot },
+    ApplyFlag { entity: String, tag: String, kind: crate::flag_kind::FlagKind },
+    RemoveFlag { entity: String, tag: String, kind: crate::flag_kind::FlagKind },
+    ApplyIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot, bonus: i32 },
+    RemoveIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot },
+    GameOver { message: Option<String> },
+}
+
+/// A single trigger: a condition plus an ordered list of actions.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Trigger {
+    pub condition: TriggerCondition,
+    pub actions: Vec<TriggerAction>,
+}
+
+/// A single response option within a comms dialogue node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommsResponse {
+    pub text: String,
+    pub actions: Vec<TriggerAction>,
+    pub follow_up: Option<CommsDialogueNode>,
+}
+
+/// A single node in an inline dialogue tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommsDialogueNode {
+    pub body: String,
+    pub responses: Vec<CommsResponse>,
+}
+
+/// A comms template: a root dialogue node associated with a trigger condition.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommsTemplate {
+    /// Entity name whose UUID is the sender of the comms message.
+    pub from: String,
+    /// The trigger condition that fires this template.
+    pub trigger: TriggerCondition,
+    /// The root dialogue node.
+    pub node: CommsDialogueNode,
+}
+
+// ── Parser helpers ─────────────────────────────────────────────────────────
+
+fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String> {
+    use crate::messages::ModifierSlot;
+    match s {
+        "MaxSpeed" => Ok(ModifierSlot::MaxSpeed),
+        "MaxYawRate" => Ok(ModifierSlot::MaxYawRate),
+        "RadarRange" => Ok(ModifierSlot::RadarRange),
+        "PhaserDamage" => Ok(ModifierSlot::PhaserDamage),
+        "HullDamageTaken" => Ok(ModifierSlot::HullDamageTaken),
+        "RepairRate" => Ok(ModifierSlot::RepairRate),
+        other => Err(format!("Unknown slot '{}'; valid values: MaxSpeed, MaxYawRate, RadarRange, PhaserDamage, HullDamageTaken, RepairRate", other)),
+    }
+}
+
+fn parse_int_modifier_slot(s: &str) -> Result<crate::modifiers::IntModifierSlot, String> {
+    use crate::modifiers::IntModifierSlot;
+    match s {
+        "RepairTeams" => Ok(IntModifierSlot::RepairTeams),
+        other => Err(format!("Unknown int slot '{}'; valid values: RepairTeams", other)),
+    }
+}
+
+fn parse_flag_kind(s: &str) -> Result<crate::flag_kind::FlagKind, String> {
+    use crate::flag_kind::FlagKind;
+    match s {
+        "CommsJammed" => Ok(FlagKind::CommsJammed),
+        "SensorBlind" => Ok(FlagKind::SensorBlind),
+        other => Err(format!("Unknown kind '{}'; valid values: CommsJammed, SensorBlind", other)),
+    }
+}
+
+fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction>, String> {
+    let mut actions = Vec::new();
+    for raw_action in raw_actions {
+        let action = match raw_action.kind.as_str() {
+            "add_objective" => TriggerAction::AddObjective {
+                id: raw_action.id.clone().ok_or_else(|| "Action 'add_objective' requires an 'id' field".to_string())?,
+                text: raw_action.text.clone().ok_or_else(|| "Action 'add_objective' requires a 'text' field".to_string())?,
+                mandatory: raw_action.mandatory.unwrap_or(false),
+            },
+            "complete_objective" => TriggerAction::CompleteObjective {
+                id: raw_action.id.clone().ok_or_else(|| "Action 'complete_objective' requires an 'id' field".to_string())?,
+            },
+            "fail_objective" => TriggerAction::FailObjective {
+                id: raw_action.id.clone().ok_or_else(|| "Action 'fail_objective' requires an 'id' field".to_string())?,
+            },
+            "set_ai_state" => TriggerAction::SetAiState {
+                entity: raw_action.entity.clone().ok_or_else(|| "Action 'set_ai_state' requires an 'entity' field".to_string())?,
+                state: raw_action.state.clone().ok_or_else(|| "Action 'set_ai_state' requires a 'state' field".to_string())?,
+                target: raw_action.target.clone(),
+            },
+            "apply_modifier" => {
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| "Action 'apply_modifier' requires a 'slot' field".to_string())?;
+                TriggerAction::ApplyModifier {
+                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'apply_modifier' requires an 'entity' field".to_string())?,
+                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'apply_modifier' requires a 'tag' field".to_string())?,
+                    slot: parse_modifier_slot(slot_str)?,
+                    bonus: raw_action.bonus.ok_or_else(|| "Action 'apply_modifier' requires a 'bonus' field".to_string())?,
+                }
+            }
+            "remove_modifier" => {
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| "Action 'remove_modifier' requires a 'slot' field".to_string())?;
+                TriggerAction::RemoveModifier {
+                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'remove_modifier' requires an 'entity' field".to_string())?,
+                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'remove_modifier' requires a 'tag' field".to_string())?,
+                    slot: parse_modifier_slot(slot_str)?,
+                }
+            }
+            "apply_flag" => {
+                let kind_str = raw_action.flag_kind.as_deref().ok_or_else(|| "Action 'apply_flag' requires a 'kind' field".to_string())?;
+                TriggerAction::ApplyFlag {
+                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'apply_flag' requires an 'entity' field".to_string())?,
+                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'apply_flag' requires a 'tag' field".to_string())?,
+                    kind: parse_flag_kind(kind_str)?,
+                }
+            }
+            "remove_flag" => {
+                let kind_str = raw_action.flag_kind.as_deref().ok_or_else(|| "Action 'remove_flag' requires a 'kind' field".to_string())?;
+                TriggerAction::RemoveFlag {
+                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'remove_flag' requires an 'entity' field".to_string())?,
+                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'remove_flag' requires a 'tag' field".to_string())?,
+                    kind: parse_flag_kind(kind_str)?,
+                }
+            }
+            "apply_int_modifier" => {
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| "Action 'apply_int_modifier' requires a 'slot' field".to_string())?;
+                TriggerAction::ApplyIntModifier {
+                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'apply_int_modifier' requires an 'entity' field".to_string())?,
+                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'apply_int_modifier' requires a 'tag' field".to_string())?,
+                    slot: parse_int_modifier_slot(slot_str)?,
+                    bonus: raw_action.int_bonus.ok_or_else(|| "Action 'apply_int_modifier' requires an 'int_bonus' field".to_string())?,
+                }
+            }
+            "remove_int_modifier" => {
+                let slot_str = raw_action.slot.as_deref().ok_or_else(|| "Action 'remove_int_modifier' requires a 'slot' field".to_string())?;
+                TriggerAction::RemoveIntModifier {
+                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'remove_int_modifier' requires an 'entity' field".to_string())?,
+                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'remove_int_modifier' requires a 'tag' field".to_string())?,
+                    slot: parse_int_modifier_slot(slot_str)?,
+                }
+            }
+            "game_over" => TriggerAction::GameOver { message: raw_action.message.clone() },
+            other => return Err(format!("Unknown trigger action '{}'", other)),
+        };
+        actions.push(action);
+    }
+    Ok(actions)
+}
+
+fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<CommsResponse>, String> {
+    let mut responses = Vec::new();
+    for raw_resp in raw_responses {
+        let actions = parse_raw_actions(&raw_resp.actions)?;
+        let follow_up = if let Some(ref raw_fu) = raw_resp.follow_up {
+            let fu_responses = parse_comms_responses(&raw_fu.responses)?;
+            Some(CommsDialogueNode { body: raw_fu.message.clone(), responses: fu_responses })
+        } else {
+            None
+        };
+        responses.push(CommsResponse { text: raw_resp.text.clone(), actions, follow_up });
+    }
+    Ok(responses)
+}
+
+fn parse_trigger_condition_from_string(
+    name: &str,
+    entity: Option<String>,
+    after_secs: Option<f32>,
+    ctx: &str,
+) -> Result<TriggerCondition, String> {
+    match name {
+        "on_destroyed" => Ok(TriggerCondition::OnDestroyed {
+            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_destroyed' requires an 'entity' field"))?,
+        }),
+        "on_attacked" => Ok(TriggerCondition::OnAttacked {
+            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_attacked' requires an 'entity' field"))?,
+        }),
+        "on_timer" => Ok(TriggerCondition::OnTimer {
+            after_secs: after_secs.ok_or_else(|| format!("{ctx} 'on_timer' requires an 'after_secs' field"))?,
+        }),
+        "on_hailed" => Ok(TriggerCondition::OnHailed {
+            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_hailed' requires an 'entity' field"))?,
+        }),
+        other => Err(format!("Unknown {ctx} condition '{}'", other)),
+    }
 }
 
 // ── Public typed config ────────────────────────────────────────────────────
 
 /// Parsed unified world configuration.
 ///
-/// Carries the anchor table and the `[[entity]]` instances. Anchors are
-/// normalised to fixed-size `[f32; 3]` arrays at parse time so downstream
-/// consumers (e.g. AI patrol path lookups, region positioning) don't have
-/// to re-validate length on every read.
+/// Carries the anchor table, `[[entity]]` instances, `[[trigger]]` blocks,
+/// and `[[comms]]` templates. Anchors are normalised to fixed-size `[f32; 3]`
+/// arrays at parse time so downstream consumers (e.g. AI patrol path lookups,
+/// region positioning) don't have to re-validate length on every read.
 #[derive(Clone, Debug, Default, bevy::prelude::Resource)]
 pub struct WorldConfig {
     pub global: GlobalConfig,
     pub anchors: HashMap<String, [f32; 3]>,
-    pub entities: Vec<EntityInstance>,
+    pub entities: Vec<WorldEntity>,
+    /// Ordered list of triggers declared in the world.
+    pub triggers: Vec<Trigger>,
+    /// Ordered list of comms dialogue templates declared in the world.
+    pub comms: Vec<CommsTemplate>,
     /// Map of `name → uuid` for entities spawned via `[[entity]] name = "..."`.
     /// Populated by `spawn_world_entities` (PRD #337/#339 slice 2); read by
     /// trigger and comms lookup paths that resolve a name to a live UUID.
@@ -67,7 +396,7 @@ impl WorldConfig {
     }
 
     /// Borrow the unified `[[entity]]` instance list.
-    pub fn entities(&self) -> &[EntityInstance] {
+    pub fn entities(&self) -> &[WorldEntity] {
         &self.entities
     }
 }
@@ -78,7 +407,8 @@ impl WorldConfig {
 ///
 /// Validates that every anchor position has 2 or 3 components and normalises
 /// to `[x, y, z]`. Returns an `Err` with a human-readable message on TOML
-/// parse errors or invalid anchor shapes.
+/// parse errors, invalid anchor shapes, unknown trigger conditions, or
+/// invalid trigger actions.
 pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     let raw: RawWorld = toml::from_str(toml_str).map_err(|e| e.to_string())?;
 
@@ -96,10 +426,39 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         anchors.insert(name, normalised);
     }
 
+    // Triggers.
+    let mut triggers = Vec::with_capacity(raw.triggers.len());
+    for raw_trigger in raw.triggers {
+        let condition = parse_trigger_condition_from_string(
+            &raw_trigger.condition,
+            raw_trigger.entity,
+            raw_trigger.after_secs,
+            "Trigger",
+        )?;
+        let actions = parse_raw_actions(&raw_trigger.actions)?;
+        triggers.push(Trigger { condition, actions });
+    }
+
+    // Comms templates.
+    let mut comms = Vec::with_capacity(raw.comms.len());
+    for raw_comms in raw.comms {
+        let trigger = parse_trigger_condition_from_string(
+            &raw_comms.trigger,
+            raw_comms.entity,
+            None,
+            "Comms block",
+        )?;
+        let responses = parse_comms_responses(&raw_comms.responses)?;
+        let node = CommsDialogueNode { body: raw_comms.message, responses };
+        comms.push(CommsTemplate { from: raw_comms.from, trigger, node });
+    }
+
     Ok(WorldConfig {
         global: raw.global,
         anchors,
         entities: raw.entities,
+        triggers,
+        comms,
         name_to_uuid: HashMap::new(),
     })
 }
@@ -112,7 +471,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
 /// helper stays a pure function (tests pass a counter; production passes
 /// `|| Uuid::new_v4().to_string()`).
 pub fn assign_named_entity_uuids<F>(
-    entities: &[EntityInstance],
+    entities: &[WorldEntity],
     mut gen_uuid: F,
 ) -> HashMap<String, String>
 where
@@ -128,8 +487,8 @@ where
 }
 
 /// Predicate: is this `[[entity]]` instance owned by the unified pipeline
-/// (`spawn_world_entities`), rather than the legacy
-/// `setup_world_from_config` path?
+/// (`spawn_world_entities`), rather than the complementary `setup_world`
+/// path in `server_app.rs`?
 ///
 /// PRD #337 routes two kinds of entries through the unified pipeline:
 /// * **Slice 1**: any entry whose resolved template is an asteroid field.
@@ -139,7 +498,7 @@ where
 /// Both call sites (legacy + unified) call this helper with the same
 /// `is_asteroid_field` lookup to guarantee no entry is spawned twice.
 pub fn is_owned_by_unified_pipeline<F>(
-    entity_inst: &EntityInstance,
+    entity_inst: &WorldEntity,
     is_asteroid_field: F,
 ) -> bool
 where
@@ -173,27 +532,27 @@ pub fn entity_template_paths(world: &WorldConfig) -> Vec<String> {
 /// it up in the config cache and checking `EntityConfig.asteroid_field`) and
 /// returns `true` for asteroid-field templates.
 ///
-/// During PRD #337/#338 slice 1 the asteroid-field instances flow through the
-/// new `spawn_world_entities` Bevy system, while every other immediate-spawn
-/// instance continues to flow through the legacy `setup_world_from_config`
-/// path. Keeping the partitioning logic pure means both call sites consult
-/// the same source of truth and double-spawn is impossible.
+/// Asteroid-field instances and any `[[entity]]` carrying a `name` field flow
+/// through the `spawn_world_entities` Bevy system; every other immediate-spawn
+/// instance flows through the complementary `setup_world` system in
+/// `server_app.rs`. Keeping the partitioning logic pure means both call sites
+/// consult the same source of truth and double-spawn is impossible.
 ///
-/// Only `EntityInstanceSpawnOn::Immediate` entries are considered; `GameStart`
+/// Only `WorldEntitySpawnOn::Immediate` entries are considered; `GameStart`
 /// entries are returned in neither bucket (they're handled by
 /// `spawn_game_start_entities`).
 pub fn partition_immediate_entities<F>(
     world: &WorldConfig,
     is_asteroid_field: F,
-) -> (Vec<&crate::map_config::EntityInstance>, Vec<&crate::map_config::EntityInstance>)
+) -> (Vec<&crate::world::config::WorldEntity>, Vec<&crate::world::config::WorldEntity>)
 where
     F: Fn(&str) -> bool,
 {
-    use crate::map_config::EntityInstanceSpawnOn;
+    use crate::world::config::WorldEntitySpawnOn;
     let mut fields = Vec::new();
     let mut others = Vec::new();
     for ent in &world.entities {
-        if ent.spawn_on != EntityInstanceSpawnOn::Immediate {
+        if ent.spawn_on != WorldEntitySpawnOn::Immediate {
             continue;
         }
         if is_asteroid_field(&ent.template_path) {
@@ -221,7 +580,7 @@ where
 /// the unified `[[entity]]` pipeline so NPCs can be migrated off
 /// `[[spawn]]`. Pure function — tested without Bevy.
 pub fn resolve_entity_position(
-    entity_inst: &crate::map_config::EntityInstance,
+    entity_inst: &crate::world::config::WorldEntity,
     anchors: &HashMap<String, [f32; 3]>,
 ) -> Result<[f32; 3], String> {
     if let Some(name) = entity_inst.anchor.as_ref() {
@@ -248,8 +607,8 @@ pub fn resolve_entity_position(
 /// PRD #339 slice 2: the unified pipeline owns BOTH asteroid-field templates
 /// AND any entry carrying a `name` field (so the entity that triggers / comms
 /// resolve through `name → uuid` is actually spawned with that UUID). The
-/// legacy `setup_world_from_config` path only spawns the third bucket
-/// (anonymous non-asteroid entries).
+/// complementary `setup_world` path in `server_app.rs` only spawns the third
+/// bucket (anonymous non-asteroid entries).
 ///
 /// Returns `(asteroid_fields, named_non_asteroid, anonymous_non_asteroid)`.
 /// `GameStart` entries are returned in none of the three buckets.
@@ -257,19 +616,19 @@ pub fn partition_immediate_entities_three_way<F>(
     world: &WorldConfig,
     is_asteroid_field: F,
 ) -> (
-    Vec<&crate::map_config::EntityInstance>,
-    Vec<&crate::map_config::EntityInstance>,
-    Vec<&crate::map_config::EntityInstance>,
+    Vec<&crate::world::config::WorldEntity>,
+    Vec<&crate::world::config::WorldEntity>,
+    Vec<&crate::world::config::WorldEntity>,
 )
 where
     F: Fn(&str) -> bool,
 {
-    use crate::map_config::EntityInstanceSpawnOn;
+    use crate::world::config::WorldEntitySpawnOn;
     let mut fields = Vec::new();
     let mut named = Vec::new();
     let mut anon = Vec::new();
     for ent in &world.entities {
-        if ent.spawn_on != EntityInstanceSpawnOn::Immediate {
+        if ent.spawn_on != WorldEntitySpawnOn::Immediate {
             continue;
         }
         if is_asteroid_field(&ent.template_path) {
@@ -288,7 +647,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map_config::EntityInstanceSpawnOn;
+    use crate::world::config::WorldEntitySpawnOn;
 
     #[test]
     fn parse_world_empty_string_returns_empty_config() {
@@ -358,7 +717,7 @@ template_path = "assets/entities/asteroid_field_main.toml"
 position = [0.0, 0.0, 0.0]
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.entities[0].spawn_on, EntityInstanceSpawnOn::Immediate);
+        assert_eq!(cfg.entities[0].spawn_on, WorldEntitySpawnOn::Immediate);
     }
 
     #[test]
@@ -374,21 +733,21 @@ position = [0.0, 0.0, 0.0]
     #[test]
     fn assign_named_entity_uuids_collects_named_only_with_stable_uuids() {
         // PRD #337/#339 slice 2: a pure helper builds the `name → uuid`
-        // map from a slice of EntityInstance. Anonymous entries are skipped;
+        // map from a slice of WorldEntity. Anonymous entries are skipped;
         // a caller-supplied generator yields the UUIDs (so tests can be
         // deterministic without dragging real RNG in).
         let entities = vec![
-            EntityInstance {
+            WorldEntity {
                 template_path: "assets/entities/station_outpost.toml".into(),
                 name: Some("starbase_alpha".into()),
                 ..Default::default()
             },
-            EntityInstance {
+            WorldEntity {
                 template_path: "assets/entities/star_sun.toml".into(),
                 name: None,
                 ..Default::default()
             },
-            EntityInstance {
+            WorldEntity {
                 template_path: "assets/entities/planet_earth.toml".into(),
                 name: Some("earth".into()),
                 ..Default::default()
@@ -406,19 +765,19 @@ position = [0.0, 0.0, 0.0]
 
     #[test]
     fn is_owned_by_unified_pipeline_routes_asteroid_fields_and_named_entries() {
-        // PRD #337/#339 slice 2: the legacy `setup_world_from_config` path
-        // must skip both asteroid-field templates (slice 1) AND any entry
-        // carrying a `name` field (slice 2 — owned by `spawn_world_entities`).
-        let asteroid = EntityInstance {
+        // The complementary `setup_world` path in `server_app.rs` must skip
+        // both asteroid-field templates AND any entry carrying a `name` field
+        // (owned by `spawn_world_entities`).
+        let asteroid = WorldEntity {
             template_path: "assets/entities/asteroid_field_dense.toml".into(),
             ..Default::default()
         };
-        let named = EntityInstance {
+        let named = WorldEntity {
             template_path: "assets/entities/station_outpost.toml".into(),
             name: Some("starbase_alpha".into()),
             ..Default::default()
         };
-        let anon = EntityInstance {
+        let anon = WorldEntity {
             template_path: "assets/entities/star_sun.toml".into(),
             ..Default::default()
         };
@@ -437,26 +796,26 @@ position = [0.0, 0.0, 0.0]
         // PRD #339 slice 2: named non-asteroid entries are owned by the
         // unified pipeline (and must be spawned by it). The partition
         // helper now produces three buckets so `spawn_world_entities` can
-        // iterate both fields AND named entries while
-        // `setup_world_from_config` keeps anonymous ones.
+        // iterate both fields AND named entries while the complementary
+        // `setup_world` in `server_app.rs` keeps anonymous ones.
         let mut cfg = WorldConfig::default();
-        cfg.entities.push(EntityInstance {
+        cfg.entities.push(WorldEntity {
             template_path: "assets/entities/asteroid_field_main.toml".into(),
             ..Default::default()
         });
-        cfg.entities.push(EntityInstance {
+        cfg.entities.push(WorldEntity {
             template_path: "assets/entities/station_outpost.toml".into(),
             name: Some("starbase_alpha".into()),
             ..Default::default()
         });
-        cfg.entities.push(EntityInstance {
+        cfg.entities.push(WorldEntity {
             template_path: "assets/entities/star_sun.toml".into(),
             ..Default::default()
         });
         // game_start entries are in no bucket
-        cfg.entities.push(EntityInstance {
+        cfg.entities.push(WorldEntity {
             template_path: "assets/entities/player_ship.toml".into(),
-            spawn_on: crate::map_config::EntityInstanceSpawnOn::GameStart,
+            spawn_on: crate::world::config::WorldEntitySpawnOn::GameStart,
             ..Default::default()
         });
 
@@ -529,7 +888,7 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_uses_anchor_when_set() {
-        let entity = EntityInstance {
+        let entity = WorldEntity {
             template_path: "assets/entities/pirate_raider.toml".into(),
             anchor: Some("patrol_alpha".into()),
             ..Default::default()
@@ -541,7 +900,7 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_falls_back_to_inline_position() {
-        let entity = EntityInstance {
+        let entity = WorldEntity {
             template_path: "assets/entities/star_sun.toml".into(),
             position: vec![10.0, 0.0, 20.0],
             ..Default::default()
@@ -552,7 +911,7 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_errors_on_unknown_anchor() {
-        let entity = EntityInstance {
+        let entity = WorldEntity {
             template_path: "assets/entities/pirate_raider.toml".into(),
             anchor: Some("ghost".into()),
             ..Default::default()
@@ -563,7 +922,7 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_anchor_wins_over_inline_position() {
-        let entity = EntityInstance {
+        let entity = WorldEntity {
             template_path: "x.toml".into(),
             anchor: Some("a".into()),
             position: vec![999.0, 999.0, 999.0],
@@ -584,15 +943,15 @@ position = [0.0, 0.0, 0.0]
 spawn_on = "game_start"
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.entities[0].spawn_on, EntityInstanceSpawnOn::GameStart);
+        assert_eq!(cfg.entities[0].spawn_on, WorldEntitySpawnOn::GameStart);
         assert_eq!(cfg.entities[0].id.as_deref(), Some("player-ship"));
     }
 
     #[test]
-    fn parse_world_silently_ignores_legacy_spawn_trigger_comms_blocks() {
-        // The unified parser owns [[entity]]; the legacy [[spawn]] / [[trigger]] /
-        // [[comms]] blocks continue to flow through parse_scenario until later
-        // slices fold them in. They must not error here.
+    fn parse_world_silently_ignores_legacy_spawn_blocks() {
+        // PRD #341: the unified parser owns [[entity]], [[trigger]], and
+        // [[comms]]. Legacy [[spawn]] blocks (no longer used by any shipped
+        // world) are silently ignored — they must not error.
         let toml = r#"
 [anchors]
 alpha = [0.0, 0.0, 0.0]
@@ -605,20 +964,125 @@ position = [0.0, 0.0, 0.0]
 name = "raider"
 entity_path = "assets/entities/pirate_raider.toml"
 anchor = "alpha"
-
-[[trigger]]
-condition = "on_destroyed"
-entity = "raider"
-
-[[comms]]
-from = "raider"
-trigger = "on_attacked"
-entity = "raider"
-message = "Mayday"
 "#;
-        let cfg = parse_world(toml).expect("legacy blocks must be ignored, not errored");
+        let cfg = parse_world(toml).expect("legacy [[spawn]] blocks must be ignored, not errored");
         assert_eq!(cfg.entities.len(), 1);
         assert_eq!(cfg.anchors.len(), 1);
+    }
+
+    // ── Triggers & comms (PRD #341) ───────────────────────────────────────
+
+    #[test]
+    fn parse_world_reads_on_destroyed_trigger_with_actions() {
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider_alpha"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-raider-destroyed"
+  text      = "Pirate raider eliminated."
+  mandatory = false
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.triggers.len(), 1);
+        assert_eq!(
+            cfg.triggers[0].condition,
+            TriggerCondition::OnDestroyed { entity_name: "raider_alpha".to_string() }
+        );
+        assert_eq!(cfg.triggers[0].actions.len(), 1);
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::AddObjective { id, text, mandatory } => {
+                assert_eq!(id, "obj-raider-destroyed");
+                assert_eq!(text, "Pirate raider eliminated.");
+                assert_eq!(*mandatory, false);
+            }
+            other => panic!("expected AddObjective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_reads_on_attacked_comms_template() {
+        let toml = r#"
+[[comms]]
+from    = "raider_alpha"
+trigger = "on_attacked"
+entity  = "raider_alpha"
+message = "MAYDAY!"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.comms.len(), 1);
+        assert_eq!(cfg.comms[0].from, "raider_alpha");
+        assert_eq!(
+            cfg.comms[0].trigger,
+            TriggerCondition::OnAttacked { entity_name: "raider_alpha".to_string() }
+        );
+        assert_eq!(cfg.comms[0].node.body, "MAYDAY!");
+        assert!(cfg.comms[0].node.responses.is_empty());
+    }
+
+    #[test]
+    fn parse_world_reads_comms_response_tree_with_actions() {
+        let toml = r#"
+[[comms]]
+from    = "Starbase Alpha"
+trigger = "on_hailed"
+entity  = "Starbase Alpha"
+message = "Please state your business."
+
+  [[comms.response]]
+  text = "We are on a survey mission."
+    [[comms.response.action]]
+    type = "add_objective"
+    id   = "obj-survey"
+    text = "Complete the survey."
+
+  [[comms.response]]
+  text = "We require docking clearance."
+    [[comms.response.action]]
+    type      = "add_objective"
+    id        = "obj-dock"
+    text      = "Dock at Starbase Alpha."
+    mandatory = true
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.comms.len(), 1);
+        let tmpl = &cfg.comms[0];
+        assert_eq!(tmpl.node.responses.len(), 2);
+        assert_eq!(tmpl.node.responses[0].text, "We are on a survey mission.");
+        assert_eq!(tmpl.node.responses[0].actions.len(), 1);
+        assert_eq!(tmpl.node.responses[1].text, "We require docking clearance.");
+        match &tmpl.node.responses[1].actions[0] {
+            TriggerAction::AddObjective { mandatory, .. } => assert!(*mandatory),
+            _ => panic!("expected mandatory AddObjective"),
+        }
+    }
+
+    #[test]
+    fn parse_world_unknown_trigger_condition_errors() {
+        let toml = r#"
+[[trigger]]
+condition = "on_zombie"
+"#;
+        let err = parse_world(toml).expect_err("unknown trigger condition must error");
+        assert!(err.contains("on_zombie"), "error must mention the bad condition: {err}");
+    }
+
+    #[test]
+    fn parse_world_default_toml_loads_triggers_and_comms() {
+        let toml = include_str!("../../assets/worlds/default.toml");
+        let cfg = parse_world(toml).expect("default.toml must parse");
+        assert_eq!(cfg.triggers.len(), 1, "default.toml has 1 [[trigger]]");
+        assert_eq!(cfg.comms.len(), 3, "default.toml has 3 [[comms]] templates");
+    }
+
+    #[test]
+    fn parse_world_patrol_toml_loads_triggers_with_no_comms() {
+        let toml = include_str!("../../assets/worlds/patrol.toml");
+        let cfg = parse_world(toml).expect("patrol.toml must parse");
+        assert_eq!(cfg.triggers.len(), 1);
+        assert!(cfg.comms.is_empty());
     }
 
     // ── Shipped-world smoke parses ────────────────────────────────────────

@@ -1,4 +1,4 @@
-// Asteroid lifecycle managed by a ring-buffer window.
+﻿// Asteroid lifecycle managed by a ring-buffer window.
 //
 // This module provides:
 // - AsteroidWindow resource: 2D ring-buffer tracking which grid cells are loaded
@@ -198,7 +198,7 @@ fn full_rebuild(
     outbox: &mut ResMut<SimOutbox>,
     gx: i32, gz: i32,
     field_idx: usize,
-    grid: &crate::map_config::GridConfig,
+    grid: &crate::entity_config::GridConfig,
     inner_radius: f32, outer_radius: f32,
     gameplay_type_paths: &[String],
 ) {
@@ -243,7 +243,7 @@ fn try_spawn_cell(
     cell_gx: i32, cell_gz: i32,
     slot_x: usize, slot_z: usize,
     field_idx: usize,
-    grid: &crate::map_config::GridConfig,
+    grid: &crate::entity_config::GridConfig,
     inner_radius: f32, outer_radius: f32,
     gameplay_type_paths: &[String],
 ) {
@@ -345,7 +345,7 @@ mod tests {
     use crate::entity_spawner::AsteroidFieldSection;
     use crate::lobby::OutboundMessage;
     use crate::simulation::SimOutbox;
-    use crate::map_config::{AsteroidFieldConfig, GridConfig};
+    use crate::entity_config::{AsteroidFieldConfig, GridConfig};
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn window_initialises_from_spawned_asteroid_field_section() {
         let mut app = test_app();
-        // No MapConfig resource. The system should still find the field.
+        // No world resource. The system should still find the field.
         app.world_mut().spawn((
             AsteroidFieldSection(field(15.0)),
             Transform::default(),

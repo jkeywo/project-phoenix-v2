@@ -248,7 +248,6 @@ fn rebuild_embedded_tab_bars(
     active: Res<ActiveConsole>,
     phone_assets: Res<PhoneAssets>,
     mut tab_bars: Query<(Entity, &EmbeddedTabBar, &mut Visibility)>,
-    children_q: Query<&Children>,
 ) {
     if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
         return;
@@ -262,11 +261,7 @@ fn rebuild_embedded_tab_bars(
 
     for (tab_bar_entity, _embedded, mut vis) in tab_bars.iter_mut() {
         // Despawn old tab-button children.
-        if let Ok(children) = children_q.get(tab_bar_entity) {
-            for child in children.iter() {
-                commands.entity(child).despawn();
-            }
-        }
+        commands.entity(tab_bar_entity).despawn_related::<Children>();
 
         if !show_tabs {
             *vis = Visibility::Hidden;

@@ -668,7 +668,6 @@ fn rebuild_lobby_ui_on_change(
     token: Res<LocalPlayerToken>,
     landscape: Res<LandscapeMode>,
     console_root: Query<Entity, With<ConsoleListRoot>>,
-    children_q: Query<&Children>,
     asset_server: Res<AssetServer>,
 ) {
     if !state.is_changed() && !token.is_changed() && !landscape.is_changed() {
@@ -682,11 +681,7 @@ fn rebuild_lobby_ui_on_change(
     let Ok(body_root) = console_root.single() else { return };
 
     // Clear existing body children.
-    if let Ok(children) = children_q.get(body_root) {
-        for child in children.iter() {
-            commands.entity(child).despawn();
-        }
-    }
+    commands.entity(body_root).despawn_related::<Children>();
 
     // Update ConsoleListRoot flex_direction based on orientation.
     commands.entity(body_root).insert(Node {

@@ -3,6 +3,8 @@
 debug
 target
 dist
+raw
+.planning
 .obsidian
 .claude
 .sandcastle

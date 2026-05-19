@@ -12,8 +12,8 @@ export const RADAR_SHAPE_FALLBACK = 'X';
 /**
  * Resolve the visual appearance of a world entity for canvas rendering.
  *
- * @param {object} entity       - Parsed TOML entity object (may have radar_appearance).
- * @param {object[]} [anchors]  - Array of { name, position } anchor objects for anchor lookup.
+ * @param {object} entity    - Parsed TOML entity object (may have radar_appearance).
+ * @param {object} [anchors] - The `worldState.anchors` flat TOML map `{ anchorName: [x,y,z] }`.
  * @returns {{
  *   colour: [number, number, number],
  *   radius: number,
@@ -23,7 +23,7 @@ export const RADAR_SHAPE_FALLBACK = 'X';
  *   z: number,
  * }}
  */
-export function resolveEntityAppearance(entity, anchors = []) {
+export function resolveEntityAppearance(entity, anchors = {}) {
   const tags = entity.tags || [];
   const shape = tagShape(tags);
 
@@ -45,11 +45,11 @@ export function resolveEntityAppearance(entity, anchors = []) {
   if (entity.position && Array.isArray(entity.position)) {
     x = entity.position[0];
     z = entity.position[2];
-  } else if (entity.anchor && anchors.length > 0) {
-    const anchor = anchors.find(a => a.name === entity.anchor);
-    if (anchor && Array.isArray(anchor.position)) {
-      x = anchor.position[0];
-      z = anchor.position[2];
+  } else if (entity.anchor && anchors && typeof anchors === 'object') {
+    const pos = anchors[entity.anchor];
+    if (Array.isArray(pos) && pos.length >= 3) {
+      x = pos[0];
+      z = pos[2];
     }
   }
 

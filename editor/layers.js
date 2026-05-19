@@ -8,7 +8,7 @@ export function inferLayerKind(toml) {
   return 'unknown';
 }
 
-import { getSpawns } from './toml-utils.js';
+import { getSpawns, getSpawnName, getEntityPath } from './toml-utils.js';
 
 export class LayerManager {
   constructor() {
@@ -80,38 +80,78 @@ export class LayerManager {
   }
 }
 
-export function renderLayersPanel(layerManager, onUpdate) {
+export function renderLayersPanel(layerManager, onUpdate, onSpawnSelect) {
   const container = document.getElementById('layersList');
   container.innerHTML = '';
 
   for (const layer of layerManager.getLayers()) {
+    if (layer._expanded === undefined) layer._expanded = true;
+
     const el = document.createElement('div');
     el.className = 'layer-item' + (layer === layerManager.getActiveLayer() ? ' active' : '');
-    el.dataset.filename = layer.filename;
 
-    el.innerHTML = `
+    const header = document.createElement('div');
+    header.className = 'layer-header';
+    header.innerHTML = `
+      <span class="layer-expand">${layer._expanded ? '▾' : '▸'}</span>
       <span class="visibility-toggle">${layer.visible ? '👁' : '🚫'}</span>
       <span class="layer-name">${layer.filename}</span>
       ${layer.isDirty ? '<span class="unsaved-mark">*</span>' : ''}
-      <span class="delete-layer" data-action="delete">✕</span>
+      <span class="delete-layer">✕</span>
     `;
 
-    el.querySelector('.visibility-toggle').addEventListener('click', (e) => {
+    header.querySelector('.layer-expand').addEventListener('click', (e) => {
+      e.stopPropagation();
+      layer._expanded = !layer._expanded;
+      onUpdate();
+    });
+
+    header.querySelector('.visibility-toggle').addEventListener('click', (e) => {
       e.stopPropagation();
       layer.visible = !layer.visible;
       onUpdate();
     });
 
-    el.addEventListener('click', () => {
-      layerManager.setActiveLayer(layer);
-      onUpdate();
-    });
-
-    el.querySelector('.delete-layer').addEventListener('click', (e) => {
+    header.querySelector('.delete-layer').addEventListener('click', (e) => {
       e.stopPropagation();
       layerManager.removeLayer(layer);
       onUpdate();
     });
+
+    header.addEventListener('click', () => {
+      layerManager.setActiveLayer(layer);
+      onUpdate();
+    });
+
+    el.appendChild(header);
+
+    if (layer._expanded) {
+      const spawns = getSpawns(layer);
+      if (spawns.length > 0) {
+        const spawnList = document.createElement('div');
+        spawnList.className = 'layer-spawn-list';
+        for (const spawn of spawns) {
+          const spawnEl = document.createElement('div');
+          spawnEl.className = 'layer-spawn-item';
+          const name = getSpawnName(spawn);
+          const path = getEntityPath(spawn);
+          const short = path ? path.split('/').pop().replace('.toml', '') : '';
+          spawnEl.innerHTML = `<span class="spawn-bullet">◦</span><span class="spawn-name">${name}</span>${short ? `<span class="spawn-entity-label">${short}</span>` : ''}`;
+          spawnEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (onSpawnSelect) onSpawnSelect(spawn, layer);
+            onUpdate();
+          });
+          spawnList.appendChild(spawnEl);
+        }
+        el.appendChild(spawnList);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'layer-spawn-empty';
+        empty.textContent = 'no entities';
+        el.appendChild(empty);
+      }
+    }
 
     container.appendChild(el);
   }

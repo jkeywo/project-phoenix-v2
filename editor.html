@@ -133,14 +133,27 @@
             Shape Type:
             <select id="regionShape">
               <option value="sphere">Sphere</option>
+              <option value="torus">Torus (belt)</option>
               <option value="cylinder">Cylinder</option>
               <option value="box">Box</option>
             </select>
           </label>
-          <label>
-            Radius:
-            <input type="number" id="regionRadius" step="1" value="100">
-          </label>
+          <div id="regionRadiusField">
+            <label>
+              Radius:
+              <input type="number" id="regionRadius" step="1" value="100">
+            </label>
+          </div>
+          <div id="regionTorusFields" style="display:none;">
+            <label>
+              Inner Radius:
+              <input type="number" id="regionInnerRadius" step="1" value="80">
+            </label>
+            <label>
+              Outer Radius:
+              <input type="number" id="regionOuterRadius" step="1" value="200">
+            </label>
+          </div>
           <div class="checkbox-group">
             <label><input type="checkbox" id="effectCommsJam"> Comms Jam</label>
             <label><input type="checkbox" id="effectSensorBlind"> Sensor Blind</label>

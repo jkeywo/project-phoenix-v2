@@ -61,8 +61,15 @@ export class EntityEditor {
     document.getElementById('colliderShape').addEventListener('change', () => this.updateRawToml());
     document.getElementById('colliderRadius').addEventListener('input', () => this.updateRawToml());
     document.getElementById('hullIntegrity').addEventListener('input', () => this.updateRawToml());
-    document.getElementById('regionShape').addEventListener('change', () => this.updateRawToml());
+    document.getElementById('regionShape').addEventListener('change', () => {
+      const isTorus = document.getElementById('regionShape').value === 'torus';
+      document.getElementById('regionRadiusField').style.display = isTorus ? 'none' : '';
+      document.getElementById('regionTorusFields').style.display = isTorus ? '' : 'none';
+      this.updateRawToml();
+    });
     document.getElementById('regionRadius').addEventListener('input', () => this.updateRawToml());
+    document.getElementById('regionInnerRadius').addEventListener('input', () => this.updateRawToml());
+    document.getElementById('regionOuterRadius').addEventListener('input', () => this.updateRawToml());
     document.getElementById('rawToml').addEventListener('input', (e) => {
       try {
         const obj = window.tomlParse(e.target.value);
@@ -171,13 +178,22 @@ export class EntityEditor {
       if (document.getElementById('effectDamageZone').checked) effects.damage_zone = {};
       if (document.getElementById('effectSlowZone').checked) effects.slow_zone = {};
 
-      obj = {
-        tags,
-        shape: {
-          type: document.getElementById('regionShape').value,
+      const shapeType = document.getElementById('regionShape').value;
+      let shape;
+      if (shapeType === 'torus') {
+        shape = {
+          type: 'torus',
+          inner_radius: parseFloat(document.getElementById('regionInnerRadius').value),
+          outer_radius: parseFloat(document.getElementById('regionOuterRadius').value)
+        };
+      } else {
+        shape = {
+          type: shapeType,
           radius: parseFloat(document.getElementById('regionRadius').value)
-        }
-      };
+        };
+      }
+
+      obj = { tags, shape };
       if (Object.keys(effects).length > 0) {
         obj.effects = effects;
       }

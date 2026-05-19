@@ -42,6 +42,12 @@ function onSpawnSelect(spawn, layer) {
   propertiesPanel.render(spawn, layer);
 }
 
+function onSpawnSelectFromTree(spawn, layer) {
+  layerManager.setActiveLayer(layer);
+  canvasManager.selectedSpawn = spawn ? { spawn, layer } : null;
+  propertiesPanel.render(spawn, layer);
+}
+
 function onSpawnUpdate(spawn, layer) {
   renderAll();
 }
@@ -61,10 +67,7 @@ function onEntitySaved(entity) {
 }
 
 function renderAll() {
-  renderLayersPanel(layerManager, () => {
-    canvasManager.renderAll();
-    updateUnsavedIndicator();
-  });
+  renderLayersPanel(layerManager, renderAll, onSpawnSelectFromTree);
   canvasManager.renderAll();
   updateUnsavedIndicator();
 }

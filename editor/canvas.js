@@ -167,6 +167,18 @@ export class CanvasManager {
       }
     }
 
+    // Re-apply selection highlight after rebuild
+    if (this.selectedSpawn) {
+      const group = this.spawnGroups.get(this.selectedSpawn.spawn);
+      if (group) {
+        const circle = group.find('Circle')[0];
+        if (circle) {
+          circle.stroke('#00ff00');
+          circle.strokeWidth(4);
+        }
+      }
+    }
+
     this.updateArrows();
     this.baseLayer.batchDraw();
   }
@@ -203,14 +215,27 @@ export class CanvasManager {
 
     group.add(circle);
 
-    if (spawn.shape && spawn.shape.type === 'sphere' && spawn.shape.radius) {
-      const fillCircle = new Konva.Circle({
-        radius: spawn.shape.radius,
-        fill: color + '33',
-        stroke: color,
-        strokeWidth: 1
-      });
-      group.add(fillCircle);
+    if (spawn.shape) {
+      if (spawn.shape.type === 'sphere' && spawn.shape.radius) {
+        const fillCircle = new Konva.Circle({
+          radius: spawn.shape.radius,
+          fill: color + '33',
+          stroke: color,
+          strokeWidth: 1
+        });
+        group.add(fillCircle);
+      } else if (spawn.shape.type === 'torus') {
+        const innerR = spawn.shape.inner_radius ?? 50;
+        const outerR = spawn.shape.outer_radius ?? 150;
+        const ring = new Konva.Ring({
+          innerRadius: innerR,
+          outerRadius: outerR,
+          fill: color + '33',
+          stroke: color,
+          strokeWidth: 1
+        });
+        group.add(ring);
+      }
     }
 
     const label = new Konva.Text({

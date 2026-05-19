@@ -1,8 +1,9 @@
 tags = ["region", "asteroid_belt"]
 
 [shape]
-type = "sphere"
-radius = 180.0
+type = "torus"
+inner_radius = 100.0
+outer_radius = 250.0
 
 [effects]
 [effects.blocks_impulse]

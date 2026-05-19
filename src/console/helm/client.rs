@@ -7,13 +7,15 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::client::console_shell::ConsoleShell;
 use crate::client_app::{HelmPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    ButtonPressed, GenericJoystick, JoystickMoved, OnRadar, OrientationMode,
-    RadarAppearance, RadarCenter, RadarFilter, RadarLayer, RadarShape,
-    ReadoutValue, TextReadout,
+    ButtonPressed, ButtonSize, GenericJoystick, GenericRadar, JoystickMoved,
+    OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
+    RadarLayer, RadarShape, ReadoutValue, StateVisuals, TextReadout, Visual,
+    spawn_gui_button,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -99,6 +101,7 @@ impl Plugin for HelmPanelPlugin {
             .add_systems(Update, (
                 spawn_phone_helm_ui
                     .run_if(not(resource_exists::<PhoneHelmSpawned>)),
+                respawn_helm_on_orientation_change,
                 toggle_helm_panel_visibility,
                 update_helm_readouts,
                 bridge_client_sim_to_radar_entities,
@@ -293,7 +296,7 @@ fn bridge_client_sim_to_radar_entities(
 #[derive(Resource)]
 pub struct PhoneHelmSpawned;
 
-/// Spawns the phone helm panel using gui library widgets.
+/// Spawns the phone helm panel using `ConsoleShell::spawn` (PRD #346).
 fn spawn_phone_helm_ui(
     mut commands: Commands,
     assets: Option<Res<PhoneAssets>>,
@@ -309,199 +312,78 @@ fn spawn_phone_helm_ui(
 
     commands.insert_resource(PhoneHelmSpawned);
 
-    let mono = |s: f32| TextFont { font: assets.font_mono.clone(), font_size: s, ..default() };
-    let display = |s: f32| TextFont { font: assets.font_display.clone(), font_size: s, ..default() };
+    let shell = ConsoleShell::spawn(
+        &mut commands,
+        assets.helm_panel_bg.clone(),
+        is_landscape,
+        |commands: &mut Commands, primary: Entity| {
+            fill_helm_radar(commands, primary, &assets);
+        },
+        |commands: &mut Commands, secondary: Entity| {
+            fill_helm_joystick(commands, secondary, &assets);
+        },
+        &assets,
+    );
+
+    // Insert HelmPanel marker on the root for visibility queries
+    commands.entity(shell.root).insert(HelmPanel);
+}
+
+// ── Fill helpers ─────────────────────────────────────────────────────
+
+fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
     let dim = Color::srgb(0.55, 0.70, 1.0);
-    let muted = Color::srgb(0.6, 0.7, 0.73);
-    let readout_visuals = || crate::gui::StateVisuals::from_colors(
+    let readout_visuals = || StateVisuals::from_colors(
         dim, dim, dim, dim, Color::srgb(0.3, 0.4, 0.6),
     );
+    let display = |s: f32| TextFont { font: assets.font_display.clone(), font_size: s, ..default() };
 
-    // ── Pre-spawn widget entities (outside any with_children closures) ──
-
-    let joystick_visuals = crate::gui::StateVisuals::from_colors(
-        Color::srgb(0.10, 0.10, 0.18), Color::srgb(0.10, 0.10, 0.18),
-        Color::srgb(0.10, 0.10, 0.18), Color::srgb(0.10, 0.10, 0.18),
-        Color::srgb(0.05, 0.05, 0.10),
-    );
-    let joystick_pad = GenericJoystick::spawn(
-        &mut commands, HELM_PAD_SIZE, None, None, joystick_visuals,
-    );
-    commands.entity(joystick_pad).observe(on_helm_joystick_moved);
-
+    // ── Radar ──
     let radar_filter = RadarFilter(std::collections::HashSet::from([
         RadarLayer::Ship, RadarLayer::Asteroid,
         RadarLayer::Station, RadarLayer::Missile,
         RadarLayer::Planet, RadarLayer::Star,
     ]));
-    let radar = crate::gui::GenericRadar::spawn(
-        &mut commands, COMPASS_RADAR_DIAMETER, HELM_RADAR_RANGE,
+    let radar = GenericRadar::spawn(
+        commands, COMPASS_RADAR_DIAMETER, HELM_RADAR_RANGE,
         OrientationMode::ShipRelative, radar_filter,
-        Some(assets.compass_ring.clone()), None,
+        Some(assets.radar_bg.clone()), Some(assets.radar_surround.clone()),
     );
+    commands.entity(container).add_child(radar);
 
-    let hdg = TextReadout::spawn(&mut commands, "HDG", readout_visuals());
+    // HDG readout
+    let hdg = TextReadout::spawn(commands, "HDG", readout_visuals());
     commands.entity(hdg).insert((HelmReadoutKind::Hdg, Node {
         position_type: PositionType::Absolute,
         left: Val::Px(2.0), top: Val::Px(2.0), ..default()
     }));
     commands.entity(radar).add_child(hdg);
 
-    let spd = TextReadout::spawn(&mut commands, "SPD", readout_visuals());
+    // SPD readout
+    let spd = TextReadout::spawn(commands, "SPD", readout_visuals());
     commands.entity(spd).insert((HelmReadoutKind::Spd, Node {
         position_type: PositionType::Absolute,
         right: Val::Px(2.0), top: Val::Px(2.0), ..default()
     }));
     commands.entity(radar).add_child(spd);
 
-    let x_read = TextReadout::spawn(&mut commands, "X", readout_visuals());
+    // X readout
+    let x_read = TextReadout::spawn(commands, "X", readout_visuals());
     commands.entity(x_read).insert((HelmReadoutKind::X, Node {
         position_type: PositionType::Absolute,
         left: Val::Px(2.0), bottom: Val::Px(2.0), ..default()
     }));
     commands.entity(radar).add_child(x_read);
 
-    let z_read = TextReadout::spawn(&mut commands, "Z", readout_visuals());
+    // Z readout
+    let z_read = TextReadout::spawn(commands, "Z", readout_visuals());
     commands.entity(z_read).insert((HelmReadoutKind::Z, Node {
         position_type: PositionType::Absolute,
         right: Val::Px(2.0), bottom: Val::Px(2.0), ..default()
     }));
     commands.entity(radar).add_child(z_read);
 
-    let on_screen_btn = crate::gui::spawn_gui_button(
-        &mut commands,
-        crate::gui::ButtonSize::Rect { width: 120.0, height: 32.0 },
-        crate::gui::StateVisuals::from_colors(
-            Color::srgb(0.13, 0.13, 0.27), Color::srgb(0.13, 0.13, 0.27),
-            Color::srgb(0.10, 0.40, 0.15), Color::srgb(0.13, 0.13, 0.27),
-            Color::srgb(0.08, 0.08, 0.15),
-        ),
-        None,
-    );
-    commands.entity(on_screen_btn).with_children(|btn| {
-        btn.spawn((Text::new("ON SCREEN"), display(12.0), TextColor(Color::srgb(0.93, 0.93, 1.0))));
-    });
-    commands.entity(on_screen_btn).observe(on_on_screen_button_pressed);
-
-    let impulse_btn = crate::gui::spawn_gui_button(
-        &mut commands,
-        crate::gui::ButtonSize::Rect { width: 120.0, height: 32.0 },
-        crate::gui::StateVisuals::from_colors(
-            Color::srgb(0.10, 0.25, 0.40), Color::srgb(0.10, 0.25, 0.40),
-            Color::srgb(0.15, 0.35, 0.50), Color::srgb(0.10, 0.25, 0.40),
-            Color::srgb(0.05, 0.10, 0.20),
-        ),
-        None,
-    );
-    commands.entity(impulse_btn).with_children(|btn| {
-        btn.spawn((Text::new("IMPULSE"), display(12.0), TextColor(Color::srgb(0.5, 0.8, 1.0))));
-    });
-    commands.entity(impulse_btn).observe(on_impulse_button_pressed);
-
-    // ── Spawn panel and build flat hierarchy using add_child ──
-
-    let panel = commands.spawn((
-        HelmPanel,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(4.0), right: Val::Px(4.0),
-            top: Val::Px(4.0), bottom: Val::Px(4.0),
-            flex_direction: FlexDirection::Column,
-            ..default()
-        },
-        Visibility::Hidden,
-    )).id();
-
-    // Title bar
-    let title_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        ..default()
-    }).id();
-    commands.entity(title_row).with_children(|tr| {
-        tr.spawn((Text::new("Helm"), TextFont { font_size: 18.0, ..default() }, TextColor(Color::srgb(0.3, 1.0, 0.8))));
-        crate::client_elements::spawn_help_button(tr, crate::client_elements::HelpPanel::Helm, 14.0);
-    });
-    commands.entity(panel).add_child(title_row);
-
-    commands.entity(panel).with_children(|root| {
-        crate::client_elements::spawn_help_overlay(root, crate::client_elements::HelpPanel::Helm);
-    });
-
-    // Content row
-    let content_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::FlexEnd,
-        justify_content: JustifyContent::SpaceBetween,
-        flex_grow: 1.0,
-        column_gap: Val::Px(8.0),
-        ..default()
-    }).id();
-    commands.entity(panel).add_child(content_row);
-
-    // ── Build joystick column (all entities spawned flat) ──
-    let joystick_col = commands.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        row_gap: Val::Px(4.0),
-        ..default()
-    }).id();
-
-    let fwd_indicator = commands.spawn((Text::new("▲"), mono(16.0), TextColor(dim), Node::default())).id();
-    commands.entity(joystick_col).add_child(fwd_indicator);
-
-    let joystick_center_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(4.0),
-        ..default()
-    }).id();
-    let left_indicator = commands.spawn((Text::new("◄"), mono(14.0), TextColor(dim), Node::default())).id();
-    let right_indicator = commands.spawn((Text::new("►"), mono(14.0), TextColor(dim), Node::default())).id();
-    commands.entity(joystick_center_row).add_child(left_indicator);
-    commands.entity(joystick_center_row).add_child(joystick_pad);
-    commands.entity(joystick_center_row).add_child(right_indicator);
-    commands.entity(joystick_col).add_child(joystick_center_row);
-
-    let aft_indicator = commands.spawn((Text::new("▼"), mono(16.0), TextColor(dim), Node::default())).id();
-    commands.entity(joystick_col).add_child(aft_indicator);
-
-    let fwd_rev_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        column_gap: Val::Px(24.0),
-        ..default()
-    }).id();
-    let fwd_label = commands.spawn((Text::new("FWD"), mono(9.0), TextColor(muted))).id();
-    let rev_label = commands.spawn((Text::new("REV"), mono(9.0), TextColor(muted))).id();
-    commands.entity(fwd_rev_row).add_child(fwd_label);
-    commands.entity(fwd_rev_row).add_child(rev_label);
-    commands.entity(joystick_col).add_child(fwd_rev_row);
-
-    let port_stbd_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        column_gap: Val::Px(32.0),
-        ..default()
-    }).id();
-    let port_label = commands.spawn((Text::new("PORT"), mono(9.0), TextColor(muted))).id();
-    let stbd_label = commands.spawn((Text::new("STBD"), mono(9.0), TextColor(muted))).id();
-    commands.entity(port_stbd_row).add_child(port_label);
-    commands.entity(port_stbd_row).add_child(stbd_label);
-    commands.entity(joystick_col).add_child(port_stbd_row);
-
-    // ── Build radar column ──
-    let radar_col = commands.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        row_gap: Val::Px(6.0),
-        ..default()
-    }).id();
-    commands.entity(radar_col).add_child(radar);
-
+    // ── Buttons row ──
     let buttons_row = commands.spawn(Node {
         flex_direction: FlexDirection::Row,
         align_items: AlignItems::Center,
@@ -509,17 +391,143 @@ fn spawn_phone_helm_ui(
         column_gap: Val::Px(8.0),
         ..default()
     }).id();
-    commands.entity(buttons_row).add_child(on_screen_btn);
-    commands.entity(buttons_row).add_child(impulse_btn);
-    commands.entity(radar_col).add_child(buttons_row);
 
-    // ── Attach columns to content row ──
-    if is_landscape {
-        commands.entity(content_row).add_child(radar_col);
-        commands.entity(content_row).add_child(joystick_col);
-    } else {
-        commands.entity(content_row).add_child(joystick_col);
-        commands.entity(content_row).add_child(radar_col);
+    // ON SCREEN button with button-normal PNG visuals
+    let on_screen_btn = spawn_gui_button(
+        commands,
+        ButtonSize::Rect { width: 120.0, height: 32.0 },
+        StateVisuals {
+            idle: Visual { image: Some(assets.btn_normal_idle.clone()), color: Color::NONE },
+            hover: Visual { image: Some(assets.btn_normal_hover.clone()), color: Color::NONE },
+            active: Visual { image: Some(assets.btn_normal_active.clone()), color: Color::NONE },
+            press: Visual { image: Some(assets.btn_normal_press.clone()), color: Color::NONE },
+            disabled: Visual { image: None, color: Color::srgba(0.08, 0.08, 0.15, 0.5) },
+        },
+        None,
+    );
+    commands.entity(on_screen_btn).with_children(|btn| {
+        btn.spawn((Text::new("ON SCREEN"), display(12.0), TextColor(Color::srgb(0.93, 0.93, 1.0))));
+    });
+    commands.entity(on_screen_btn).observe(on_on_screen_button_pressed);
+    commands.entity(buttons_row).add_child(on_screen_btn);
+
+    // IMPULSE button with impulse PNG visuals
+    let impulse_btn = spawn_gui_button(
+        commands,
+        ButtonSize::Rect { width: 120.0, height: 32.0 },
+        StateVisuals {
+            idle: Visual { image: Some(assets.impulse_ready.clone()), color: Color::NONE },
+            hover: Visual { image: Some(assets.impulse_hover.clone()), color: Color::NONE },
+            active: Visual { image: Some(assets.impulse_active.clone()), color: Color::NONE },
+            press: Visual { image: Some(assets.impulse_press.clone()), color: Color::NONE },
+            disabled: Visual { image: None, color: Color::srgba(0.05, 0.10, 0.20, 0.5) },
+        },
+        None,
+    );
+    commands.entity(impulse_btn).with_children(|btn| {
+        btn.spawn((Text::new("IMPULSE"), display(12.0), TextColor(Color::srgb(0.5, 0.8, 1.0))));
+    });
+    commands.entity(impulse_btn).observe(on_impulse_button_pressed);
+    commands.entity(buttons_row).add_child(impulse_btn);
+
+    commands.entity(container).add_child(buttons_row);
+}
+
+fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
+    let dim = Color::srgb(0.55, 0.70, 1.0);
+    let muted = Color::srgb(0.6, 0.7, 0.73);
+    let mono = |s: f32| TextFont { font: assets.font_mono.clone(), font_size: s, ..default() };
+
+    // Directional indicators
+    let fwd = commands.spawn((Text::new("▲"), mono(16.0), TextColor(dim), Node::default())).id();
+    commands.entity(container).add_child(fwd);
+
+    let joystick_center_row = commands.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(4.0),
+        ..default()
+    }).id();
+    commands.entity(container).add_child(joystick_center_row);
+
+    // Left directional chevron
+    let left_arrow = commands.spawn((Text::new("◄"), mono(14.0), TextColor(dim), Node::default())).id();
+    commands.entity(joystick_center_row).add_child(left_arrow);
+
+    // Joystick with PNG visuals
+    let joystick_knob_visuals = StateVisuals {
+        idle: Visual { image: Some(assets.joystick_knob_idle.clone()), color: Color::NONE },
+        hover: Visual { image: Some(assets.joystick_knob_hover.clone()), color: Color::NONE },
+        active: Visual { image: Some(assets.joystick_knob_active.clone()), color: Color::NONE },
+        press: Visual { image: Some(assets.joystick_knob_press.clone()), color: Color::NONE },
+        disabled: Visual { image: None, color: Color::srgba(0.05, 0.05, 0.10, 0.5) },
+    };
+    let pad = GenericJoystick::spawn(
+        commands, HELM_PAD_SIZE,
+        Some(assets.joystick_pad_idle.clone()),
+        Some(assets.joystick_knob_idle.clone()),
+        joystick_knob_visuals,
+    );
+    commands.entity(pad).observe(on_helm_joystick_moved);
+    commands.entity(joystick_center_row).add_child(pad);
+
+    // Right directional chevron
+    let right_arrow = commands.spawn((Text::new("►"), mono(14.0), TextColor(dim), Node::default())).id();
+    commands.entity(joystick_center_row).add_child(right_arrow);
+
+    let aft = commands.spawn((Text::new("▼"), mono(16.0), TextColor(dim), Node::default())).id();
+    commands.entity(container).add_child(aft);
+
+    // FWD/REV labels
+    let fwd_rev_row = commands.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        column_gap: Val::Px(24.0),
+        ..default()
+    }).id();
+    commands.entity(fwd_rev_row).with_children(|row| {
+        row.spawn((Text::new("FWD"), mono(9.0), TextColor(muted)));
+        row.spawn((Text::new("REV"), mono(9.0), TextColor(muted)));
+    });
+    commands.entity(container).add_child(fwd_rev_row);
+
+    // PORT/STBD labels
+    let port_stbd_row = commands.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        column_gap: Val::Px(32.0),
+        ..default()
+    }).id();
+    commands.entity(port_stbd_row).with_children(|row| {
+        row.spawn((Text::new("PORT"), mono(9.0), TextColor(muted)));
+        row.spawn((Text::new("STBD"), mono(9.0), TextColor(muted)));
+    });
+    commands.entity(container).add_child(port_stbd_row);
+}
+
+// ── Orientation respawn ──────────────────────────────────────────────
+
+/// When `DeviceOrientation` changes, despawn the current `HelmPanel` and
+/// remove the `PhoneHelmSpawned` resource so `spawn_phone_helm_ui` respawns
+/// with the correct layout.
+fn respawn_helm_on_orientation_change(
+    orientation: Res<DeviceOrientation>,
+    mut last_orientation: Local<Option<DeviceOrientation>>,
+    panel: Query<Entity, With<HelmPanel>>,
+    mut commands: Commands,
+) {
+    let Some(ref last) = *last_orientation else {
+        *last_orientation = Some(orientation.clone());
+        return;
+    };
+    if *orientation != *last {
+        *last_orientation = Some(orientation.clone());
+        for entity in panel.iter() {
+            commands.entity(entity).despawn();
+        }
+        commands.remove_resource::<PhoneHelmSpawned>();
     }
 }
 

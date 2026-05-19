@@ -1604,6 +1604,7 @@ pub fn add_client_plugins(app: &mut App) {
         .add_plugins(crate::gui::GuiPlugin)
         .add_plugins(crate::ship_view::ShipViewPlugin)
         .add_plugins(crate::phone_border::PhoneBorderPlugin)
+        .add_plugins(super::console_shell::ConsoleShellPlugin)
         .add_plugins(crate::captain_panel::CaptainPanelPlugin)
         .add_plugins(crate::helm_panel::HelmPanelPlugin)
         .add_plugins(crate::weapons_panel::WeaponsPanelPlugin)

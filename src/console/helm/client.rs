@@ -338,6 +338,18 @@ fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAss
     );
     let display = |s: f32| TextFont { font: assets.font_display.clone(), font_size: s, ..default() };
 
+    // ── Column wrapper to stack radar + buttons vertically ──
+    let col = commands.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        width: Val::Percent(100.0),
+        height: Val::Percent(100.0),
+        row_gap: Val::Px(8.0),
+        ..default()
+    }).id();
+    commands.entity(container).add_child(col);
+
     // ── Radar ──
     let radar_filter = RadarFilter(std::collections::HashSet::from([
         RadarLayer::Ship, RadarLayer::Asteroid,
@@ -349,7 +361,7 @@ fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAss
         OrientationMode::ShipRelative, radar_filter,
         Some(assets.radar_bg.clone()), Some(assets.radar_surround.clone()),
     );
-    commands.entity(container).add_child(radar);
+    commands.entity(col).add_child(radar);
 
     // HDG readout
     let hdg = TextReadout::spawn(commands, "HDG", readout_visuals());
@@ -430,7 +442,7 @@ fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAss
     commands.entity(impulse_btn).observe(on_impulse_button_pressed);
     commands.entity(buttons_row).add_child(impulse_btn);
 
-    commands.entity(container).add_child(buttons_row);
+    commands.entity(col).add_child(buttons_row);
 }
 
 fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
@@ -438,9 +450,19 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
     let muted = Color::srgb(0.6, 0.7, 0.73);
     let mono = |s: f32| TextFont { font: assets.font_mono.clone(), font_size: s, ..default() };
 
+    // ── Column wrapper to stack joystick elements vertically ──
+    let col = commands.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        row_gap: Val::Px(4.0),
+        ..default()
+    }).id();
+    commands.entity(container).add_child(col);
+
     // Directional indicators
     let fwd = commands.spawn((Text::new("▲"), mono(16.0), TextColor(dim), Node::default())).id();
-    commands.entity(container).add_child(fwd);
+    commands.entity(col).add_child(fwd);
 
     let joystick_center_row = commands.spawn(Node {
         flex_direction: FlexDirection::Row,
@@ -448,7 +470,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
         column_gap: Val::Px(4.0),
         ..default()
     }).id();
-    commands.entity(container).add_child(joystick_center_row);
+    commands.entity(col).add_child(joystick_center_row);
 
     // Left directional chevron
     let left_arrow = commands.spawn((Text::new("◄"), mono(14.0), TextColor(dim), Node::default())).id();
@@ -476,7 +498,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
     commands.entity(joystick_center_row).add_child(right_arrow);
 
     let aft = commands.spawn((Text::new("▼"), mono(16.0), TextColor(dim), Node::default())).id();
-    commands.entity(container).add_child(aft);
+    commands.entity(col).add_child(aft);
 
     // FWD/REV labels
     let fwd_rev_row = commands.spawn(Node {
@@ -490,7 +512,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
         row.spawn((Text::new("FWD"), mono(9.0), TextColor(muted)));
         row.spawn((Text::new("REV"), mono(9.0), TextColor(muted)));
     });
-    commands.entity(container).add_child(fwd_rev_row);
+    commands.entity(col).add_child(fwd_rev_row);
 
     // PORT/STBD labels
     let port_stbd_row = commands.spawn(Node {
@@ -504,7 +526,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
         row.spawn((Text::new("PORT"), mono(9.0), TextColor(muted)));
         row.spawn((Text::new("STBD"), mono(9.0), TextColor(muted)));
     });
-    commands.entity(container).add_child(port_stbd_row);
+    commands.entity(col).add_child(port_stbd_row);
 }
 
 // ── Orientation respawn ──────────────────────────────────────────────

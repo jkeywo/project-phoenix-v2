@@ -270,6 +270,7 @@ fn bridge_client_sim_to_radar_entities(
                 OnRadar(layer),
                 appearance,
                 Transform::from_xyz(snapshot.x(), 0.0, snapshot.z()),
+                GlobalTransform::default(),
             )).id();
             radar.blips.insert(uuid.clone(), blip);
         }
@@ -300,7 +301,7 @@ fn spawn_phone_helm_ui(
     orientation: Option<Res<DeviceOrientation>>,
 ) {
     let Some(assets) = assets else { return };
-    let is_landscape = matches!(orientation.as_deref(), Some(DeviceOrientation::Landscape));
+    let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
         commands.entity(entity).despawn();

@@ -231,12 +231,12 @@ pub fn spawn_help_overlay(parent: &mut ChildSpawnerCommands, panel: HelpPanel) {
 /// When a help button is pressed, show the matching overlay.
 pub fn handle_help_button_press(
     buttons: Query<(&HelpButton, &Interaction), Changed<Interaction>>,
-    mut overlays: Query<(&HelpPanel, &mut Visibility), With<HelpOverlay>>,
+    mut overlays: Query<(&HelpOverlay, &mut Visibility)>,
 ) {
     for (btn, interaction) in buttons.iter() {
         if *interaction != Interaction::Pressed { continue; }
-        for (panel, mut vis) in overlays.iter_mut() {
-            if *panel == btn.0 {
+        for (overlay, mut vis) in overlays.iter_mut() {
+            if overlay.0 == btn.0 {
                 *vis = Visibility::Visible;
             }
         }
@@ -246,12 +246,12 @@ pub fn handle_help_button_press(
 /// When a help overlay is pressed (clicked anywhere), dismiss it.
 pub fn handle_help_overlay_dismiss(
     buttons: Query<(&HelpOverlay, &Interaction), Changed<Interaction>>,
-    mut overlays: Query<(&HelpPanel, &mut Visibility), With<HelpOverlay>>,
+    mut overlays: Query<(&HelpOverlay, &mut Visibility)>,
 ) {
-    for (overlay, interaction) in buttons.iter() {
+    for (pressed, interaction) in buttons.iter() {
         if *interaction != Interaction::Pressed { continue; }
-        for (panel, mut vis) in overlays.iter_mut() {
-            if *panel == overlay.0 {
+        for (overlay, mut vis) in overlays.iter_mut() {
+            if overlay.0 == pressed.0 {
                 *vis = Visibility::Hidden;
             }
         }

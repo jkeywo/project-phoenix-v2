@@ -52,6 +52,14 @@ impl Default for DeviceOrientation {
     }
 }
 
+/// Returns `true` when the device is in landscape orientation.
+///
+/// Accepts `Option<&DeviceOrientation>` so callers can pass
+/// `orientation.as_deref()` directly from an `Option<Res<DeviceOrientation>>`.
+pub fn is_landscape(orientation: Option<&DeviceOrientation>) -> bool {
+    matches!(orientation, Some(DeviceOrientation::Landscape))
+}
+
 // ── Pulse constants (mirrors viewscreen_border.rs) ───────────────────
 
 const EASE_DURATION: f32 = 0.25;

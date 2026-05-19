@@ -113,11 +113,13 @@ fn setup(
     commands.spawn((LobbyCamera, Camera2d, Camera { order: 0, ..default() }, IsDefaultUiCamera));
 
     // 3D camera — active during in-game phase, positioned for ship view.
+    // order: -1 so the 3D scene composites before the UI layer (LobbyCamera
+    // order 0), keeping the viewscreen border in front of all 3D objects.
     // Far plane extended so the starfield skybox at radius ~2000 is visible.
     commands.spawn((
         GameCamera,
         Camera3d::default(),
-        Camera { is_active: false, order: 0, ..default() },
+        Camera { is_active: false, order: -1, ..default() },
         Projection::Perspective(PerspectiveProjection {
             far: 5000.0,
             ..default()

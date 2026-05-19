@@ -426,10 +426,12 @@ fn rotate_needle_by_direction(
 fn handle_direction_press(
     mut interactions: Query<(&Interaction, &DirButton), (Changed<Interaction>, With<Button>)>,
     mut outbound: MessageWriter<OutboundClientMessage>,
+    mut ship_view: ResMut<ShipView>,
 ) {
     for (interaction, dir_btn) in interactions.iter_mut() {
         if *interaction == Interaction::Pressed {
             outbound.write(OutboundClientMessage(direction_press_message(dir_btn.0.clone())));
+            ship_view.view_mode = ViewMode::Camera(dir_btn.0.clone());
         }
     }
 }

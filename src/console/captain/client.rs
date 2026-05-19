@@ -22,16 +22,11 @@ const LED_SIZE: f32 = 8.0;
 /// Size of the needle image.
 const NEEDLE_SIZE: f32 = 64.0;
 
-/// Gap between the compass and the red alert toggle.
-#[allow(dead_code)]
-const COMPASS_TO_ALERT_GAP: f32 = 24.0;
-
 // ── Colours ──
 
 const DIR_BG_IDLE: Color = Color::srgb(0.12, 0.12, 0.26);
 const DIR_BG_ACTIVE: Color = Color::srgb(0.20, 0.28, 0.50);
-#[allow(dead_code)]
-const DIR_BORDER: Color = Color::srgba(0.55, 0.70, 1.0, 0.25);
+
 const LED_OFF: Color = Color::srgb(0.12, 0.12, 0.22);
 const LED_ON: Color = Color::srgb(0.2, 0.9, 0.2);
 const GLYPH_COLOR: Color = Color::srgb(0.90, 0.90, 1.0);

@@ -43,7 +43,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-a36699c17ad0711f.js" crossorigin="anonymous" integrity="sha384-hRhWnUN6T0uKVf6hwi+xkV3IodOp9picc1IadZwpcsigw+nbKpkjV2unlNCk2Tzg"><link rel="preload" href="./project-phoenix-a36699c17ad0711f_bg.wasm" crossorigin="anonymous" integrity="sha384-O6klTbmq2kqvTffyV5S342TV4LxdVIDTbhFZLpelIWMAvB1kbgsF1tSPwfRE9g26" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b450b8e8743df973.js" crossorigin="anonymous" integrity="sha384-Pg0OU/KVsG2TrQvRGMOXuhCELiX6pvkJa413CJlD6nDd5vo58spupY0F+h+iturC"><link rel="preload" href="./project-phoenix-b450b8e8743df973_bg.wasm" crossorigin="anonymous" integrity="sha384-XoKBx1Hxtdy1LCANIAnDEwsYWgL3exmjoYn8gKoTvcwktJj5UO60P5iDevt0PjFR" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">
@@ -76,8 +76,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-a36699c17ad0711f.js';
-const wasm = await init({ module_or_path: './project-phoenix-a36699c17ad0711f_bg.wasm' });
+import init, * as bindings from './project-phoenix-b450b8e8743df973.js';
+const wasm = await init({ module_or_path: './project-phoenix-b450b8e8743df973_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -236,39 +236,22 @@ async function preloadAndStart() {
     window.set_config_request_callback = wasmBindings.set_config_request_callback;
     set_config_request_callback(handleConfigRequest);
     
-    // Step 2: Fetch and load the default map
-    const mapResponse = await fetch('assets/maps/default.toml');
-    if (!mapResponse.ok) {
-      console.error('Failed to fetch default map:', mapResponse.status);
-      throw new Error('Map fetch failed');
+    // Step 2: Fetch and load the unified world TOML (map + scenario in one file)
+    const worldResponse = await fetch('assets/worlds/default.toml');
+    if (!worldResponse.ok) {
+      console.error('Failed to fetch default world:', worldResponse.status);
+      throw new Error('World fetch failed');
     }
-    const mapToml = await mapResponse.text();
-    
-    // Step 3: Load the map - this will trigger callbacks for entity paths
-    window.wasm_load_map = wasmBindings.wasm_load_map;
+    const worldToml = await worldResponse.text();
+
+    // Step 3: Load the world — parses both the map half (anchors, [[entity]],
+    // global config) and the scenario half (spawns, triggers, comms) from one
+    // TOML, then fires callbacks for all referenced entity paths.
+    window.wasm_load_world = wasmBindings.wasm_load_world;
     window.wasm_load_config = wasmBindings.wasm_load_config;
     window.wasm_is_preload_complete = wasmBindings.wasm_is_preload_complete;
-    window.wasm_load_world_content = wasmBindings.wasm_load_world_content;
-    window.wasm_get_world_content_path = wasmBindings.wasm_get_world_content_path;
-    
-    wasm_load_map(mapToml);
 
-    // Step 3b: If the map declares a default scenario, fetch and load it.
-    // wasm_load_world_content queues any spawn entity paths into the preload pipeline.
-    const scenarioPath = wasm_get_world_content_path();
-    if (scenarioPath) {
-      try {
-        const scenarioResponse = await fetch(scenarioPath);
-        if (scenarioResponse.ok) {
-          const scenarioToml = await scenarioResponse.text();
-          wasm_load_world_content(scenarioPath, scenarioToml);
-        } else {
-          console.warn('Failed to fetch scenario:', scenarioPath, scenarioResponse.status);
-        }
-      } catch (e) {
-        console.warn('Scenario fetch error:', e);
-      }
-    }
+    wasm_load_world('assets/worlds/default.toml', worldToml);
 
   } catch (e) {
     console.error('Preload failed:', e);

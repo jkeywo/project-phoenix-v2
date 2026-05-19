@@ -10,6 +10,8 @@
  * to their anchor.
  */
 
+import { stringifyWorldToml } from './world-toml.js';
+
 /**
  * Convert the flat anchors map from a parsed world TOML into an array of
  * marker objects suitable for canvas rendering.
@@ -23,6 +25,22 @@ export function getAnchorMarkers(anchors) {
   return Object.entries(anchors)
     .filter(([, pos]) => Array.isArray(pos) && pos.length >= 3)
     .map(([name, pos]) => ({ name, x: pos[0], z: pos[2] }));
+}
+
+/**
+ * Return an array of render specs for drawing cross-hair markers and labels.
+ * Each spec is a pure-data object a renderer would use to draw a cross-hair
+ * and name label at the anchor's position.
+ *
+ * @param {Object} anchors - The `worldState.anchors` flat TOML map, e.g.
+ *   `{ starbase_alpha: [500.0, 0.0, 0.0] }`
+ * @returns {{ name: string, x: number, z: number, size: number }[]}
+ */
+export function getAnchorRenderSpecs(anchors) {
+  if (!anchors || typeof anchors !== 'object') return [];
+  return Object.entries(anchors)
+    .filter(([, pos]) => Array.isArray(pos) && pos.length >= 3)
+    .map(([name, pos]) => ({ name, x: pos[0], z: pos[2], size: 10 }));
 }
 
 /**
@@ -55,11 +73,11 @@ export function moveAnchor(worldState, anchorName, newX, newZ) {
  *
  * Resolution order:
  *   1. entity.position ([x, y, z] array) — used as-is
- *   2. entity.anchor — looked up in the anchors array
+ *   2. entity.anchor — looked up in the anchors flat TOML map
  *   3. fallback { x: 0, z: 0 }
  *
- * @param {Object}   entity  - Parsed entity object (may have .position or .anchor).
- * @param {Object}   anchors - The `worldState.anchors` map (same shape as TOML).
+ * @param {Object} entity   - Parsed entity object (may have .position or .anchor).
+ * @param {Object} anchors  - The `worldState.anchors` flat map `{ name: [x,y,z] }`.
  * @returns {{ x: number, z: number }}
  */
 export function resolveEntityPosition(entity, anchors) {
@@ -77,4 +95,15 @@ export function resolveEntityPosition(entity, anchors) {
   }
 
   return { x: 0, z: 0 };
+}
+
+/**
+ * Serialize a worldState (potentially with updated anchors) to a TOML string.
+ * Demonstrates the save path: call this after moveAnchor to persist changes.
+ *
+ * @param {Object} worldState - Parsed world TOML object (e.g. result of moveAnchor).
+ * @returns {string} TOML text ready to write to disk.
+ */
+export function serializeWorldWithAnchor(worldState) {
+  return stringifyWorldToml(worldState);
 }

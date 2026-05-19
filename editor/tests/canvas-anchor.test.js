@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getAnchorMarkers, moveAnchor, resolveEntityPosition } from '../canvas-anchor.js';
+import { getAnchorMarkers, getAnchorRenderSpecs, moveAnchor, resolveEntityPosition, serializeWorldWithAnchor } from '../canvas-anchor.js';
+import { parseWorldToml } from '../world-toml.js';
 
 // Tests for the pure anchor-logic module used by Scenario Mode canvas.
 
@@ -215,5 +216,82 @@ describe('resolveEntityPosition', () => {
     const updated = moveAnchor(worldState, 'patrol_alpha', 400.0, -400.0);
     const after = resolveEntityPosition(entity, updated.anchors);
     expect(after).toEqual({ x: 400.0, z: -400.0 });
+  });
+});
+
+describe('getAnchorRenderSpecs', () => {
+  it('returns an empty array for null/undefined input', () => {
+    expect(getAnchorRenderSpecs(null)).toEqual([]);
+    expect(getAnchorRenderSpecs(undefined)).toEqual([]);
+  });
+
+  it('returns an empty array for an empty anchors object', () => {
+    expect(getAnchorRenderSpecs({})).toEqual([]);
+  });
+
+  it('returns a spec with name, x, z, and size:10 for a single anchor', () => {
+    const anchors = { starbase_alpha: [500.0, 0.0, 0.0] };
+    const result = getAnchorRenderSpecs(anchors);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({ name: 'starbase_alpha', x: 500.0, z: 0.0, size: 10 });
+  });
+
+  it('returns specs for multiple anchors', () => {
+    const anchors = {
+      starbase_alpha: [500.0, 0.0, 0.0],
+      patrol_alpha:   [300.0, 0.0, -300.0],
+    };
+    const result = getAnchorRenderSpecs(anchors);
+    expect(result).toHaveLength(2);
+    const alpha = result.find(s => s.name === 'starbase_alpha');
+    expect(alpha).toEqual({ name: 'starbase_alpha', x: 500.0, z: 0.0, size: 10 });
+    const patrol = result.find(s => s.name === 'patrol_alpha');
+    expect(patrol).toEqual({ name: 'patrol_alpha', x: 300.0, z: -300.0, size: 10 });
+  });
+
+  it('always sets size to 10', () => {
+    const anchors = { origin: [0.0, 0.0, 0.0] };
+    const result = getAnchorRenderSpecs(anchors);
+    expect(result[0].size).toBe(10);
+  });
+
+  it('skips entries that are not arrays or have fewer than 3 elements', () => {
+    const anchors = {
+      valid: [1.0, 0.0, 2.0],
+      invalid: 'not-an-array',
+      short: [1.0, 2.0],
+    };
+    const result = getAnchorRenderSpecs(anchors);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('valid');
+  });
+});
+
+describe('serializeWorldWithAnchor', () => {
+  it('returns a non-empty string for a valid worldState', () => {
+    const worldState = {
+      global: { seed: 42 },
+      anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
+    };
+    const result = serializeWorldWithAnchor(worldState);
+    expect(typeof result).toBe('string');
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it('round-trips a moved anchor — serialize, re-parse, check new position', () => {
+    const worldState = {
+      global: { seed: 42 },
+      anchors: {
+        starbase_alpha: [500.0, 0.0, 0.0],
+        patrol_alpha:   [300.0, 0.0, -300.0],
+      },
+    };
+    const updated = moveAnchor(worldState, 'patrol_alpha', 400.0, -400.0);
+    const toml = serializeWorldWithAnchor(updated);
+    const reparsed = parseWorldToml(toml);
+    expect(reparsed.anchors.patrol_alpha[0]).toBe(400.0);
+    expect(reparsed.anchors.patrol_alpha[2]).toBe(-400.0);
+    // Other anchor unchanged
+    expect(reparsed.anchors.starbase_alpha).toEqual([500.0, 0.0, 0.0]);
   });
 });

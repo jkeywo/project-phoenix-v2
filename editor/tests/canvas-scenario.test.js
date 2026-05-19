@@ -159,15 +159,15 @@ describe('resolveEntityAppearance', () => {
         radar_appearance: { colour: [1.0, 0.0, 0.0], radius: 4.0 },
         position: [100.0, 0.0, -200.0],
       };
-      const result = resolveEntityAppearance(entity, []);
+      const result = resolveEntityAppearance(entity, {});
       expect(result.x).toBe(100.0);
       expect(result.z).toBe(-200.0);
     });
 
-    it('entity with anchor resolves position from anchors array', () => {
-      const anchors = [
-        { name: 'patrol_alpha', position: [300.0, 0.0, -300.0] },
-      ];
+    it('entity with anchor resolves position from flat anchor map', () => {
+      const anchors = {
+        patrol_alpha: [300.0, 0.0, -300.0],
+      };
       const entity = {
         tags: ['ship', 'npc'],
         radar_appearance: { colour: [1.0, 0.2, 0.2], radius: 4.0 },
@@ -180,7 +180,7 @@ describe('resolveEntityAppearance', () => {
 
     it('entity with no position or anchor defaults to [0, 0]', () => {
       const entity = { tags: ['asteroid'], radar_appearance: { colour: [0.8, 0.7, 0.4], radius: 5.0 } };
-      const result = resolveEntityAppearance(entity, []);
+      const result = resolveEntityAppearance(entity, {});
       expect(result.x).toBe(0);
       expect(result.z).toBe(0);
     });

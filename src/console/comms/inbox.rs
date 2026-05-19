@@ -1,14 +1,12 @@
 // Pure Rust module for managing the server-side Comms inbox.
 // No Bevy dependency. Owns all server-side comms message state.
 //
-// Messages are owned by the scenario that created them. On scenario unload,
-// owned messages are marked orphaned (responses disabled, "transmission ended"
-// marker). The Comms officer can clear orphaned and read messages via
+// PRD #342: legacy multi-scenario layering is gone. Messages are just
+// CommsMessage records; the Comms officer clears read messages via
 // `ClearComms`.
 //
 // Public surface:
-//   - `CommsInbox::inject` — add a message owned by a scenario
-//   - `CommsInbox::unload_scenario` — orphan all messages for that scenario
+//   - `CommsInbox::inject` — add a message
 //   - `CommsInbox::clear` — remove orphaned and read messages
 //   - `CommsInbox::messages` — ordered snapshot of current inbox
 //   - `CommsInbox::is_dirty` / `CommsInbox::mark_clean` — change tracking
@@ -19,11 +17,9 @@ use crate::messages::CommsMessage;
 #[derive(Clone, Debug)]
 struct InboxRecord {
     message: CommsMessage,
-    /// The scenario ID that owns this message.
-    scenario_id: String,
 }
 
-/// Server-side Comms inbox: stores messages across scenario boundaries.
+/// Server-side Comms inbox: stores messages for the active world.
 #[derive(Clone, Debug, Default)]
 pub struct CommsInbox {
     records: Vec<InboxRecord>,
@@ -36,37 +32,17 @@ impl CommsInbox {
         Self::default()
     }
 
-    /// Inject a comms message owned by `scenario_id` into the inbox.
+    /// Inject a comms message into the inbox.
     ///
     /// If a message with the same `id` already exists it is **not** duplicated;
     /// the call is a no-op. Returns `true` when the message was newly inserted.
-    pub fn inject(&mut self, msg: CommsMessage, scenario_id: impl Into<String>) -> bool {
+    pub fn inject(&mut self, msg: CommsMessage) -> bool {
         if self.records.iter().any(|r| r.message.id == msg.id) {
             return false;
         }
-        self.records.push(InboxRecord { message: msg, scenario_id: scenario_id.into() });
+        self.records.push(InboxRecord { message: msg });
         self.dirty = true;
         true
-    }
-
-    /// Orphan all messages owned by `scenario_id`.
-    ///
-    /// Orphaned messages have `is_orphaned = true`, their response list is
-    /// cleared (responses disabled), and their subject is set to
-    /// "Transmission ended". Returns the number of messages affected.
-    pub fn unload_scenario(&mut self, scenario_id: &str) -> usize {
-        let mut count = 0;
-        for rec in self.records.iter_mut() {
-            if rec.scenario_id == scenario_id && !rec.message.is_orphaned {
-                rec.message.is_orphaned = true;
-                rec.message.responses.clear();
-                rec.message.selected_response = None;
-                rec.message.subject = "Transmission ended".to_string();
-                count += 1;
-                self.dirty = true;
-            }
-        }
-        count
     }
 
     /// Remove all orphaned and read messages from the inbox.
@@ -149,7 +125,6 @@ mod tests {
         }
     }
 
-    // Cycle 3a: new inbox is empty and clean
     #[test]
     fn new_inbox_is_empty_and_clean() {
         let inbox = CommsInbox::new();
@@ -157,93 +132,50 @@ mod tests {
         assert!(!inbox.is_dirty());
     }
 
-    // Cycle 3b: inject adds message and sets dirty
     #[test]
     fn inject_adds_message_and_marks_dirty() {
         let mut inbox = CommsInbox::new();
-        let inserted = inbox.inject(msg("m1"), "scenario-1");
+        let inserted = inbox.inject(msg("m1"));
         assert!(inserted);
         assert_eq!(inbox.messages().len(), 1);
         assert_eq!(inbox.messages()[0].id, "m1");
         assert!(inbox.is_dirty());
     }
 
-    // Cycle 3c: inject is idempotent for same id
     #[test]
     fn inject_is_idempotent_for_same_id() {
         let mut inbox = CommsInbox::new();
-        inbox.inject(msg("m1"), "scenario-1");
+        inbox.inject(msg("m1"));
         inbox.mark_clean();
-        let second = inbox.inject(msg("m1"), "scenario-1");
+        let second = inbox.inject(msg("m1"));
         assert!(!second);
         assert_eq!(inbox.messages().len(), 1);
         assert!(!inbox.is_dirty());
     }
 
-    // Cycle 3d: unload_scenario orphans owned messages
-    #[test]
-    fn unload_scenario_orphans_owned_messages() {
-        let mut inbox = CommsInbox::new();
-        inbox.inject(msg("m1"), "scenario-1");
-        inbox.inject(msg("m2"), "scenario-2");
-        inbox.mark_clean();
-
-        let count = inbox.unload_scenario("scenario-1");
-        assert_eq!(count, 1);
-        let msgs = inbox.messages();
-        let m1 = msgs.iter().find(|m| m.id == "m1").unwrap();
-        assert!(m1.is_orphaned);
-        assert!(m1.responses.is_empty());
-        assert_eq!(m1.subject, "Transmission ended", "orphaned message subject must be 'Transmission ended'");
-        // scenario-2 message untouched
-        let m2 = msgs.iter().find(|m| m.id == "m2").unwrap();
-        assert!(!m2.is_orphaned);
-        assert!(inbox.is_dirty());
-    }
-
-    // Cycle 3e: unload_scenario does not re-orphan already-orphaned messages
-    #[test]
-    fn unload_scenario_skips_already_orphaned() {
-        let mut inbox = CommsInbox::new();
-        inbox.inject(msg("m1"), "scenario-1");
-        inbox.unload_scenario("scenario-1");
-        inbox.mark_clean();
-
-        let count = inbox.unload_scenario("scenario-1");
-        assert_eq!(count, 0);
-        assert!(!inbox.is_dirty());
-    }
-
-    // Cycle 3f: clear removes orphaned and read messages
     #[test]
     fn clear_removes_orphaned_and_read_messages() {
         let mut inbox = CommsInbox::new();
-        inbox.inject(msg("m1"), "scenario-1");
+        let mut orphaned = msg("m1");
+        orphaned.is_orphaned = true;
+        inbox.inject(orphaned);
         let mut read = msg("m2");
         read.is_read = true;
-        inbox.inject(read, "scenario-1");
-        inbox.inject(msg("m3"), "scenario-1"); // active: stays
-        inbox.unload_scenario("scenario-1"); // m1, m2, m3 all orphaned
-        // Reinject m3 as active (non-orphaned) from a new scenario
-        let mut inbox2 = CommsInbox::new();
-        inbox2.inject(msg("m3"), "scenario-2"); // fresh, non-orphaned
-        let mut read_m4 = msg("m4");
-        read_m4.is_read = true;
-        inbox2.inject(read_m4, "scenario-2");
-        inbox2.mark_clean();
+        inbox.inject(read);
+        inbox.inject(msg("m3")); // active: stays
+        inbox.mark_clean();
 
-        let removed = inbox2.clear();
-        assert_eq!(removed, 1); // only m4 (read)
-        let remaining: Vec<_> = inbox2.messages().into_iter().map(|m| m.id).collect();
+        let removed = inbox.clear();
+        assert_eq!(removed, 2);
+        let remaining: Vec<_> = inbox.messages().into_iter().map(|m| m.id).collect();
         assert_eq!(remaining, vec!["m3"]);
-        assert!(inbox2.is_dirty());
+        assert!(inbox.is_dirty());
     }
 
-    // Cycle 3g: clear leaves unread non-orphaned messages alone
     #[test]
     fn clear_leaves_active_unread_messages() {
         let mut inbox = CommsInbox::new();
-        inbox.inject(msg("m1"), "s1");
+        inbox.inject(msg("m1"));
         inbox.mark_clean();
         let removed = inbox.clear();
         assert_eq!(removed, 0);
@@ -251,11 +183,10 @@ mod tests {
         assert_eq!(inbox.messages().len(), 1);
     }
 
-    // Cycle 3h: mark_clean clears dirty flag
     #[test]
     fn mark_clean_resets_dirty() {
         let mut inbox = CommsInbox::new();
-        inbox.inject(msg("m1"), "s1");
+        inbox.inject(msg("m1"));
         assert!(inbox.is_dirty());
         inbox.mark_clean();
         assert!(!inbox.is_dirty());

@@ -198,12 +198,12 @@ src/
                         only `toml::from_str`.
     content.rs        — Pure runtime-only types: `TriggerState`, `CommsTemplateState`,
                         `ActiveDialogue`, `FiredTrigger`, `FiredCommsTemplate`, `ProcessResponseResult`,
-                        `WorldEvent`, `ScenarioManager`, `ScenarioRuntime`, plus the
+                        `WorldEvent`, plus the
                         `evaluate_triggers` / `evaluate_comms_templates` / `process_response`
                         evaluators and the `trigger_states_from_world` /
-                        `comms_template_states_from_world` factories (PRD #341 — schema types
-                        themselves live in `world/config.rs` and are re-exported here for
-                        ergonomic imports).
+                        `comms_template_states_from_world` factories (PRD #342 — multi-world
+                        layering deleted; runtime state is flat. Schema types live in
+                        `world/config.rs` and are re-exported here for ergonomic imports).
   ai/
     server.rs         — Bevy plugin: NPC patrol loop, input injection via InboundMessage.
     core.rs           — Pure AI state machine (patrol, idle, attack states).
@@ -413,7 +413,7 @@ Console input handlers use `.in_set(SimSet::Input)`, physics uses `SimSet::Physi
 | `entities/loader` | Scenario/entity loading pipeline | Yes |
 | `world/server` | WorldPlugin: world-file loading, triggers, objectives, WorldSetup broadcast. Owns `insert_world_config_resource`, `spawn_world_entities`, `init_world_runtime`, `setup_fallback_world` (PRD #341 — single `.chain()` startup, fallback gated by `run_if(not(resource_exists::<WorldConfig>))`) | Yes |
 | `world/config` | Pure single-pass `parse_world` → `WorldConfig`; owns anchors + `[[entity]]` + `[[trigger]]` + `[[comms]]` schema; `entity_template_paths`, `partition_immediate_entities` helpers (PRD #341) | No |
-| `world/content` | Runtime-only: `TriggerState`, `CommsTemplateState`, `ActiveDialogue`, `FiredTrigger`, `FiredCommsTemplate`, `ProcessResponseResult`, `WorldEvent`, `ScenarioManager`, `ScenarioRuntime`, `evaluate_triggers`, `evaluate_comms_templates`, `process_response`, `trigger_states_from_world`, `comms_template_states_from_world`. Schema types re-exported from `world/config` (PRD #341) | No |
+| `world/content` | Runtime-only: `TriggerState`, `CommsTemplateState`, `ActiveDialogue`, `FiredTrigger`, `FiredCommsTemplate`, `ProcessResponseResult`, `WorldEvent`, `evaluate_triggers`, `evaluate_comms_templates`, `process_response`, `trigger_states_from_world`, `comms_template_states_from_world`. Schema types re-exported from `world/config` (PRD #342 — multi-world layering deleted; runtime state is flat) | No |
 | `ai/server` | Bevy plugin: NPC patrol + input injection | Yes |
 | `ai/core` | Pure AI state machine | No |
 | `ai/faction` | Faction config types | No |

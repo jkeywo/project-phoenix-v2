@@ -9,9 +9,11 @@
 //   * `TriggerState` / `CommsTemplateState` — per-trigger fired flag.
 //   * `evaluate_triggers` / `evaluate_comms_templates` — single-shot evaluators.
 //   * `ActiveDialogue` / `process_response` — dialogue state machine.
-//   * `ScenarioManager` / `ScenarioRuntime` — additive multi-scenario registry.
 //   * `trigger_states_from_world` / `comms_template_states_from_world` —
 //     factories that derive runtime states from a parsed `WorldConfig`.
+//
+// PRD #342: the legacy multi-world layering machinery was deleted in slice 5.
+// One world is loaded per session; runtime state is flat.
 
 use std::collections::HashMap;
 
@@ -43,8 +45,6 @@ pub struct TriggerState {
     pub trigger: Trigger,
     /// Whether this trigger has already fired (single-shot semantics).
     pub fired: bool,
-    /// Path of the world that owns this trigger (e.g. `"assets/worlds/default.toml"`).
-    pub scenario_path: String,
 }
 
 /// Runtime state for one comms template — tracks whether it has already fired.
@@ -52,16 +52,12 @@ pub struct TriggerState {
 pub struct CommsTemplateState {
     pub template: CommsTemplate,
     pub fired: bool,
-    /// Path of the world that owns this template.
-    pub scenario_path: String,
 }
 
 /// Result of evaluating triggers against a batch of world events.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FiredTrigger {
     pub actions: Vec<TriggerAction>,
-    /// Path of the world that owned the trigger that fired.
-    pub scenario_path: String,
 }
 
 /// A comms template that fired in response to world events.
@@ -71,8 +67,6 @@ pub struct FiredCommsTemplate {
     pub from: String,
     /// The root dialogue node to inject into the inbox.
     pub node: CommsDialogueNode,
-    /// Path of the world that owns this template.
-    pub scenario_path: String,
 }
 
 /// Runtime state for one active dialogue conversation.
@@ -82,8 +76,6 @@ pub struct ActiveDialogue {
     pub message_id: String,
     /// The current dialogue node being presented.
     pub current_node: CommsDialogueNode,
-    /// Path of the world that owns this dialogue (for scoping inbox/objectives).
-    pub scenario_path: String,
 }
 
 // ── Evaluators ────────────────────────────────────────────────────────────
@@ -110,7 +102,6 @@ pub fn evaluate_triggers(
             state.fired = true;
             results.push(FiredTrigger {
                 actions: state.trigger.actions.clone(),
-                scenario_path: state.scenario_path.clone(),
             });
         }
     }
@@ -138,7 +129,6 @@ pub fn evaluate_comms_templates(
             results.push(FiredCommsTemplate {
                 from: state.template.from.clone(),
                 node: state.template.node.clone(),
-                scenario_path: state.scenario_path.clone(),
             });
         }
     }
@@ -173,11 +163,9 @@ fn condition_matches(
 
 /// Create a `Vec<TriggerState>` from a parsed `WorldConfig` (PRD #341).
 ///
-/// All triggers start unfired. The supplied `scenario_path` is recorded on
-/// every produced state for downstream scoping (objectives, comms inbox).
+/// All triggers start unfired.
 pub fn trigger_states_from_world(
     world: &crate::world::config::WorldConfig,
-    scenario_path: &str,
 ) -> Vec<TriggerState> {
     world
         .triggers
@@ -185,7 +173,6 @@ pub fn trigger_states_from_world(
         .map(|t| TriggerState {
             trigger: t.clone(),
             fired: false,
-            scenario_path: scenario_path.to_string(),
         })
         .collect()
 }
@@ -193,7 +180,6 @@ pub fn trigger_states_from_world(
 /// Create a `Vec<CommsTemplateState>` from a parsed `WorldConfig` (PRD #341).
 pub fn comms_template_states_from_world(
     world: &crate::world::config::WorldConfig,
-    scenario_path: &str,
 ) -> Vec<CommsTemplateState> {
     world
         .comms
@@ -201,7 +187,6 @@ pub fn comms_template_states_from_world(
         .map(|t| CommsTemplateState {
             template: t.clone(),
             fired: false,
-            scenario_path: scenario_path.to_string(),
         })
         .collect()
 }
@@ -234,52 +219,6 @@ pub fn process_response(
     })
 }
 
-// ── ScenarioManager ───────────────────────────────────────────────────────
-
-/// Per-path runtime state for one active world.
-#[derive(Clone, Debug, Default)]
-pub struct ScenarioRuntime {
-    pub trigger_states: Vec<TriggerState>,
-    pub comms_template_states: Vec<CommsTemplateState>,
-    pub active_dialogues: HashMap<String, ActiveDialogue>,
-    pub name_to_uuid: HashMap<String, String>,
-    pub contacts: Vec<crate::messages::CommsContact>,
-}
-
-/// Additive multi-world registry.
-#[derive(Default)]
-pub struct ScenarioManager {
-    pub scenarios: HashMap<String, ScenarioRuntime>,
-}
-
-impl ScenarioManager {
-    /// Load a scenario if not already active. Returns `true` if newly inserted, `false` if already present.
-    pub fn load_scenario(&mut self, path: impl Into<String>) -> bool {
-        let path = path.into();
-        if self.scenarios.contains_key(&path) {
-            return false;
-        }
-        self.scenarios.insert(path, ScenarioRuntime::default());
-        true
-    }
-
-    pub fn unload_scenario(&mut self, path: &str) -> Option<ScenarioRuntime> {
-        self.scenarios.remove(path)
-    }
-
-    pub fn is_active(&self, path: &str) -> bool {
-        self.scenarios.contains_key(path)
-    }
-
-    pub fn len(&self) -> usize {
-        self.scenarios.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.scenarios.is_empty()
-    }
-}
-
 // ── Unit Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -309,7 +248,6 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
-            scenario_path: "test".into(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -325,7 +263,6 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
-            scenario_path: "test".into(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -341,7 +278,6 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
-            scenario_path: "test".into(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -360,7 +296,6 @@ mod tests {
                 actions: vec![add_obj("obj-timer")],
             },
             fired: false,
-            scenario_path: "test".into(),
         }];
         let name_to_uuid = HashMap::new();
         let before = vec![WorldEvent::TimerElapsed { elapsed_secs: 10.0 }];
@@ -379,7 +314,6 @@ mod tests {
                 actions: vec![add_obj("obj-atk")],
             },
             fired: false,
-            scenario_path: "test".into(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -399,7 +333,6 @@ mod tests {
                 actions: vec![add_obj("obj-hail")],
             },
             fired: false,
-            scenario_path: "test".into(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("starbase".into(), "uuid-sb".into());
@@ -414,12 +347,10 @@ mod tests {
             TriggerState {
                 trigger: dest_trigger("raider", add_obj("obj-r")),
                 fired: false,
-                scenario_path: "test".into(),
             },
             TriggerState {
                 trigger: dest_trigger("station", add_obj("obj-s")),
                 fired: false,
-                scenario_path: "test".into(),
             },
         ];
         let mut name_to_uuid = HashMap::new();
@@ -437,7 +368,6 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: dest_trigger("ghost", add_obj("obj-ghost")),
             fired: false,
-            scenario_path: "test".into(),
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::Destroyed { uuid: "uuid-x".into() }];
@@ -452,10 +382,9 @@ mod tests {
         let mut world = WorldConfig::default();
         world.triggers.push(dest_trigger("a", add_obj("oa")));
         world.triggers.push(dest_trigger("b", add_obj("ob")));
-        let states = trigger_states_from_world(&world, "test-world");
+        let states = trigger_states_from_world(&world);
         assert_eq!(states.len(), 2);
         assert!(states.iter().all(|s| !s.fired));
-        assert!(states.iter().all(|s| s.scenario_path == "test-world"));
     }
 
     #[test]
@@ -466,10 +395,9 @@ mod tests {
             trigger: TriggerCondition::OnHailed { entity_name: "starbase".into() },
             node: CommsDialogueNode { body: "hello".into(), responses: vec![] },
         });
-        let states = comms_template_states_from_world(&world, "test-world");
+        let states = comms_template_states_from_world(&world);
         assert_eq!(states.len(), 1);
         assert!(!states[0].fired);
-        assert_eq!(states[0].scenario_path, "test-world");
     }
 
     // ── evaluate_comms_templates ──────────────────────────────────────────
@@ -483,7 +411,6 @@ mod tests {
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
             },
             fired: false,
-            scenario_path: "test".into(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-r".into());
@@ -505,7 +432,6 @@ mod tests {
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
             },
             fired: false,
-            scenario_path: "test".into(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-r".into());
@@ -528,7 +454,6 @@ mod tests {
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
             },
             fired: false,
-            scenario_path: "test".into(),
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-r".into());
@@ -555,7 +480,6 @@ mod tests {
                     follow_up: None,
                 }],
             },
-            scenario_path: "test".into(),
         }];
         let result = process_response(&dialogues, "msg-1", 0).unwrap();
         assert_eq!(result.actions.len(), 1);
@@ -577,7 +501,6 @@ mod tests {
                     }),
                 }],
             },
-            scenario_path: "test".into(),
         }];
         let result = process_response(&dialogues, "msg-1", 0).unwrap();
         assert!(result.follow_up.is_some());
@@ -598,53 +521,8 @@ mod tests {
                 body: "hi".into(),
                 responses: vec![CommsResponse { text: "a".into(), actions: vec![], follow_up: None }],
             },
-            scenario_path: "test".into(),
         }];
         assert!(process_response(&dialogues, "msg-1", 99).is_none());
-    }
-
-    // ── ScenarioManager ───────────────────────────────────────────────────
-
-    #[test]
-    fn load_scenario_inserts_new_path() {
-        let mut mgr = ScenarioManager::default();
-        assert!(mgr.load_scenario("alpha"));
-        assert!(mgr.is_active("alpha"));
-        assert_eq!(mgr.len(), 1);
-    }
-
-    #[test]
-    fn load_scenario_second_time_is_noop() {
-        let mut mgr = ScenarioManager::default();
-        assert!(mgr.load_scenario("alpha"));
-        assert!(!mgr.load_scenario("alpha"));
-        assert_eq!(mgr.len(), 1);
-    }
-
-    #[test]
-    fn load_two_different_scenarios_both_active() {
-        let mut mgr = ScenarioManager::default();
-        mgr.load_scenario("alpha");
-        mgr.load_scenario("beta");
-        assert_eq!(mgr.len(), 2);
-        assert!(mgr.is_active("alpha"));
-        assert!(mgr.is_active("beta"));
-    }
-
-    #[test]
-    fn unload_scenario_removes_from_map() {
-        let mut mgr = ScenarioManager::default();
-        mgr.load_scenario("alpha");
-        let removed = mgr.unload_scenario("alpha");
-        assert!(removed.is_some());
-        assert!(!mgr.is_active("alpha"));
-        assert!(mgr.is_empty());
-    }
-
-    #[test]
-    fn unload_nonexistent_scenario_returns_none() {
-        let mut mgr = ScenarioManager::default();
-        assert!(mgr.unload_scenario("ghost").is_none());
     }
 
     // ── Shipped-world integration ─────────────────────────────────────────
@@ -653,7 +531,7 @@ mod tests {
     fn default_world_on_attacked_fires_comms_template() {
         let toml = include_str!("../../assets/worlds/default.toml");
         let world = crate::world::config::parse_world(toml).expect("default.toml must parse");
-        let mut states = comms_template_states_from_world(&world, "default");
+        let mut states = comms_template_states_from_world(&world);
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider_alpha".into(), "uuid-r".into());
         let events = vec![WorldEvent::Attacked {
@@ -669,7 +547,7 @@ mod tests {
     fn patrol_world_on_destroyed_trigger_fires_add_objective() {
         let toml = include_str!("../../assets/worlds/patrol.toml");
         let world = crate::world::config::parse_world(toml).expect("patrol.toml must parse");
-        let mut states = trigger_states_from_world(&world, "patrol");
+        let mut states = trigger_states_from_world(&world);
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider_alpha".into(), "uuid-r".into());
         let events = vec![WorldEvent::Destroyed { uuid: "uuid-r".into() }];

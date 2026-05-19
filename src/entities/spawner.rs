@@ -79,14 +79,6 @@ pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfi
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
-/// Present on entities spawned by a scenario, identifies which scenario owns them.
-///
-/// Entities spawned from a map (not a scenario) do not carry this component.
-/// When the owning scenario is unloaded, this component is removed from the entity
-/// and the entity continues to function as self-directed.
-#[derive(Component, Clone, Debug, PartialEq)]
-pub struct ScenarioOwner(pub String);
-
 // ── Spawner ────────────────────────────────────────────────────────
 
 /// Spawn an entity from a resolved EntityConfig.
@@ -694,38 +686,6 @@ mod tests {
         let transform = world.get::<Transform>(spawned).expect("should have Transform");
         assert_eq!(transform.translation.x, 42.0);
         assert_eq!(transform.translation.z, -7.0);
-    }
-
-    // ── ScenarioOwner component tests ───────────────────────────────────────
-
-    // spawn_entity does not attach ScenarioOwner — caller's responsibility
-    #[test]
-    fn spawn_entity_does_not_attach_scenario_owner_by_default() {
-        let mut app = test_app();
-        let config = EntityConfig::from_toml("").unwrap();
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
-        assert!(
-            app.world().get::<ScenarioOwner>(spawned).is_none(),
-            "spawn_entity must not attach ScenarioOwner; caller inserts it"
-        );
-    }
-
-    // Caller can insert ScenarioOwner on the returned entity
-    #[test]
-    fn caller_can_insert_scenario_owner_after_spawn() {
-        let mut app = test_app();
-        let config = EntityConfig::from_toml("").unwrap();
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let spawned = {
-            let mut commands = app.world_mut().commands();
-            let e = spawn_entity(&mut commands, &config, Vec3::ZERO, uuid, None);
-            commands.entity(e).insert(ScenarioOwner("scenarios/phase1.toml".to_string()));
-            e
-        };
-        app.update();
-        let owner = app.world().get::<ScenarioOwner>(spawned).expect("should have ScenarioOwner");
-        assert_eq!(owner.0, "scenarios/phase1.toml");
     }
 
     // ── EntityConsoleHull component tests ───────────────────────────────────

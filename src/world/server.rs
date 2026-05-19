@@ -1,10 +1,9 @@
-﻿use bevy::prelude::*;
+use bevy::prelude::*;
 use crate::damage::ConsoleHull;
 use crate::simulation::{Ship, ShipHullIntegrity};
 use std::collections::HashMap;
 
 use crate::comms_inbox::CommsInbox;
-use crate::entity_spawner::ScenarioOwner;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::simulation::SimOutbox;
 use crate::messages::{
@@ -17,7 +16,7 @@ use crate::world::content::{
     evaluate_triggers, trigger_states_from_world,
 };
 
-// ── Resources ──────────────────────────────────────────────────────────────
+// -- Resources --------------------------------------------------------------
 
 /// Server-side runtime state for the currently active world content.
 ///
@@ -33,7 +32,7 @@ pub struct WorldContentRuntime {
     pub comms_template_states: Vec<CommsTemplateState>,
     /// Active in-flight dialogues keyed by CommsMessage id.
     pub active_dialogues: HashMap<String, ActiveDialogue>,
-    /// Named-entity → UUID mapping (populated from `WorldConfig.name_to_uuid`).
+    /// Named-entity ? UUID mapping (populated from `WorldConfig.name_to_uuid`).
     pub name_to_uuid: HashMap<String, String>,
     /// Hailable contacts derived from world comms templates.
     pub contacts: Vec<CommsContact>,
@@ -288,7 +287,7 @@ fn setup_fallback_world(
     mut materials: ResMut<Assets<StandardMaterial>>,
     _world: ResMut<WorldResource>,
 ) {
-    // ── Starfield skybox ───────────────────────────────────────────────────
+    // -- Starfield skybox ---------------------------------------------------
     // Procedural points: many small unlit white spheres at radius ~2000
     // around the origin. Cheap and works on WebGL2.
     let star_mat = materials.add(StandardMaterial {
@@ -362,7 +361,7 @@ fn setup_fallback_world(
 }
 
 
-// ── Startup systems ─────────────────────────────────────────────────────────
+// -- Startup systems ---------------------------------------------------------
 
 /// Startup system: initialise `WorldContentRuntime`, `CommsInboxRes`, and
 /// `WorldResource` from the loaded `WorldConfig` (if any).
@@ -394,11 +393,9 @@ fn init_world_runtime(
     }
 
     // Derive trigger/comms runtime states straight from the parsed world.
-    // Use a stable scenario_path key — we no longer track per-file paths.
-    let scenario_path = "world";
-    runtime.trigger_states = trigger_states_from_world(&world_config, scenario_path);
+    runtime.trigger_states = trigger_states_from_world(&world_config);
     runtime.comms_template_states =
-        comms_template_states_from_world(&world_config, scenario_path);
+        comms_template_states_from_world(&world_config);
 
     // Build the contact list from comms templates using the merged
     // `runtime.name_to_uuid` so unified-pipeline UUIDs are picked up.
@@ -441,7 +438,7 @@ fn mark_comms_dirty_on_game_start(
     inbox.0.mark_dirty();
 }
 
-// ── Update systems ──────────────────────────────────────────────────────────
+// -- Update systems ----------------------------------------------------------
 
 /// Handle `Hail { target_uuid }` messages from Comms console holders.
 ///
@@ -502,7 +499,7 @@ fn handle_hail(
                 is_orphaned: false,
             };
 
-            inbox.0.inject(msg, &f.scenario_path);
+            inbox.0.inject(msg);
 
             // Record the active dialogue.
             runtime.active_dialogues.insert(
@@ -510,7 +507,6 @@ fn handle_hail(
                 ActiveDialogue {
                     message_id: String::new(), // not needed in the map key
                     current_node: f.node.clone(),
-                    scenario_path: f.scenario_path.clone(),
                 },
             );
         }
@@ -528,7 +524,6 @@ fn handle_respond_to_message(
     mut inbox: ResMut<CommsInboxRes>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     _commands: Commands,
-    _scenario_owner_query: Query<(Entity, &ScenarioOwner)>,
 ) {
     for ev in reader.read() {
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
@@ -560,7 +555,7 @@ fn handle_respond_to_message(
         for action in &response.actions {
             match action {
                 TriggerAction::AddObjective { id, text, mandatory } => {
-                    objectives.0.add(id, text, *mandatory, &dialogue.scenario_path);
+                    objectives.0.add(id, text, *mandatory);
                 }
                 TriggerAction::CompleteObjective { id } => {
                     objectives.0.complete(id);
@@ -616,7 +611,7 @@ fn handle_respond_to_message(
                 is_orphaned: false,
             };
 
-            inbox.0.inject(new_msg, &dialogue.scenario_path);
+            inbox.0.inject(new_msg);
 
             // Record the follow-up dialogue.
             runtime.active_dialogues.insert(
@@ -624,7 +619,6 @@ fn handle_respond_to_message(
                 ActiveDialogue {
                     message_id: String::new(),
                     current_node: follow_up.clone(),
-                    scenario_path: dialogue.scenario_path.clone(),
                 },
             );
         }
@@ -708,7 +702,7 @@ fn broadcast_objective_summary(
     objectives.0.mark_clean();
 }
 
-// ── AI-event trigger system ─────────────────────────────────────────────────
+// -- AI-event trigger system -------------------------------------------------
 
 /// Read `AiEntityAttacked` and `AiEntityDestroyed` messages, translate them
 /// into `WorldEvent`s, evaluate the scenario trigger table, and execute the
@@ -719,7 +713,6 @@ fn handle_ai_events(
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut inbox: ResMut<CommsInboxRes>,
     _commands: Commands,
-    _scenario_owner_query: Query<(Entity, &ScenarioOwner)>,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
     mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
@@ -770,13 +763,12 @@ fn handle_ai_events(
             is_read: false,
             is_orphaned: false,
         };
-        inbox.0.inject(msg, &fc.scenario_path);
+        inbox.0.inject(msg);
         runtime.active_dialogues.insert(
             msg_id,
             ActiveDialogue {
                 message_id: String::new(),
                 current_node: fc.node.clone(),
-                scenario_path: fc.scenario_path.clone(),
             },
         );
     }
@@ -787,7 +779,7 @@ fn handle_ai_events(
         for action in &ft.actions {
             match action {
                 TriggerAction::AddObjective { id, text, mandatory } => {
-                    objectives.0.add(id.clone(), text.clone(), *mandatory, ft.scenario_path.clone());
+                    objectives.0.add(id.clone(), text.clone(), *mandatory);
                 }
                 TriggerAction::CompleteObjective { id } => {
                     objectives.0.complete(id);
@@ -796,7 +788,7 @@ fn handle_ai_events(
                     objectives.0.fail(id);
                 }
                 TriggerAction::SetAiState { entity, state, target } => {
-                    // Resolve spawn name → UUID
+                    // Resolve spawn name ? UUID
                     let target_uuid = match name_to_uuid.get(entity) {
                         Some(u) => u.clone(),
                         None => {
@@ -841,7 +833,7 @@ fn handle_ai_events(
                     if let Some(ref mut mods) = modifiers {
                         mods.add_or_update(crate::modifiers::Modifier {
                             source: crate::messages::ModifierSource::World {
-                                id: ft.scenario_path.clone(),
+                                id: "world".to_string(),
                                 tag: tag.clone(),
                             },
                             slot: slot.clone(),
@@ -859,7 +851,7 @@ fn handle_ai_events(
                     if let Some(ref mut mods) = modifiers {
                         mods.remove(
                             &crate::messages::ModifierSource::World {
-                                id: ft.scenario_path.clone(),
+                                id: "world".to_string(),
                                 tag: tag.clone(),
                             },
                             slot,
@@ -876,7 +868,7 @@ fn handle_ai_events(
                     if let Some(ref mut mods) = modifiers {
                         mods.add_flag(
                             crate::messages::ModifierSource::World {
-                                id: ft.scenario_path.clone(),
+                                id: "world".to_string(),
                                 tag: tag.clone(),
                             },
                             kind.clone(),
@@ -893,7 +885,7 @@ fn handle_ai_events(
                     if let Some(ref mut mods) = modifiers {
                         mods.remove_flag(
                             crate::messages::ModifierSource::World {
-                                id: ft.scenario_path.clone(),
+                                id: "world".to_string(),
                                 tag: tag.clone(),
                             },
                             kind.clone(),
@@ -910,7 +902,7 @@ fn handle_ai_events(
                     if let Some(ref mut mods) = modifiers {
                         mods.add_or_update_int(crate::modifiers::IntModifier {
                             source: crate::messages::ModifierSource::World {
-                                id: ft.scenario_path.clone(),
+                                id: "world".to_string(),
                                 tag: tag.clone(),
                             },
                             slot: slot.clone(),
@@ -928,7 +920,7 @@ fn handle_ai_events(
                     if let Some(ref mut mods) = modifiers {
                         mods.remove_int(
                             &crate::messages::ModifierSource::World {
-                                id: ft.scenario_path.clone(),
+                                id: "world".to_string(),
                                 tag: tag.clone(),
                             },
                             slot,
@@ -960,7 +952,7 @@ mod tests {
     use crate::messages::*;
     use crate::world::content::{CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition};
 
-    // ── setup_fallback_world run-condition tests (PRD #341) ──────────────────
+    // -- setup_fallback_world run-condition tests (PRD #341) ------------------
     //
     // The fallback system must run exactly when no `WorldConfig` resource is
     // present (e.g. native unit tests, no WASM-loaded world). When a
@@ -1007,7 +999,7 @@ mod tests {
         );
     }
 
-    // ── Test app ─────────────────────────────────────────────────────────────
+    // -- Test app -------------------------------------------------------------
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -1129,12 +1121,11 @@ mod tests {
                 },
             },
             fired: false,
-            scenario_path: "test".to_string(),
         });
         runtime.needs_broadcast = true;
     }
 
-    // ── Cycle 1: hail delivers CommsState to comms holder ────────────────────
+    // -- Cycle 1: hail delivers CommsState to comms holder --------------------
 
     #[test]
     fn hail_with_matching_template_sends_comms_state_to_comms_holder() {
@@ -1177,7 +1168,7 @@ mod tests {
         assert_eq!(messages[0].responses.len(), 1);
     }
 
-    // ── Cycle 2: hail from non-Comms player is ignored ───────────────────────
+    // -- Cycle 2: hail from non-Comms player is ignored -----------------------
 
     #[test]
     fn hail_from_non_comms_player_is_ignored() {
@@ -1209,7 +1200,7 @@ mod tests {
         );
     }
 
-    // ── Cycle 3: respond fires actions and updates CommsState ────────────────
+    // -- Cycle 3: respond fires actions and updates CommsState ----------------
 
     #[test]
     fn respond_to_message_fires_add_objective_and_broadcasts_update() {
@@ -1276,7 +1267,7 @@ mod tests {
         assert_eq!(objectives[0].text, "Complete the survey");
     }
 
-    // ── Cycle 4: clear comms removes read/orphaned messages ──────────────────
+    // -- Cycle 4: clear comms removes read/orphaned messages ------------------
 
     #[test]
     fn clear_comms_removes_orphaned_messages_and_broadcasts_update() {
@@ -1301,7 +1292,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<CommsInboxRes>()
             .0
-            .inject(orphaned, "default");
+            .inject(orphaned);
         let _ = tick(&mut app);
 
         push_msg(&mut app, "comms", ClientMessage::ClearComms);
@@ -1322,7 +1313,7 @@ mod tests {
         );
     }
 
-    // ── Cycle 5: initial CommsState with contacts sent on game start ─────────
+    // -- Cycle 5: initial CommsState with contacts sent on game start ---------
 
     #[test]
     fn initial_comms_state_includes_contacts_from_scenario() {
@@ -1347,7 +1338,7 @@ mod tests {
         );
     }
 
-    // ── AI-event trigger tests ───────────────────────────────────────────────
+    // -- AI-event trigger tests -----------------------------------------------
 
     /// Build a minimal test app that includes just what handle_ai_events needs.
     fn ai_trigger_test_app() -> App {
@@ -1382,7 +1373,6 @@ mod tests {
                 }],
             },
             fired: false,
-            scenario_path: "test".to_string(),
         }];
 
         // Emit the AiEntityDestroyed message.
@@ -1418,7 +1408,6 @@ mod tests {
                     }],
                 },
                 fired: false,
-                scenario_path: "test".to_string(),
             }];
         }
 
@@ -1472,7 +1461,7 @@ mod tests {
             .controller.current_state_name.clone();
         assert_eq!(ctrl_state_name, "idle");
 
-        // Set up trigger: on attacked → SetAiState to "chase"
+        // Set up trigger: on attacked ? SetAiState to "chase"
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime.name_to_uuid.insert("npc_alpha".to_string(), npc_uuid.to_string());
@@ -1486,7 +1475,6 @@ mod tests {
                     }],
                 },
                 fired: false,
-                scenario_path: "test".to_string(),
             }];
         }
 
@@ -1509,51 +1497,7 @@ mod tests {
         );
     }
 
-    // ── ScenarioOwner component tests ─────────────────────────────────────────
-
-    // Entities manually tagged with ScenarioOwner can be queried by scenario path
-    #[test]
-    fn scenario_owner_component_queryable_by_path() {
-        let mut app = App::new();
-        app.add_plugins(bevy::time::TimePlugin);
-
-        // Spawn two entities: one scenario-owned, one not
-        let owned = app.world_mut().spawn(ScenarioOwner("scenarios/alpha.toml".to_string())).id();
-        let _free = app.world_mut().spawn_empty().id();
-
-        // Query all entities with ScenarioOwner matching a specific path
-        let mut found = Vec::new();
-        for (entity, owner) in app.world_mut()
-            .query::<(Entity, &ScenarioOwner)>()
-            .iter(app.world())
-        {
-            if owner.0 == "scenarios/alpha.toml" {
-                found.push(entity);
-            }
-        }
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0], owned);
-    }
-
-    // After unloading a scenario, ScenarioOwner is removed and entity persists
-    #[test]
-    fn remove_scenario_owner_entity_persists() {
-        let mut app = App::new();
-        app.add_plugins(bevy::time::TimePlugin);
-
-        let entity = app.world_mut().spawn(ScenarioOwner("scenarios/alpha.toml".to_string())).id();
-        app.update();
-
-        // Remove ScenarioOwner (simulating unload)
-        app.world_mut().entity_mut(entity).remove::<ScenarioOwner>();
-        app.update();
-
-        // Entity still exists, no longer has ScenarioOwner
-        assert!(app.world().get_entity(entity).is_ok(), "entity should persist after owner removal");
-        assert!(app.world().get::<ScenarioOwner>(entity).is_none());
-    }
-
-    // ── on_attacked comms template auto-injection tests ───────────────────────
+    // -- on_attacked comms template auto-injection tests -----------------------
 
     /// When an entity is attacked, comms templates with `on_attacked` condition
     /// must fire automatically (no player hailing required) and inject a message
@@ -1581,7 +1525,6 @@ mod tests {
                     },
                 },
                 fired: false,
-                scenario_path: "default".to_string(),
             }];
         }
 
@@ -1625,7 +1568,6 @@ mod tests {
                     },
                 },
                 fired: false,
-                scenario_path: "default".to_string(),
             }];
         }
 
@@ -1651,7 +1593,7 @@ mod tests {
         assert_eq!(inbox.messages().len(), 1, "on_attacked comms template must fire only once");
     }
 
-    // ── Unified [[entity]] name → uuid pipeline (PRD #337/#339 slice 2) ───────
+    // -- Unified [[entity]] name ? uuid pipeline (PRD #337/#339 slice 2) -------
 
     #[test]
     fn spawn_world_entities_populates_name_to_uuid_for_named_entity() {
@@ -1923,7 +1865,7 @@ mod tests {
         );
     }
 
-    // ── PRD #337 slice 3: NPCs through unified pipeline ──────────────────
+    // -- PRD #337 slice 3: NPCs through unified pipeline ------------------
 
     #[test]
     fn spawn_immediate_entities_resolves_anchor_position_for_named_entry() {

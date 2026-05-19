@@ -1002,7 +1002,6 @@ mod tests {
     // When ScenarioUnloadedMarker is on an entity, it fires on_scenario_unloaded transition.
     #[test]
     fn on_scenario_unloaded_transition_fires_when_scenario_being_unloaded() {
-        use crate::entities::spawner::ScenarioOwner;
         use crate::entity_config::{BehaviourConfig, StateConfig};
         use crate::ai::{TransitionConfig, StringOrVec};
 
@@ -1029,7 +1028,6 @@ mod tests {
             Transform::from_xyz(0.0, 0.0, 0.0),
             EntityUuid("ent-unloaded-001".to_string()),
             BehaviourSection(behaviour),
-            ScenarioOwner("scenarios/alpha.toml".to_string()),
         )).id();
 
         app.update(); // attach controller
@@ -1046,7 +1044,7 @@ mod tests {
         );
     }
 
-    // Entity without ScenarioOwner does not get scenario_unloaded flag
+    // Entity without ScenarioUnloadedMarker does not get scenario_unloaded flag
     #[test]
     fn entity_without_scenario_owner_does_not_see_scenario_unloaded() {
         use crate::entity_config::{BehaviourConfig, StateConfig};
@@ -1071,7 +1069,7 @@ mod tests {
             }],
         };
 
-        // Entity has NO ScenarioOwner and no ScenarioUnloadedMarker
+        // Entity has no ScenarioUnloadedMarker
         let entity = app.world_mut().spawn((
             Transform::from_xyz(0.0, 0.0, 0.0),
             EntityUuid("ent-free-002".to_string()),

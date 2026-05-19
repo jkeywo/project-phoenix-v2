@@ -139,7 +139,7 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 - Internally the parser is moving toward a single-pass `parse_world` → unified `WorldConfig` (PRD #337/#338 slice 1 + #339 slice 2). The legacy `MapConfig` / `ScenarioConfig` two-pass split still runs for sections not yet folded into the unified pipeline; named `[[entity]]` entries flow through `spawn_world_entities`, while anonymous entries continue through `setup_world_from_config`.
 - Named spawn anchors are declared at the top of the world file and referenced by name from `[[spawn]]` entries' `anchor = "..."` field; positions never need to be hardcoded in scripts. Anchor lookup on `[[entity]]` is pending a later slice of PRD #337 — for now, named `[[entity]]` entries inline their position.
 - A single global seed drives all deterministic generation; per-field index offsets prevent reshuffling when one field's config changes.
-- Scenario chaining (`load_scenario` / `unload_scenario` actions) is **not supported.** Each session loads exactly one world file at startup and runs it to completion.
+- World chaining is **not supported.** Each session loads exactly one world file at startup and runs it to completion.
 
 ### Asteroids and asteroid fields
 - An asteroid field is an entity with inner radius, outer radius, density, and a list of gameplay/cosmetic asteroid type paths.
@@ -187,22 +187,20 @@ A per-console complexity tier hides UI elements and adds AI to operate the hidde
 ### World engine
 - World files are TOMLs in `assets/worlds/`, fetched at runtime by JS and passed into Rust via a single `wasm_load_world(path, toml_str)` call (WASM) or read from disk (native).
 - A world file can spawn entities, react to trigger conditions, fire actions, manage objectives, and script comms exchanges — all the things the old separate "scenario" file used to do, plus the static layout (anchors, entity instances) the old separate "map" file used to do.
-- **One world per session.** Scenario chaining is removed. The `LoadScenario` / `UnloadScenario` trigger actions no longer exist. The world file loaded at startup is the only world for that session.
+- **One world per session.** World chaining is removed. The world file loaded at startup is the only world for that session.
 - World triggers fire only the first time their condition is met per session (single-shot).
-- Internally `ScenarioManager`, `ScenarioOwner`, and the `scenario_path` field on triggers/comms/dialogues survive as plumbing for `CommsInbox::unload_scenario` and `ObjectiveManager::unload_scenario` cleanup paths — they are not exposed to TOML authors. PRD #337 will delete these and the multi-scenario `HashMap<path, …>` layering throughout the runtime.
+- Runtime state is flat: triggers, comms templates, dialogues, inbox messages, and objectives all live for the duration of the session with no per-world ownership tracking (PRD #342).
 
 ### Trigger conditions
 - `on_attacked` — fires when the named entity is attacked.
 - `on_destroyed` — fires when the named entity is destroyed (hull reaches 0).
 - `on_hailed` — fires when an entity is hailed by the Comms officer.
 - `on_timer { seconds }` — fires after a duration.
-- `on_entity_attacked { entity }` / `on_entity_destroyed { entity }` — scenario subscribes to AI/world events on a named entity.
+- `on_entity_attacked { entity }` / `on_entity_destroyed { entity }` — world subscribes to AI/world events on a named entity.
 
 ### Trigger actions
-- `load_scenario { path }` — additively loads a follow-on scenario alongside any currently active scenarios. No-op if the path is already active.
-- `unload_scenario { path }` — explicitly unloads a named scenario: fires `on_scenario_unloaded` on all owned AI entities immediately, orphans owned comms messages, removes the scenario from the active map. Owned entities persist as self-directed.
 - `add_objective` / `complete_objective` / `fail_objective` — manage the objective list.
-- Inline branching dialogue inside a single scenario file for short exchanges.
+- Inline branching dialogue inside a single world file for short exchanges.
 - `set_ai_state { entity, state, target? }` — forces a named AI entity into a given state; resets `state_entered_at`, optionally overwrites blackboard `target`, leaves `last_attacker` and `waypoint_index` alone.
 - `apply_modifier { entity, tag, slot, bonus: f32 }` / `remove_modifier { entity, tag, slot }` — scenario-applied float modifier on a slot.
 - `apply_int_modifier { entity, tag, slot, bonus: i32 }` / `remove_int_modifier { entity, tag, slot }` — scenario-applied integer modifier (e.g. grant a bonus repair team).

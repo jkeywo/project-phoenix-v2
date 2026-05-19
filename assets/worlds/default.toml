@@ -85,6 +85,14 @@ entity    = "raider_alpha"
   text      = "Pirate raider eliminated."
   mandatory = false
 
+[[trigger]]
+condition = "on_attacked"
+entity    = "raider_alpha"
+
+  [[trigger.action]]
+  type          = "load_scenario"
+  load_scenario = "assets/worlds/patrol.toml"
+
 # ── Comms templates ──────────────────────────────────────────────────────────
 
 # Automatic distress call broadcast when the raider is first attacked.

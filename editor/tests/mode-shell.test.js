@@ -179,6 +179,58 @@ describe('mode-shell', () => {
     });
   });
 
+  describe('active layer per mode (write-destination)', () => {
+    it('starts with no active layer', () => {
+      const shell = new ModeShell();
+      expect(shell.getActiveLayer('Scenario')).toBeNull();
+    });
+
+    it('setActiveLayer stores the write-destination layer for a mode', () => {
+      const shell = new ModeShell();
+      shell.setOpenFiles('Scenario', ['worlds/a.toml', 'worlds/b.toml']);
+      shell.setActiveLayer('Scenario', 'worlds/b.toml');
+      expect(shell.getActiveLayer('Scenario')).toBe('worlds/b.toml');
+    });
+
+    it('active layer is independent from active file', () => {
+      const shell = new ModeShell();
+      shell.setOpenFiles('Scenario', ['worlds/a.toml', 'worlds/b.toml']);
+      shell.setActiveFile('Scenario', 'worlds/a.toml');
+      shell.setActiveLayer('Scenario', 'worlds/b.toml');
+      expect(shell.getActiveFile('Scenario')).toBe('worlds/a.toml');
+      expect(shell.getActiveLayer('Scenario')).toBe('worlds/b.toml');
+    });
+
+    it('active layer and active file remain independent after mode switch and back', () => {
+      const shell = new ModeShell();
+      shell.setOpenFiles('Scenario', ['worlds/a.toml', 'worlds/b.toml']);
+      shell.setActiveFile('Scenario', 'worlds/a.toml');
+      shell.setActiveLayer('Scenario', 'worlds/b.toml');
+
+      shell.switchMode('Entity');
+      shell.setActiveFile('Entity', 'entities/c.toml');
+      shell.setActiveLayer('Entity', 'entities/d.toml');
+
+      shell.switchMode('Scenario');
+      expect(shell.getActiveFile('Scenario')).toBe('worlds/a.toml');
+      expect(shell.getActiveLayer('Scenario')).toBe('worlds/b.toml');
+    });
+
+    it('active layer is independent per mode', () => {
+      const shell = new ModeShell();
+      shell.setActiveLayer('Scenario', 'worlds/a.toml');
+      shell.setActiveLayer('Entity', 'entities/b.toml');
+      expect(shell.getActiveLayer('Scenario')).toBe('worlds/a.toml');
+      expect(shell.getActiveLayer('Entity')).toBe('entities/b.toml');
+    });
+
+    it('setActiveLayer with invalid mode is silently ignored', () => {
+      const shell = new ModeShell();
+      shell.setActiveLayer('NonExistent', 'file.toml');
+      expect(shell.getActiveLayer('NonExistent')).toBeNull();
+    });
+  });
+
   describe('undo history per file per mode', () => {
     it('starts with empty undo history', () => {
       const shell = new ModeShell();

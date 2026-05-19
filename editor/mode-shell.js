@@ -7,12 +7,14 @@ export class ModeShell {
     this._openFiles = {};
     this._dirtyFiles = {};
     this._activeFiles = {};
+    this._activeLayer = {};
     this._undoHistory = {};
 
     for (const mode of modes) {
       this._openFiles[mode] = [];
       this._dirtyFiles[mode] = {};
       this._activeFiles[mode] = null;
+      this._activeLayer[mode] = null;
       this._undoHistory[mode] = {};
     }
   }
@@ -75,6 +77,16 @@ export class ModeShell {
   setActiveFile(mode, filePath) {
     if (!this._modes.includes(mode)) return;
     this._activeFiles[mode] = filePath;
+  }
+
+  getActiveLayer(mode) {
+    if (!this._modes.includes(mode)) return null;
+    return this._activeLayer[mode];
+  }
+
+  setActiveLayer(mode, filePath) {
+    if (!this._modes.includes(mode)) return;
+    this._activeLayer[mode] = filePath;
   }
 
   getUndoHistory(mode, filePath) {

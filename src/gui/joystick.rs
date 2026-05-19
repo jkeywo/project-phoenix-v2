@@ -170,7 +170,7 @@ fn on_joystick_drag_start(
     trigger: On<Pointer<DragStart>>,
     mut pads: Query<&mut JoystickDragState, With<GenericJoystickPad>>,
 ) {
-    let entity = trigger.entity();
+    let entity = trigger.entity;
     if let Ok(mut state) = pads.get_mut(entity) {
         state.active = true;
     }
@@ -181,7 +181,7 @@ fn on_joystick_drag(
     mut pads: Query<(&GenericJoystickPad, &mut JoystickDragState)>,
     mut commands: Commands,
 ) {
-    let entity = trigger.entity();
+    let entity = trigger.entity;
     let Ok((pad_comp, mut state)) = pads.get_mut(entity) else {
         return;
     };
@@ -207,7 +207,7 @@ fn on_joystick_drag_end(
     mut pads: Query<&mut JoystickDragState, With<GenericJoystickPad>>,
     mut commands: Commands,
 ) {
-    let entity = trigger.entity();
+    let entity = trigger.entity;
     if let Ok(mut state) = pads.get_mut(entity) {
         release_joystick(&mut state, entity, &mut commands);
     }
@@ -218,7 +218,7 @@ fn on_joystick_cancel(
     mut pads: Query<&mut JoystickDragState, With<GenericJoystickPad>>,
     mut commands: Commands,
 ) {
-    let entity = trigger.entity();
+    let entity = trigger.entity;
     if let Ok(mut state) = pads.get_mut(entity) {
         release_joystick(&mut state, entity, &mut commands);
     }

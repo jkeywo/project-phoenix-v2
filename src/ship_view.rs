@@ -128,40 +128,91 @@ struct ConsoleHullBarBg;
 #[derive(Component)]
 struct ConsoleHullBarFill;
 
+/// Marks the `current / max` text overlay shown on top of the hull bar.
+#[cfg(feature = "client")]
+#[derive(Component)]
+struct ConsoleHullBarText;
+
 #[allow(dead_code)]
-const HULL_BAR_BG: Color = Color::srgba(0.15, 0.15, 0.15, 0.85);
+const HULL_BAR_BG: Color = Color::srgba(0.08, 0.08, 0.12, 0.85);
 #[allow(dead_code)]
 const HULL_BAR_FILL: Color = Color::srgb(0.2, 0.75, 0.3);
 #[allow(dead_code)]
 const HULL_BAR_FILL_LOW: Color = Color::srgb(0.85, 0.25, 0.15);
 
+/// Width of the hull bar in logical pixels — wide enough to hold a "999 / 999"
+/// text overlay comfortably.
+#[cfg(feature = "client")]
+const HULL_BAR_WIDTH: f32 = 220.0;
+
+/// Height of the hull bar in logical pixels.
+#[cfg(feature = "client")]
+const HULL_BAR_HEIGHT: f32 = 18.0;
+
+/// Distance from the bottom edge of the viewport.
+#[cfg(feature = "client")]
+const HULL_BAR_BOTTOM: f32 = 12.0;
+
 #[cfg(feature = "client")]
 fn spawn_console_hull_bar(mut commands: Commands) {
+    // Outer wrapper centres the bar horizontally at the bottom of the
+    // viewport using a full-width flex row anchored at the bottom edge.
     commands
         .spawn((
             ConsoleHullBarBg,
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(16.0),
-                left: Val::Px(16.0),
-                width: Val::Px(200.0),
-                height: Val::Px(14.0),
+                bottom: Val::Px(HULL_BAR_BOTTOM),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                height: Val::Px(HULL_BAR_HEIGHT),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(HULL_BAR_BG),
             Visibility::Hidden,
         ))
-        .with_children(|bg| {
-            bg.spawn((
-                ConsoleHullBarFill,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                BackgroundColor(HULL_BAR_FILL),
-                Visibility::Hidden,
-            ));
+        .with_children(|wrapper| {
+            // Inner bar: fixed-width pill that holds the fill + text overlay.
+            wrapper
+                .spawn((
+                    Node {
+                        width: Val::Px(HULL_BAR_WIDTH),
+                        height: Val::Px(HULL_BAR_HEIGHT),
+                        position_type: PositionType::Relative,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(HULL_BAR_BG),
+                ))
+                .with_children(|bar| {
+                    // Fill: anchored to the left edge so width % maps to HP %.
+                    bar.spawn((
+                        ConsoleHullBarFill,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            bottom: Val::Px(0.0),
+                            width: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(HULL_BAR_FILL),
+                        Visibility::Hidden,
+                    ));
+                    // Text overlay on top of the fill, centred over the bar.
+                    bar.spawn((
+                        ConsoleHullBarText,
+                        Text::new(""),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(Color::srgb(0.95, 0.95, 0.95)),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            ..default()
+                        },
+                    ));
+                });
         });
 }
 
@@ -169,8 +220,9 @@ fn spawn_console_hull_bar(mut commands: Commands) {
 fn update_console_hull_bar(
     ship_view: Res<ShipView>,
     active: Res<crate::lobby::client_panel::ActiveConsole>,
-    mut bg_q: Query<&mut Visibility, (With<ConsoleHullBarBg>, Without<ConsoleHullBarFill>)>,
-    mut fill_q: Query<(&mut Node, &mut Visibility, &mut BackgroundColor), With<ConsoleHullBarFill>>,
+    mut bg_q: Query<&mut Visibility, (With<ConsoleHullBarBg>, Without<ConsoleHullBarFill>, Without<ConsoleHullBarText>)>,
+    mut fill_q: Query<(&mut Node, &mut Visibility, &mut BackgroundColor), (With<ConsoleHullBarFill>, Without<ConsoleHullBarText>)>,
+    mut text_q: Query<&mut Text, With<ConsoleHullBarText>>,
 ) {
     if !ship_view.is_changed() && !active.is_changed() {
         return;
@@ -189,6 +241,12 @@ fn update_console_hull_bar(
                 color.0 = if fraction < 0.35 { HULL_BAR_FILL_LOW } else { HULL_BAR_FILL };
             }
         }
+    }
+    for mut text in &mut text_q {
+        text.0 = match hp_data {
+            None => String::new(),
+            Some((cur, max)) => format!("{} / {}", cur.round() as i32, max.round() as i32),
+        };
     }
 }
 

@@ -399,6 +399,8 @@ fn setup_fallback_world(
         science_console: None,
             sensors_console: None,
         shields_console: None,
+        torpedoes: None,
+        repair: None,
         star: None,
         planet: None,
         asteroid_field: None,

@@ -290,15 +290,38 @@ pub struct ShipClientConfig {
     /// from `[helm_console.radar] range` in the ship TOML.
     #[serde(default = "default_helm_radar_range")]
     pub helm_radar_range: f32,
+    /// Seconds a repair team spends travelling to a console (and returning).
+    /// Sourced from `[repair] travel_duration_secs` in the ship TOML. Used by
+    /// the client Repair panel to render travel/return progress bars.
+    #[serde(default = "default_repair_travel_secs")]
+    pub repair_travel_secs: f32,
+    /// HP restored per second while a repair team is at a console. Sourced
+    /// from `[repair] repair_rate_hp_per_sec`. Used by the client Repair
+    /// panel to derive the in-progress repair bar fill duration from the
+    /// target console's `max_hp`.
+    #[serde(default = "default_repair_rate_hp_per_sec")]
+    pub repair_rate_hp_per_sec: f32,
 }
 
 fn default_helm_radar_range() -> f32 {
     500.0
 }
 
+fn default_repair_travel_secs() -> f32 {
+    5.0
+}
+
+fn default_repair_rate_hp_per_sec() -> f32 {
+    0.5
+}
+
 impl Default for ShipClientConfig {
     fn default() -> Self {
-        Self { helm_radar_range: default_helm_radar_range() }
+        Self {
+            helm_radar_range: default_helm_radar_range(),
+            repair_travel_secs: default_repair_travel_secs(),
+            repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
+        }
     }
 }
 

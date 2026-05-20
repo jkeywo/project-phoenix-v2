@@ -13,9 +13,16 @@ use crate::ship_state::ShipState;
 use crate::radar::WEAPONS_RADAR_RANGE;
 
 // ── Beam constants ───────────────────────────────────────────────────────
-const BEAM_DURATION_SECS: f32 = 6.0;
+//
+// The legacy hardcoded values that used to drive the player phaser beam.
+// As of slice 3 of the data-driven refactor these are sourced from the
+// `PhaserCombatConfigResource` (Bevy resource), which is seeded from the
+// `[weapons_console]` block in the ship TOML. `BEAM_DAMAGE_PER_SEC`
+// remains `pub` because test scaffolding in `server_app.rs` references it
+// as a documented baseline; gameplay systems must read the resource.
+const _LEGACY_BEAM_DURATION_SECS: f32 = 6.0;
 pub const BEAM_DAMAGE_PER_SEC: f32 = 5.0;
-const BEAM_COOLDOWN_SECS: f32 = 6.0;
+const _LEGACY_BEAM_COOLDOWN_SECS: f32 = 6.0;
 
 // ── Resources ─────────────────────────────────────────────────────────────
 
@@ -36,8 +43,9 @@ pub struct ActiveBeam {
     pub bank: Option<crate::messages::PhaserBank>,
 }
 
-/// Post-beam cooldown. The weapons console is locked out for `BEAM_COOLDOWN_SECS`
-/// after every beam end (natural, sever, or cancel).
+/// Post-beam cooldown. The weapons console is locked out for
+/// `PhaserCombatConfigResource.beam_cooldown_secs` after every beam end
+/// (natural, sever, or cancel).
 #[derive(Resource, Default)]
 pub struct PhaserCooldown {
     pub remaining_secs: f32,
@@ -48,8 +56,17 @@ impl PhaserCooldown {
         self.remaining_secs > 0.0
     }
 
-    pub fn start(&mut self) {
-        self.remaining_secs = BEAM_COOLDOWN_SECS;
+    /// Start the cooldown. Reads the per-ship cooldown from
+    /// `PhaserCombatConfig`; callers without access to the resource
+    /// (legacy tests) can use [`Self::start_with_cooldown`].
+    pub fn start(&mut self, config: &crate::entity_config::PhaserCombatConfig) {
+        self.remaining_secs = config.beam_cooldown_secs;
+    }
+
+    /// Start the cooldown with an explicit value. Convenience for unit
+    /// tests that don't construct a `PhaserCombatConfig`.
+    pub fn start_with_cooldown(&mut self, secs: f32) {
+        self.remaining_secs = secs;
     }
 }
 
@@ -92,6 +109,17 @@ impl Default for PhaserRenderConfig {
 /// Wraps the pure-Rust torpedo system so it can be used as a Bevy resource.
 #[derive(Resource)]
 pub struct TorpedoSystemResource(pub TorpedoSystem);
+
+/// Bevy resource holding the player-ship phaser combat tuning
+/// (beam duration, beam cooldown, beam damage per second, phaser range).
+///
+/// Seeded with `PhaserCombatConfig::default()` (the historical
+/// hardcoded values) by `WeaponsPlugin::build`, and overridden in
+/// `spawn_game_start_entities` from the player ship's `[weapons_console]`
+/// block. Read by `handle_fire_phaser`, `tick_active_beam`, and the
+/// `weapons_update_broadcaster` to drive player phaser behaviour.
+#[derive(Resource, Default)]
+pub struct PhaserCombatConfigResource(pub crate::entity_config::PhaserCombatConfig);
 
 /// Bevy message fired (with world-space position) when an asteroid is destroyed
 /// by phaser fire. The renderer uses this to spawn a ripple VFX at the site.
@@ -140,6 +168,7 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<PhaserCooldown>()
             .init_resource::<CurrentPhaserMode>()
             .init_resource::<PhaserRenderConfig>()
+            .init_resource::<PhaserCombatConfigResource>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .add_message::<AsteroidDestroyedVfx>()
             .add_observer(on_beam_started)
@@ -209,6 +238,7 @@ fn handle_fire_phaser(
     mut beam: ResMut<ActiveBeam>,
     cooldown: Res<PhaserCooldown>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
+    combat_config: Res<PhaserCombatConfigResource>,
     _outbox: ResMut<SimOutbox>,
 ) {
     for ev in reader.read() {
@@ -225,7 +255,7 @@ fn handle_fire_phaser(
         let Some(asteroid) = world.0.entities.iter().find(|a| &a.uuid == target_uuid) else {
             continue;
         };
-        let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
+        let effective_phaser_range = combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
         if !crate::radar::is_fire_ready_with_range(asteroid.x(), asteroid.z(), ship.x, ship.z, ship.yaw, effective_phaser_range) {
             continue;
         }
@@ -241,7 +271,7 @@ fn handle_fire_phaser(
             _ => crate::messages::PhaserBank::Port,
         };
         beam.target_uuid = Some(target_uuid.clone());
-        beam.remaining_secs = BEAM_DURATION_SECS;
+        beam.remaining_secs = combat_config.0.beam_duration_secs;
         beam.damage_accumulator = 0.0;
         beam.bank = Some(next_bank);
 
@@ -510,6 +540,7 @@ fn tick_active_beam(
     mut hull_query: Query<(Entity, Option<&AsteroidUuid>, Option<&crate::entity_spawner::EntityUuid>, &mut EntityConsoleHull)>,
     mut commands: Commands,
     modifiers: Res<crate::modifiers::ShipModifiers>,
+    combat_config: Res<PhaserCombatConfigResource>,
     mut outbox: ResMut<SimOutbox>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
@@ -527,22 +558,22 @@ fn tick_active_beam(
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start();
+        cooldown.start(&combat_config.0);
         commands.trigger(BeamEndedEvent { target_uuid });
         return;
     };
 
-    let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
+    let effective_phaser_range = combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
     if !crate::radar::is_fire_ready_with_range(info.x(), info.z(), ship.x, ship.z, ship.yaw, effective_phaser_range) {
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start();
+        cooldown.start(&combat_config.0);
         commands.trigger(BeamEndedEvent { target_uuid });
         return;
     }
 
-    beam.damage_accumulator += BEAM_DAMAGE_PER_SEC * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
+    beam.damage_accumulator += combat_config.0.beam_damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
     let damage_to_apply = beam.damage_accumulator.floor() as i32;
     if damage_to_apply > 0 {
         beam.damage_accumulator -= damage_to_apply as f32;
@@ -579,7 +610,7 @@ fn tick_active_beam(
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            cooldown.start();
+            cooldown.start(&combat_config.0);
 
             outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
             commands.trigger(BeamEndedEvent { target_uuid });
@@ -595,7 +626,7 @@ fn tick_active_beam(
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            cooldown.start();
+            cooldown.start(&combat_config.0);
 
             commands.trigger(BeamEndedEvent { target_uuid });
             return;
@@ -607,7 +638,7 @@ fn tick_active_beam(
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start();
+        cooldown.start(&combat_config.0);
         commands.trigger(BeamEndedEvent { target_uuid });
     }
 }
@@ -626,8 +657,9 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             let beam = world.resource::<ActiveBeam>();
             let torpedo_sys = world.resource::<TorpedoSystemResource>();
             let modifiers = world.resource::<crate::modifiers::ShipModifiers>();
+            let combat_config = world.resource::<PhaserCombatConfigResource>();
 
-            let effective_phaser_range = crate::radar::PHASER_RANGE * modifiers.get(&ModifierSlot::RadarRange);
+            let effective_phaser_range = combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
             let fire_ready = match &weapons_target.0 {
                 None => false,
                 Some(uuid) => {
@@ -1128,6 +1160,59 @@ mod tests {
             out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube: crate::messages::TorpedoTube::ForePort, .. })),
             "expected TorpedoLaunched broadcast after Tactical fires torpedo"
         );
+    }
+
+    #[test]
+    fn torpedo_system_resource_reflects_player_ship_toml_torpedoes_block() {
+        // End-to-end TOML-driven wiring check: build the runtime
+        // TorpedoSystem the same way `spawn_game_start_entities` does
+        // (parse player_ship.toml → TorpedoesConfig::to_runtime → TorpedoSystem)
+        // and assert the magazine size matches the TOML.
+        let toml_str = include_str!("../../../assets/entities/player_ship.toml");
+        let config = crate::entity_config::EntityConfig::from_toml(toml_str)
+            .expect("player_ship.toml must parse");
+        let tc = config.torpedoes.expect("player_ship must declare [torpedoes]");
+        let runtime = tc.to_runtime();
+        let sys = crate::torpedo::TorpedoSystem::new(runtime.clone());
+        // Magazine size matches TOML — changing `count = 10` to `count = 99`
+        // in player_ship.toml would fail this assertion.
+        assert_eq!(sys.torpedoes_remaining, tc.count);
+        assert_eq!(sys.config.damage_hull, tc.damage_hull);
+        assert_eq!(sys.config.load_time, tc.load_time);
+        assert!((sys.config.turn_rate - tc.turn_rate_deg_per_sec.to_radians()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn phaser_combat_config_resource_reflects_player_ship_toml_weapons_console() {
+        // End-to-end TOML-driven wiring check: build the runtime
+        // PhaserCombatConfig the same way `spawn_game_start_entities` does
+        // (parse player_ship.toml → PhaserCombatConfig::from_weapons_console
+        // → PhaserCombatConfigResource) and assert the resulting cooldown is
+        // exactly what the TOML says. Changing `cooldown_secs = 6.0` to
+        // `99.0` in player_ship.toml would fail this assertion.
+        let toml_str = include_str!("../../../assets/entities/player_ship.toml");
+        let config = crate::entity_config::EntityConfig::from_toml(toml_str)
+            .expect("player_ship.toml must parse");
+        let wc = config.weapons_console
+            .expect("player_ship must declare [weapons_console]");
+        let combat = crate::entity_config::PhaserCombatConfig::from_weapons_console(&wc);
+
+        // The four values that actually drive player phaser behaviour.
+        assert_eq!(combat.beam_cooldown_secs, wc.cooldown_secs,
+            "beam_cooldown_secs must match TOML cooldown_secs");
+        assert_eq!(combat.beam_duration_secs, wc.beam_duration_secs,
+            "beam_duration_secs must match TOML beam_duration_secs");
+        assert_eq!(combat.beam_damage_per_sec, wc.beam_damage_per_sec,
+            "beam_damage_per_sec must match TOML beam_damage_per_sec");
+        assert_eq!(combat.phaser_range, wc.beam_range,
+            "phaser_range must match TOML beam_range");
+
+        // And starting the cooldown produces exactly that value, so it flows
+        // through to live `PhaserCooldown.remaining_secs`.
+        let mut cd = PhaserCooldown::default();
+        cd.start(&combat);
+        assert_eq!(cd.remaining_secs, wc.cooldown_secs,
+            "PhaserCooldown::start must use the TOML-sourced cooldown");
     }
 
     #[test]

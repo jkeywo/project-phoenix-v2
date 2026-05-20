@@ -58,8 +58,25 @@ pub struct RowData {
 const TRAVEL_DURATION_SECS: f32 = 5.0;
 const REPAIR_DURATION_SECS: f32 = 50.0;
 
-/// Derive [`RowData`] from a single `TeamSlot`.
-pub fn row_data_for_slot(slot: &TeamSlot) -> RowData {
+/// Derive [`RowData`] from a single `TeamSlot` using server-broadcast timings.
+///
+/// `travel_duration_secs` and `repair_duration_secs` are sourced from
+/// `LobbyState.ship_config` (which carries the `[repair]` block from the
+/// ship TOML). `repair_duration_secs` is the time to fully repair the
+/// target console at the broadcast rate (i.e. `console_max_hp / rate`).
+///
+/// Callers that don't have the server timings yet (very early frames, or
+/// pure tests) can use [`row_data_for_slot`] which falls back to the
+/// historical baseline (5s travel / 50s repair for a 25-HP console).
+pub fn row_data_for_slot_with_timings(
+    slot: &TeamSlot,
+    travel_duration_secs: f32,
+    repair_duration_secs: f32,
+) -> RowData {
+    // Guard against divide-by-zero / negative timings from a misconfigured
+    // ship TOML — fall back to the baseline so the UI never produces NaN.
+    let travel = if travel_duration_secs > 0.0 { travel_duration_secs } else { TRAVEL_DURATION_SECS };
+    let repair = if repair_duration_secs > 0.0 { repair_duration_secs } else { REPAIR_DURATION_SECS };
     match slot {
         TeamSlot::Idle => RowData {
             pct: 0.0,
@@ -69,21 +86,21 @@ pub fn row_data_for_slot(slot: &TeamSlot) -> RowData {
             active_console: None,
         },
         TeamSlot::Travelling { console, elapsed } => RowData {
-            pct: (elapsed / TRAVEL_DURATION_SECS * 100.0).clamp(0.0, 100.0),
+            pct: (elapsed / travel * 100.0).clamp(0.0, 100.0),
             fills: true,
             status: format!("→ {}", console.display_name()),
             is_idle: false,
             active_console: Some(console.clone()),
         },
         TeamSlot::Repairing { console, elapsed } => RowData {
-            pct: (elapsed / REPAIR_DURATION_SECS * 100.0).clamp(0.0, 100.0),
+            pct: (elapsed / repair * 100.0).clamp(0.0, 100.0),
             fills: true,
             status: format!("Repairing {}", console.display_name()),
             is_idle: false,
             active_console: Some(console.clone()),
         },
         TeamSlot::Returning { remaining, queued } => RowData {
-            pct: (remaining / TRAVEL_DURATION_SECS * 100.0).clamp(0.0, 100.0),
+            pct: (remaining / travel * 100.0).clamp(0.0, 100.0),
             fills: false,
             status: if let Some(c) = queued {
                 format!("Returning → {}", c.display_name())
@@ -94,6 +111,14 @@ pub fn row_data_for_slot(slot: &TeamSlot) -> RowData {
             active_console: queued.clone(),
         },
     }
+}
+
+/// Back-compat wrapper that uses the historical baseline timings
+/// (5 s travel, 50 s repair for a 25-HP console). Prefer
+/// [`row_data_for_slot_with_timings`] in live code paths so the panel
+/// honours the `[repair]` block in the ship TOML.
+pub fn row_data_for_slot(slot: &TeamSlot) -> RowData {
+    row_data_for_slot_with_timings(slot, TRAVEL_DURATION_SECS, REPAIR_DURATION_SECS)
 }
 
 // ── Marker components ────────────────────────────────────────────────
@@ -224,12 +249,13 @@ fn toggle_repair_panel_visibility(
 /// Refresh the repair panel: hull display and dynamic team rows with dispatch buttons.
 fn refresh_repair_panel(
     sim: Res<ClientSimState>,
+    lobby: Res<LobbyState>,
     mut hull_text: Query<&mut Text, With<RepairHullText>>,
     container: Query<Entity, With<RepairTeamContainer>>,
     mut commands: Commands,
     existing_rows: Query<Entity, With<RepairTeamRow>>,
 ) {
-    if !sim.is_changed() {
+    if !sim.is_changed() && !lobby.is_changed() {
         return;
     }
 
@@ -250,7 +276,11 @@ fn refresh_repair_panel(
         return;
     };
 
-    // Pre-compute team row data via the pure `row_data_for_slot` function.
+    // Server-broadcast repair pacing (sourced from [repair] in the ship TOML).
+    let travel_secs = lobby.ship_config.repair_travel_secs;
+    let repair_rate = lobby.ship_config.repair_rate_hp_per_sec;
+
+    // Pre-compute team row data via the pure `row_data_for_slot_with_timings` function.
     struct RenderRow {
         data: RowData,
         bar_color: Color,
@@ -258,7 +288,25 @@ fn refresh_repair_panel(
     }
 
     let rows: Vec<RenderRow> = sim.repair_teams.iter().map(|slot| {
-        let data = row_data_for_slot(slot);
+        // Derive "time to fully repair the target console" from the broadcast
+        // rate and the target console's max_hp (so a 50-HP console correctly
+        // takes twice as long to fill as a 25-HP one). Fall back to the first
+        // console_hull entry when the slot isn't pointing at a known console.
+        let repair_secs = match slot {
+            TeamSlot::Repairing { console, .. } | TeamSlot::Travelling { console, .. } => {
+                let max_hp = sim.console_hull
+                    .iter()
+                    .find(|h| &h.console == console)
+                    .map(|h| h.max_hp)
+                    .unwrap_or(25.0);
+                if repair_rate > 0.0 { max_hp / repair_rate } else { 50.0 }
+            }
+            _ => {
+                let max_hp = sim.console_hull.first().map(|h| h.max_hp).unwrap_or(25.0);
+                if repair_rate > 0.0 { max_hp / repair_rate } else { 50.0 }
+            }
+        };
+        let data = row_data_for_slot_with_timings(slot, travel_secs, repair_secs);
         let (bar_color, status_color) = if data.is_idle {
             (Color::srgb(0.10, 0.20, 0.60), Color::srgb(0.5, 0.7, 1.0))
         } else if data.fills {
@@ -607,5 +655,52 @@ mod tests {
         assert!(
             matches!(msg, ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm }),
         );
+    }
+
+    // ── row_data_for_slot_with_timings (broadcast-driven) ────────────
+
+    #[test]
+    fn travelling_pct_scales_with_broadcast_travel_duration() {
+        // With travel=10s, elapsed=2.5s should yield 25 % (vs 50 % at travel=5s).
+        let d = row_data_for_slot_with_timings(
+            &TeamSlot::Travelling { console: Console::Helm, elapsed: 2.5 },
+            10.0, // broadcast travel duration
+            50.0, // repair duration unused for Travelling
+        );
+        assert!((d.pct - 25.0).abs() < 0.01, "pct should be 25, got {}", d.pct);
+        assert_eq!(d.active_console, Some(Console::Helm));
+    }
+
+    #[test]
+    fn repairing_pct_scales_with_broadcast_repair_duration() {
+        // With repair duration=100s (e.g. 50 HP / 0.5 HP/s), elapsed=25s → 25 %.
+        let d = row_data_for_slot_with_timings(
+            &TeamSlot::Repairing { console: Console::Tactical, elapsed: 25.0 },
+            5.0,   // travel unused
+            100.0, // broadcast repair duration
+        );
+        assert!((d.pct - 25.0).abs() < 0.01, "pct should be 25, got {}", d.pct);
+    }
+
+    #[test]
+    fn returning_pct_scales_with_broadcast_travel_duration() {
+        let d = row_data_for_slot_with_timings(
+            &TeamSlot::Returning { remaining: 2.5, queued: None },
+            10.0,
+            50.0,
+        );
+        assert!((d.pct - 25.0).abs() < 0.01, "drain pct should be 25, got {}", d.pct);
+        assert!(!d.fills);
+    }
+
+    #[test]
+    fn zero_broadcast_timings_fall_back_to_baseline() {
+        // If the broadcast hasn't arrived yet or carries a zero (misconfigured
+        // TOML), the helper falls back to baseline so the UI never produces NaN.
+        let d = row_data_for_slot_with_timings(
+            &TeamSlot::Travelling { console: Console::Helm, elapsed: 2.5 },
+            0.0, 0.0,
+        );
+        assert!((d.pct - 50.0).abs() < 0.01, "should fall back to 5s travel, got {}", d.pct);
     }
 }

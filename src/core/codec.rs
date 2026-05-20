@@ -868,6 +868,28 @@ mod tests {
     }
 
     #[test]
+    fn welcome_with_custom_repair_timings_round_trips() {
+        // Verify the [repair] block fields ride through Welcome intact —
+        // changing values in the ship TOML must reach the client byte-equal.
+        let ship_config = ShipClientConfig {
+            helm_radar_range: 700.0,
+            repair_travel_secs: 9.0,
+            repair_rate_hp_per_sec: 1.5,
+        };
+        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations(), ship_config };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
+        match msg {
+            ServerMessage::Welcome { ship_config, .. } => {
+                assert_eq!(ship_config.repair_travel_secs, 9.0);
+                assert_eq!(ship_config.repair_rate_hp_per_sec, 1.5);
+                assert_eq!(ship_config.helm_radar_range, 700.0);
+            }
+            _ => panic!("expected Welcome"),
+        }
+    }
+
+    #[test]
     fn client_increase_power_round_trips() {
         let msg = ClientMessage::IncreasePower { console: Console::Helm };
         assert_client_roundtrip(&JsonCodec, msg.clone());

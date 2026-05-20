@@ -655,6 +655,7 @@ mod tests {
             .add_message::<crate::simulation::AsteroidDestroyedVfx>()
             .init_resource::<PhaserCooldown>()
             .init_resource::<CurrentPhaserMode>()
+            .init_resource::<crate::weapons_plugin::PhaserCombatConfigResource>()
             .insert_resource(ShipRepairTeams(RepairTeams::default()))
             .insert_resource(crate::modifiers::ShipModifiers::new())
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))

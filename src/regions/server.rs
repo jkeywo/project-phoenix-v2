@@ -1,4 +1,4 @@
-﻿use bevy::prelude::*;
+use bevy::prelude::*;
 use rand::SeedableRng as _;
 use std::collections::{HashMap, HashSet};
 
@@ -276,6 +276,8 @@ mod tests {
             science_console: None,
             sensors_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -478,6 +480,8 @@ mod tests {
             science_console: None,
             sensors_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -510,6 +514,8 @@ mod tests {
             science_console: None,
             sensors_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -701,6 +707,8 @@ mod tests {
             science_console: None,
             sensors_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -828,6 +836,8 @@ mod tests {
             science_console: None,
             sensors_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             star: None,
             planet: None,
             asteroid_field: None,
@@ -1029,6 +1039,8 @@ mod tests {
             captain_console: None, power: None, science_console: None,
             sensors_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             star: None, planet: None, asteroid_field: None,
             station: None,
             faction: None,
@@ -1054,6 +1066,8 @@ mod tests {
             captain_console: None, power: None, science_console: None,
             sensors_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             star: None, planet: None, asteroid_field: None,
             station: None,
             faction: None,

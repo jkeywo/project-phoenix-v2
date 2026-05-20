@@ -28,9 +28,10 @@ Extracted from `simulation.rs` as part of the simulation split series (issue [#2
 |---|---|
 | `WeaponsTarget` | Currently locked target UUID (`None` if no lock) |
 | `ActiveBeam` | Active phaser beam: target UUID, remaining seconds, damage accumulator, bank |
-| `PhaserCooldown` | Post-beam cooldown (6 s lockout after every beam end) |
+| `PhaserCooldown` | Post-beam cooldown (duration sourced from `PhaserCombatConfigResource`) |
 | `CurrentPhaserMode` | Auto or Manual phaser mode |
-| `PhaserRenderConfig` | Beam colour and max range, populated from ship TOML during world setup |
+| `PhaserRenderConfig` | Beam colour and max render range, populated from ship TOML during world setup |
+| `PhaserCombatConfigResource` | Player phaser tuning (beam duration, cooldown, damage/sec, range); sourced from `[weapons_console]` |
 | `TorpedoSystemResource` | Wraps the pure-Rust `TorpedoSystem` state machine |
 
 ### Message type
@@ -80,6 +81,105 @@ Tests live in `src/weapons_plugin.rs` under `#[cfg(test)] mod tests`.
 | `phaser_damage_modifier_doubles_kill_rate` | `PhaserDamage` modifier at +1 doubles effective DPS |
 
 Integration tests (test-app exercises `WeaponsPlugin` as a complete plugin) are in `src/simulation.rs::tests`.
+
+## Torpedo configuration (TOML-driven)
+
+The `TorpedoSystemResource` is initialised by `WeaponsPlugin::build` with
+`TorpedoConfig::default()` so test apps that never load a ship TOML still
+get a working torpedo system. The live game path overrides this resource
+during `spawn_game_start_entities` (`src/server_app.rs`) when the spawned
+ship's `EntityConfig` carries a `[torpedoes]` block:
+
+```toml
+[torpedoes]
+count = 10
+damage_hull = 50
+damage_shields = 5
+speed = 30.0
+turn_rate_deg_per_sec = 45.0   # converted to radians at the boundary
+lifespan = 20.0
+load_time = 10.0
+```
+
+All fields use `serde(default)` and fall back to the same values as
+`TorpedoConfig::default()` (`src/weapons/torpedo.rs:49`). Designer-facing
+`turn_rate_deg_per_sec` is converted to radians in
+`TorpedoesConfig::to_runtime()` (`src/entities/config.rs`).
+
+NPC ships that want a different loadout simply add their own `[torpedoes]`
+block to their entity TOML; NPC ships that omit the block keep the defaults.
+
+A drift-guard test
+(`player_ship_toml_torpedoes_block_matches_runtime_default_values` in
+`src/entities/config.rs`) fails if the player ship's `[torpedoes]` values
+diverge from `TorpedoConfig::default()`.
+
+## Phaser combat configuration (TOML-driven)
+
+Player phaser tuning (beam duration, cooldown, damage-per-second, range)
+is sourced from the existing `[weapons_console]` block in
+`assets/entities/player_ship.toml`:
+
+```toml
+[weapons_console]
+beam_range = 40.0
+beam_damage_per_sec = 5.0
+beam_duration_secs = 6.0
+cooldown_secs = 6.0
+```
+
+`PhaserCombatConfig::from_weapons_console` (`src/entities/config.rs`)
+maps these into a `PhaserCombatConfig` (using "zero means absent"
+fallback to defaults, mirroring the NPC weapons path). The value is
+inserted as `PhaserCombatConfigResource` during
+`spawn_game_start_entities` (`src/server_app.rs`). `WeaponsPlugin::build`
+seeds the resource with `PhaserCombatConfig::default()` so test apps
+that never load a ship TOML still get a working phaser system.
+
+`handle_fire_phaser`, `tick_active_beam`, and the
+`weapons_update_broadcaster` all read this resource instead of the
+legacy module-private `_LEGACY_BEAM_DURATION_SECS` /
+`_LEGACY_BEAM_COOLDOWN_SECS` constants. The public
+`BEAM_DAMAGE_PER_SEC` constant is retained because integration tests in
+`src/server_app.rs` use it as a baseline assertion value.
+
+Deliberately **not** TOML-driven (engineering invariants): the forward
+firing arc (180° hemisphere) and `radar::PHASER_RANGE` (only referenced
+by `radar.rs`'s own unit tests now). The `PhaserConfig` /
+`PhaserSystem` types in `src/weapons/phaser.rs` are dead code in the
+live game and were intentionally left untouched this slice.
+
+Drift guards in `src/entities/config.rs`:
+- `player_ship_toml_weapons_console_phaser_combat_matches_runtime_defaults`
+- `player_ship_toml_shields_base_block_matches_runtime_default_values`
+
+End-to-end "TOML flows to live state" tests:
+- `phaser_combat_config_resource_reflects_player_ship_toml_weapons_console`
+  (`src/console/weapons/server.rs`)
+- `shield_system_reflects_player_ship_toml_shields_console_base_block`
+  (`src/weapons/shield.rs`)
+
+## Shield base configuration (TOML-driven)
+
+Shield base tuning (facing count, max HP, regen rate, offline duration)
+lives in a nested sub-block under `[shields_console]`:
+
+```toml
+[shields_console.base]
+num_facings = 4         # UI assumes 4; changing this will break the Shields panel
+max_hp = 100
+regen_per_sec = 5.0
+offline_duration = 10.0
+```
+
+The nested block mirrors the `[sensors_console.long_range_radar]`
+precedent. `ShieldsBaseConfig::to_runtime()` produces a
+`ShieldConfig`; `spawn_game_start_entities` constructs the live
+`ShieldSystem` via
+`ShieldSystem::new(&sc.base.map(to_runtime).unwrap_or_default())` and
+then overlays the focus configuration. `Option<ShieldsBaseConfig>` was
+used so the 22 existing `EntityConfig {...}` test literals scattered
+across the codebase did not need to be touched.
 
 ## Sources
 

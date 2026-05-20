@@ -748,4 +748,30 @@ mod tests {
         // The decay code (which only targets non-focused facings) did not run,
         // confirming the focused arc does not get focus-decayed.
     }
+
+    /// End-to-end TOML-driven wiring check: build the runtime `ShieldSystem`
+    /// the same way `spawn_game_start_entities` does (parse player_ship.toml
+    /// → ShieldsBaseConfig::to_runtime → ShieldSystem::new) and assert the
+    /// facings reflect the TOML. Changing `max_hp = 100` to `max_hp = 999`
+    /// in `[shields_console.base]` would fail this test.
+    #[test]
+    fn shield_system_reflects_player_ship_toml_shields_console_base_block() {
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
+        let config = crate::entity_config::EntityConfig::from_toml(toml_str)
+            .expect("player_ship.toml must parse");
+        let base = config.shields_console
+            .expect("player_ship must declare [shields_console]")
+            .base
+            .expect("player_ship must declare [shields_console.base]");
+        let shield_config = base.to_runtime();
+        let system = ShieldSystem::new(&shield_config);
+        // Each facing must take its max_hp from the TOML.
+        assert_eq!(system.facings.len(), base.num_facings);
+        for f in &system.facings {
+            assert_eq!(f.max_hp, base.max_hp, "facing max_hp must match TOML");
+            assert_eq!(f.hp, base.max_hp, "facing starts full");
+            assert_eq!(f.regen_per_sec, base.regen_per_sec, "regen must match TOML");
+            assert_eq!(f.offline_duration, base.offline_duration, "offline_duration must match TOML");
+        }
+    }
 }

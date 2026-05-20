@@ -238,4 +238,27 @@ mod tests {
         });
         assert!(has_repair_state, "RepairState should include a Travelling team after dispatch");
     }
+
+    /// End-to-end TOML-driven wiring check: build the runtime `RepairTeams`
+    /// the same way `spawn_game_start_entities` does (parse player_ship.toml
+    /// → RepairConfig::to_runtime → RepairTeams::new_with_timings) and
+    /// assert the timings match the TOML. Changing
+    /// `travel_duration_secs = 5.0` to e.g. `99.0` in player_ship.toml
+    /// would fail this test.
+    #[test]
+    fn repair_teams_resource_reflects_player_ship_toml_repair_block() {
+        let toml_str = include_str!("../../../assets/entities/player_ship.toml");
+        let config = crate::entity_config::EntityConfig::from_toml(toml_str)
+            .expect("player_ship.toml must parse");
+        let rc = config.repair.expect("player_ship must declare [repair]");
+        let timings = rc.to_runtime();
+        let teams = crate::repair_teams::RepairTeams::new_with_timings(2, timings);
+        assert_eq!(teams.timings().travel_duration, rc.travel_duration_secs);
+        assert_eq!(teams.timings().repair_rate_hp_per_sec, rc.repair_rate_hp_per_sec);
+        // And the runtime defaults still match (until someone intentionally
+        // diverges them).
+        let baseline = crate::repair_teams::RepairTimings::default();
+        assert_eq!(teams.timings().travel_duration, baseline.travel_duration);
+        assert_eq!(teams.timings().repair_rate_hp_per_sec, baseline.repair_rate_hp_per_sec);
+    }
 }

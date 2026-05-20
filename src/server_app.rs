@@ -888,7 +888,16 @@ fn spawn_game_start_entities(
                 };
                 commands.insert_resource(ShipHullIntegrity(hull));
                 let team_count = if hc.repair_team_count > 0 { hc.repair_team_count as usize } else { 2 };
-                commands.insert_resource(ShipRepairTeams(crate::repair_teams::RepairTeams::new(team_count)));
+                // [repair] block — overrides default RepairTimings if present.
+                // Absent block keeps the same defaults the hardcoded constants
+                // used to provide (5.0s travel, 0.5 HP/s repair rate).
+                let timings = config.repair
+                    .as_ref()
+                    .map(|rc| rc.to_runtime())
+                    .unwrap_or_default();
+                commands.insert_resource(ShipRepairTeams(
+                    crate::repair_teams::RepairTeams::new_with_timings(team_count, timings),
+                ));
             } else {
                 commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                     (Console::Helm, 25.0),
@@ -898,9 +907,18 @@ fn spawn_game_start_entities(
                 ])));
             }
 
-            // Apply shield focus config from TOML if present
+            // Apply shield focus config + base shield-system values from TOML if present.
+            // The `[shields_console.base]` sub-block, when present, overrides
+            // the four hardcoded defaults in `ShieldConfig::default()`
+            // (num_facings, max_hp, regen_per_sec, offline_duration).
+            // When absent we keep the historical defaults (4 quadrants,
+            // 100 HP, 5 HP/s regen, 10 s offline).
             if let Some(sc) = &config.shields_console {
-                let mut shields = ShipShields(ShieldSystem::default());
+                let shield_config = sc.base
+                    .as_ref()
+                    .map(|b| b.to_runtime())
+                    .unwrap_or_default();
+                let mut shields = ShipShields(ShieldSystem::new(&shield_config));
                 shields.0.focus_config = crate::shield::ShieldFocusConfig {
                     bonus_max_hp: sc.focus_bonus_max_hp,
                     bonus_regen: sc.focus_bonus_regen,
@@ -915,6 +933,33 @@ fn spawn_game_start_entities(
                 let beam_color = crate::beam_render::resolve_beam_color(&wc.beam_color);
                 let beam_range = if wc.beam_range > 0.0 { wc.beam_range } else { 40.0 };
                 commands.insert_resource(PhaserRenderConfig { beam_color, beam_range });
+
+                // Player phaser combat tuning — overrides the default
+                // PhaserCombatConfig that WeaponsPlugin installed. The
+                // [weapons_console] block already carries `beam_range`,
+                // `beam_damage_per_sec`, `beam_duration_secs`, and
+                // `cooldown_secs`; before this slice those were only
+                // honoured by the NPC phaser path. Now the player path
+                // also reads them via the PhaserCombatConfig resource.
+                commands.insert_resource(crate::weapons_plugin::PhaserCombatConfigResource(
+                    crate::entity_config::PhaserCombatConfig::from_weapons_console(wc),
+                ));
+            }
+
+            // [torpedoes] block — overrides the default TorpedoSystemResource
+            // that `WeaponsPlugin` initialised. Absent block keeps defaults
+            // (so NPC ships without `[torpedoes]` are unaffected).
+            //
+            // TODO: NPC ships that declare their own `[torpedoes]` block will
+            // parse it (it lands in `EntityConfig.torpedoes`) but it is
+            // silently ignored here because this override lives inside the
+            // "first ship entity == player ship" branch. When per-entity NPC
+            // torpedo systems land, lift this into `entity_spawner::spawn_entity`
+            // as a per-entity component instead of a single shared resource.
+            if let Some(tc) = &config.torpedoes {
+                commands.insert_resource(crate::weapons_plugin::TorpedoSystemResource(
+                    crate::torpedo::TorpedoSystem::new(tc.to_runtime()),
+                ));
             }
 
             if let Some(pc) = &config.power {

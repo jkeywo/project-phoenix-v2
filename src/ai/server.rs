@@ -1,4 +1,4 @@
-﻿/// Bevy plugin: AI controller lifecycle — attaches `AiController` components
+/// Bevy plugin: AI controller lifecycle — attaches `AiController` components
 /// to entities that declare a `[behaviour]` block, mints synthetic
 /// `ai:<entity_uuid>` session tokens, and ticks controllers during
 /// `InProgress` phase.
@@ -1112,6 +1112,8 @@ mod tests {
             science_console: None,
             sensors_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             station: None,
             radar_appearance: None,
         };

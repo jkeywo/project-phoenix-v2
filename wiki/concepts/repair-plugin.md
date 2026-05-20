@@ -69,6 +69,34 @@ Tests live in `src/repair_plugin.rs` under `#[cfg(test)] mod tests`.
 | `empty_queue_clears_all_icons` | Emptying the queue clears all icons and sends no `ShowRepairIcon` |
 | `no_undamaged_consoles_shows_no_decoy` | When all consoles are damaged, no extra decoy is added |
 
+## Repair timings configuration (TOML-driven)
+
+`RepairTeams` carries a `RepairTimings { travel_duration, repair_rate_hp_per_sec }`
+struct (see `src/modifiers/repair_teams.rs`) initialised from the `[repair]`
+block in `assets/entities/player_ship.toml`:
+
+```toml
+[repair]
+travel_duration_secs = 5.0
+repair_rate_hp_per_sec = 0.5
+```
+
+All fields use `serde(default)` and fall back to the same values as
+`RepairTimings::default()`. The override is applied during
+`spawn_game_start_entities` (`src/server_app.rs`) when the spawned ship's
+`EntityConfig` carries a `[repair]` block — absent block keeps defaults.
+
+The same values are forwarded to clients via `ShipClientConfig` in the
+`Welcome` message (`repair_travel_secs`, `repair_rate_hp_per_sec`). The
+Repair panel reads them out of `LobbyState.ship_config` and derives its
+progress-bar durations (`max_hp / rate` for the per-console repair fill)
+rather than hardcoding them. Two drift-guard tests
+(`player_ship_toml_repair_block_matches_runtime_default_values` in
+`src/entities/config.rs` and
+`repair_teams_resource_reflects_player_ship_toml_repair_block` in
+`src/console/repair/server.rs`) fail if either the TOML values diverge
+from `RepairTimings::default()` or the TOML→runtime wiring breaks.
+
 ## Sources
 
 - `src/repair_plugin.rs`

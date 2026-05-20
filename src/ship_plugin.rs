@@ -474,6 +474,8 @@ mod tests {
             power: None,
             science_console: None,
             shields_console: None,
+            torpedoes: None,
+            repair: None,
             sensors_console: None,
             star: None,
             planet: None,

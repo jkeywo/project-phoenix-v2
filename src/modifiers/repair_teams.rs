@@ -1,10 +1,28 @@
 use crate::damage::ConsoleHull;
 use crate::messages::{Console, TeamSlot};
 
-/// Seconds a team spends travelling to a console (or returning from one).
-const TRAVEL_DURATION: f32 = 5.0;
-/// HP restored per second while the team is at the console.
-const REPAIR_RATE_HP_PER_SEC: f32 = 0.5; // 1 HP per 2 seconds
+/// Tunable timings for the repair-team state machine.
+///
+/// Sourced from the `[repair]` block in `assets/entities/player_ship.toml`
+/// via `RepairConfig::to_runtime()` (see `src/entities/config.rs`). Tests
+/// and code paths that don't load a ship TOML use `RepairTimings::default()`,
+/// which matches the historical hardcoded constants exactly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RepairTimings {
+    /// Seconds a team spends travelling to a console (or returning from one).
+    pub travel_duration: f32,
+    /// HP restored per second while the team is at the console.
+    pub repair_rate_hp_per_sec: f32,
+}
+
+impl Default for RepairTimings {
+    fn default() -> Self {
+        Self {
+            travel_duration: 5.0,
+            repair_rate_hp_per_sec: 0.5, // 1 HP per 2 seconds
+        }
+    }
+}
 
 /// Pure state machine for all repair teams on the ship.
 ///
@@ -13,14 +31,28 @@ const REPAIR_RATE_HP_PER_SEC: f32 = 0.5; // 1 HP per 2 seconds
 #[derive(Debug, Clone)]
 pub struct RepairTeams {
     slots: Vec<TeamSlot>,
+    timings: RepairTimings,
 }
 
 impl RepairTeams {
-    /// Create a new `RepairTeams` with `count` teams, all idle.
+    /// Create a new `RepairTeams` with `count` teams, all idle, using
+    /// the default (hardcoded-baseline) timings.
     pub fn new(count: usize) -> Self {
+        Self::new_with_timings(count, RepairTimings::default())
+    }
+
+    /// Create a new `RepairTeams` with `count` teams and explicit timings
+    /// (typically from `RepairConfig::to_runtime()`).
+    pub fn new_with_timings(count: usize, timings: RepairTimings) -> Self {
         Self {
             slots: vec![TeamSlot::Idle; count],
+            timings,
         }
+    }
+
+    /// Borrow the current timings.
+    pub fn timings(&self) -> RepairTimings {
+        self.timings
     }
 
     /// Borrow the full slot slice.
@@ -41,11 +73,12 @@ impl RepairTeams {
     ///   → `Returning { remaining: t, queued: Some(console) }`.
     /// - `Travelling { elapsed: t }` to the **same** console (recall):
     ///   → `Returning { remaining: t, queued: None }`.
-    /// - `Repairing` to any console (redirect): `remaining = TRAVEL_DURATION`, queued.
-    /// - `Repairing` to same console (recall): `remaining = TRAVEL_DURATION`, no queue.
+    /// - `Repairing` to any console (redirect): `remaining = travel_duration`, queued.
+    /// - `Repairing` to same console (recall): `remaining = travel_duration`, no queue.
     /// - `Returning` with a queued console: replace the queued console.
     /// - `Returning` with no queue: add the console as queued (or clear if same).
     pub fn dispatch(&mut self, team_idx: usize, new_console: Console) {
+        let travel_duration = self.timings.travel_duration;
         let Some(slot) = self.slots.get_mut(team_idx) else { return };
         match slot.clone() {
             TeamSlot::Idle => {
@@ -57,7 +90,7 @@ impl RepairTeams {
             }
             TeamSlot::Repairing { console: current, .. } => {
                 let queued = if new_console == current { None } else { Some(new_console) };
-                *slot = TeamSlot::Returning { remaining: TRAVEL_DURATION, queued };
+                *slot = TeamSlot::Returning { remaining: travel_duration, queued };
             }
             TeamSlot::Returning { remaining, .. } => {
                 *slot = TeamSlot::Returning { remaining, queued: Some(new_console) };
@@ -67,20 +100,22 @@ impl RepairTeams {
 
     /// Advance all active timers by `dt` seconds.
     ///
-    /// - `Travelling` advances its `elapsed` toward `TRAVEL_DURATION` (5s), then
+    /// - `Travelling` advances its `elapsed` toward `travel_duration`, then
     ///   transitions to `Repairing { elapsed: 0.0 }`. If the target console is
     ///   already at full HP on arrival, the team skips straight to `Returning`.
-    /// - `Repairing` calls `hull.restore(console, dt * REPAIR_RATE_HP_PER_SEC)` each
+    /// - `Repairing` calls `hull.restore(console, dt * repair_rate_hp_per_sec)` each
     ///   tick. Once the console is at full HP, the team transitions to `Returning`.
     /// - `Returning` decrements `remaining` toward 0. On completion:
     ///   - If `queued = Some(c)`: auto-dispatch to `Travelling { console: c, elapsed: 0 }`.
     ///   - If `queued = None`: → `Idle`.
     pub fn tick(&mut self, dt: f32, hull: &mut ConsoleHull) {
+        let travel_duration = self.timings.travel_duration;
+        let repair_rate = self.timings.repair_rate_hp_per_sec;
         for slot in self.slots.iter_mut() {
             match slot {
                 TeamSlot::Travelling { console, elapsed } => {
                     *elapsed += dt;
-                    if *elapsed >= TRAVEL_DURATION {
+                    if *elapsed >= travel_duration {
                         let console = console.clone();
                         let is_full = hull.is_at_max(&console);
                         if is_full {
@@ -91,11 +126,11 @@ impl RepairTeams {
                     }
                 }
                 TeamSlot::Repairing { console, elapsed } => {
-                    let hp_to_restore = dt * REPAIR_RATE_HP_PER_SEC;
+                    let hp_to_restore = dt * repair_rate;
                     hull.restore(console.clone(), hp_to_restore);
                     *elapsed += dt;
                     if hull.is_at_max(console) {
-                        *slot = TeamSlot::Returning { remaining: TRAVEL_DURATION, queued: None };
+                        *slot = TeamSlot::Returning { remaining: travel_duration, queued: None };
                     }
                 }
                 TeamSlot::Returning { remaining, queued } => {

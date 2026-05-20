@@ -100,15 +100,22 @@ fn update_session_with_config(
         // `HelmConsoleConfig::effective_radar_range()` prefers the structured
         // [helm_console.radar] range when present, falling back to the legacy
         // flat radar_range field, then to the Default.
+        let mut next = ShipClientConfig::default();
         if let Some(hc) = &ship_config.helm_console {
             let range = hc.effective_radar_range();
-            let range = if range > 0.0 {
-                range
-            } else {
-                ShipClientConfig::default().helm_radar_range
-            };
-            ship_client_config.0 = ShipClientConfig { helm_radar_range: range };
+            if range > 0.0 {
+                next.helm_radar_range = range;
+            }
         }
+        // [repair] block — pushes repair-team timings to the client so the
+        // Repair panel can derive its progress-bar durations without knowing
+        // server-side constants. Absent block keeps defaults that match the
+        // historical hardcoded constants.
+        if let Some(rc) = &ship_config.repair {
+            next.repair_travel_secs = rc.travel_duration_secs;
+            next.repair_rate_hp_per_sec = rc.repair_rate_hp_per_sec;
+        }
+        ship_client_config.0 = next;
     }
 }
 

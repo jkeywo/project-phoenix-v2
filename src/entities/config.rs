@@ -257,7 +257,11 @@ pub struct ScienceConsoleConfig {
 
 /// Config block for the Shields console focus bonuses/penalties.
 ///
-/// Loaded from `[shields_console]` in `player_ship.toml`.
+/// Loaded from `[shields_console]` in `player_ship.toml`. The nested
+/// `[shields_console.base]` sub-block (modelled by [`ShieldsBaseConfig`])
+/// supplies the underlying shield-system base values (number of facings,
+/// max HP, regen, offline duration) that were previously hardcoded by
+/// `ShieldConfig::default()` at `src/weapons/shield.rs:50-58`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShieldsConsoleConfig {
     /// Extra max HP applied to the focused facing.
@@ -275,6 +279,11 @@ pub struct ShieldsConsoleConfig {
     /// HP per second decay applied to non-focused facings when above reduced max.
     #[serde(default = "default_focus_decay_rate")]
     pub focus_decay_rate: f32,
+    /// Base shield-system values (number of facings, max HP, regen,
+    /// offline duration). When absent the historical hardcoded defaults
+    /// from `ShieldConfig::default()` are used.
+    #[serde(default)]
+    pub base: Option<ShieldsBaseConfig>,
     /// Path to a complexity TOML file for this console.
     #[serde(default)]
     pub complexity_toml: Option<String>,
@@ -294,7 +303,233 @@ impl Default for ShieldsConsoleConfig {
             focus_penalty_max_hp: 25,
             focus_penalty_regen: 2.5,
             focus_decay_rate: 10.0,
+            base: None,
             complexity_toml: None,
+        }
+    }
+}
+
+/// Base shield-system values loaded from `[shields_console.base]`.
+///
+/// These map 1:1 onto `crate::shield::ShieldConfig` (the runtime struct
+/// consumed by `ShieldSystem::new`). All fields default to the historical
+/// hardcoded values from `ShieldConfig::default()` so omitting the block
+/// changes nothing.
+///
+/// `num_facings` is exposed for symmetry but the client panel UI assumes
+/// 4 quadrants — values other than 4 will break the Shields panel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShieldsBaseConfig {
+    /// Number of equally-spaced shield facings. The client panel UI
+    /// assumes 4 (fore/port/aft/starboard); other values will not render
+    /// correctly.
+    #[serde(default = "default_shields_num_facings")]
+    pub num_facings: usize,
+    /// Maximum HP per facing.
+    #[serde(default = "default_shields_max_hp")]
+    pub max_hp: i32,
+    /// HP regenerated per second per online facing.
+    #[serde(default = "default_shields_regen_per_sec")]
+    pub regen_per_sec: f32,
+    /// Seconds a facing stays offline after its HP is depleted.
+    #[serde(default = "default_shields_offline_duration")]
+    pub offline_duration: f32,
+}
+
+fn default_shields_num_facings() -> usize { 4 }
+fn default_shields_max_hp() -> i32 { 100 }
+fn default_shields_regen_per_sec() -> f32 { 5.0 }
+fn default_shields_offline_duration() -> f32 { 10.0 }
+
+impl Default for ShieldsBaseConfig {
+    fn default() -> Self {
+        Self {
+            num_facings: default_shields_num_facings(),
+            max_hp: default_shields_max_hp(),
+            regen_per_sec: default_shields_regen_per_sec(),
+            offline_duration: default_shields_offline_duration(),
+        }
+    }
+}
+
+impl ShieldsBaseConfig {
+    /// Convert this TOML config into a runtime `ShieldConfig`.
+    pub fn to_runtime(&self) -> crate::shield::ShieldConfig {
+        crate::shield::ShieldConfig {
+            num_facings: self.num_facings,
+            max_hp: self.max_hp,
+            regen_per_sec: self.regen_per_sec,
+            offline_duration: self.offline_duration,
+        }
+    }
+}
+
+/// Player-ship phaser combat tuning, derived from the existing flat fields
+/// on `[weapons_console]` (`beam_range`, `beam_damage_per_sec`,
+/// `beam_duration_secs`, `cooldown_secs`).
+///
+/// Until this slice these fields were only honoured by the NPC phaser
+/// path; the player path used hardcoded constants
+/// (`BEAM_DURATION_SECS = 6.0`, `BEAM_COOLDOWN_SECS = 6.0`,
+/// `BEAM_DAMAGE_PER_SEC = 5.0`, `radar::PHASER_RANGE = 40.0`).
+/// `PhaserCombatConfig` is the player-path source of truth, installed
+/// as a Bevy resource by `WeaponsPlugin` (defaults match the constants)
+/// and overridden in `spawn_game_start_entities` from the player ship's
+/// `[weapons_console]` block.
+///
+/// The arc fields on `phaser::PhaserConfig` (`fire_arc_deg`,
+/// `auto_arc_deg`) are deliberately NOT moved to TOML: the live game has
+/// a single hardcoded 180° forward hemisphere with no auto/manual arc
+/// distinction. See AGENTS.md slice notes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhaserCombatConfig {
+    /// Effective player phaser range in world units.
+    pub phaser_range: f32,
+    /// Active beam duration in seconds (how long a beam stays on a target).
+    pub beam_duration_secs: f32,
+    /// Post-beam cooldown in seconds.
+    pub beam_cooldown_secs: f32,
+    /// Damage applied to the target per second of active beam.
+    pub beam_damage_per_sec: f32,
+}
+
+impl Default for PhaserCombatConfig {
+    fn default() -> Self {
+        // These four constants are the historical hardcoded values from
+        // `src/console/weapons/server.rs` (BEAM_*) and `src/radar.rs:19`
+        // (PHASER_RANGE). Keep them in sync with the live constants.
+        Self {
+            phaser_range: 40.0,
+            beam_duration_secs: 6.0,
+            beam_cooldown_secs: 6.0,
+            beam_damage_per_sec: 5.0,
+        }
+    }
+}
+
+impl PhaserCombatConfig {
+    /// Build a `PhaserCombatConfig` from a parsed `[weapons_console]`
+    /// block, falling back to `PhaserCombatConfig::default()` for any
+    /// field whose TOML value is `<= 0.0` (the same "zero means absent"
+    /// convention used by the NPC phaser path at
+    /// `src/console/weapons/server.rs:330-337`).
+    pub fn from_weapons_console(wc: &WeaponsConsoleConfig) -> Self {
+        let default = Self::default();
+        Self {
+            phaser_range: if wc.beam_range > 0.0 { wc.beam_range } else { default.phaser_range },
+            beam_duration_secs: if wc.beam_duration_secs > 0.0 { wc.beam_duration_secs } else { default.beam_duration_secs },
+            beam_cooldown_secs: if wc.cooldown_secs > 0.0 { wc.cooldown_secs } else { default.beam_cooldown_secs },
+            beam_damage_per_sec: if wc.beam_damage_per_sec > 0.0 { wc.beam_damage_per_sec } else { default.beam_damage_per_sec },
+        }
+    }
+}
+
+/// Config block for the repair-team state machine in a ship TOML.
+///
+/// Loaded from `[repair]` in `player_ship.toml` (and any NPC ship TOML
+/// that wishes to override repair pacing). All fields are optional; missing
+/// fields fall back to the same defaults as `RepairTimings::default()` and
+/// to the historical hardcoded constants (`TRAVEL_DURATION = 5.0`,
+/// `REPAIR_RATE_HP_PER_SEC = 0.5`).
+///
+/// The same values are forwarded to the client via
+/// `ShipClientConfig.repair_travel_secs` and
+/// `ShipClientConfig.repair_rate_hp_per_sec` so that the Repair panel UI
+/// can derive its progress-bar timings without redefining the constants.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepairConfig {
+    /// Seconds a team spends travelling to a console (and the same again returning).
+    #[serde(default = "default_repair_travel_duration_secs")]
+    pub travel_duration_secs: f32,
+    /// HP restored per second while a team is at a console.
+    #[serde(default = "default_repair_rate_hp_per_sec")]
+    pub repair_rate_hp_per_sec: f32,
+}
+
+fn default_repair_travel_duration_secs() -> f32 { 5.0 }
+fn default_repair_rate_hp_per_sec() -> f32 { 0.5 }
+
+impl Default for RepairConfig {
+    fn default() -> Self {
+        Self {
+            travel_duration_secs: default_repair_travel_duration_secs(),
+            repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
+        }
+    }
+}
+
+impl RepairConfig {
+    /// Convert this TOML config into a runtime `RepairTimings`.
+    pub fn to_runtime(&self) -> crate::repair_teams::RepairTimings {
+        crate::repair_teams::RepairTimings {
+            travel_duration: self.travel_duration_secs,
+            repair_rate_hp_per_sec: self.repair_rate_hp_per_sec,
+        }
+    }
+}
+
+/// Config block for the torpedo system in a ship TOML.
+///
+/// Loaded from `[torpedoes]` in `player_ship.toml` (and any NPC ship TOML
+/// that wishes to override the torpedo loadout). All fields are optional;
+/// missing fields fall back to the same defaults as `TorpedoConfig::default()`.
+///
+/// `turn_rate_deg_per_sec` is in **degrees per second** for designer
+/// readability; it is converted to radians by `to_runtime()`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TorpedoesConfig {
+    #[serde(default = "default_torpedo_count")]
+    pub count: u32,
+    #[serde(default = "default_torpedo_damage_hull")]
+    pub damage_hull: i32,
+    #[serde(default = "default_torpedo_damage_shields")]
+    pub damage_shields: i32,
+    #[serde(default = "default_torpedo_speed")]
+    pub speed: f32,
+    /// Maximum turn rate in **degrees per second** (homing).
+    /// Converted to radians by `to_runtime()`.
+    #[serde(default = "default_torpedo_turn_rate_deg_per_sec")]
+    pub turn_rate_deg_per_sec: f32,
+    #[serde(default = "default_torpedo_lifespan")]
+    pub lifespan: f32,
+    #[serde(default = "default_torpedo_load_time")]
+    pub load_time: f32,
+}
+
+fn default_torpedo_count() -> u32 { 10 }
+fn default_torpedo_damage_hull() -> i32 { 50 }
+fn default_torpedo_damage_shields() -> i32 { 5 }
+fn default_torpedo_speed() -> f32 { 30.0 }
+fn default_torpedo_turn_rate_deg_per_sec() -> f32 { 45.0 }
+fn default_torpedo_lifespan() -> f32 { 20.0 }
+fn default_torpedo_load_time() -> f32 { 10.0 }
+
+impl Default for TorpedoesConfig {
+    fn default() -> Self {
+        Self {
+            count: default_torpedo_count(),
+            damage_hull: default_torpedo_damage_hull(),
+            damage_shields: default_torpedo_damage_shields(),
+            speed: default_torpedo_speed(),
+            turn_rate_deg_per_sec: default_torpedo_turn_rate_deg_per_sec(),
+            lifespan: default_torpedo_lifespan(),
+            load_time: default_torpedo_load_time(),
+        }
+    }
+}
+
+impl TorpedoesConfig {
+    /// Convert this TOML config into a runtime `TorpedoConfig`.
+    /// Performs the degrees → radians conversion on `turn_rate_deg_per_sec`.
+    pub fn to_runtime(&self) -> crate::torpedo::TorpedoConfig {
+        crate::torpedo::TorpedoConfig {
+            count: self.count,
+            damage_hull: self.damage_hull,
+            damage_shields: self.damage_shields,
+            speed: self.speed,
+            turn_rate: self.turn_rate_deg_per_sec.to_radians(),
+            lifespan: self.lifespan,
+            load_time: self.load_time,
         }
     }
 }
@@ -329,6 +564,10 @@ pub struct EntityConfig {
     pub sensors_console: Option<SensorsConsoleConfig>,
     /// Shields console focus config.
     pub shields_console: Option<ShieldsConsoleConfig>,
+    /// Torpedo system config (player ship and any NPC ship with torpedoes).
+    pub torpedoes: Option<TorpedoesConfig>,
+    /// Repair team timings (travel duration, repair rate).
+    pub repair: Option<RepairConfig>,
     /// Star section from entity template (name, radius, colour, etc.)
     pub star: Option<StarConfig>,
     /// Planet section from entity template (name, radius, colour, etc.)
@@ -367,6 +606,8 @@ struct TomlConfig {
     science_console: Option<ScienceConsoleConfig>,
     sensors_console: Option<SensorsConsoleConfig>,
     shields_console: Option<ShieldsConsoleConfig>,
+    torpedoes: Option<TorpedoesConfig>,
+    repair: Option<RepairConfig>,
     star: Option<StarConfig>,
     planet: Option<PlanetConfig>,
     asteroid_field: Option<AsteroidFieldConfig>,
@@ -453,6 +694,8 @@ impl EntityConfig {
             science_console: raw.science_console,
             shields_console: raw.shields_console,
             sensors_console: raw.sensors_console,
+            torpedoes: raw.torpedoes,
+            repair: raw.repair,
             star: raw.star,
             planet: raw.planet,
             asteroid_field: raw.asteroid_field,
@@ -1544,6 +1787,333 @@ target_speed = 0.5
         assert!(conditions.contains(&"hull_below"), "must have hull_below transition");
         assert!(conditions.contains(&"on_timer"), "must have on_timer transition");
         assert!(conditions.contains(&"on_scenario_unloaded"), "must have on_scenario_unloaded transition");
+    }
+
+    // ── [torpedoes] block tests ────────────────────────────────────────────
+
+    #[test]
+    fn torpedoes_block_full_round_trips() {
+        let toml_str = r##"
+[torpedoes]
+count = 12
+damage_hull = 60
+damage_shields = 7
+speed = 35.0
+turn_rate_deg_per_sec = 90.0
+lifespan = 25.0
+load_time = 8.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let t = config.torpedoes.expect("torpedoes must be Some");
+        assert_eq!(t.count, 12);
+        assert_eq!(t.damage_hull, 60);
+        assert_eq!(t.damage_shields, 7);
+        assert_eq!(t.speed, 35.0);
+        assert_eq!(t.turn_rate_deg_per_sec, 90.0);
+        assert_eq!(t.lifespan, 25.0);
+        assert_eq!(t.load_time, 8.0);
+    }
+
+    #[test]
+    fn torpedoes_block_absent_yields_none() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.torpedoes.is_none());
+    }
+
+    #[test]
+    fn torpedoes_block_partial_keeps_defaults_for_missing_fields() {
+        let toml_str = r##"
+[torpedoes]
+count = 99
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let t = config.torpedoes.expect("torpedoes must be Some");
+        assert_eq!(t.count, 99, "override applied");
+        assert_eq!(t.damage_hull, 50, "default preserved");
+        assert_eq!(t.damage_shields, 5, "default preserved");
+        assert_eq!(t.speed, 30.0, "default preserved");
+        assert_eq!(t.turn_rate_deg_per_sec, 45.0, "default preserved");
+        assert_eq!(t.lifespan, 20.0, "default preserved");
+        assert_eq!(t.load_time, 10.0, "default preserved");
+    }
+
+    #[test]
+    fn torpedoes_to_runtime_converts_degrees_to_radians() {
+        let mut t = TorpedoesConfig::default();
+        t.turn_rate_deg_per_sec = 45.0;
+        let rt = t.to_runtime();
+        assert!((rt.turn_rate - std::f32::consts::FRAC_PI_4).abs() < 1e-5,
+            "45 deg/s should convert to PI/4 rad/s, got {}", rt.turn_rate);
+        assert_eq!(rt.count, 10);
+        assert_eq!(rt.damage_hull, 50);
+        assert_eq!(rt.load_time, 10.0);
+    }
+
+    #[test]
+    fn torpedoes_defaults_match_runtime_torpedo_config_default() {
+        let toml_default = TorpedoesConfig::default().to_runtime();
+        let runtime_default = crate::torpedo::TorpedoConfig::default();
+        assert_eq!(toml_default.count, runtime_default.count);
+        assert_eq!(toml_default.damage_hull, runtime_default.damage_hull);
+        assert_eq!(toml_default.damage_shields, runtime_default.damage_shields);
+        assert_eq!(toml_default.speed, runtime_default.speed);
+        assert!((toml_default.turn_rate - runtime_default.turn_rate).abs() < 1e-5);
+        assert_eq!(toml_default.lifespan, runtime_default.lifespan);
+        assert_eq!(toml_default.load_time, runtime_default.load_time);
+    }
+
+    #[test]
+    fn player_ship_toml_torpedoes_block_matches_runtime_default_values() {
+        // Drift guard: if the [torpedoes] block in player_ship.toml ever
+        // diverges from TorpedoConfig::default(), this test fails so the
+        // owner can confirm the change is intentional.
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
+        let t = config.torpedoes.expect("player_ship must have [torpedoes]");
+        let rt = t.to_runtime();
+        let baseline = crate::torpedo::TorpedoConfig::default();
+        assert_eq!(rt.count, baseline.count, "magazine size drift");
+        assert_eq!(rt.damage_hull, baseline.damage_hull);
+        assert_eq!(rt.damage_shields, baseline.damage_shields);
+        assert_eq!(rt.speed, baseline.speed);
+        assert!((rt.turn_rate - baseline.turn_rate).abs() < 1e-5);
+        assert_eq!(rt.lifespan, baseline.lifespan);
+        assert_eq!(rt.load_time, baseline.load_time);
+    }
+
+    // ── [repair] block tests ───────────────────────────────────────────────
+
+    #[test]
+    fn repair_block_full_round_trips() {
+        let toml_str = r##"
+[repair]
+travel_duration_secs = 7.5
+repair_rate_hp_per_sec = 1.25
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let r = config.repair.expect("repair must be Some");
+        assert_eq!(r.travel_duration_secs, 7.5);
+        assert_eq!(r.repair_rate_hp_per_sec, 1.25);
+    }
+
+    #[test]
+    fn repair_block_absent_yields_none() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.repair.is_none());
+    }
+
+    #[test]
+    fn repair_block_partial_keeps_defaults_for_missing_fields() {
+        let toml_str = r##"
+[repair]
+travel_duration_secs = 9.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let r = config.repair.expect("repair must be Some");
+        assert_eq!(r.travel_duration_secs, 9.0, "override applied");
+        assert_eq!(r.repair_rate_hp_per_sec, 0.5, "default preserved");
+    }
+
+    #[test]
+    fn repair_to_runtime_preserves_values() {
+        let r = RepairConfig {
+            travel_duration_secs: 3.0,
+            repair_rate_hp_per_sec: 2.0,
+        };
+        let rt = r.to_runtime();
+        assert_eq!(rt.travel_duration, 3.0);
+        assert_eq!(rt.repair_rate_hp_per_sec, 2.0);
+    }
+
+    #[test]
+    fn repair_defaults_match_runtime_repair_timings_default() {
+        let toml_default = RepairConfig::default().to_runtime();
+        let runtime_default = crate::repair_teams::RepairTimings::default();
+        assert_eq!(toml_default.travel_duration, runtime_default.travel_duration);
+        assert_eq!(toml_default.repair_rate_hp_per_sec, runtime_default.repair_rate_hp_per_sec);
+    }
+
+    #[test]
+    fn player_ship_toml_repair_block_matches_runtime_default_values() {
+        // Drift guard: if the [repair] block in player_ship.toml ever diverges
+        // from RepairTimings::default(), this test fails so the owner can
+        // confirm the change is intentional. (The defaults themselves match
+        // the historical hardcoded constants in `repair_teams.rs`.)
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
+        let r = config.repair.expect("player_ship must have [repair]");
+        let rt = r.to_runtime();
+        let baseline = crate::repair_teams::RepairTimings::default();
+        assert_eq!(rt.travel_duration, baseline.travel_duration, "travel duration drift");
+        assert_eq!(rt.repair_rate_hp_per_sec, baseline.repair_rate_hp_per_sec, "repair rate drift");
+    }
+
+    // ── [shields_console.base] block tests ────────────────────────────────
+
+    #[test]
+    fn shields_console_base_block_full_round_trips() {
+        let toml_str = r##"
+[shields_console]
+
+[shields_console.base]
+num_facings = 6
+max_hp = 200
+regen_per_sec = 7.5
+offline_duration = 12.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let sc = config.shields_console.expect("shields_console must be Some");
+        let base = sc.base.expect("base sub-block must be Some");
+        assert_eq!(base.num_facings, 6);
+        assert_eq!(base.max_hp, 200);
+        assert_eq!(base.regen_per_sec, 7.5);
+        assert_eq!(base.offline_duration, 12.0);
+    }
+
+    #[test]
+    fn shields_console_without_base_subblock_yields_none() {
+        // The flat focus fields parse fine; absent `[shields_console.base]`
+        // must produce `base: None` so the runtime falls back to
+        // `ShieldConfig::default()`.
+        let toml_str = r##"
+[shields_console]
+focus_bonus_max_hp = 99
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let sc = config.shields_console.expect("shields_console must be Some");
+        assert!(sc.base.is_none(), "base sub-block must default to None when absent");
+        assert_eq!(sc.focus_bonus_max_hp, 99, "flat focus field still parses");
+    }
+
+    #[test]
+    fn shields_base_block_partial_keeps_defaults_for_missing_fields() {
+        let toml_str = r##"
+[shields_console.base]
+max_hp = 250
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let base = config.shields_console.expect("shields_console").base.expect("base");
+        assert_eq!(base.max_hp, 250, "override applied");
+        assert_eq!(base.num_facings, 4, "default preserved");
+        assert_eq!(base.regen_per_sec, 5.0, "default preserved");
+        assert_eq!(base.offline_duration, 10.0, "default preserved");
+    }
+
+    #[test]
+    fn shields_base_to_runtime_preserves_values() {
+        let base = ShieldsBaseConfig {
+            num_facings: 3,
+            max_hp: 75,
+            regen_per_sec: 2.5,
+            offline_duration: 8.0,
+        };
+        let rt = base.to_runtime();
+        assert_eq!(rt.num_facings, 3);
+        assert_eq!(rt.max_hp, 75);
+        assert_eq!(rt.regen_per_sec, 2.5);
+        assert_eq!(rt.offline_duration, 8.0);
+    }
+
+    #[test]
+    fn shields_base_defaults_match_runtime_shield_config_default() {
+        let toml_default = ShieldsBaseConfig::default().to_runtime();
+        let runtime_default = crate::shield::ShieldConfig::default();
+        assert_eq!(toml_default.num_facings, runtime_default.num_facings);
+        assert_eq!(toml_default.max_hp, runtime_default.max_hp);
+        assert_eq!(toml_default.regen_per_sec, runtime_default.regen_per_sec);
+        assert_eq!(toml_default.offline_duration, runtime_default.offline_duration);
+    }
+
+    #[test]
+    fn player_ship_toml_shields_base_block_matches_runtime_default_values() {
+        // Drift guard: if [shields_console.base] in player_ship.toml ever
+        // diverges from ShieldConfig::default(), this test fails so the
+        // owner can confirm the change is intentional.
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
+        let base = config.shields_console
+            .expect("player_ship must have [shields_console]")
+            .base
+            .expect("player_ship must have [shields_console.base]");
+        let rt = base.to_runtime();
+        let baseline = crate::shield::ShieldConfig::default();
+        assert_eq!(rt.num_facings, baseline.num_facings, "num_facings drift");
+        assert_eq!(rt.max_hp, baseline.max_hp, "max_hp drift");
+        assert_eq!(rt.regen_per_sec, baseline.regen_per_sec, "regen drift");
+        assert_eq!(rt.offline_duration, baseline.offline_duration, "offline duration drift");
+    }
+
+    // ── PhaserCombatConfig (player phaser tuning) tests ───────────────────
+    //
+    // PhaserCombatConfig is built from the existing flat fields on
+    // [weapons_console] (beam_range, beam_damage_per_sec, beam_duration_secs,
+    // cooldown_secs). No new TOML keys were introduced for this slice; the
+    // change is "the player path now honours them too".
+
+    #[test]
+    fn phaser_combat_config_default_matches_legacy_constants() {
+        // Defaults must match the historical hardcoded constants in
+        // src/console/weapons/server.rs and src/radar.rs:19.
+        let d = PhaserCombatConfig::default();
+        assert_eq!(d.phaser_range, 40.0);
+        assert_eq!(d.beam_duration_secs, 6.0);
+        assert_eq!(d.beam_cooldown_secs, 6.0);
+        assert_eq!(d.beam_damage_per_sec, 5.0);
+    }
+
+    #[test]
+    fn phaser_combat_config_from_weapons_console_uses_supplied_values() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 99.0
+beam_damage_per_sec = 12.0
+beam_duration_secs = 4.0
+cooldown_secs = 7.5
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let wc = config.weapons_console.expect("weapons_console");
+        let combat = PhaserCombatConfig::from_weapons_console(&wc);
+        assert_eq!(combat.phaser_range, 99.0);
+        assert_eq!(combat.beam_damage_per_sec, 12.0);
+        assert_eq!(combat.beam_duration_secs, 4.0);
+        assert_eq!(combat.beam_cooldown_secs, 7.5);
+    }
+
+    #[test]
+    fn phaser_combat_config_falls_back_to_defaults_for_zero_or_missing_fields() {
+        // Mirrors the "zero means absent" convention used by the NPC phaser
+        // path at console/weapons/server.rs:336-337.
+        let toml_str = r##"
+[weapons_console]
+beam_range = 50.0
+# beam_damage_per_sec omitted → 0.0 → fall back to default 5.0
+# beam_duration_secs omitted → 0.0 → fall back to default 6.0
+# cooldown_secs omitted → 0.0 → fall back to default 6.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let wc = config.weapons_console.expect("weapons_console");
+        let combat = PhaserCombatConfig::from_weapons_console(&wc);
+        assert_eq!(combat.phaser_range, 50.0, "supplied override applied");
+        assert_eq!(combat.beam_damage_per_sec, 5.0, "default for omitted field");
+        assert_eq!(combat.beam_duration_secs, 6.0, "default for omitted field");
+        assert_eq!(combat.beam_cooldown_secs, 6.0, "default for omitted field");
+    }
+
+    #[test]
+    fn player_ship_toml_weapons_console_phaser_combat_matches_runtime_defaults() {
+        // Drift guard: if [weapons_console] in player_ship.toml ever
+        // changes the player phaser combat tuning (away from the legacy
+        // BEAM_* / PHASER_RANGE constants), this test fails so the owner
+        // can confirm the change is intentional.
+        let toml_str = include_str!("../../assets/entities/player_ship.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
+        let wc = config.weapons_console.expect("player_ship must have [weapons_console]");
+        let combat = PhaserCombatConfig::from_weapons_console(&wc);
+        let baseline = PhaserCombatConfig::default();
+        assert_eq!(combat.phaser_range, baseline.phaser_range, "phaser_range drift");
+        assert_eq!(combat.beam_duration_secs, baseline.beam_duration_secs, "beam_duration drift");
+        assert_eq!(combat.beam_cooldown_secs, baseline.beam_cooldown_secs, "beam_cooldown drift");
+        assert_eq!(combat.beam_damage_per_sec, baseline.beam_damage_per_sec, "beam_damage drift");
     }
 }
 

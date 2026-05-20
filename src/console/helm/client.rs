@@ -214,22 +214,45 @@ fn bridge_client_sim_to_radar_entities(
     ship_view: Res<ShipView>,
     mut radar: ResMut<HelmRadarEntities>,
 ) {
-    // Manage the RadarCenter entity
+    // Manage the RadarCenter entity.
+    //
+    // The centre entity doubles as the player-ship blip: we attach
+    // `OnRadar(Ship) + RadarAppearance(Triangle)` and a Transform at the
+    // ship's world position. In `ShipRelative` orientation it projects to
+    // the radar centre (0, 0), drawing the player as a triangle pointing
+    // up. Without this, the radar would never show the player's own ship
+    // — the sim entity stream omits it (the local ship is implicit).
+    let ship_appearance = RadarAppearance {
+        color: Color::srgb(0.95, 0.95, 1.0),
+        radius: 6.0,
+        shape: RadarShape::Triangle,
+    };
     let _center_entity = match radar.center {
         Some(e) => {
-            commands.entity(e).insert(RadarCenter {
-                world_x: ship_view.ship_x,
-                world_z: ship_view.ship_z,
-                yaw: ship_view.ship_yaw,
-            });
+            commands.entity(e).insert((
+                RadarCenter {
+                    world_x: ship_view.ship_x,
+                    world_z: ship_view.ship_z,
+                    yaw: ship_view.ship_yaw,
+                },
+                OnRadar(RadarLayer::Ship),
+                ship_appearance,
+                Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
+            ));
             e
         }
         None => {
-            let e = commands.spawn(RadarCenter {
-                world_x: ship_view.ship_x,
-                world_z: ship_view.ship_z,
-                yaw: ship_view.ship_yaw,
-            }).id();
+            let e = commands.spawn((
+                RadarCenter {
+                    world_x: ship_view.ship_x,
+                    world_z: ship_view.ship_z,
+                    yaw: ship_view.ship_yaw,
+                },
+                OnRadar(RadarLayer::Ship),
+                ship_appearance,
+                Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
+                GlobalTransform::default(),
+            )).id();
             radar.center = Some(e);
             e
         }
@@ -380,10 +403,18 @@ fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAss
         RadarLayer::Station, RadarLayer::Missile,
         RadarLayer::Planet, RadarLayer::Star,
     ]));
+    // Layering (back → front, per user direction):
+    //   1. radar-surround.png  (outer frame / tick marks) — passed as `bg_image`
+    //   2. radar-bg.png        (inner dial face)          — passed as `overlay_image`
+    //   3. blips drawn by `draw_generic_radars` via Gizmos, on top of both.
+    //
+    // The arg names on `GenericRadar::spawn` describe Z-order (bg = behind,
+    // overlay = in front) rather than asset role, so we deliberately pass
+    // surround as the back layer and bg as the front layer.
     let radar = GenericRadar::spawn(
         commands, COMPASS_RADAR_DIAMETER, HELM_RADAR_RANGE_FALLBACK,
         OrientationMode::ShipRelative, radar_filter,
-        Some(assets.radar_bg.clone()), Some(assets.radar_surround.clone()),
+        Some(assets.radar_surround.clone()), Some(assets.radar_bg.clone()),
     );
     commands.entity(col).add_child(radar);
 

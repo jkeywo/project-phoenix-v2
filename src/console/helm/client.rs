@@ -373,6 +373,7 @@ fn spawn_phone_helm_ui(
     mut commands: Commands,
     assets: Option<Res<PhoneAssets>>,
     old_panel: Query<Entity, With<HelmPanel>>,
+    old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
     orientation: Option<Res<DeviceOrientation>>,
 ) {
     let Some(assets) = assets else { return };
@@ -381,6 +382,13 @@ fn spawn_phone_helm_ui(
     for entity in old_panel.iter() {
         commands.entity(entity).despawn_related::<Children>();
     }
+    // Despawn any stale Helm help-overlay from a previous spawn (e.g. an
+    // orientation respawn) before ConsoleShell::spawn creates a fresh one.
+    for (entity, overlay) in old_help.iter() {
+        if overlay.0 == crate::client::elements::HelpPanel::Helm {
+            commands.entity(entity).despawn();
+        }
+    }
 
     commands.insert_resource(PhoneHelmSpawned);
 
@@ -388,6 +396,7 @@ fn spawn_phone_helm_ui(
         &mut commands,
         assets.helm_panel_bg.clone(),
         is_landscape,
+        crate::client::elements::HelpPanel::Helm,
         |commands: &mut Commands, primary: Entity| {
             fill_helm_radar(commands, primary, &assets, is_landscape);
         },

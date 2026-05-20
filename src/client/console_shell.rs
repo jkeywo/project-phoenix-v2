@@ -11,6 +11,7 @@
 use bevy::prelude::*;
 
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
+use crate::client::elements::{spawn_help_overlay_root, HelpButton, HelpPanel};
 use crate::gui::{StateVisuals, Visual, WidgetState};
 use crate::messages::{Console, GamePhase};
 use crate::phone_border::framing::PhoneAssets;
@@ -61,6 +62,11 @@ impl ConsoleShell {
     /// `is_landscape` — layout mode: `true` puts the tab bar on the left
     /// (vertical), `false` puts it on top (horizontal).
     ///
+    /// `help_panel` — which [`HelpPanel`] the top-left "?" button opens.
+    /// The button is spawned inside the shell root; its overlay is
+    /// spawned at window root so it can render above the tab bar and
+    /// bezel as a full-screen modal (see [`spawn_help_overlay_root`]).
+    ///
     /// `fill_primary` / `fill_secondary` — called after the content
     /// containers exist.  Each receives `(&mut Commands, Entity)` where
     /// the `Entity` is the primary or secondary container, so the caller
@@ -72,6 +78,7 @@ impl ConsoleShell {
         commands: &mut Commands,
         panel_bg: Handle<Image>,
         is_landscape: bool,
+        help_panel: HelpPanel,
         fill_primary: impl FnOnce(&mut Commands, Entity),
         fill_secondary: impl FnOnce(&mut Commands, Entity),
         _phone_assets: &PhoneAssets,
@@ -120,6 +127,9 @@ impl ConsoleShell {
             ))
             .with_children(|root| {
                 // ── Tab bar ─────────────────────────────────────────
+                // Leading padding leaves space for the absolutely-positioned
+                // help button in the top-left corner of the shell root.
+                let tab_pad_lead = Val::Px(36.0);
                 tab_bar_id = root
                     .spawn((
                         EmbeddedTabBar {
@@ -130,7 +140,21 @@ impl ConsoleShell {
                             height: tab_h,
                             flex_direction: tab_dir,
                             column_gap: Val::Px(2.0),
-                            padding: UiRect::all(Val::Px(2.0)),
+                            padding: if is_landscape {
+                                UiRect {
+                                    left: Val::Px(2.0),
+                                    right: Val::Px(2.0),
+                                    top: tab_pad_lead,
+                                    bottom: Val::Px(2.0),
+                                }
+                            } else {
+                                UiRect {
+                                    left: tab_pad_lead,
+                                    right: Val::Px(2.0),
+                                    top: Val::Px(2.0),
+                                    bottom: Val::Px(2.0),
+                                }
+                            },
                             align_items: AlignItems::Center,
                             overflow: Overflow::clip(),
                             ..default()
@@ -181,6 +205,45 @@ impl ConsoleShell {
                     .id();
             })
             .id();
+
+        // ── Help "?" button (top-left of shell root) ────────────────
+        // Absolutely positioned so it sits above the tab bar without
+        // disrupting the flex layout. Spawned as a child of the shell
+        // root so it lives inside BorderContentArea after reparenting.
+        commands.entity(root_id).with_children(|root| {
+            root.spawn((
+                HelpButton(help_panel),
+                Button,
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(4.0),
+                    left: Val::Px(4.0),
+                    width: Val::Px(28.0),
+                    height: Val::Px(28.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.7)),
+                ZIndex(50),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("?"),
+                    TextFont {
+                        font_size: 18.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.7, 0.8, 1.0)),
+                ));
+            });
+        });
+
+        // ── Help overlay (full-screen modal at window root) ─────────
+        // Lives at top level so it covers the bezel + tab bar when
+        // visible. Matched to its button by HelpPanel discriminant via
+        // handle_help_button_press.
+        spawn_help_overlay_root(commands, help_panel);
 
         // Invoke fill closures so callers can populate the slots.
         fill_primary(commands, primary_id);

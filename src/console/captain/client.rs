@@ -133,6 +133,7 @@ fn spawn_captain_ui(
     mut commands: Commands,
     assets: Option<Res<PhoneAssets>>,
     old_panel: Query<Entity, With<CaptainPanel>>,
+    old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
     orientation: Option<Res<DeviceOrientation>>,
 ) {
     let Some(assets) = assets else { return };
@@ -141,6 +142,13 @@ fn spawn_captain_ui(
     for entity in old_panel.iter() {
         commands.entity(entity).despawn_related::<Children>();
     }
+    // Despawn any stale Captain help-overlay from a previous spawn (e.g. an
+    // orientation respawn) before ConsoleShell::spawn creates a fresh one.
+    for (entity, overlay) in old_help.iter() {
+        if overlay.0 == crate::client::elements::HelpPanel::CaptainChair {
+            commands.entity(entity).despawn();
+        }
+    }
 
     commands.insert_resource(CaptainPanelSpawned);
 
@@ -148,6 +156,7 @@ fn spawn_captain_ui(
         &mut commands,
         assets.captain_panel_bg.clone(),
         is_landscape,
+        crate::client::elements::HelpPanel::CaptainChair,
         |commands: &mut Commands, primary: Entity| {
             fill_captain_dirpad(commands, primary, &assets);
         },

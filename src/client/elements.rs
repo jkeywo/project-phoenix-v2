@@ -228,6 +228,58 @@ pub fn spawn_help_overlay(parent: &mut ChildSpawnerCommands, panel: HelpPanel) {
     });
 }
 
+/// Spawn a help overlay as a top-level (window-root) entity that covers
+/// the entire viewport when visible. Uses [`GlobalZIndex`] to render
+/// above the bezel and tab strip — acts as a click-to-dismiss modal
+/// that dims everything underneath.
+///
+/// Matched to its [`HelpButton`] by [`HelpPanel`] discriminant in
+/// [`handle_help_button_press`], so it doesn't need a hierarchical
+/// relationship to the triggering button.
+pub fn spawn_help_overlay_root(commands: &mut Commands, panel: HelpPanel) {
+    let sections = help_sections(panel);
+    commands
+        .spawn((
+            HelpOverlay(panel),
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(24.0)),
+                row_gap: Val::Px(8.0),
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.02, 0.02, 0.05, 0.88)),
+            GlobalZIndex(1000),
+            Visibility::Hidden,
+        ))
+        .with_children(|ov| {
+            ov.spawn((
+                Text::new("HELP — tap to dismiss"),
+                TextFont {
+                    font_size: 18.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.7, 0.8, 1.0)),
+            ));
+            for (label, desc) in sections {
+                ov.spawn((
+                    Text::new(format!("{}\n{}", label, desc)),
+                    TextFont {
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.8, 0.85, 0.9)),
+                ));
+            }
+        });
+}
+
 /// When a help button is pressed, show the matching overlay.
 pub fn handle_help_button_press(
     buttons: Query<(&HelpButton, &Interaction), Changed<Interaction>>,

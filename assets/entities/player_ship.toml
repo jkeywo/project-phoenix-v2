@@ -61,6 +61,10 @@ max_yaw_rate = 1.5708
 impulse_charge_duration = 3.0
 impulse_speed_multiplier = 10.0
 
+[helm_console.radar]
+range = 500.0
+shows = ["asteroid", "ship", "station", "planet", "star"]
+
 [navigation_console]
 
 [navigation_console.system_chart]

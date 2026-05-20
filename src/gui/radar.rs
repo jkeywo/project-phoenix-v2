@@ -255,7 +255,7 @@ fn sync_radar_blip_nodes(
         Entity,
         &GenericRadarWidget,
         &ComputedNode,
-        &ViewVisibility,
+        &bevy::camera::visibility::InheritedVisibility,
         Option<&Children>,
     )>,
     blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform)>,

@@ -1,10 +1,10 @@
+pub use crate::entity_tags::EntityTag;
+use crate::flag_kind::FlagKind;
+use crate::stations_config::ShipStations;
 use bevy::prelude::States;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
-pub use crate::entity_tags::EntityTag;
-use crate::flag_kind::FlagKind;
-use crate::stations_config::ShipStations;
 
 /// Which ship attribute a modifier affects. Defined here so it can be used in
 /// wire messages without creating a circular dependency with `modifiers.rs`.
@@ -23,11 +23,16 @@ pub enum ModifierSlot {
 pub enum ModifierSource {
     Console(Console),
     ImpulseDrive,
-    RegionEffect { uuid: Uuid },
+    RegionEffect {
+        uuid: Uuid,
+    },
     /// A modifier applied by a world trigger (formerly "scenario"). The
     /// `(id, tag)` pair is the identity key: two applications with the same
     /// pair replace each other via add-or-update semantics.
-    World { id: String, tag: String },
+    World {
+        id: String,
+        tag: String,
+    },
 }
 
 impl Eq for ModifierSource {}
@@ -105,13 +110,22 @@ pub enum PhaserMode {
 pub enum TeamSlot {
     Idle,
     /// Team is en route to the target console. `elapsed` counts up toward 5s.
-    Travelling { console: Console, elapsed: f32 },
+    Travelling {
+        console: Console,
+        elapsed: f32,
+    },
     /// Team is at the console performing repairs. `elapsed` counts HP restored.
-    Repairing { console: Console, elapsed: f32 },
+    Repairing {
+        console: Console,
+        elapsed: f32,
+    },
     /// Team has finished and is returning to engineering.
     /// `remaining` counts down from 5s. `queued` holds the next console to
     /// dispatch to automatically on arrival (if any).
-    Returning { remaining: f32, queued: Option<Console> },
+    Returning {
+        remaining: f32,
+        queued: Option<Console>,
+    },
 }
 
 impl Default for TeamSlot {
@@ -392,6 +406,12 @@ pub struct EntitySnapshot {
     /// Seconds remaining until the entity completes warp-out (set while in `warping_out` state).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warp_out_remaining_secs: Option<f32>,
+    /// Optional per-entity world-space size override for radar blip
+    /// rendering. When `None`, clients fall back to `radius`. Authors
+    /// set this in the entity TOML's `[radar_appearance]` table to fudge
+    /// radar visibility independently of the entity's actual physical size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radar_world_size: Option<f32>,
 }
 
 impl EntitySnapshot {
@@ -429,11 +449,18 @@ impl EntitySnapshot {
             hull_fraction: None,
             inner_radius: None,
             warp_out_remaining_secs: None,
+            radar_world_size: None,
         }
     }
 
     /// Convenience constructor for an asteroid field entity.
-    pub fn asteroid_field(uuid: impl Into<String>, x: f32, z: f32, inner_radius: f32, outer_radius: f32) -> Self {
+    pub fn asteroid_field(
+        uuid: impl Into<String>,
+        x: f32,
+        z: f32,
+        inner_radius: f32,
+        outer_radius: f32,
+    ) -> Self {
         Self {
             uuid: uuid.into(),
             id: None,
@@ -446,6 +473,7 @@ impl EntitySnapshot {
             hull_fraction: None,
             inner_radius: Some(inner_radius),
             warp_out_remaining_secs: None,
+            radar_world_size: None,
         }
     }
 
@@ -463,6 +491,7 @@ impl EntitySnapshot {
             hull_fraction: None,
             inner_radius: None,
             warp_out_remaining_secs: None,
+            radar_world_size: None,
         }
     }
 }
@@ -531,75 +560,141 @@ pub struct WorldData {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ClientMessage {
-    Identify { token: String, name: String },
-    SetName { name: String },
-    SelectStation { station: String },
+    Identify {
+        token: String,
+        name: String,
+    },
+    SetName {
+        name: String,
+    },
+    SelectStation {
+        station: String,
+    },
     ReleaseStation,
     StartGame,
     ToggleRedAlert,
-    HelmInput { thrust: f32, steering: f32 },
+    HelmInput {
+        thrust: f32,
+        steering: f32,
+    },
     /// Sent by the Helm officer to begin charging the impulse drive.
     StartImpulseCharge,
     /// Sent by the Science officer to cancel an active or charging impulse drive.
     CancelImpulse,
-    SetView { mode: ViewMode },
-    SetTarget { uuid: String },
+    SetView {
+        mode: ViewMode,
+    },
+    SetTarget {
+        uuid: String,
+    },
     /// Science officer taps an entity on their radar to suggest it as a target
     /// to the Weapons console. Advisory only — does not affect lock state.
-    SetScienceTarget { uuid: String },
+    SetScienceTarget {
+        uuid: String,
+    },
     /// Sensors operator taps an entity on their long-range radar to suggest it
     /// as a target to Tactical. Advisory only — does not affect lock state.
-    SetSensorsTarget { uuid: String },
+    SetSensorsTarget {
+        uuid: String,
+    },
     FirePhaser,
-    SetPhaserMode { mode: PhaserMode },
+    SetPhaserMode {
+        mode: PhaserMode,
+    },
     /// Dispatch a specific repair team (by index) to the named console.
     /// Supports redirect and recall (see PRD #305).
-    DispatchRepairTeam { team_idx: u8, console: Console },
+    DispatchRepairTeam {
+        team_idx: u8,
+        console: Console,
+    },
     /// Fire a torpedo from the specified tube. `target_uuid` is optional homing target.
-    FireTorpedo { tube: TorpedoTube, target_uuid: Option<String> },
+    FireTorpedo {
+        tube: TorpedoTube,
+        target_uuid: Option<String>,
+    },
     /// Increase power allocation for a console. Validated server-side:
     /// sender must hold `Console::Power`.
-    IncreasePower { console: Console },
+    IncreasePower {
+        console: Console,
+    },
     /// Decrease power allocation for a console. Validated server-side:
     /// sender must hold `Console::Power`.
-    DecreasePower { console: Console },
+    DecreasePower {
+        console: Console,
+    },
     /// Change the complexity preset for a console the sender holds.
     /// Validated server-side: sender must hold the console and the preset
     /// name must exist in the ship's complexity config.
-    SetComplexity { console: Console, preset_name: String },
+    SetComplexity {
+        console: Console,
+        preset_name: String,
+    },
     /// Set the phaser emitter frequency (0.0–1.0).
     ///
     /// Normally sent by the Tactical holder. When Tactical is at Low
     /// complexity, the Science holder may also send this message
     /// (delegation allowlist in `delegation.rs`).
-    SetPhaserFrequency { frequency: f32 },
+    SetPhaserFrequency {
+        frequency: f32,
+    },
     /// Hail a target entity (e.g. a station). Server responds with a
     /// `CommsState` update that adds the contact's message to the inbox.
     /// Sender must hold `Console::Comms`.
-    Hail { target_uuid: String },
+    Hail {
+        target_uuid: String,
+    },
     /// Select a message in the Comms inbox (opens the chat view).
-    SelectCommsMessage { message_id: String },
+    SelectCommsMessage {
+        message_id: String,
+    },
     /// Choose a response to a received message.
-    RespondToMessage { message_id: String, response_index: usize },
+    RespondToMessage {
+        message_id: String,
+        response_index: usize,
+    },
     /// Clear all read or orphaned messages from the inbox.
     ClearComms,
     /// Focus one shield arc (Fore/Port/Aft/Starboard), or `None` to clear focus.
     /// Sender must hold `Console::Shields`.
-    SetShieldFocus { facing: Option<ViewDirection> },
+    SetShieldFocus {
+        facing: Option<ViewDirection>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {
-    Welcome { state: GameState, ship_stations: ShipStations, ship_config: ShipClientConfig },
-    PlayerJoined { player: Player },
-    PlayerLeft { token: String },
-    StationAssigned { token: String, station: Option<String>, consoles: Vec<Console> },
-    NameChanged { token: String, name: String },
+    Welcome {
+        state: GameState,
+        ship_stations: ShipStations,
+        ship_config: ShipClientConfig,
+    },
+    PlayerJoined {
+        player: Player,
+    },
+    PlayerLeft {
+        token: String,
+    },
+    StationAssigned {
+        token: String,
+        station: Option<String>,
+        consoles: Vec<Console>,
+    },
+    NameChanged {
+        token: String,
+        name: String,
+    },
     GameStarted,
-    SimState { snapshot: SimSnapshot },
-    WorldSetup { world: WorldData },
-    TargetLock { uuid: String, locked: bool },
+    SimState {
+        snapshot: SimSnapshot,
+    },
+    WorldSetup {
+        world: WorldData,
+    },
+    TargetLock {
+        uuid: String,
+        locked: bool,
+    },
     /// Sent at 10 Hz to the Weapons console player only.  `target_uuid` is the
     /// currently locked target (`None` if no lock), `fire_ready` indicates
     /// whether that target is within phaser range and in the forward 180° arc,
@@ -626,21 +721,34 @@ pub enum ServerMessage {
     },
     /// Broadcast when a phaser beam starts. Sent to all players so the renderer
     /// can draw the beam on the viewscreen.
-    BeamStarted { target_uuid: String },
+    BeamStarted {
+        target_uuid: String,
+    },
     /// Broadcast when a phaser beam ends (natural expiry, sever, or cancel).
-    BeamEnded { target_uuid: String },
+    BeamEnded {
+        target_uuid: String,
+    },
     /// Broadcast when an asteroid's HP reaches 0 and it is despawned.
-    AsteroidDestroyed { uuid: String },
+    AsteroidDestroyed {
+        uuid: String,
+    },
     /// Broadcast to all players when the Science officer taps a radar entity
     /// to designate it as a suggested target. Advisory only — does not lock
     /// the Tactical console.
-    ScienceTargetSuggestion { uuid: String },
+    ScienceTargetSuggestion {
+        uuid: String,
+    },
     /// Broadcast to all players when the Sensors operator taps an entity on
     /// their long-range radar to designate it as a suggested target for
     /// Tactical. Advisory only — does not lock the Tactical console.
-    SensorsTargetSuggestion { uuid: String },
+    SensorsTargetSuggestion {
+        uuid: String,
+    },
     /// Sent when a phaser bank fires a shot at a target.
-    PhaserFired { bank: PhaserBank, target_uuid: String },
+    PhaserFired {
+        bank: PhaserBank,
+        target_uuid: String,
+    },
     /// Sent at 10 Hz to the Repair console holder. Contains the current
     /// state of all repair teams, each with a `target_console` field.
     RepairState {
@@ -648,15 +756,32 @@ pub enum ServerMessage {
     },
     /// Sent at 10 Hz (or on change) to all players. Contains HP and online
     /// status for every shield facing.
-    ShieldStatus { facings: Vec<ShieldFacingStatus> },
+    ShieldStatus {
+        facings: Vec<ShieldFacingStatus>,
+    },
     /// Broadcast to all when a torpedo is launched from a tube.
-    TorpedoLaunched { uuid: String, tube: TorpedoTube, x: f32, z: f32, heading: f32 },
+    TorpedoLaunched {
+        uuid: String,
+        tube: TorpedoTube,
+        x: f32,
+        z: f32,
+        heading: f32,
+    },
     /// Broadcast to all when a torpedo is destroyed (expired or hit something).
-    TorpedoDestroyed { uuid: String },
+    TorpedoDestroyed {
+        uuid: String,
+    },
     /// Broadcast when a modifier is added or updated on the ship.
-    ModifierAdded { source: ModifierSource, slot: ModifierSlot, bonus: f32 },
+    ModifierAdded {
+        source: ModifierSource,
+        slot: ModifierSlot,
+        bonus: f32,
+    },
     /// Broadcast when a modifier is removed from the ship.
-    ModifierRemoved { source: ModifierSource, slot: ModifierSlot },
+    ModifierRemoved {
+        source: ModifierSource,
+        slot: ModifierSlot,
+    },
     /// Broadcast when an asteroid is spawned by the window lifecycle system.
     /// Sent to all players so the client can track the new entity.
     AsteroidSpawned {
@@ -737,11 +862,16 @@ pub enum ServerMessage {
     ShipDestroyed,
     /// Broadcast when the game transitions to the GameOver phase.
     /// Carries a human-readable reason string displayed on the game-over screen.
-    GameOver { reason: String },
+    GameOver {
+        reason: String,
+    },
     /// Broadcast when the ship takes damage (from collision or damage zone).
     /// `shield` = HP absorbed by shields, `hull` = HP that reached the hull.
     /// Either field may be zero (e.g. shield-only hit has `hull: 0.0`).
-    DamageTaken { hull: f32, shield: f32 },
+    DamageTaken {
+        hull: f32,
+        shield: f32,
+    },
 }
 
 // ── Objective wire types ───────────────────────────────────────────────────

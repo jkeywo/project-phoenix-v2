@@ -6,50 +6,54 @@
 
 use bevy::prelude::*;
 
+pub use border::{
+    BorderAssets, BorderConfig, BorderContentArea, CornerSlot, EdgeSlot, GuiBorder,
+    GuiBorderPlugin, GuiBorderWidget,
+};
+pub use button::{
+    resolve_click_sound, setup_ui_sounds, spawn_gui_button, ButtonPressed, ButtonSize, ClickSound,
+    GuiButtonMarker, UiSounds, WidgetActivated, WidgetDeactivated,
+};
 pub use foundation::{
     resolve_visual, resolve_visuals_system, Disabled, StateVisuals, Visual, WidgetState,
 };
-pub use button::{
-    ButtonPressed, ButtonSize, ClickSound, GuiButtonMarker, UiSounds,
-    WidgetActivated, WidgetDeactivated, resolve_click_sound, setup_ui_sounds,
-    spawn_gui_button,
-};
 pub use joystick::{
-    normalize_joystick, GenericJoystick, GenericJoystickPad, GenericJoystickKnob,
+    normalize_joystick, GenericJoystick, GenericJoystickKnob, GenericJoystickPad,
     JoystickDragState, JoystickMoved, JoystickResendTimer,
 };
-pub use radar::{
-    GenericRadar, GenericRadarWidget, OnRadar, RadarAppearance, RadarCenter,
-    RadarFilter, RadarLayer, RadarShape, OrientationMode,
-    is_on_radar, project_radar_entity,
+pub use light::{
+    effective_interval, FlickerLight, FlickerLightConfig, FlickerLightMarker, FlickerLightState,
 };
-pub use panel::{GuiPanel, GuiPanelMarker, PanelSize, lerp_size};
+pub use panel::{lerp_size, GuiPanel, GuiPanelMarker, PanelSize};
 pub use progress::{
-    ProgressBar, ProgressBarMarker, ProgressBarVariant, ProgressValue,
-    SegmentCount, filled_segments,
+    filled_segments, ProgressBar, ProgressBarMarker, ProgressBarVariant, ProgressValue,
+    SegmentCount,
 };
-pub use light::{FlickerLight, FlickerLightConfig, FlickerLightMarker, FlickerLightState, effective_interval};
-pub use readout::{TextReadout, TextReadoutMarker, ReadoutValue};
-pub use radio::{RadioGroup, RadioGroupMarker, RadioMember, RadioSelected, RadioButtonConfig, next_radio_selection};
-pub use border::{
-    BorderAssets, BorderConfig, BorderContentArea, CornerSlot, EdgeSlot,
-    GuiBorder, GuiBorderWidget, GuiBorderPlugin,
+pub use radar::{
+    blip_local_offset, is_on_radar, project_radar_entity, world_size_to_px, GenericRadar,
+    GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
+    RadarIcon, RadarIconLookup, RadarLayer,
 };
+pub use radio::{
+    next_radio_selection, RadioButtonConfig, RadioGroup, RadioGroupMarker, RadioMember,
+    RadioSelected,
+};
+pub use readout::{ReadoutValue, TextReadout, TextReadoutMarker};
 pub use vignette::{
-    RedAlertIntensity, RedAlertVignetteMaterial, GuiVignette, GuiVignetteWidget,
-    VignetteMaterialHandle, GuiVignettePlugin,
+    GuiVignette, GuiVignettePlugin, GuiVignetteWidget, RedAlertIntensity, RedAlertVignetteMaterial,
+    VignetteMaterialHandle,
 };
 
-mod foundation;
+pub mod border;
 pub mod button;
+mod foundation;
 pub mod joystick;
-pub mod radar;
+pub mod light;
 pub mod panel;
 pub mod progress;
-pub mod light;
-pub mod readout;
+pub mod radar;
 pub mod radio;
-pub mod border;
+pub mod readout;
 pub mod vignette;
 
 // ── Root plugin ───────────────────────────────────────────────────────────────
@@ -61,15 +65,15 @@ pub struct GuiPlugin;
 impl Plugin for GuiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, resolve_visuals_system)
-           .add_plugins(button::GuiButtonPlugin)
-           .add_plugins(joystick::GuiJoystickPlugin)
-           .add_plugins(radar::GuiRadarPlugin)
-           .add_plugins(panel::GuiPanelPlugin)
-           .add_plugins(progress::GuiProgressPlugin)
-           .add_plugins(light::GuiLightPlugin)
-           .add_plugins(readout::GuiReadoutPlugin)
-           .add_plugins(radio::GuiRadioPlugin)
-           .add_plugins(border::GuiBorderPlugin)
-           .add_plugins(vignette::GuiVignettePlugin);
+            .add_plugins(button::GuiButtonPlugin)
+            .add_plugins(joystick::GuiJoystickPlugin)
+            .add_plugins(radar::GuiRadarPlugin)
+            .add_plugins(panel::GuiPanelPlugin)
+            .add_plugins(progress::GuiProgressPlugin)
+            .add_plugins(light::GuiLightPlugin)
+            .add_plugins(readout::GuiReadoutPlugin)
+            .add_plugins(radio::GuiRadioPlugin)
+            .add_plugins(border::GuiBorderPlugin)
+            .add_plugins(vignette::GuiVignettePlugin);
     }
 }

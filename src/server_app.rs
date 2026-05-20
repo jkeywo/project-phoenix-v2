@@ -1,42 +1,40 @@
-﻿use bevy::prelude::*;
+use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::damage::{ConsoleHull};
-use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
-use rand::SeedableRng as _;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::shield::ShieldSystem;
+use crate::damage::ConsoleHull;
+use crate::lobby::{InboundMessage, OutboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
-    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, ViewDirection,
+    ClientMessage, Console, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus,
+    ViewDirection,
 };
+use crate::shield::ShieldSystem;
+use rand::SeedableRng as _;
 
+use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage};
+use crate::shield::attacker_bearing_relative;
 use crate::ship_physics::ShipPhysicsConfig;
 use crate::ship_state::ShipState;
-use crate::damage::{collision_damage, apply_damage_with_shields, apply_hull_damage};
-use crate::shield::attacker_bearing_relative;
 use bevy_rapier3d::prelude::ReadRapierContext;
 
+use crate::entity_spawner::{
+    EntityId, EntityTagsSection, EntityUuid, RadarAppearanceSection, RegionShapeSection,
+};
 use crate::impulse::ImpulseState;
-use crate::modifiers::ShipModifiers;
 use crate::messages::ModifierSlot;
-use crate::entity_spawner::{EntityUuid, EntityId, RegionShapeSection, EntityTagsSection, RadarAppearanceSection};
+use crate::modifiers::ShipModifiers;
 use std::collections::HashMap;
 
 // â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 pub use crate::weapons_plugin::{
-    WeaponsTarget, ActiveBeam, PhaserCooldown, CurrentPhaserMode,
-    PhaserRenderConfig, TorpedoSystemResource, AsteroidDestroyedVfx,
-    weapons_update_broadcaster,
+    weapons_update_broadcaster, ActiveBeam, AsteroidDestroyedVfx, CurrentPhaserMode,
+    PhaserCooldown, PhaserRenderConfig, TorpedoSystemResource, WeaponsTarget,
 };
 
-pub use crate::repair_plugin::{
-    ShipRepairTeams,
-    repair_state_broadcaster,
-};
+pub use crate::repair_plugin::{repair_state_broadcaster, ShipRepairTeams};
 
 pub use crate::power_plugin::{
-    ShipPowerSystem, PowerConfigResource, PowerMultiplierResource,
-    power_state_broadcaster,
+    power_state_broadcaster, PowerConfigResource, PowerMultiplierResource, ShipPowerSystem,
 };
 
 // â"€â"€ Marker Components â"€â"€â"€â"€â"€â"€â"€â"€
@@ -67,15 +65,6 @@ pub struct ShipShields(pub ShieldSystem);
 /// The ship's impulse drive state. Cancelled automatically when hull damage is taken.
 #[derive(Resource)]
 pub struct ShipImpulse(pub ImpulseState);
-
-
-
-
-
-
-
-
-
 
 /// Carries the reason string when the game ends. Set to `Some(reason)` before
 /// transitioning to `GamePhase::GameOver`. The `OnEnter(GameOver)` system reads
@@ -121,8 +110,6 @@ pub struct TrackedEntities {
     pub seeded: bool,
 }
 
-
-
 // â"€â"€ Plugin â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 /// Empty system used as an ordering anchor for the sim broadcast dispatch.
 /// All sim-phase systems (message handlers, tick systems, broadcasters) should
@@ -135,177 +122,244 @@ pub fn sim_processing_anchor() {}
 /// This is the canonical registration point for the server simulation.
 /// Call this from `wasm_init()` (bridge) instead of using a `SimulationPlugin`.
 pub fn add_simulation_plugins(app: &mut App) {
-        app.configure_sets(Update, (
+    app.configure_sets(
+        Update,
+        (
             crate::sim_sets::SimSet::Input,
             crate::sim_sets::SimSet::Physics,
             crate::sim_sets::SimSet::Damage,
             crate::sim_sets::SimSet::Modifiers,
             crate::sim_sets::SimSet::Broadcast,
-        ).chain().run_if(in_state(GamePhase::InProgress)).after(crate::lobby::process_lobby))
-        .add_plugins(RapierPhysicsPlugin::<()>::default())
-            .add_plugins(crate::region_plugin::RegionPlugin)
-            .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
-            .add_plugins(crate::ai_plugin::AiPlugin)
-            .add_plugins(crate::captain_plugin::CaptainPlugin)
-            .add_plugins(crate::ship_plugin::ShipPlugin)
-            .add_plugins(crate::weapons_plugin::WeaponsPlugin)
-            .add_plugins(crate::repair_plugin::RepairPlugin)
-            .add_plugins(crate::power_plugin::PowerPlugin)
-            .add_plugins(crate::science_plugin::SciencePlugin)
-            .add_message::<AsteroidDestroyedVfx>()
-            .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-                (Console::Power, 25.0),
-                (Console::Shields, 25.0),
-            ])))
-            .insert_resource(ShipShields(ShieldSystem::default()))
-            .insert_resource(ShipImpulse(ImpulseState::new()))
-            .insert_resource(crate::config_cache::FactionRegistryResource(crate::config_cache::get_faction_registry()))
-            .init_resource::<WorldResource>()
-            .init_resource::<WorldSetupBroadcast>()
-            .init_resource::<CollisionCooldown>()
-            .init_resource::<TrackedEntities>()
-            .init_resource::<SimOutbox>()
-            .insert_resource(SimBroadcastTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
-            .add_systems(Startup, setup_world)
-            .add_systems(OnEnter(GamePhase::InProgress), (
-                spawn_game_start_entities,
-                render_spawned_entities,
-            ))
-            .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
-            .insert_resource(GameOverReason(None))
-            .add_systems(Update, (
-                reconcile_runtime_entities,
-                broadcast_world_setup_on_start,
-            ).chain().after(crate::lobby::process_lobby).before(crate::sim_sets::SimSet::Input))
-            .add_systems(Update, (
-                handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
-                handle_set_shield_focus.in_set(crate::sim_sets::SimSet::Input),
-                tick_shields.in_set(crate::sim_sets::SimSet::Physics),
-                handle_collisions.in_set(crate::sim_sets::SimSet::Physics),
-                broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
-                sim_processing_anchor,
-            ).after(crate::lobby::process_lobby))
-            .add_systems(Update, crate::modifier_coordination::translate_power_modifiers.in_set(crate::sim_sets::SimSet::Modifiers))
-            .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers.in_set(crate::sim_sets::SimSet::Modifiers))
-
-            .add_plugins(weapons_update_broadcaster())
-            .add_plugins(sim_state_broadcaster())
-            .add_plugins(modifier_events_broadcaster())
-            .add_plugins(sim_outbox_broadcaster());
+        )
+            .chain()
+            .run_if(in_state(GamePhase::InProgress))
+            .after(crate::lobby::process_lobby),
+    )
+    .add_plugins(RapierPhysicsPlugin::<()>::default())
+    .add_plugins(crate::region_plugin::RegionPlugin)
+    .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
+    .add_plugins(crate::ai_plugin::AiPlugin)
+    .add_plugins(crate::captain_plugin::CaptainPlugin)
+    .add_plugins(crate::ship_plugin::ShipPlugin)
+    .add_plugins(crate::weapons_plugin::WeaponsPlugin)
+    .add_plugins(crate::repair_plugin::RepairPlugin)
+    .add_plugins(crate::power_plugin::PowerPlugin)
+    .add_plugins(crate::science_plugin::SciencePlugin)
+    .add_message::<AsteroidDestroyedVfx>()
+    .insert_resource(ShipState::new())
+    .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+        (Console::Helm, 25.0),
+        (Console::Tactical, 25.0),
+        (Console::Power, 25.0),
+        (Console::Shields, 25.0),
+    ])))
+    .insert_resource(ShipShields(ShieldSystem::default()))
+    .insert_resource(ShipImpulse(ImpulseState::new()))
+    .insert_resource(crate::config_cache::FactionRegistryResource(
+        crate::config_cache::get_faction_registry(),
+    ))
+    .init_resource::<WorldResource>()
+    .init_resource::<WorldSetupBroadcast>()
+    .init_resource::<CollisionCooldown>()
+    .init_resource::<TrackedEntities>()
+    .init_resource::<SimOutbox>()
+    .insert_resource(SimBroadcastTimer(Timer::from_seconds(
+        0.1,
+        TimerMode::Repeating,
+    )))
+    .add_systems(Startup, setup_world)
+    .add_systems(
+        OnEnter(GamePhase::InProgress),
+        (spawn_game_start_entities, render_spawned_entities),
+    )
+    .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
+    .insert_resource(GameOverReason(None))
+    .add_systems(
+        Update,
+        (reconcile_runtime_entities, broadcast_world_setup_on_start)
+            .chain()
+            .after(crate::lobby::process_lobby)
+            .before(crate::sim_sets::SimSet::Input),
+    )
+    .add_systems(
+        Update,
+        (
+            handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
+            handle_set_shield_focus.in_set(crate::sim_sets::SimSet::Input),
+            tick_shields.in_set(crate::sim_sets::SimSet::Physics),
+            handle_collisions.in_set(crate::sim_sets::SimSet::Physics),
+            broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
+            sim_processing_anchor,
+        )
+            .after(crate::lobby::process_lobby),
+    )
+    .add_systems(
+        Update,
+        crate::modifier_coordination::translate_power_modifiers
+            .in_set(crate::sim_sets::SimSet::Modifiers),
+    )
+    .add_systems(
+        Update,
+        crate::modifier_coordination::translate_impulse_modifiers
+            .in_set(crate::sim_sets::SimSet::Modifiers),
+    )
+    .add_plugins(weapons_update_broadcaster())
+    .add_plugins(sim_state_broadcaster())
+    .add_plugins(modifier_events_broadcaster())
+    .add_plugins(sim_outbox_broadcaster());
 }
-
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.
 ///
 /// Broadcasts `SimState` at 10 Hz to all players (`Audience::All`).
 /// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
 pub fn sim_state_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
-        Audience::All,
-        Cadence::Hz(10.0),
-        |world: &mut World| {
-            // Build per-tick entity state from live ECS first (before any resource
-            // borrows, so world.query() can get the exclusive access it needs).
-            let entity_states: Vec<crate::messages::EntityStateSnapshot> = {
-                // Asteroids carry AsteroidUuid.
-                let mut asteroid_query = world.query::<(&Transform, &AsteroidUuid, Option<&crate::entity_spawner::EntityConsoleHull>)>();
-                let asteroid_states: Vec<_> = asteroid_query.iter(world)
-                    .map(|(transform, uuid, hull_comp)| {
-                        let hull_fraction = hull_comp.map(|h| {
-                            let max = h.0.total_max();
-                            if max > 0.0 { h.0.total_current() / max } else { 1.0 }
-                        });
-                        crate::messages::EntityStateSnapshot {
-                            uuid: uuid.0.clone(),
-                            position: Some([transform.translation.x, transform.translation.y, transform.translation.z]),
-                            yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
-                            hull_fraction,
-                            flags: vec![],
-                            shields: None,
-                            warp_out_remaining_secs: None,
+    SimBroadcaster::new().register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
+        // Build per-tick entity state from live ECS first (before any resource
+        // borrows, so world.query() can get the exclusive access it needs).
+        let entity_states: Vec<crate::messages::EntityStateSnapshot> = {
+            // Asteroids carry AsteroidUuid.
+            let mut asteroid_query = world.query::<(
+                &Transform,
+                &AsteroidUuid,
+                Option<&crate::entity_spawner::EntityConsoleHull>,
+            )>();
+            let asteroid_states: Vec<_> = asteroid_query
+                .iter(world)
+                .map(|(transform, uuid, hull_comp)| {
+                    let hull_fraction = hull_comp.map(|h| {
+                        let max = h.0.total_max();
+                        if max > 0.0 {
+                            h.0.total_current() / max
+                        } else {
+                            1.0
                         }
-                    })
-                    .collect();
+                    });
+                    crate::messages::EntityStateSnapshot {
+                        uuid: uuid.0.clone(),
+                        position: Some([
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z,
+                        ]),
+                        yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                        hull_fraction,
+                        flags: vec![],
+                        shields: None,
+                        warp_out_remaining_secs: None,
+                    }
+                })
+                .collect();
 
-                // Non-asteroid entities (NPCs, stations) carry EntityUuid.
-                let mut npc_query = world.query_filtered::<(&Transform, &EntityUuid, Option<&crate::entity_spawner::EntityConsoleHull>), Without<Asteroid>>();
-                let npc_states: Vec<_> = npc_query.iter(world)
-                    .map(|(transform, uuid, hull_comp)| {
-                        let hull_fraction = hull_comp.map(|h| {
-                            let max = h.0.total_max();
-                            if max > 0.0 { h.0.total_current() / max } else { 1.0 }
-                        });
-                        crate::messages::EntityStateSnapshot {
-                            uuid: uuid.0.clone(),
-                            position: Some([transform.translation.x, transform.translation.y, transform.translation.z]),
-                            yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
-                            hull_fraction,
-                            flags: vec![],
-                            shields: None,
-                            warp_out_remaining_secs: None,
+            // Non-asteroid entities (NPCs, stations) carry EntityUuid.
+            let mut npc_query = world.query_filtered::<(
+                &Transform,
+                &EntityUuid,
+                Option<&crate::entity_spawner::EntityConsoleHull>,
+            ), Without<Asteroid>>();
+            let npc_states: Vec<_> = npc_query
+                .iter(world)
+                .map(|(transform, uuid, hull_comp)| {
+                    let hull_fraction = hull_comp.map(|h| {
+                        let max = h.0.total_max();
+                        if max > 0.0 {
+                            h.0.total_current() / max
+                        } else {
+                            1.0
                         }
-                    })
-                    .collect();
+                    });
+                    crate::messages::EntityStateSnapshot {
+                        uuid: uuid.0.clone(),
+                        position: Some([
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z,
+                        ]),
+                        yaw: Some(transform.rotation.to_euler(bevy::math::EulerRot::YXZ).0),
+                        hull_fraction,
+                        flags: vec![],
+                        shields: None,
+                        warp_out_remaining_secs: None,
+                    }
+                })
+                .collect();
 
-                asteroid_states.into_iter().chain(npc_states).collect()
-            };
+            asteroid_states.into_iter().chain(npc_states).collect()
+        };
 
-            // Extract all resource data (borrows are confined to this block).
-            let (console_hull, power_levels, flags, helm_range_mult, charge_progress,
-                 ship_x, ship_z, ship_yaw, ship_forward_speed, ship_red_alert, ship_view_mode) = {
-                let ship = world.resource::<ShipState>();
-                let hull = world.resource::<ShipHullIntegrity>();
-                let power = world.get_resource::<ShipPowerSystem>();
-                let impulse = world.resource::<ShipImpulse>();
-                let modifiers = world.resource::<crate::modifiers::ShipModifiers>();
+        // Extract all resource data (borrows are confined to this block).
+        let (
+            console_hull,
+            power_levels,
+            flags,
+            helm_range_mult,
+            charge_progress,
+            ship_x,
+            ship_z,
+            ship_yaw,
+            ship_forward_speed,
+            ship_red_alert,
+            ship_view_mode,
+        ) = {
+            let ship = world.resource::<ShipState>();
+            let hull = world.resource::<ShipHullIntegrity>();
+            let power = world.get_resource::<ShipPowerSystem>();
+            let impulse = world.resource::<ShipImpulse>();
+            let modifiers = world.resource::<crate::modifiers::ShipModifiers>();
 
-                let power_levels = power
-                    .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
-                    .unwrap_or((2, 2, 2));
-                let flags = modifiers.flags();
-                let helm_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-                let console_hull: Vec<crate::messages::ConsoleHullStatus> = hull.0.entries()
-                    .iter()
-                    .map(|(c, cur, max)| crate::messages::ConsoleHullStatus {
-                        console: c.clone(),
-                        current: *cur,
-                        max_hp: *max,
-                    })
-                    .collect();
-                (
-                    console_hull, power_levels, flags, helm_range_mult,
-                    impulse.0.charge_progress,
-                    ship.x, ship.z, ship.yaw, ship.forward_speed, ship.red_alert(), ship.view_mode.clone(),
-                )
-            };
-
-            let radar_state = crate::messages::RadarStateSnapshot {
-                helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
-                tactical_range: crate::client_sim::WEAPONS_RADAR_RANGE * helm_range_mult,
-                science_long_range: crate::client_sim::SCIENCE_RADAR_RANGE * helm_range_mult,
-                science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
-            };
-
-            let snapshot = crate::messages::SimSnapshot {
-                red_alert: ship_red_alert,
-                view_mode: ship_view_mode,
-                ship_x,
-                ship_z,
-                ship_yaw,
-                forward_speed: ship_forward_speed,
+            let power_levels = power
+                .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
+                .unwrap_or((2, 2, 2));
+            let flags = modifiers.flags();
+            let helm_range_mult = modifiers.get(&ModifierSlot::RadarRange);
+            let console_hull: Vec<crate::messages::ConsoleHullStatus> = hull
+                .0
+                .entries()
+                .iter()
+                .map(|(c, cur, max)| crate::messages::ConsoleHullStatus {
+                    console: c.clone(),
+                    current: *cur,
+                    max_hp: *max,
+                })
+                .collect();
+            (
                 console_hull,
                 power_levels,
                 flags,
-                entity_states,
-                radar_state,
-                impulse_charge_progress: charge_progress,
-            };
-            vec![ServerMessage::SimState { snapshot }]
-        },
-    )
+                helm_range_mult,
+                impulse.0.charge_progress,
+                ship.x,
+                ship.z,
+                ship.yaw,
+                ship.forward_speed,
+                ship.red_alert(),
+                ship.view_mode.clone(),
+            )
+        };
+
+        let radar_state = crate::messages::RadarStateSnapshot {
+            helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
+            tactical_range: crate::client_sim::WEAPONS_RADAR_RANGE * helm_range_mult,
+            science_long_range: crate::client_sim::SCIENCE_RADAR_RANGE * helm_range_mult,
+            science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
+        };
+
+        let snapshot = crate::messages::SimSnapshot {
+            red_alert: ship_red_alert,
+            view_mode: ship_view_mode,
+            ship_x,
+            ship_z,
+            ship_yaw,
+            forward_speed: ship_forward_speed,
+            console_hull,
+            power_levels,
+            flags,
+            entity_states,
+            radar_state,
+            impulse_charge_progress: charge_progress,
+        };
+        vec![ServerMessage::SimState { snapshot }]
+    })
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `ModifierAdded` and
@@ -317,28 +371,30 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 /// any Hz timer; an empty drain produces no outbound messages.
 /// Registered by [`add_simulation_plugins`] and the test harness in `test_app()`.
 pub fn modifier_events_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
-        Audience::All,
-        Cadence::OnEvent,
-        |world: &mut World| {
-            use crate::modifiers::ModifierEvent;
-            let events: Vec<_> = {
-                let mut modifiers = world.resource_mut::<crate::modifiers::ShipModifiers>();
-                std::mem::take(&mut modifiers.pending_events)
-            };
-            events
-                .into_iter()
-                .map(|event| match event {
-                    ModifierEvent::Added { source, slot, bonus } => {
-                        ServerMessage::ModifierAdded { source, slot, bonus }
-                    }
-                    ModifierEvent::Removed { source, slot } => {
-                        ServerMessage::ModifierRemoved { source, slot }
-                    }
-                })
-                .collect()
-        },
-    )
+    SimBroadcaster::new().register(Audience::All, Cadence::OnEvent, |world: &mut World| {
+        use crate::modifiers::ModifierEvent;
+        let events: Vec<_> = {
+            let mut modifiers = world.resource_mut::<crate::modifiers::ShipModifiers>();
+            std::mem::take(&mut modifiers.pending_events)
+        };
+        events
+            .into_iter()
+            .map(|event| match event {
+                ModifierEvent::Added {
+                    source,
+                    slot,
+                    bonus,
+                } => ServerMessage::ModifierAdded {
+                    source,
+                    slot,
+                    bonus,
+                },
+                ModifierEvent::Removed { source, slot } => {
+                    ServerMessage::ModifierRemoved { source, slot }
+                }
+            })
+            .collect()
+    })
 }
 
 /// Returns a [`SimBroadcaster`] that drains [`SimOutbox`] each frame and writes
@@ -349,18 +405,14 @@ pub fn modifier_events_broadcaster() -> SimBroadcaster {
 /// When populated (by any simulation system) the queued entries are flushed
 /// directly to `OutboundMessage` with their original `Target` routing.
 pub fn sim_outbox_broadcaster() -> SimBroadcaster {
-    SimBroadcaster::new().register(
-        Audience::All,
-        Cadence::OnEvent,
-        |world: &mut World| {
-            let mut outbox = world.resource_mut::<SimOutbox>();
-            let entries = std::mem::take(&mut outbox.0);
-            for (target, msg) in entries {
-                world.write_message(OutboundMessage { target, msg });
-            }
-            vec![]
-        },
-    )
+    SimBroadcaster::new().register(Audience::All, Cadence::OnEvent, |world: &mut World| {
+        let mut outbox = world.resource_mut::<SimOutbox>();
+        let entries = std::mem::take(&mut outbox.0);
+        for (target, msg) in entries {
+            world.write_message(OutboundMessage { target, msg });
+        }
+        vec![]
+    })
 }
 
 // -- Helper: token validation with AI fallback --------------------------------
@@ -394,7 +446,9 @@ fn handle_set_sensors_target(
     mut outbox: ResMut<SimOutbox>,
 ) {
     for ev in reader.read() {
-        let ClientMessage::SetSensorsTarget { uuid } = &ev.msg else { continue };
+        let ClientMessage::SetSensorsTarget { uuid } = &ev.msg else {
+            continue;
+        };
 
         // Only the Sensors console holder may broadcast a target suggestion.
         if sessions.0.console_holder(Console::Sensors) != Some(ev.token.as_str()) {
@@ -406,10 +460,12 @@ fn handle_set_sensors_target(
             continue;
         };
 
-        outbox.0.push((Target::Token(tactical_token.to_string()), ServerMessage::SensorsTargetSuggestion { uuid: uuid.clone() }));
+        outbox.0.push((
+            Target::Token(tactical_token.to_string()),
+            ServerMessage::SensorsTargetSuggestion { uuid: uuid.clone() },
+        ));
     }
 }
-
 
 fn handle_collisions(
     time: Res<Time>,
@@ -429,11 +485,21 @@ fn handle_collisions(
     cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
 
     let Ok(ctx) = context.single() else { return };
-    let Ok(ship_entity) = ship_query.single() else { return };
+    let Ok(ship_entity) = ship_query.single() else {
+        return;
+    };
 
-    let contact = ctx.contact_pairs_with(ship_entity).next().map(|pair| {
-        if pair.collider1() == Some(ship_entity) { pair.collider2() } else { pair.collider1() }
-    }).flatten();
+    let contact = ctx
+        .contact_pairs_with(ship_entity)
+        .next()
+        .map(|pair| {
+            if pair.collider1() == Some(ship_entity) {
+                pair.collider2()
+            } else {
+                pair.collider1()
+            }
+        })
+        .flatten();
 
     if contact.is_some() {
         if cooldown.remaining_secs > 0.0 {
@@ -457,18 +523,19 @@ fn handle_collisions(
             })
             .unwrap_or(0.0);
 
-        let hull_damage_from_shields = apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
+        let hull_damage_from_shields =
+            apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
         if hull_damage_from_shields > 0 {
             let rng = &mut rand::rngs::SmallRng::from_os_rng();
-            let (hull_applied, ship_destroyed) = apply_hull_damage(
-                &mut hull.0,
-                hull_damage_from_shields as f32,
-                rng,
-            );
-            outbox.0.push((Target::All, ServerMessage::DamageTaken {
-                hull: hull_applied,
-                shield: damage - hull_damage_from_shields as f32,
-            }));
+            let (hull_applied, ship_destroyed) =
+                apply_hull_damage(&mut hull.0, hull_damage_from_shields as f32, rng);
+            outbox.0.push((
+                Target::All,
+                ServerMessage::DamageTaken {
+                    hull: hull_applied,
+                    shield: damage - hull_damage_from_shields as f32,
+                },
+            ));
             if ship_destroyed {
                 outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
                 if game_over_reason.0.is_none() {
@@ -477,10 +544,13 @@ fn handle_collisions(
                 next_state.set(GamePhase::GameOver);
             }
         } else {
-            outbox.0.push((Target::All, ServerMessage::DamageTaken {
-                hull: 0.0,
-                shield: damage,
-            }));
+            outbox.0.push((
+                Target::All,
+                ServerMessage::DamageTaken {
+                    hull: 0.0,
+                    shield: damage,
+                },
+            ));
         }
         ship.forward_speed = 0.0;
         cooldown.remaining_secs = 1.0;
@@ -522,18 +592,24 @@ fn handle_set_shield_focus(
         // Immediately broadcast the updated shield status so the client UI
         // sees the new max_hp / is_focused values without waiting for the
         // 10 Hz tick.
-        let facings = shields.0.snapshot().into_iter().map(|s| ShieldFacingStatus {
-            label: s.label,
-            hp: s.hp,
-            max_hp: s.max_hp,
-            online: s.online,
-            offline_remaining: s.offline_remaining,
-            is_focused: s.is_focused,
-        }).collect();
-        outbox.0.push((Target::All, ServerMessage::ShieldStatus { facings }));
+        let facings = shields
+            .0
+            .snapshot()
+            .into_iter()
+            .map(|s| ShieldFacingStatus {
+                label: s.label,
+                hp: s.hp,
+                max_hp: s.max_hp,
+                online: s.online,
+                offline_remaining: s.offline_remaining,
+                is_focused: s.is_focused,
+            })
+            .collect();
+        outbox
+            .0
+            .push((Target::All, ServerMessage::ShieldStatus { facings }));
     }
 }
-
 
 /// Broadcast `ShieldStatus` to all players at 10 Hz.
 fn broadcast_shield_status(
@@ -545,17 +621,23 @@ fn broadcast_shield_status(
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
-    let facings = shields.0.snapshot().into_iter().map(|s| ShieldFacingStatus {
-        label: s.label,
-        hp: s.hp,
-        max_hp: s.max_hp,
-        online: s.online,
-        offline_remaining: s.offline_remaining,
-        is_focused: s.is_focused,
-    }).collect();
-    outbox.0.push((Target::All, ServerMessage::ShieldStatus { facings }));
+    let facings = shields
+        .0
+        .snapshot()
+        .into_iter()
+        .map(|s| ShieldFacingStatus {
+            label: s.label,
+            hp: s.hp,
+            max_hp: s.max_hp,
+            online: s.online,
+            offline_remaining: s.offline_remaining,
+            is_focused: s.is_focused,
+        })
+        .collect();
+    outbox
+        .0
+        .push((Target::All, ServerMessage::ShieldStatus { facings }));
 }
-
 
 /// Tracks whether the initial WorldSetup broadcast has fired, so it only
 /// goes out once per game.
@@ -567,12 +649,11 @@ struct WorldSetupBroadcast {
 /// Broadcast `GameOver { reason }` to all players when the game enters the
 /// GameOver phase. Reads the reason from `GameOverReason` resource and resets
 /// it to `None` after broadcast.
-fn on_game_over_enter(
-    mut game_over_reason: ResMut<GameOverReason>,
-    mut outbox: ResMut<SimOutbox>,
-) {
+fn on_game_over_enter(mut game_over_reason: ResMut<GameOverReason>, mut outbox: ResMut<SimOutbox>) {
     let reason = game_over_reason.0.take().unwrap_or_default();
-    outbox.0.push((Target::All, ServerMessage::GameOver { reason }));
+    outbox
+        .0
+        .push((Target::All, ServerMessage::GameOver { reason }));
 }
 
 /// Emit a single `WorldSetup` broadcast when the game enters `InProgress`.
@@ -586,7 +667,12 @@ fn broadcast_world_setup_on_start(
     if sent.sent || state.get() != &GamePhase::InProgress {
         return;
     }
-    outbox.0.push((Target::All, ServerMessage::WorldSetup { world: world.0.clone() }));
+    outbox.0.push((
+        Target::All,
+        ServerMessage::WorldSetup {
+            world: world.0.clone(),
+        },
+    ));
     sent.sent = true;
 }
 
@@ -605,7 +691,18 @@ fn broadcast_world_setup_on_start(
 fn reconcile_runtime_entities(
     mut registry: ResMut<TrackedEntities>,
     mut world: ResMut<WorldResource>,
-    query: Query<(Entity, &EntityUuid, Option<&EntityId>, &Transform, Option<&RegionShapeSection>, Option<&EntityTagsSection>, Option<&RadarAppearanceSection>), Without<Asteroid>>,
+    query: Query<
+        (
+            Entity,
+            &EntityUuid,
+            Option<&EntityId>,
+            &Transform,
+            Option<&RegionShapeSection>,
+            Option<&EntityTagsSection>,
+            Option<&RadarAppearanceSection>,
+        ),
+        Without<Asteroid>,
+    >,
     mut outbox: ResMut<SimOutbox>,
 ) {
     // Build the current set of ECS entity UUIDs.
@@ -621,7 +718,8 @@ fn reconcile_runtime_entities(
             RegionShape::Sphere { .. } => "sphere",
             RegionShape::Box { .. } => "box",
             RegionShape::Torus { .. } => "torus",
-        }.to_string()
+        }
+        .to_string()
     }
 
     // Seed reported set from ECS on first in-progress frame so that initial
@@ -630,7 +728,9 @@ fn reconcile_runtime_entities(
     if !registry.seeded {
         for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance)) = query.get(*entity) {
+            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance)) =
+                query.get(*entity)
+            {
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
@@ -652,6 +752,7 @@ fn reconcile_runtime_entities(
                     if let Some(r) = ra.0.radius {
                         snapshot.radius = Some(r);
                     }
+                    snapshot.radar_world_size = ra.0.world_size;
                 }
                 world.0.entities.push(snapshot);
             }
@@ -663,7 +764,9 @@ fn reconcile_runtime_entities(
     // Emit EntitySpawned for new entities.
     for (uuid, entity) in &current {
         if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance)) = query.get(*entity) {
+            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance)) =
+                query.get(*entity)
+            {
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
@@ -685,9 +788,12 @@ fn reconcile_runtime_entities(
                     if let Some(r) = ra.0.radius {
                         snapshot.radius = Some(r);
                     }
+                    snapshot.radar_world_size = ra.0.world_size;
                 }
                 world.0.entities.push(snapshot.clone());
-                outbox.0.push((Target::All, ServerMessage::EntitySpawned { snapshot }));
+                outbox
+                    .0
+                    .push((Target::All, ServerMessage::EntitySpawned { snapshot }));
             }
         }
     }
@@ -698,7 +804,10 @@ fn reconcile_runtime_entities(
         if !current.contains_key(uuid) {
             registry.reported.remove(uuid);
             world.0.entities.retain(|e| e.uuid != *uuid);
-            outbox.0.push((Target::All, ServerMessage::EntityDespawned { uuid: uuid.clone() }));
+            outbox.0.push((
+                Target::All,
+                ServerMessage::EntityDespawned { uuid: uuid.clone() },
+            ));
         }
     }
 }
@@ -738,15 +847,12 @@ fn setup_world(
         // Asteroid-field entries and named entries are owned by the unified
         // spawn pass in `world::server::spawn_world_entities`. Skip them to
         // avoid double-spawning.
-        let is_unified = crate::world::config::is_owned_by_unified_pipeline(
-            entity_inst,
-            |path| {
-                config_cache
-                    .get(path)
-                    .and_then(|c| c.asteroid_field.as_ref())
-                    .is_some()
-            },
-        );
+        let is_unified = crate::world::config::is_owned_by_unified_pipeline(entity_inst, |path| {
+            config_cache
+                .get(path)
+                .and_then(|c| c.asteroid_field.as_ref())
+                .is_some()
+        });
         if is_unified {
             continue;
         }
@@ -847,20 +953,32 @@ fn spawn_game_start_entities(
         let config = match crate::entity_loader::resolve_entity(entity_inst, &config_cache) {
             Ok(c) => c,
             Err(e) => {
-                bevy::log::error!("Failed to resolve GameStart entity '{}': {}", entity_inst.template_path, e);
+                bevy::log::error!(
+                    "Failed to resolve GameStart entity '{}': {}",
+                    entity_inst.template_path,
+                    e
+                );
                 continue;
             }
         };
 
         let uuid = crate::entity_loader::assign_uuid();
         let pos = if entity_inst.position.len() >= 3 {
-            Vec3::new(entity_inst.position[0], entity_inst.position[1], entity_inst.position[2])
+            Vec3::new(
+                entity_inst.position[0],
+                entity_inst.position[1],
+                entity_inst.position[2],
+            )
         } else {
             Vec3::ZERO
         };
 
         let spawned = crate::entity_spawner::spawn_entity(
-            &mut commands, &config, pos, uuid, entity_inst.id.clone(),
+            &mut commands,
+            &config,
+            pos,
+            uuid,
+            entity_inst.id.clone(),
         );
 
         // The first GameStart entity with tags containing "ship" gets the Ship marker
@@ -876,7 +994,8 @@ fn spawn_game_start_entities(
 
             // Ship-specific resource setup
             if let Some(hc) = &config.hull {
-                let entries: Vec<(Console, f32)> = hc.console_hull
+                let entries: Vec<(Console, f32)> = hc
+                    .console_hull
                     .iter()
                     .map(|e| (e.console.clone(), e.max_hp))
                     .collect();
@@ -887,11 +1006,16 @@ fn spawn_game_start_entities(
                     ConsoleHull::from_config(&entries)
                 };
                 commands.insert_resource(ShipHullIntegrity(hull));
-                let team_count = if hc.repair_team_count > 0 { hc.repair_team_count as usize } else { 2 };
+                let team_count = if hc.repair_team_count > 0 {
+                    hc.repair_team_count as usize
+                } else {
+                    2
+                };
                 // [repair] block — overrides default RepairTimings if present.
                 // Absent block keeps the same defaults the hardcoded constants
                 // used to provide (5.0s travel, 0.5 HP/s repair rate).
-                let timings = config.repair
+                let timings = config
+                    .repair
                     .as_ref()
                     .map(|rc| rc.to_runtime())
                     .unwrap_or_default();
@@ -914,10 +1038,7 @@ fn spawn_game_start_entities(
             // When absent we keep the historical defaults (4 quadrants,
             // 100 HP, 5 HP/s regen, 10 s offline).
             if let Some(sc) = &config.shields_console {
-                let shield_config = sc.base
-                    .as_ref()
-                    .map(|b| b.to_runtime())
-                    .unwrap_or_default();
+                let shield_config = sc.base.as_ref().map(|b| b.to_runtime()).unwrap_or_default();
                 let mut shields = ShipShields(ShieldSystem::new(&shield_config));
                 shields.0.focus_config = crate::shield::ShieldFocusConfig {
                     bonus_max_hp: sc.focus_bonus_max_hp,
@@ -931,8 +1052,15 @@ fn spawn_game_start_entities(
 
             if let Some(wc) = &config.weapons_console {
                 let beam_color = crate::beam_render::resolve_beam_color(&wc.beam_color);
-                let beam_range = if wc.beam_range > 0.0 { wc.beam_range } else { 40.0 };
-                commands.insert_resource(PhaserRenderConfig { beam_color, beam_range });
+                let beam_range = if wc.beam_range > 0.0 {
+                    wc.beam_range
+                } else {
+                    40.0
+                };
+                commands.insert_resource(PhaserRenderConfig {
+                    beam_color,
+                    beam_range,
+                });
 
                 // Player phaser combat tuning — overrides the default
                 // PhaserCombatConfig that WeaponsPlugin installed. The
@@ -963,22 +1091,21 @@ fn spawn_game_start_entities(
             }
 
             if let Some(pc) = &config.power {
-                commands.insert_resource(PowerConfigResource(
-                    crate::power_system::PowerConfig {
-                        capacity: pc.capacity,
-                        rates: pc.rates,
-                        emergency_threshold: pc.emergency_threshold,
-                    }
-                ));
+                commands.insert_resource(PowerConfigResource(crate::power_system::PowerConfig {
+                    capacity: pc.capacity,
+                    rates: pc.rates,
+                    emergency_threshold: pc.emergency_threshold,
+                }));
             }
 
             // Power multipliers
             let defaults = [-0.5, 0.0, 0.25, 0.5];
-            let mut multipliers: std::collections::HashMap<Console, [f32; 4]> = std::collections::HashMap::from([
-                (Console::Helm, defaults),
-                (Console::Tactical, defaults),
-                (Console::Sensors, defaults),
-            ]);
+            let mut multipliers: std::collections::HashMap<Console, [f32; 4]> =
+                std::collections::HashMap::from([
+                    (Console::Helm, defaults),
+                    (Console::Tactical, defaults),
+                    (Console::Sensors, defaults),
+                ]);
             if let Some(hc) = &config.helm_console {
                 if let Some(pm) = hc.power_multipliers {
                     multipliers.insert(Console::Helm, pm);
@@ -998,31 +1125,31 @@ fn spawn_game_start_entities(
             commands.insert_resource(PowerMultiplierResource { multipliers });
 
             // Ship physics config from [helm_console] TOML, or default
-            let physics_cfg = config.helm_console.as_ref().map(|hc| {
-                crate::ship_physics::ShipPhysicsConfig {
-                    max_speed: hc.max_speed,
-                    max_reverse_speed: hc.max_reverse_speed,
-                    acceleration: hc.acceleration,
-                    deceleration: hc.deceleration,
-                    max_yaw_rate: hc.max_yaw_rate,
-                }
-            });
-            commands.insert_resource(
-                crate::ship_plugin::ShipPhysicsConfigResource(
-                    physics_cfg.unwrap_or(crate::ship_physics::ShipPhysicsConfig::new())
-                )
-            );
+            let physics_cfg =
+                config
+                    .helm_console
+                    .as_ref()
+                    .map(|hc| crate::ship_physics::ShipPhysicsConfig {
+                        max_speed: hc.max_speed,
+                        max_reverse_speed: hc.max_reverse_speed,
+                        acceleration: hc.acceleration,
+                        deceleration: hc.deceleration,
+                        max_yaw_rate: hc.max_yaw_rate,
+                    });
+            commands.insert_resource(crate::ship_plugin::ShipPhysicsConfigResource(
+                physics_cfg.unwrap_or(crate::ship_physics::ShipPhysicsConfig::new()),
+            ));
 
             // Impulse config from [helm_console] TOML, or default
-            let impulse_cfg = config.helm_console.as_ref().map(|hc| {
-                crate::ship_plugin::ImpulseConfigResource {
-                    charge_duration: hc.impulse_charge_duration,
-                    speed_multiplier: hc.impulse_speed_multiplier,
-                }
-            });
-            commands.insert_resource(
-                impulse_cfg.unwrap_or_default()
-            );
+            let impulse_cfg =
+                config
+                    .helm_console
+                    .as_ref()
+                    .map(|hc| crate::ship_plugin::ImpulseConfigResource {
+                        charge_duration: hc.impulse_charge_duration,
+                        speed_multiplier: hc.impulse_speed_multiplier,
+                    });
+            commands.insert_resource(impulse_cfg.unwrap_or_default());
         }
     }
 
@@ -1039,7 +1166,9 @@ fn render_spawned_entities(
     planets: Query<(Entity, &crate::entity_spawner::PlanetSection, &Transform), Without<Mesh3d>>,
 ) {
     for (entity, star, _transform) in stars.iter() {
-        let mesh = meshes.add(Sphere { radius: star.0.radius });
+        let mesh = meshes.add(Sphere {
+            radius: star.0.radius,
+        });
         let color = if star.0.colour.len() >= 3 {
             Color::srgb(star.0.colour[0], star.0.colour[1], star.0.colour[2])
         } else {
@@ -1050,7 +1179,10 @@ fn render_spawned_entities(
             emissive: LinearRgba::from(color) * 2.0,
             ..default()
         });
-        let light_color = star.0.light_colour.as_ref()
+        let light_color = star
+            .0
+            .light_colour
+            .as_ref()
             .filter(|c| c.len() >= 3)
             .map(|c| Color::srgb(c[0], c[1], c[2]))
             .unwrap_or(Color::WHITE);
@@ -1070,7 +1202,9 @@ fn render_spawned_entities(
     }
 
     for (entity, planet, _transform) in planets.iter() {
-        let mesh = meshes.add(Sphere { radius: planet.0.radius });
+        let mesh = meshes.add(Sphere {
+            radius: planet.0.radius,
+        });
         let color = if planet.0.colour.len() >= 3 {
             Color::srgb(planet.0.colour[0], planet.0.colour[1], planet.0.colour[2])
         } else {
@@ -1080,17 +1214,18 @@ fn render_spawned_entities(
             base_color: color,
             ..default()
         });
-        commands.entity(entity).insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+        commands
+            .entity(entity)
+            .insert((Mesh3d(mesh), MeshMaterial3d(mat)));
     }
 }
-
 
 // â"€â"€ Tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::damage::collision_damage;
-    use crate::lobby::{LobbyPlugin, InboundMessage, OutboundMessage};
+    use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
     use crate::messages::*;
     use crate::ship_plugin::handle_impulse_messages;
     use crate::weapons_plugin::BEAM_DAMAGE_PER_SEC;
@@ -1104,64 +1239,80 @@ mod tests {
         }
     }
 
-fn test_app() -> App {
-    let mut app = App::new();
-    app.add_plugins(LobbyPlugin)
-        .add_plugins(bevy::time::TimePlugin)
-        // Advance time by 200 ms per tick so Hz-based SimBroadcaster timers
-        // (period = 100 ms) always fire within a single update call.
-        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            std::time::Duration::from_millis(200),
-        ))
-        .insert_resource(ShipState::new())
-        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-            (Console::Helm, 25.0),
-            (Console::Tactical, 25.0),
-            (Console::Power, 25.0),
-            (Console::Shields, 25.0),
-        ])))
-        .insert_resource(ShipShields(ShieldSystem::default()))
-        .insert_resource(ShipImpulse(ImpulseState::new()))
-        .init_resource::<WorldResource>()
-
-        .insert_resource(crate::modifiers::ShipModifiers::new())
-        .init_resource::<TrackedEntities>()
-        .insert_resource(SimBroadcastTimer(Timer::new(
-            std::time::Duration::from_nanos(1), TimerMode::Repeating)))
-        .init_resource::<WorldSetupBroadcast>()
-        .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
-        .init_resource::<SimOutbox>()
-        .init_resource::<Outbox>()
-        .add_message::<crate::ai_plugin::AiEntityDestroyed>()
-        .add_plugins(crate::captain_plugin::CaptainPlugin)
-        .add_plugins(crate::weapons_plugin::WeaponsPlugin)
-        .add_plugins(crate::repair_plugin::RepairPlugin)
-        .add_plugins(crate::power_plugin::PowerPlugin)
-        .add_plugins(crate::science_plugin::SciencePlugin)
-        .add_systems(Update, (
-            handle_set_sensors_target,
-            handle_impulse_messages, handle_set_shield_focus,
-            broadcast_shield_status,
-            reconcile_runtime_entities.after(crate::lobby::process_lobby).before(broadcast_world_setup_on_start),
-            broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
-        ))
-        .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
-            .after(crate::power_plugin::handle_power_messages)
-            .after(crate::power_plugin::tick_power_system))
-        .add_systems(Update, crate::modifier_coordination::translate_impulse_modifiers
-            .after(handle_impulse_messages))
-        .add_systems(Update, sim_processing_anchor)
-        .add_plugins(weapons_update_broadcaster())
-        .add_plugins(sim_state_broadcaster())
-        .add_plugins(modifier_events_broadcaster())
-        .add_systems(PostUpdate, collect);
-    app
-}
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            // Advance time by 200 ms per tick so Hz-based SimBroadcaster timers
+            // (period = 100 ms) always fire within a single update call.
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
+            .insert_resource(ShipState::new())
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm, 25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power, 25.0),
+                (Console::Shields, 25.0),
+            ])))
+            .insert_resource(ShipShields(ShieldSystem::default()))
+            .insert_resource(ShipImpulse(ImpulseState::new()))
+            .init_resource::<WorldResource>()
+            .insert_resource(crate::modifiers::ShipModifiers::new())
+            .init_resource::<TrackedEntities>()
+            .insert_resource(SimBroadcastTimer(Timer::new(
+                std::time::Duration::from_nanos(1),
+                TimerMode::Repeating,
+            )))
+            .init_resource::<WorldSetupBroadcast>()
+            .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
+            .init_resource::<SimOutbox>()
+            .init_resource::<Outbox>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_plugins(crate::captain_plugin::CaptainPlugin)
+            .add_plugins(crate::weapons_plugin::WeaponsPlugin)
+            .add_plugins(crate::repair_plugin::RepairPlugin)
+            .add_plugins(crate::power_plugin::PowerPlugin)
+            .add_plugins(crate::science_plugin::SciencePlugin)
+            .add_systems(
+                Update,
+                (
+                    handle_set_sensors_target,
+                    handle_impulse_messages,
+                    handle_set_shield_focus,
+                    broadcast_shield_status,
+                    reconcile_runtime_entities
+                        .after(crate::lobby::process_lobby)
+                        .before(broadcast_world_setup_on_start),
+                    broadcast_world_setup_on_start.after(crate::lobby::process_lobby),
+                ),
+            )
+            .add_systems(
+                Update,
+                crate::modifier_coordination::translate_power_modifiers
+                    .after(crate::power_plugin::handle_power_messages)
+                    .after(crate::power_plugin::tick_power_system),
+            )
+            .add_systems(
+                Update,
+                crate::modifier_coordination::translate_impulse_modifiers
+                    .after(handle_impulse_messages),
+            )
+            .add_systems(Update, sim_processing_anchor)
+            .add_plugins(weapons_update_broadcaster())
+            .add_plugins(sim_state_broadcaster())
+            .add_plugins(modifier_events_broadcaster())
+            .add_systems(PostUpdate, collect);
+        app
+    }
 
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -1179,9 +1330,22 @@ fn test_app() -> App {
     }
 
     fn start_game(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app); // process_lobby → sets NextState::Set(InProgress)
@@ -1189,39 +1353,117 @@ fn test_app() -> App {
     }
 
     fn start_game_with_helm(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "helm", ClientMessage::Identify { token: "helm".into(), name: "Bob".into() });
+        push(
+            app,
+            "helm",
+            ClientMessage::Identify {
+                token: "helm".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(app);
-        push(app, "helm", ClientMessage::SelectStation { station: "Helm".into() });
+        push(
+            app,
+            "helm",
+            ClientMessage::SelectStation {
+                station: "Helm".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
 
     fn start_game_with_sensors(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
+        push(
+            app,
+            "sensors",
+            ClientMessage::Identify {
+                token: "sensors".into(),
+                name: "Spock".into(),
+            },
+        );
         tick(app);
-        push(app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
+        push(
+            app,
+            "sensors",
+            ClientMessage::SelectStation {
+                station: "Sensors".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
 
     fn start_game_with_navigation(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "navigation", ClientMessage::Identify { token: "navigation".into(), name: "Decker".into() });
+        push(
+            app,
+            "navigation",
+            ClientMessage::Identify {
+                token: "navigation".into(),
+                name: "Decker".into(),
+            },
+        );
         tick(app);
-        push(app, "navigation", ClientMessage::SelectStation { station: "Navigation".into() });
+        push(
+            app,
+            "navigation",
+            ClientMessage::SelectStation {
+                station: "Navigation".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -1231,7 +1473,13 @@ fn test_app() -> App {
     fn sensors_can_switch_view_to_science_radar() {
         let mut app = test_app();
         start_game_with_sensors(&mut app);
-        push(&mut app, "sensors", ClientMessage::SetView { mode: ViewMode::ScienceRadar });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetView {
+                mode: ViewMode::ScienceRadar,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1242,7 +1490,13 @@ fn test_app() -> App {
     fn sensors_can_switch_view_to_sensors_radar() {
         let mut app = test_app();
         start_game_with_sensors(&mut app);
-        push(&mut app, "sensors", ClientMessage::SetView { mode: ViewMode::SensorsRadar });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetView {
+                mode: ViewMode::SensorsRadar,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1254,7 +1508,13 @@ fn test_app() -> App {
     fn non_sensors_cannot_switch_view_to_sensors_radar() {
         let mut app = test_app();
         start_game_with_sensors(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::SensorsRadar });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::SensorsRadar,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1262,12 +1522,17 @@ fn test_app() -> App {
         );
     }
 
-
     #[test]
     fn navigation_can_switch_view_to_system_chart() {
         let mut app = test_app();
         start_game_with_navigation(&mut app);
-        push(&mut app, "navigation", ClientMessage::SetView { mode: ViewMode::SystemChart });
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::SetView {
+                mode: ViewMode::SystemChart,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1279,7 +1544,13 @@ fn test_app() -> App {
     fn non_sensors_cannot_switch_view_to_science_radar() {
         let mut app = test_app();
         start_game_with_sensors(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::ScienceRadar });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::ScienceRadar,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1291,7 +1562,13 @@ fn test_app() -> App {
     fn non_navigation_cannot_switch_view_to_system_chart() {
         let mut app = test_app();
         start_game_with_navigation(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::SystemChart });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::SystemChart,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1303,7 +1580,13 @@ fn test_app() -> App {
     fn navigation_can_switch_view_to_navigation_chart() {
         let mut app = test_app();
         start_game_with_navigation(&mut app);
-        push(&mut app, "navigation", ClientMessage::SetView { mode: ViewMode::NavigationChart });
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::SetView {
+                mode: ViewMode::NavigationChart,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1315,7 +1598,13 @@ fn test_app() -> App {
     fn non_navigation_cannot_switch_view_to_navigation_chart() {
         let mut app = test_app();
         start_game_with_navigation(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::NavigationChart });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::NavigationChart,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1324,13 +1613,39 @@ fn test_app() -> App {
     }
 
     fn start_game_with_comms(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "comms", ClientMessage::Identify { token: "comms".into(), name: "Uhura".into() });
+        push(
+            app,
+            "comms",
+            ClientMessage::Identify {
+                token: "comms".into(),
+                name: "Uhura".into(),
+            },
+        );
         tick(app);
-        push(app, "comms", ClientMessage::SelectStation { station: "Comms".into() });
+        push(
+            app,
+            "comms",
+            ClientMessage::SelectStation {
+                station: "Comms".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -1340,7 +1655,13 @@ fn test_app() -> App {
     fn comms_can_push_view_to_comms() {
         let mut app = test_app();
         start_game_with_comms(&mut app);
-        push(&mut app, "comms", ClientMessage::SetView { mode: ViewMode::Comms });
+        push(
+            &mut app,
+            "comms",
+            ClientMessage::SetView {
+                mode: ViewMode::Comms,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1352,10 +1673,22 @@ fn test_app() -> App {
     fn captain_override_from_comms_view_works() {
         let mut app = test_app();
         start_game_with_comms(&mut app);
-        push(&mut app, "comms", ClientMessage::SetView { mode: ViewMode::Comms });
+        push(
+            &mut app,
+            "comms",
+            ClientMessage::SetView {
+                mode: ViewMode::Comms,
+            },
+        );
         tick(&mut app);
         // Captain overrides back to a camera view.
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::Camera(ViewDirection::Aft),
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1367,7 +1700,13 @@ fn test_app() -> App {
     fn non_comms_cannot_push_comms_view() {
         let mut app = test_app();
         start_game_with_comms(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Comms });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::Comms,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1379,7 +1718,13 @@ fn test_app() -> App {
     fn helm_can_switch_view_to_radar() {
         let mut app = test_app();
         start_game_with_helm(&mut app);
-        push(&mut app, "helm", ClientMessage::SetView { mode: ViewMode::Radar });
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::SetView {
+                mode: ViewMode::Radar,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1392,7 +1737,13 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_helm(&mut app);
         // Captain has no authority over Radar; request is silently dropped.
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Radar });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::Radar,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1404,7 +1755,13 @@ fn test_app() -> App {
     fn helm_cannot_switch_view_to_camera() {
         let mut app = test_app();
         start_game_with_helm(&mut app);
-        push(&mut app, "helm", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) });
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::SetView {
+                mode: ViewMode::Camera(ViewDirection::Aft),
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -1423,17 +1780,26 @@ fn test_app() -> App {
             ship.z = -3.5;
             ship.yaw = 1.25;
         }
-        push(&mut app, "helm", ClientMessage::SetView { mode: ViewMode::Radar });
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::SetView {
+                mode: ViewMode::Radar,
+            },
+        );
         tick(&mut app);
         // Ensure Time has accumulated some real delta and the broadcast fires.
         // Two prior ticks have already advanced TimePlugin's clock; a fresh
         // tick now sees a non-zero delta, finishing the 1-ns broadcast timer.
         let out = tick(&mut app);
 
-        let snap = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-            _ => None,
-        }).expect("expected a SimState broadcast");
+        let snap = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("expected a SimState broadcast");
 
         assert_eq!(snap.ship_x, 12.0);
         assert_eq!(snap.ship_z, -3.5);
@@ -1451,20 +1817,39 @@ fn test_app() -> App {
         }));
 
         // Bring the game up to the point of pressing StartGame
-        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "A".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(&mut app);
         // Simulate OnEnter(InProgress) having run by inserting ShipHullIntegrity.
         // The test explicitly advances phase to InProgress so broadcast_world_setup_on_start fires.
         push(&mut app, "captain", ClientMessage::StartGame);
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
         let start_out = tick(&mut app);
 
-        let world_setups: Vec<_> = start_out.iter().filter(|m|
-            matches!(&m.msg, ServerMessage::WorldSetup { .. })
-        ).collect();
-        assert_eq!(world_setups.len(), 1, "expected exactly one WorldSetup on the StartGame tick");
+        let world_setups: Vec<_> = start_out
+            .iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. }))
+            .collect();
+        assert_eq!(
+            world_setups.len(),
+            1,
+            "expected exactly one WorldSetup on the StartGame tick"
+        );
         match &world_setups[0].msg {
             ServerMessage::WorldSetup { world } => {
                 assert_eq!(world.entities.len(), 1);
@@ -1479,8 +1864,12 @@ fn test_app() -> App {
 
         // Subsequent ticks must not re-broadcast WorldSetup
         let later = tick(&mut app);
-        assert!(!later.iter().any(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. })),
-            "WorldSetup should only fire once per game");
+        assert!(
+            !later
+                .iter()
+                .any(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. })),
+            "WorldSetup should only fire once per game"
+        );
     }
 
     #[test]
@@ -1491,12 +1880,28 @@ fn test_app() -> App {
             ..Default::default()
         }));
         // Identify and select a console but don't start the game.
-        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "A".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "A".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         let out = tick(&mut app);
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. })),
-            "WorldSetup should not be broadcast in the Lobby phase");
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::WorldSetup { .. })),
+            "WorldSetup should not be broadcast in the Lobby phase"
+        );
     }
 
     #[test]
@@ -1504,10 +1909,13 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game(&mut app);
         let out = tick(&mut app);
-        let snap = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-            _ => None,
-        }).expect("expected a SimState broadcast");
+        let snap = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("expected a SimState broadcast");
         let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
         assert!((total - 100.0).abs() < 1e-6);
     }
@@ -1522,14 +1930,18 @@ fn test_app() -> App {
             let mut rng = rand::rng();
             app.world_mut()
                 .resource_mut::<ShipHullIntegrity>()
-                .0.apply_damage(10.0, &mut rng);
+                .0
+                .apply_damage(10.0, &mut rng);
         }
 
         let out = tick(&mut app);
-        let snap = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-            _ => None,
-        }).expect("expected a SimState broadcast");
+        let snap = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("expected a SimState broadcast");
         let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
         assert!((total - 90.0).abs() < 1e-6);
     }
@@ -1538,31 +1950,70 @@ fn test_app() -> App {
 
     fn setup_weapons_world(app: &mut App, asteroid_x: f32, asteroid_z: f32) {
         app.world_mut().insert_resource(WorldResource(WorldData {
-            entities: vec![EntitySnapshot::asteroid("target-uuid", asteroid_x, asteroid_z, 2.0)],
+            entities: vec![EntitySnapshot::asteroid(
+                "target-uuid",
+                asteroid_x,
+                asteroid_z,
+                2.0,
+            )],
             ..Default::default()
         }));
     }
 
     /// Like `setup_weapons_world` but also spawns the Bevy entity so that beam
     /// damage can actually be applied and the asteroid can be destroyed.
-    fn setup_weapons_world_with_entity(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> bevy::ecs::entity::Entity {
+    fn setup_weapons_world_with_entity(
+        app: &mut App,
+        asteroid_x: f32,
+        asteroid_z: f32,
+    ) -> bevy::ecs::entity::Entity {
         setup_weapons_world(app, asteroid_x, asteroid_z);
-        app.world_mut().spawn((
-            Asteroid,
-            AsteroidUuid("target-uuid".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
-            Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
-        )).id()
+        app.world_mut()
+            .spawn((
+                Asteroid,
+                AsteroidUuid("target-uuid".into()),
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                    &[(crate::messages::Console::CaptainChair, 30.0)],
+                )),
+                Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
+            ))
+            .id()
     }
 
     fn start_game_with_weapons(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -1575,13 +2026,22 @@ fn test_app() -> App {
         setup_weapons_world(&mut app, 30.0, 0.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let out = tick(&mut app);
 
-        let lock = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
-            _ => None,
-        }).expect("expected a TargetLock response");
+        let lock = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+                _ => None,
+            })
+            .expect("expected a TargetLock response");
         assert_eq!(lock.0, "target-uuid");
         assert!(lock.1, "expected locked=true for in-range asteroid");
 
@@ -1599,13 +2059,22 @@ fn test_app() -> App {
         setup_weapons_world(&mut app, 80.0, 0.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let out = tick(&mut app);
 
-        let lock = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
-            _ => None,
-        }).expect("expected a TargetLock response");
+        let lock = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+                _ => None,
+            })
+            .expect("expected a TargetLock response");
         assert!(!lock.1, "expected locked=false for out-of-range asteroid");
         assert!(app.world().resource::<WeaponsTarget>().0.is_none());
     }
@@ -1616,13 +2085,22 @@ fn test_app() -> App {
         setup_weapons_world(&mut app, 10.0, 0.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "no-such-asteroid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "no-such-asteroid".into(),
+            },
+        );
         let out = tick(&mut app);
 
-        let lock = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
-            _ => None,
-        }).expect("expected a TargetLock response");
+        let lock = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+                _ => None,
+            })
+            .expect("expected a TargetLock response");
         assert!(!lock.1, "expected locked=false for unknown UUID");
         assert!(app.world().resource::<WeaponsTarget>().0.is_none());
     }
@@ -1637,19 +2115,34 @@ fn test_app() -> App {
         setup_weapons_world(&mut app, 0.0, -20.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         // Lock the target
         let _ = tick(&mut app);
         // Now run another tick to get a WeaponsUpdate
         let out = tick(&mut app);
 
-        let update = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::WeaponsUpdate { target_uuid, fire_ready, .. } =>
-                Some((target_uuid.clone(), *fire_ready)),
-            _ => None,
-        }).expect("expected a WeaponsUpdate message");
+        let update = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::WeaponsUpdate {
+                    target_uuid,
+                    fire_ready,
+                    ..
+                } => Some((target_uuid.clone(), *fire_ready)),
+                _ => None,
+            })
+            .expect("expected a WeaponsUpdate message");
         assert_eq!(update.0.as_deref(), Some("target-uuid"));
-        assert!(update.1, "expected fire_ready=true for in-range, forward-arc target");
+        assert!(
+            update.1,
+            "expected fire_ready=true for in-range, forward-arc target"
+        );
     }
 
     /// Target locked but beyond 40-unit phaser range (within 60u lock range) â†' fire_ready = false.
@@ -1661,17 +2154,32 @@ fn test_app() -> App {
         setup_weapons_world(&mut app, 0.0, -50.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
-        let update = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::WeaponsUpdate { target_uuid, fire_ready, .. } =>
-                Some((target_uuid.clone(), *fire_ready)),
-            _ => None,
-        }).expect("expected a WeaponsUpdate message");
+        let update = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::WeaponsUpdate {
+                    target_uuid,
+                    fire_ready,
+                    ..
+                } => Some((target_uuid.clone(), *fire_ready)),
+                _ => None,
+            })
+            .expect("expected a WeaponsUpdate message");
         assert_eq!(update.0.as_deref(), Some("target-uuid"));
-        assert!(!update.1, "expected fire_ready=false for beyond-phaser-range target");
+        assert!(
+            !update.1,
+            "expected fire_ready=false for beyond-phaser-range target"
+        );
     }
 
     // â"€â"€ FirePhaser / beam lifecycle tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -1681,7 +2189,13 @@ fn test_app() -> App {
         setup_weapons_world(app, asteroid_x, asteroid_z);
         start_game_with_weapons(app);
         // Lock
-        push(app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let _ = tick(app);
         // Fire
         push(app, "weapons", ClientMessage::FirePhaser);
@@ -1695,8 +2209,13 @@ fn test_app() -> App {
         // Asteroid directly ahead at 20 units (yaw=0 â†' facing -Z â†' asteroid at (0,-20)).
         let out = lock_and_fire(&mut app, 0.0, -20.0);
 
-        let beam_started = out.iter().find(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. }));
-        assert!(beam_started.is_some(), "expected BeamStarted after firing at fire-ready target");
+        let beam_started = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. }));
+        assert!(
+            beam_started.is_some(),
+            "expected BeamStarted after firing at fire-ready target"
+        );
         match &beam_started.unwrap().msg {
             ServerMessage::BeamStarted { target_uuid } => assert_eq!(target_uuid, "target-uuid"),
             _ => unreachable!(),
@@ -1721,13 +2240,18 @@ fn test_app() -> App {
 
         // Manually put the cooldown into active state (simulating a beam just ended).
         app.world_mut().resource_mut::<ActiveBeam>().target_uuid = None;
-        app.world_mut().resource_mut::<PhaserCooldown>().remaining_secs = 3.0;
+        app.world_mut()
+            .resource_mut::<PhaserCooldown>()
+            .remaining_secs = 3.0;
 
         push(&mut app, "weapons", ClientMessage::FirePhaser);
         let out = tick(&mut app);
 
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
-            "BeamStarted should not fire during cooldown");
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "BeamStarted should not fire during cooldown"
+        );
     }
 
     /// Non-weapons player cannot fire.
@@ -1740,8 +2264,11 @@ fn test_app() -> App {
         push(&mut app, "captain", ClientMessage::FirePhaser);
         let out = tick(&mut app);
 
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
-            "captain should not be able to fire phaser");
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "captain should not be able to fire phaser"
+        );
     }
 
     /// When the beam fires at a target outside the 180Â° arc, it is rejected.
@@ -1752,14 +2279,23 @@ fn test_app() -> App {
         setup_weapons_world(&mut app, 0.0, 20.0);
         start_game_with_weapons(&mut app);
         // Lock (within 60u range) â€" lock doesn't require arc.
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let _ = tick(&mut app);
         // Fire â€" rejected because target is behind.
         push(&mut app, "weapons", ClientMessage::FirePhaser);
         let out = tick(&mut app);
 
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
-            "FirePhaser should be rejected when target is in rear arc");
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "FirePhaser should be rejected when target is in rear arc"
+        );
     }
 
     /// A 6-second natural beam kills the asteroid (5 HP/s Ã— 6s = 30 HP total).
@@ -1771,11 +2307,16 @@ fn test_app() -> App {
         let mut app = test_app();
 
         // Spawn an asteroid entity with full HP so tick_active_beam can find it.
-        let asteroid_entity = app.world_mut().spawn((
-            Asteroid,
-            AsteroidUuid("target-uuid".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
-        )).id();
+        let asteroid_entity = app
+            .world_mut()
+            .spawn((
+                Asteroid,
+                AsteroidUuid("target-uuid".into()),
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                    &[(crate::messages::Console::CaptainChair, 30.0)],
+                )),
+            ))
+            .id();
 
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
@@ -1796,20 +2337,33 @@ fn test_app() -> App {
         let out = tick(&mut app);
 
         // Asteroid destroyed message should be present.
-        let destroyed = out.iter().find(|m| matches!(&m.msg, ServerMessage::AsteroidDestroyed { .. }));
-        assert!(destroyed.is_some(), "expected AsteroidDestroyed when asteroid HP reaches 0");
+        let destroyed = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::AsteroidDestroyed { .. }));
+        assert!(
+            destroyed.is_some(),
+            "expected AsteroidDestroyed when asteroid HP reaches 0"
+        );
         match &destroyed.unwrap().msg {
             ServerMessage::AsteroidDestroyed { uuid } => assert_eq!(uuid, "target-uuid"),
             _ => unreachable!(),
         }
 
         // BeamEnded also broadcast.
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
-            "expected BeamEnded after asteroid destruction");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded after asteroid destruction"
+        );
 
         // Asteroid no longer in world data.
         assert!(
-            !app.world().resource::<WorldResource>().0.entities.iter().any(|a| a.uuid == "target-uuid"),
+            !app.world()
+                .resource::<WorldResource>()
+                .0
+                .entities
+                .iter()
+                .any(|a| a.uuid == "target-uuid"),
             "destroyed asteroid should be removed from WorldData"
         );
 
@@ -1817,12 +2371,18 @@ fn test_app() -> App {
         assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none());
 
         // Cooldown started.
-        assert!(app.world().resource::<PhaserCooldown>().is_active(),
-            "cooldown should start after beam end");
+        assert!(
+            app.world().resource::<PhaserCooldown>().is_active(),
+            "cooldown should start after beam end"
+        );
 
         // The entity should be despawned.
-        assert!(app.world().get::<crate::entity_spawner::EntityConsoleHull>(asteroid_entity).is_none(),
-            "asteroid entity should be despawned");
+        assert!(
+            app.world()
+                .get::<crate::entity_spawner::EntityConsoleHull>(asteroid_entity)
+                .is_none(),
+            "asteroid entity should be despawned"
+        );
     }
 
     /// Beam severs when ship rotates target out of the 180Â° forward arc.
@@ -1836,12 +2396,19 @@ fn test_app() -> App {
 
         let out = tick(&mut app);
 
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
-            "expected BeamEnded when target leaves forward arc");
-        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none(),
-            "beam should be cleared after sever-by-arc");
-        assert!(app.world().resource::<PhaserCooldown>().is_active(),
-            "cooldown should start after arc sever");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded when target leaves forward arc"
+        );
+        assert!(
+            app.world().resource::<ActiveBeam>().target_uuid.is_none(),
+            "beam should be cleared after sever-by-arc"
+        );
+        assert!(
+            app.world().resource::<PhaserCooldown>().is_active(),
+            "cooldown should start after arc sever"
+        );
     }
 
     /// Beam severs when the target moves beyond 40-unit phaser range.
@@ -1851,39 +2418,56 @@ fn test_app() -> App {
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
         // Move asteroid position in WorldData to 50 units away (out of 40u range).
-        app.world_mut().resource_mut::<WorldResource>().0.entities[0].position = Some([0.0, 0.0, -50.0]);
+        app.world_mut().resource_mut::<WorldResource>().0.entities[0].position =
+            Some([0.0, 0.0, -50.0]);
 
         let out = tick(&mut app);
 
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
-            "expected BeamEnded when target leaves phaser range");
-        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none(),
-            "beam should be cleared after sever-by-range");
-        assert!(app.world().resource::<PhaserCooldown>().is_active(),
-            "cooldown should start after range sever");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded when target leaves phaser range"
+        );
+        assert!(
+            app.world().resource::<ActiveBeam>().target_uuid.is_none(),
+            "beam should be cleared after sever-by-range"
+        );
+        assert!(
+            app.world().resource::<PhaserCooldown>().is_active(),
+            "cooldown should start after range sever"
+        );
     }
 
     /// No damage refund on sever â€" whatever HP was dealt is permanent.
     #[test]
     fn no_damage_refund_on_sever() {
         let mut app = test_app();
-        let asteroid_entity = app.world_mut().spawn((
-            Asteroid,
-            AsteroidUuid("target-uuid".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
-        )).id();
+        let asteroid_entity = app
+            .world_mut()
+            .spawn((
+                Asteroid,
+                AsteroidUuid("target-uuid".into()),
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                    &[(crate::messages::Console::CaptainChair, 30.0)],
+                )),
+            ))
+            .id();
 
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
         // Apply partial damage via accumulator.
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 10.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 10.0;
         let _ = tick(&mut app);
 
         // Now sever by rotating ship.
         app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
         let _ = tick(&mut app);
 
-        let hp = app.world().get::<crate::entity_spawner::EntityConsoleHull>(asteroid_entity)
+        let hp = app
+            .world()
+            .get::<crate::entity_spawner::EntityConsoleHull>(asteroid_entity)
             .map(|h| h.0.total_current());
         assert!(
             hp.is_some() && hp.unwrap() < 30.0,
@@ -1909,53 +2493,103 @@ fn test_app() -> App {
         start_game_with_weapons(&mut app);
 
         // Lock and fire at t1.
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t1".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget { uuid: "t1".into() },
+        );
         let _ = tick(&mut app);
         push(&mut app, "weapons", ClientMessage::FirePhaser);
         let _ = tick(&mut app);
-        assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t1"));
+        assert_eq!(
+            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            Some("t1")
+        );
 
         // Natural beam expiry: set remaining to 0.
         app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 0.0;
         // Zero damage accumulator so no destruction fires.
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 0.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 0.0;
         let _ = tick(&mut app); // beam ends, cooldown starts
 
         // Cooldown should be active.
         assert!(app.world().resource::<PhaserCooldown>().is_active());
 
         // Force cooldown to expire.
-        app.world_mut().resource_mut::<PhaserCooldown>().remaining_secs = 0.0;
+        app.world_mut()
+            .resource_mut::<PhaserCooldown>()
+            .remaining_secs = 0.0;
 
         // Lock and fire at t2.
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t2".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget { uuid: "t2".into() },
+        );
         let _ = tick(&mut app);
         push(&mut app, "weapons", ClientMessage::FirePhaser);
         let out = tick(&mut app);
 
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
-            "expected BeamStarted for new target after cooldown");
-        assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t2"));
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "expected BeamStarted for new target after cooldown"
+        );
+        assert_eq!(
+            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            Some("t2")
+        );
     }
 
     // -- Repair helpers --------------------------------------------------
 
     /// Set up a game with a captain and repair player.
     fn start_game_with_repair(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "eng", ClientMessage::Identify { token: "eng".into(), name: "Bob".into() });
+        push(
+            app,
+            "eng",
+            ClientMessage::Identify {
+                token: "eng".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(app);
-        push(app, "eng", ClientMessage::SelectStation { station: "Repair".into() });
+        push(
+            app,
+            "eng",
+            ClientMessage::SelectStation {
+                station: "Repair".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
 
     fn team_is_travelling(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Travelling { .. })
+        matches!(
+            teams.0.slots()[idx],
+            crate::messages::TeamSlot::Travelling { .. }
+        )
     }
 
     fn team_is_idle(teams: &ShipRepairTeams, idx: usize) -> bool {
@@ -1968,35 +2602,79 @@ fn test_app() -> App {
     fn non_repair_sender_is_ignored() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
-        push(&mut app, "captain", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
         tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_idle(&teams, 0), "team 0 should remain idle after non-Repair dispatch");
+        assert!(
+            team_is_idle(&teams, 0),
+            "team 0 should remain idle after non-Repair dispatch"
+        );
     }
 
     #[test]
     fn repair_holder_can_dispatch_team() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
         tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_travelling(&teams, 0), "team 0 should be travelling after dispatch");
+        assert!(
+            team_is_travelling(&teams, 0),
+            "team 0 should be travelling after dispatch"
+        );
     }
 
     #[test]
     fn all_busy_teams_ignore_further_dispatches() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
         tick(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 1, console: Console::Tactical });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 1,
+                console: Console::Tactical,
+            },
+        );
         tick(&mut app);
         // Redirect team 0 (different console → Returning)
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Power });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Power,
+            },
+        );
         tick(&mut app);
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(matches!(&teams.0.slots()[0], crate::messages::TeamSlot::Returning { .. }));
+        assert!(matches!(
+            &teams.0.slots()[0],
+            crate::messages::TeamSlot::Returning { .. }
+        ));
         assert!(team_is_travelling(&teams, 1));
     }
 
@@ -2004,17 +2682,25 @@ fn test_app() -> App {
     fn repair_state_broadcast_after_dispatch() {
         let mut app = test_app();
         start_game_with_repair(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
         let out = tick(&mut app);
         let repair_state = out.iter().find(|m| {
             matches!(&m.msg, ServerMessage::RepairState { teams } if
                 teams.iter().any(|t| matches!(t, crate::messages::TeamSlot::Travelling { .. })))
                 && matches!(&m.target, Target::Token(t) if t == "eng")
         });
-        assert!(repair_state.is_some(),
-            "RepairState with Travelling team should be broadcast to repair console");
+        assert!(
+            repair_state.is_some(),
+            "RepairState with Travelling team should be broadcast to repair console"
+        );
     }
-
 
     // â"€â"€ SetPhaserMode tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
@@ -2023,7 +2709,13 @@ fn test_app() -> App {
     fn weapons_console_can_set_phaser_mode_to_manual() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(&mut app, "weapons", ClientMessage::SetPhaserMode { mode: crate::messages::PhaserMode::Manual });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserMode {
+                mode: crate::messages::PhaserMode::Manual,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<CurrentPhaserMode>().0,
@@ -2037,7 +2729,13 @@ fn test_app() -> App {
     fn non_weapons_player_cannot_set_phaser_mode() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(&mut app, "captain", ClientMessage::SetPhaserMode { mode: crate::messages::PhaserMode::Manual });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetPhaserMode {
+                mode: crate::messages::PhaserMode::Manual,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<CurrentPhaserMode>().0,
@@ -2049,17 +2747,56 @@ fn test_app() -> App {
     // â"€â"€ SetSensorsTarget / SensorsTargetSuggestion tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
     fn start_game_with_sensors_and_weapons(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
+        push(
+            app,
+            "sensors",
+            ClientMessage::Identify {
+                token: "sensors".into(),
+                name: "Spock".into(),
+            },
+        );
         tick(app);
-        push(app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
+        push(
+            app,
+            "sensors",
+            ClientMessage::SelectStation {
+                station: "Sensors".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -2070,17 +2807,27 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
 
-        push(&mut app, "sensors", ClientMessage::SetSensorsTarget { uuid: "asteroid-99".into() });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetSensorsTarget {
+                uuid: "asteroid-99".into(),
+            },
+        );
         let out = tick(&mut app);
 
-        let suggestion = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::SensorsTargetSuggestion { uuid } => Some(uuid.clone()),
-            _ => None,
-        }).expect("expected a SensorsTargetSuggestion message");
+        let suggestion = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::SensorsTargetSuggestion { uuid } => Some(uuid.clone()),
+                _ => None,
+            })
+            .expect("expected a SensorsTargetSuggestion message");
         assert_eq!(suggestion, "asteroid-99");
 
         // Must be targeted to Tactical console player only.
-        let suggestion_msg = out.iter()
+        let suggestion_msg = out
+            .iter()
             .find(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. }))
             .unwrap();
         assert!(
@@ -2094,11 +2841,18 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
 
-        push(&mut app, "captain", ClientMessage::SetSensorsTarget { uuid: "asteroid-99".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetSensorsTarget {
+                uuid: "asteroid-99".into(),
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
             "non-Sensors player should not be able to send SensorsTargetSuggestion"
         );
     }
@@ -2106,20 +2860,39 @@ fn test_app() -> App {
     #[test]
     fn set_sensors_target_ignored_in_lobby() {
         let mut app = test_app();
-        push(&mut app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::Identify {
+                token: "sensors".into(),
+                name: "Spock".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SelectStation {
+                station: "Sensors".into(),
+            },
+        );
         tick(&mut app);
 
-        push(&mut app, "sensors", ClientMessage::SetSensorsTarget { uuid: "asteroid-99".into() });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetSensorsTarget {
+                uuid: "asteroid-99".into(),
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::SensorsTargetSuggestion { .. })),
             "SetSensorsTarget should be ignored during Lobby phase"
         );
     }
-
 
     // â"€â"€ FireTorpedo tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
@@ -2128,14 +2901,24 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::ForePort,
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: crate::messages::TorpedoTube::ForePort,
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube: crate::messages::TorpedoTube::ForePort, .. })),
+            out.iter().any(|m| matches!(
+                &m.msg,
+                ServerMessage::TorpedoLaunched {
+                    tube: crate::messages::TorpedoTube::ForePort,
+                    ..
+                }
+            )),
             "expected TorpedoLaunched broadcast after Tactical fires torpedo"
         );
     }
@@ -2145,14 +2928,19 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "captain", ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::ForePort,
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::FireTorpedo {
+                tube: crate::messages::TorpedoTube::ForePort,
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
             "captain should not be able to fire torpedo"
         );
     }
@@ -2162,19 +2950,37 @@ fn test_app() -> App {
         // Note: The Lobby gate is now at the SimSet chain level.
         // In test configurations without SimSet, the system processes messages during Lobby.
         let mut app = test_app();
-        push(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         tick(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::Aft,
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: crate::messages::TorpedoTube::Aft,
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
             "FireTorpedo should fire during Lobby when no SimSet gate is configured"
         );
     }
@@ -2184,17 +2990,24 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::ForeStarboard,
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: crate::messages::TorpedoTube::ForeStarboard,
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
-        let launched = out.iter().find(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. }))
+        let launched = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. }))
             .expect("expected TorpedoLaunched");
         assert!(
             matches!(&launched.target, Target::All),
-            "TorpedoLaunched should be broadcast to All, not {:?}", launched.target
+            "TorpedoLaunched should be broadcast to All, not {:?}",
+            launched.target
         );
     }
 
@@ -2210,7 +3023,13 @@ fn test_app() -> App {
         start_game_with_weapons(&mut app);
 
         // Lock and fire
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         tick(&mut app);
         push(&mut app, "weapons", ClientMessage::FirePhaser);
         tick(&mut app);
@@ -2227,7 +3046,12 @@ fn test_app() -> App {
         // After that, asteroid should have taken ~2â€"3 HP (not destroyed yet).
         let hp_before = {
             let world = app.world().resource::<WorldResource>();
-            world.0.entities.iter().find(|a| a.uuid == "target-uuid").map(|_| true)
+            world
+                .0
+                .entities
+                .iter()
+                .find(|a| a.uuid == "target-uuid")
+                .map(|_| true)
         };
         assert!(hp_before.is_some(), "asteroid should still exist after <1s");
     }
@@ -2239,8 +3063,8 @@ fn test_app() -> App {
     /// Test: after running ~4s of game time, the asteroid is destroyed with 2Ã— but not with 1Ã—.
     #[test]
     fn phaser_damage_modifier_doubles_kill_rate() {
-        use crate::modifiers::{Modifier, ShipModifiers};
         use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::modifiers::{Modifier, ShipModifiers};
 
         // --- App with 2Ã— PhaserDamage modifier ---
         let mut app_fast = test_app();
@@ -2251,11 +3075,17 @@ fn test_app() -> App {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::PhaserDamage,
-                bonus: 1.0,  // â†' multiplier 2.0
+                bonus: 1.0, // â†' multiplier 2.0
             });
         }
         start_game_with_weapons(&mut app_fast);
-        push(&mut app_fast, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app_fast,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         tick(&mut app_fast);
         push(&mut app_fast, "weapons", ClientMessage::FirePhaser);
         tick(&mut app_fast); // processes FirePhaser, beam becomes active
@@ -2267,27 +3097,46 @@ fn test_app() -> App {
         }
         tick(&mut app_fast); // One tick to process the accumulated damage.
 
-        let still_exists_fast = app_fast.world().resource::<WorldResource>()
-            .0.entities.iter().any(|a| a.uuid == "target-uuid");
-        assert!(!still_exists_fast, "with 2Ã— phaser damage modifier, asteroid should be destroyed after 3.5s of beam");
+        let still_exists_fast = app_fast
+            .world()
+            .resource::<WorldResource>()
+            .0
+            .entities
+            .iter()
+            .any(|a| a.uuid == "target-uuid");
+        assert!(
+            !still_exists_fast,
+            "with 2Ã— phaser damage modifier, asteroid should be destroyed after 3.5s of beam"
+        );
 
         // --- App with identity modifier (baseline): same damage injected but at 1Ã— ---
         let mut app_base = test_app();
         setup_weapons_world_with_entity(&mut app_base, 0.0, -20.0);
         start_game_with_weapons(&mut app_base);
-        push(&mut app_base, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app_base,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         tick(&mut app_base);
         push(&mut app_base, "weapons", ClientMessage::FirePhaser);
         tick(&mut app_base); // processes FirePhaser, beam becomes active
-        // Inject same real time but at base rate: 3.5s Ã— 5 HP/s = 17.5 HP accumulated
+                             // Inject same real time but at base rate: 3.5s Ã— 5 HP/s = 17.5 HP accumulated
         {
             let mut beam = app_base.world_mut().resource_mut::<ActiveBeam>();
             beam.damage_accumulator = BEAM_DAMAGE_PER_SEC * 1.0 * 3.5;
         }
         tick(&mut app_base);
 
-        let still_exists_base = app_base.world().resource::<WorldResource>()
-            .0.entities.iter().any(|a| a.uuid == "target-uuid");
+        let still_exists_base = app_base
+            .world()
+            .resource::<WorldResource>()
+            .0
+            .entities
+            .iter()
+            .any(|a| a.uuid == "target-uuid");
         assert!(still_exists_base, "with identity modifier, asteroid should survive 3.5s of beam (only 17.5/30 HP removed)");
     }
 
@@ -2297,8 +3146,8 @@ fn test_app() -> App {
 
     #[test]
     fn add_modifier_broadcasts_modifier_added_message() {
-        use crate::modifiers::{Modifier, ShipModifiers};
         use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::modifiers::{Modifier, ShipModifiers};
 
         let mut app = test_app();
         start_game(&mut app);
@@ -2315,20 +3164,22 @@ fn test_app() -> App {
         }
         let out = tick(&mut app);
 
-        let found = out.iter().any(|m| matches!(
-            &m.msg,
-            ServerMessage::ModifierAdded { source, slot, bonus }
-                if *source == ModifierSource::ImpulseDrive
-                && *slot == ModifierSlot::MaxSpeed
-                && (*bonus - 0.5).abs() < 1e-6
-        ));
+        let found = out.iter().any(|m| {
+            matches!(
+                &m.msg,
+                ServerMessage::ModifierAdded { source, slot, bonus }
+                    if *source == ModifierSource::ImpulseDrive
+                    && *slot == ModifierSlot::MaxSpeed
+                    && (*bonus - 0.5).abs() < 1e-6
+            )
+        });
         assert!(found, "expected ModifierAdded in outbound messages");
     }
 
     #[test]
     fn remove_modifier_broadcasts_modifier_removed_message() {
-        use crate::modifiers::{Modifier, ShipModifiers};
         use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::modifiers::{Modifier, ShipModifiers};
 
         let mut app = test_app();
         start_game(&mut app);
@@ -2350,19 +3201,21 @@ fn test_app() -> App {
         }
         let out = tick(&mut app);
 
-        let found = out.iter().any(|m| matches!(
-            &m.msg,
-            ServerMessage::ModifierRemoved { source, slot }
-                if *source == ModifierSource::ImpulseDrive
-                && *slot == ModifierSlot::MaxSpeed
-        ));
+        let found = out.iter().any(|m| {
+            matches!(
+                &m.msg,
+                ServerMessage::ModifierRemoved { source, slot }
+                    if *source == ModifierSource::ImpulseDrive
+                    && *slot == ModifierSlot::MaxSpeed
+            )
+        });
         assert!(found, "expected ModifierRemoved in outbound messages");
     }
 
     #[test]
     fn hull_damage_modifier_halves_collision_damage() {
-        use crate::modifiers::{Modifier, ShipModifiers};
         use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::modifiers::{Modifier, ShipModifiers};
 
         // Hull damage halved via modifier.
         let mut app = test_app();
@@ -2372,33 +3225,50 @@ fn test_app() -> App {
             mods.add_or_update(Modifier {
                 source: ModifierSource::ImpulseDrive,
                 slot: ModifierSlot::HullDamageTaken,
-                bonus: -1.0,  // â†' multiplier 0.5
+                bonus: -1.0, // â†' multiplier 0.5
             });
         }
 
         // Apply collision damage directly through the formula used in handle_collisions.
         // Ship at zero speed: collision_damage(0, max_speed) = 5.
         // With 0.5Ã— modifier: (5 * 0.5).round() = 3.
-        fn near(a: f32, b: f32) -> bool { (a - b).abs() < 1e-6 }
+        fn near(a: f32, b: f32) -> bool {
+            (a - b).abs() < 1e-6
+        }
         let max_speed = ShipPhysicsConfig::new().max_speed;
         let mods = app.world().resource::<ShipModifiers>().clone();
         let base_damage = collision_damage(0.0, max_speed) as f32; // 5
         let scaled_damage = (base_damage * mods.get(&ModifierSlot::HullDamageTaken)).round();
-        assert!(near(base_damage, 5.0), "base collision damage at zero speed should be 5");
-        assert!(near(scaled_damage, 3.0), "with 0.5Ã— modifier, damage should be 3 (round(5Ã—0.5)=3)");
+        assert!(
+            near(base_damage, 5.0),
+            "base collision damage at zero speed should be 5"
+        );
+        assert!(
+            near(scaled_damage, 3.0),
+            "with 0.5Ã— modifier, damage should be 3 (round(5Ã—0.5)=3)"
+        );
 
         // Verify the hull loses only the scaled amount by triggering damage through the resource.
         {
             let mut rng = rand::rng();
-            app.world_mut().resource_mut::<ShipHullIntegrity>().0.apply_damage(scaled_damage, &mut rng);
+            app.world_mut()
+                .resource_mut::<ShipHullIntegrity>()
+                .0
+                .apply_damage(scaled_damage, &mut rng);
         }
         let out = tick(&mut app);
-        let snap = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-            _ => None,
-        }).expect("expected SimState");
+        let snap = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("expected SimState");
         let total: f32 = snap.console_hull.iter().map(|c| c.current).sum();
-        assert!(near(total, 97.0), "hull should be 100 - 3 = 97 with halved collision damage");
+        assert!(
+            near(total, 97.0),
+            "hull should be 100 - 3 = 97 with halved collision damage"
+        );
     }
 
     #[test]
@@ -2408,31 +3278,61 @@ fn test_app() -> App {
 
         // Write directly to SimOutbox
         let len_before = app.world().resource::<SimOutbox>().0.len();
-        app.world_mut().resource_mut::<SimOutbox>().0.push((
-            Target::All,
-            ServerMessage::GameStarted,
-        ));
+        app.world_mut()
+            .resource_mut::<SimOutbox>()
+            .0
+            .push((Target::All, ServerMessage::GameStarted));
 
         // Drain manually
         app.world_mut().resource_mut::<SimOutbox>().0.clear();
 
         // Check SimOutbox is now empty
         let len_after = app.world().resource::<SimOutbox>().0.len();
-        assert_eq!(len_after, 0, "SimOutbox should be empty after drain, was {} before drain", len_before + 1);
+        assert_eq!(
+            len_after,
+            0,
+            "SimOutbox should be empty after drain, was {} before drain",
+            len_before + 1
+        );
     }
-
 
     // -- Power system integration tests --------------------------------------
 
     /// Helper: captain + power console player, game started.
     fn start_game_with_power(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "power", ClientMessage::Identify { token: "power".into(), name: "Monty".into() });
+        push(
+            app,
+            "power",
+            ClientMessage::Identify {
+                token: "power".into(),
+                name: "Monty".into(),
+            },
+        );
         tick(app);
-        push(app, "power", ClientMessage::SelectStation { station: "Power".into() });
+        push(
+            app,
+            "power",
+            ClientMessage::SelectStation {
+                station: "Power".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         let _ = tick(app);
@@ -2447,7 +3347,13 @@ fn test_app() -> App {
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 1;
 
         // Captain (not Power holder) tries to increase Helm.
-        push(&mut app, "captain", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         let _ = tick(&mut app);
 
         assert_eq!(
@@ -2463,7 +3369,13 @@ fn test_app() -> App {
         start_game_with_power(&mut app);
 
         // Captain (not Power holder) tries to decrease Sensors.
-        push(&mut app, "captain", ClientMessage::DecreasePower { console: Console::Sensors });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::DecreasePower {
+                console: Console::Sensors,
+            },
+        );
         let _ = tick(&mut app);
 
         assert_eq!(
@@ -2479,15 +3391,27 @@ fn test_app() -> App {
         start_game_with_power(&mut app);
 
         // Power holder increases Helm from 2 to 3.
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         let _ = tick(&mut app);
 
         let out = tick(&mut app);
-        let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { helm, .. } => Some(*helm),
-            _ => None,
-        }).expect("expected a PowerState message for power holder");
-        assert_eq!(power_state, 3, "PowerState should show helm=3 after increase");
+        let power_state = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::PowerState { helm, .. } => Some(*helm),
+                _ => None,
+            })
+            .expect("expected a PowerState message for power holder");
+        assert_eq!(
+            power_state, 3,
+            "PowerState should show helm=3 after increase"
+        );
     }
 
     #[test]
@@ -2496,15 +3420,27 @@ fn test_app() -> App {
         start_game_with_power(&mut app);
 
         // Power holder decreases Weapons from 2 to 1.
-        push(&mut app, "power", ClientMessage::DecreasePower { console: Console::Tactical });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::DecreasePower {
+                console: Console::Tactical,
+            },
+        );
         let _ = tick(&mut app);
 
         let out = tick(&mut app);
-        let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { weapons, .. } => Some(*weapons),
-            _ => None,
-        }).expect("expected a PowerState message");
-        assert_eq!(power_state, 1, "PowerState should show weapons=1 after decrease");
+        let power_state = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::PowerState { weapons, .. } => Some(*weapons),
+                _ => None,
+            })
+            .expect("expected a PowerState message");
+        assert_eq!(
+            power_state, 1,
+            "PowerState should show weapons=1 after decrease"
+        );
     }
 
     #[test]
@@ -2515,7 +3451,10 @@ fn test_app() -> App {
         let out = tick(&mut app);
 
         // Every PowerState message should target the power holder.
-        for m in out.iter().filter(|m| matches!(&m.msg, ServerMessage::PowerState { .. })) {
+        for m in out
+            .iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::PowerState { .. }))
+        {
             assert!(
                 matches!(&m.target, Target::Token(t) if t == "power"),
                 "PowerState should only go to the Power holder, got {:?}",
@@ -2531,8 +3470,13 @@ fn test_app() -> App {
         start_game(&mut app);
 
         let out = tick(&mut app);
-        let any_power_state = out.iter().any(|m| matches!(&m.msg, ServerMessage::PowerState { .. }));
-        assert!(!any_power_state, "no PowerState should be sent when no Power console holder exists");
+        let any_power_state = out
+            .iter()
+            .any(|m| matches!(&m.msg, ServerMessage::PowerState { .. }));
+        assert!(
+            !any_power_state,
+            "no PowerState should be sent when no Power console holder exists"
+        );
     }
 
     #[test]
@@ -2541,18 +3485,37 @@ fn test_app() -> App {
         start_game_with_power(&mut app);
 
         // Increase Helm power via Power console.
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         // Increase Sensors power via Power console.
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Sensors });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Sensors,
+            },
+        );
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
-        let snap = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-            _ => None,
-        }).expect("expected a SimState broadcast");
+        let snap = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("expected a SimState broadcast");
         // Default (2,2,2) ? increase helm ? (3,2,2) ? increase sensors ? (3,2,3)
-        assert_eq!(snap.power_levels, (3, 2, 3), "SimState.power_levels should reflect power system state");
+        assert_eq!(
+            snap.power_levels,
+            (3, 2, 3),
+            "SimState.power_levels should reflect power system state"
+        );
     }
 
     #[test]
@@ -2563,15 +3526,27 @@ fn test_app() -> App {
         // Manually set Helm to 4 (max).
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
 
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
-        let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { helm, .. } => Some(*helm),
-            _ => None,
-        }).expect("expected a PowerState message");
-        assert_eq!(power_state, 4, "helm should stay at 4 (max bound enforced by PowerSystem)");
+        let power_state = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::PowerState { helm, .. } => Some(*helm),
+                _ => None,
+            })
+            .expect("expected a PowerState message");
+        assert_eq!(
+            power_state, 4,
+            "helm should stay at 4 (max bound enforced by PowerSystem)"
+        );
     }
 
     // -- Power ? Modifier wiring integration tests -------------------------
@@ -2582,18 +3557,30 @@ fn test_app() -> App {
         start_game_with_power(&mut app);
 
         // Override multipliers for Helm so level 2 ? 0.0, level 3 ? 1.0
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
-            Console::Helm, [-0.5, 0.0, 1.0, 2.0],
-        );
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Helm, [-0.5, 0.0, 1.0, 2.0]);
 
         // Increase Helm from 2 ? 3
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         let _ = tick(&mut app);
 
         // Level 3 ? index 2 ? bonus 1.0 ? MaxSpeed multiplier = 2.0
-        let mult = app.world().resource::<ShipModifiers>().get(&ModifierSlot::MaxSpeed);
-        assert!((mult - 2.0).abs() < 1e-6,
-            "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}");
+        let mult = app
+            .world()
+            .resource::<ShipModifiers>()
+            .get(&ModifierSlot::MaxSpeed);
+        assert!(
+            (mult - 2.0).abs() < 1e-6,
+            "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}"
+        );
     }
 
     #[test]
@@ -2602,19 +3589,31 @@ fn test_app() -> App {
         start_game_with_power(&mut app);
 
         // Override multipliers for Tactical: level 2 ? 0.0, level 1 ? -0.5
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
-            Console::Tactical, [-0.5, 0.0, 0.25, 0.5],
-        );
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Tactical, [-0.5, 0.0, 0.25, 0.5]);
 
         // Decrease Weapons from 2 ? 1
-        push(&mut app, "power", ClientMessage::DecreasePower { console: Console::Tactical });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::DecreasePower {
+                console: Console::Tactical,
+            },
+        );
         let _ = tick(&mut app);
 
         // Level 1 ? index 0 ? bonus -0.5 (negative) ? 1.0 / (1.0 + 0.5) = 0.666...
         let expected = 1.0 / 1.5;
-        let mult = app.world().resource::<ShipModifiers>().get(&ModifierSlot::PhaserDamage);
-        assert!((mult - expected).abs() < 1e-6,
-            "Weapons power 1 should give PhaserDamage multiplier {expected}, got {mult}");
+        let mult = app
+            .world()
+            .resource::<ShipModifiers>()
+            .get(&ModifierSlot::PhaserDamage);
+        assert!(
+            (mult - expected).abs() < 1e-6,
+            "Weapons power 1 should give PhaserDamage multiplier {expected}, got {mult}"
+        );
     }
 
     #[test]
@@ -2624,12 +3623,18 @@ fn test_app() -> App {
 
         // Set known multipliers for all three
         let defaults = [-0.5, 0.0, 0.25, 0.5];
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
-            Console::Helm, defaults);
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
-            Console::Tactical, defaults);
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
-            Console::Sensors, defaults);
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Helm, defaults);
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Tactical, defaults);
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Sensors, defaults);
 
         // Set state that will trigger exhaustion on the next tick:
         // total=8 (negative rate), battery already at 0 ? tick keeps it at 0
@@ -2650,12 +3655,21 @@ fn test_app() -> App {
         let expected = 1.0 / 1.5;
         let mods = app.world().resource::<ShipModifiers>();
 
-        assert!((mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,
-            "after exhaustion MaxSpeed should be {expected}, got {}", mods.get(&ModifierSlot::MaxSpeed));
-        assert!((mods.get(&ModifierSlot::PhaserDamage) - expected).abs() < 1e-6,
-            "after exhaustion PhaserDamage should be {expected}, got {}", mods.get(&ModifierSlot::PhaserDamage));
-        assert!((mods.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
-            "after exhaustion RadarRange should be {expected}, got {}", mods.get(&ModifierSlot::RadarRange));
+        assert!(
+            (mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,
+            "after exhaustion MaxSpeed should be {expected}, got {}",
+            mods.get(&ModifierSlot::MaxSpeed)
+        );
+        assert!(
+            (mods.get(&ModifierSlot::PhaserDamage) - expected).abs() < 1e-6,
+            "after exhaustion PhaserDamage should be {expected}, got {}",
+            mods.get(&ModifierSlot::PhaserDamage)
+        );
+        assert!(
+            (mods.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
+            "after exhaustion RadarRange should be {expected}, got {}",
+            mods.get(&ModifierSlot::RadarRange)
+        );
     }
 
     #[test]
@@ -2667,17 +3681,32 @@ fn test_app() -> App {
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
 
         // Try to increase sensors — total is 8 (the cap), should be blocked.
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Sensors });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Sensors,
+            },
+        );
         let _ = tick(&mut app);
 
         let out = tick(&mut app);
-        let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { sensors, .. } => Some(*sensors),
-            _ => None,
-        }).expect("expected a PowerState message");
-        assert_eq!(power_state, 2, "sensors should stay at 2 when total is already at the cap of 8");
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.total(), 8,
-            "total should remain 8");
+        let power_state = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::PowerState { sensors, .. } => Some(*sensors),
+                _ => None,
+            })
+            .expect("expected a PowerState message");
+        assert_eq!(
+            power_state, 2,
+            "sensors should stay at 2 when total is already at the cap of 8"
+        );
+        assert_eq!(
+            app.world().resource::<ShipPowerSystem>().0.total(),
+            8,
+            "total should remain 8"
+        );
     }
 
     // -- Runtime entity lifecycle (EntitySpawned / EntityDespawned) -----
@@ -2688,7 +3717,10 @@ fn test_app() -> App {
         start_game(&mut app);
         // After start_game, the system should have seeded (even if empty).
         let registry = app.world().resource::<TrackedEntities>();
-        assert!(registry.seeded, "system should be seeded after first InProgress frame");
+        assert!(
+            registry.seeded,
+            "system should be seeded after first InProgress frame"
+        );
     }
 
     #[test]
@@ -2707,7 +3739,10 @@ fn test_app() -> App {
             ServerMessage::EntitySpawned { snapshot } => Some(snapshot.clone()),
             _ => None,
         });
-        assert!(spawned.is_some(), "expected EntitySpawned after spawning a non-asteroid entity");
+        assert!(
+            spawned.is_some(),
+            "expected EntitySpawned after spawning a non-asteroid entity"
+        );
         assert_eq!(spawned.unwrap().uuid, "runtime-entity-1");
     }
 
@@ -2724,10 +3759,13 @@ fn test_app() -> App {
 
         let out = tick(&mut app);
 
-        let spawned = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::EntitySpawned { snapshot } => Some(snapshot.clone()),
-            _ => None,
-        }).expect("expected EntitySpawned");
+        let spawned = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::EntitySpawned { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("expected EntitySpawned");
 
         assert_eq!(spawned.uuid, "pos-entity");
         assert_eq!(spawned.id, Some("station-alpha".into()));
@@ -2740,10 +3778,13 @@ fn test_app() -> App {
         start_game(&mut app);
 
         // Spawn a non-asteroid entity.
-        let entity = app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("to-despawn".into()),
-            Transform::default(),
-        )).id();
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("to-despawn".into()),
+                Transform::default(),
+            ))
+            .id();
 
         // Tick once so the spawn system picks it up.
         let _ = tick(&mut app);
@@ -2756,7 +3797,10 @@ fn test_app() -> App {
             ServerMessage::EntityDespawned { uuid } => Some(uuid.clone()),
             _ => None,
         });
-        assert!(despawned.is_some(), "expected EntityDespawned after despawning a non-asteroid entity");
+        assert!(
+            despawned.is_some(),
+            "expected EntityDespawned after despawning a non-asteroid entity"
+        );
         assert_eq!(despawned.unwrap(), "to-despawn");
     }
 
@@ -2770,14 +3814,22 @@ fn test_app() -> App {
             crate::entity_spawner::EntityUuid("asteroid-1".into()),
             Asteroid,
             AsteroidUuid("asteroid-1".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                crate::messages::Console::CaptainChair,
+                30.0,
+            )])),
             Transform::default(),
         ));
 
         let out = tick(&mut app);
 
-        let spawned = out.iter().any(|m| matches!(&m.msg, ServerMessage::EntitySpawned { .. }));
-        assert!(!spawned, "asteroid spawn must not emit EntitySpawned (uses AsteroidSpawned instead)");
+        let spawned = out
+            .iter()
+            .any(|m| matches!(&m.msg, ServerMessage::EntitySpawned { .. }));
+        assert!(
+            !spawned,
+            "asteroid spawn must not emit EntitySpawned (uses AsteroidSpawned instead)"
+        );
     }
 
     #[test]
@@ -2795,8 +3847,15 @@ fn test_app() -> App {
 
         // The entity should now be in world.entities so Welcome includes it.
         let world = app.world().resource::<WorldResource>();
-        let found = world.0.entities.iter().any(|e| e.uuid == "reconnect-entity");
-        assert!(found, "runtime entity must appear in WorldResource for Welcome reconnects");
+        let found = world
+            .0
+            .entities
+            .iter()
+            .any(|e| e.uuid == "reconnect-entity");
+        assert!(
+            found,
+            "runtime entity must appear in WorldResource for Welcome reconnects"
+        );
     }
 
     #[test]
@@ -2811,7 +3870,9 @@ fn test_app() -> App {
 
         let out = tick(&mut app);
 
-        let spawn_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::EntitySpawned { .. }))
+        let spawn_msg = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::EntitySpawned { .. }))
             .expect("expected EntitySpawned message");
         assert!(
             matches!(&spawn_msg.target, crate::lobby::Target::All),
@@ -2825,16 +3886,21 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game(&mut app);
 
-        let entity = app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("broadcast-despawn".into()),
-            Transform::default(),
-        )).id();
+        let entity = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("broadcast-despawn".into()),
+                Transform::default(),
+            ))
+            .id();
         let _ = tick(&mut app);
 
         app.world_mut().despawn(entity);
         let out = tick(&mut app);
 
-        let despawn_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::EntityDespawned { .. }))
+        let despawn_msg = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::EntityDespawned { .. }))
             .expect("expected EntityDespawned message");
         assert!(
             matches!(&despawn_msg.target, crate::lobby::Target::All),
@@ -2850,10 +3916,17 @@ fn test_app() -> App {
     fn tactical_holder_can_set_phaser_frequency() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: 0.8 });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserFrequency { frequency: 0.8 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.8).abs() < 1e-5, "Tactical holder should set phaser frequency to 0.8, got {freq}");
+        assert!(
+            (freq - 0.8).abs() < 1e-5,
+            "Tactical holder should set phaser frequency to 0.8, got {freq}"
+        );
     }
 
     /// Sensors holder may set phaser frequency when Tactical is Low.
@@ -2865,10 +3938,17 @@ fn test_app() -> App {
         app.world_mut()
             .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
-        push(&mut app, "sensors", ClientMessage::SetPhaserFrequency { frequency: 0.3 });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetPhaserFrequency { frequency: 0.3 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.3).abs() < 1e-5, "Sensors holder should set phaser frequency when Tactical is Low, got {freq}");
+        assert!(
+            (freq - 0.3).abs() < 1e-5,
+            "Sensors holder should set phaser frequency when Tactical is Low, got {freq}"
+        );
     }
 
     /// Sensors holder is rejected when Tactical is Full.
@@ -2877,10 +3957,17 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
         // Default complexity is Full (unset = no override ? not Low).
-        push(&mut app, "sensors", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetPhaserFrequency { frequency: 0.9 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.5).abs() < 1e-5, "Sensors holder must NOT change phaser frequency when Tactical is Full, got {freq}");
+        assert!(
+            (freq - 0.5).abs() < 1e-5,
+            "Sensors holder must NOT change phaser frequency when Tactical is Full, got {freq}"
+        );
     }
 
     /// An unrelated console (e.g. captain) cannot set phaser frequency.
@@ -2888,10 +3975,17 @@ fn test_app() -> App {
     fn unrelated_console_cannot_set_phaser_frequency() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetPhaserFrequency { frequency: 0.9 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.5).abs() < 1e-5, "Captain must NOT change phaser frequency, got {freq}");
+        assert!(
+            (freq - 0.5).abs() < 1e-5,
+            "Captain must NOT change phaser frequency, got {freq}"
+        );
     }
 
     /// Frequency value is clamped to [0.0, 1.0] by the handler.
@@ -2899,27 +3993,67 @@ fn test_app() -> App {
     fn set_phaser_frequency_clamps_value() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: 1.5 });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserFrequency { frequency: 1.5 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 1.0).abs() < 1e-5, "frequency above 1.0 should clamp to 1.0, got {freq}");
+        assert!(
+            (freq - 1.0).abs() < 1e-5,
+            "frequency above 1.0 should clamp to 1.0, got {freq}"
+        );
 
-        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: -0.5 });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserFrequency { frequency: -0.5 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.0).abs() < 1e-5, "frequency below 0.0 should clamp to 0.0, got {freq}");
+        assert!(
+            (freq - 0.0).abs() < 1e-5,
+            "frequency below 0.0 should clamp to 0.0, got {freq}"
+        );
     }
 
     // -- Shield focus tests --------------------------------------------------
 
     fn start_game_with_shields(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "shields", ClientMessage::Identify { token: "shields".into(), name: "Sully".into() });
+        push(
+            app,
+            "shields",
+            ClientMessage::Identify {
+                token: "shields".into(),
+                name: "Sully".into(),
+            },
+        );
         tick(app);
-        push(app, "shields", ClientMessage::SelectStation { station: "Shields".into() });
+        push(
+            app,
+            "shields",
+            ClientMessage::SelectStation {
+                station: "Shields".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         let _ = tick(app);
@@ -2930,10 +4064,19 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_shields(&mut app);
 
-        push(&mut app, "shields", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Fore) });
+        push(
+            &mut app,
+            "shields",
+            ClientMessage::SetShieldFocus {
+                facing: Some(ViewDirection::Fore),
+            },
+        );
         tick(&mut app);
 
-        assert_eq!(app.world().resource::<ShipShields>().0.focused_facing, Some(0));
+        assert_eq!(
+            app.world().resource::<ShipShields>().0.focused_facing,
+            Some(0)
+        );
         assert!(app.world().resource::<ShipShields>().0.facings[0].is_focused);
     }
 
@@ -2943,10 +4086,21 @@ fn test_app() -> App {
         start_game_with_shields(&mut app);
 
         // Captain (not Shields holder) tries to set focus.
-        push(&mut app, "captain", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Port) });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetShieldFocus {
+                facing: Some(ViewDirection::Port),
+            },
+        );
         tick(&mut app);
 
-        assert!(app.world().resource::<ShipShields>().0.focused_facing.is_none());
+        assert!(app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .focused_facing
+            .is_none());
     }
 
     #[test]
@@ -2954,28 +4108,70 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_shields(&mut app);
 
-        push(&mut app, "shields", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Fore) });
+        push(
+            &mut app,
+            "shields",
+            ClientMessage::SetShieldFocus {
+                facing: Some(ViewDirection::Fore),
+            },
+        );
         tick(&mut app);
-        assert_eq!(app.world().resource::<ShipShields>().0.focused_facing, Some(0));
+        assert_eq!(
+            app.world().resource::<ShipShields>().0.focused_facing,
+            Some(0)
+        );
 
-        push(&mut app, "shields", ClientMessage::SetShieldFocus { facing: None });
+        push(
+            &mut app,
+            "shields",
+            ClientMessage::SetShieldFocus { facing: None },
+        );
         tick(&mut app);
-        assert!(app.world().resource::<ShipShields>().0.focused_facing.is_none());
+        assert!(app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .focused_facing
+            .is_none());
     }
 
     #[test]
     fn shield_focus_is_ignored_during_lobby() {
         let mut app = test_app();
-        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(&mut app);
 
         // Still in Lobby — SetShieldFocus should be ignored.
-        push(&mut app, "captain", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Aft) });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetShieldFocus {
+                facing: Some(ViewDirection::Aft),
+            },
+        );
         tick(&mut app);
 
-        assert!(app.world().resource::<ShipShields>().0.focused_facing.is_none());
+        assert!(app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .focused_facing
+            .is_none());
     }
 
     #[test]
@@ -2983,25 +4179,30 @@ fn test_app() -> App {
         let mut app = test_app();
         start_game_with_shields(&mut app);
 
-        push(&mut app, "shields", ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Fore) });
+        push(
+            &mut app,
+            "shields",
+            ClientMessage::SetShieldFocus {
+                facing: Some(ViewDirection::Fore),
+            },
+        );
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
-        let shield_status = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::ShieldStatus { facings } => Some(facings.clone()),
-            _ => None,
-        }).expect("expected a ShieldStatus broadcast after focus change");
+        let shield_status = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::ShieldStatus { facings } => Some(facings.clone()),
+                _ => None,
+            })
+            .expect("expected a ShieldStatus broadcast after focus change");
 
         assert!(shield_status[0].is_focused, "Fore should be focused");
         assert!(!shield_status[1].is_focused, "Port should not be focused");
         assert!(!shield_status[2].is_focused, "Aft should not be focused");
-        assert!(!shield_status[3].is_focused, "Starboard should not be focused");
+        assert!(
+            !shield_status[3].is_focused,
+            "Starboard should not be focused"
+        );
     }
 }
-
-
-
-
-
-
-

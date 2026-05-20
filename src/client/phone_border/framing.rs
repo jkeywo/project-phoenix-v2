@@ -19,13 +19,23 @@
 use bevy::prelude::*;
 
 use crate::gui::{
-    BorderAssets, BorderConfig, BorderContentArea,
-    GuiBorderWidget,
+    BorderAssets, BorderConfig, BorderContentArea, GuiBorderWidget, RadarIcon, RadarIconLookup,
     RedAlertIntensity,
 };
 use crate::ship_view::ShipView;
 
 // ── Resources ────────────────────────────────────────────────────────
+
+/// Handles to the six radar-blip icon PNGs.
+#[derive(Clone, Debug)]
+pub struct RadarIconHandles {
+    pub ship: Handle<Image>,
+    pub asteroid: Handle<Image>,
+    pub station: Handle<Image>,
+    pub planet: Handle<Image>,
+    pub star: Handle<Image>,
+    pub torpedo: Handle<Image>,
+}
 
 /// Holds non-border phone assets: compass ring, needle, tab corner, fonts,
 /// plus console-panel widget textures (buttons, panels, joysticks, radar, etc.).
@@ -70,6 +80,8 @@ pub struct PhoneAssets {
     pub red_alert_press: Handle<Image>,
     pub red_alert_armed: Handle<Image>,
     pub inset_card: Handle<Image>,
+    // ── radar_icons/ ──
+    pub radar_icons: RadarIconHandles,
 }
 
 /// Auto-detected device orientation, updated each frame from the window
@@ -132,6 +144,7 @@ impl Plugin for PhoneBorderPlugin {
                     reparent_panels_into_bezel,
                     update_red_alert_intensity,
                     refresh_alert_banner,
+                    populate_radar_icon_lookup,
                 ),
             );
     }
@@ -180,6 +193,14 @@ fn load_phone_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
         red_alert_press: asset_server.load("captain_console/red-alert-press.png"),
         red_alert_armed: asset_server.load("captain_console/red-alert-armed.png"),
         inset_card: asset_server.load("captain_console/inset-card.png"),
+        radar_icons: RadarIconHandles {
+            ship: asset_server.load("radar_icons/Icon-Ship.png"),
+            asteroid: asset_server.load("radar_icons/Icon-Asteroid.png"),
+            station: asset_server.load("radar_icons/Icon-Station.png"),
+            planet: asset_server.load("radar_icons/Icon-Planet.png"),
+            star: asset_server.load("radar_icons/Icon-Star.png"),
+            torpedo: asset_server.load("radar_icons/Icon-Torpedo.png"),
+        },
     };
     commands.insert_resource(phone);
 
@@ -205,12 +226,42 @@ fn load_phone_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.insert_resource(border);
 }
 
+/// Populate the shared `RadarIconLookup` from `PhoneAssets.radar_icons`
+/// once those assets are loaded. Idempotent: runs every frame but is a
+/// no-op after first population.
+fn populate_radar_icon_lookup(
+    assets: Option<Res<PhoneAssets>>,
+    mut lookup: ResMut<RadarIconLookup>,
+) {
+    if !lookup.0.is_empty() {
+        return;
+    }
+    let Some(assets) = assets else {
+        return;
+    };
+    lookup
+        .0
+        .insert(RadarIcon::Ship, assets.radar_icons.ship.clone());
+    lookup
+        .0
+        .insert(RadarIcon::Asteroid, assets.radar_icons.asteroid.clone());
+    lookup
+        .0
+        .insert(RadarIcon::Station, assets.radar_icons.station.clone());
+    lookup
+        .0
+        .insert(RadarIcon::Planet, assets.radar_icons.planet.clone());
+    lookup
+        .0
+        .insert(RadarIcon::Star, assets.radar_icons.star.clone());
+    lookup
+        .0
+        .insert(RadarIcon::Torpedo, assets.radar_icons.torpedo.clone());
+}
+
 /// Detect device orientation from window aspect ratio. Updated each frame
 /// but only inserted once; change detection avoids pointless writes.
-fn detect_orientation(
-    windows: Query<&Window>,
-    mut orientation: ResMut<DeviceOrientation>,
-) {
+fn detect_orientation(windows: Query<&Window>, mut orientation: ResMut<DeviceOrientation>) {
     let Ok(window) = windows.single() else { return };
     let aspect = window.width() / window.height();
     let new = if aspect >= 1.0 {
@@ -236,7 +287,12 @@ fn spawn_bezel_on_startup(
     phone_assets: Res<PhoneAssets>,
 ) {
     // Spawn the 9-slice border via the gui library widget.
-    GuiBorderWidget::spawn(&mut commands, &border_assets, &BorderConfig::default(), false);
+    GuiBorderWidget::spawn(
+        &mut commands,
+        &border_assets,
+        &BorderConfig::default(),
+        false,
+    );
 
     // Spawn the "RED ALERT" banner (phone-specific, not part of generic border).
     //
@@ -256,7 +312,10 @@ fn spawn_bezel_on_startup(
             position_type: PositionType::Absolute,
             top: Val::Px(84.0),
             left: Val::Percent(50.0),
-            margin: UiRect { left: Val::Px(-60.0), ..default() },
+            margin: UiRect {
+                left: Val::Px(-60.0),
+                ..default()
+            },
             ..default()
         },
         Visibility::Hidden,
@@ -285,10 +344,25 @@ fn reparent_panels_into_bezel(
     hull_bar: Query<Entity, With<crate::ship_view::ConsoleHullBarBg>>,
     parents: Query<&ChildOf>,
 ) {
-    let Ok(target) = content_area.single() else { return };
-    for entity in lobby.iter().chain(captain.iter()).chain(helm.iter()).chain(sensors.iter()).chain(shields.iter()).chain(navigation.iter()).chain(weapons.iter()).chain(hull_bar.iter()) {
+    let Ok(target) = content_area.single() else {
+        return;
+    };
+    for entity in lobby
+        .iter()
+        .chain(captain.iter())
+        .chain(helm.iter())
+        .chain(sensors.iter())
+        .chain(shields.iter())
+        .chain(navigation.iter())
+        .chain(weapons.iter())
+        .chain(hull_bar.iter())
+    {
         // Skip if already a direct child of the content area.
-        if parents.get(entity).map(|p| p.parent() == target).unwrap_or(false) {
+        if parents
+            .get(entity)
+            .map(|p| p.parent() == target)
+            .unwrap_or(false)
+        {
             continue;
         }
         commands.entity(entity).set_parent_in_place(target);
@@ -421,7 +495,10 @@ mod tests {
             prev = next;
             t += DT_60HZ;
         }
-        assert!(hit_zero, "intensity did not reach 0 within {EASE_DURATION}s ease");
+        assert!(
+            hit_zero,
+            "intensity did not reach 0 within {EASE_DURATION}s ease"
+        );
 
         let next = pulse_intensity(t, false, 0.0, DT_60HZ);
         assert_eq!(next, 0.0);

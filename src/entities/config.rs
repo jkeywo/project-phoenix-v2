@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
-use serde::de::Error as SerdeError;
-use uuid::Uuid;
-use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectsConfig;
+use crate::region_shape::RegionShape;
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Configuration for a single named AI state.
 ///
@@ -126,6 +126,11 @@ pub struct RadarAppearanceConfig {
     pub colour: Vec<f32>,
     #[serde(default)]
     pub radius: Option<f32>,
+    /// Authored world-space size override for radar rendering. When
+    /// `None`, the entity's physical `radius` is used. Lets authors fudge
+    /// radar visibility for tiny or oversized objects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_size: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -289,11 +294,21 @@ pub struct ShieldsConsoleConfig {
     pub complexity_toml: Option<String>,
 }
 
-fn default_focus_bonus_max_hp() -> i32 { 50 }
-fn default_focus_bonus_regen() -> f32 { 5.0 }
-fn default_focus_penalty_max_hp() -> i32 { 25 }
-fn default_focus_penalty_regen() -> f32 { 2.5 }
-fn default_focus_decay_rate() -> f32 { 10.0 }
+fn default_focus_bonus_max_hp() -> i32 {
+    50
+}
+fn default_focus_bonus_regen() -> f32 {
+    5.0
+}
+fn default_focus_penalty_max_hp() -> i32 {
+    25
+}
+fn default_focus_penalty_regen() -> f32 {
+    2.5
+}
+fn default_focus_decay_rate() -> f32 {
+    10.0
+}
 
 impl Default for ShieldsConsoleConfig {
     fn default() -> Self {
@@ -336,10 +351,18 @@ pub struct ShieldsBaseConfig {
     pub offline_duration: f32,
 }
 
-fn default_shields_num_facings() -> usize { 4 }
-fn default_shields_max_hp() -> i32 { 100 }
-fn default_shields_regen_per_sec() -> f32 { 5.0 }
-fn default_shields_offline_duration() -> f32 { 10.0 }
+fn default_shields_num_facings() -> usize {
+    4
+}
+fn default_shields_max_hp() -> i32 {
+    100
+}
+fn default_shields_regen_per_sec() -> f32 {
+    5.0
+}
+fn default_shields_offline_duration() -> f32 {
+    10.0
+}
 
 impl Default for ShieldsBaseConfig {
     fn default() -> Self {
@@ -416,10 +439,26 @@ impl PhaserCombatConfig {
     pub fn from_weapons_console(wc: &WeaponsConsoleConfig) -> Self {
         let default = Self::default();
         Self {
-            phaser_range: if wc.beam_range > 0.0 { wc.beam_range } else { default.phaser_range },
-            beam_duration_secs: if wc.beam_duration_secs > 0.0 { wc.beam_duration_secs } else { default.beam_duration_secs },
-            beam_cooldown_secs: if wc.cooldown_secs > 0.0 { wc.cooldown_secs } else { default.beam_cooldown_secs },
-            beam_damage_per_sec: if wc.beam_damage_per_sec > 0.0 { wc.beam_damage_per_sec } else { default.beam_damage_per_sec },
+            phaser_range: if wc.beam_range > 0.0 {
+                wc.beam_range
+            } else {
+                default.phaser_range
+            },
+            beam_duration_secs: if wc.beam_duration_secs > 0.0 {
+                wc.beam_duration_secs
+            } else {
+                default.beam_duration_secs
+            },
+            beam_cooldown_secs: if wc.cooldown_secs > 0.0 {
+                wc.cooldown_secs
+            } else {
+                default.beam_cooldown_secs
+            },
+            beam_damage_per_sec: if wc.beam_damage_per_sec > 0.0 {
+                wc.beam_damage_per_sec
+            } else {
+                default.beam_damage_per_sec
+            },
         }
     }
 }
@@ -446,8 +485,12 @@ pub struct RepairConfig {
     pub repair_rate_hp_per_sec: f32,
 }
 
-fn default_repair_travel_duration_secs() -> f32 { 5.0 }
-fn default_repair_rate_hp_per_sec() -> f32 { 0.5 }
+fn default_repair_travel_duration_secs() -> f32 {
+    5.0
+}
+fn default_repair_rate_hp_per_sec() -> f32 {
+    0.5
+}
 
 impl Default for RepairConfig {
     fn default() -> Self {
@@ -496,13 +539,27 @@ pub struct TorpedoesConfig {
     pub load_time: f32,
 }
 
-fn default_torpedo_count() -> u32 { 10 }
-fn default_torpedo_damage_hull() -> i32 { 50 }
-fn default_torpedo_damage_shields() -> i32 { 5 }
-fn default_torpedo_speed() -> f32 { 30.0 }
-fn default_torpedo_turn_rate_deg_per_sec() -> f32 { 45.0 }
-fn default_torpedo_lifespan() -> f32 { 20.0 }
-fn default_torpedo_load_time() -> f32 { 10.0 }
+fn default_torpedo_count() -> u32 {
+    10
+}
+fn default_torpedo_damage_hull() -> i32 {
+    50
+}
+fn default_torpedo_damage_shields() -> i32 {
+    5
+}
+fn default_torpedo_speed() -> f32 {
+    30.0
+}
+fn default_torpedo_turn_rate_deg_per_sec() -> f32 {
+    45.0
+}
+fn default_torpedo_lifespan() -> f32 {
+    20.0
+}
+fn default_torpedo_load_time() -> f32 {
+    10.0
+}
 
 impl Default for TorpedoesConfig {
     fn default() -> Self {
@@ -707,7 +764,6 @@ impl EntityConfig {
             radar_appearance: raw.radar_appearance,
         })
     }
-
 }
 
 #[cfg(test)]
@@ -880,7 +936,10 @@ length = 6.0
         assert!(config.weapons_console.is_none());
         assert!(config.engineering_console.is_none());
         assert!(config.captain_console.is_none());
-        assert!(config.radar_appearance.is_none(), "radar_appearance should default to None");
+        assert!(
+            config.radar_appearance.is_none(),
+            "radar_appearance should default to None"
+        );
     }
 
     #[test]
@@ -926,8 +985,11 @@ shows = ["asteroid"]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let h = config.helm_console.expect("helm_console must be Some");
-        assert_eq!(h.effective_radar_range(), 750.0,
-            "nested [helm_console.radar] range must win over flat radar_range");
+        assert_eq!(
+            h.effective_radar_range(),
+            750.0,
+            "nested [helm_console.radar] range must win over flat radar_range"
+        );
     }
 
     #[test]
@@ -949,7 +1011,9 @@ radar_range = 250.0
 beam_color = [1.0, 0.5, 0.2, 0.9]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let w = config.weapons_console.expect("weapons_console must be Some");
+        let w = config
+            .weapons_console
+            .expect("weapons_console must be Some");
         assert_eq!(w.beam_color, vec![1.0, 0.5, 0.2, 0.9]);
     }
 
@@ -960,8 +1024,13 @@ beam_color = [1.0, 0.5, 0.2, 0.9]
 beam_range = 40.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let w = config.weapons_console.expect("weapons_console must be Some");
-        assert!(w.beam_color.is_empty(), "beam_color should default to empty vec when omitted");
+        let w = config
+            .weapons_console
+            .expect("weapons_console must be Some");
+        assert!(
+            w.beam_color.is_empty(),
+            "beam_color should default to empty vec when omitted"
+        );
     }
 
     // ── Power section tests ────────────────────────────────────────────────
@@ -984,7 +1053,10 @@ emergency_threshold = 30.0
     #[test]
     fn power_section_omitted_when_not_in_toml() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
-        assert!(config.power.is_none(), "power should be None when not specified");
+        assert!(
+            config.power.is_none(),
+            "power should be None when not specified"
+        );
     }
 
     #[test]
@@ -994,7 +1066,9 @@ emergency_threshold = 30.0
 power_multipliers = [-1.0, 0.0, 1.0, 2.0]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let s = config.science_console.expect("science_console must be Some");
+        let s = config
+            .science_console
+            .expect("science_console must be Some");
         assert_eq!(s.power_multipliers, Some([-1.0, 0.0, 1.0, 2.0]));
     }
 
@@ -1021,12 +1095,20 @@ range = 500.0
 shows = ["region", "asteroid_field", "star", "planet"]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let science = config.science_console.expect("science_console must be Some");
+        let science = config
+            .science_console
+            .expect("science_console must be Some");
         assert_eq!(science.power_multipliers, Some([-0.5, 0.0, 0.25, 0.5]));
         assert_eq!(science.long_range_radar.range, 200.0);
         assert!(science.long_range_radar.shows.contains(&EntityTag::Region));
-        assert!(science.long_range_radar.shows.contains(&EntityTag::AsteroidField));
-        assert!(science.long_range_radar.shows.contains(&EntityTag::Asteroid));
+        assert!(science
+            .long_range_radar
+            .shows
+            .contains(&EntityTag::AsteroidField));
+        assert!(science
+            .long_range_radar
+            .shows
+            .contains(&EntityTag::Asteroid));
         assert_eq!(science.system_map.range, 500.0);
         assert!(science.system_map.shows.contains(&EntityTag::Region));
         assert!(science.system_map.shows.contains(&EntityTag::AsteroidField));
@@ -1045,12 +1127,20 @@ range = 200.0
 shows = ["region", "asteroid_field", "asteroid", "ship"]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let sensors = config.sensors_console.expect("sensors_console must be Some");
+        let sensors = config
+            .sensors_console
+            .expect("sensors_console must be Some");
         assert_eq!(sensors.power_multipliers, Some([-0.5, 0.0, 0.25, 0.5]));
         assert_eq!(sensors.long_range_radar.range, 200.0);
         assert!(sensors.long_range_radar.shows.contains(&EntityTag::Region));
-        assert!(sensors.long_range_radar.shows.contains(&EntityTag::AsteroidField));
-        assert!(sensors.long_range_radar.shows.contains(&EntityTag::Asteroid));
+        assert!(sensors
+            .long_range_radar
+            .shows
+            .contains(&EntityTag::AsteroidField));
+        assert!(sensors
+            .long_range_radar
+            .shows
+            .contains(&EntityTag::Asteroid));
     }
 
     #[test]
@@ -1079,7 +1169,9 @@ power_multipliers = [-0.3, 0.0, 0.15, 0.3]
 beam_range = 40.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let w = config.weapons_console.expect("weapons_console must be Some");
+        let w = config
+            .weapons_console
+            .expect("weapons_console must be Some");
         assert_eq!(w.power_multipliers, Some([-0.3, 0.0, 0.15, 0.3]));
     }
 
@@ -1104,7 +1196,9 @@ complexity_toml = "assets/complexity/tactical.toml"
 beam_range = 40.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let w = config.weapons_console.expect("weapons_console must be Some");
+        let w = config
+            .weapons_console
+            .expect("weapons_console must be Some");
         assert_eq!(
             w.complexity_toml.as_deref(),
             Some("assets/complexity/tactical.toml")
@@ -1133,7 +1227,9 @@ max_speed = 50.0
 complexity_toml = "assets/complexity/repair.toml"
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let e = config.engineering_console.expect("engineering_console must be Some");
+        let e = config
+            .engineering_console
+            .expect("engineering_console must be Some");
         assert_eq!(
             e.complexity_toml.as_deref(),
             Some("assets/complexity/repair.toml")
@@ -1147,7 +1243,9 @@ complexity_toml = "assets/complexity/repair.toml"
 complexity_toml = "assets/complexity/captain.toml"
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let c = config.captain_console.expect("captain_console must be Some");
+        let c = config
+            .captain_console
+            .expect("captain_console must be Some");
         assert_eq!(
             c.complexity_toml.as_deref(),
             Some("assets/complexity/captain.toml")
@@ -1161,7 +1259,9 @@ complexity_toml = "assets/complexity/captain.toml"
 complexity_toml = "assets/complexity/science.toml"
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let s = config.science_console.expect("science_console must be Some");
+        let s = config
+            .science_console
+            .expect("science_console must be Some");
         assert_eq!(
             s.complexity_toml.as_deref(),
             Some("assets/complexity/science.toml")
@@ -1181,7 +1281,9 @@ complexity_toml = "assets/complexity/science.toml"
 beam_range = 40.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let w = config.weapons_console.expect("weapons_console must be Some");
+        let w = config
+            .weapons_console
+            .expect("weapons_console must be Some");
         assert!(w.complexity_toml.is_none());
     }
 
@@ -1327,7 +1429,10 @@ radius = 100.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let shape = config.shape.expect("shape must be Some");
-        assert_eq!(shape, crate::region_shape::RegionShape::Sphere { radius: 100.0 });
+        assert_eq!(
+            shape,
+            crate::region_shape::RegionShape::Sphere { radius: 100.0 }
+        );
     }
 
     #[test]
@@ -1341,7 +1446,13 @@ half_extents = [50.0, 30.0, 40.0]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let shape = config.shape.expect("shape must be Some");
-        assert_eq!(shape, crate::region_shape::RegionShape::Box { half_extents: [50.0, 30.0, 40.0], yaw: 0.0 });
+        assert_eq!(
+            shape,
+            crate::region_shape::RegionShape::Box {
+                half_extents: [50.0, 30.0, 40.0],
+                yaw: 0.0
+            }
+        );
     }
 
     #[test]
@@ -1356,7 +1467,13 @@ outer_radius = 80.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let shape = config.shape.expect("shape must be Some");
-        assert_eq!(shape, crate::region_shape::RegionShape::Torus { inner_radius: 50.0, outer_radius: 80.0 });
+        assert_eq!(
+            shape,
+            crate::region_shape::RegionShape::Torus {
+                inner_radius: 50.0,
+                outer_radius: 80.0
+            }
+        );
     }
 
     #[test]
@@ -1388,9 +1505,15 @@ tags = ["region"]
 [effects.comms_jammed]
 "##;
         let result = EntityConfig::from_toml(toml_str);
-        assert!(result.is_err(), "region entity with effects but no shape should error");
+        assert!(
+            result.is_err(),
+            "region entity with effects but no shape should error"
+        );
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("shape"), "error should mention missing shape: {err}");
+        assert!(
+            err.contains("shape"),
+            "error should mention missing shape: {err}"
+        );
     }
 
     #[test]
@@ -1508,7 +1631,10 @@ hull_integrity = 100
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         assert!(config.star.is_some(), "star should be Some");
         assert!(config.planet.is_some(), "planet should be Some");
-        assert!(config.asteroid_field.is_some(), "asteroid_field should be Some");
+        assert!(
+            config.asteroid_field.is_some(),
+            "asteroid_field should be Some"
+        );
         assert!(config.hull.is_some(), "hull should be Some");
         assert_eq!(config.tags, vec!["full"]);
     }
@@ -1522,14 +1648,20 @@ hull_integrity = 100
     fn star_sun_template_parses_with_star_and_collider_section() {
         let toml_str = include_str!("../../assets/entities/star_sun.toml");
         let config = EntityConfig::from_toml(toml_str).expect("star_sun.toml must parse");
-        let star = config.star.as_ref().expect("star_sun.toml must have [star]");
+        let star = config
+            .star
+            .as_ref()
+            .expect("star_sun.toml must have [star]");
         assert_eq!(star.name, "Sun");
         assert!((star.radius - 50.0).abs() < 1e-6);
         assert_eq!(star.colour, vec![1.0, 0.8, 0.0]);
         assert_eq!(star.light_range, Some(5000.0));
         assert_eq!(star.light_intensity, Some(150000.0));
         assert_eq!(star.light_colour, Some(vec![1.0, 0.95, 0.85]));
-        let collider = config.collider.as_ref().expect("star_sun.toml must have [collider]");
+        let collider = config
+            .collider
+            .as_ref()
+            .expect("star_sun.toml must have [collider]");
         assert_eq!(collider.shape, ColliderShape::Ball);
         assert!((collider.radius - 50.0).abs() < 1e-6);
     }
@@ -1538,10 +1670,16 @@ hull_integrity = 100
     fn planet_earth_template_parses_with_planet_and_collider_section() {
         let toml_str = include_str!("../../assets/entities/planet_earth.toml");
         let config = EntityConfig::from_toml(toml_str).expect("planet_earth.toml must parse");
-        let planet = config.planet.as_ref().expect("planet_earth.toml must have [planet]");
+        let planet = config
+            .planet
+            .as_ref()
+            .expect("planet_earth.toml must have [planet]");
         assert_eq!(planet.name, "Earth");
         assert!((planet.radius - 20.0).abs() < 1e-6);
-        let collider = config.collider.as_ref().expect("planet_earth.toml must have [collider]");
+        let collider = config
+            .collider
+            .as_ref()
+            .expect("planet_earth.toml must have [collider]");
         assert_eq!(collider.shape, ColliderShape::Ball);
         assert!((collider.radius - 20.0).abs() < 1e-6);
     }
@@ -1549,11 +1687,18 @@ hull_integrity = 100
     #[test]
     fn asteroid_field_main_template_parses_with_field_and_grid() {
         let toml_str = include_str!("../../assets/entities/asteroid_field_main.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("asteroid_field_main.toml must parse");
-        let field = config.asteroid_field.as_ref().expect("must have [asteroid_field]");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("asteroid_field_main.toml must parse");
+        let field = config
+            .asteroid_field
+            .as_ref()
+            .expect("must have [asteroid_field]");
         assert!((field.inner_radius - 100.0).abs() < 1e-6);
         assert!((field.outer_radius - 200.0).abs() < 1e-6);
-        let grid = field.grid.as_ref().expect("must have [asteroid_field.grid]");
+        let grid = field
+            .grid
+            .as_ref()
+            .expect("must have [asteroid_field.grid]");
         assert!((grid.resolution - 15.0).abs() < 1e-6);
         assert_eq!(field.asteroid_type_paths.len(), 2);
         assert_eq!(field.cosmetic_type_paths.len(), 1);
@@ -1569,10 +1714,7 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 "#;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let faction = config.faction.expect("faction must be Some");
-        assert_eq!(
-            faction.to_string(),
-            "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
-        );
+        assert_eq!(faction.to_string(), "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa");
     }
 
     #[test]
@@ -1671,7 +1813,10 @@ target_speed = -0.5
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let state = &config.behaviour.unwrap().state[0];
-        assert_eq!(state.target_speed, 0.0, "negative target_speed must clamp to 0");
+        assert_eq!(
+            state.target_speed, 0.0,
+            "negative target_speed must clamp to 0"
+        );
     }
 
     #[test]
@@ -1699,7 +1844,10 @@ initial_state = "idle"
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let behaviour = config.behaviour.expect("behaviour must be Some");
-        assert!(behaviour.state.is_empty(), "state array must default to empty");
+        assert!(
+            behaviour.state.is_empty(),
+            "state array must default to empty"
+        );
     }
 
     #[test]
@@ -1734,7 +1882,9 @@ target_speed = 0.5
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         // Must have pirate faction UUID
-        let faction = config.faction.expect("pirate_raider must declare a faction");
+        let faction = config
+            .faction
+            .expect("pirate_raider must declare a faction");
         assert_eq!(
             faction.to_string(),
             "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
@@ -1746,7 +1896,10 @@ target_speed = 0.5
     fn pirate_raider_template_has_hull() {
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
-        assert!(config.hull.is_some(), "pirate_raider must have a [hull] section");
+        assert!(
+            config.hull.is_some(),
+            "pirate_raider must have a [hull] section"
+        );
         let hull = config.hull.as_ref().unwrap();
         assert!(
             hull.captain_chair.map_or(false, |hp| hp > 0.0),
@@ -1758,21 +1911,41 @@ target_speed = 0.5
     fn pirate_raider_template_has_helm_and_weapons_console() {
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
-        assert!(config.helm_console.is_some(), "pirate_raider must have a [helm_console]");
-        assert!(config.weapons_console.is_some(), "pirate_raider must have a [weapons_console]");
+        assert!(
+            config.helm_console.is_some(),
+            "pirate_raider must have a [helm_console]"
+        );
+        assert!(
+            config.weapons_console.is_some(),
+            "pirate_raider must have a [weapons_console]"
+        );
     }
 
     #[test]
     fn pirate_raider_template_has_behaviour_with_all_six_states() {
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
-        let behaviour = config.behaviour.expect("pirate_raider must have a [behaviour] block");
+        let behaviour = config
+            .behaviour
+            .expect("pirate_raider must have a [behaviour] block");
         let state_kinds: Vec<&str> = behaviour.state.iter().map(|s| s.kind.as_str()).collect();
-        assert!(state_kinds.contains(&"patrolling"), "must have patrolling state");
-        assert!(state_kinds.contains(&"pursuing"), "must have pursuing state");
-        assert!(state_kinds.contains(&"attacking"), "must have attacking state");
+        assert!(
+            state_kinds.contains(&"patrolling"),
+            "must have patrolling state"
+        );
+        assert!(
+            state_kinds.contains(&"pursuing"),
+            "must have pursuing state"
+        );
+        assert!(
+            state_kinds.contains(&"attacking"),
+            "must have attacking state"
+        );
         assert!(state_kinds.contains(&"fleeing"), "must have fleeing state");
-        assert!(state_kinds.contains(&"warping_out"), "must have warping_out state");
+        assert!(
+            state_kinds.contains(&"warping_out"),
+            "must have warping_out state"
+        );
     }
 
     #[test]
@@ -1780,13 +1953,35 @@ target_speed = 0.5
         let toml_str = include_str!("../../assets/entities/pirate_raider.toml");
         let config = EntityConfig::from_toml(toml_str).expect("pirate_raider.toml must parse");
         let behaviour = config.behaviour.expect("behaviour must be Some");
-        let conditions: Vec<&str> = behaviour.transition.iter().map(|t| t.condition.as_str()).collect();
-        assert!(conditions.contains(&"enemy_in_range"), "must have enemy_in_range transition");
-        assert!(conditions.contains(&"on_attacked"), "must have on_attacked transition");
-        assert!(conditions.contains(&"in_weapons_range"), "must have in_weapons_range transition");
-        assert!(conditions.contains(&"hull_below"), "must have hull_below transition");
-        assert!(conditions.contains(&"on_timer"), "must have on_timer transition");
-        assert!(conditions.contains(&"on_scenario_unloaded"), "must have on_scenario_unloaded transition");
+        let conditions: Vec<&str> = behaviour
+            .transition
+            .iter()
+            .map(|t| t.condition.as_str())
+            .collect();
+        assert!(
+            conditions.contains(&"enemy_in_range"),
+            "must have enemy_in_range transition"
+        );
+        assert!(
+            conditions.contains(&"on_attacked"),
+            "must have on_attacked transition"
+        );
+        assert!(
+            conditions.contains(&"in_weapons_range"),
+            "must have in_weapons_range transition"
+        );
+        assert!(
+            conditions.contains(&"hull_below"),
+            "must have hull_below transition"
+        );
+        assert!(
+            conditions.contains(&"on_timer"),
+            "must have on_timer transition"
+        );
+        assert!(
+            conditions.contains(&"on_scenario_unloaded"),
+            "must have on_scenario_unloaded transition"
+        );
     }
 
     // ── [torpedoes] block tests ────────────────────────────────────────────
@@ -1842,8 +2037,11 @@ count = 99
         let mut t = TorpedoesConfig::default();
         t.turn_rate_deg_per_sec = 45.0;
         let rt = t.to_runtime();
-        assert!((rt.turn_rate - std::f32::consts::FRAC_PI_4).abs() < 1e-5,
-            "45 deg/s should convert to PI/4 rad/s, got {}", rt.turn_rate);
+        assert!(
+            (rt.turn_rate - std::f32::consts::FRAC_PI_4).abs() < 1e-5,
+            "45 deg/s should convert to PI/4 rad/s, got {}",
+            rt.turn_rate
+        );
         assert_eq!(rt.count, 10);
         assert_eq!(rt.damage_hull, 50);
         assert_eq!(rt.load_time, 10.0);
@@ -1929,8 +2127,14 @@ travel_duration_secs = 9.0
     fn repair_defaults_match_runtime_repair_timings_default() {
         let toml_default = RepairConfig::default().to_runtime();
         let runtime_default = crate::repair_teams::RepairTimings::default();
-        assert_eq!(toml_default.travel_duration, runtime_default.travel_duration);
-        assert_eq!(toml_default.repair_rate_hp_per_sec, runtime_default.repair_rate_hp_per_sec);
+        assert_eq!(
+            toml_default.travel_duration,
+            runtime_default.travel_duration
+        );
+        assert_eq!(
+            toml_default.repair_rate_hp_per_sec,
+            runtime_default.repair_rate_hp_per_sec
+        );
     }
 
     #[test]
@@ -1944,8 +2148,14 @@ travel_duration_secs = 9.0
         let r = config.repair.expect("player_ship must have [repair]");
         let rt = r.to_runtime();
         let baseline = crate::repair_teams::RepairTimings::default();
-        assert_eq!(rt.travel_duration, baseline.travel_duration, "travel duration drift");
-        assert_eq!(rt.repair_rate_hp_per_sec, baseline.repair_rate_hp_per_sec, "repair rate drift");
+        assert_eq!(
+            rt.travel_duration, baseline.travel_duration,
+            "travel duration drift"
+        );
+        assert_eq!(
+            rt.repair_rate_hp_per_sec, baseline.repair_rate_hp_per_sec,
+            "repair rate drift"
+        );
     }
 
     // ── [shields_console.base] block tests ────────────────────────────────
@@ -1962,7 +2172,9 @@ regen_per_sec = 7.5
 offline_duration = 12.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let sc = config.shields_console.expect("shields_console must be Some");
+        let sc = config
+            .shields_console
+            .expect("shields_console must be Some");
         let base = sc.base.expect("base sub-block must be Some");
         assert_eq!(base.num_facings, 6);
         assert_eq!(base.max_hp, 200);
@@ -1980,8 +2192,13 @@ offline_duration = 12.0
 focus_bonus_max_hp = 99
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let sc = config.shields_console.expect("shields_console must be Some");
-        assert!(sc.base.is_none(), "base sub-block must default to None when absent");
+        let sc = config
+            .shields_console
+            .expect("shields_console must be Some");
+        assert!(
+            sc.base.is_none(),
+            "base sub-block must default to None when absent"
+        );
         assert_eq!(sc.focus_bonus_max_hp, 99, "flat focus field still parses");
     }
 
@@ -1992,7 +2209,11 @@ focus_bonus_max_hp = 99
 max_hp = 250
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let base = config.shields_console.expect("shields_console").base.expect("base");
+        let base = config
+            .shields_console
+            .expect("shields_console")
+            .base
+            .expect("base");
         assert_eq!(base.max_hp, 250, "override applied");
         assert_eq!(base.num_facings, 4, "default preserved");
         assert_eq!(base.regen_per_sec, 5.0, "default preserved");
@@ -2021,7 +2242,10 @@ max_hp = 250
         assert_eq!(toml_default.num_facings, runtime_default.num_facings);
         assert_eq!(toml_default.max_hp, runtime_default.max_hp);
         assert_eq!(toml_default.regen_per_sec, runtime_default.regen_per_sec);
-        assert_eq!(toml_default.offline_duration, runtime_default.offline_duration);
+        assert_eq!(
+            toml_default.offline_duration,
+            runtime_default.offline_duration
+        );
     }
 
     #[test]
@@ -2031,7 +2255,8 @@ max_hp = 250
         // owner can confirm the change is intentional.
         let toml_str = include_str!("../../assets/entities/player_ship.toml");
         let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
-        let base = config.shields_console
+        let base = config
+            .shields_console
             .expect("player_ship must have [shields_console]")
             .base
             .expect("player_ship must have [shields_console.base]");
@@ -2040,7 +2265,10 @@ max_hp = 250
         assert_eq!(rt.num_facings, baseline.num_facings, "num_facings drift");
         assert_eq!(rt.max_hp, baseline.max_hp, "max_hp drift");
         assert_eq!(rt.regen_per_sec, baseline.regen_per_sec, "regen drift");
-        assert_eq!(rt.offline_duration, baseline.offline_duration, "offline duration drift");
+        assert_eq!(
+            rt.offline_duration, baseline.offline_duration,
+            "offline duration drift"
+        );
     }
 
     // ── PhaserCombatConfig (player phaser tuning) tests ───────────────────
@@ -2107,13 +2335,27 @@ beam_range = 50.0
         // can confirm the change is intentional.
         let toml_str = include_str!("../../assets/entities/player_ship.toml");
         let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
-        let wc = config.weapons_console.expect("player_ship must have [weapons_console]");
+        let wc = config
+            .weapons_console
+            .expect("player_ship must have [weapons_console]");
         let combat = PhaserCombatConfig::from_weapons_console(&wc);
         let baseline = PhaserCombatConfig::default();
-        assert_eq!(combat.phaser_range, baseline.phaser_range, "phaser_range drift");
-        assert_eq!(combat.beam_duration_secs, baseline.beam_duration_secs, "beam_duration drift");
-        assert_eq!(combat.beam_cooldown_secs, baseline.beam_cooldown_secs, "beam_cooldown drift");
-        assert_eq!(combat.beam_damage_per_sec, baseline.beam_damage_per_sec, "beam_damage drift");
+        assert_eq!(
+            combat.phaser_range, baseline.phaser_range,
+            "phaser_range drift"
+        );
+        assert_eq!(
+            combat.beam_duration_secs, baseline.beam_duration_secs,
+            "beam_duration drift"
+        );
+        assert_eq!(
+            combat.beam_cooldown_secs, baseline.beam_cooldown_secs,
+            "beam_cooldown drift"
+        );
+        assert_eq!(
+            combat.beam_damage_per_sec, baseline.beam_damage_per_sec,
+            "beam_damage drift"
+        );
     }
 }
 
@@ -2202,14 +2444,30 @@ pub struct GridConfig {
     pub despawn_cells: u32,
 }
 
-fn default_fill_gameplay() -> f32 { 0.4 }
-fn default_fill_cosmetic() -> f32 { 0.15 }
-fn default_noise_freq() -> f32 { 0.02 }
-fn default_noise_octaves() -> u32 { 3 }
-fn default_density_noise_freq() -> f32 { 0.01 }
-fn default_density_noise_octaves() -> u32 { 2 }
-fn default_spawn_cells() -> u32 { 10 }
-fn default_despawn_cells() -> u32 { 12 }
+fn default_fill_gameplay() -> f32 {
+    0.4
+}
+fn default_fill_cosmetic() -> f32 {
+    0.15
+}
+fn default_noise_freq() -> f32 {
+    0.02
+}
+fn default_noise_octaves() -> u32 {
+    3
+}
+fn default_density_noise_freq() -> f32 {
+    0.01
+}
+fn default_density_noise_octaves() -> u32 {
+    2
+}
+fn default_spawn_cells() -> u32 {
+    10
+}
+fn default_despawn_cells() -> u32 {
+    12
+}
 
 /// Configuration for an asteroid field.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -2231,5 +2489,9 @@ pub struct AsteroidFieldConfig {
     pub grid: Option<GridConfig>,
 }
 
-fn default_spawn_distance() -> f32 { 150.0 }
-fn default_despawn_distance() -> f32 { 250.0 }
+fn default_spawn_distance() -> f32 {
+    150.0
+}
+fn default_despawn_distance() -> f32 {
+    250.0
+}

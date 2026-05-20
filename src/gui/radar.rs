@@ -1,13 +1,14 @@
-//! `GenericRadar` widget — gizmo-based radar with configurable range, orientation,
-//! and per-layer entity filtering.
+//! `GenericRadar` widget — UI-node-based radar with configurable range,
+//! orientation, and per-layer entity filtering.
 //!
 //! Game-world entities opt in by carrying `OnRadar(RadarLayer)` and
 //! `RadarAppearance`.  The reference entity (player ship) carries `RadarCenter`.
-//! All drawing is done via Bevy gizmos each frame; the UI node provides only the
-//! layout footprint.
+//! Blips are reconciled each frame into child UI nodes of the radar widget so
+//! they render *over* the radar background (gizmos draw under UI and would be
+//! occluded by the opaque radar dial image).
 
 use bevy::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 // ── Layer / filter ────────────────────────────────────────────────────────────
 
@@ -33,27 +34,36 @@ pub struct RadarFilter(pub HashSet<RadarLayer>);
 
 // ── Appearance ────────────────────────────────────────────────────────────────
 
-/// How an `OnRadar` entity is rendered on the radar.
-#[derive(Clone, Debug)]
-pub enum RadarShape {
-    Dot,
-    Triangle,
-    /// Diamond outline (use for stations or special markers).
-    Diamond,
-    /// Square outline (square bounding-box, axis-aligned in radar space).
-    Square,
-    Ring,
-    Icon(Handle<Image>),
+/// Which icon to render for a radar blip. Each variant maps 1:1 to a
+/// PNG in `assets/radar_icons/`. `Missile` uses `Icon-Torpedo.png`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RadarIcon {
+    Ship,
+    Asteroid,
+    Station,
+    Planet,
+    Star,
+    Torpedo,
 }
 
-/// Appearance for a radar blip.
+/// How an `OnRadar` entity is rendered on the radar.
+///
+/// `world_size` is a world-space diameter that the radar widget
+/// projects into pixels via its current `range` and pixel radius.
+/// `color` tints the icon (use `Color::WHITE` for no tint).
 #[derive(Component, Clone, Debug)]
 pub struct RadarAppearance {
+    pub icon: RadarIcon,
+    pub world_size: f32,
     pub color: Color,
-    /// Radius of the drawn shape in pixels (scaled to widget size).
-    pub radius: f32,
-    pub shape: RadarShape,
 }
+
+/// Maps `RadarIcon` to the loaded `Handle<Image>` for the corresponding
+/// PNG. Populated once at startup by `client::phone_border::framing`
+/// when `PhoneAssets` is ready. Empty until populated; blips with a
+/// missing icon render as a coloured square (defensive fallback).
+#[derive(Resource, Default)]
+pub struct RadarIconLookup(pub HashMap<RadarIcon, Handle<Image>>);
 
 // ── Orientation mode ──────────────────────────────────────────────────────────
 
@@ -88,7 +98,43 @@ pub struct RadarCenter {
     pub yaw: f32,
 }
 
+// ── Blip node tag ────────────────────────────────────────────────────────────
+
+/// Tags a UI node spawned by `sync_radar_blip_nodes` to represent a
+/// blip. Holds the source `Entity` so the diff can reconcile.
+#[derive(Component)]
+struct RadarBlipNode {
+    source: Entity,
+}
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
+
+/// Minimum blip diameter in pixels so very small or distant entities
+/// remain visible on the HUD even when truthful projection would
+/// produce sub-pixel sizes.
+pub const MIN_BLIP_PX: f32 = 8.0;
+
+/// Project a world-space size into a pixel diameter for a radar blip
+/// icon, given the radar's pixel radius and world-space range. Clamps
+/// to `[MIN_BLIP_PX, radar_pixel_diameter]`.
+pub fn world_size_to_px(world_size: f32, range: f32, radar_radius_px: f32) -> f32 {
+    if range <= 0.0 || radar_radius_px <= 0.0 {
+        return MIN_BLIP_PX;
+    }
+    let raw = world_size / range * radar_radius_px * 2.0;
+    raw.clamp(MIN_BLIP_PX, radar_radius_px * 2.0)
+}
+
+/// Given a projection in normalised radar coords (`nx, ny` in [-1, 1]
+/// with +y up per gizmo convention), the radar's pixel radius, and a
+/// blip's half-size in pixels, returns the top-left corner of a UI
+/// `Node` that centres the blip on the projection point inside the
+/// radar widget. Y is flipped to UI's y-down convention.
+pub fn blip_local_offset(nx: f32, ny: f32, radar_radius_px: f32, half_size_px: f32) -> (f32, f32) {
+    let left = radar_radius_px + nx * radar_radius_px - half_size_px;
+    let top = radar_radius_px - ny * radar_radius_px - half_size_px;
+    (left, top)
+}
 
 /// Returns `true` if `layer` is included in `filter`.
 ///
@@ -142,18 +188,16 @@ pub fn project_radar_entity(
 pub struct GenericRadar;
 
 impl GenericRadar {
-    /// Spawn a `GenericRadar` widget.
+    /// Spawn a `GenericRadar` widget that fills its parent's slot.
     ///
-    /// - `size` — width and height of the UI node in pixels.
     /// - `range` — world-unit radius drawn by the radar.
     /// - `orientation` — `ShipRelative` or `WorldFixed`.
     /// - `filter` — which `RadarLayer` values to draw.
-    /// - `bg_image` / `overlay_image` — optional background and overlay images.
+    /// - `bg_image` (back layer) / `overlay_image` (front layer) — optional images.
     ///
     /// Returns the UI node entity.
     pub fn spawn(
         commands: &mut Commands,
-        size: f32,
         range: f32,
         orientation: OrientationMode,
         filter: RadarFilter,
@@ -161,10 +205,15 @@ impl GenericRadar {
         overlay_image: Option<Handle<Image>>,
     ) -> Entity {
         let mut node = commands.spawn((
-            GenericRadarWidget { range, orientation, filter },
+            GenericRadarWidget {
+                range,
+                orientation,
+                filter,
+            },
             Node {
-                width: Val::Px(size),
-                height: Val::Px(size),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                aspect_ratio: Some(1.0),
                 position_type: PositionType::Relative,
                 ..default()
             },
@@ -179,8 +228,10 @@ impl GenericRadar {
                 parent.spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        width: Val::Px(size),
-                        height: Val::Px(size),
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        top: Val::Px(0.0),
+                        left: Val::Px(0.0),
                         ..default()
                     },
                     ImageNode::new(overlay),
@@ -193,39 +244,42 @@ impl GenericRadar {
     }
 }
 
-// ── Draw system ───────────────────────────────────────────────────────────────
+// ── Sync system ───────────────────────────────────────────────────────────────
 
-/// Each frame: for every `GenericRadarWidget` node, project and draw all
-/// `OnRadar` + `RadarAppearance` entities that pass the filter.
-fn draw_generic_radars(
-    mut gizmos: Gizmos,
-    radars: Query<(&GenericRadarWidget, &ComputedNode, &GlobalTransform, &ViewVisibility)>,
-    blips: Query<(&OnRadar, &RadarAppearance, &GlobalTransform)>,
+/// Each frame: for every visible `GenericRadarWidget`, project all
+/// `OnRadar` + `RadarAppearance` entities passing the filter into child UI
+/// nodes (icons via `RadarIconLookup`). New blips spawn, existing ones
+/// update in place, missing ones despawn.
+fn sync_radar_blip_nodes(
+    mut commands: Commands,
+    radars: Query<(
+        Entity,
+        &GenericRadarWidget,
+        &ComputedNode,
+        &ViewVisibility,
+        Option<&Children>,
+    )>,
+    blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform)>,
     centers: Query<&RadarCenter>,
-    windows: Query<&Window>,
+    mut existing_nodes: Query<(&mut Node, &mut ImageNode, &RadarBlipNode)>,
+    icons: Res<RadarIconLookup>,
 ) {
-    let Ok(window) = windows.single() else { return };
     let Ok(center) = centers.single() else { return };
-    let viewport_w = window.width();
-    let viewport_h = window.height();
 
-    for (widget, computed, gt, vis) in radars.iter() {
+    for (radar_entity, widget, computed, vis, children) in radars.iter() {
         if !vis.get() {
             continue;
         }
-        let node_size = computed.size();
-        let radius = node_size.x.min(node_size.y) * 0.5;
-        if radius <= 0.0 {
+        let size = computed.size();
+        let radar_radius_px = size.x.min(size.y) * 0.5;
+        if radar_radius_px <= 0.0 {
             continue;
         }
 
-        // Convert UI node centre from viewport pixels to Camera2d world coordinates.
-        let screen = gt.translation().truncate();
-        let cx = screen.x - viewport_w / 2.0;
-        let cy = viewport_h / 2.0 - screen.y;
-        let widget_centre = Vec2::new(cx, cy);
-
-        for (on_radar, appearance, blip_gtf) in blips.iter() {
+        // Build intended blip set: source -> (left, top, size_px, color, icon_handle)
+        let mut intended: HashMap<Entity, (f32, f32, f32, Color, Option<Handle<Image>>)> =
+            HashMap::new();
+        for (src, on_radar, appearance, blip_gtf) in blips.iter() {
             if !is_on_radar(&widget.filter, on_radar.0) {
                 continue;
             }
@@ -237,74 +291,71 @@ fn draw_generic_radars(
                 center.world_z,
                 center.yaw,
                 widget.range,
-                appearance.radius,
+                appearance.world_size * 0.5,
                 &widget.orientation,
             ) else {
                 continue;
             };
+            let size_px = world_size_to_px(appearance.world_size, widget.range, radar_radius_px);
+            let half = size_px * 0.5;
+            let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
+            let icon_handle = icons.0.get(&appearance.icon).cloned();
+            intended.insert(src, (left, top, size_px, appearance.color, icon_handle));
+        }
 
-            // Clip blip to the radar circle boundary.
-            let draw_offset = Vec2::new(nx * radius, ny * radius);
-            let draw_pos = if draw_offset.length() > radius {
-                widget_centre + draw_offset.normalize_or_zero() * radius
-            } else {
-                widget_centre + draw_offset
-            };
-            let r = appearance.radius.max(1.0);
-
-            match &appearance.shape {
-                RadarShape::Dot => {
-                    // Filled disc: concentric rings at 1 px spacing fill the area.
-                    let mut rr = 1.0_f32;
-                    while rr <= r {
-                        gizmos.circle_2d(draw_pos, rr, appearance.color);
-                        rr += 1.0;
+        // Reconcile existing children.
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok((mut node, mut image, tag)) = existing_nodes.get_mut(child) {
+                    if let Some((left, top, size_px, color, icon_handle)) =
+                        intended.remove(&tag.source)
+                    {
+                        node.left = Val::Px(left);
+                        node.top = Val::Px(top);
+                        node.width = Val::Px(size_px);
+                        node.height = Val::Px(size_px);
+                        if let Some(h) = icon_handle {
+                            image.image = h;
+                        }
+                        image.color = color;
+                    } else {
+                        // Source no longer present — despawn.
+                        commands.entity(child).despawn();
                     }
                 }
-                RadarShape::Ring => {
-                    gizmos.circle_2d(draw_pos, r, appearance.color);
-                }
-                RadarShape::Square => {
-                    let top    = draw_pos + Vec2::new(0.0,  r);
-                    let right  = draw_pos + Vec2::new( r, 0.0);
-                    let bot    = draw_pos + Vec2::new(0.0, -r);
-                    let left   = draw_pos + Vec2::new(-r, 0.0);
-                    gizmos.line_2d(top, right, appearance.color);
-                    gizmos.line_2d(right, bot, appearance.color);
-                    gizmos.line_2d(bot, left, appearance.color);
-                    gizmos.line_2d(left, top, appearance.color);
-                }
-                RadarShape::Diamond => {
-                    let top   = draw_pos + Vec2::new(0.0,  r);
-                    let right = draw_pos + Vec2::new( r, 0.0);
-                    let bot   = draw_pos + Vec2::new(0.0, -r);
-                    let left  = draw_pos + Vec2::new(-r, 0.0);
-                    gizmos.line_2d(top, right, appearance.color);
-                    gizmos.line_2d(right, bot, appearance.color);
-                    gizmos.line_2d(bot, left, appearance.color);
-                    gizmos.line_2d(left, top, appearance.color);
-                }
-                RadarShape::Triangle => {
-                    let nose  = draw_pos + Vec2::new(0.0, r);
-                    let left  = draw_pos + Vec2::new(-r * 0.866, -r * 0.5);
-                    let right = draw_pos + Vec2::new( r * 0.866, -r * 0.5);
-                    gizmos.line_2d(nose, left, appearance.color);
-                    gizmos.line_2d(left, right, appearance.color);
-                    gizmos.line_2d(right, nose, appearance.color);
-                }
-                RadarShape::Icon(_) => {
-                    // Images cannot be drawn through gizmos; render a diamond
-                    // outline as a distinct fallback marker.
-                    let top   = draw_pos + Vec2::new(0.0,  r);
-                    let right = draw_pos + Vec2::new( r, 0.0);
-                    let bot   = draw_pos + Vec2::new(0.0, -r);
-                    let left  = draw_pos + Vec2::new(-r, 0.0);
-                    gizmos.line_2d(top, right, appearance.color);
-                    gizmos.line_2d(right, bot, appearance.color);
-                    gizmos.line_2d(bot, left, appearance.color);
-                    gizmos.line_2d(left, top, appearance.color);
-                }
             }
+        }
+
+        // Spawn new nodes for any remaining intended blips.
+        if !intended.is_empty() {
+            commands.entity(radar_entity).with_children(|parent| {
+                for (source, (left, top, size_px, color, icon_handle)) in intended.drain() {
+                    let node = Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(left),
+                        top: Val::Px(top),
+                        width: Val::Px(size_px),
+                        height: Val::Px(size_px),
+                        ..default()
+                    };
+                    if let Some(h) = icon_handle {
+                        parent.spawn((
+                            node,
+                            ImageNode::new(h).with_color(color),
+                            ZIndex(10),
+                            RadarBlipNode { source },
+                        ));
+                    } else {
+                        // Defensive fallback: coloured square when icon missing.
+                        parent.spawn((
+                            node,
+                            ImageNode::solid_color(color),
+                            ZIndex(10),
+                            RadarBlipNode { source },
+                        ));
+                    }
+                }
+            });
         }
     }
 }
@@ -316,7 +367,8 @@ pub struct GuiRadarPlugin;
 
 impl Plugin for GuiRadarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, draw_generic_radars);
+        app.init_resource::<RadarIconLookup>()
+            .add_systems(Update, sync_radar_blip_nodes);
     }
 }
 
@@ -382,7 +434,16 @@ mod tests {
 
     #[test]
     fn center_entity_projects_to_zero() {
-        let result = project_radar_entity(0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::ShipRelative);
+        let result = project_radar_entity(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &OrientationMode::ShipRelative,
+        );
         let (x, y) = result.unwrap();
         assert!((x).abs() < 1e-5);
         assert!((y).abs() < 1e-5);
@@ -390,13 +451,31 @@ mod tests {
 
     #[test]
     fn entity_beyond_range_returns_none() {
-        let result = project_radar_entity(200.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::ShipRelative);
+        let result = project_radar_entity(
+            200.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &OrientationMode::ShipRelative,
+        );
         assert!(result.is_none());
     }
 
     #[test]
     fn zero_range_returns_none_safely() {
-        let result = project_radar_entity(10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &OrientationMode::ShipRelative);
+        let result = project_radar_entity(
+            10.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            &OrientationMode::ShipRelative,
+        );
         assert!(result.is_none());
     }
 
@@ -404,7 +483,16 @@ mod tests {
     fn ship_relative_yaw_zero_ahead_entity_gives_positive_y() {
         // At yaw=0: forward = (sin(0), -cos(0)) = (0,-1) in XZ.
         // Entity at dz=-100 (ahead) → radar_y = dx*sin(0) - dz*cos(0) = 0 - (-100)*1 = +1.0
-        let result = project_radar_entity(0.0, -100.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::ShipRelative);
+        let result = project_radar_entity(
+            0.0,
+            -100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &OrientationMode::ShipRelative,
+        );
         let (_, y) = result.unwrap();
         assert!((y - 1.0).abs() < 1e-5, "expected radar_y=1.0, got {y}");
     }
@@ -412,32 +500,152 @@ mod tests {
     #[test]
     fn world_fixed_ignores_yaw() {
         let yaw = std::f32::consts::FRAC_PI_2; // 90 degrees
-        let ship_relative = project_radar_entity(50.0, 0.0, 0.0, 0.0, yaw, 100.0, 0.0, &OrientationMode::ShipRelative);
-        let world_fixed   = project_radar_entity(50.0, 0.0, 0.0, 0.0, yaw, 100.0, 0.0, &OrientationMode::WorldFixed);
+        let ship_relative = project_radar_entity(
+            50.0,
+            0.0,
+            0.0,
+            0.0,
+            yaw,
+            100.0,
+            0.0,
+            &OrientationMode::ShipRelative,
+        );
+        let world_fixed = project_radar_entity(
+            50.0,
+            0.0,
+            0.0,
+            0.0,
+            yaw,
+            100.0,
+            0.0,
+            &OrientationMode::WorldFixed,
+        );
         // WorldFixed should give the same as ShipRelative at yaw=0
-        let world_fixed_0 = project_radar_entity(50.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::ShipRelative);
-        assert_ne!(ship_relative, world_fixed, "ship_relative should differ from world_fixed at non-zero yaw");
-        assert_eq!(world_fixed, world_fixed_0, "world_fixed should equal ship_relative@yaw=0");
+        let world_fixed_0 = project_radar_entity(
+            50.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &OrientationMode::ShipRelative,
+        );
+        assert_ne!(
+            ship_relative, world_fixed,
+            "ship_relative should differ from world_fixed at non-zero yaw"
+        );
+        assert_eq!(
+            world_fixed, world_fixed_0,
+            "world_fixed should equal ship_relative@yaw=0"
+        );
     }
 
     #[test]
     fn entity_at_range_boundary_is_included() {
         // Exactly at range (dx=100, dz=0, range=100): dx²+dz² = 10000 = range²  → included.
-        let result = project_radar_entity(100.0, 0.0, 0.0, 0.0, 0.0, 100.0, 0.0, &OrientationMode::WorldFixed);
+        let result = project_radar_entity(
+            100.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &OrientationMode::WorldFixed,
+        );
         assert!(result.is_some());
     }
 
     #[test]
     fn entity_radius_extends_detection_range() {
         // Entity center at 120 units, range=100, entity_radius=25 → 120 <= 125 → included.
-        let result = project_radar_entity(120.0, 0.0, 0.0, 0.0, 0.0, 100.0, 25.0, &OrientationMode::WorldFixed);
+        let result = project_radar_entity(
+            120.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            25.0,
+            &OrientationMode::WorldFixed,
+        );
         assert!(result.is_some());
     }
 
     #[test]
     fn entity_radius_does_not_include_fully_out_of_range() {
         // Entity center at 200 units, range=100, entity_radius=25 → 200 > 125 → excluded.
-        let result = project_radar_entity(200.0, 0.0, 0.0, 0.0, 0.0, 100.0, 25.0, &OrientationMode::WorldFixed);
+        let result = project_radar_entity(
+            200.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            25.0,
+            &OrientationMode::WorldFixed,
+        );
         assert!(result.is_none());
+    }
+
+    // ── world_size_to_px ─────────────────────────────────────────────────────
+
+    #[test]
+    fn world_size_to_px_returns_min_when_range_zero() {
+        assert_eq!(world_size_to_px(50.0, 0.0, 140.0), MIN_BLIP_PX);
+    }
+
+    #[test]
+    fn world_size_to_px_returns_min_when_radius_zero() {
+        assert_eq!(world_size_to_px(50.0, 500.0, 0.0), MIN_BLIP_PX);
+    }
+
+    #[test]
+    fn world_size_to_px_below_min_clamps_up() {
+        assert_eq!(world_size_to_px(0.1, 500.0, 140.0), MIN_BLIP_PX);
+    }
+
+    #[test]
+    fn world_size_to_px_linear_interior() {
+        // 50 / 500 * 140 * 2 = 28.0
+        assert!((world_size_to_px(50.0, 500.0, 140.0) - 28.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn world_size_to_px_above_diameter_clamps() {
+        // raw would be 1000/500*140*2 = 560 → clamps to diameter 280.
+        assert!((world_size_to_px(1000.0, 500.0, 140.0) - 280.0).abs() < 1e-5);
+    }
+
+    // ── blip_local_offset ────────────────────────────────────────────────────
+
+    #[test]
+    fn blip_local_offset_centre_projection() {
+        let (left, top) = blip_local_offset(0.0, 0.0, 140.0, 8.0);
+        assert!((left - 132.0).abs() < 1e-5);
+        assert!((top - 132.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn blip_local_offset_right_edge() {
+        let (left, top) = blip_local_offset(1.0, 0.0, 140.0, 8.0);
+        assert!((left - 272.0).abs() < 1e-5);
+        assert!((top - 132.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn blip_local_offset_top_edge() {
+        // ny = 1 → top = 140 - 1*140 - 8 = -8 (Y flipped to UI's y-down).
+        let (left, top) = blip_local_offset(0.0, 1.0, 140.0, 8.0);
+        assert!((left - 132.0).abs() < 1e-5);
+        assert!((top - (-8.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn blip_local_offset_bottom_edge() {
+        let (left, top) = blip_local_offset(0.0, -1.0, 140.0, 8.0);
+        assert!((left - 132.0).abs() < 1e-5);
+        assert!((top - 272.0).abs() < 1e-5);
     }
 }

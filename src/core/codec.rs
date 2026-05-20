@@ -40,32 +40,54 @@ mod tests {
 
     impl MessageCodec for PrettyJsonCodec {
         type Error = serde_json::Error;
-        fn encode_client(&self, msg: &ClientMessage) -> Result<String, Self::Error> { serde_json::to_string_pretty(msg) }
-        fn decode_client(&self, s: &str) -> Result<ClientMessage, Self::Error> { serde_json::from_str(s) }
-        fn encode_server(&self, msg: &ServerMessage) -> Result<String, Self::Error> { serde_json::to_string_pretty(msg) }
-        fn decode_server(&self, s: &str) -> Result<ServerMessage, Self::Error> { serde_json::from_str(s) }
+        fn encode_client(&self, msg: &ClientMessage) -> Result<String, Self::Error> {
+            serde_json::to_string_pretty(msg)
+        }
+        fn decode_client(&self, s: &str) -> Result<ClientMessage, Self::Error> {
+            serde_json::from_str(s)
+        }
+        fn encode_server(&self, msg: &ServerMessage) -> Result<String, Self::Error> {
+            serde_json::to_string_pretty(msg)
+        }
+        fn decode_server(&self, s: &str) -> Result<ServerMessage, Self::Error> {
+            serde_json::from_str(s)
+        }
     }
 
     fn assert_client_roundtrip<C: MessageCodec>(codec: &C, msg: ClientMessage)
-    where C::Error: std::fmt::Debug {
+    where
+        C::Error: std::fmt::Debug,
+    {
         let encoded = codec.encode_client(&msg).unwrap();
         let decoded = codec.decode_client(&encoded).unwrap();
         assert_eq!(msg, decoded);
     }
 
     fn assert_server_roundtrip<C: MessageCodec>(codec: &C, msg: ServerMessage)
-    where C::Error: std::fmt::Debug {
+    where
+        C::Error: std::fmt::Debug,
+    {
         let encoded = codec.encode_server(&msg).unwrap();
         let decoded = codec.decode_server(&encoded).unwrap();
         assert_eq!(msg, decoded);
     }
 
     fn player() -> Player {
-        Player { token: "tok".into(), name: "Alice".into(), consoles: vec![], connected: true }
+        Player {
+            token: "tok".into(),
+            name: "Alice".into(),
+            consoles: vec![],
+            connected: true,
+        }
     }
 
     fn state() -> GameState {
-        GameState { phase: GamePhase::Lobby, players: vec![player()], complexity: HashMap::new(), world: None }
+        GameState {
+            phase: GamePhase::Lobby,
+            players: vec![player()],
+            complexity: HashMap::new(),
+            world: None,
+        }
     }
 
     fn empty_ship_stations() -> crate::stations_config::ShipStations {
@@ -76,14 +98,19 @@ mod tests {
 
     #[test]
     fn client_identify() {
-        let msg = ClientMessage::Identify { token: "t".into(), name: "Bob".into() };
+        let msg = ClientMessage::Identify {
+            token: "t".into(),
+            name: "Bob".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_name() {
-        let msg = ClientMessage::SetName { name: "Carol".into() };
+        let msg = ClientMessage::SetName {
+            name: "Carol".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -104,70 +131,91 @@ mod tests {
 
     #[test]
     fn client_set_view_fore() {
-        let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Fore) };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::Camera(ViewDirection::Fore),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_aft() {
-        let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::Camera(ViewDirection::Aft),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_port() {
-        let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Port) };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::Camera(ViewDirection::Port),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_starboard() {
-        let msg = ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::Camera(ViewDirection::Starboard),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_radar() {
-        let msg = ClientMessage::SetView { mode: ViewMode::Radar };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::Radar,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_science_radar() {
-        let msg = ClientMessage::SetView { mode: ViewMode::ScienceRadar };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::ScienceRadar,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_system_chart() {
-        let msg = ClientMessage::SetView { mode: ViewMode::SystemChart };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::SystemChart,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_navigation_chart() {
-        let msg = ClientMessage::SetView { mode: ViewMode::NavigationChart };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::NavigationChart,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_comms() {
-        let msg = ClientMessage::SetView { mode: ViewMode::Comms };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::Comms,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_helm_input() {
-        let msg = ClientMessage::HelmInput { thrust: 0.75, steering: -0.5 };
+        let msg = ClientMessage::HelmInput {
+            thrust: 0.75,
+            steering: -0.5,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -190,7 +238,11 @@ mod tests {
 
     #[test]
     fn server_welcome() {
-        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations(), ship_config: ShipClientConfig::default() };
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config: ShipClientConfig::default(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -204,14 +256,19 @@ mod tests {
 
     #[test]
     fn server_player_left() {
-        let msg = ServerMessage::PlayerLeft { token: "tok".into() };
+        let msg = ServerMessage::PlayerLeft {
+            token: "tok".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_name_changed() {
-        let msg = ServerMessage::NameChanged { token: "tok".into(), name: "Dave".into() };
+        let msg = ServerMessage::NameChanged {
+            token: "tok".into(),
+            name: "Dave".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -277,7 +334,7 @@ mod tests {
                 ship_z: 0.0,
                 ship_yaw: 0.0,
                 forward_speed: 0.0,
-            power_levels: (2, 2, 2),
+                power_levels: (2, 2, 2),
                 flags: vec![],
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
@@ -347,7 +404,9 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
-                    inner_radius: None, warp_out_remaining_secs: None,
+                    inner_radius: None,
+                    warp_out_remaining_secs: None,
+                    radar_world_size: None,
                 }],
                 ..Default::default()
             },
@@ -371,7 +430,9 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: None, warp_out_remaining_secs: None,
+                        inner_radius: None,
+                        warp_out_remaining_secs: None,
+                        radar_world_size: None,
                     },
                     EntitySnapshot {
                         uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(),
@@ -383,7 +444,9 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: None, warp_out_remaining_secs: None,
+                        inner_radius: None,
+                        warp_out_remaining_secs: None,
+                        radar_world_size: None,
                     },
                 ],
                 ..Default::default()
@@ -411,7 +474,9 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: None, warp_out_remaining_secs: None,
+                        inner_radius: None,
+                        warp_out_remaining_secs: None,
+                        radar_world_size: None,
                     }],
                     ..Default::default()
                 }),
@@ -425,21 +490,29 @@ mod tests {
 
     #[test]
     fn client_set_target() {
-        let msg = ClientMessage::SetTarget { uuid: "550e8400-e29b-41d4-a716-446655440000".into() };
+        let msg = ClientMessage::SetTarget {
+            uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_target_lock_confirmed() {
-        let msg = ServerMessage::TargetLock { uuid: "550e8400-e29b-41d4-a716-446655440000".into(), locked: true };
+        let msg = ServerMessage::TargetLock {
+            uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            locked: true,
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_target_lock_rejected() {
-        let msg = ServerMessage::TargetLock { uuid: "550e8400-e29b-41d4-a716-446655440000".into(), locked: false };
+        let msg = ServerMessage::TargetLock {
+            uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+            locked: false,
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -451,9 +524,12 @@ mod tests {
             fire_ready: true,
             on_cooldown: false,
             torpedo_count: 10,
-            fore_port_loaded: true, fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true, fore_starboard_reload_secs: 0.0,
-            aft_loaded: true, aft_reload_secs: 0.0,
+            fore_port_loaded: true,
+            fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: true,
+            aft_reload_secs: 0.0,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -466,9 +542,12 @@ mod tests {
             fire_ready: false,
             on_cooldown: false,
             torpedo_count: 8,
-            fore_port_loaded: false, fore_port_reload_secs: 7.5,
-            fore_starboard_loaded: true, fore_starboard_reload_secs: 0.0,
-            aft_loaded: false, aft_reload_secs: 3.2,
+            fore_port_loaded: false,
+            fore_port_reload_secs: 7.5,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: false,
+            aft_reload_secs: 3.2,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -481,9 +560,12 @@ mod tests {
             fire_ready: false,
             on_cooldown: true,
             torpedo_count: 0,
-            fore_port_loaded: false, fore_port_reload_secs: 10.0,
-            fore_starboard_loaded: false, fore_starboard_reload_secs: 5.0,
-            aft_loaded: false, aft_reload_secs: 2.0,
+            fore_port_loaded: false,
+            fore_port_reload_secs: 10.0,
+            fore_starboard_loaded: false,
+            fore_starboard_reload_secs: 5.0,
+            aft_loaded: false,
+            aft_reload_secs: 2.0,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -498,21 +580,27 @@ mod tests {
 
     #[test]
     fn server_beam_started_round_trips() {
-        let msg = ServerMessage::BeamStarted { target_uuid: "550e8400-e29b-41d4-a716-446655440000".into() };
+        let msg = ServerMessage::BeamStarted {
+            target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_beam_ended_round_trips() {
-        let msg = ServerMessage::BeamEnded { target_uuid: "550e8400-e29b-41d4-a716-446655440000".into() };
+        let msg = ServerMessage::BeamEnded {
+            target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_asteroid_destroyed_round_trips() {
-        let msg = ServerMessage::AsteroidDestroyed { uuid: "550e8400-e29b-41d4-a716-446655440000".into() };
+        let msg = ServerMessage::AsteroidDestroyed {
+            uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -520,7 +608,10 @@ mod tests {
     #[test]
     fn client_dispatch_repair_team_round_trips() {
         use crate::messages::Console;
-        let msg = ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm };
+        let msg = ClientMessage::DispatchRepairTeam {
+            team_idx: 0,
+            console: Console::Helm,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -531,9 +622,18 @@ mod tests {
         let msg = ServerMessage::RepairState {
             teams: vec![
                 TeamSlot::Idle,
-                TeamSlot::Travelling { console: Console::Helm, elapsed: 2.5 },
-                TeamSlot::Repairing { console: Console::Tactical, elapsed: 1.0 },
-                TeamSlot::Returning { remaining: 3.0, queued: None },
+                TeamSlot::Travelling {
+                    console: Console::Helm,
+                    elapsed: 2.5,
+                },
+                TeamSlot::Repairing {
+                    console: Console::Tactical,
+                    elapsed: 1.0,
+                },
+                TeamSlot::Returning {
+                    remaining: 3.0,
+                    queued: None,
+                },
             ],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -542,7 +642,9 @@ mod tests {
 
     #[test]
     fn client_set_phaser_mode_round_trips() {
-        let msg = ClientMessage::SetPhaserMode { mode: crate::messages::PhaserMode::Manual };
+        let msg = ClientMessage::SetPhaserMode {
+            mode: crate::messages::PhaserMode::Manual,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -559,35 +661,45 @@ mod tests {
 
     #[test]
     fn client_set_science_target_round_trips() {
-        let msg = ClientMessage::SetScienceTarget { uuid: "entity-uuid-123".into() };
+        let msg = ClientMessage::SetScienceTarget {
+            uuid: "entity-uuid-123".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_sensors_target_round_trips() {
-        let msg = ClientMessage::SetSensorsTarget { uuid: "entity-uuid-sensors-123".into() };
+        let msg = ClientMessage::SetSensorsTarget {
+            uuid: "entity-uuid-sensors-123".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_science_target_suggestion_round_trips() {
-        let msg = ServerMessage::ScienceTargetSuggestion { uuid: "entity-uuid-456".into() };
+        let msg = ServerMessage::ScienceTargetSuggestion {
+            uuid: "entity-uuid-456".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_sensors_target_suggestion_round_trips() {
-        let msg = ServerMessage::SensorsTargetSuggestion { uuid: "entity-uuid-sensors-456".into() };
+        let msg = ServerMessage::SensorsTargetSuggestion {
+            uuid: "entity-uuid-sensors-456".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_set_view_sensors_radar() {
-        let msg = ClientMessage::SetView { mode: ViewMode::SensorsRadar };
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::SensorsRadar,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -596,10 +708,38 @@ mod tests {
     fn server_shield_status_round_trips() {
         let msg = ServerMessage::ShieldStatus {
             facings: vec![
-                ShieldFacingStatus { label: "Fore".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
-                ShieldFacingStatus { label: "Port".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 7.5, is_focused: false },
-                ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
-                ShieldFacingStatus { label: "Starboard".into(), hp: 55, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus {
+                    label: "Fore".into(),
+                    hp: 80,
+                    max_hp: 100,
+                    online: true,
+                    offline_remaining: 0.0,
+                    is_focused: false,
+                },
+                ShieldFacingStatus {
+                    label: "Port".into(),
+                    hp: 0,
+                    max_hp: 100,
+                    online: false,
+                    offline_remaining: 7.5,
+                    is_focused: false,
+                },
+                ShieldFacingStatus {
+                    label: "Aft".into(),
+                    hp: 100,
+                    max_hp: 100,
+                    online: true,
+                    offline_remaining: 0.0,
+                    is_focused: false,
+                },
+                ShieldFacingStatus {
+                    label: "Starboard".into(),
+                    hp: 55,
+                    max_hp: 100,
+                    online: true,
+                    offline_remaining: 0.0,
+                    is_focused: false,
+                },
             ],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -608,7 +748,9 @@ mod tests {
 
     #[test]
     fn client_set_shield_focus_some_round_trips() {
-        let msg = ClientMessage::SetShieldFocus { facing: Some(ViewDirection::Fore) };
+        let msg = ClientMessage::SetShieldFocus {
+            facing: Some(ViewDirection::Fore),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -622,7 +764,14 @@ mod tests {
 
     #[test]
     fn shield_facing_status_with_focus_round_trips() {
-        let msg = ShieldFacingStatus { label: "Fore".into(), hp: 150, max_hp: 150, online: true, offline_remaining: 0.0, is_focused: true };
+        let msg = ShieldFacingStatus {
+            label: "Fore".into(),
+            hp: 150,
+            max_hp: 150,
+            online: true,
+            offline_remaining: 0.0,
+            is_focused: true,
+        };
         let encoded = serde_json::to_string(&msg).unwrap();
         let decoded: ShieldFacingStatus = serde_json::from_str(&encoded).unwrap();
         assert_eq!(msg, decoded);
@@ -663,7 +812,9 @@ mod tests {
 
     #[test]
     fn server_torpedo_destroyed_round_trips() {
-        let msg = ServerMessage::TorpedoDestroyed { uuid: "torpedo-uuid-1".into() };
+        let msg = ServerMessage::TorpedoDestroyed {
+            uuid: "torpedo-uuid-1".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -694,7 +845,6 @@ mod tests {
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
-
     #[test]
     fn server_modifier_added_console_source_round_trips() {
         let msg = ServerMessage::ModifierAdded {
@@ -709,7 +859,9 @@ mod tests {
     #[test]
     fn server_modifier_added_region_source_round_trips() {
         let msg = ServerMessage::ModifierAdded {
-            source: crate::messages::ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(7) },
+            source: crate::messages::ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(7),
+            },
             slot: crate::messages::ModifierSlot::HullDamageTaken,
             bonus: -0.3,
         };
@@ -755,13 +907,25 @@ mod tests {
 
     #[test]
     fn modifier_source_world_hash_and_eq() {
-        use std::collections::HashSet;
         use crate::messages::ModifierSource;
+        use std::collections::HashSet;
 
-        let a = ModifierSource::World { id: "s1".into(), tag: "t1".into() };
-        let b = ModifierSource::World { id: "s1".into(), tag: "t1".into() };
-        let c = ModifierSource::World { id: "s1".into(), tag: "t2".into() };
-        let d = ModifierSource::World { id: "s2".into(), tag: "t1".into() };
+        let a = ModifierSource::World {
+            id: "s1".into(),
+            tag: "t1".into(),
+        };
+        let b = ModifierSource::World {
+            id: "s1".into(),
+            tag: "t1".into(),
+        };
+        let c = ModifierSource::World {
+            id: "s1".into(),
+            tag: "t2".into(),
+        };
+        let d = ModifierSource::World {
+            id: "s2".into(),
+            tag: "t1".into(),
+        };
 
         // Same (id, tag) → equal
         assert_eq!(a, b);
@@ -789,7 +953,10 @@ mod tests {
 
     #[test]
     fn flag_kind_round_trips() {
-        for flag in &[crate::flag_kind::FlagKind::CommsJammed, crate::flag_kind::FlagKind::SensorBlind] {
+        for flag in &[
+            crate::flag_kind::FlagKind::CommsJammed,
+            crate::flag_kind::FlagKind::SensorBlind,
+        ] {
             let json = serde_json::to_string(flag).unwrap();
             let decoded: crate::flag_kind::FlagKind = serde_json::from_str(&json).unwrap();
             assert_eq!(*flag, decoded);
@@ -800,7 +967,9 @@ mod tests {
 
     #[test]
     fn client_select_station_round_trips() {
-        let msg = ClientMessage::SelectStation { station: "Captain".into() };
+        let msg = ClientMessage::SelectStation {
+            station: "Captain".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -839,8 +1008,9 @@ mod tests {
         use crate::stations_config::{ShipStations, StationDef};
         use std::collections::HashMap;
         let mut configs = HashMap::new();
-        configs.insert(1u32, vec![
-            StationDef {
+        configs.insert(
+            1u32,
+            vec![StationDef {
                 name: "Captain".into(),
                 description: "The big chair".into(),
                 consoles: vec![Console::CaptainChair],
@@ -848,17 +1018,30 @@ mod tests {
                 short_code: "CAP".into(),
                 next: None,
                 previous: None,
-            },
-        ]);
-        let ship_stations = ShipStations { configs, min_players: 1, max_players: 1, complexity_presets: std::collections::HashMap::new() };
-        let msg = ServerMessage::Welcome { state: state(), ship_stations, ship_config: ShipClientConfig::default() };
+            }],
+        );
+        let ship_stations = ShipStations {
+            configs,
+            min_players: 1,
+            max_players: 1,
+            complexity_presets: std::collections::HashMap::new(),
+        };
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations,
+            ship_config: ShipClientConfig::default(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn welcome_with_world_none_round_trips() {
-        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations(), ship_config: ShipClientConfig::default() };
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config: ShipClientConfig::default(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
         match msg {
@@ -876,7 +1059,11 @@ mod tests {
             repair_travel_secs: 9.0,
             repair_rate_hp_per_sec: 1.5,
         };
-        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations(), ship_config };
+        let msg = ServerMessage::Welcome {
+            state: state(),
+            ship_stations: empty_ship_stations(),
+            ship_config,
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
         match msg {
@@ -891,35 +1078,48 @@ mod tests {
 
     #[test]
     fn client_increase_power_round_trips() {
-        let msg = ClientMessage::IncreasePower { console: Console::Helm };
+        let msg = ClientMessage::IncreasePower {
+            console: Console::Helm,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_decrease_power_round_trips() {
-        let msg = ClientMessage::DecreasePower { console: Console::Sensors };
+        let msg = ClientMessage::DecreasePower {
+            console: Console::Sensors,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_sensors_console_round_trips() {
-        let msg = ClientMessage::SetComplexity { console: Console::Sensors, preset_name: "Low".into() };
+        let msg = ClientMessage::SetComplexity {
+            console: Console::Sensors,
+            preset_name: "Low".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_shields_console_round_trips() {
-        let msg = ClientMessage::SetComplexity { console: Console::Shields, preset_name: "Std".into() };
+        let msg = ClientMessage::SetComplexity {
+            console: Console::Shields,
+            preset_name: "Std".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_navigation_console_round_trips() {
-        let msg = ClientMessage::SetComplexity { console: Console::Navigation, preset_name: "Std".into() };
+        let msg = ClientMessage::SetComplexity {
+            console: Console::Navigation,
+            preset_name: "Std".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -978,7 +1178,9 @@ mod tests {
             snapshot: SimSnapshot {
                 red_alert: false,
                 view_mode: ViewMode::default(),
-                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
                 forward_speed: 0.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
@@ -1010,7 +1212,9 @@ mod tests {
                     colour: None,
                     yaw: None,
                     hull_fraction: None,
-                    inner_radius: None, warp_out_remaining_secs: None,
+                    inner_radius: None,
+                    warp_out_remaining_secs: None,
+                    radar_world_size: None,
                 }],
                 ..Default::default()
             },
@@ -1033,7 +1237,9 @@ mod tests {
                     colour: Some([0.2, 0.5, 0.8]),
                     yaw: Some(1.57),
                     hull_fraction: Some(0.85),
-                    inner_radius: Some(2.0), warp_out_remaining_secs: None,
+                    inner_radius: Some(2.0),
+                    warp_out_remaining_secs: None,
+                    radar_world_size: None,
                 }],
                 ..Default::default()
             },
@@ -1058,12 +1264,67 @@ mod tests {
                     hull_fraction: None,
                     inner_radius: None,
                     warp_out_remaining_secs: Some(3.5),
+                    radar_world_size: None,
                 }],
                 ..Default::default()
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_snapshot_radar_world_size_round_trips() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![EntitySnapshot {
+                    uuid: "u-radar".into(),
+                    id: None,
+                    position: Some([1.0, 0.0, 2.0]),
+                    tags: vec!["ship".into()],
+                    shape: None,
+                    radius: Some(3.0),
+                    colour: None,
+                    yaw: None,
+                    hull_fraction: None,
+                    inner_radius: None,
+                    warp_out_remaining_secs: None,
+                    radar_world_size: Some(12.5),
+                }],
+                ..Default::default()
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn entity_snapshot_radar_world_size_none_is_omitted_from_json() {
+        let msg = ServerMessage::WorldSetup {
+            world: WorldData {
+                entities: vec![EntitySnapshot {
+                    uuid: "u-noradar".into(),
+                    id: None,
+                    position: Some([0.0, 0.0, 0.0]),
+                    tags: vec![],
+                    shape: None,
+                    radius: Some(1.0),
+                    colour: None,
+                    yaw: None,
+                    hull_fraction: None,
+                    inner_radius: None,
+                    warp_out_remaining_secs: None,
+                    radar_world_size: None,
+                }],
+                ..Default::default()
+            },
+        };
+        let encoded = JsonCodec.encode_server(&msg).expect("encode");
+        assert!(
+            !encoded.contains("radar_world_size"),
+            "None radar_world_size must be omitted from JSON, got: {}",
+            encoded
+        );
     }
 
     #[test]
@@ -1081,7 +1342,9 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: None, warp_out_remaining_secs: None,
+                        inner_radius: None,
+                        warp_out_remaining_secs: None,
+                        radar_world_size: None,
                     },
                     EntitySnapshot {
                         uuid: "field-1".into(),
@@ -1093,7 +1356,9 @@ mod tests {
                         colour: None,
                         yaw: None,
                         hull_fraction: None,
-                        inner_radius: Some(10.0), warp_out_remaining_secs: None,
+                        inner_radius: Some(10.0),
+                        warp_out_remaining_secs: None,
+                        radar_world_size: None,
                     },
                 ],
                 ..Default::default()
@@ -1109,7 +1374,9 @@ mod tests {
             snapshot: SimSnapshot {
                 red_alert: false,
                 view_mode: ViewMode::default(),
-                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
                 forward_speed: 0.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
@@ -1119,7 +1386,8 @@ mod tests {
                     yaw: Some(0.5),
                     hull_fraction: Some(1.0),
                     flags: vec![],
-                    shields: None, warp_out_remaining_secs: None,
+                    shields: None,
+                    warp_out_remaining_secs: None,
                 }],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
@@ -1136,7 +1404,9 @@ mod tests {
             snapshot: SimSnapshot {
                 red_alert: false,
                 view_mode: ViewMode::default(),
-                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
                 forward_speed: 0.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
@@ -1146,7 +1416,8 @@ mod tests {
                     yaw: None,
                     hull_fraction: None,
                     flags: vec![],
-                    shields: None, warp_out_remaining_secs: None,
+                    shields: None,
+                    warp_out_remaining_secs: None,
                 }],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
@@ -1163,7 +1434,9 @@ mod tests {
             snapshot: SimSnapshot {
                 red_alert: false,
                 view_mode: ViewMode::default(),
-                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
                 forward_speed: 0.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
@@ -1188,7 +1461,9 @@ mod tests {
             snapshot: SimSnapshot {
                 red_alert: true,
                 view_mode: ViewMode::Radar,
-                ship_x: 10.0, ship_z: -20.0, ship_yaw: 1.0,
+                ship_x: 10.0,
+                ship_z: -20.0,
+                ship_yaw: 1.0,
                 forward_speed: 0.0,
                 power_levels: (3, 2, 1),
                 flags: vec![crate::flag_kind::FlagKind::SensorBlind],
@@ -1199,7 +1474,8 @@ mod tests {
                         yaw: Some(0.0),
                         hull_fraction: Some(1.0),
                         flags: vec![],
-                        shields: None, warp_out_remaining_secs: None,
+                        shields: None,
+                        warp_out_remaining_secs: None,
                     },
                     EntityStateSnapshot {
                         uuid: "e2".into(),
@@ -1207,7 +1483,8 @@ mod tests {
                         yaw: None,
                         hull_fraction: Some(0.5),
                         flags: vec![crate::flag_kind::FlagKind::CommsJammed],
-                        shields: None, warp_out_remaining_secs: None,
+                        shields: None,
+                        warp_out_remaining_secs: None,
                     },
                 ],
                 radar_state: RadarStateSnapshot {
@@ -1226,7 +1503,14 @@ mod tests {
 
     #[test]
     fn entity_tag_round_trips() {
-        for tag in &[EntityTag::Asteroid, EntityTag::Ship, EntityTag::AsteroidField, EntityTag::Star, EntityTag::Planet, EntityTag::Region] {
+        for tag in &[
+            EntityTag::Asteroid,
+            EntityTag::Ship,
+            EntityTag::AsteroidField,
+            EntityTag::Star,
+            EntityTag::Planet,
+            EntityTag::Region,
+        ] {
             let json = serde_json::to_string(tag).unwrap();
             let decoded: EntityTag = serde_json::from_str(&json).unwrap();
             assert_eq!(*tag, decoded);
@@ -1237,21 +1521,30 @@ mod tests {
 
     #[test]
     fn client_set_complexity_round_trips() {
-        let msg = ClientMessage::SetComplexity { console: Console::Helm, preset_name: "Low".into() };
+        let msg = ClientMessage::SetComplexity {
+            console: Console::Helm,
+            preset_name: "Low".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn server_complexity_changed_round_trips() {
-        let msg = ServerMessage::ComplexityChanged { console: Console::Tactical, preset_name: "Std".into() };
+        let msg = ServerMessage::ComplexityChanged {
+            console: Console::Tactical,
+            preset_name: "Std".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn set_complexity_with_captain_chair_console_round_trips() {
-        let msg = ClientMessage::SetComplexity { console: Console::CaptainChair, preset_name: "Std".into() };
+        let msg = ClientMessage::SetComplexity {
+            console: Console::CaptainChair,
+            preset_name: "Std".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -1271,7 +1564,9 @@ mod tests {
                 colour: Some([0.2, 0.5, 0.8]),
                 yaw: Some(1.57),
                 hull_fraction: Some(0.85),
-                inner_radius: Some(2.0), warp_out_remaining_secs: None,
+                inner_radius: Some(2.0),
+                warp_out_remaining_secs: None,
+                radar_world_size: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1291,7 +1586,9 @@ mod tests {
                 colour: None,
                 yaw: None,
                 hull_fraction: None,
-                inner_radius: None, warp_out_remaining_secs: None,
+                inner_radius: None,
+                warp_out_remaining_secs: None,
+                radar_world_size: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1366,7 +1663,9 @@ mod tests {
 
     #[test]
     fn server_station_destroyed_round_trips() {
-        let msg = ServerMessage::StationDestroyed { uuid: "station-1".into() };
+        let msg = ServerMessage::StationDestroyed {
+            uuid: "station-1".into(),
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -1434,21 +1733,28 @@ mod tests {
 
     #[test]
     fn client_hail_round_trips() {
-        let msg = ClientMessage::Hail { target_uuid: "station-uuid-123".into() };
+        let msg = ClientMessage::Hail {
+            target_uuid: "station-uuid-123".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_select_comms_message_round_trips() {
-        let msg = ClientMessage::SelectCommsMessage { message_id: "msg-1".into() };
+        let msg = ClientMessage::SelectCommsMessage {
+            message_id: "msg-1".into(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn client_respond_to_message_round_trips() {
-        let msg = ClientMessage::RespondToMessage { message_id: "msg-1".into(), response_index: 2 };
+        let msg = ClientMessage::RespondToMessage {
+            message_id: "msg-1".into(),
+            response_index: 2,
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -1525,7 +1831,9 @@ mod tests {
             snapshot: crate::messages::SimSnapshot {
                 red_alert: false,
                 view_mode: crate::messages::ViewMode::default(),
-                ship_x: 0.0, ship_z: 0.0, ship_yaw: 0.0,
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
                 forward_speed: 0.0,
                 power_levels: (2, 2, 2),
                 flags: vec![],
@@ -1536,10 +1844,38 @@ mod tests {
                     hull_fraction: Some(0.75),
                     flags: vec![],
                     shields: Some(vec![
-                        ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 10.0, is_focused: false },
-                        ShieldFacingStatus { label: "Aft".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
-                        ShieldFacingStatus { label: "Port".into(), hp: 50, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
-                        ShieldFacingStatus { label: "Starboard".into(), hp: 80, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                        ShieldFacingStatus {
+                            label: "Fore".into(),
+                            hp: 0,
+                            max_hp: 100,
+                            online: false,
+                            offline_remaining: 10.0,
+                            is_focused: false,
+                        },
+                        ShieldFacingStatus {
+                            label: "Aft".into(),
+                            hp: 100,
+                            max_hp: 100,
+                            online: true,
+                            offline_remaining: 0.0,
+                            is_focused: false,
+                        },
+                        ShieldFacingStatus {
+                            label: "Port".into(),
+                            hp: 50,
+                            max_hp: 100,
+                            online: true,
+                            offline_remaining: 0.0,
+                            is_focused: false,
+                        },
+                        ShieldFacingStatus {
+                            label: "Starboard".into(),
+                            hp: 80,
+                            max_hp: 100,
+                            online: true,
+                            offline_remaining: 0.0,
+                            is_focused: false,
+                        },
                     ]),
                     warp_out_remaining_secs: None,
                 }],
@@ -1561,21 +1897,30 @@ mod tests {
 
     #[test]
     fn damage_taken_shield_only_round_trips() {
-        let msg = ServerMessage::DamageTaken { hull: 0.0, shield: 12.5 };
+        let msg = ServerMessage::DamageTaken {
+            hull: 0.0,
+            shield: 12.5,
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn damage_taken_hull_only_round_trips() {
-        let msg = ServerMessage::DamageTaken { hull: 8.0, shield: 0.0 };
+        let msg = ServerMessage::DamageTaken {
+            hull: 8.0,
+            shield: 0.0,
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn damage_taken_both_fields_round_trips() {
-        let msg = ServerMessage::DamageTaken { hull: 3.5, shield: 10.0 };
+        let msg = ServerMessage::DamageTaken {
+            hull: 3.5,
+            shield: 10.0,
+        };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -1587,7 +1932,10 @@ mod tests {
         let decoded: ServerMessage = JsonCodec.decode_server(json).unwrap();
         if let ServerMessage::SimState { snapshot } = decoded {
             assert_eq!(snapshot.entity_states.len(), 1);
-            assert!(snapshot.entity_states[0].shields.is_none(), "shields must default to None when absent");
+            assert!(
+                snapshot.entity_states[0].shields.is_none(),
+                "shields must default to None when absent"
+            );
         } else {
             panic!("expected SimState");
         }

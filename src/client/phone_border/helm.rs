@@ -5,10 +5,5 @@
 //! `crate::phone_border::helm` continues to compile without change.
 
 pub use crate::console::helm::client::{
-    HelmPanelPlugin,
-    COMPASS_RADAR_DIAMETER,
-    HELM_PAD_SIZE,
-    yaw_to_heading,
-    PhoneHelmSpawned,
-    HelmTickTimer,
+    yaw_to_heading, HelmPanelPlugin, HelmTickTimer, PhoneHelmSpawned, HELM_PAD_SIZE,
 };

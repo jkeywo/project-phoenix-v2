@@ -12,10 +12,9 @@ use crate::client_app::{HelmPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    ButtonPressed, ButtonSize, GenericJoystick, GenericRadar, JoystickMoved,
-    OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
-    RadarLayer, RadarShape, ReadoutValue, StateVisuals, TextReadout, Visual,
-    spawn_gui_button,
+    spawn_gui_button, ButtonPressed, ButtonSize, GenericJoystick, GenericRadar, JoystickMoved,
+    OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
+    ReadoutValue, StateVisuals, TextReadout, Visual,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -24,11 +23,7 @@ use crate::ship_view::ShipView;
 // ── Pure helpers ─────────────────────────────────────────────────────
 
 /// Decide whether the helm panel should be visible.
-pub fn helm_panel_visible(
-    lobby: &LobbyState,
-    token: &str,
-    active: &ActiveConsole,
-) -> bool {
+pub fn helm_panel_visible(lobby: &LobbyState, token: &str, active: &ActiveConsole) -> bool {
     use crate::client_lobby::LobbyView;
     if lobby.phase != GamePhase::InProgress {
         return false;
@@ -77,9 +72,6 @@ enum HelmReadoutKind {
 /// Diameter of the joystick pad in logical pixels.
 pub const HELM_PAD_SIZE: f32 = 200.0;
 
-/// Diameter of the compass-ring radar in logical pixels.
-pub const COMPASS_RADAR_DIAMETER: f32 = 280.0;
-
 /// Fallback radar range in world units, used when the server has not yet
 /// sent a `Welcome` with a `ShipClientConfig.helm_radar_range`. The real
 /// runtime value comes from `LobbyState.ship_config.helm_radar_range`,
@@ -99,17 +91,22 @@ pub struct HelmPanelPlugin;
 
 impl Plugin for HelmPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(HelmTickTimer(Timer::from_seconds(0.1, TimerMode::Repeating)))
-            .init_resource::<HelmRadarEntities>()
-            .add_systems(Update, (
-                spawn_phone_helm_ui
-                    .run_if(not(resource_exists::<PhoneHelmSpawned>)),
+        app.insert_resource(HelmTickTimer(Timer::from_seconds(
+            0.1,
+            TimerMode::Repeating,
+        )))
+        .init_resource::<HelmRadarEntities>()
+        .add_systems(
+            Update,
+            (
+                spawn_phone_helm_ui.run_if(not(resource_exists::<PhoneHelmSpawned>)),
                 respawn_helm_on_orientation_change,
                 toggle_helm_panel_visibility,
                 update_helm_readouts,
                 sync_helm_radar_range,
                 bridge_client_sim_to_radar_entities,
-            ));
+            ),
+        );
     }
 }
 
@@ -124,13 +121,18 @@ fn toggle_helm_panel_visibility(
 ) {
     let visible = helm_panel_visible(&lobby, &token.0, &active);
     for mut vis in panel.iter_mut() {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !visible {
         // Send zero input when panel is hidden
-        outbound.write(OutboundClientMessage(
-            ClientMessage::HelmInput { thrust: 0.0, steering: 0.0 },
-        ));
+        outbound.write(OutboundClientMessage(ClientMessage::HelmInput {
+            thrust: 0.0,
+            steering: 0.0,
+        }));
     }
 }
 
@@ -143,9 +145,10 @@ fn on_helm_joystick_moved(
     let moved = trigger.event();
     let thrust = -moved.dy;
     let steering = moved.dx;
-    outbound.write(OutboundClientMessage(
-        ClientMessage::HelmInput { thrust, steering },
-    ));
+    outbound.write(OutboundClientMessage(ClientMessage::HelmInput {
+        thrust,
+        steering,
+    }));
 }
 
 // ── Button observers ─────────────────────────────────────────────────
@@ -154,7 +157,9 @@ fn on_on_screen_button_pressed(
     _trigger: On<ButtonPressed>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
-    outbound.write(OutboundClientMessage(ClientMessage::SetView { mode: ViewMode::Radar }));
+    outbound.write(OutboundClientMessage(ClientMessage::SetView {
+        mode: ViewMode::Radar,
+    }));
 }
 
 fn on_impulse_button_pressed(
@@ -176,7 +181,9 @@ fn update_helm_readouts(
 ) {
     for (mut value, kind) in readouts.iter_mut() {
         *value = match kind {
-            HelmReadoutKind::Hdg => ReadoutValue(format!("HDG {}", yaw_to_heading(ship_view.ship_yaw))),
+            HelmReadoutKind::Hdg => {
+                ReadoutValue(format!("HDG {}", yaw_to_heading(ship_view.ship_yaw)))
+            }
             HelmReadoutKind::Spd => ReadoutValue(format!("SPD {:.0}", ship_view.forward_speed)),
             HelmReadoutKind::X => ReadoutValue(format!("X {:.0}", ship_view.ship_x)),
             HelmReadoutKind::Z => ReadoutValue(format!("Z {:.0}", ship_view.ship_z)),
@@ -206,6 +213,19 @@ fn sync_helm_radar_range(
 
 // ── Radar entity bridge ─────────────────────────────────────────────
 
+/// Map a `RadarLayer` to the icon used for its blip. `Missile` uses the
+/// torpedo icon since the wire layer for torpedoes is `Missile`.
+fn layer_to_icon(layer: RadarLayer) -> RadarIcon {
+    match layer {
+        RadarLayer::Ship => RadarIcon::Ship,
+        RadarLayer::Asteroid => RadarIcon::Asteroid,
+        RadarLayer::Station => RadarIcon::Station,
+        RadarLayer::Missile => RadarIcon::Torpedo,
+        RadarLayer::Planet => RadarIcon::Planet,
+        RadarLayer::Star => RadarIcon::Star,
+    }
+}
+
 /// Bridges `ClientSimState` entity snapshots into ECS entities with
 /// `OnRadar` / `RadarAppearance` for the `GenericRadar` widget.
 fn bridge_client_sim_to_radar_entities(
@@ -217,15 +237,15 @@ fn bridge_client_sim_to_radar_entities(
     // Manage the RadarCenter entity.
     //
     // The centre entity doubles as the player-ship blip: we attach
-    // `OnRadar(Ship) + RadarAppearance(Triangle)` and a Transform at the
-    // ship's world position. In `ShipRelative` orientation it projects to
-    // the radar centre (0, 0), drawing the player as a triangle pointing
-    // up. Without this, the radar would never show the player's own ship
-    // — the sim entity stream omits it (the local ship is implicit).
+    // `OnRadar(Ship) + RadarAppearance` and a Transform at the ship's
+    // world position. In `ShipRelative` orientation it projects to the
+    // radar centre (0, 0). Without this, the radar would never show the
+    // player's own ship — the sim entity stream omits it (the local ship
+    // is implicit).
     let ship_appearance = RadarAppearance {
+        icon: RadarIcon::Ship,
+        world_size: 6.0,
         color: Color::srgb(0.95, 0.95, 1.0),
-        radius: 6.0,
-        shape: RadarShape::Triangle,
     };
     let _center_entity = match radar.center {
         Some(e) => {
@@ -242,17 +262,19 @@ fn bridge_client_sim_to_radar_entities(
             e
         }
         None => {
-            let e = commands.spawn((
-                RadarCenter {
-                    world_x: ship_view.ship_x,
-                    world_z: ship_view.ship_z,
-                    yaw: ship_view.ship_yaw,
-                },
-                OnRadar(RadarLayer::Ship),
-                ship_appearance,
-                Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
-                GlobalTransform::default(),
-            )).id();
+            let e = commands
+                .spawn((
+                    RadarCenter {
+                        world_x: ship_view.ship_x,
+                        world_z: ship_view.ship_z,
+                        yaw: ship_view.ship_yaw,
+                    },
+                    OnRadar(RadarLayer::Ship),
+                    ship_appearance,
+                    Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
+                    GlobalTransform::default(),
+                ))
+                .id();
             radar.center = Some(e);
             e
         }
@@ -296,17 +318,18 @@ fn bridge_client_sim_to_radar_entities(
             RadarLayer::Planet => Color::srgb(0.0, 0.6, 1.0),
             RadarLayer::Star => Color::srgb(1.0, 0.85, 0.3),
         };
-        let shape = if has_tag("ship") {
-            RadarShape::Triangle
-        } else if has_tag("station") {
-            RadarShape::Square
-        } else {
-            RadarShape::Dot
-        };
+        let icon = layer_to_icon(layer);
+        // Prefer the authored radar override, then the physical radius,
+        // then a fallback of 4.0 world units.
+        let world_size = snapshot
+            .radar_world_size
+            .or(Some(snapshot.radius_or_zero()))
+            .filter(|s| *s > 0.0)
+            .unwrap_or(4.0);
         let appearance = RadarAppearance {
+            icon,
+            world_size,
             color: colour.unwrap_or(default_color),
-            radius: snapshot.radius_or_zero().max(2.0),
-            shape,
         };
 
         if let Some(existing) = radar.blips.get(uuid) {
@@ -316,12 +339,14 @@ fn bridge_client_sim_to_radar_entities(
                 Transform::from_xyz(snapshot.x(), 0.0, snapshot.z()),
             ));
         } else {
-            let blip = commands.spawn((
-                OnRadar(layer),
-                appearance,
-                Transform::from_xyz(snapshot.x(), 0.0, snapshot.z()),
-                GlobalTransform::default(),
-            )).id();
+            let blip = commands
+                .spawn((
+                    OnRadar(layer),
+                    appearance,
+                    Transform::from_xyz(snapshot.x(), 0.0, snapshot.z()),
+                    GlobalTransform::default(),
+                ))
+                .id();
             radar.blips.insert(uuid.clone(), blip);
         }
     }
@@ -380,121 +405,202 @@ fn spawn_phone_helm_ui(
 
 fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
     let dim = Color::srgb(0.55, 0.70, 1.0);
-    let readout_visuals = || StateVisuals::from_colors(
-        dim, dim, dim, dim, Color::srgb(0.3, 0.4, 0.6),
-    );
-    let display = |s: f32| TextFont { font: assets.font_display.clone(), font_size: s, ..default() };
+    let readout_visuals =
+        || StateVisuals::from_colors(dim, dim, dim, dim, Color::srgb(0.3, 0.4, 0.6));
+    let display = |s: f32| TextFont {
+        font: assets.font_display.clone(),
+        font_size: s,
+        ..default()
+    };
 
     // ── Column wrapper to stack radar + buttons vertically ──
-    let col = commands.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        width: Val::Percent(100.0),
-        height: Val::Percent(100.0),
-        row_gap: Val::Px(8.0),
-        ..default()
-    }).id();
+    let col = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(8.0),
+            ..default()
+        })
+        .id();
     commands.entity(container).add_child(col);
 
     // ── Radar ──
     let radar_filter = RadarFilter(std::collections::HashSet::from([
-        RadarLayer::Ship, RadarLayer::Asteroid,
-        RadarLayer::Station, RadarLayer::Missile,
-        RadarLayer::Planet, RadarLayer::Star,
+        RadarLayer::Ship,
+        RadarLayer::Asteroid,
+        RadarLayer::Station,
+        RadarLayer::Missile,
+        RadarLayer::Planet,
+        RadarLayer::Star,
     ]));
     // Layering (back → front, per user direction):
     //   1. radar-surround.png  (outer frame / tick marks) — passed as `bg_image`
     //   2. radar-bg.png        (inner dial face)          — passed as `overlay_image`
-    //   3. blips drawn by `draw_generic_radars` via Gizmos, on top of both.
+    //   3. blips rendered as child UI nodes (icons) over both.
     //
     // The arg names on `GenericRadar::spawn` describe Z-order (bg = behind,
     // overlay = in front) rather than asset role, so we deliberately pass
     // surround as the back layer and bg as the front layer.
     let radar = GenericRadar::spawn(
-        commands, COMPASS_RADAR_DIAMETER, HELM_RADAR_RANGE_FALLBACK,
-        OrientationMode::ShipRelative, radar_filter,
-        Some(assets.radar_surround.clone()), Some(assets.radar_bg.clone()),
+        commands,
+        HELM_RADAR_RANGE_FALLBACK,
+        OrientationMode::ShipRelative,
+        radar_filter,
+        Some(assets.radar_surround.clone()),
+        Some(assets.radar_bg.clone()),
     );
     commands.entity(col).add_child(radar);
 
     // HDG readout
     let hdg = TextReadout::spawn(commands, "HDG", readout_visuals());
-    commands.entity(hdg).insert((HelmReadoutKind::Hdg, Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(2.0), top: Val::Px(2.0), ..default()
-    }));
+    commands.entity(hdg).insert((
+        HelmReadoutKind::Hdg,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(2.0),
+            top: Val::Px(2.0),
+            ..default()
+        },
+    ));
     commands.entity(radar).add_child(hdg);
 
     // SPD readout
     let spd = TextReadout::spawn(commands, "SPD", readout_visuals());
-    commands.entity(spd).insert((HelmReadoutKind::Spd, Node {
-        position_type: PositionType::Absolute,
-        right: Val::Px(2.0), top: Val::Px(2.0), ..default()
-    }));
+    commands.entity(spd).insert((
+        HelmReadoutKind::Spd,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(2.0),
+            top: Val::Px(2.0),
+            ..default()
+        },
+    ));
     commands.entity(radar).add_child(spd);
 
     // X readout
     let x_read = TextReadout::spawn(commands, "X", readout_visuals());
-    commands.entity(x_read).insert((HelmReadoutKind::X, Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(2.0), bottom: Val::Px(2.0), ..default()
-    }));
+    commands.entity(x_read).insert((
+        HelmReadoutKind::X,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(2.0),
+            bottom: Val::Px(2.0),
+            ..default()
+        },
+    ));
     commands.entity(radar).add_child(x_read);
 
     // Z readout
     let z_read = TextReadout::spawn(commands, "Z", readout_visuals());
-    commands.entity(z_read).insert((HelmReadoutKind::Z, Node {
-        position_type: PositionType::Absolute,
-        right: Val::Px(2.0), bottom: Val::Px(2.0), ..default()
-    }));
+    commands.entity(z_read).insert((
+        HelmReadoutKind::Z,
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(2.0),
+            bottom: Val::Px(2.0),
+            ..default()
+        },
+    ));
     commands.entity(radar).add_child(z_read);
 
     // ── Buttons row ──
-    let buttons_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        column_gap: Val::Px(8.0),
-        ..default()
-    }).id();
+    let buttons_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .id();
 
     // ON SCREEN button with button-normal PNG visuals
     let on_screen_btn = spawn_gui_button(
         commands,
-        ButtonSize::Rect { width: 120.0, height: 32.0 },
+        ButtonSize::Rect {
+            width: 120.0,
+            height: 32.0,
+        },
         StateVisuals {
-            idle: Visual { image: Some(assets.btn_normal_idle.clone()), color: Color::NONE },
-            hover: Visual { image: Some(assets.btn_normal_hover.clone()), color: Color::NONE },
-            active: Visual { image: Some(assets.btn_normal_active.clone()), color: Color::NONE },
-            press: Visual { image: Some(assets.btn_normal_press.clone()), color: Color::NONE },
-            disabled: Visual { image: None, color: Color::srgba(0.08, 0.08, 0.15, 0.5) },
+            idle: Visual {
+                image: Some(assets.btn_normal_idle.clone()),
+                color: Color::NONE,
+            },
+            hover: Visual {
+                image: Some(assets.btn_normal_hover.clone()),
+                color: Color::NONE,
+            },
+            active: Visual {
+                image: Some(assets.btn_normal_active.clone()),
+                color: Color::NONE,
+            },
+            press: Visual {
+                image: Some(assets.btn_normal_press.clone()),
+                color: Color::NONE,
+            },
+            disabled: Visual {
+                image: None,
+                color: Color::srgba(0.08, 0.08, 0.15, 0.5),
+            },
         },
         None,
     );
     commands.entity(on_screen_btn).with_children(|btn| {
-        btn.spawn((Text::new("ON SCREEN"), display(12.0), TextColor(Color::srgb(0.93, 0.93, 1.0))));
+        btn.spawn((
+            Text::new("ON SCREEN"),
+            display(12.0),
+            TextColor(Color::srgb(0.93, 0.93, 1.0)),
+        ));
     });
-    commands.entity(on_screen_btn).observe(on_on_screen_button_pressed);
+    commands
+        .entity(on_screen_btn)
+        .observe(on_on_screen_button_pressed);
     commands.entity(buttons_row).add_child(on_screen_btn);
 
     // IMPULSE button with impulse PNG visuals
     let impulse_btn = spawn_gui_button(
         commands,
-        ButtonSize::Rect { width: 120.0, height: 32.0 },
+        ButtonSize::Rect {
+            width: 120.0,
+            height: 32.0,
+        },
         StateVisuals {
-            idle: Visual { image: Some(assets.impulse_ready.clone()), color: Color::NONE },
-            hover: Visual { image: Some(assets.impulse_hover.clone()), color: Color::NONE },
-            active: Visual { image: Some(assets.impulse_active.clone()), color: Color::NONE },
-            press: Visual { image: Some(assets.impulse_press.clone()), color: Color::NONE },
-            disabled: Visual { image: None, color: Color::srgba(0.05, 0.10, 0.20, 0.5) },
+            idle: Visual {
+                image: Some(assets.impulse_ready.clone()),
+                color: Color::NONE,
+            },
+            hover: Visual {
+                image: Some(assets.impulse_hover.clone()),
+                color: Color::NONE,
+            },
+            active: Visual {
+                image: Some(assets.impulse_active.clone()),
+                color: Color::NONE,
+            },
+            press: Visual {
+                image: Some(assets.impulse_press.clone()),
+                color: Color::NONE,
+            },
+            disabled: Visual {
+                image: None,
+                color: Color::srgba(0.05, 0.10, 0.20, 0.5),
+            },
         },
         None,
     );
     commands.entity(impulse_btn).with_children(|btn| {
-        btn.spawn((Text::new("IMPULSE"), display(12.0), TextColor(Color::srgb(0.5, 0.8, 1.0))));
+        btn.spawn((
+            Text::new("IMPULSE"),
+            display(12.0),
+            TextColor(Color::srgb(0.5, 0.8, 1.0)),
+        ));
     });
-    commands.entity(impulse_btn).observe(on_impulse_button_pressed);
+    commands
+        .entity(impulse_btn)
+        .observe(on_impulse_button_pressed);
     commands.entity(buttons_row).add_child(impulse_btn);
 
     commands.entity(col).add_child(buttons_row);
@@ -503,44 +609,72 @@ fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAss
 fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
     let dim = Color::srgb(0.55, 0.70, 1.0);
     let muted = Color::srgb(0.6, 0.7, 0.73);
-    let mono = |s: f32| TextFont { font: assets.font_mono.clone(), font_size: s, ..default() };
+    let mono = |s: f32| TextFont {
+        font: assets.font_mono.clone(),
+        font_size: s,
+        ..default()
+    };
 
     // ── Column wrapper to stack joystick elements vertically ──
-    let col = commands.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        row_gap: Val::Px(4.0),
-        ..default()
-    }).id();
+    let col = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            row_gap: Val::Px(4.0),
+            ..default()
+        })
+        .id();
     commands.entity(container).add_child(col);
 
     // Directional indicators
-    let fwd = commands.spawn((Text::new("▲"), mono(16.0), TextColor(dim), Node::default())).id();
+    let fwd = commands
+        .spawn((Text::new("▲"), mono(16.0), TextColor(dim), Node::default()))
+        .id();
     commands.entity(col).add_child(fwd);
 
-    let joystick_center_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(4.0),
-        ..default()
-    }).id();
+    let joystick_center_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(4.0),
+            ..default()
+        })
+        .id();
     commands.entity(col).add_child(joystick_center_row);
 
     // Left directional chevron
-    let left_arrow = commands.spawn((Text::new("◄"), mono(14.0), TextColor(dim), Node::default())).id();
+    let left_arrow = commands
+        .spawn((Text::new("◄"), mono(14.0), TextColor(dim), Node::default()))
+        .id();
     commands.entity(joystick_center_row).add_child(left_arrow);
 
     // Joystick with PNG visuals
     let joystick_knob_visuals = StateVisuals {
-        idle: Visual { image: Some(assets.joystick_knob_idle.clone()), color: Color::NONE },
-        hover: Visual { image: Some(assets.joystick_knob_hover.clone()), color: Color::NONE },
-        active: Visual { image: Some(assets.joystick_knob_active.clone()), color: Color::NONE },
-        press: Visual { image: Some(assets.joystick_knob_press.clone()), color: Color::NONE },
-        disabled: Visual { image: None, color: Color::srgba(0.05, 0.05, 0.10, 0.5) },
+        idle: Visual {
+            image: Some(assets.joystick_knob_idle.clone()),
+            color: Color::NONE,
+        },
+        hover: Visual {
+            image: Some(assets.joystick_knob_hover.clone()),
+            color: Color::NONE,
+        },
+        active: Visual {
+            image: Some(assets.joystick_knob_active.clone()),
+            color: Color::NONE,
+        },
+        press: Visual {
+            image: Some(assets.joystick_knob_press.clone()),
+            color: Color::NONE,
+        },
+        disabled: Visual {
+            image: None,
+            color: Color::srgba(0.05, 0.05, 0.10, 0.5),
+        },
     };
     let pad = GenericJoystick::spawn(
-        commands, HELM_PAD_SIZE,
+        commands,
+        HELM_PAD_SIZE,
         Some(assets.joystick_pad_idle.clone()),
         Some(assets.joystick_knob_idle.clone()),
         joystick_knob_visuals,
@@ -549,20 +683,26 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
     commands.entity(joystick_center_row).add_child(pad);
 
     // Right directional chevron
-    let right_arrow = commands.spawn((Text::new("►"), mono(14.0), TextColor(dim), Node::default())).id();
+    let right_arrow = commands
+        .spawn((Text::new("►"), mono(14.0), TextColor(dim), Node::default()))
+        .id();
     commands.entity(joystick_center_row).add_child(right_arrow);
 
-    let aft = commands.spawn((Text::new("▼"), mono(16.0), TextColor(dim), Node::default())).id();
+    let aft = commands
+        .spawn((Text::new("▼"), mono(16.0), TextColor(dim), Node::default()))
+        .id();
     commands.entity(col).add_child(aft);
 
     // FWD/REV labels
-    let fwd_rev_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        column_gap: Val::Px(24.0),
-        ..default()
-    }).id();
+    let fwd_rev_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            column_gap: Val::Px(24.0),
+            ..default()
+        })
+        .id();
     commands.entity(fwd_rev_row).with_children(|row| {
         row.spawn((Text::new("FWD"), mono(9.0), TextColor(muted)));
         row.spawn((Text::new("REV"), mono(9.0), TextColor(muted)));
@@ -570,13 +710,15 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
     commands.entity(col).add_child(fwd_rev_row);
 
     // PORT/STBD labels
-    let port_stbd_row = commands.spawn(Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        column_gap: Val::Px(32.0),
-        ..default()
-    }).id();
+    let port_stbd_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            column_gap: Val::Px(32.0),
+            ..default()
+        })
+        .id();
     commands.entity(port_stbd_row).with_children(|row| {
         row.spawn((Text::new("PORT"), mono(9.0), TextColor(muted)));
         row.spawn((Text::new("STBD"), mono(9.0), TextColor(muted)));
@@ -621,15 +763,29 @@ mod tests {
     // ── helm_panel_visible ────────────────────────────────────────────
 
     fn player(token: &str, consoles: Vec<Console>) -> Player {
-        Player { token: token.into(), name: "test".into(), consoles, connected: true }
+        Player {
+            token: token.into(),
+            name: "test".into(),
+            consoles,
+            connected: true,
+        }
     }
 
     fn game_state(phase: GamePhase, players: Vec<Player>) -> GameState {
-        GameState { phase, players, complexity: HashMap::new(), world: None }
+        GameState {
+            phase,
+            players,
+            complexity: HashMap::new(),
+            world: None,
+        }
     }
 
     fn welcome(state: GameState) -> ServerMessage {
-        ServerMessage::Welcome { state, ship_stations: ShipStations::default(), ship_config: ShipClientConfig::default() }
+        ServerMessage::Welcome {
+            state,
+            ship_stations: ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
+        }
     }
 
     fn in_progress_helm_lobby(token: &str) -> LobbyState {
@@ -641,8 +797,12 @@ mod tests {
         s
     }
 
-    fn no_tab() -> ActiveConsole { ActiveConsole(None) }
-    fn tab(c: Console) -> ActiveConsole { ActiveConsole(Some(c)) }
+    fn no_tab() -> ActiveConsole {
+        ActiveConsole(None)
+    }
+    fn tab(c: Console) -> ActiveConsole {
+        ActiveConsole(Some(c))
+    }
 
     #[test]
     fn helm_panel_hidden_in_lobby_phase() {

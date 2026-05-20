@@ -10,10 +10,10 @@
 
 use bevy::prelude::*;
 
+use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::gui::{StateVisuals, Visual, WidgetState};
 use crate::messages::{Console, GamePhase};
 use crate::phone_border::framing::PhoneAssets;
-use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 
 // ── Return type for ConsoleShell::spawn ────────────────────────────
 
@@ -136,45 +136,41 @@ impl ConsoleShell {
 
                 // ── Primary content ─────────────────────────────────
                 primary_id = root
-                    .spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            width: if is_landscape {
-                                Val::Percent(100.0)
-                            } else {
-                                Val::Auto
-                            },
-                            height: if is_landscape {
-                                Val::Auto
-                            } else {
-                                Val::Percent(100.0)
-                            },
-                            overflow: Overflow::clip(),
-                            ..default()
+                    .spawn((Node {
+                        flex_grow: 1.0,
+                        width: if is_landscape {
+                            Val::Percent(100.0)
+                        } else {
+                            Val::Auto
                         },
-                    ))
+                        height: if is_landscape {
+                            Val::Auto
+                        } else {
+                            Val::Percent(100.0)
+                        },
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },))
                     .id();
 
                 // ── Secondary content ───────────────────────────────
                 secondary_id = root
-                    .spawn((
-                        Node {
-                            flex_shrink: 0.0,
-                            flex_grow: 0.0,
-                            width: if is_landscape {
-                                Val::Auto
-                            } else {
-                                Val::Percent(100.0)
-                            },
-                            height: if is_landscape {
-                                Val::Percent(100.0)
-                            } else {
-                                Val::Auto
-                            },
-                            overflow: Overflow::clip(),
-                            ..default()
+                    .spawn((Node {
+                        flex_shrink: 0.0,
+                        flex_grow: 0.0,
+                        width: if is_landscape {
+                            Val::Auto
+                        } else {
+                            Val::Percent(100.0)
                         },
-                    ))
+                        height: if is_landscape {
+                            Val::Percent(100.0)
+                        } else {
+                            Val::Auto
+                        },
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },))
                     .id();
             })
             .id();
@@ -264,7 +260,9 @@ fn rebuild_embedded_tab_bars(
         // there are too many tabs to fit.
         let use_initials = !embedded.is_vertical && my_consoles.len() >= 5;
         // Despawn old tab-button children.
-        commands.entity(tab_bar_entity).despawn_related::<Children>();
+        commands
+            .entity(tab_bar_entity)
+            .despawn_related::<Children>();
 
         if !show_tabs {
             *vis = Visibility::Hidden;
@@ -351,7 +349,6 @@ mod tests {
     use super::*;
     use crate::messages::Player;
 
-
     /// Build a minimal [`PhoneAssets`] with weak default handles (no real
     /// asset pipeline needed for unit tests).
     fn test_phone_assets() -> PhoneAssets {
@@ -391,6 +388,14 @@ mod tests {
             red_alert_press: d.clone(),
             red_alert_armed: d.clone(),
             inset_card: d.clone(),
+            radar_icons: crate::phone_border::framing::RadarIconHandles {
+                ship: d.clone(),
+                asteroid: d.clone(),
+                station: d.clone(),
+                planet: d.clone(),
+                star: d.clone(),
+                torpedo: d.clone(),
+            },
         }
     }
 
@@ -403,27 +408,23 @@ mod tests {
         app.init_resource::<LocalPlayerToken>();
         app.init_resource::<ActiveConsole>();
         app.insert_resource(test_phone_assets());
-        app.add_systems(Update, (rebuild_embedded_tab_bars, handle_embedded_tab_press));
+        app.add_systems(
+            Update,
+            (rebuild_embedded_tab_bars, handle_embedded_tab_press),
+        );
         app
     }
 
     /// Helper: spawn an [`EmbeddedTabBar`] entity for testing.
     fn spawn_tab_bar(app: &mut App) -> Entity {
         app.world_mut()
-            .spawn((
-                EmbeddedTabBar {
-                    is_vertical: false,
-                },
-                Visibility::Visible,
-            ))
+            .spawn((EmbeddedTabBar { is_vertical: false }, Visibility::Visible))
             .id()
     }
 
     /// Helper: set up the lobby so the local player holds the given consoles.
     fn set_player_consoles(app: &mut App, token: &str, consoles: Vec<Console>) {
-        app.world_mut()
-            .resource_mut::<LocalPlayerToken>()
-            .0 = token.to_string();
+        app.world_mut().resource_mut::<LocalPlayerToken>().0 = token.to_string();
 
         let mut lobby = app.world_mut().resource_mut::<LobbyState>();
         lobby.phase = GamePhase::InProgress;
@@ -455,28 +456,36 @@ mod tests {
 
         // Tab bar should be hidden.
         let vis = app.world().get::<Visibility>(tab_bar).unwrap();
-        assert_eq!(*vis, Visibility::Hidden, "single-console bar must be hidden");
+        assert_eq!(
+            *vis,
+            Visibility::Hidden,
+            "single-console bar must be hidden"
+        );
 
         // No tab buttons should exist.
-        assert_eq!(tab_button_count(&mut app), 0, "single-console player must have zero tab buttons");
+        assert_eq!(
+            tab_button_count(&mut app),
+            0,
+            "single-console player must have zero tab buttons"
+        );
     }
 
     #[test]
     fn two_console_player_shows_two_tab_buttons() {
         let mut app = test_app();
 
-        set_player_consoles(
-            &mut app,
-            "me",
-            vec![Console::CaptainChair, Console::Helm],
-        );
+        set_player_consoles(&mut app, "me", vec![Console::CaptainChair, Console::Helm]);
         let tab_bar = spawn_tab_bar(&mut app);
 
         app.update();
 
         // Tab bar should be visible.
         let vis = app.world().get::<Visibility>(tab_bar).unwrap();
-        assert_eq!(*vis, Visibility::Visible, "multi-console bar must be visible");
+        assert_eq!(
+            *vis,
+            Visibility::Visible,
+            "multi-console bar must be visible"
+        );
 
         // Two tab buttons should exist.
         assert_eq!(tab_button_count(&mut app), 2);
@@ -526,11 +535,7 @@ mod tests {
     fn pressing_tab_updates_active_console() {
         let mut app = test_app();
 
-        set_player_consoles(
-            &mut app,
-            "me",
-            vec![Console::CaptainChair, Console::Helm],
-        );
+        set_player_consoles(&mut app, "me", vec![Console::CaptainChair, Console::Helm]);
         let _tab_bar = spawn_tab_bar(&mut app);
 
         // First update: build tabs.

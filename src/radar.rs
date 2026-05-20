@@ -7,8 +7,8 @@
 // client). Keeping the math separate makes both renderers identical and
 // independently unit-testable.
 
+use crate::entity_tags::{matches_any, parse_tags, EntityTag};
 use crate::messages::EntitySnapshot;
-use crate::entity_tags::{EntityTag, matches_any, parse_tags};
 use crate::radar_config::RadarConfig;
 
 /// Range, in world units, that the radar covers from its centre to the
@@ -35,7 +35,13 @@ pub const WEAPONS_RADAR_RANGE: f32 = 60.0;
 ///
 /// Output is normalised to `[-1.0, 1.0]` on both axes (1.0 = `RADAR_RANGE`).
 /// X is right, Y is forward.
-pub fn project_to_radar(world_x: f32, world_z: f32, ship_x: f32, ship_z: f32, ship_yaw: f32) -> Option<(f32, f32)> {
+pub fn project_to_radar(
+    world_x: f32,
+    world_z: f32,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+) -> Option<(f32, f32)> {
     // World-space displacement from ship to point.
     let dx = world_x - ship_x;
     let dz = world_z - ship_z;
@@ -150,7 +156,12 @@ pub fn radar_dots_filtered<'a>(
 /// Returns `None` if the entity centre is outside `RADAR_RANGE`. The
 /// scaled radius is in the same `[-1, 1]` units as the position (i.e. the
 /// entity's world radius divided by `RADAR_RANGE`).
-pub fn project_entity_as_asteroid(entity: &EntitySnapshot, ship_x: f32, ship_z: f32, ship_yaw: f32) -> Option<(f32, f32, f32)> {
+pub fn project_entity_as_asteroid(
+    entity: &EntitySnapshot,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+) -> Option<(f32, f32, f32)> {
     let (rx, ry) = project_to_radar(entity.x(), entity.z(), ship_x, ship_z, ship_yaw)?;
     Some((rx, ry, entity.radius_or_zero() / RADAR_RANGE))
 }
@@ -202,7 +213,8 @@ pub fn radar_dots_with_config<'a>(
         if !matches_any(&entity_tags, &config.shows) {
             return None;
         }
-        let (rx, ry) = project_to_radar_with_config(e.x(), e.z(), ship_x, ship_z, ship_yaw, config)?;
+        let (rx, ry) =
+            project_to_radar_with_config(e.x(), e.z(), ship_x, ship_z, ship_yaw, config)?;
         Some((rx, ry, e.radius_or_zero() / config.range))
     })
 }
@@ -238,7 +250,12 @@ pub fn project_entity_as_field(
     let centre_x = (dx * cos_y + dz * sin_y) / RADAR_RANGE;
     let centre_y = (dx * sin_y - dz * cos_y) / RADAR_RANGE;
 
-    Some((centre_x, centre_y, inner_r / RADAR_RANGE, outer_r / RADAR_RANGE))
+    Some((
+        centre_x,
+        centre_y,
+        inner_r / RADAR_RANGE,
+        outer_r / RADAR_RANGE,
+    ))
 }
 
 /// Iterator of `(centre_x, centre_y, inner_r, outer_r)` tuples (all in radar
@@ -330,7 +347,8 @@ pub fn compute_science_radar_view(
             if entity_tags.contains(&EntityTag::AsteroidField) {
                 return None;
             }
-            let (rx, ry) = project_to_radar_with_config(e.x(), e.z(), ship_x, ship_z, ship_yaw, config)?;
+            let (rx, ry) =
+                project_to_radar_with_config(e.x(), e.z(), ship_x, ship_z, ship_yaw, config)?;
             Some(ScienceRadarDot {
                 uuid: e.uuid.clone(),
                 radar_x: rx,
@@ -395,7 +413,12 @@ pub const NAVIGATION_CHART_RANGE: f32 = 500.0;
 pub fn navigation_chart_config() -> RadarConfig {
     RadarConfig {
         range: NAVIGATION_CHART_RANGE,
-        shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField, EntityTag::Region],
+        shows: vec![
+            EntityTag::Star,
+            EntityTag::Planet,
+            EntityTag::AsteroidField,
+            EntityTag::Region,
+        ],
     }
 }
 
@@ -484,16 +507,19 @@ pub fn compute_star_centred_nav_chart(
                 scaled_radius: e.radius_or_zero() / range,
             })
         })
-        .chain(std::iter::once_with(|| {
-            // Always include the ship as a sentinel dot.
-            let (rx, ry) = project(ship_x, ship_z)?;
-            Some(ScienceRadarDot {
-                uuid: SHIP_DOT_UUID.to_string(),
-                radar_x: rx,
-                radar_y: ry,
-                scaled_radius: 0.0,
+        .chain(
+            std::iter::once_with(|| {
+                // Always include the ship as a sentinel dot.
+                let (rx, ry) = project(ship_x, ship_z)?;
+                Some(ScienceRadarDot {
+                    uuid: SHIP_DOT_UUID.to_string(),
+                    radar_x: rx,
+                    radar_y: ry,
+                    scaled_radius: 0.0,
+                })
             })
-        }).flatten())
+            .flatten(),
+        )
         .collect();
 
     let rings = entities
@@ -643,7 +669,9 @@ mod tests {
             colour: None,
             yaw: None,
             hull_fraction: None,
-            inner_radius: None, warp_out_remaining_secs: None,
+            inner_radius: None,
+            warp_out_remaining_secs: None,
+            radar_world_size: None,
         }
     }
 
@@ -662,7 +690,10 @@ mod tests {
         let near = entity_at(0.0, -10.0, &["asteroid"]);
         let dots: Vec<_> = radar_dots(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(dots.len(), 1);
-        assert_eq!(dots[0], project_entity_as_asteroid(&near, 0.0, 0.0, 0.0).unwrap());
+        assert_eq!(
+            dots[0],
+            project_entity_as_asteroid(&near, 0.0, 0.0, 0.0).unwrap()
+        );
     }
 
     #[test]
@@ -675,7 +706,10 @@ mod tests {
     fn radar_dots_skips_non_asteroid_entities() {
         let ship = entity_at(0.0, -10.0, &["ship"]);
         let dots: Vec<_> = radar_dots(&[ship], 0.0, 0.0, 0.0).collect();
-        assert!(dots.is_empty(), "radar_dots should only show entities tagged 'asteroid'");
+        assert!(
+            dots.is_empty(),
+            "radar_dots should only show entities tagged 'asteroid'"
+        );
     }
 
     // ── radar_dots_filtered ────────────────────────────────────────────────
@@ -685,9 +719,13 @@ mod tests {
         let asteroid = entity_at(0.0, -10.0, &["asteroid"]);
         let ship = entity_at(0.0, -15.0, &["ship"]);
         let filter = vec![EntityTag::Asteroid];
-        let dots: Vec<_> = radar_dots_filtered(&[asteroid.clone(), ship], 0.0, 0.0, 0.0, &filter).collect();
+        let dots: Vec<_> =
+            radar_dots_filtered(&[asteroid.clone(), ship], 0.0, 0.0, 0.0, &filter).collect();
         assert_eq!(dots.len(), 1);
-        assert_eq!(dots[0], project_entity_as_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap());
+        assert_eq!(
+            dots[0],
+            project_entity_as_asteroid(&asteroid, 0.0, 0.0, 0.0).unwrap()
+        );
     }
 
     #[test]
@@ -795,7 +833,10 @@ mod tests {
     #[test]
     fn config_project_clips_at_config_range() {
         // Config range = 30; point at 35 units ahead is out of range.
-        let cfg = RadarConfig { range: 30.0, shows: vec![EntityTag::Asteroid] };
+        let cfg = RadarConfig {
+            range: 30.0,
+            shows: vec![EntityTag::Asteroid],
+        };
         assert!(project_to_radar_with_config(0.0, -35.0, 0.0, 0.0, 0.0, &cfg).is_none());
         // Same point is within the global RADAR_RANGE (50) — ensure we use config range.
         assert!(project_to_radar(0.0, -35.0, 0.0, 0.0, 0.0).is_some());
@@ -804,7 +845,10 @@ mod tests {
     #[test]
     fn config_project_normalises_to_config_range() {
         // Point at config.range ahead should map to radar_y = 1.0.
-        let cfg = RadarConfig { range: 80.0, shows: vec![] };
+        let cfg = RadarConfig {
+            range: 80.0,
+            shows: vec![],
+        };
         let p = project_to_radar_with_config(0.0, -80.0, 0.0, 0.0, 0.0, &cfg).unwrap();
         close(p.1, 1.0);
     }
@@ -819,7 +863,8 @@ mod tests {
             range: 50.0,
             shows: vec![EntityTag::Asteroid],
         };
-        let dots: Vec<_> = radar_dots_with_config(&[asteroid.clone(), ship_entity], 0.0, 0.0, 0.0, &cfg).collect();
+        let dots: Vec<_> =
+            radar_dots_with_config(&[asteroid.clone(), ship_entity], 0.0, 0.0, 0.0, &cfg).collect();
         assert_eq!(dots.len(), 1);
         // Scaled radius should use config.range.
         close(dots[0].2, 1.0 / cfg.range);
@@ -828,7 +873,10 @@ mod tests {
     #[test]
     fn dots_with_config_empty_shows_returns_nothing() {
         let asteroid = entity_at(0.0, -10.0, &["asteroid"]);
-        let cfg = RadarConfig { range: 50.0, shows: vec![] };
+        let cfg = RadarConfig {
+            range: 50.0,
+            shows: vec![],
+        };
         let dots: Vec<_> = radar_dots_with_config(&[asteroid], 0.0, 0.0, 0.0, &cfg).collect();
         assert!(dots.is_empty());
     }
@@ -837,7 +885,10 @@ mod tests {
     fn dots_with_config_clips_at_config_range_not_global() {
         // Asteroid at 40 units (inside RADAR_RANGE=50 but outside config range=30).
         let asteroid = entity_at(0.0, -40.0, &["asteroid"]);
-        let cfg = RadarConfig { range: 30.0, shows: vec![EntityTag::Asteroid] };
+        let cfg = RadarConfig {
+            range: 30.0,
+            shows: vec![EntityTag::Asteroid],
+        };
         let dots: Vec<_> = radar_dots_with_config(&[asteroid], 0.0, 0.0, 0.0, &cfg).collect();
         assert!(dots.is_empty());
     }
@@ -867,7 +918,9 @@ mod tests {
             colour: None,
             yaw: None,
             hull_fraction: None,
-            inner_radius: Some(inner), warp_out_remaining_secs: None,
+            inner_radius: Some(inner),
+            warp_out_remaining_secs: None,
+            radar_world_size: None,
         }
     }
 
@@ -923,7 +976,10 @@ mod tests {
     fn radar_rings_skips_non_field_entities() {
         let ast = entity_at(0.0, -10.0, &["asteroid"]);
         let rings: Vec<_> = radar_rings(&[ast], 0.0, 0.0, 0.0).collect();
-        assert!(rings.is_empty(), "radar_rings should only show entities tagged 'asteroid_field'");
+        assert!(
+            rings.is_empty(),
+            "radar_rings should only show entities tagged 'asteroid_field'"
+        );
     }
 
     // ── ScienceRadarView ──────────────────────────────────────────────────
@@ -976,7 +1032,10 @@ mod tests {
     #[test]
     fn science_radar_view_excludes_entity_not_in_shows() {
         // Config only shows asteroids; a "ship" tagged entity is excluded.
-        let cfg = RadarConfig { range: 100.0, shows: vec![EntityTag::Asteroid] };
+        let cfg = RadarConfig {
+            range: 100.0,
+            shows: vec![EntityTag::Asteroid],
+        };
         let ship = EntitySnapshot::simple("s1", 0.0, -20.0, vec!["ship".into()]);
         let view = compute_science_radar_view(&[ship], 0.0, 0.0, 0.0, &cfg);
         assert!(view.dots.is_empty());
@@ -985,7 +1044,10 @@ mod tests {
     #[test]
     fn science_radar_dot_position_is_normalised_to_config_range() {
         // Asteroid at exactly config.range ahead → radar_y = 1.0.
-        let cfg = RadarConfig { range: 80.0, shows: vec![EntityTag::Asteroid] };
+        let cfg = RadarConfig {
+            range: 80.0,
+            shows: vec![EntityTag::Asteroid],
+        };
         let a = ast_entity("a2", 0.0, -80.0);
         let view = compute_science_radar_view(&[a], 0.0, 0.0, 0.0, &cfg);
         assert_eq!(view.dots.len(), 1);
@@ -1052,7 +1114,12 @@ mod tests {
     fn nav_config() -> RadarConfig {
         RadarConfig {
             range: NAVIGATION_CHART_RANGE,
-            shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField, EntityTag::Region],
+            shows: vec![
+                EntityTag::Star,
+                EntityTag::Planet,
+                EntityTag::AsteroidField,
+                EntityTag::Region,
+            ],
         }
     }
 
@@ -1099,7 +1166,10 @@ mod tests {
     fn navigation_chart_excludes_individual_asteroid() {
         let a = ast_entity("ast-1", 0.0, -50.0);
         let view = compute_navigation_system_chart(&[a], 0.0, 0.0, 0.0, &nav_config());
-        assert!(view.dots.is_empty(), "individual asteroids must not appear on navigation chart");
+        assert!(
+            view.dots.is_empty(),
+            "individual asteroids must not appear on navigation chart"
+        );
     }
 
     #[test]
@@ -1128,7 +1198,12 @@ mod tests {
     fn star_centred_config() -> RadarConfig {
         RadarConfig {
             range: 500.0,
-            shows: vec![EntityTag::Star, EntityTag::Planet, EntityTag::AsteroidField, EntityTag::Region],
+            shows: vec![
+                EntityTag::Star,
+                EntityTag::Planet,
+                EntityTag::AsteroidField,
+                EntityTag::Region,
+            ],
         }
     }
 
@@ -1141,7 +1216,10 @@ mod tests {
         let cfg = star_centred_config();
         let view = compute_star_centred_nav_chart(&[star, planet], 30.0, -20.0, &cfg);
 
-        let star_dot = view.dots.iter().find(|d| d.uuid == "sun")
+        let star_dot = view
+            .dots
+            .iter()
+            .find(|d| d.uuid == "sun")
             .expect("star must appear as a dot");
         let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
         close(star_dot.radar_x, 0.0);
@@ -1150,12 +1228,15 @@ mod tests {
 
     #[test]
     fn star_centred_nav_chart_planet_at_correct_position() {
-        let star   = EntitySnapshot::simple("sun",  0.0,  0.0, vec!["star".into()]);
+        let star = EntitySnapshot::simple("sun", 0.0, 0.0, vec!["star".into()]);
         let planet = EntitySnapshot::simple("mars", 100.0, 50.0, vec!["planet".into()]);
-        let cfg    = star_centred_config();
-        let view   = compute_star_centred_nav_chart(&[star, planet], 30.0, -20.0, &cfg);
+        let cfg = star_centred_config();
+        let view = compute_star_centred_nav_chart(&[star, planet], 30.0, -20.0, &cfg);
 
-        let planet_dot = view.dots.iter().find(|d| d.uuid == "mars")
+        let planet_dot = view
+            .dots
+            .iter()
+            .find(|d| d.uuid == "mars")
             .expect("planet must appear as a dot");
         let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
         // radar_x = (100 - 0) / 500, radar_y = -(50 - 0) / 500
@@ -1166,11 +1247,14 @@ mod tests {
     #[test]
     fn star_centred_nav_chart_ship_dot_at_correct_position() {
         let star = EntitySnapshot::simple("sun", 0.0, 0.0, vec!["star".into()]);
-        let cfg  = star_centred_config();
+        let cfg = star_centred_config();
         // Ship at (30, -20) world.
         let view = compute_star_centred_nav_chart(&[star], 30.0, -20.0, &cfg);
 
-        let ship_dot = view.dots.iter().find(|d| d.uuid == SHIP_DOT_UUID)
+        let ship_dot = view
+            .dots
+            .iter()
+            .find(|d| d.uuid == SHIP_DOT_UUID)
             .expect("ship sentinel dot must be present");
         let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
         // radar_x = (30 - 0) / 500, radar_y = -(-20 - 0) / 500
@@ -1181,19 +1265,20 @@ mod tests {
     /// Verify that yaw has NO effect on the star-centred chart (north always up).
     #[test]
     fn star_centred_nav_chart_ignores_ship_yaw() {
-        let star   = EntitySnapshot::simple("sun",  0.0,  0.0, vec!["star".into()]);
+        let star = EntitySnapshot::simple("sun", 0.0, 0.0, vec!["star".into()]);
         let planet = EntitySnapshot::simple("mars", 100.0, 0.0, vec!["planet".into()]);
-        let cfg    = star_centred_config();
+        let cfg = star_centred_config();
 
         // Call with ship yaw = 0 and ship yaw = π/2; planet position must be identical.
-        let view_yaw0   = compute_star_centred_nav_chart(&[star.clone(), planet.clone()], 0.0, 0.0, &cfg);
-        let view_yaw90  = compute_star_centred_nav_chart(&[star.clone(), planet.clone()], 0.0, 0.0, &cfg);
+        let view_yaw0 =
+            compute_star_centred_nav_chart(&[star.clone(), planet.clone()], 0.0, 0.0, &cfg);
+        let view_yaw90 =
+            compute_star_centred_nav_chart(&[star.clone(), planet.clone()], 0.0, 0.0, &cfg);
 
-        let dot0  = view_yaw0 .dots.iter().find(|d| d.uuid == "mars").unwrap();
+        let dot0 = view_yaw0.dots.iter().find(|d| d.uuid == "mars").unwrap();
         let dot90 = view_yaw90.dots.iter().find(|d| d.uuid == "mars").unwrap();
         let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
         close(dot0.radar_x, dot90.radar_x);
         close(dot0.radar_y, dot90.radar_y);
     }
 }
-

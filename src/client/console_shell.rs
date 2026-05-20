@@ -99,14 +99,20 @@ impl ConsoleShell {
         let mut secondary_id = Entity::PLACEHOLDER;
 
         // ── Root ────────────────────────────────────────────────────
+        // Fills its parent. Before `reparent_panels_into_bezel` runs, the
+        // parent is the window root; afterwards it is `BorderContentArea`,
+        // which itself is inset by the bezel's corner/edge thickness — so
+        // we want zero offsets here, not a hard-coded inset (which would
+        // double up on the bezel's safe zone and push the tab strip
+        // outside it on top of the border art).
         let root_id = commands
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(4.0),
-                    right: Val::Px(4.0),
-                    top: Val::Px(4.0),
-                    bottom: Val::Px(4.0),
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
                     flex_direction: root_flex,
                     ..default()
                 },

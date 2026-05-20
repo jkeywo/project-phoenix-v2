@@ -10,6 +10,10 @@ length = 6.0
 [hull]
 repair_team_count = 2
 
+[repair]
+travel_duration_secs = 5.0
+repair_rate_hp_per_sec = 0.5
+
 [[hull.console_hull]]
 console = "Helm"
 max_hp = 25.0
@@ -38,6 +42,15 @@ beam_damage_per_sec = 5.0
 beam_duration_secs = 6.0
 cooldown_secs = 6.0
 beam_color = [1.0, 0.4, 0.1, 1.0]
+
+[torpedoes]
+count = 10
+damage_hull = 50
+damage_shields = 5
+speed = 30.0
+turn_rate_deg_per_sec = 45.0
+lifespan = 20.0
+load_time = 10.0
 
 [sensors_console]
 power_multipliers = [-0.5, 0.0, 0.25, 0.5]
@@ -77,6 +90,13 @@ focus_bonus_regen = 5.0
 focus_penalty_max_hp = 25
 focus_penalty_regen = 2.5
 focus_decay_rate = 10.0
+
+[shields_console.base]
+# UI assumes 4; other values will break the client Shields panel.
+num_facings = 4
+max_hp = 100
+regen_per_sec = 5.0
+offline_duration = 10.0
 
 [engineering_console]
 

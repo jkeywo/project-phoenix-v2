@@ -2629,14 +2629,25 @@ transition = []
     /// return `(world_path, template_path)` as `String`s.
     ///
     /// The world has one named `[[entity]]` so we get a predictable spawn count
-    /// without relying on the shipped `patrol.toml` config-cache.
+    /// without relying on the shipped `patrol.toml` config-cache.  Uses an
+    /// atomic counter for unique paths so parallel test runs don't collide.
     fn write_layer_entity_fixtures() -> (String, String) {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
         let tmp = std::env::temp_dir();
-        let template_path = tmp.join("layer_test_npc.toml");
-        let world_path = tmp.join("layer_test_world.toml");
+        let tag = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let template_path = tmp.join(format!("layer_test_npc_{tag}.toml"));
+        let world_path = tmp.join(format!("layer_test_world_{tag}.toml"));
 
-        // Minimal entity template — just enough to satisfy `EntityConfig::from_toml`.
-        std::fs::write(&template_path, "").expect("failed to write stub template");
+        let template_toml = r##"
+tags = ["npc"]
+
+[appearance]
+colour = "#888888"
+size_min = 1.0
+size_max = 2.0
+"##;
+        std::fs::write(&template_path, template_toml).expect("failed to write stub template");
 
         let template_path_str = template_path.to_string_lossy().replace('\\', "/");
 
@@ -2660,7 +2671,6 @@ entity = "layer_npc"
   text = "Destroyed."
   mandatory = false
 "#,
-            template_path_str = template_path_str,
         );
 
         std::fs::write(&world_path, &world_toml).expect("failed to write layer world TOML");

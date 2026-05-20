@@ -306,10 +306,16 @@ fn fill_captain_alert(commands: &mut Commands, container: Entity, assets: &Phone
     commands.entity(container).with_children(|parent| {
         // Centering wrapper — keeps the button at its intrinsic size instead
         // of stretching to fill the secondary slot.
+        //
+        // The extra padding here is on top of the ConsoleShell secondary
+        // slot's own 12 px padding; together they keep the button visibly
+        // clear of the bezel artwork rim (which extends a few px inside the
+        // BorderContentArea edge).
         parent.spawn((
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
+                padding: UiRect::all(Val::Px(16.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()

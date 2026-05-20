@@ -341,6 +341,9 @@ fn reparent_panels_into_bezel(
     shields: Query<Entity, With<crate::shields_panel::ShieldsPanel>>,
     navigation: Query<Entity, With<crate::navigation_panel::NavigationPanel>>,
     weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
+    repair: Query<Entity, With<crate::repair_panel::RepairPanel>>,
+    power: Query<Entity, With<crate::power_panel::PowerPanel>>,
+    comms: Query<Entity, With<crate::comms_panel::CommsPanel>>,
     hull_bar: Query<Entity, With<crate::ship_view::ConsoleHullBarBg>>,
     parents: Query<&ChildOf>,
 ) {
@@ -355,6 +358,9 @@ fn reparent_panels_into_bezel(
         .chain(shields.iter())
         .chain(navigation.iter())
         .chain(weapons.iter())
+        .chain(repair.iter())
+        .chain(power.iter())
+        .chain(comms.iter())
         .chain(hull_bar.iter())
     {
         // Skip if already a direct child of the content area.

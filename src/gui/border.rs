@@ -183,27 +183,29 @@ impl GuiBorderWidget {
 
                 // 4 edges (tiled)
                 let edges: [(EdgeSlot, Val, Val, Val, Val, bool, bool); 4] = [
-                    (EdgeSlot::Top,    Val::Px(0.0), Val::Px(cs), Val::Auto,    Val::Auto,    true,  false),
-                    (EdgeSlot::Bottom, Val::Auto,    Val::Px(cs), Val::Auto,    Val::Px(0.0), true,  false),
-                    (EdgeSlot::Left,   Val::Px(cs),  Val::Px(0.0), Val::Auto,    Val::Auto,    false, true ),
-                    (EdgeSlot::Right,  Val::Px(cs),  Val::Auto,    Val::Px(0.0), Val::Auto,    false, true ),
+                    (EdgeSlot::Top,    Val::Px(0.0), Val::Px(cs),  Val::Px(cs),  Val::Auto,    true,  false),
+                    (EdgeSlot::Bottom, Val::Auto,    Val::Px(cs),  Val::Px(cs),  Val::Px(0.0), true,  false),
+                    (EdgeSlot::Left,   Val::Px(cs),  Val::Px(0.0), Val::Auto,    Val::Px(cs),  false, true ),
+                    (EdgeSlot::Right,  Val::Px(cs),  Val::Auto,    Val::Px(0.0), Val::Px(cs),  false, true ),
                 ];
-                for (slot, top_or_left, left_or_right, _, _, tile_x, tile_y) in edges {
+                for (slot, top, left, right, bottom, tile_x, tile_y) in edges {
                     let node = if tile_x {
                         Node {
                             position_type: PositionType::Absolute,
-                            top: top_or_left,
-                            left: left_or_right,
-                            right: Val::Px(cs),
+                            top,
+                            left,
+                            right,
+                            bottom,
                             height: Val::Px(et),
                             ..default()
                         }
                     } else {
                         Node {
                             position_type: PositionType::Absolute,
-                            top: Val::Px(cs),
-                            left: top_or_left,
-                            bottom: Val::Px(cs),
+                            top,
+                            left,
+                            right,
+                            bottom,
                             width: Val::Px(et),
                             ..default()
                         }

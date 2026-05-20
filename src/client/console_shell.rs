@@ -169,6 +169,7 @@ impl ConsoleShell {
                             Val::Auto
                         },
                         overflow: Overflow::clip(),
+                        padding: UiRect::all(Val::Px(12.0)),
                         ..default()
                     },))
                     .id();
@@ -288,20 +289,40 @@ fn rebuild_embedded_tab_bars(
                     phone_assets.btn_small_idle.clone()
                 };
 
+                let button_node = if embedded.is_vertical {
+                    Node {
+                        width: Val::Percent(100.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        padding: if use_initials {
+                            UiRect::axes(Val::Px(6.0), Val::Px(6.0))
+                        } else {
+                            UiRect::axes(Val::Px(14.0), Val::Px(6.0))
+                        },
+                        ..default()
+                    }
+                } else {
+                    Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        padding: if use_initials {
+                            UiRect::axes(Val::Px(6.0), Val::Px(6.0))
+                        } else {
+                            UiRect::axes(Val::Px(14.0), Val::Px(6.0))
+                        },
+                        ..default()
+                    }
+                };
+
                 parent
                     .spawn((
                         EmbeddedTabButton(console.clone()),
                         Button,
                         ImageNode::new(default_image),
                         visuals.clone(),
-                        Node {
-                            padding: if use_initials {
-                                UiRect::axes(Val::Px(6.0), Val::Px(6.0))
-                            } else {
-                                UiRect::axes(Val::Px(14.0), Val::Px(6.0))
-                            },
-                            ..default()
-                        },
+                        button_node,
                         BackgroundColor(Color::NONE),
                         WidgetState { active: is_active },
                     ))

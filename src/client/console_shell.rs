@@ -126,8 +126,8 @@ impl ConsoleShell {
                 ImageNode::new(panel_bg),
                 ZIndex(1),
             ))
-            .with_children(|bezel|
-                let inset_id = bezel
+            .with_children(|bezel| {
+                let _inset_id = bezel
                     .spawn(
                         Node {
                             position_type: PositionType::Absolute,
@@ -137,9 +137,9 @@ impl ConsoleShell {
                             bottom: Val::Px(44.0),
                             flex_direction: root_flex,
                             ..default()
-                    },
-                )    
-            )
+                        },
+                    );
+            })
             .with_children(|root| {
                 // ── Tab bar ─────────────────────────────────────────
                 // Leading padding leaves space for the absolutely-positioned

@@ -116,10 +116,10 @@ impl ConsoleShell {
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
+                    left: Val::Px(44.0),
+                    right: Val::Px(44.0),
+                    top: Val::Px(44.0),
+                    bottom: Val::Px(44.0),
                     flex_direction: root_flex,
                     ..default()
                 },
@@ -167,7 +167,7 @@ impl ConsoleShell {
                 // ── Primary content ─────────────────────────────────
                 primary_id = root
                     .spawn((Node {
-                        flex_grow: 1.0,
+                        flex_grow: 2.0,
                         width: if is_landscape {
                             Val::Percent(100.0)
                         } else {
@@ -187,7 +187,7 @@ impl ConsoleShell {
                 secondary_id = root
                     .spawn((Node {
                         flex_shrink: 0.0,
-                        flex_grow: 0.0,
+                        flex_grow: 1.0,
                         width: if is_landscape {
                             Val::Auto
                         } else {

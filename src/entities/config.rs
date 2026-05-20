@@ -66,6 +66,36 @@ pub enum StationShape {
     Torus,
 }
 
+/// Shape variant for the `[mesh]` section of an entity TOML.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MeshShape {
+    Sphere,
+    Cuboid,
+    Torus,
+}
+
+/// Visual mesh definition for an entity.
+///
+/// Present in entity TOMLs as a `[mesh]` section. The renderer creates the
+/// appropriate Bevy primitive and material from this data; entities without
+/// a `[mesh]` section are not given a 3-D visual on the viewscreen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeshConfig {
+    pub shape: MeshShape,
+    /// RGB colour `[r, g, b]` in linear 0–1 range.
+    pub colour: Vec<f32>,
+    /// Sphere radius, or torus major radius. Ignored for `cuboid`.
+    #[serde(default)]
+    pub radius: f32,
+    /// Full XYZ dimensions of a `cuboid` mesh.
+    #[serde(default)]
+    pub size: Option<[f32; 3]>,
+    /// Tube radius for a `torus` mesh.
+    #[serde(default)]
+    pub minor_radius: f32,
+}
+
 /// Configuration for a station entity (space station, outpost, etc.).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StationConfig {
@@ -646,6 +676,9 @@ pub struct EntityConfig {
     /// Radar appearance (colour, optional radius) for the helm radar blip.
     #[serde(default)]
     pub radar_appearance: Option<RadarAppearanceConfig>,
+    /// 3-D mesh definition. When present the entity receives a visual on the viewscreen.
+    #[serde(default)]
+    pub mesh: Option<MeshConfig>,
 }
 
 #[derive(Deserialize)]
@@ -674,6 +707,7 @@ struct TomlConfig {
     faction: Option<Uuid>,
     behaviour: Option<BehaviourConfig>,
     radar_appearance: Option<RadarAppearanceConfig>,
+    mesh: Option<MeshConfig>,
 }
 
 impl EntityConfig {
@@ -762,6 +796,7 @@ impl EntityConfig {
             faction: raw.faction,
             behaviour,
             radar_appearance: raw.radar_appearance,
+            mesh: raw.mesh,
         })
     }
 }

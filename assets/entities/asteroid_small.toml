@@ -8,3 +8,8 @@ length = 0.0
 
 [hull]
 hull_integrity = 30
+
+[mesh]
+shape = "sphere"
+radius = 5.0
+colour = [0.55, 0.50, 0.42]

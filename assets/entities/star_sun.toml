@@ -18,3 +18,8 @@ length = 0.0
 [radar_appearance]
 colour = [1.0, 0.85, 0.3]
 radius = 50.0
+
+[mesh]
+shape = "sphere"
+radius = 50.0
+colour = [1.0, 0.8, 0.0]

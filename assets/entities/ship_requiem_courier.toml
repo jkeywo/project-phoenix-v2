@@ -13,6 +13,11 @@ length = 4.0
 colour = [0.2, 0.6, 0.9]
 radius = 4.0
 
+[mesh]
+shape = "cuboid"
+size = [3.0, 1.0, 5.0]
+colour = [0.2, 0.6, 0.9]
+
 [behaviour]
 initial_state = "idle"
 

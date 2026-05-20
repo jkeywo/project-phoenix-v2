@@ -9,3 +9,9 @@ hull_integrity = 60.0
 [radar_appearance]
 colour = [0.3, 0.8, 0.6]
 radius = 8.0
+
+[mesh]
+shape = "torus"
+radius = 8.0
+minor_radius = 2.0
+colour = [0.4, 0.7, 0.9]

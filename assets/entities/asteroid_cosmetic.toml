@@ -5,3 +5,8 @@ tags = ["asteroid", "cosmetic"]
 shape = "Ball"
 radius = 3.0
 length = 0.0
+
+[mesh]
+shape = "sphere"
+radius = 3.0
+colour = [0.50, 0.45, 0.38]

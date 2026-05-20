@@ -36,6 +36,12 @@ pub struct ColliderSection(pub crate::entity_config::ColliderConfig);
 #[derive(Component, Clone, Debug)]
 pub struct AppearanceSection(pub crate::entity_config::AppearanceConfig);
 
+/// Present when the EntityConfig has a [mesh] section.
+/// Drives all 3-D viewscreen rendering — the renderer creates a Bevy mesh and
+/// material from this data, ignoring PlanetSection/StarSection for visual shape.
+#[derive(Component, Clone, Debug)]
+pub struct MeshSection(pub crate::entity_config::MeshConfig);
+
 /// Present when the EntityConfig had a [shape] section (region entity).
 #[derive(Component, Clone, Debug)]
 pub struct RegionShapeSection(pub RegionShape);
@@ -129,6 +135,11 @@ pub fn spawn_entity(
         entity_commands.insert(AppearanceSection(appearance.clone()));
     }
 
+    // Mesh section
+    if let Some(mesh) = &config.mesh {
+        entity_commands.insert(MeshSection(mesh.clone()));
+    }
+
     // Star section
     if let Some(star) = &config.star {
         entity_commands.insert(StarSection(star.clone()));
@@ -216,71 +227,6 @@ pub fn spawn_entity(
     entity_commands.id()
 }
 
-/// Query for all entities with StarSection and ensure they have visual
-/// meshes and materials. Runs as a startup system after entity spawning.
-pub fn render_star_sections(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    stars: Query<(Entity, &StarSection, &Transform), Without<Mesh3d>>,
-) {
-    for (entity, star, _transform) in stars.iter() {
-        let mesh = meshes.add(Sphere { radius: star.0.radius });
-        let color = if star.0.colour.len() >= 3 {
-            Color::srgb(star.0.colour[0], star.0.colour[1], star.0.colour[2])
-        } else {
-            Color::srgb(1.0, 1.0, 1.0)
-        };
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
-            emissive: LinearRgba::from(color) * 2.0,
-            ..default()
-        });
-        let light_color = star.0.light_colour.as_ref()
-            .filter(|c| c.len() >= 3)
-            .map(|c| Color::srgb(c[0], c[1], c[2]))
-            .unwrap_or(Color::WHITE);
-        let range = star.0.light_range.unwrap_or(star.0.radius * 60.0);
-        let intensity = star.0.light_intensity.unwrap_or(star.0.radius * 2000.0);
-        commands.entity(entity).insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(mat),
-            PointLight {
-                color: light_color,
-                intensity,
-                range,
-                shadows_enabled: false,
-                ..default()
-            },
-        ));
-    }
-}
-
-/// Query for all entities with PlanetSection and ensure they have visual
-/// meshes and materials.
-pub fn render_planet_sections(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    planets: Query<(Entity, &PlanetSection, &Transform), Without<Mesh3d>>,
-) {
-    for (entity, planet, _transform) in planets.iter() {
-        let mesh = meshes.add(Sphere { radius: planet.0.radius });
-        let color = if planet.0.colour.len() >= 3 {
-            Color::srgb(planet.0.colour[0], planet.0.colour[1], planet.0.colour[2])
-        } else {
-            Color::srgb(0.5, 0.5, 0.5)
-        };
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
-            ..default()
-        });
-        commands.entity(entity).insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(mat),
-        ));
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -348,6 +294,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -390,6 +337,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -434,6 +382,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -483,6 +432,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -524,6 +474,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -590,6 +541,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -634,6 +586,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -672,6 +625,7 @@ mod tests {
             station: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -736,6 +690,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -789,6 +744,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -833,6 +789,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
@@ -876,6 +833,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);

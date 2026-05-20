@@ -1162,107 +1162,67 @@ fn render_spawned_entities(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    stars: Query<(Entity, &crate::entity_spawner::StarSection, &Transform), Without<Mesh3d>>,
-    planets: Query<(Entity, &crate::entity_spawner::PlanetSection, &Transform), Without<Mesh3d>>,
-    generic_entities: Query<
-        (
-            Entity,
-            &crate::entity_spawner::ColliderSection,
-            Option<&crate::entity_spawner::RadarAppearanceSection>,
-            Option<&crate::entity_spawner::EntityTagsSection>,
-        ),
-        (
-            Without<Mesh3d>,
-            Without<Ship>,
-            Without<crate::entity_spawner::StarSection>,
-            Without<crate::entity_spawner::PlanetSection>,
-        ),
+    entities: Query<
+        (Entity, &crate::entity_spawner::MeshSection, Option<&crate::entity_spawner::StarSection>),
+        Without<Mesh3d>,
     >,
 ) {
-    for (entity, star, _transform) in stars.iter() {
-        let mesh = meshes.add(Sphere {
-            radius: star.0.radius,
-        });
-        let color = if star.0.colour.len() >= 3 {
-            Color::srgb(star.0.colour[0], star.0.colour[1], star.0.colour[2])
+    use crate::entity_config::MeshShape;
+
+    for (entity, mesh_sec, star_sec) in entities.iter() {
+        let cfg = &mesh_sec.0;
+
+        let color = if cfg.colour.len() >= 3 {
+            Color::srgb(cfg.colour[0], cfg.colour[1], cfg.colour[2])
         } else {
-            Color::srgb(1.0, 1.0, 1.0)
+            Color::srgb(0.6, 0.6, 0.6)
         };
+
+        let emissive = if star_sec.is_some() {
+            LinearRgba::from(color) * 2.0
+        } else {
+            LinearRgba::from(color) * 0.4
+        };
+
+        let mesh = match cfg.shape {
+            MeshShape::Sphere => meshes.add(Sphere { radius: cfg.radius.max(0.1) }),
+            MeshShape::Cuboid => {
+                let [x, y, z] = cfg.size.unwrap_or([2.0, 1.0, 3.0]);
+                meshes.add(Cuboid::new(x, y, z))
+            }
+            MeshShape::Torus => meshes.add(Torus {
+                major_radius: cfg.radius.max(0.5),
+                minor_radius: cfg.minor_radius.max(0.1),
+            }),
+        };
+
         let mat = materials.add(StandardMaterial {
             base_color: color,
-            emissive: LinearRgba::from(color) * 2.0,
+            emissive,
             ..default()
         });
-        let light_color = star
-            .0
-            .light_colour
-            .as_ref()
-            .filter(|c| c.len() >= 3)
-            .map(|c| Color::srgb(c[0], c[1], c[2]))
-            .unwrap_or(Color::WHITE);
-        let range = star.0.light_range.unwrap_or(star.0.radius * 60.0);
-        let intensity = star.0.light_intensity.unwrap_or(star.0.radius * 2000.0);
-        commands.entity(entity).insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(mat),
-            PointLight {
+
+        let mut ec = commands.entity(entity);
+        ec.insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+
+        if let Some(star) = star_sec {
+            let light_color = star
+                .0
+                .light_colour
+                .as_ref()
+                .filter(|c| c.len() >= 3)
+                .map(|c| Color::srgb(c[0], c[1], c[2]))
+                .unwrap_or(Color::WHITE);
+            let range = star.0.light_range.unwrap_or(cfg.radius * 60.0);
+            let intensity = star.0.light_intensity.unwrap_or(cfg.radius * 2000.0);
+            ec.insert(PointLight {
                 color: light_color,
                 intensity,
                 range,
                 shadows_enabled: false,
                 ..default()
-            },
-        ));
-    }
-
-    for (entity, planet, _transform) in planets.iter() {
-        let mesh = meshes.add(Sphere {
-            radius: planet.0.radius,
-        });
-        let color = if planet.0.colour.len() >= 3 {
-            Color::srgb(planet.0.colour[0], planet.0.colour[1], planet.0.colour[2])
-        } else {
-            Color::srgb(0.5, 0.5, 0.5)
-        };
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
-            ..default()
-        });
-        commands
-            .entity(entity)
-            .insert((Mesh3d(mesh), MeshMaterial3d(mat)));
-    }
-
-    for (entity, collider, radar_appearance, tags) in generic_entities.iter() {
-        let radius = collider.0.radius.max(0.5);
-
-        let color = if let Some(ra) = radar_appearance {
-            if ra.0.colour.len() >= 3 {
-                Color::srgb(ra.0.colour[0], ra.0.colour[1], ra.0.colour[2])
-            } else {
-                Color::srgb(0.6, 0.6, 0.6)
-            }
-        } else if let Some(t) = tags {
-            if t.0.iter().any(|s| s == "asteroid") {
-                Color::srgb(0.55, 0.50, 0.42)
-            } else if t.0.iter().any(|s| s == "station") {
-                Color::srgb(0.35, 0.75, 0.60)
-            } else if t.0.iter().any(|s| s == "ship") {
-                Color::srgb(0.85, 0.30, 0.20)
-            } else {
-                Color::srgb(0.6, 0.6, 0.6)
-            }
-        } else {
-            Color::srgb(0.6, 0.6, 0.6)
-        };
-
-        let mesh = meshes.add(Sphere { radius });
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
-            emissive: LinearRgba::from(color) * 0.4,
-            ..default()
-        });
-        commands.entity(entity).insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+            });
+        }
     }
 }
 

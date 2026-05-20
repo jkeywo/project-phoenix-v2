@@ -13,6 +13,11 @@ length = 7.0
 colour = [0.8, 0.3, 0.1]
 radius = 7.0
 
+[mesh]
+shape = "cuboid"
+size = [6.0, 2.0, 10.0]
+colour = [0.8, 0.3, 0.1]
+
 [behaviour]
 initial_state = "patrolling"
 

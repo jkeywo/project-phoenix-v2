@@ -1116,6 +1116,7 @@ mod tests {
             repair: None,
             station: None,
             radar_appearance: None,
+            mesh: None,
         };
 
         let mut commands = app.world_mut().commands();

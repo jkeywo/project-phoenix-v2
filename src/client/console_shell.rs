@@ -116,15 +116,30 @@ impl ConsoleShell {
             .spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(44.0),
-                    right: Val::Px(44.0),
-                    top: Val::Px(44.0),
-                    bottom: Val::Px(44.0),
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
                     flex_direction: root_flex,
                     ..default()
                 },
                 ImageNode::new(panel_bg),
+                ZIndex(1),
             ))
+            .with_children(|bezel|
+                inset_id = root
+                    .spawn(
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(44.0),
+                            right: Val::Px(44.0),
+                            top: Val::Px(44.0),
+                            bottom: Val::Px(44.0),
+                            flex_direction: root_flex,
+                            ..default()
+                    },
+                )    
+            )
             .with_children(|root| {
                 // ── Tab bar ─────────────────────────────────────────
                 // Leading padding leaves space for the absolutely-positioned

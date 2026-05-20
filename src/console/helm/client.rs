@@ -433,8 +433,8 @@ fn fill_helm_radar(
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
+            width: Val::Percent(90.0),
+            height: Val::Percent(90.0),
             row_gap: Val::Px(8.0),
             ..default()
         })

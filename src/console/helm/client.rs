@@ -774,8 +774,18 @@ fn respawn_helm_on_orientation_change(
     if !orientation.is_changed() {
         return;
     }
+    // Skip the first-frame `is_changed` that fires when the resource is
+    // freshly inserted — there is no helm panel to respawn yet, and treating
+    // the insert as a "change" would orphan the just-spawned panel root,
+    // since `despawn_related::<Children>` keeps the marked entity alive
+    // while `spawn_phone_helm_ui` then creates a second `HelmPanel`.
+    if orientation.is_added() {
+        return;
+    }
+    // Despawn the panel root entirely (along with all children) so the next
+    // `spawn_phone_helm_ui` produces exactly one `HelmPanel`, not two.
     for entity in panel.iter() {
-        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).despawn();
     }
     // Clear stale entity IDs so bridge systems don't command dead entities.
     if let Some(center) = radar.center.take() {

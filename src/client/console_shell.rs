@@ -127,7 +127,7 @@ impl ConsoleShell {
                 ZIndex(1),
             ))
             .with_children(|bezel|
-                inset_id = root
+                let inset_id = bezel
                     .spawn(
                         Node {
                             position_type: PositionType::Absolute,

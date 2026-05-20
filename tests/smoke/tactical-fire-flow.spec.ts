@@ -30,11 +30,12 @@ const WORLD_WITHOUT_FAR_RAIDER = REAL_WORLD.replace(
 );
 const CLOSE_RAIDER_WORLD = WORLD_WITHOUT_FAR_RAIDER + `
 
-# Smoke-test override: a raider 20 units in front of the simulation origin.
+# Smoke-test override: a raider 20 units in front of the player ship spawn.
+# Ship spawns at (150, 0, 0) per assets/worlds/default.toml; forward is -Z.
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
-position      = [0.0, 0.0, -20.0]
+position      = [150.0, 0.0, -20.0]
 `;
 
 async function waitForStation(

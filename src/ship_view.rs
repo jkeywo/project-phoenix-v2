@@ -177,6 +177,7 @@ fn spawn_console_hull_bar(mut commands: Commands) {
                 align_items: AlignItems::Center,
                 ..default()
             },
+            ZIndex(50),
             Visibility::Hidden,
         ))
         .with_children(|wrapper| {

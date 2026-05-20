@@ -356,7 +356,7 @@ fn bridge_client_sim_to_radar_entities(
         if seen.contains(uuid) {
             true
         } else {
-            commands.entity(*entity).despawn_related::<Children>();
+            commands.entity(*entity).despawn();
             false
         }
     });
@@ -744,8 +744,12 @@ fn respawn_helm_on_orientation_change(
         commands.entity(entity).despawn_related::<Children>();
     }
     // Clear stale entity IDs so bridge systems don't command dead entities.
-    radar.center = None;
-    radar.blips.clear();
+    if let Some(center) = radar.center.take() {
+        commands.entity(center).despawn();
+    }
+    for (_, entity) in radar.blips.drain() {
+        commands.entity(entity).despawn();
+    }
     commands.remove_resource::<PhoneHelmSpawned>();
 }
 

@@ -138,7 +138,7 @@ fn spawn_generic_joystick(
     commands.entity(pad).with_children(|parent| {
         let mut knob = parent.spawn((
             GenericJoystickKnob { half_size: knob_half },
-            BackgroundColor(Color::srgb(0.6, 0.7, 1.0)),
+            BackgroundColor(if knob_image.is_some() { Color::NONE } else { Color::srgb(0.6, 0.7, 1.0) }),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(radius - knob_half),

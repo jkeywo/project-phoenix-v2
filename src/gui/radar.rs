@@ -212,7 +212,6 @@ impl GenericRadar {
             },
             Node {
                 width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
                 aspect_ratio: Some(1.0),
                 position_type: PositionType::Relative,
                 ..default()
@@ -264,7 +263,7 @@ fn sync_radar_blip_nodes(
     mut existing_nodes: Query<(&mut Node, &mut ImageNode, &RadarBlipNode)>,
     icons: Res<RadarIconLookup>,
 ) {
-    let Ok(center) = centers.single() else { return };
+    let Some(center) = centers.iter().next() else { return };
 
     for (radar_entity, widget, computed, vis, children) in radars.iter() {
         if !vis.get() {

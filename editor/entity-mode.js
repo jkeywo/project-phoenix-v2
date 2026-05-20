@@ -12,6 +12,7 @@
 
 import { parseEntityToml, stringifyEntityToml, validateEntitySections } from './entity-toml.js';
 import { COMPONENT_SCHEMA, ENTITY_CONFIG_SECTIONS } from './component-schema.js';
+import { getComboTemplate, getRawSectionDefaults } from './component-templates.js';
 
 // ── Component Card ────────────────────────────────────────────────────────────
 
@@ -223,6 +224,63 @@ export class EntityModeShell {
   /** Return all complexity paths (for dropdowns). */
   getComplexityPaths() {
     return [...this._complexityPaths];
+  }
+
+  // ── Add component / combo ─────────────────────────────────────────────────
+
+  /**
+   * Add a single raw section with its schema defaults as a new ComponentCard.
+   * If the section is already present, this is a no-op and a warning is logged.
+   *
+   * @param {string} sectionKey  e.g. 'hull', 'helm_console'
+   * @returns {{ ok: boolean, warning?: string }}
+   */
+  addComponent(sectionKey) {
+    const existing = this._cards.find((c) => c.section === sectionKey);
+    if (existing) {
+      const msg = `addComponent: section '${sectionKey}' is already present — skipping`;
+      console.warn(msg);
+      return { ok: false, warning: msg };
+    }
+
+    const defaults = getRawSectionDefaults(sectionKey) ?? {};
+    const schema = COMPONENT_SCHEMA[sectionKey] ?? null;
+    const card = new ComponentCard(sectionKey, defaults, schema);
+    this._cards.push(card);
+    return { ok: true };
+  }
+
+  /**
+   * Add all sections defined by a combo template as new ComponentCards.
+   * Sections that are already present are skipped (no-op with a warning per
+   * skipped section).  Unknown combo names produce a warning and return ok: false.
+   *
+   * @param {string} comboName  e.g. 'Ship', 'Station', 'Asteroid Field'
+   * @returns {{ ok: boolean, warnings: string[] }}
+   */
+  addCombo(comboName) {
+    const template = getComboTemplate(comboName);
+    if (!template) {
+      const msg = `addCombo: unknown combo '${comboName}'`;
+      console.warn(msg);
+      return { ok: false, warnings: [msg] };
+    }
+
+    const warnings = [];
+    for (const { key, defaults } of template.sections) {
+      const existing = this._cards.find((c) => c.section === key);
+      if (existing) {
+        const msg = `addCombo '${comboName}': section '${key}' is already present — skipping`;
+        console.warn(msg);
+        warnings.push(msg);
+        continue;
+      }
+      const schema = COMPONENT_SCHEMA[key] ?? null;
+      const card = new ComponentCard(key, { ...defaults }, schema);
+      this._cards.push(card);
+    }
+
+    return { ok: true, warnings };
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

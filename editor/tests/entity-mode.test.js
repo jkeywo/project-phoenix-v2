@@ -425,8 +425,7 @@ describe('EntityModeShell', () => {
       const factionFiles = listDir('assets/factions')
         .filter((f) => f.endsWith('.toml'))
         .map((name) => ({ name, content: readFaction(name) }));
-      const { buildFactionMap: bfm } = require('../entity-toml.js');
-      const map = bfm(factionFiles);
+      const map = buildFactionMap(factionFiles);
       shell.setFactionMap(map);
       expect(shell.resolveFactionName('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb')).toBe('Pirate');
     });
@@ -461,18 +460,29 @@ describe('EntityModeShell', () => {
     });
   });
 
-  describe('preview pane (placeholder)', () => {
+  describe('preview pane', () => {
     it('returns placeholder stub before any file is opened', () => {
       const preview = shell.getPreviewPane();
       expect(preview.placeholder).toBe(true);
       expect(preview.activeFile).toBeNull();
     });
 
-    it('returns active file in preview pane after opening', () => {
+    it('returns real preview data after opening an entity', () => {
       shell.openFile('pirate_raider.toml', readEntity('pirate_raider.toml'));
       const preview = shell.getPreviewPane();
-      expect(preview.placeholder).toBe(true);
-      expect(preview.activeFile).toBe('pirate_raider.toml');
+      // Not a placeholder — real preview shape
+      expect(preview.placeholder).toBeUndefined();
+      expect(preview).toHaveProperty('radarShape');
+      expect(preview).toHaveProperty('radarColour');
+      expect(preview).toHaveProperty('colliderShape');
+      expect(preview).toHaveProperty('regionShape');
+      expect(preview).toHaveProperty('asteroidField');
+      expect(preview).toHaveProperty('showForwardArrow', true);
+      expect(preview).toHaveProperty('textOverlay');
+      expect(preview.textOverlay).toHaveProperty('tags');
+      expect(preview.textOverlay).toHaveProperty('faction');
+      expect(preview.textOverlay).toHaveProperty('consoles');
+      expect(preview.textOverlay).toHaveProperty('hullTotal');
     });
   });
 

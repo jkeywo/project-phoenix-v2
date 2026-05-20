@@ -13,6 +13,7 @@
 import { parseEntityToml, stringifyEntityToml, validateEntitySections } from './entity-toml.js';
 import { COMPONENT_SCHEMA, ENTITY_CONFIG_SECTIONS } from './component-schema.js';
 import { getComboTemplate, getRawSectionDefaults } from './component-templates.js';
+import { computeEntityPreview } from './entity-preview.js';
 
 // ── Component Card ────────────────────────────────────────────────────────────
 
@@ -169,14 +170,18 @@ export class EntityModeShell {
     return this._cards.find((c) => c.section === section) ?? null;
   }
 
-  // ── Right pane: preview placeholder ──────────────────────────────────────
+  // ── Right pane: preview ──────────────────────────────────────────────────
 
   /**
-   * Return preview pane data.  Currently a placeholder stub.
-   * @returns {{ placeholder: true, activeFile: string|null }}
+   * Return preview pane data for the active entity, or a placeholder stub
+   * when no file is open.
+   * @returns {object|null}
    */
   getPreviewPane() {
-    return { placeholder: true, activeFile: this._activeFile };
+    if (!this._parsedEntity) {
+      return { placeholder: true, activeFile: this._activeFile };
+    }
+    return computeEntityPreview(this._parsedEntity, this._factionMap);
   }
 
   // ── Faction dropdown ──────────────────────────────────────────────────────

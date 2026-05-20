@@ -561,7 +561,7 @@ mod tests {
 
     // ── captain_panel_visible ───────────────────────────────────────
 
-    use crate::messages::{GameState, Player, ServerMessage};
+    use crate::messages::{GameState, Player, ServerMessage, ShipClientConfig};
     use crate::stations_config::ShipStations;
     use std::collections::HashMap;
 
@@ -574,7 +574,7 @@ mod tests {
     }
 
     fn welcome(state: GameState) -> ServerMessage {
-        ServerMessage::Welcome { state, ship_stations: ShipStations::default() }
+        ServerMessage::Welcome { state, ship_stations: ShipStations::default(), ship_config: ShipClientConfig::default() }
     }
 
     fn in_progress_lobby(captain_token: &str) -> LobbyState {

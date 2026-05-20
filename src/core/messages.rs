@@ -278,6 +278,30 @@ pub struct GameState {
     pub world: Option<WorldData>,
 }
 
+/// Static, per-ship configuration sent to clients in `Welcome`.
+///
+/// Carries the bits of `assets/entities/player_ship.toml` that the client UI
+/// needs to render correctly (e.g. helm radar range). Falls back to sensible
+/// defaults via `Default` so test code that builds a `Welcome` doesn't have to
+/// know about every field.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ShipClientConfig {
+    /// Detection range for the helm radar widget, in world units. Sourced
+    /// from `[helm_console.radar] range` in the ship TOML.
+    #[serde(default = "default_helm_radar_range")]
+    pub helm_radar_range: f32,
+}
+
+fn default_helm_radar_range() -> f32 {
+    500.0
+}
+
+impl Default for ShipClientConfig {
+    fn default() -> Self {
+        Self { helm_radar_range: default_helm_radar_range() }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SimSnapshot {
     pub red_alert: bool,
@@ -544,7 +568,7 @@ pub enum ClientMessage {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum ServerMessage {
-    Welcome { state: GameState, ship_stations: ShipStations },
+    Welcome { state: GameState, ship_stations: ShipStations, ship_config: ShipClientConfig },
     PlayerJoined { player: Player },
     PlayerLeft { token: String },
     StationAssigned { token: String, station: Option<String>, consoles: Vec<Console> },

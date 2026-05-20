@@ -391,7 +391,7 @@ fn handle_dispatch_button_press(
 mod tests {
     use super::*;
     use crate::client_lobby::{ActiveConsole, LobbyState};
-    use crate::messages::{ClientMessage, Console, GamePhase, Player};
+    use crate::messages::{ClientMessage, Console, GamePhase, Player, ShipClientConfig};
     use std::collections::HashMap;
 
     fn lobby_with_repair_player(token: &str, phase: GamePhase) -> LobbyState {
@@ -410,6 +410,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         lobby
     }
@@ -454,6 +455,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         let active = ActiveConsole(Some(Console::Repair));
         assert!(repair_panel_visible(&lobby, "tok", &active));
@@ -476,6 +478,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         let active = ActiveConsole(Some(Console::Tactical));
         assert!(!repair_panel_visible(&lobby, "tok", &active));
@@ -498,6 +501,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         let active = ActiveConsole::default(); // None → auto → count != 1
         assert!(!repair_panel_visible(&lobby, "tok", &active));

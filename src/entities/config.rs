@@ -140,10 +140,17 @@ pub struct HelmConsoleConfig {
     pub deceleration: f32,
     #[serde(default)]
     pub max_yaw_rate: f32,
+    /// Legacy flat radar range. Prefer the nested `[helm_console.radar] range`
+    /// table. Read with `effective_radar_range()` which prefers `radar.range`
+    /// when present.
     #[serde(default)]
     pub radar_range: f32,
     #[serde(default)]
     pub radar_shows: bool,
+    /// Structured radar configuration. When present, `radar.range` overrides
+    /// the legacy flat `radar_range` field.
+    #[serde(default)]
+    pub radar: Option<crate::radar_config::RadarConfig>,
     #[serde(default)]
     pub power_multipliers: Option<[f32; 4]>,
     /// Path to a complexity TOML file for this console.
@@ -157,6 +164,18 @@ pub struct HelmConsoleConfig {
     /// Defaults to `IMPULSE_SPEED_MULTIPLIER` (10.0) when absent.
     #[serde(default = "default_impulse_speed_multiplier")]
     pub impulse_speed_multiplier: f32,
+}
+
+impl HelmConsoleConfig {
+    /// Effective radar range: prefers the structured `[helm_console.radar]
+    /// range` table value when present, otherwise falls back to the legacy
+    /// flat `radar_range` field. Returns `0.0` if neither is set.
+    pub fn effective_radar_range(&self) -> f32 {
+        if let Some(r) = &self.radar {
+            return r.range;
+        }
+        self.radar_range
+    }
 }
 
 fn default_impulse_charge_duration() -> f32 {
@@ -633,6 +652,51 @@ radar_shows = false
         assert_eq!(h.max_speed, 30.0);
         assert!(!h.radar_shows);
         assert_eq!(h.max_reverse_speed, 0.0);
+    }
+
+    #[test]
+    fn helm_console_radar_table_parses_into_nested_field() {
+        let toml_str = r##"
+[helm_console]
+max_speed = 30.0
+
+[helm_console.radar]
+range = 750.0
+shows = ["asteroid", "ship"]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        let radar = h.radar.as_ref().expect("helm_console.radar must parse");
+        assert_eq!(radar.range, 750.0);
+        assert_eq!(h.effective_radar_range(), 750.0);
+    }
+
+    #[test]
+    fn helm_console_effective_radar_range_prefers_nested_over_flat() {
+        let toml_str = r##"
+[helm_console]
+radar_range = 100.0
+
+[helm_console.radar]
+range = 750.0
+shows = ["asteroid"]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        assert_eq!(h.effective_radar_range(), 750.0,
+            "nested [helm_console.radar] range must win over flat radar_range");
+    }
+
+    #[test]
+    fn helm_console_effective_radar_range_falls_back_to_flat_when_no_nested() {
+        let toml_str = r##"
+[helm_console]
+radar_range = 250.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let h = config.helm_console.expect("helm_console must be Some");
+        assert!(h.radar.is_none());
+        assert_eq!(h.effective_radar_range(), 250.0);
     }
 
     #[test]

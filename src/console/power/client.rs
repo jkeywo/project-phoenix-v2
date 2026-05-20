@@ -402,7 +402,7 @@ fn handle_decrease_power(
 mod tests {
     use super::*;
     use crate::client_lobby::{ActiveConsole, LobbyState};
-    use crate::messages::{Console, GamePhase, Player};
+    use crate::messages::{Console, GamePhase, Player, ShipClientConfig};
     use std::collections::HashMap;
 
     fn lobby_with_power_player(token: &str, phase: GamePhase) -> LobbyState {
@@ -421,6 +421,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         lobby
     }
@@ -465,6 +466,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         let active = ActiveConsole(Some(Console::Power));
         assert!(power_panel_visible(&lobby, "tok", &active));
@@ -487,6 +489,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         let active = ActiveConsole(Some(Console::Tactical));
         assert!(!power_panel_visible(&lobby, "tok", &active));
@@ -509,6 +512,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         let active = ActiveConsole::default(); // None → auto → count != 1
         assert!(!power_panel_visible(&lobby, "tok", &active));

@@ -80,8 +80,11 @@ pub const HELM_PAD_SIZE: f32 = 200.0;
 /// Diameter of the compass-ring radar in logical pixels.
 pub const COMPASS_RADAR_DIAMETER: f32 = 280.0;
 
-/// Radar range in world units for the helm generic radar.
-pub const HELM_RADAR_RANGE: f32 = 500.0;
+/// Fallback radar range in world units, used when the server has not yet
+/// sent a `Welcome` with a `ShipClientConfig.helm_radar_range`. The real
+/// runtime value comes from `LobbyState.ship_config.helm_radar_range`,
+/// sourced from `[helm_console.radar] range` in `player_ship.toml`.
+pub const HELM_RADAR_RANGE_FALLBACK: f32 = 500.0;
 
 /// Convert ship yaw (radians, CCW from +Z) to a 3-digit heading string
 /// (degrees, 0–360, 0 = ship-forward = "north" on the compass).
@@ -104,6 +107,7 @@ impl Plugin for HelmPanelPlugin {
                 respawn_helm_on_orientation_change,
                 toggle_helm_panel_visibility,
                 update_helm_readouts,
+                sync_helm_radar_range,
                 bridge_client_sim_to_radar_entities,
             ));
     }
@@ -163,13 +167,13 @@ fn on_impulse_button_pressed(
 // ── Readout update system ────────────────────────────────────────────
 
 /// Each frame: write HDG / SPD / X / Z readout values from `ShipView`.
+/// No `is_changed()` gate — readouts must update every frame so that small
+/// per-frame velocity / position deltas are reflected on the bezel without
+/// waiting for a coarse change-detection tick.
 fn update_helm_readouts(
     ship_view: Res<ShipView>,
     mut readouts: Query<(&mut ReadoutValue, &HelmReadoutKind)>,
 ) {
-    if !ship_view.is_changed() {
-        return;
-    }
     for (mut value, kind) in readouts.iter_mut() {
         *value = match kind {
             HelmReadoutKind::Hdg => ReadoutValue(format!("HDG {}", yaw_to_heading(ship_view.ship_yaw))),
@@ -177,6 +181,26 @@ fn update_helm_readouts(
             HelmReadoutKind::X => ReadoutValue(format!("X {:.0}", ship_view.ship_x)),
             HelmReadoutKind::Z => ReadoutValue(format!("Z {:.0}", ship_view.ship_z)),
         };
+    }
+}
+
+/// Keeps `GenericRadarWidget.range` in sync with the server-provided
+/// `LobbyState.ship_config.helm_radar_range`. Runs whenever `LobbyState`
+/// changes (i.e. on `Welcome`) so the helm radar uses the TOML-driven
+/// range from `[helm_console.radar]`.
+fn sync_helm_radar_range(
+    lobby: Res<LobbyState>,
+    mut radars: Query<&mut crate::gui::GenericRadarWidget>,
+) {
+    if !lobby.is_changed() {
+        return;
+    }
+    let range = lobby.ship_config.helm_radar_range;
+    if range <= 0.0 {
+        return;
+    }
+    for mut widget in radars.iter_mut() {
+        widget.range = range;
     }
 }
 
@@ -357,7 +381,7 @@ fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAss
         RadarLayer::Planet, RadarLayer::Star,
     ]));
     let radar = GenericRadar::spawn(
-        commands, COMPASS_RADAR_DIAMETER, HELM_RADAR_RANGE,
+        commands, COMPASS_RADAR_DIAMETER, HELM_RADAR_RANGE_FALLBACK,
         OrientationMode::ShipRelative, radar_filter,
         Some(assets.radar_bg.clone()), Some(assets.radar_surround.clone()),
     );
@@ -558,7 +582,7 @@ fn respawn_helm_on_orientation_change(
 mod tests {
     use super::*;
     use crate::client_lobby::{ActiveConsole, LobbyState};
-    use crate::messages::{Console, GamePhase, GameState, Player, ServerMessage};
+    use crate::messages::{Console, GamePhase, GameState, Player, ServerMessage, ShipClientConfig};
     use crate::stations_config::ShipStations;
     use std::collections::HashMap;
     use std::f32::consts::{FRAC_PI_4, TAU};
@@ -574,7 +598,7 @@ mod tests {
     }
 
     fn welcome(state: GameState) -> ServerMessage {
-        ServerMessage::Welcome { state, ship_stations: ShipStations::default() }
+        ServerMessage::Welcome { state, ship_stations: ShipStations::default(), ship_config: ShipClientConfig::default() }
     }
 
     fn in_progress_helm_lobby(token: &str) -> LobbyState {

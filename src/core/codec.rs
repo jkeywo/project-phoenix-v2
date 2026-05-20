@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn server_welcome() {
-        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations() };
+        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations(), ship_config: ShipClientConfig::default() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -417,6 +417,7 @@ mod tests {
                 }),
             },
             ship_stations: empty_ship_stations(),
+            ship_config: ShipClientConfig::default(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -850,14 +851,14 @@ mod tests {
             },
         ]);
         let ship_stations = ShipStations { configs, min_players: 1, max_players: 1, complexity_presets: std::collections::HashMap::new() };
-        let msg = ServerMessage::Welcome { state: state(), ship_stations };
+        let msg = ServerMessage::Welcome { state: state(), ship_stations, ship_config: ShipClientConfig::default() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
     }
 
     #[test]
     fn welcome_with_world_none_round_trips() {
-        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations() };
+        let msg = ServerMessage::Welcome { state: state(), ship_stations: empty_ship_stations(), ship_config: ShipClientConfig::default() };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg.clone());
         match msg {

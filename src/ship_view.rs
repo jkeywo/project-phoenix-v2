@@ -195,7 +195,7 @@ fn update_console_hull_bar(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{RadarStateSnapshot, SimSnapshot};
+    use crate::messages::{RadarStateSnapshot, ShipClientConfig, SimSnapshot};
 
     fn base_snapshot() -> SimSnapshot {
         SimSnapshot {
@@ -243,6 +243,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert!(!view.red_alert);
         assert_eq!(view.ship_x, 0.0);

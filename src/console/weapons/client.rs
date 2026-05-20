@@ -702,7 +702,7 @@ fn draw_weapons_radar(
 mod tests {
     use super::*;
     use crate::client_lobby::{ActiveConsole, LobbyState};
-    use crate::messages::{GamePhase, Console, GameState, Player, ServerMessage};
+    use crate::messages::{GamePhase, Console, GameState, Player, ServerMessage, ShipClientConfig};
     use crate::stations_config::ShipStations;
     use std::collections::HashMap;
 
@@ -715,7 +715,7 @@ mod tests {
     }
 
     fn welcome(state: GameState) -> ServerMessage {
-        ServerMessage::Welcome { state, ship_stations: ShipStations::default() }
+        ServerMessage::Welcome { state, ship_stations: ShipStations::default(), ship_config: ShipClientConfig::default() }
     }
 
     fn in_progress_tactical_lobby(token: &str) -> LobbyState {

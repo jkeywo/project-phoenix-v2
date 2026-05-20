@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::messages::{
-    ClientMessage, Console, GamePhase, GameState, ServerMessage, WorldData,
+    ClientMessage, Console, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
 use crate::session::SessionManager;
 use crate::stations_config::{all_stations_filled, get_station, ShipStations, StationAssignments};
@@ -39,6 +39,7 @@ pub fn process_message(
     phase: GamePhase,
     world: Option<&WorldData>,
     ship_stations: &ShipStations,
+    ship_config: &ShipClientConfig,
 ) -> LobbyHandlerResult {
     let mut outbound = Vec::new();
     let mut new_phase = None;
@@ -60,7 +61,7 @@ pub fn process_message(
                 // Send Welcome and PlayerJoined
                 let player = sessions.players().iter().find(|p| p.token == *id_token).cloned().unwrap();
                 let state = derive_game_state(sessions, &phase, world);
-                outbound.push((Target::Token(id_token.clone()), ServerMessage::Welcome { state, ship_stations: ship_stations.clone() }));
+                outbound.push((Target::Token(id_token.clone()), ServerMessage::Welcome { state, ship_stations: ship_stations.clone(), ship_config: ship_config.clone() }));
                 outbound.push((Target::AllExcept(id_token.clone()), ServerMessage::PlayerJoined { player }));
 
                 // Lobby-safe station advance on join: existing assigned players
@@ -449,9 +450,10 @@ mod tests {
     }
 
     fn default_stations() -> ShipStations { ShipStations::default() }
+    fn default_ship_config() -> ShipClientConfig { ShipClientConfig::default() }
 
     fn pm(token: &str, msg: &ClientMessage, sessions: &mut SessionManager, phase: GamePhase, world: Option<&WorldData>) -> LobbyHandlerResult {
-        process_message(token, msg, sessions, phase, world, &default_stations())
+        process_message(token, msg, sessions, phase, world, &default_stations(), &default_ship_config())
     }
 
     // ── process_disconnect ────────────────────────────────────────────────
@@ -563,7 +565,7 @@ mod tests {
     }
 
     fn pm_stations(token: &str, msg: &ClientMessage, sessions: &mut SessionManager, phase: GamePhase, world: Option<&WorldData>) -> LobbyHandlerResult {
-        process_message(token, msg, sessions, phase, world, &ship_stations())
+        process_message(token, msg, sessions, phase, world, &ship_stations(), &default_ship_config())
     }
 
     // ── process_message: SelectStation / ReleaseStation ───────────────────
@@ -768,7 +770,7 @@ mod tests {
         let mut sessions = sessions_at_max(&stations);
         // 7th player identifies — max_players (6) already have stations
         let msg = ClientMessage::Identify { token: "t7".into(), name: "Grace".into() };
-        let result = process_message("t7", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
+        let result = process_message("t7", &msg, &mut sessions, GamePhase::Lobby, None, &stations, &default_ship_config());
         assert!(
             sessions.spectator_queue().contains(&"t7".to_string()),
             "t7 should be in the spectator queue"
@@ -785,7 +787,7 @@ mod tests {
     fn release_station_pushes_token_to_spectator_queue() {
         let stations = ship_stations();
         let mut sessions = sessions_at_max(&stations);
-        process_message("t1", &ClientMessage::ReleaseStation, &mut sessions, GamePhase::Lobby, None, &stations);
+        process_message("t1", &ClientMessage::ReleaseStation, &mut sessions, GamePhase::Lobby, None, &stations, &default_ship_config());
         assert!(
             sessions.spectator_queue().contains(&"t1".to_string()),
             "releaser should be pushed to spectator queue"
@@ -799,7 +801,7 @@ mod tests {
         // t1 disconnects (their station becomes free) then reconnects
         sessions.disconnect("t1");
         let msg = ClientMessage::Identify { token: "t1".into(), name: "Alice".into() };
-        let _result = process_message("t1", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
+        let _result = process_message("t1", &msg, &mut sessions, GamePhase::Lobby, None, &stations, &default_ship_config());
         // Reconnect must NOT auto-assign the old station
         assert!(
             sessions.players().iter().find(|p| p.token == "t1").map(|p| p.consoles.is_empty()).unwrap_or(false),
@@ -938,7 +940,7 @@ mod tests {
         // t1 identifies fresh (no prior players).
         let mut sessions = SessionManager::new();
         let msg = ClientMessage::Identify { token: "t1".into(), name: "Alice".into() };
-        let result = process_message("t1", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
+        let result = process_message("t1", &msg, &mut sessions, GamePhase::Lobby, None, &stations, &default_ship_config());
         // t1 must have no consoles — no auto-assignment.
         let consoles = sessions.players().iter()
             .find(|p| p.token == "t1")
@@ -966,7 +968,7 @@ mod tests {
 
         // t2 joins.
         let msg = ClientMessage::Identify { token: "t2".into(), name: "Bob".into() };
-        let result = process_message("t2", &msg, &mut sessions, GamePhase::Lobby, None, &stations);
+        let result = process_message("t2", &msg, &mut sessions, GamePhase::Lobby, None, &stations, &default_ship_config());
 
         // t1 should be moved to Helm (next of Captain at 2P).
         let t1_consoles = sessions.players().iter()
@@ -1047,6 +1049,7 @@ tags = ["player"]
             GamePhase::Lobby,
             None,
             &stations,
+            &default_ship_config(),
         );
 
         // Session state: t1 must have no consoles (rollback).

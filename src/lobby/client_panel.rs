@@ -6,7 +6,7 @@
 //! Bevy-free so they can be unit-tested on native and reused by the
 //! WASM client UI layer.
 
-use crate::messages::{ClientMessage, Console, GamePhase, GameState, Player, ServerMessage};
+use crate::messages::{ClientMessage, Console, GamePhase, GameState, Player, ServerMessage, ShipClientConfig};
 use crate::stations_config::ShipStations;
 use bevy::prelude::Resource;
 use std::collections::HashMap;
@@ -22,6 +22,9 @@ pub struct LobbyState {
     pub players: Vec<Player>,
     /// Station configuration received from the server on `Welcome`.
     pub ship_stations: ShipStations,
+    /// Per-ship static config (e.g. helm radar range) received on `Welcome`.
+    /// Used by UI widgets that need to know ship-specific tuning values.
+    pub ship_config: ShipClientConfig,
     /// Current per-console complexity preset selection.
     pub complexity: HashMap<Console, String>,
     /// Reason string for game over, if the game has ended.
@@ -38,6 +41,7 @@ impl Default for LobbyState {
             phase: GamePhase::Lobby,
             players: Vec::new(),
             ship_stations: ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
             complexity: HashMap::new(),
             game_over_reason: None,
             scenario_title: String::new(),
@@ -49,10 +53,11 @@ impl Default for LobbyState {
 impl LobbyState {
     /// Replace the entire lobby state — used on `Welcome`, which is the
     /// authoritative initial sync.
-    pub fn replace_from(&mut self, state: GameState, ship_stations: ShipStations) {
+    pub fn replace_from(&mut self, state: GameState, ship_stations: ShipStations, ship_config: ShipClientConfig) {
         self.phase = state.phase;
         self.players = state.players;
         self.ship_stations = ship_stations;
+        self.ship_config = ship_config;
         self.complexity = state.complexity;
         self.scenario_title = state.world.as_ref().map(|w| w.scenario_title.clone()).unwrap_or_default();
         self.scenario_body = state.world.as_ref().map(|w| w.scenario_description.clone()).unwrap_or_default();
@@ -62,8 +67,8 @@ impl LobbyState {
     /// the lobby (e.g. `SimState`, `WorldSetup`) are ignored.
     pub fn apply(&mut self, msg: &ServerMessage) {
         match msg {
-            ServerMessage::Welcome { state, ship_stations } => {
-                self.replace_from(state.clone(), ship_stations.clone());
+            ServerMessage::Welcome { state, ship_stations, ship_config } => {
+                self.replace_from(state.clone(), ship_stations.clone(), ship_config.clone());
             }
             ServerMessage::PlayerJoined { player } => {
                 if let Some(existing) = self.players.iter_mut().find(|p| p.token == player.token) {
@@ -485,6 +490,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert_eq!(s.players.len(), 1);
         assert_eq!(s.players[0].name, "Alice");
@@ -815,6 +821,7 @@ consoles = ["Tactical"]
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: stations.clone(),
+            ship_config: ShipClientConfig::default(),
         });
         assert_eq!(s.ship_stations, stations);
     }

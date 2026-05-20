@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::lobby_handler;
 pub use crate::lobby_handler::Target;
-use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage, WorldData};
+use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData};
 use crate::session::SessionManager;
 use crate::stations_config::ShipStations;
 
@@ -22,6 +22,11 @@ pub struct LobbyOutbox(pub Vec<(Target, ServerMessage)>);
 
 #[derive(Resource)]
 pub struct Sessions(pub SessionManager);
+
+/// Bevy resource wrapping the per-ship client config sent in `Welcome`.
+/// Populated from the loaded ship TOML by `update_session_with_config`.
+#[derive(Resource, Default)]
+pub struct ShipClientConfigResource(pub ShipClientConfig);
 
 /// Server's authoritative copy of the world layout — populated once during
 /// world setup and broadcast to clients via `WorldSetup` after `StartGame`,
@@ -70,6 +75,7 @@ impl Plugin for LobbyPlugin {
         app.insert_resource(Sessions(SessionManager::new()))
             .insert_resource(initial_cache)
             .insert_resource(LobbyOutbox::default())
+            .insert_resource(ShipClientConfigResource::default())
             .init_state::<GamePhase>()
             .add_message::<InboundMessage>()
             .add_message::<OutboundMessage>()
@@ -82,12 +88,27 @@ impl Plugin for LobbyPlugin {
 /// Update the Sessions resource with available consoles from the ship's EntityConfig.
 fn update_session_with_config(
     mut sessions: ResMut<Sessions>,
+    mut ship_client_config: ResMut<ShipClientConfigResource>,
 ) {
     // Get the config cache from thread-local storage
     if let Some(ship_config) = crate::config_cache::get_config_cache()
         .get("assets/entities/player_ship.toml")
     {
         sessions.0 = SessionManager::new_with_config(ship_config);
+
+        // Build the client-facing ship config from the same source-of-truth.
+        // `HelmConsoleConfig::effective_radar_range()` prefers the structured
+        // [helm_console.radar] range when present, falling back to the legacy
+        // flat radar_range field, then to the Default.
+        if let Some(hc) = &ship_config.helm_console {
+            let range = hc.effective_radar_range();
+            let range = if range > 0.0 {
+                range
+            } else {
+                ShipClientConfig::default().helm_radar_range
+            };
+            ship_client_config.0 = ShipClientConfig { helm_radar_range: range };
+        }
     }
 }
 
@@ -114,6 +135,7 @@ pub fn process_lobby(
     mut outbox: ResMut<LobbyOutbox>,
     world: Option<Res<WorldResource>>,
     ship_stations: Option<Res<ShipStations>>,
+    ship_client_config: Res<ShipClientConfigResource>,
 ) {
     // Only consume inbound messages during the Lobby phase.  In InProgress the
     // simulation systems own the message queue; draining here would silently
@@ -132,6 +154,7 @@ pub fn process_lobby(
             state.get().clone(),
             world_data,
             stations,
+            &ship_client_config.0,
         );
         apply_result(result, &mut outbox, &mut next_state);
     }

@@ -597,7 +597,7 @@ pub fn set_phaser_frequency_message(frequency: f32) -> ClientMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{Console, ConsoleHullStatus, EntitySnapshot, GamePhase, GameState, Player, RadarStateSnapshot, SimSnapshot, WorldData};
+    use crate::messages::{Console, ConsoleHullStatus, EntitySnapshot, GamePhase, GameState, Player, RadarStateSnapshot, ShipClientConfig, SimSnapshot, WorldData};
 
     #[test]
     fn default_sim_state_has_empty_world() {
@@ -635,6 +635,7 @@ mod tests {
                 world: Some(world.clone()),
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         // Console-specific state must reset to defaults.
         assert_eq!(s.world, world, "world from Welcome must be retained");
@@ -655,6 +656,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert_eq!(s, ClientSimState::default());
     }
@@ -720,6 +722,7 @@ mod tests {
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert!(s.science_target_suggestion.is_none());
     }
@@ -755,6 +758,7 @@ mod tests {
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert!(s.sensors_target_suggestion.is_none());
     }
@@ -932,6 +936,7 @@ mod tests {
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert!(s.shield_facings.is_empty());
     }
@@ -1644,6 +1649,7 @@ mod tests {
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert!(
             s.modifier_bonus(&ModifierSource::ImpulseDrive, &ModifierSlot::MaxSpeed).is_none(),
@@ -1688,6 +1694,7 @@ mod tests {
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert_eq!(s.power_state_payload, None, "power_state_payload cleared on Welcome");
     }
@@ -1732,6 +1739,7 @@ mod tests {
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert!(s.repair_teams.is_empty(), "Welcome should reset repair_teams to empty");
     }
@@ -1825,6 +1833,7 @@ mod tests {
         s.apply(&ServerMessage::Welcome {
             state: GameState { phase: GamePhase::Lobby, players: vec![], complexity: HashMap::new(), world: None },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert!(s.console_hull.is_empty(), "Welcome should reset console_hull to empty");
     }
@@ -1999,6 +2008,7 @@ mod tests {
                 world: Some(world_with_runtime.clone()),
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         // After Welcome, if the same entity is spawned again via EntitySpawned,
         // it must not duplicate.
@@ -2028,6 +2038,7 @@ mod tests {
                 world: Some(world_with_runtime),
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert_eq!(s.world.entities.len(), 1);
 
@@ -2125,6 +2136,7 @@ mod tests {
                 world: None,
             },
             ship_stations: crate::stations_config::ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
         });
         assert_eq!(s.frequency_hint, None, "frequency_hint must be cleared on Welcome");
     }

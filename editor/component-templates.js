@@ -13,7 +13,7 @@
  *   getRawSectionDefaults(sectionKey) — default data object for a raw section
  */
 
-import { COMPONENT_SCHEMA } from './component-schema.js';
+import { COMPONENT_SCHEMA, ENTITY_CONFIG_SECTIONS } from './component-schema.js';
 
 // ── Raw section defaults ──────────────────────────────────────────────────────
 
@@ -276,4 +276,25 @@ export function getComboTemplate(name) {
  */
 export function getAllComboNames() {
   return Object.keys(COMBO_TEMPLATES);
+}
+
+/**
+ * Return a composed picker data model for the two-tier component picker UI.
+ *
+ * The top tier contains combo entries (grouped archetypes); the second tier
+ * contains raw section entries drawn from ENTITY_CONFIG_SECTIONS.
+ *
+ * @returns {{
+ *   combos: Array<{ name: string, label: string }>,
+ *   rawSections: Array<{ key: string, label: string }>
+ * }}
+ */
+export function getPickerModel() {
+  return {
+    combos: getAllComboNames().map(name => ({ name, label: name })),
+    rawSections: ENTITY_CONFIG_SECTIONS.map(key => ({
+      key,
+      label: COMPONENT_SCHEMA[key]?.label ?? key
+    }))
+  };
 }

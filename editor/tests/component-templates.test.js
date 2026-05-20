@@ -5,8 +5,9 @@ import {
   getComboTemplate,
   getAllComboNames,
   getRawSectionDefaults,
+  getPickerModel,
 } from '../component-templates.js';
-import { COMPONENT_SCHEMA } from '../component-schema.js';
+import { COMPONENT_SCHEMA, ENTITY_CONFIG_SECTIONS } from '../component-schema.js';
 import { parseEntityToml, stringifyEntityToml } from '../entity-toml.js';
 import { EntityModeShell } from '../entity-mode.js';
 
@@ -357,5 +358,59 @@ describe('EntityModeShell.addCombo', () => {
     expect(result.warnings.length).toBe(3);
     // Only helm_console and radar_appearance should be new
     expect(shell.getComponentCards().length).toBe(before + 2);
+  });
+});
+
+// ── getPickerModel ────────────────────────────────────────────────────────────
+
+describe('getPickerModel', () => {
+  it('returns an object with combos and rawSections arrays', () => {
+    const model = getPickerModel();
+    expect(model).toHaveProperty('combos');
+    expect(model).toHaveProperty('rawSections');
+    expect(Array.isArray(model.combos)).toBe(true);
+    expect(Array.isArray(model.rawSections)).toBe(true);
+  });
+
+  it('combos has exactly 8 entries (one per combo name)', () => {
+    const model = getPickerModel();
+    expect(model.combos).toHaveLength(8);
+  });
+
+  it('rawSections has one entry per section in ENTITY_CONFIG_SECTIONS', () => {
+    const model = getPickerModel();
+    expect(model.rawSections).toHaveLength(ENTITY_CONFIG_SECTIONS.length);
+  });
+
+  it('each combo entry has name and label', () => {
+    const model = getPickerModel();
+    for (const combo of model.combos) {
+      expect(combo).toHaveProperty('name');
+      expect(combo).toHaveProperty('label');
+      expect(typeof combo.name).toBe('string');
+      expect(typeof combo.label).toBe('string');
+    }
+  });
+
+  it('each rawSection entry has key and label', () => {
+    const model = getPickerModel();
+    for (const section of model.rawSections) {
+      expect(section).toHaveProperty('key');
+      expect(section).toHaveProperty('label');
+      expect(typeof section.key).toBe('string');
+      expect(typeof section.label).toBe('string');
+    }
+  });
+
+  it('combo names match getAllComboNames()', () => {
+    const model = getPickerModel();
+    const names = model.combos.map(c => c.name);
+    expect(names).toEqual(getAllComboNames());
+  });
+
+  it('rawSection keys match ENTITY_CONFIG_SECTIONS', () => {
+    const model = getPickerModel();
+    const keys = model.rawSections.map(s => s.key);
+    expect(keys).toEqual(ENTITY_CONFIG_SECTIONS);
   });
 });

@@ -28,7 +28,11 @@ struct RedAlertVignetteMaterial {
     _pad1: f32,
 };
 
-@group(0) @binding(0)
+// UiMaterial: group(0) is reserved for the view/globals uniforms; custom
+// material bindings live at group(1).  Misplacing this at group(0) made
+// the uniform read garbage (interpreted view uniform bytes as intensity),
+// which is why the vignette appeared to never render.
+@group(1) @binding(0)
 var<uniform> material: RedAlertVignetteMaterial;
 
 // Anti-aliased step from `edge0` to `edge1`. `value` outside the range
@@ -40,24 +44,25 @@ fn smooth_band(edge0: f32, edge1: f32, value: f32) -> f32 {
 
 @fragment
 fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
-    // Centre-relative coordinates in [-1, 1]. Treating x and y on the
-    // same axis (no aspect divide) gives an elliptical glow that hugs
-    // the screen edges, matching the original `radial-gradient(ellipse...)`.
+    // Centre-relative coordinates in [-1, 1].
     let p = in.uv * 2.0 - vec2<f32>(1.0, 1.0);
-    let r = length(p);
 
-    // Inset distance from the nearest screen edge: 0 at the very edge,
-    // grows toward the centre. We work with this so both falloffs are
-    // edge-anchored regardless of viewport size.
-    let inset = 1.0 - clamp(r, 0.0, 1.0);
+    // Inset distance from the nearest screen edge, using a Chebyshev
+    // metric (min of horizontal + vertical distance-to-edge). This
+    // gives a uniform rectangular border glow — equal thickness on all
+    // four edges — instead of the elliptical glow that `length(p)`
+    // produces (which hugs corners and leaves mid-edges weaker).
+    let edge_dist = min(1.0 - abs(p.x), 1.0 - abs(p.y));
+    let inset = clamp(edge_dist, 0.0, 1.0);
 
-    // Outer falloff — soft red glow leaking inward roughly the inner
-    // 35% of the radial range (matches the 65%→100% gradient stops).
-    let outer = (1.0 - smooth_band(0.0, 0.35, inset)) * 0.55;
+    // Outer falloff — soft red glow leaking inward through ~40% of the
+    // radial range. Tuned so the gradient is clearly visible inside the
+    // bezel border on the viewscreen without dominating the centre.
+    let outer = (1.0 - smooth_band(0.0, 0.18, inset)) * 0.55;
 
-    // Inner core — narrow, brighter ring just inside the edge (matches
-    // the inset box-shadow's tight 60px spread). Lives in the inner ~8%.
-    let core = (1.0 - smooth_band(0.0, 0.08, inset)) * 0.85;
+    // Inner core — narrower, brighter ring just inside the edge.  Lives
+    // in the inner ~12% so the bright band shows past the bezel sprites.
+    let core = (1.0 - smooth_band(0.0, 0.04, inset)) * 0.85;
 
     // Flash white overlay — additive on top of the vignette.
     // Driven by `material.flash_intensity` (set by the shield-hit
@@ -68,5 +73,9 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     let total_alpha = clamp(vignette_alpha + flash_alpha, 0.0, 1.0);
     let white_contribution = flash_alpha / max(total_alpha, 0.001);
     let colour = mix(vec3<f32>(1.0, 0.12, 0.12), vec3<f32>(1.0), white_contribution);
-    return vec4<f32>(colour * total_alpha, total_alpha);
+    // Straight alpha (NOT premultiplied) — Bevy UI's default blend pipeline
+    // multiplies rgb by alpha during the blend, so returning premultiplied
+    // here causes a double-multiply (rgb * a * a) which made the vignette
+    // almost invisible in practice.
+    return vec4<f32>(colour, total_alpha);
 }

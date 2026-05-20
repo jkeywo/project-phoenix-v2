@@ -1,14 +1,16 @@
-//! Phone bezel frame — corners, edges, vignette, status banner and orientation.
+//! Phone bezel frame — corners, edges, status banner and orientation.
 //!
-//! This module owns the phone bezel frame that wraps console panels.  It mirrors
-//! the server-side `ViewscreenBorderPlugin` but for the client WASM app (phone
-//! HTML). The bezel is always visible (both Lobby and InProgress).
+//! This module owns the phone bezel frame that wraps console panels.  It
+//! is a slimmer cousin of the server-side `ViewscreenBorderPlugin`: the
+//! phone gets the 9-slice frame and red-alert texture swap, but NOT the
+//! fullscreen radial vignette (that overlay only makes sense on the
+//! viewscreen).  The bezel is always visible (both Lobby and InProgress).
 //!
-//! The 9-slice border itself is now built by `GuiBorderWidget::spawn` from the
-//! `gui` library; this module handles phone-specific wiring:
+//! The 9-slice border itself is now built by `GuiBorderWidget::spawn` from
+//! the `gui` library; this module handles phone-specific wiring:
 //!
 //! - Populating `BorderAssets` with the phone bezel textures
-//! - Spawning the `GuiBorderWidget` + `GuiVignetteWidget` at startup
+//! - Spawning the `GuiBorderWidget` at startup
 //! - Driving the shared `RedAlertIntensity` resource (pulse math)
 //! - Showing/hiding the "RED ALERT" status banner
 //! - Reparenting console panels into the safe content area
@@ -18,8 +20,8 @@ use bevy::prelude::*;
 
 use crate::gui::{
     BorderAssets, BorderConfig, BorderContentArea,
-    GuiBorderWidget, GuiVignetteWidget,
-    RedAlertIntensity, RedAlertVignetteMaterial, VignetteMaterialHandle,
+    GuiBorderWidget,
+    RedAlertIntensity,
 };
 use crate::ship_view::ShipView;
 
@@ -107,11 +109,15 @@ struct AlertBannerText;
 
 // ── Plugin ───────────────────────────────────────────────────────────
 
-/// Loads phone bezel assets, borders, and spawns the bezel frame + vignette.
-/// The bezel is always visible in both lobby and in-progress phases.
+/// Loads phone bezel assets, borders, and spawns the bezel frame at
+/// startup.  The bezel is always visible in both lobby and in-progress
+/// phases.
 ///
-/// The `RedAlertVignetteMaterial` UiMaterial is registered by `GuiVignettePlugin`
-/// (added via `GuiPlugin`); this plugin only wires the phone-specific inputs.
+/// Unlike the viewscreen, this plugin deliberately does NOT spawn a
+/// fullscreen `RedAlertVignetteMaterial` overlay — the phone is a control
+/// surface and a screen-filling red gradient there only adds noise.  The
+/// shared `RedAlertIntensity` resource is still driven so that the border
+/// texture swap continues to work.
 pub struct PhoneBorderPlugin;
 
 impl Plugin for PhoneBorderPlugin {
@@ -217,25 +223,26 @@ fn detect_orientation(
     }
 }
 
-/// Spawn the bezel frame at app startup using `GuiBorderWidget` and
-/// `GuiVignetteWidget`. Also spawns the "RED ALERT" status banner.
+/// Spawn the bezel frame at app startup using `GuiBorderWidget`. Also
+/// spawns the "RED ALERT" status banner.
+///
+/// The radial vignette overlay deliberately lives ONLY on the server
+/// viewscreen (`ViewscreenBorderPlugin`).  The phone client is meant to be
+/// a control surface, not a viewport into space, so a fullscreen red
+/// gradient there only adds visual noise without conveying useful state.
 fn spawn_bezel_on_startup(
     mut commands: Commands,
     border_assets: Res<BorderAssets>,
     phone_assets: Res<PhoneAssets>,
-    mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
 ) {
-    // Create the vignette material instance
-    let vignette = materials.add(RedAlertVignetteMaterial::new(0.0));
-    commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
-
-    // Spawn the vignette overlay first (behind the border)
-    GuiVignetteWidget::spawn(&mut commands, vignette);
-
-    // Spawn the 9-slice border via the gui library widget (on top of vignette)
+    // Spawn the 9-slice border via the gui library widget.
     GuiBorderWidget::spawn(&mut commands, &border_assets, &BorderConfig::default(), false);
 
-    // Spawn the "RED ALERT" banner (phone-specific, not part of generic border)
+    // Spawn the "RED ALERT" banner (phone-specific, not part of generic border).
+    //
+    // Positioned BELOW the tab bar so it doesn't overlap the console
+    // selection tabs.  Bezel top inset is 40px (corner_size); tab bar
+    // adds another ~36px height.  Banner sits just below at ~84px.
     commands.spawn((
         AlertBannerText,
         Text::new("RED ALERT"),
@@ -247,7 +254,7 @@ fn spawn_bezel_on_startup(
         TextColor(Color::srgb(1.0, 0.2, 0.2)),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(44.0),
+            top: Val::Px(84.0),
             left: Val::Percent(50.0),
             margin: UiRect { left: Val::Px(-60.0), ..default() },
             ..default()

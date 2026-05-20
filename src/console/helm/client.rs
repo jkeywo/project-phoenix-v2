@@ -389,7 +389,7 @@ fn spawn_phone_helm_ui(
         assets.helm_panel_bg.clone(),
         is_landscape,
         |commands: &mut Commands, primary: Entity| {
-            fill_helm_radar(commands, primary, &assets);
+            fill_helm_radar(commands, primary, &assets, is_landscape);
         },
         |commands: &mut Commands, secondary: Entity| {
             fill_helm_joystick(commands, secondary, &assets);
@@ -403,7 +403,12 @@ fn spawn_phone_helm_ui(
 
 // ── Fill helpers ─────────────────────────────────────────────────────
 
-fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAssets) {
+fn fill_helm_radar(
+    commands: &mut Commands,
+    container: Entity,
+    assets: &PhoneAssets,
+    is_landscape: bool,
+) {
     let dim = Color::srgb(0.55, 0.70, 1.0);
     let readout_visuals =
         || StateVisuals::from_colors(dim, dim, dim, dim, Color::srgb(0.3, 0.4, 0.6));
@@ -452,6 +457,26 @@ fn fill_helm_radar(commands: &mut Commands, container: Entity, assets: &PhoneAss
         Some(assets.radar_surround.clone()),
         Some(assets.radar_bg.clone()),
     );
+    // Override the default Val::Percent(100.0)-width sizing from
+    // GenericRadar::spawn so the radar squares-fit the parent slot:
+    //   landscape → constrain by height (parent is wider than tall)
+    //   portrait  → constrain by width  (parent is taller than wide)
+    // aspect_ratio: 1.0 derives the other axis from the constrained one.
+    commands.entity(radar).insert(Node {
+        width: if is_landscape {
+            Val::Auto
+        } else {
+            Val::Percent(100.0)
+        },
+        height: if is_landscape {
+            Val::Percent(100.0)
+        } else {
+            Val::Auto
+        },
+        aspect_ratio: Some(1.0),
+        position_type: PositionType::Relative,
+        ..default()
+    });
     commands.entity(col).add_child(radar);
 
     // HDG readout

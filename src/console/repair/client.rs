@@ -266,9 +266,13 @@ fn refresh_repair_panel(
         **text = format!("Hull: {:.0}/{}", total_current, total_max as u32);
     }
 
-    // Despawn all existing team rows (handles count changes cleanly)
+    // Despawn all existing team rows (handles count changes cleanly).
+    // `.despawn()` removes the row entity AND its descendants recursively.
+    // (A previous fix used `despawn_related::<Children>()` here, which only
+    // detaches the children — leaving the empty row Node behind every refresh
+    // and accumulating thin coloured bars across the panel.)
     for entity in existing_rows.iter() {
-        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).despawn();
     }
 
     // Respawn team rows from current repair teams

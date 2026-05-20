@@ -282,10 +282,11 @@ fn reparent_panels_into_bezel(
     shields: Query<Entity, With<crate::shields_panel::ShieldsPanel>>,
     navigation: Query<Entity, With<crate::navigation_panel::NavigationPanel>>,
     weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
+    hull_bar: Query<Entity, With<crate::ship_view::ConsoleHullBarBg>>,
     parents: Query<&ChildOf>,
 ) {
     let Ok(target) = content_area.single() else { return };
-    for entity in lobby.iter().chain(captain.iter()).chain(helm.iter()).chain(sensors.iter()).chain(shields.iter()).chain(navigation.iter()).chain(weapons.iter()) {
+    for entity in lobby.iter().chain(captain.iter()).chain(helm.iter()).chain(sensors.iter()).chain(shields.iter()).chain(navigation.iter()).chain(weapons.iter()).chain(hull_bar.iter()) {
         // Skip if already a direct child of the content area.
         if parents.get(entity).map(|p| p.parent() == target).unwrap_or(false) {
             continue;

@@ -119,9 +119,13 @@ fn apply_ship_view_messages(
 // ── Console hull bar overlay ──────────────────────────────────────────────────
 
 /// Marks the background container of the per-console hull bar.
+///
+/// `pub(crate)` so that `client::phone_border::framing` can reparent the
+/// bar into the bezel's `BorderContentArea`, anchoring it just above the
+/// bottom border edge instead of floating over the raw viewport.
 #[cfg(feature = "client")]
 #[derive(Component)]
-struct ConsoleHullBarBg;
+pub(crate) struct ConsoleHullBarBg;
 
 /// Marks the fill node of the per-console hull bar.
 #[cfg(feature = "client")]
@@ -149,9 +153,12 @@ const HULL_BAR_WIDTH: f32 = 220.0;
 #[cfg(feature = "client")]
 const HULL_BAR_HEIGHT: f32 = 18.0;
 
-/// Distance from the bottom edge of the viewport.
+/// Distance from the bottom edge of the bezel `BorderContentArea`.
+/// The reparenting system in `client::phone_border::framing` slots this
+/// bar inside the bezel safe zone, so this value is measured from the
+/// top of the bezel's bottom border rather than from the raw viewport.
 #[cfg(feature = "client")]
-const HULL_BAR_BOTTOM: f32 = 12.0;
+const HULL_BAR_BOTTOM: f32 = 6.0;
 
 #[cfg(feature = "client")]
 fn spawn_console_hull_bar(mut commands: Commands) {

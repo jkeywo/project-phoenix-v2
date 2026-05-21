@@ -421,9 +421,9 @@ fn toggle_repair_panel_visibility(
 fn refresh_repair_panel(
     sim: Res<ClientSimState>,
     lobby: Res<LobbyState>,
-    mut hull_readout: Query<&mut ReadoutValue, With<RepairHullReadout>>,
+    mut hull_readout: Query<&mut ReadoutValue, (With<RepairHullReadout>, Without<RepairTeamStatusReadout>)>,
     mut team_bars: Query<(Entity, &mut ProgressValue, &mut StateVisuals, &RepairTeamBar)>,
-    mut team_statuses: Query<(&mut ReadoutValue, &RepairTeamStatusReadout)>,
+    mut team_statuses: Query<(&mut ReadoutValue, &RepairTeamStatusReadout), Without<RepairHullReadout>>,
     mut dispatch_buttons: Query<(&mut WidgetState, &DispatchButton)>,
 ) {
     if !sim.is_changed() && !lobby.is_changed() {

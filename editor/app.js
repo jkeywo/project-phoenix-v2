@@ -122,6 +122,17 @@ function renderAll() {
     onSelectEntity: (name) => {
       canvasManager.selectByEntityName(name);
     },
+    onSelectTrigger: (triggerIndex) => {
+      const layer = layerManager.getActiveLayer();
+      if (!layer) return;
+      propertiesPanel.render({ type: 'trigger', triggerIndex, layer });
+    },
+    onSelectComms: (commsIndex) => {
+      const layer = layerManager.getActiveLayer();
+      if (!layer) return;
+      // Stub for Slice 4b; renders a placeholder.
+      propertiesPanel.render({ type: 'comms', commsIndex, layer });
+    },
   });
 
   updateUnsavedIndicator();

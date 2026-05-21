@@ -9,6 +9,12 @@
  * preserved across re-renders via module-local Set.  Clicking a named
  * entity (or a trigger/comms row whose `entity` is set) dispatches
  * `onSelectEntity(name)`; otherwise rows are inert.
+ *
+ * Slice 4a addition: trigger rows additionally fire
+ * `onSelectTrigger(triggerIndex)`, and comms rows fire
+ * `onSelectComms(commsIndex)`.  Both callbacks are wired alongside
+ * `onSelectEntity` (no replacement) — the right-hand pane picks which
+ * takes precedence in its selection state.
  */
 
 import { getWorldContentData } from './world-content-panel.js';
@@ -31,14 +37,21 @@ const SECTIONS = [
  * @param {object|null} opts.worldState          Active layer's toml object.
  * @param {object}      opts.crossRefIndex       CrossReferenceIndex instance.
  * @param {string|null} opts.activeLayerPath     Filename of the active layer.
- * @param {(name: string) => void} opts.onSelectEntity
+ * @param {(name: string) => void}    [opts.onSelectEntity]
  *        Called when a clickable row identifies an entity to highlight.
+ * @param {(triggerIndex: number) => void} [opts.onSelectTrigger]
+ *        Called when a trigger row is clicked (Slice 4a). Fires in
+ *        addition to `onSelectEntity` if the trigger has an entity.
+ * @param {(commsIndex: number) => void} [opts.onSelectComms]
+ *        Called when a comms row is clicked (Slice 4a stub for 4b).
  */
 export function renderWorldContentPanel({
   worldState,
   crossRefIndex,
   activeLayerPath,
   onSelectEntity,
+  onSelectTrigger,
+  onSelectComms,
 }) {
   const host = document.getElementById('worldContentList');
   if (!host) return;
@@ -50,14 +63,21 @@ export function renderWorldContentPanel({
 
   const data = getWorldContentData(worldState, crossRefIndex, activeLayerPath);
 
+  // Inject array indices so trigger/comms rows can dispatch index-based
+  // selection callbacks even though the pure data module doesn't track them.
+  (data.triggers || []).forEach((r, i) => { r.triggerIndex = i; });
+  (data.commsTemplates || []).forEach((r, i) => { r.commsIndex = i; });
+
+  const callbacks = { onSelectEntity, onSelectTrigger, onSelectComms };
+
   host.innerHTML = '';
   for (const section of SECTIONS) {
     const rows = data[section.key] || [];
-    host.appendChild(buildSection(section, rows, onSelectEntity));
+    host.appendChild(buildSection(section, rows, callbacks));
   }
 }
 
-function buildSection(section, rows, onSelectEntity) {
+function buildSection(section, rows, callbacks) {
   const wrap = document.createElement('div');
   wrap.className = 'world-content-section';
   if (collapsed.has(section.key)) wrap.classList.add('collapsed');
@@ -72,7 +92,7 @@ function buildSection(section, rows, onSelectEntity) {
       collapsed.add(section.key);
     }
     // Cheap local re-render: regenerate just this section.
-    const fresh = buildSection(section, rows, onSelectEntity);
+    const fresh = buildSection(section, rows, callbacks);
     wrap.replaceWith(fresh);
   });
   wrap.appendChild(header);
@@ -87,7 +107,7 @@ function buildSection(section, rows, onSelectEntity) {
       body.appendChild(empty);
     } else {
       for (const row of rows) {
-        body.appendChild(section.render(row, section.icon, onSelectEntity));
+        body.appendChild(section.render(row, section.icon, callbacks));
       }
     }
     wrap.appendChild(body);
@@ -95,43 +115,62 @@ function buildSection(section, rows, onSelectEntity) {
   return wrap;
 }
 
-function makeRow(icon, label, refCount, targetEntity, onSelectEntity) {
+function makeRow(icon, label, refCount, clickHandler) {
   const row = document.createElement('div');
   row.className = 'world-content-row';
-  if (targetEntity) row.classList.add('clickable');
+  if (clickHandler) row.classList.add('clickable');
   row.innerHTML = `<span class="wc-icon">${icon}</span><span class="wc-label">${escapeHtml(label)}</span>` +
     (refCount != null ? `<span class="wc-refcount">(${refCount})</span>` : '');
-  if (targetEntity && typeof onSelectEntity === 'function') {
-    row.addEventListener('click', () => onSelectEntity(targetEntity));
+  if (clickHandler) {
+    row.addEventListener('click', clickHandler);
   }
   return row;
 }
 
-function renderAnchorRow(row, icon, onSelectEntity) {
+function renderAnchorRow(row, icon, _callbacks) {
   // Anchors are not directly entity-clickable; show the count of spawns
   // anchored to them but no highlight (per audit §4 decision).
-  return makeRow(icon, row.name, row.refCount, null, onSelectEntity);
+  return makeRow(icon, row.name, row.refCount, null);
 }
 
-function renderEntityRow(row, icon, onSelectEntity) {
+function renderEntityRow(row, icon, callbacks) {
   const tail = row.template_path ? ` ← ${shortPath(row.template_path)}` : '';
-  return makeRow(icon, `${row.name}${tail}`, row.refCount, row.name, onSelectEntity);
+  const handler = (typeof callbacks.onSelectEntity === 'function')
+    ? () => callbacks.onSelectEntity(row.name)
+    : null;
+  return makeRow(icon, `${row.name}${tail}`, row.refCount, handler);
 }
 
-function renderTriggerRow(row, icon, onSelectEntity) {
+function renderTriggerRow(row, icon, callbacks) {
   const cond = row.condition || '*';
   const ent  = row.entity ? `:${row.entity}` : '';
-  return makeRow(icon, `${cond}${ent} (×${row.actionCount})`, null, row.entity || null, onSelectEntity);
+  const handler = () => {
+    if (typeof callbacks.onSelectTrigger === 'function') {
+      callbacks.onSelectTrigger(row.triggerIndex);
+    }
+    if (row.entity && typeof callbacks.onSelectEntity === 'function') {
+      callbacks.onSelectEntity(row.entity);
+    }
+  };
+  return makeRow(icon, `${cond}${ent} (×${row.actionCount})`, null, handler);
 }
 
-function renderCommsRow(row, icon, onSelectEntity) {
+function renderCommsRow(row, icon, callbacks) {
   const parts = [row.from, row.trigger].filter(Boolean).join(' / ');
-  return makeRow(icon, parts || '(unnamed)', null, row.entity || null, onSelectEntity);
+  const handler = () => {
+    if (typeof callbacks.onSelectComms === 'function') {
+      callbacks.onSelectComms(row.commsIndex);
+    }
+    if (row.entity && typeof callbacks.onSelectEntity === 'function') {
+      callbacks.onSelectEntity(row.entity);
+    }
+  };
+  return makeRow(icon, parts || '(unnamed)', null, handler);
 }
 
-function renderObjectiveRow(row, icon, onSelectEntity) {
+function renderObjectiveRow(row, icon, _callbacks) {
   const text = row.text ? `: ${row.text}` : '';
-  return makeRow(icon, `${row.id}${text}`, row.refCount, null, onSelectEntity);
+  return makeRow(icon, `${row.id}${text}`, row.refCount, null);
 }
 
 function shortPath(p) {

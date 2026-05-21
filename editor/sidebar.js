@@ -2,6 +2,7 @@ import { getSpawnName, getSpawnPosition, getEntityPath, getRelativeInfo, setSpaw
 import { getSpawnsFromAllLayers } from './toml-utils.js';
 import { snapshotForUndo } from './undo-controller.js';
 import { renderOverridePanel } from './override-view.js';
+import { renderTriggerPanel } from './trigger-view.js';
 
 export class PropertiesPanel {
   constructor(canvasManager, layerManager) {
@@ -12,14 +13,58 @@ export class PropertiesPanel {
     this.currentLayer = null;
   }
 
-  render(spawn, layer) {
-    this.currentSpawn = spawn;
-    this.currentLayer = layer;
+  /**
+   * Render the properties pane for the given selection.
+   *
+   * Accepts either the new discriminated-union form (`render(selection)`)
+   * or the legacy `(spawn, layer)` signature used by Slice 1-3 callers.
+   */
+  render(selectionOrSpawn, layer) {
+    const selection = this._coerceSelection(selectionOrSpawn, layer);
 
-    if (!spawn || !layer) {
+    if (!selection || selection.type === null) {
+      this.currentSpawn = null;
+      this.currentLayer = null;
       this.container.innerHTML = '<p class="placeholder">Select a spawn to edit properties</p>';
       return;
     }
+
+    if (selection.type === 'trigger') {
+      this.currentSpawn = null;
+      this.currentLayer = selection.layer ?? null;
+      this.container.innerHTML = '';
+      renderTriggerPanel(this.container, selection, {
+        allLayers: this.canvasManager.buildV2Layers(),
+        canvasManager: this.canvasManager,
+        layerManager: this.layerManager,
+      });
+      return;
+    }
+
+    if (selection.type === 'comms') {
+      this.currentSpawn = null;
+      this.currentLayer = selection.layer ?? null;
+      this.container.innerHTML = '<p class="placeholder">Comms editor coming in Slice 4b</p>';
+      return;
+    }
+
+    // selection.type === 'spawn' — existing V1 form + override panel.
+    this._renderSpawn(selection.spawn, selection.layer);
+  }
+
+  _coerceSelection(selectionOrSpawn, layer) {
+    if (selectionOrSpawn && typeof selectionOrSpawn === 'object' && 'type' in selectionOrSpawn) {
+      return selectionOrSpawn;
+    }
+    if (!selectionOrSpawn || !layer) {
+      return { type: null };
+    }
+    return { type: 'spawn', spawn: selectionOrSpawn, layer };
+  }
+
+  _renderSpawn(spawn, layer) {
+    this.currentSpawn = spawn;
+    this.currentLayer = layer;
 
     const name = getSpawnName(spawn);
     const entityPath = getEntityPath(spawn);

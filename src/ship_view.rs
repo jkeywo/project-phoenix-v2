@@ -137,11 +137,11 @@ struct ConsoleHullBarFill;
 #[derive(Component)]
 struct ConsoleHullBarText;
 
-#[allow(dead_code)]
+#[cfg(feature = "client")]
 const HULL_BAR_BG: Color = Color::srgba(0.08, 0.08, 0.12, 0.85);
-#[allow(dead_code)]
+#[cfg(feature = "client")]
 const HULL_BAR_FILL: Color = Color::srgb(0.2, 0.75, 0.3);
-#[allow(dead_code)]
+#[cfg(feature = "client")]
 const HULL_BAR_FILL_LOW: Color = Color::srgb(0.85, 0.25, 0.15);
 
 /// Width of the hull bar in logical pixels — wide enough to hold a "999 / 999"

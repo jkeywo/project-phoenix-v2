@@ -259,45 +259,6 @@ mod tests {
         app.update();
     }
 
-    fn start_game_with_helm(app: &mut App) {
-        push(
-            app,
-            "captain",
-            ClientMessage::Identify {
-                token: "captain".into(),
-                name: "Alice".into(),
-            },
-        );
-        tick(app);
-        push(
-            app,
-            "captain",
-            ClientMessage::SelectStation {
-                station: "Captain's Chair".into(),
-            },
-        );
-        tick(app);
-        push(
-            app,
-            "helm",
-            ClientMessage::Identify {
-                token: "helm".into(),
-                name: "Bob".into(),
-            },
-        );
-        tick(app);
-        push(
-            app,
-            "helm",
-            ClientMessage::SelectStation {
-                station: "Helm".into(),
-            },
-        );
-        tick(app);
-        push(app, "captain", ClientMessage::StartGame);
-        tick(app);
-    }
-
     fn start_game_with_helm_and_science(app: &mut App) {
         push(
             app,

@@ -87,10 +87,6 @@ mod tests {
         assert!(!s.red_alert);
     }
 
-    fn near(a: f32, b: f32) -> bool {
-        (a - b).abs() < 1e-6
-    }
-
     fn empty_entity_states() -> Vec<EntityStateSnapshot> { vec![] }
     fn default_radar() -> RadarStateSnapshot { RadarStateSnapshot::default() }
 

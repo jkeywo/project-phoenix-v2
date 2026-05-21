@@ -413,29 +413,6 @@ pub fn sim_outbox_broadcaster() -> SimBroadcaster {
     })
 }
 
-// -- Helper: token validation with AI fallback --------------------------------
-
-/// Returns `true` when `token` is the holder of `console` in the session
-/// manager, OR when `token` is a registered AI token (so AI-generated
-/// messages for that console are not silently discarded once future slices
-/// start injecting `HelmInput` etc.).
-///
-/// Currently used as documentation of the fallback contract; future AI-input
-/// slices will thread this through the individual message handlers.
-#[allow(dead_code)]
-fn is_valid_console_holder(
-    token: &str,
-    console: Console,
-    sessions: &Sessions,
-    ai_registry: &crate::ai_plugin::AiTokenRegistry,
-) -> bool {
-    if sessions.0.console_holder(console) == Some(token) {
-        return true;
-    }
-    // Fallback: token belongs to an AI-controlled entity
-    ai_registry.entity_uuid_for_token(token).is_some()
-}
-
 // -- Systems -------------------------------------------------------------------
 
 fn handle_set_sensors_target(

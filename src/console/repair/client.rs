@@ -85,7 +85,11 @@ pub fn row_data_for_slot_with_timings(
     // Guard against divide-by-zero / negative timings from a misconfigured
     // ship TOML — fall back to the baseline so the UI never produces NaN.
     let travel = if travel_duration_secs > 0.0 { travel_duration_secs } else { TRAVEL_DURATION_SECS };
-    let _repair = if repair_duration_secs > 0.0 { repair_duration_secs } else { REPAIR_DURATION_SECS };
+    // NOTE: `repair_duration_secs` is accepted for symmetry with `travel`, but the
+    // `Repairing` branch currently shows a flat 100% bar (progress is implied by
+    // the per-team status broadcast). Kept as a parameter so callers don't have
+    // to change when we surface per-tick repair progress.
+    let _ = repair_duration_secs;
     match slot {
         TeamSlot::Idle => RowData {
             pct: 0.0,

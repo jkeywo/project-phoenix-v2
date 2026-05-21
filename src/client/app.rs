@@ -60,11 +60,6 @@ pub struct GameOverReasonText;
 #[derive(Component)]
 struct ConsoleListRoot;
 
-/// Marks the container of the player list lines.
-#[derive(Component)]
-#[allow(dead_code)]
-struct PlayerListRoot;
-
 /// Marks the Engage button so we can toggle its visibility per captaincy.
 #[derive(Component)]
 struct EngageButton;

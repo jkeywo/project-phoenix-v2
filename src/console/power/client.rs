@@ -111,10 +111,9 @@ pub fn level_readout_visuals() -> StateVisuals {
 #[derive(Component)]
 pub struct PowerPanel;
 
-/// Marks one power allocation row container, carrying the console it controls.
+/// Marks one power allocation row container.
 #[derive(Component)]
-#[allow(dead_code)]
-struct PowerRow(Console);
+struct PowerRow;
 
 /// Marks the `TextReadout` root for the power level display.
 /// Carries the console it represents for refresh matching.
@@ -273,7 +272,7 @@ fn setup_power_ui(mut commands: Commands) {
 fn spawn_power_row(commands: &mut Commands, console: Console, label: &str) -> Entity {
     let row = commands
         .spawn((
-            PowerRow(console.clone()),
+            PowerRow,
             Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,

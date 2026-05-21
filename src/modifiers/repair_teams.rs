@@ -472,7 +472,6 @@ mod tests {
     #[test]
     fn dispatching_team_0_does_not_affect_team_1() {
         let mut teams = RepairTeams::new(2);
-        let mut hull = hull_damaged(10.0);
         teams.dispatch(0, Console::Helm);
         // team 1 remains Idle
         assert!(matches!(&teams.slots()[1], TeamSlot::Idle));

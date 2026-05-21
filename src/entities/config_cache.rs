@@ -633,14 +633,6 @@ length = 0.0
             }
         }
         
-        fn contains(&self, path: &str) -> bool {
-            self.cache.contains_key(path)
-        }
-        
-        fn get(&self, path: &str) -> Option<&EntityConfig> {
-            self.cache.get(path)
-        }
-        
         fn has_pending(&self) -> bool {
             !self.pending.is_empty()
         }
@@ -655,10 +647,6 @@ length = 0.0
         
         fn mark_in_flight(&mut self, path: String) {
             self.in_flight.insert(path);
-        }
-        
-        fn next_pending(&mut self) -> Option<String> {
-            self.pending.pop_front()
         }
         
         fn all_pending(&self) -> Vec<String> {

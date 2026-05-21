@@ -694,7 +694,7 @@ mod tests {
     use super::*;
     use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
-    use crate::messages::{EntitySnapshot, WorldData, *};
+    use crate::messages::*;
     use crate::modifiers::ShipModifiers;
     use crate::simulation::{ShipHullIntegrity, ShipImpulse, SimOutbox};
 
@@ -1661,7 +1661,6 @@ mod tests {
         // When an NPC's beam_remaining_secs reaches zero, cooldown_remaining must
         // be set to a positive value and beam_active must become false.
         use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
-        use crate::entity_spawner::EntityConsoleHull;
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -1710,7 +1709,7 @@ mod tests {
         // directly in its forward arc and within beam range causes
         // `tick_ai_controllers` to write a `FirePhaser` `InboundMessage`, which
         // `handle_fire_phaser_npc` picks up and sets `EntityPhaserState::beam_active`.
-        use crate::ai_plugin::{AiPlugin, AiControllerComponent, EntityPhaserState};
+        use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
         use crate::entity_spawner::{EntityUuid, EntityConsoleHull, WeaponsConsoleSection};
         use crate::entity_config::{BehaviourConfig, StateConfig};
         use crate::damage::ConsoleHull;

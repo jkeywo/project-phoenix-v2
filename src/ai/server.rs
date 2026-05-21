@@ -771,12 +771,12 @@ mod tests {
 
         // Spawn entity with on_attacked transition and an attacker component.
         let attacker_id = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000099").unwrap();
-        let entity = app.world_mut().spawn((
+        app.world_mut().spawn((
             Transform::from_xyz(0.0, 0.0, 0.0),
             EntityUuid("ent-attacked-001".to_string()),
             BehaviourSection(build_on_attacked_behaviour()),
             AttackerThisTick(attacker_id),
-        )).id();
+        ));
 
         app.update(); // attach controller + first tick
         app.update(); // tick fires transition
@@ -954,30 +954,6 @@ mod tests {
         }
     }
 
-    /// Spawn an NPC entity with EntityConsoleHull at the given HP fraction and return its entity.
-    fn spawn_npc_with_hull(app: &mut App, uuid: &str, current_hp: f32, max_hp: f32) -> Entity {
-        use crate::entity_spawner::EntityConsoleHull;
-        use crate::damage::ConsoleHull;
-        use crate::messages::Console;
-
-        let mut hull = ConsoleHull::from_config(&[(Console::CaptainChair, max_hp)]);
-        if current_hp < max_hp {
-            let damage = max_hp - current_hp;
-            let mut rng = rand::rng();
-            hull.apply_damage(damage, &mut rng);
-        }
-        app.world_mut().spawn((
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            EntityUuid(uuid.to_string()),
-            BehaviourSection(BehaviourConfig {
-                initial_state: "idle".into(),
-                state: vec![],
-                transition: vec![],
-            }),
-            EntityConsoleHull(hull),
-        )).id()
-    }
-
     #[test]
     fn self_hull_fraction_reflects_entity_console_hull() {
         use crate::entity_spawner::EntityConsoleHull;
@@ -1147,7 +1123,7 @@ mod tests {
 
     #[test]
     fn faction_registry_resource_is_present_on_native() {
-        let mut app = build_test_app();
+        let app = build_test_app();
         // The resource must already be present (inserted unconditionally).
         assert!(
             app.world().get_resource::<FactionRegistryResource>().is_some(),

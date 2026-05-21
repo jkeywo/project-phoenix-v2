@@ -97,15 +97,6 @@ mod tests {
         out
     }
 
-    fn start_game(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
-        tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
-        tick(app);
-        push(app, "captain", ClientMessage::StartGame);
-        tick(app);
-    }
-
     fn start_game_with_sensors_and_weapons(app: &mut App) {
         push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
         tick(app);

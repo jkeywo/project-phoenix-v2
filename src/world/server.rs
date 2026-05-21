@@ -326,20 +326,6 @@ fn resolve_position(
     Ok(Vec3::new(pos[0], pos[1], pos[2]))
 }
 
-#[allow(dead_code)]
-fn instance_position(entity_inst: &crate::world::config::WorldEntity) -> Vec3 {
-    if entity_inst.position.len() >= 3 {
-        Vec3::new(
-            entity_inst.position[0],
-            entity_inst.position[1],
-            entity_inst.position[2],
-        )
-    } else {
-        Vec3::ZERO
-    }
-}
-
-
 /// Fallback world setup with hardcoded values for development/testing.
 /// Runs only when no `WorldConfig` resource was loaded (gated by the
 /// `WorldPlugin` `run_if` clause).
@@ -1431,7 +1417,6 @@ mod tests {
     }
 
     fn push_msg(app: &mut App, token: &str, msg: ClientMessage) {
-        use bevy::ecs::system::RunSystemOnce;
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
             .write(InboundMessage { token: token.into(), msg });
@@ -1674,7 +1659,7 @@ mod tests {
         let _ = tick(&mut app);
 
         // Inject an orphaned message directly.
-        let mut orphaned = CommsMessage {
+        let orphaned = CommsMessage {
             id: "orphaned-001".into(),
             sender_uuid: station_uuid.into(),
             sender_name: "Starbase Alpha".into(),

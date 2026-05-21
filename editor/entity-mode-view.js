@@ -34,11 +34,15 @@ import { readFile, listDirectory, getProjectRoot } from './project-root.js';
  * @param {import('./mode-shell.js').ModeShell} opts.modeShell
  * @param {import('./save-flow.js').SaveFlow} opts.saveFlow
  * @param {(mode:string, fn:(modeShell, path, direction)=>void)=>void} opts.registerRestore
+ * @param {object} [opts.invalidationBus]
+ *   Optional InvalidationBus. When supplied, Entity Mode subscribes to
+ *   `onFactionSaved` so the faction dropdown picks up Definitions Mode
+ *   edits (Slice 6 cross-mode coupling).
  * @param {object} [opts.io]  Override I/O for tests: { readFile, listDirectory,
  *                            preload, onCacheInvalidate, getProjectRoot, discover }.
  * @returns {{ shell: EntityModeShell, render: () => void }}
  */
-export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, io }) {
+export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, invalidationBus, io }) {
   if (!host) return null;
 
   const shell = new EntityModeShell();
@@ -230,6 +234,30 @@ export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, io
     });
   }
 
+  // ── Faction invalidation (Slice 6 cross-mode coupling) ────────────────
+  // When Definitions Mode saves a faction file, re-run discovery so the
+  // faction dropdown in component cards reflects the renamed/removed
+  // faction immediately.
+  async function refreshFactionMap() {
+    try {
+      const { factionMap } = await ioDeps.discover({
+        listDirectory: ioDeps.listDirectory,
+        readFile: ioDeps.readFile,
+      });
+      shell.setFactionMap(factionMap);
+      renderCenter();
+    } catch (err) {
+      console.warn('[entity-mode-view] faction refresh failed:', err?.message || err);
+    }
+  }
+
+  let factionSavedSub = null;
+  if (invalidationBus && typeof invalidationBus.onFactionSaved === 'function') {
+    factionSavedSub = invalidationBus.onFactionSaved(() => {
+      refreshFactionMap();
+    });
+  }
+
   // ── Bootstrap ─────────────────────────────────────────────────────────
   (async () => {
     // Initial discovery (factions + complexity).
@@ -273,6 +301,7 @@ export function mountEntityMode({ host, modeShell, saveFlow, registerRestore, io
       refreshFileList,
       handleCardEdit,
       handleAddChoice,
+      refreshFactionMap,
     },
   };
 }

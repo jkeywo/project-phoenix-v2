@@ -10,6 +10,7 @@ import { renderWorldContentPanel } from './world-content-view.js';
 import { renderTriggerableWorldsPanel } from './triggerable-worlds-panel.js';
 import { mountNewWorldButton } from './new-world-dialog.js';
 import { mountEntityMode } from './entity-mode-view.js';
+import { mountDefinitionsMode } from './definitions-mode-view.js';
 import { readFile, writeFile, listDirectory } from './project-root.js';
 
 const layerManager = new LayerManager();
@@ -50,6 +51,20 @@ async function init() {
       modeShell: v2Boot.modeShell,
       saveFlow: v2Boot.saveFlow,
       registerRestore: v2Boot.registerRestore,
+      invalidationBus: v2Boot.invalidationBus,
+    });
+  }
+
+  // Slice 6: mount Definitions Mode two-section shell.
+  const definitionsHost = document.getElementById('definitions-mode-root');
+  if (definitionsHost && v2Boot && v2Boot.modeShell && v2Boot.saveFlow) {
+    mountDefinitionsMode({
+      host: definitionsHost,
+      modeShell: v2Boot.modeShell,
+      saveFlow: v2Boot.saveFlow,
+      registerRestore: v2Boot.registerRestore,
+      invalidationBus: v2Boot.invalidationBus,
+      io: { readFile, listDirectory },
     });
   }
 

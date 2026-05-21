@@ -1,9 +1,21 @@
 import { validateFile } from './validation.js';
 
 export class SaveFlow {
-  constructor(modeShell, stringifyFunctions) {
+  /**
+   * @param {ModeShell} modeShell
+   * @param {{ world: (obj) => string, entity: (obj) => string }} stringifyFunctions
+   * @param {(path: string, content: string) => Promise<void>} [writeFile]
+   *   FSA-backed writer. Defaults to a no-op that resolves immediately so
+   *   pre-Slice-1 callers / older tests that don't supply one keep working.
+   * @param {{ fireEntitySaved?: (path: string) => void,
+   *           fireWorldSaved?: (path: string) => void }} [invalidationBus]
+   *   Notified on successful save. Optional for the same back-compat reason.
+   */
+  constructor(modeShell, stringifyFunctions, writeFile, invalidationBus) {
     this._modeShell = modeShell;
     this._stringifyFunctions = stringifyFunctions;
+    this._writeFile = writeFile || (async () => {});
+    this._invalidationBus = invalidationBus || null;
     this._contentCache = {};
   }
 
@@ -30,7 +42,7 @@ export class SaveFlow {
     return this._contentCache[mode]?.[filePath];
   }
 
-  saveActive(crossRefIndex) {
+  async saveActive(crossRefIndex) {
     const mode = this._modeShell.getCurrentMode();
     const path = this._modeShell.getActiveFile(mode);
 
@@ -38,6 +50,22 @@ export class SaveFlow {
       return { ok: false, errors: ['No active file to save'], warnings: [] };
     }
 
+    return this._saveOne(mode, path);
+  }
+
+  async saveAll(crossRefIndex) {
+    const dirtyFiles = this.getDirtyFiles();
+    const results = [];
+
+    for (const { mode, path } of dirtyFiles) {
+      const result = await this._saveOne(mode, path);
+      results.push({ path, ...result });
+    }
+
+    return results;
+  }
+
+  async _saveOne(mode, path) {
     const parsedContent = this._getParsedContent(mode, path);
     if (!parsedContent) {
       return { ok: false, errors: ['No content available for the active file'], warnings: [] };
@@ -53,37 +81,24 @@ export class SaveFlow {
     const validationResults = validateFile(path, parsedContent);
     const warnings = validationResults.map((r) => r.message);
 
-    this._modeShell.markDirty(mode, path, false);
-
-    return { ok: true, errors: [], warnings };
-  }
-
-  saveAll(crossRefIndex) {
-    const dirtyFiles = this.getDirtyFiles();
-    const results = [];
-
-    for (const { mode, path } of dirtyFiles) {
-      const parsedContent = this._getParsedContent(mode, path);
-      if (!parsedContent) {
-        results.push({ path, ok: false, errors: ['No content available'], warnings: [] });
-        continue;
-      }
-
-      try {
-        this.getContentForFile(mode, path, parsedContent);
-      } catch (e) {
-        results.push({ path, ok: false, errors: [e.message], warnings: [] });
-        continue;
-      }
-
-      const validationResults = validateFile(path, parsedContent);
-      const warnings = validationResults.map((r) => r.message);
-
-      this._modeShell.markDirty(mode, path, false);
-      results.push({ path, ok: true, errors: [], warnings });
+    try {
+      await this._writeFile(path, content);
+    } catch (e) {
+      return { ok: false, errors: [`Write failed: ${e.message}`], warnings };
     }
 
-    return results;
+    this._modeShell.markDirty(mode, path, false);
+    this._modeShell.clearUndoHistory(mode, path);
+
+    if (this._invalidationBus) {
+      if (mode === 'Entity' && typeof this._invalidationBus.fireEntitySaved === 'function') {
+        this._invalidationBus.fireEntitySaved(path);
+      } else if (mode === 'Scenario' && typeof this._invalidationBus.fireWorldSaved === 'function') {
+        this._invalidationBus.fireWorldSaved(path);
+      }
+    }
+
+    return { ok: true, errors: [], warnings };
   }
 
   getDirtyFiles() {

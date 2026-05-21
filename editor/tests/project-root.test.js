@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { isSupported, readFile, writeFile, _setRootHandleForTest } from '../project-root.js';
+import { isSupported, readFile, writeFile, listDirectory, _setRootHandleForTest } from '../project-root.js';
 
 function createMockFileHandle(name, content) {
   return {
@@ -168,9 +168,8 @@ describe('project-root', () => {
           return {
             getFile: async () => ({ text: async () => content }),
             createWritable: async () => {
-              let buffer = files[name];
               return {
-                write: async (data) => { files[name] = data; buffer = data; },
+                write: async (data) => { files[name] = data; },
                 close: async () => {},
               };
             },
@@ -184,6 +183,69 @@ describe('project-root', () => {
       await writeFile('test.toml', toml);
       const result = await readFile('test.toml');
       expect(result).toBe(toml);
+    });
+  });
+
+  describe('listDirectory', () => {
+    it('rejects when no root is selected', async () => {
+      // Either throws "No project root selected" (if loadHandle resolves to
+      // null) or rejects with an indexedDB error (in test env). Both are
+      // "not usable" — what matters is that callers must select a root first.
+      await expect(listDirectory('')).rejects.toBeDefined();
+    });
+
+    it('lists files at the root', async () => {
+      const root = createMockDirectoryHandle({
+        'a.toml': 'a',
+        'b.toml': 'b',
+      });
+      _setRootHandleForTest(root);
+
+      const entries = await listDirectory('');
+      const names = entries.map((e) => e.name).sort();
+      expect(names).toEqual(['a.toml', 'b.toml']);
+      expect(entries.every((e) => e.kind === 'file')).toBe(true);
+    });
+
+    it('lists entries in a nested directory', async () => {
+      const inner = {
+        entries: async function* () {
+          yield ['x.toml', { kind: 'file' }];
+          yield ['y.toml', { kind: 'file' }];
+        },
+      };
+      const root = {
+        getDirectoryHandle: async (name) => {
+          if (name === 'assets') {
+            return {
+              getDirectoryHandle: async (n) => {
+                if (n === 'entities') return inner;
+                throw new DOMException('Not found', 'NotFoundError');
+              },
+            };
+          }
+          throw new DOMException('Not found', 'NotFoundError');
+        },
+      };
+      _setRootHandleForTest(root);
+
+      const entries = await listDirectory('assets/entities');
+      expect(entries.map((e) => e.name).sort()).toEqual(['x.toml', 'y.toml']);
+    });
+
+    it('distinguishes files from directories via kind', async () => {
+      const root = {
+        entries: async function* () {
+          yield ['file.toml', { kind: 'file' }];
+          yield ['subdir', { kind: 'directory' }];
+        },
+      };
+      _setRootHandleForTest(root);
+
+      const entries = await listDirectory('');
+      const byName = Object.fromEntries(entries.map((e) => [e.name, e.kind]));
+      expect(byName['file.toml']).toBe('file');
+      expect(byName['subdir']).toBe('directory');
     });
   });
 });

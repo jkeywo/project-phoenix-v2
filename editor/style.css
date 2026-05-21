@@ -963,6 +963,18 @@ form {
   display: none !important;
 }
 
+/* V2: per-mode pane container.
+ * Visible pane fills the main area in the same flex layout V1 used; hidden
+ * panes are dropped entirely so their children don't steal layout space. */
+.mode-pane {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+.mode-pane.hidden {
+  display: none !important;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

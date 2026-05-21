@@ -1,16 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { tagShape, RADAR_SHAPE } from '../tag-shape-map.js';
 
-// Mirrors the runtime mapping in src/console/helm/client.rs:
-//   ship  → Triangle
-//   station → Square
-//   (everything else) → Dot
+// Mirrors the runtime table `tags_to_radar_layer` + `layer_to_icon` in
+// src/gui/radar.rs. The full editor mapping is:
+//   ship | pirate          → Triangle
+//   asteroid | asteroid_field → Dot
+//   station               → Diamond
+//   missile | torpedo     → Dot
+//   planet                → Ring
+//   star                  → Dot
+//   region                → Dot   (regions are filtered from runtime radar
+//                                  entirely; editor uses Dot as a generic)
+//   (everything else)     → Dot
 
 describe('tag-shape-map', () => {
   describe('RADAR_SHAPE constants', () => {
-    it('exports Triangle, Square, and Dot constants', () => {
+    it('exports Triangle, Square, Diamond, Ring, and Dot constants', () => {
       expect(RADAR_SHAPE.Triangle).toBe('Triangle');
       expect(RADAR_SHAPE.Square).toBe('Square');
+      expect(RADAR_SHAPE.Diamond).toBe('Diamond');
+      expect(RADAR_SHAPE.Ring).toBe('Ring');
       expect(RADAR_SHAPE.Dot).toBe('Dot');
     });
   });
@@ -20,8 +29,8 @@ describe('tag-shape-map', () => {
       expect(tagShape(['player', 'ship'])).toBe(RADAR_SHAPE.Triangle);
     });
 
-    it('pirate_raider ["ship","npc","enemy"] → Triangle', () => {
-      expect(tagShape(['ship', 'npc', 'enemy'])).toBe(RADAR_SHAPE.Triangle);
+    it('pirate-tagged entity ["pirate","npc","enemy"] → Triangle', () => {
+      expect(tagShape(['pirate', 'npc', 'enemy'])).toBe(RADAR_SHAPE.Triangle);
     });
 
     it('ship_harrow_patrol ["ship","npc","comms_contact"] → Triangle', () => {
@@ -38,20 +47,30 @@ describe('tag-shape-map', () => {
   });
 
   describe('tagShape — station entities', () => {
-    it('station_axiom ["station","comms_contact","allied"] → Square', () => {
-      expect(tagShape(['station', 'comms_contact', 'allied'])).toBe(RADAR_SHAPE.Square);
+    it('station_axiom ["station","comms_contact","allied"] → Diamond', () => {
+      expect(tagShape(['station', 'comms_contact', 'allied'])).toBe(RADAR_SHAPE.Diamond);
     });
 
-    it('station_outpost ["station","destructible"] → Square', () => {
-      expect(tagShape(['station', 'destructible'])).toBe(RADAR_SHAPE.Square);
+    it('station_outpost ["station","destructible"] → Diamond', () => {
+      expect(tagShape(['station', 'destructible'])).toBe(RADAR_SHAPE.Diamond);
     });
 
-    it('station_research_outpost ["station","comms_contact","science_facility"] → Square', () => {
-      expect(tagShape(['station', 'comms_contact', 'science_facility'])).toBe(RADAR_SHAPE.Square);
+    it('station_research_outpost ["station","comms_contact","science_facility"] → Diamond', () => {
+      expect(tagShape(['station', 'comms_contact', 'science_facility'])).toBe(RADAR_SHAPE.Diamond);
     });
   });
 
-  describe('tagShape — dot entities (asteroids, planets, stars, regions, fields)', () => {
+  describe('tagShape — planet entities', () => {
+    it('planet_earth ["planet","habitable"] → Ring', () => {
+      expect(tagShape(['planet', 'habitable'])).toBe(RADAR_SHAPE.Ring);
+    });
+
+    it('planet_mars ["planet","barren"] → Ring', () => {
+      expect(tagShape(['planet', 'barren'])).toBe(RADAR_SHAPE.Ring);
+    });
+  });
+
+  describe('tagShape — dot entities (asteroids, stars, missiles, regions, fields)', () => {
     it('asteroid_large ["asteroid","gameplay","large"] → Dot', () => {
       expect(tagShape(['asteroid', 'gameplay', 'large'])).toBe(RADAR_SHAPE.Dot);
     });
@@ -68,12 +87,16 @@ describe('tag-shape-map', () => {
       expect(tagShape(['field', 'main', 'asteroid_field'])).toBe(RADAR_SHAPE.Dot);
     });
 
-    it('planet_earth ["planet","habitable"] → Dot', () => {
-      expect(tagShape(['planet', 'habitable'])).toBe(RADAR_SHAPE.Dot);
-    });
-
     it('star_sun ["star","center"] → Dot', () => {
       expect(tagShape(['star', 'center'])).toBe(RADAR_SHAPE.Dot);
+    });
+
+    it('missile-tagged entity → Dot', () => {
+      expect(tagShape(['missile'])).toBe(RADAR_SHAPE.Dot);
+    });
+
+    it('torpedo-tagged entity → Dot', () => {
+      expect(tagShape(['torpedo'])).toBe(RADAR_SHAPE.Dot);
     });
 
     it('region_nebula ["region","nebula"] → Dot', () => {
@@ -84,22 +107,30 @@ describe('tag-shape-map', () => {
       expect(tagShape(['region', 'asteroid_belt'])).toBe(RADAR_SHAPE.Dot);
     });
 
-    it('region_kaleth_nebula ["region","nebula"] → Dot', () => {
-      expect(tagShape(['region', 'nebula'])).toBe(RADAR_SHAPE.Dot);
-    });
-
     it('region_radiation_zone ["region","damage_zone","weapon_effect"] → Dot', () => {
       expect(tagShape(['region', 'damage_zone', 'weapon_effect'])).toBe(RADAR_SHAPE.Dot);
     });
   });
 
-  describe('tagShape — deterministic for multi-tag entities', () => {
-    it('same tags in different order produce same result', () => {
-      expect(tagShape(['npc', 'ship', 'enemy'])).toBe(tagShape(['ship', 'npc', 'enemy']));
+  describe('tagShape — precedence', () => {
+    it('region tag forces Dot even when combined with station', () => {
+      // Matches the Rust precedence: region check is first.
+      expect(tagShape(['region', 'station'])).toBe(RADAR_SHAPE.Dot);
     });
 
-    it('same tags in different order produce same result for stations', () => {
-      expect(tagShape(['comms_contact', 'station', 'allied'])).toBe(tagShape(['station', 'allied', 'comms_contact']));
+    it('ship beats station when both tags present', () => {
+      // Matches the Rust precedence: ship is checked before station.
+      expect(tagShape(['station', 'ship'])).toBe(RADAR_SHAPE.Triangle);
+    });
+
+    it('station beats planet when both tags present', () => {
+      expect(tagShape(['planet', 'station'])).toBe(RADAR_SHAPE.Diamond);
+    });
+
+    it('same tags in different order produce same result', () => {
+      expect(tagShape(['npc', 'ship', 'enemy'])).toBe(tagShape(['ship', 'npc', 'enemy']));
+      expect(tagShape(['comms_contact', 'station', 'allied']))
+        .toBe(tagShape(['station', 'allied', 'comms_contact']));
     });
   });
 

@@ -79,9 +79,9 @@ describe('computeEntityPreview', () => {
       expect(result.radarShape).toBe('Triangle');
     });
 
-    it('station-tagged entity with radar_appearance returns Square shape', () => {
+    it('station-tagged entity with radar_appearance returns Diamond shape', () => {
       const result = computeEntityPreview(stationWithRadar);
-      expect(result.radarShape).toBe('Square');
+      expect(result.radarShape).toBe('Diamond');
     });
   });
 

@@ -11,6 +11,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::client::console_shell::ConsoleShell;
 use crate::client_app::{
     WeaponsPanel, OutboundClientMessage, RepairIconLabel,
     HideableElement, ComplexityPopupRoot, ComplexityPresetButton, ComplexityPopupConfirm,
@@ -28,6 +29,7 @@ use crate::gui::{
     Disabled,
 };
 use crate::messages::{Console, GamePhase, TorpedoTube};
+use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
 // ── Pure visibility helper ────────────────────────────────────────────
@@ -158,6 +160,12 @@ fn tube_visuals() -> StateVisuals {
 
 // ── Plugin ────────────────────────────────────────────────────────────
 
+/// Marker resource set once the weapons UI has been spawned.
+#[derive(Resource)]
+pub struct WeaponsPanelSpawned;
+
+// ── Plugin ────────────────────────────────────────────────────────────
+
 /// Plugin that owns all Tactical console UI and systems.
 pub struct WeaponsPanelPlugin;
 
@@ -166,49 +174,91 @@ impl Plugin for WeaponsPanelPlugin {
         app
             .init_resource::<SelectedTube>()
             .init_resource::<WeaponsRadarEntities>()
-            .add_systems(Startup, setup_weapons_ui)
             .add_systems(Update, (
+                spawn_weapons_ui.run_if(not(resource_exists::<WeaponsPanelSpawned>)),
                 toggle_weapons_panel_visibility,
                 add_tube_button_labels,
                 refresh_weapons_panel,
                 sync_fire_phaser_disabled,
                 refresh_torpedo_ui,
                 bridge_client_sim_to_weapons_radar,
+                respawn_weapons_on_orientation_change,
             ));
     }
 }
 
-// ── Setup ─────────────────────────────────────────────────────────────
+// ── Spawn (ConsoleShell) ──────────────────────────────────────────────
 
-fn setup_weapons_ui(mut commands: Commands) {
-    // ── Root panel ────────────────────────────────────────────────────
-    let panel = commands
+fn spawn_weapons_ui(
+    mut commands: Commands,
+    assets: Option<Res<PhoneAssets>>,
+    old_panel: Query<Entity, With<WeaponsPanel>>,
+    old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
+    orientation: Option<Res<DeviceOrientation>>,
+) {
+    let Some(assets) = assets else { return };
+    let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
+
+    for entity in old_panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    for (entity, overlay) in old_help.iter() {
+        if overlay.0 == crate::client::elements::HelpPanel::Tactical {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    commands.insert_resource(WeaponsPanelSpawned);
+
+    let shell = ConsoleShell::spawn(
+        &mut commands,
+        assets.helm_panel_bg.clone(),
+        is_landscape,
+        crate::client::elements::HelpPanel::Tactical,
+        |commands: &mut Commands, primary: Entity| {
+            fill_tactical_radar(commands, primary);
+        },
+        |commands: &mut Commands, secondary: Entity| {
+            fill_tactical_controls(commands, secondary);
+        },
+        &assets,
+    );
+
+    commands.entity(shell.root).insert((WeaponsPanel, Visibility::Hidden));
+}
+
+// ── Fill helpers ──────────────────────────────────────────────────────
+
+/// Primary slot: tactical radar (GenericRadar, WorldFixed, Ships + Torpedoes).
+fn fill_tactical_radar(commands: &mut Commands, container: Entity) {
+    let col = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(8.0),
+            ..default()
+        })
+        .id();
+    commands.entity(container).add_child(col);
+
+    let title = commands
         .spawn((
-            WeaponsPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left:   Val::Px(0.0),
-                top:    Val::Px(0.0),
-                right:  Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(16.0),
-                padding: UiRect::all(Val::Px(24.0)),
-                ..default()
-            },
-            Visibility::Hidden,
+            Text::new("Weapons Console"),
+            TextFont { font_size: 24.0, ..default() },
+            TextColor(Color::srgb(1.0, 0.5, 0.2)),
         ))
         .id();
+    commands.entity(col).add_child(title);
 
-    // ── Tactical radar (GenericRadar, WorldFixed, Ships + Torpedoes) ──
     let radar_filter = RadarFilter(std::collections::HashSet::from([
         RadarLayer::Ship,
         RadarLayer::Missile,
     ]));
     let radar = GenericRadar::spawn(
-        &mut commands,
+        commands,
         crate::client_sim::WEAPONS_RADAR_RANGE,
         OrientationMode::WorldFixed,
         radar_filter,
@@ -223,27 +273,24 @@ fn setup_weapons_ui(mut commands: Commands) {
         position_type: PositionType::Relative,
         ..default()
     });
-    commands.entity(panel).add_child(radar);
+    commands.entity(col).add_child(radar);
+}
 
-    // ── Title row ─────────────────────────────────────────────────────
-    let title_row = commands
+/// Secondary slot: torpedo section + phaser mode + fire phasers + repair label
+/// + complexity controls.
+fn fill_tactical_controls(commands: &mut Commands, container: Entity) {
+    let col = commands
         .spawn(Node {
-            flex_direction: FlexDirection::Row,
+            flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
+            justify_content: JustifyContent::FlexStart,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(12.0),
             ..default()
         })
         .id();
-    commands.entity(title_row).with_children(|row| {
-        row.spawn((
-            Text::new("Weapons Console"),
-            TextFont { font_size: 24.0, ..default() },
-            TextColor(Color::srgb(1.0, 0.5, 0.2)),
-        ));
-        crate::client_elements::spawn_help_button(row, crate::client_elements::HelpPanel::Tactical, 16.0);
-    });
-    commands.entity(panel).add_child(title_row);
-    crate::client_elements::spawn_help_overlay_root(&mut commands, crate::client_elements::HelpPanel::Tactical);
+    commands.entity(container).add_child(col);
 
     // ── Torpedo section container (hideable as "torpedo_tube_selector") ──
     let torpedo_container = commands
@@ -257,7 +304,7 @@ fn setup_weapons_ui(mut commands: Commands) {
             },
         ))
         .id();
-    commands.entity(panel).add_child(torpedo_container);
+    commands.entity(col).add_child(torpedo_container);
 
     // Torpedo count label
     let count_label = commands
@@ -270,7 +317,7 @@ fn setup_weapons_ui(mut commands: Commands) {
         .id();
     commands.entity(torpedo_container).add_child(count_label);
 
-    // ── Torpedo tube RadioGroup ────────────────────────────────────────
+    // Torpedo tube RadioGroup
     let tube_btn_configs: Vec<RadioButtonConfig> = (0..3)
         .map(|_| RadioButtonConfig {
             size: ButtonSize::Rect { width: 80.0, height: 36.0 },
@@ -279,7 +326,7 @@ fn setup_weapons_ui(mut commands: Commands) {
         .collect();
 
     let radio_group = RadioGroup::spawn(
-        &mut commands,
+        commands,
         tube_btn_configs,
         tube_visuals(),
         None,
@@ -289,21 +336,9 @@ fn setup_weapons_ui(mut commands: Commands) {
         .observe(on_tube_selected);
     commands.entity(torpedo_container).add_child(radio_group);
 
-    // Add text labels to each radio member button.
-    // RadioGroup::spawn creates children in config order; retrieve them.
-    // We know there are 3 children and label them FWD PORT, FWD STBD, AFT.
-    // The labels are added as grandchildren of radio_group via with_children
-    // deferred at spawn. We do this by querying children right after—but
-    // since the world hasn't applied the child commands yet, we instead
-    // use a one-shot post-spawn system to finish wiring.
-    //
-    // As a simpler approach: spawn the labels as an independent row below
-    // the RadioGroup and use the TubeStatusLabel instead of labelling each
-    // button, and insert text directly into each button child via the
-    // deferred approach in add_tube_button_labels system.
     commands.insert_resource(TubeButtonLabelsPending);
 
-    // Tube status labels row (one per tube, left to right order matches buttons)
+    // Tube status labels row
     let status_row = commands
         .spawn(Node {
             flex_direction: FlexDirection::Row,
@@ -332,9 +367,9 @@ fn setup_weapons_ui(mut commands: Commands) {
     }
     commands.entity(torpedo_container).add_child(status_row);
 
-    // ── Fire Torpedo button ────────────────────────────────────────────
+    // Fire Torpedo button
     let fire_torpedo_btn = spawn_gui_button(
-        &mut commands,
+        commands,
         ButtonSize::Rect { width: 200.0, height: 52.0 },
         torpedo_fire_visuals(),
         None,
@@ -355,7 +390,7 @@ fn setup_weapons_ui(mut commands: Commands) {
 
     // ── Phaser Mode toggle button (hideable as "phaser_mode_selector") ──
     let mode_btn = spawn_gui_button(
-        &mut commands,
+        commands,
         ButtonSize::Rect { width: 200.0, height: 44.0 },
         mode_visuals(),
         None,
@@ -372,11 +407,11 @@ fn setup_weapons_ui(mut commands: Commands) {
         .insert(HideableElement("phaser_mode_selector".into()))
         .add_child(mode_label)
         .observe(on_phaser_mode_pressed);
-    commands.entity(panel).add_child(mode_btn);
+    commands.entity(col).add_child(mode_btn);
 
     // ── Fire Phasers button ───────────────────────────────────────────
     let fire_phaser_btn = spawn_gui_button(
-        &mut commands,
+        commands,
         ButtonSize::Rect { width: 200.0, height: 52.0 },
         fire_visuals(),
         None,
@@ -393,7 +428,7 @@ fn setup_weapons_ui(mut commands: Commands) {
         .insert(FirePhaserButton)
         .add_child(fire_phaser_label)
         .observe(on_fire_phaser_pressed);
-    commands.entity(panel).add_child(fire_phaser_btn);
+    commands.entity(col).add_child(fire_phaser_btn);
 
     // ── Repair icon label ─────────────────────────────────────────────
     let repair_label = commands
@@ -404,7 +439,7 @@ fn setup_weapons_ui(mut commands: Commands) {
             TextColor(Color::srgb(0.8, 0.5, 0.2)),
         ))
         .id();
-    commands.entity(panel).add_child(repair_label);
+    commands.entity(col).add_child(repair_label);
 
     // ── Complexity dropdown row ───────────────────────────────────────
     let dropdown = commands
@@ -445,7 +480,7 @@ fn setup_weapons_ui(mut commands: Commands) {
             });
         }
     });
-    commands.entity(panel).add_child(dropdown);
+    commands.entity(col).add_child(dropdown);
 
     // ── Complexity pop-up overlay ─────────────────────────────────────
     let popup = commands
@@ -512,7 +547,24 @@ fn setup_weapons_ui(mut commands: Commands) {
             ));
         });
     });
-    commands.entity(panel).add_child(popup);
+    commands.entity(col).add_child(popup);
+}
+
+// ── Orientation respawn ──────────────────────────────────────────────
+
+fn respawn_weapons_on_orientation_change(
+    orientation: Option<Res<DeviceOrientation>>,
+    panel: Query<Entity, With<WeaponsPanel>>,
+    mut commands: Commands,
+) {
+    let Some(orientation) = orientation else { return };
+    if !orientation.is_changed() {
+        return;
+    }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    commands.remove_resource::<WeaponsPanelSpawned>();
 }
 
 // ── Tube button labels post-setup ─────────────────────────────────────

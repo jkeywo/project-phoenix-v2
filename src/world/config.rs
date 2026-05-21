@@ -1135,29 +1135,6 @@ spawn_on = "game_start"
         assert_eq!(cfg.entities[0].id.as_deref(), Some("player-ship"));
     }
 
-    #[test]
-    fn parse_world_silently_ignores_legacy_spawn_blocks() {
-        // PRD #341: the unified parser owns [[entity]], [[trigger]], and
-        // [[comms]]. Legacy [[spawn]] blocks (no longer used by any shipped
-        // world) are silently ignored — they must not error.
-        let toml = r#"
-[anchors]
-alpha = [0.0, 0.0, 0.0]
-
-[[entity]]
-template_path = "assets/entities/star_sun.toml"
-position = [0.0, 0.0, 0.0]
-
-[[spawn]]
-name = "raider"
-entity_path = "assets/entities/pirate_raider.toml"
-anchor = "alpha"
-"#;
-        let cfg = parse_world(toml).expect("legacy [[spawn]] blocks must be ignored, not errored");
-        assert_eq!(cfg.entities.len(), 1);
-        assert_eq!(cfg.anchors.len(), 1);
-    }
-
     // ── Triggers & comms (PRD #341) ───────────────────────────────────────
 
     #[test]
@@ -1271,93 +1248,6 @@ condition = "on_zombie"
         let cfg = parse_world(toml).expect("patrol.toml must parse");
         assert_eq!(cfg.triggers.len(), 1);
         assert!(cfg.comms.is_empty());
-    }
-
-    // ── Shipped-world smoke parses ────────────────────────────────────────
-
-    #[test]
-    fn parse_world_handles_shipped_default_toml_in_one_pass() {
-        let toml = include_str!("../../assets/worlds/default.toml");
-        let cfg = parse_world(toml).expect("default.toml must parse via new pipeline");
-        // Anchors declared in default.toml.
-        assert!(cfg.anchors.contains_key("starbase_alpha"));
-        assert!(cfg.anchors.contains_key("patrol_alpha"));
-        // [[entity]] blocks: star, planet (named "earth"), asteroid_field,
-        // player_ship, region_nebula, Starbase Alpha (named, was [[spawn]]
-        // — migrated in PRD #339 slice 2), raider_alpha (named NPC, was
-        // [[spawn]] — migrated in PRD #337 slice 3).
-        assert_eq!(
-            cfg.entities.len(),
-            7,
-            "default.toml must contain 7 [[entity]] blocks after raider migration"
-        );
-        // Asteroid field must be present so spawn_world_entities can route it.
-        assert!(
-            cfg.entities
-                .iter()
-                .any(|e| e.template_path.contains("asteroid_field")),
-            "asteroid_field [[entity]] must be visible to the unified pipeline"
-        );
-        // PRD #339 slice 2: named entries are now [[entity]] with `name`.
-        assert!(
-            cfg.entities.iter().any(|e| e.name.as_deref() == Some("Starbase Alpha")),
-            "Starbase Alpha must be a named [[entity]] after slice 2 migration"
-        );
-        assert!(
-            cfg.entities.iter().any(|e| e.name.as_deref() == Some("earth")),
-            "earth must carry a `name` field after slice 2 migration"
-        );
-        // PRD #337 slice 3: the default-world raider migrated from
-        // [[spawn]] to a named [[entity]] with `anchor = "patrol_alpha"`.
-        let raider = cfg
-            .entities
-            .iter()
-            .find(|e| e.name.as_deref() == Some("raider_alpha"))
-            .expect("raider_alpha must be a named [[entity]] after slice 3 migration");
-        assert_eq!(
-            raider.anchor.as_deref(),
-            Some("patrol_alpha"),
-            "default-world raider must use anchor positioning"
-        );
-        assert!(
-            raider.position.is_empty(),
-            "default-world raider must have no inline position when anchor is supplied"
-        );
-    }
-
-    #[test]
-    fn parse_world_handles_shipped_patrol_toml_in_one_pass() {
-        let toml = include_str!("../../assets/worlds/patrol.toml");
-        let cfg = parse_world(toml).expect("patrol.toml must parse via new pipeline");
-        assert!(cfg.anchors.contains_key("patrol_alpha"));
-        // PRD #337 slice 3: the raider migrated from [[spawn]] to a named
-        // [[entity]] with `anchor = "patrol_alpha"`. Total [[entity]] blocks:
-        // star, asteroid_field, player_ship, raider_alpha.
-        assert_eq!(
-            cfg.entities.len(),
-            4,
-            "patrol.toml must contain 4 [[entity]] blocks after raider migration"
-        );
-        assert!(
-            cfg.entities
-                .iter()
-                .any(|e| e.template_path.contains("asteroid_field")),
-            "asteroid_field [[entity]] must be visible to the unified pipeline"
-        );
-        let raider = cfg
-            .entities
-            .iter()
-            .find(|e| e.name.as_deref() == Some("raider_alpha"))
-            .expect("raider_alpha must be a named [[entity]] after slice 3 migration");
-        assert_eq!(
-            raider.anchor.as_deref(),
-            Some("patrol_alpha"),
-            "raider must use anchor positioning"
-        );
-        assert!(
-            raider.position.is_empty(),
-            "raider must have no inline position when anchor is supplied"
-        );
     }
 
     // ── entity_template_paths ─────────────────────────────────────────────

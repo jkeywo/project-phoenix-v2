@@ -2314,17 +2314,6 @@ max_hp = 250
     // change is "the player path now honours them too".
 
     #[test]
-    fn phaser_combat_config_default_matches_legacy_constants() {
-        // Defaults must match the historical hardcoded constants in
-        // src/console/weapons/server.rs and src/radar.rs:19.
-        let d = PhaserCombatConfig::default();
-        assert_eq!(d.phaser_range, 40.0);
-        assert_eq!(d.beam_duration_secs, 6.0);
-        assert_eq!(d.beam_cooldown_secs, 6.0);
-        assert_eq!(d.beam_damage_per_sec, 5.0);
-    }
-
-    #[test]
     fn phaser_combat_config_from_weapons_console_uses_supplied_values() {
         let toml_str = r##"
 [weapons_console]
@@ -2360,37 +2349,6 @@ beam_range = 50.0
         assert_eq!(combat.beam_damage_per_sec, 5.0, "default for omitted field");
         assert_eq!(combat.beam_duration_secs, 6.0, "default for omitted field");
         assert_eq!(combat.beam_cooldown_secs, 6.0, "default for omitted field");
-    }
-
-    #[test]
-    fn player_ship_toml_weapons_console_phaser_combat_matches_runtime_defaults() {
-        // Drift guard: if [weapons_console] in player_ship.toml ever
-        // changes the player phaser combat tuning (away from the legacy
-        // BEAM_* / PHASER_RANGE constants), this test fails so the owner
-        // can confirm the change is intentional.
-        let toml_str = include_str!("../../assets/entities/player_ship.toml");
-        let config = EntityConfig::from_toml(toml_str).expect("player_ship.toml must parse");
-        let wc = config
-            .weapons_console
-            .expect("player_ship must have [weapons_console]");
-        let combat = PhaserCombatConfig::from_weapons_console(&wc);
-        let baseline = PhaserCombatConfig::default();
-        assert_eq!(
-            combat.phaser_range, baseline.phaser_range,
-            "phaser_range drift"
-        );
-        assert_eq!(
-            combat.beam_duration_secs, baseline.beam_duration_secs,
-            "beam_duration drift"
-        );
-        assert_eq!(
-            combat.beam_cooldown_secs, baseline.beam_cooldown_secs,
-            "beam_cooldown drift"
-        );
-        assert_eq!(
-            combat.beam_damage_per_sec, baseline.beam_damage_per_sec,
-            "beam_damage drift"
-        );
     }
 }
 

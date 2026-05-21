@@ -141,13 +141,17 @@ impl Plugin for PhoneBorderPlugin {
                 Update,
                 (
                     detect_orientation,
-                    reparent_panels_into_bezel,
                     update_red_alert_intensity,
                     swap_phone_border_textures,
                     refresh_alert_banner,
                     populate_radar_icon_lookup,
                 ),
-            );
+            )
+            // reparent_panels_into_bezel runs in PostUpdate so all Update commands
+            // (including despawns from respawn_*_on_orientation_change) are already
+            // applied before it queries for panel entities. Without this ordering,
+            // set_parent_in_place would panic on entities despawned in the same frame.
+            .add_systems(PostUpdate, reparent_panels_into_bezel);
     }
 }
 

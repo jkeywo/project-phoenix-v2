@@ -45,6 +45,9 @@
   </style>
 </head>
 <body>
+  <audio id="bg-hum" src="assets/sounds/background_hum.mp3" loop></audio>
+  <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.mp3"></audio>
+
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">
     <div class="spinner-ring"></div>
@@ -192,11 +195,22 @@
 
     // ── Outbound routing ───────────────────────────────────────────────────
 
+    let prevRedAlert = false;
+
     function routeOutbound(target, payload) {
       try {
         const parsed = JSON.parse(payload);
-        if (parsed.type === 'GameStarted')
+        if (parsed.type === 'GameStarted') {
           document.getElementById('overlay').style.display = 'none';
+          document.getElementById('bg-hum').play().catch(() => {});
+        }
+        if (parsed.type === 'SimState') {
+          const redAlert = parsed.data?.snapshot?.red_alert;
+          if (redAlert && !prevRedAlert) {
+            document.getElementById('red-alert-siren').play().catch(() => {});
+          }
+          prevRedAlert = redAlert;
+        }
       } catch (_) {}
 
       if (target === 'all') {
@@ -308,6 +322,7 @@ function finishInit() {
   window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
   window.wasm_toggle_debug_regions = wasmBindings.wasm_toggle_debug_regions;
   window.wasm_toggle_debug_overlay = wasmBindings.wasm_toggle_debug_overlay;
+  window.wasm_toggle_debug_pause = wasmBindings.wasm_toggle_debug_pause;
   window.wasm_get_debug_state = wasmBindings.wasm_get_debug_state;
 
   // Validate station config before starting PeerJS or the Bevy app.
@@ -452,6 +467,16 @@ window.addEventListener('TrunkApplicationStarted', startPhoenix);
       }
       requestAnimationFrame(rafLoop);
     })();
+
+    // ── F9 — debug pause simulation ──────────────────────────────────────
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'F9') {
+        e.preventDefault();
+        if (typeof wasm_toggle_debug_pause === 'function') {
+          wasm_toggle_debug_pause();
+        }
+      }
+    });
   </script>
 </body>
 </html>

@@ -12,6 +12,10 @@ pub struct DebugRegionsEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct DebugOverlayEnabled(pub bool);
 
+/// Resource indicating whether the simulation is debug-paused (F9).
+#[derive(Resource, Default)]
+pub struct DebugPaused(pub bool);
+
 /// Server-only plugin that draws region shape wireframes when enabled.
 ///
 /// The `enabled` field is typically set from the `?debug_regions=1` URL parameter
@@ -24,6 +28,7 @@ impl Plugin for DebugOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DebugRegionsEnabled(self.enabled));
         app.init_resource::<DebugOverlayEnabled>();
+        app.init_resource::<DebugPaused>();
         app.add_systems(
             Update,
             draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),

@@ -54,6 +54,10 @@ thread_local! {
     /// `drain_debug_toggles` each `PreUpdate` frame.
     static PENDING_TOGGLE_OVERLAY: RefCell<bool> = const { RefCell::new(false) };
 
+    /// Pending toggle request from `wasm_toggle_debug_pause()`. Drained by
+    /// `drain_debug_toggles` each `PreUpdate` frame.
+    static PENDING_PAUSE_TOGGLE: RefCell<bool> = const { RefCell::new(false) };
+
     /// Pre-formatted modifier debug text written by `write_debug_state` each
     /// `PostUpdate` frame when the overlay is enabled. Read by
     /// `wasm_get_debug_state()` from JS.
@@ -207,6 +211,16 @@ pub fn wasm_toggle_debug_overlay() {
     PENDING_TOGGLE_OVERLAY.with(|v| *v.borrow_mut() = true);
 }
 
+/// Called by JS (e.g. F9 keydown) to toggle the debug simulation pause at runtime.
+///
+/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
+/// `PreUpdate` frame, which pauses or unpauses `Time<Virtual>`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_debug_pause() {
+    PENDING_PAUSE_TOGGLE.with(|v| *v.borrow_mut() = true);
+}
+
 /// Called by JS each animation frame to read the latest formatted modifier
 /// debug state when the overlay is visible.
 #[cfg(target_arch = "wasm32")]
@@ -295,11 +309,14 @@ fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
 }
 
 /// Drains the pending debug-toggle flags each frame and updates the corresponding
-/// Bevy resources: `DebugRegionsEnabled` (F4) and `DebugOverlayEnabled` (F3).
+/// Bevy resources: `DebugRegionsEnabled` (F4), `DebugOverlayEnabled` (F3), and
+/// `DebugPaused` (F9).
 #[cfg(target_arch = "wasm32")]
 fn drain_debug_toggles(
     mut regions_enabled: ResMut<crate::debug_overlay::DebugRegionsEnabled>,
     mut overlay_enabled: ResMut<crate::debug_overlay::DebugOverlayEnabled>,
+    mut paused: ResMut<crate::debug_overlay::DebugPaused>,
+    mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
     // ── Region wireframes toggle (F4) ──────────────────────────────────────
     let pending_regions = PENDING_DEBUG_TOGGLE.with(|v| {
@@ -321,6 +338,21 @@ fn drain_debug_toggles(
     });
     if pending_overlay {
         overlay_enabled.0 = !overlay_enabled.0;
+    }
+
+    // ── Simulation pause toggle (F9) ───────────────────────────────────────
+    let pending_pause = PENDING_PAUSE_TOGGLE.with(|v| {
+        let was = *v.borrow();
+        *v.borrow_mut() = false;
+        was
+    });
+    if pending_pause {
+        paused.0 = !paused.0;
+        if paused.0 {
+            virtual_time.pause();
+        } else {
+            virtual_time.unpause();
+        }
     }
 }
 

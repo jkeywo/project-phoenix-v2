@@ -1,17 +1,22 @@
-//! Client-side Shields Panel plugin — migrated to `src/gui/` library widgets.
+//! Client-side Shields Panel plugin — migrated to `ConsoleShell` (PRD #346).
 //!
-//! Owns the Shields console UI: 4-quadrant HP bars, focus-facing mechanic,
-//! and real-time shield status updates.
+//! Owns the Shields console UI: 4-quadrant HP bars, focus-facing mechanic
+//! (Fore/Port/Aft/Stbd + Clear), and real-time shield status updates.
 //!
-//! No per-button marker-component query systems remain.  All button callbacks
-//! are wired via observers at spawn time.  `ProgressValue` drives the HP bars;
-//! `ReadoutValue` drives the HP text readouts; `RadioGroup` drives the focus
-//! selector.
+//! The panel uses `ConsoleShell::spawn` so it shares the bezel-aware root,
+//! embedded orientation-aware tab bar, and absolute-positioned help button
+//! with the rest of the migrated consoles.
+//!
+//! Layout:
+//! - **Primary slot:** the 4 HP rows (Fore/Port/Aft/Stbd) — the focal display.
+//! - **Secondary slot:** the focus `RadioGroup` plus a "Clear" button that
+//!   emits `SetShieldFocus { facing: None }` to drop the focus entirely.
 //!
 //! Compiled only when the `client` Cargo feature is enabled.
 
 use bevy::prelude::*;
 
+use crate::client::console_shell::ConsoleShell;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
@@ -20,6 +25,7 @@ use crate::gui::{
     ReadoutValue, SegmentCount, StateVisuals, TextReadout,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewDirection};
+use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 
 // ── Pure visibility helper ────────────────────────────────────────────
 
@@ -63,6 +69,19 @@ pub fn focus_button_visuals() -> StateVisuals {
         Color::srgb(0.10, 0.55, 0.75), // active (selected)
         Color::srgb(0.15, 0.35, 0.55), // press
         Color::srgb(0.05, 0.08, 0.14), // disabled
+    )
+}
+
+/// Build `StateVisuals` for the Clear-focus button.
+///
+/// Distinct amber tint to differentiate it from the radio group.
+pub fn clear_button_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.35, 0.25, 0.10),
+        Color::srgb(0.50, 0.36, 0.16),
+        Color::srgb(0.70, 0.50, 0.20),
+        Color::srgb(0.55, 0.40, 0.18),
+        Color::srgb(0.14, 0.10, 0.05),
     )
 }
 
@@ -137,9 +156,17 @@ pub const FACING_LABELS: [&str; 4] = ["Fore", "Port", "Aft", "Starboard"];
 #[derive(Component)]
 pub struct ShieldsPanel;
 
+/// Marker resource set once the phone shields UI has been spawned.
+#[derive(Resource)]
+pub struct ShieldsPanelSpawned;
+
 /// Marks the `RadioGroup` entity used for shield focus selection.
 #[derive(Component)]
 struct ShieldFocusRadio;
+
+/// Marks the Clear-focus button entity.
+#[derive(Component)]
+struct ClearFocusButton;
 
 /// Marks a shield HP `ProgressBar` root; carries the facing index (0-3).
 #[derive(Component)]
@@ -155,81 +182,97 @@ pub struct ShieldsPanelPlugin;
 
 impl Plugin for ShieldsPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_shields_ui)
-            .add_systems(
-                Update,
-                (
-                    toggle_shields_panel_visibility,
-                    refresh_shields_panel,
-                ),
-            );
+        app.add_systems(
+            Update,
+            (
+                spawn_shields_ui.run_if(not(resource_exists::<ShieldsPanelSpawned>)),
+                toggle_shields_panel_visibility,
+                refresh_shields_panel,
+                handle_clear_focus_press,
+                respawn_shields_on_orientation_change,
+            ),
+        );
     }
 }
 
-// ── Setup ────────────────────────────────────────────────────────────
+// ── Spawn (ConsoleShell) ─────────────────────────────────────────────
 
-fn setup_shields_ui(mut commands: Commands) {
-    // ── Root panel ────────────────────────────────────────────────────
-    let panel = commands
-        .spawn((
-            ShieldsPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left:   Val::Px(0.0),
-                top:    Val::Px(0.0),
-                right:  Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(8.0),
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(16.0)),
-                ..default()
-            },
-            Visibility::Hidden,
-        ))
-        .id();
+fn spawn_shields_ui(
+    mut commands: Commands,
+    assets: Option<Res<PhoneAssets>>,
+    old_panel: Query<Entity, With<ShieldsPanel>>,
+    old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
+    orientation: Option<Res<DeviceOrientation>>,
+) {
+    let Some(assets) = assets else { return };
+    let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
-    // ── Title row ─────────────────────────────────────────────────────
-    let title_row = commands
+    for entity in old_panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    for (entity, overlay) in old_help.iter() {
+        if overlay.0 == crate::client::elements::HelpPanel::Shields {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    commands.insert_resource(ShieldsPanelSpawned);
+
+    let shell = ConsoleShell::spawn(
+        &mut commands,
+        assets.helm_panel_bg.clone(),
+        is_landscape,
+        crate::client::elements::HelpPanel::Shields,
+        |commands: &mut Commands, primary: Entity| {
+            fill_shields_hp_rows(commands, primary);
+        },
+        |commands: &mut Commands, secondary: Entity| {
+            fill_shields_focus_controls(commands, secondary);
+        },
+        &assets,
+    );
+
+    commands.entity(shell.root).insert((ShieldsPanel, Visibility::Hidden));
+}
+
+// ── Fill helpers ─────────────────────────────────────────────────────
+
+/// Build the four HP rows (Fore/Port/Aft/Stbd) into the primary container.
+fn fill_shields_hp_rows(commands: &mut Commands, container: Entity) {
+    // Column wrapper so rows centre vertically.
+    let col = commands
         .spawn(Node {
-            flex_direction: FlexDirection::Row,
+            flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(8.0),
             ..default()
         })
         .id();
-    commands.entity(title_row).with_children(|tr| {
-        tr.spawn((
+    commands.entity(container).add_child(col);
+
+    let title = commands
+        .spawn((
             Text::new("SHIELDS"),
             TextFont { font_size: 24.0, ..default() },
             TextColor(Color::srgb(0.4, 0.8, 1.0)),
-        ));
-        crate::client_elements::spawn_help_button(
-            tr,
-            crate::client_elements::HelpPanel::Shields,
-            16.0,
-        );
-    });
-    commands.entity(panel).add_child(title_row);
-    crate::client_elements::spawn_help_overlay_root(
-        &mut commands,
-        crate::client_elements::HelpPanel::Shields,
-    );
+        ))
+        .id();
+    commands.entity(col).add_child(title);
 
-    // ── Four facing rows: label + HP bar + HP readout ─────────────────
     for (idx, label) in FACING_LABELS.iter().enumerate() {
         let row = commands
             .spawn(Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
-                width: Val::Percent(80.0),
+                width: Val::Percent(90.0),
                 column_gap: Val::Px(8.0),
                 ..default()
             })
             .id();
 
-        // Facing name label
         let name_label = commands
             .spawn((
                 Text::new(*label),
@@ -240,9 +283,8 @@ fn setup_shields_ui(mut commands: Commands) {
             .id();
         commands.entity(row).add_child(name_label);
 
-        // HP ProgressBar (segmented, 10 segments)
         let bar = ProgressBar::spawn(
-            &mut commands,
+            commands,
             Vec2::new(160.0, 24.0),
             ProgressBarVariant::Segmented,
             hp_bar_visuals(),
@@ -251,8 +293,7 @@ fn setup_shields_ui(mut commands: Commands) {
         commands.entity(bar).insert(ShieldHpBar(idx));
         commands.entity(row).add_child(bar);
 
-        // HP TextReadout
-        let readout = TextReadout::spawn(&mut commands, "", hp_readout_visuals());
+        let readout = TextReadout::spawn(commands, "", hp_readout_visuals());
         commands
             .entity(readout)
             .insert((
@@ -265,10 +306,25 @@ fn setup_shields_ui(mut commands: Commands) {
             ));
         commands.entity(row).add_child(readout);
 
-        commands.entity(panel).add_child(row);
+        commands.entity(col).add_child(row);
     }
+}
 
-    // ── Focus RadioGroup (Fore / Port / Aft / Stbd) ───────────────────
+/// Build the focus `RadioGroup` + Clear button into the secondary container.
+fn fill_shields_focus_controls(commands: &mut Commands, container: Entity) {
+    let col = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(10.0),
+            ..default()
+        })
+        .id();
+    commands.entity(container).add_child(col);
+
     let focus_label = commands
         .spawn((
             Text::new("Focus:"),
@@ -276,7 +332,7 @@ fn setup_shields_ui(mut commands: Commands) {
             TextColor(Color::srgb(0.6, 0.8, 1.0)),
         ))
         .id();
-    commands.entity(panel).add_child(focus_label);
+    commands.entity(col).add_child(focus_label);
 
     let btn_configs: Vec<RadioButtonConfig> = (0..4)
         .map(|_| RadioButtonConfig {
@@ -286,7 +342,7 @@ fn setup_shields_ui(mut commands: Commands) {
         .collect();
 
     let radio_group = RadioGroup::spawn(
-        &mut commands,
+        commands,
         btn_configs,
         focus_button_visuals(),
         None,
@@ -295,10 +351,37 @@ fn setup_shields_ui(mut commands: Commands) {
         .entity(radio_group)
         .insert(ShieldFocusRadio)
         .observe(on_focus_selected);
-    commands.entity(panel).add_child(radio_group);
+    commands.entity(col).add_child(radio_group);
 
-    // Add text labels to each radio member button after children are resolved.
+    // Add text labels to each radio member button.
     commands.insert_resource(FocusButtonLabelsPending);
+
+    // ── Clear-focus button ─────────────────────────────────────────────
+    let clear_visuals = clear_button_visuals();
+    let clear_btn = commands
+        .spawn((
+            ClearFocusButton,
+            Button,
+            Node {
+                width: Val::Px(96.0),
+                height: Val::Px(32.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                margin: UiRect::top(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(crate::gui::resolve_visual(&clear_visuals, false, false, false, false).color),
+            clear_visuals,
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("Clear"),
+                TextFont { font_size: 12.0, ..default() },
+                TextColor(Color::srgb(1.0, 0.92, 0.78)),
+            ));
+        })
+        .id();
+    commands.entity(col).add_child(clear_btn);
 }
 
 // ── Focus button label post-setup ─────────────────────────────────────
@@ -379,6 +462,37 @@ fn toggle_shields_panel_visibility(
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
     }
+}
+
+/// Sends `SetShieldFocus { facing: None }` when the Clear button is pressed.
+fn handle_clear_focus_press(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<ClearFocusButton>)>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    for interaction in interactions.iter() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(ClientMessage::SetShieldFocus {
+                facing: None,
+            }));
+        }
+    }
+}
+
+// ── Orientation respawn ──────────────────────────────────────────────
+
+fn respawn_shields_on_orientation_change(
+    orientation: Option<Res<DeviceOrientation>>,
+    panel: Query<Entity, With<ShieldsPanel>>,
+    mut commands: Commands,
+) {
+    let Some(orientation) = orientation else { return };
+    if !orientation.is_changed() {
+        return;
+    }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    commands.remove_resource::<ShieldsPanelSpawned>();
 }
 
 // ── RadioGroup observer ───────────────────────────────────────────────
@@ -603,6 +717,16 @@ mod tests {
         assert_ne!(idle, active);
         assert_ne!(idle, press);
         assert_ne!(idle, disabled);
+    }
+
+    // ── clear_button_visuals ──────────────────────────────────────────────
+
+    #[test]
+    fn clear_button_visuals_idle_differs_from_press() {
+        let v = clear_button_visuals();
+        let idle  = resolve_visual(&v, false, false, false, false).color;
+        let press = resolve_visual(&v, false, true,  false, false).color;
+        assert_ne!(idle, press);
     }
 
     // ── hp_bar_visuals: active (focused) differs from idle ────────────────

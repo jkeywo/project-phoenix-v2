@@ -20,33 +20,24 @@ async function init() {
   setupOpenFile();
   setupSaveFile();
 
-  const root = await getProjectRoot();
-  if (root) {
-    showEditor();
-  } else {
-    showPicker();
-  }
-}
-
-function hideV1() {
-  const app = document.getElementById('app');
-  if (app) app.style.display = 'none';
+  // V1 map editor (canvas + layers) is the default view.
+  // V2 text editor stays hidden; it's shown only when the user triggers it
+  // from the V1 toolbar. The root handle (if persisted) is available for
+  // V2's File System Access API read/write when needed.
+  await getProjectRoot();
 }
 
 function showBanner() {
   $('browser-not-supported').classList.remove('hidden');
-  hideV1();
 }
 
 function showPicker() {
   $('root-picker').classList.remove('hidden');
-  hideV1();
 }
 
 function showEditor() {
   $('v2-editor').classList.remove('hidden');
   $('v2-root-label').textContent = 'Project root: selected';
-  hideV1();
 }
 
 function setupModeSwitcher() {
@@ -83,18 +74,29 @@ function setupChangeRoot() {
 }
 
 function setupOpenFile() {
-  $('v2-open-btn').addEventListener('click', async () => {
-    const path = prompt('Enter relative file path (e.g., assets/worlds/default.toml):');
-    if (!path) return;
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.toml';
+  fileInput.multiple = false;
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
 
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     try {
-      const content = await readFile(path);
-      currentFilePath = path;
+      const content = await file.text();
+      currentFilePath = file.name;
       $('v2-file-content').value = content;
-      $('v2-status').textContent = `Loaded: ${path}`;
+      $('v2-status').textContent = `Loaded: ${file.name}`;
     } catch (err) {
       $('v2-status').textContent = `Error: ${err.message}`;
     }
+    fileInput.value = '';
+  });
+
+  $('v2-open-btn').addEventListener('click', () => {
+    fileInput.click();
   });
 }
 

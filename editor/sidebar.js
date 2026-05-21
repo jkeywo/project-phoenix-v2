@@ -5,7 +5,7 @@ export class PropertiesPanel {
   constructor(canvasManager, layerManager) {
     this.canvasManager = canvasManager;
     this.layerManager = layerManager;
-    this.container = document.getElementById('propertiesPanel');
+    this.container = document.getElementById('propertiesPanelContent');
     this.currentSpawn = null;
     this.currentLayer = null;
   }

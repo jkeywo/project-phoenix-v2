@@ -167,7 +167,7 @@ export class CanvasManager {
     const pos = getSpawnPosition(spawn, allAnchors);
     const relative = getRelativeInfo(spawn);
 
-    // Merge entity-template radar_appearance into spawn if present
+    // Merge entity-template fields into spawn if not already set
     const entConfig = spawn.entity_path || spawn.template_path
       ? getEntityConfig(spawn.entity_path || spawn.template_path)
       : null;
@@ -176,6 +176,14 @@ export class CanvasManager {
       if (!spawn.radar_appearance && entConfig.radar_appearance) spawn.radar_appearance = entConfig.radar_appearance;
       if (!spawn.collider && entConfig.collider) spawn.collider = entConfig.collider;
       if (!spawn.shape && entConfig.shape) spawn.shape = entConfig.shape;
+      // Synthesize a torus shape from asteroid_field block
+      if (!spawn.shape && entConfig.asteroid_field) {
+        spawn.shape = {
+          type: 'torus',
+          inner_radius: entConfig.asteroid_field.inner_radius ?? 100,
+          outer_radius: entConfig.asteroid_field.outer_radius ?? 200,
+        };
+      }
     }
 
     const canvasPos = this.worldToCanvas(pos.x, pos.z);
@@ -196,33 +204,47 @@ export class CanvasManager {
       name: 'spawnGroup'
     });
 
-    // Draw the radar-appearance shape (Triangle / Square / Dot) or X fallback
-    drawEntityShape(group, Konva, appearance, isSelected);
-
-    // Draw region area overlay when the entity has a geometric shape
-    if (!appearance.hasFallback && spawn.shape) {
+    // Draw region area overlay FIRST (behind the entity marker)
+    if (spawn.shape) {
       const hexColour = colourToHex(appearance.colour);
+      const s = this.scale;
       if (spawn.shape.type === 'sphere' && spawn.shape.radius) {
         const fillCircle = new Konva.Circle({
-          radius: spawn.shape.radius,
+          radius: spawn.shape.radius * s,
           fill: hexColour + '22',
           stroke: hexColour,
-          strokeWidth: 1
+          strokeWidth: 1 / s
         });
         group.add(fillCircle);
       } else if (spawn.shape.type === 'torus') {
-        const innerR = spawn.shape.inner_radius ?? 50;
-        const outerR = spawn.shape.outer_radius ?? 150;
+        const innerR = (spawn.shape.inner_radius ?? 50) * s;
+        const outerR = (spawn.shape.outer_radius ?? 150) * s;
         const ring = new Konva.Ring({
           innerRadius: innerR,
           outerRadius: outerR,
           fill: hexColour + '22',
           stroke: hexColour,
-          strokeWidth: 1
+          strokeWidth: 1 / s
         });
         group.add(ring);
+      } else if (spawn.shape.type === 'box') {
+        const hx = (Array.isArray(spawn.shape.half_extents) ? spawn.shape.half_extents[0] : 0) * s;
+        const hz = (Array.isArray(spawn.shape.half_extents) ? spawn.shape.half_extents[2] : 0) * s;
+        const rect = new Konva.Rect({
+          x: -hx,
+          y: -hz,
+          width: hx * 2,
+          height: hz * 2,
+          fill: hexColour + '22',
+          stroke: hexColour,
+          strokeWidth: 1 / s
+        });
+        group.add(rect);
       }
     }
+
+    // Draw the entity marker on top of the region shape
+    drawEntityShape(group, Konva, appearance, isSelected);
 
     const label = new Konva.Text({
       x: -40,
@@ -358,13 +380,11 @@ export class CanvasManager {
 
   selectSpawn(spawn, layer) {
     this.selectedSpawn = { spawn, layer };
-    this.renderAll();
     this.onSpawnSelect(spawn, layer);
   }
 
   deselectSpawn() {
     this.selectedSpawn = null;
-    this.renderAll();
     this.onSpawnSelect(null, null);
   }
 

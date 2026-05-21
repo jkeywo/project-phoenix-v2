@@ -35,6 +35,7 @@ async function init() {
 
   setupToolbar();
   setupLayersPanel();
+  setupModeTabs();
   renderAll();
 }
 
@@ -185,6 +186,33 @@ async function saveLayer(layer) {
 function setupLayersPanel() {
   document.getElementById('addLayerBtn').addEventListener('click', () => {
     fileInput.click();
+  });
+}
+
+function setupModeTabs() {
+  const tabs = document.querySelectorAll('.v2-mode-tab');
+  const propertiesPanel = document.getElementById('propertiesPanel');
+  const textPanel = document.getElementById('v2-text-panel');
+  const v2Toolbar = document.querySelector('.v2-text-toolbar');
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const mode = tab.dataset.mode;
+
+      // Update active tab
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      if (mode === 'Properties') {
+        propertiesPanel?.classList.remove('hidden');
+        textPanel?.classList.add('hidden');
+        v2Toolbar?.classList.add('hidden');
+      } else {
+        propertiesPanel?.classList.add('hidden');
+        textPanel?.classList.remove('hidden');
+        v2Toolbar?.classList.remove('hidden');
+      }
+    });
   });
 }
 

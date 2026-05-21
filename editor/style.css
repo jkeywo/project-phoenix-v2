@@ -352,25 +352,7 @@ body {
   flex-direction: column;
 }
 
-#rightPanel h3 {
-  padding: 12px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #888;
-  text-transform: uppercase;
-  border-bottom: 1px solid #3c3c3c;
-}
 
-#propertiesPanel {
-  flex: 1;
-  padding: 12px;
-  overflow-y: auto;
-}
-
-#propertiesPanel .placeholder {
-  color: #666;
-  font-style: italic;
-}
 
 /* Properties Form */
 .property-group {
@@ -846,6 +828,134 @@ form {
 
 .v2-editor-textarea::placeholder {
   color: #555;
+}
+
+/* Mode tabs in V1 toolbar */
+.v2-mode-group {
+  display: flex;
+  gap: 2px;
+  margin: 0 12px;
+}
+
+.v2-mode-tab {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.v2-mode-tab:hover {
+  color: #ccc;
+  background: #3c3c3c;
+}
+
+.v2-mode-tab.active {
+  color: #e0e0e0;
+  border-color: #007acc;
+  background: #2d2d40;
+}
+
+/* V2 text toolbar (Open/Save buttons, shown when a V2 mode is active) */
+.v2-text-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v2-text-toolbar button {
+  padding: 4px 10px;
+  background: #3c3c3c;
+  border: 1px solid #555;
+  color: #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.v2-text-toolbar button:hover {
+  background: #505050;
+}
+
+#v2-status {
+  font-size: 11px;
+  color: #888;
+  margin-left: 4px;
+}
+
+.v2-root-status-inline button {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+/* V2 text editor panel inside right panel */
+#v2-text-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+#v2-text-panel h3 {
+  padding: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  border-bottom: 1px solid #3c3c3c;
+  flex-shrink: 0;
+}
+
+#v2-text-panel .v2-editor-textarea {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 8px;
+  background: #1a1a1a;
+  color: #ce9178;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  border: none;
+  resize: none;
+  outline: none;
+  tab-size: 4;
+  line-height: 1.5;
+}
+
+#v2-text-panel .v2-editor-textarea::placeholder {
+  color: #555;
+}
+
+/* Properties panel wrapper */
+#propertiesPanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+#propertiesPanel h3 {
+  padding: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  border-bottom: 1px solid #3c3c3c;
+  flex-shrink: 0;
+}
+
+#propertiesPanelContent {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+#propertiesPanelContent .placeholder {
+  color: #666;
+  font-style: italic;
 }
 
 /* V2: hidden utility */

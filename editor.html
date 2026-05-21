@@ -32,26 +32,7 @@
     <button id="pickRootBtn">Pick Project Root…</button>
   </div>
 
-  <!-- V2: Editor workspace -->
-  <div id="v2-editor" class="hidden">
-    <div class="v2-root-status">
-      <span id="v2-root-label"></span>
-      <button id="v2-change-root-btn">Change root</button>
-    </div>
-    <div class="v2-mode-switcher">
-      <button class="v2-mode-tab active" data-mode="Scenario">Scenario</button>
-      <button class="v2-mode-tab" data-mode="Entity">Entity</button>
-      <button class="v2-mode-tab" data-mode="Definitions">Definitions</button>
-    </div>
-    <div class="v2-toolbar">
-      <button id="v2-open-btn">Open File…</button>
-      <button id="v2-save-btn">Save</button>
-      <span id="v2-status"></span>
-    </div>
-    <div class="v2-workspace">
-      <textarea id="v2-file-content" class="v2-editor-textarea" spellcheck="false" placeholder="Open a TOML file to edit…"></textarea>
-    </div>
-  </div>
+  <!-- V2: Root picker / mode text editor (integrated into V1 layout below) -->
 
   <div id="app">
     <!-- Toolbar -->
@@ -66,6 +47,20 @@
         </div>
         <button id="saveAllBtn">Save All</button>
         <button id="saveLayerBtn">Save Layer</button>
+      </div>
+      <div class="toolbar-group v2-mode-group">
+        <button class="v2-mode-tab active" data-mode="Properties">Properties</button>
+        <button class="v2-mode-tab" data-mode="Scenario">Scenario</button>
+        <button class="v2-mode-tab" data-mode="Entity">Entity</button>
+        <button class="v2-mode-tab" data-mode="Definitions">Definitions</button>
+      </div>
+      <div class="toolbar-group v2-text-toolbar hidden">
+        <button id="v2-open-btn">Open File…</button>
+        <button id="v2-save-btn">Save</button>
+        <span id="v2-status"></span>
+        <div class="v2-root-status-inline">
+          <button id="v2-change-root-btn">Change root</button>
+        </div>
       </div>
       <div class="toolbar-group">
         <span id="unsavedIndicator"></span>
@@ -99,11 +94,17 @@
         </div>
       </div>
 
-      <!-- Right Panel (Properties) -->
+      <!-- Right Panel (Properties / Text Editor) -->
       <div id="rightPanel">
-        <h3>PROPERTIES</h3>
         <div id="propertiesPanel">
-          <p class="placeholder">Select a spawn to edit properties</p>
+          <h3>PROPERTIES</h3>
+          <div id="propertiesPanelContent">
+            <p class="placeholder">Select a spawn to edit properties</p>
+          </div>
+        </div>
+        <div id="v2-text-panel" class="hidden">
+          <h3>TEXT EDITOR</h3>
+          <textarea id="v2-file-content" class="v2-editor-textarea" spellcheck="false" placeholder="Open a TOML file to edit…"></textarea>
         </div>
       </div>
     </div>

@@ -4,6 +4,30 @@ const DB_NAME = 'phoenix-editor';
 const STORE_NAME = 'project-root';
 const DB_VERSION = 1;
 
+const rootChangeListeners = new Set();
+
+/**
+ * Subscribe to project-root change events. The listener is fired AFTER
+ * `pickProjectRoot()` has successfully persisted the new handle.
+ * Returns `{ unsubscribe }`.
+ */
+export function onRootChanged(cb) {
+  if (typeof cb !== 'function') return { unsubscribe: () => {} };
+  rootChangeListeners.add(cb);
+  return {
+    unsubscribe: () => { rootChangeListeners.delete(cb); },
+  };
+}
+
+function fireRootChanged(handle) {
+  for (const cb of rootChangeListeners) {
+    try { cb(handle); } catch (err) {
+      // Swallow listener errors so one bad subscriber can't block save flow.
+      console.warn('[project-root] onRootChanged listener threw:', err);
+    }
+  }
+}
+
 export function isSupported() {
   return typeof window !== 'undefined'
     && 'showDirectoryPicker' in window
@@ -13,6 +37,7 @@ export function isSupported() {
 export async function pickProjectRoot() {
   rootHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
   await persistHandle(rootHandle);
+  fireRootChanged(rootHandle);
   return rootHandle;
 }
 
@@ -73,6 +98,11 @@ export async function listDirectory(relativePath = '') {
 /** For testing: inject a mock root handle */
 export function _setRootHandleForTest(handle) {
   rootHandle = handle;
+}
+
+/** For testing: drop all root-change listeners. */
+export function _resetListenersForTest() {
+  rootChangeListeners.clear();
 }
 
 async function requireRoot() {

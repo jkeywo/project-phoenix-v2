@@ -1,4 +1,4 @@
-import { isSupported, pickProjectRoot, getProjectRoot, readFile, writeFile } from './project-root.js';
+import { isSupported, pickProjectRoot, getProjectRoot, readFile, writeFile, onRootChanged } from './project-root.js';
 import { ModeShell } from './mode-shell.js';
 import { stringifyWorldToml } from './world-toml.js';
 import { stringifyEntityToml } from './entity-toml.js';
@@ -6,6 +6,7 @@ import { stringifyFactionToml } from './faction-editor.js';
 import { stringifyComplexityToml } from './complexity-editor.js';
 import { InvalidationBus } from './invalidation-bus.js';
 import { SaveFlow } from './save-flow.js';
+import { confirmSaveIfCommented, resetCommentWarningOnRootChange } from './save-confirm.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,6 +35,7 @@ const saveFlow = new SaveFlow(
   },
   writeFile,
   invalidationBus,
+  (content) => confirmSaveIfCommented(content),
 );
 
 let currentFilePath = null;
@@ -70,6 +72,7 @@ async function init() {
   setupOpenFile();
   setupSaveFile();
   setupGlobalUndoShortcuts();
+  resetCommentWarningOnRootChange({ onRootChanged });
 
   // V1 map editor (canvas + layers) is the default view.
   // V2 text editor stays hidden; it's shown only when the user triggers it

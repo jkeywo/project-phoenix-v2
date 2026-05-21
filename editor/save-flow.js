@@ -10,12 +10,19 @@ export class SaveFlow {
    * @param {{ fireEntitySaved?: (path: string) => void,
    *           fireWorldSaved?: (path: string) => void }} [invalidationBus]
    *   Notified on successful save. Optional for the same back-compat reason.
+   * @param {(content: string) => boolean} [commentConfirm]
+   *   Optional gate: called with the stringified TOML before writing. If
+   *   it returns `false` the save is aborted with `{ ok: false, ... }`.
+   *   When omitted (or null) no gate is applied. Slice 7 wires this to
+   *   `confirmSaveIfCommented` so comment-bearing TOML prompts once per
+   *   session.
    */
-  constructor(modeShell, stringifyFunctions, writeFile, invalidationBus) {
+  constructor(modeShell, stringifyFunctions, writeFile, invalidationBus, commentConfirm) {
     this._modeShell = modeShell;
     this._stringifyFunctions = stringifyFunctions;
     this._writeFile = writeFile || (async () => {});
     this._invalidationBus = invalidationBus || null;
+    this._commentConfirm = typeof commentConfirm === 'function' ? commentConfirm : null;
     this._contentCache = {};
     /**
      * Optional predicate keyed by `${mode}:${path}` returning true if the
@@ -104,6 +111,13 @@ export class SaveFlow {
 
     const validationResults = validateFile(path, parsedContent);
     const warnings = validationResults.map((r) => r.message);
+
+    if (this._commentConfirm && typeof content === 'string' && content.includes('#')) {
+      const ok = this._commentConfirm(content);
+      if (!ok) {
+        return { ok: false, errors: ['Save aborted: file contains comments'], warnings };
+      }
+    }
 
     try {
       await this._writeFile(path, content);

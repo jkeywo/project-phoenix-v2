@@ -85,7 +85,7 @@ pub fn row_data_for_slot_with_timings(
     // Guard against divide-by-zero / negative timings from a misconfigured
     // ship TOML — fall back to the baseline so the UI never produces NaN.
     let travel = if travel_duration_secs > 0.0 { travel_duration_secs } else { TRAVEL_DURATION_SECS };
-    let repair = if repair_duration_secs > 0.0 { repair_duration_secs } else { REPAIR_DURATION_SECS };
+    let _repair = if repair_duration_secs > 0.0 { repair_duration_secs } else { REPAIR_DURATION_SECS };
     match slot {
         TeamSlot::Idle => RowData {
             pct: 0.0,

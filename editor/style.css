@@ -1564,3 +1564,16 @@ form {
   width: 140px; color: #aaa; font-size: 11px;
 }
 .def-ai-param-input { flex: 1; }
+
+/* ── Validation badges (Slice 7) ──────────────────────────────────────── */
+.validation-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: help;
+  user-select: none;
+  vertical-align: middle;
+}
+.validation-badge-error   { color: #ff5c5c; }
+.validation-badge-warning { color: #f0c674; }

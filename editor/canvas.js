@@ -2,6 +2,7 @@ import { getSpawns, getAnchors, getSpawnPosition, getSpawnName, getEntityPath, g
 import { getColorForEntity } from './layers.js';
 import { loadEntityConfig, getEntityConfig } from './entity-cache.js';
 import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALLBACK } from './canvas-scenario.js';
+import { getRegionRenderSpec } from './canvas-region.js';
 import { snapshotForUndo } from './undo-controller.js';
 
 export class CanvasManager {
@@ -210,40 +211,72 @@ export class CanvasManager {
 
     // Draw region area overlay FIRST (behind the entity marker)
     if (spawn.shape) {
-      const hexColour = colourToHex(appearance.colour);
+      // Build a region entity input for the pure renderer. The spawn group is
+      // already positioned at (canvasPos.x, canvasPos.y), so we want the spec
+      // centred on the group origin — pass position=[0,0,0] and let the
+      // shapes draw at local (0,0). `cx`/`cz` from the spec are not used here.
+      const regionEntity = {
+        shape: spawn.shape,
+        colour: spawn.colour,
+        effects: spawn.effects,
+        position: [0, 0, 0],
+      };
+      const spec = getRegionRenderSpec(regionEntity);
+      const hexColour = colourToHex(spec.colour);
+      const alphaHex = Math.round(spec.fillAlpha * 255).toString(16).padStart(2, '0');
+      const fillColour = hexColour + alphaHex;
       const s = this.scale;
-      if (spawn.shape.type === 'sphere' && spawn.shape.radius) {
+
+      if (spec.shape === 'circle') {
         const fillCircle = new Konva.Circle({
-          radius: spawn.shape.radius * s,
-          fill: hexColour + '22',
+          radius: (spec.radius ?? 0) * s,
+          fill: fillColour,
           stroke: hexColour,
           strokeWidth: 1 / s
         });
         group.add(fillCircle);
-      } else if (spawn.shape.type === 'torus') {
-        const innerR = (spawn.shape.inner_radius ?? 50) * s;
-        const outerR = (spawn.shape.outer_radius ?? 150) * s;
+      } else if (spec.shape === 'torus') {
         const ring = new Konva.Ring({
-          innerRadius: innerR,
-          outerRadius: outerR,
-          fill: hexColour + '22',
+          innerRadius: (spec.inner_radius ?? 0) * s,
+          outerRadius: (spec.outer_radius ?? 0) * s,
+          fill: fillColour,
           stroke: hexColour,
           strokeWidth: 1 / s
         });
         group.add(ring);
-      } else if (spawn.shape.type === 'box') {
-        const hx = (Array.isArray(spawn.shape.half_extents) ? spawn.shape.half_extents[0] : 0) * s;
-        const hz = (Array.isArray(spawn.shape.half_extents) ? spawn.shape.half_extents[2] : 0) * s;
+      } else if (spec.shape === 'rect') {
+        const hx = (spec.half_x ?? 0) * s;
+        const hz = (spec.half_z ?? 0) * s;
         const rect = new Konva.Rect({
           x: -hx,
           y: -hz,
           width: hx * 2,
           height: hz * 2,
-          fill: hexColour + '22',
+          fill: fillColour,
           stroke: hexColour,
           strokeWidth: 1 / s
         });
         group.add(rect);
+      }
+
+      // Effect-icon cluster: horizontal row centred on the region origin.
+      if (Array.isArray(spec.effects) && spec.effects.length > 0) {
+        const iconFontSize = 14;
+        const iconGap = 4;
+        const iconWidth = iconFontSize + iconGap;
+        const totalWidth = spec.effects.length * iconWidth - iconGap;
+        const startX = -totalWidth / 2;
+        spec.effects.forEach((key, i) => {
+          const glyph = spec.effectIcons[key] || '?';
+          const txt = new Konva.Text({
+            x: startX + i * iconWidth,
+            y: -iconFontSize / 2,
+            text: glyph,
+            fontSize: iconFontSize,
+            fill: '#ffffff',
+          });
+          group.add(txt);
+        });
       }
     }
 

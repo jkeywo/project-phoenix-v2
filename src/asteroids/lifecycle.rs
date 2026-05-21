@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use crate::asteroid_spawner::eval_cell;
 use crate::asteroid_window::{compute_player_grid_cell, compute_slot_for_world_cell, eval_on_player_move};
-use crate::entity_spawner::AsteroidFieldSection;
+use crate::entity_spawner::{AsteroidFieldSection, MeshSection};
 use crate::lobby::Target;
 use crate::simulation::SimOutbox;
 use crate::messages::ServerMessage;
@@ -275,14 +275,25 @@ fn try_spawn_cell(
         crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])
     );
 
-    let entity = commands.spawn((
+    let mut entity_cmd = commands.spawn((
         Asteroid,
         AsteroidUuid(uuid.clone()),
         asteroid_hull,
         Transform::from_xyz(spawn.x, spawn.y, spawn.z),
         bevy_rapier3d::prelude::Collider::ball(2.0),
         bevy_rapier3d::prelude::RigidBody::Fixed,
-    )).id();
+    ));
+
+    // Look up the entity config from the cache and attach MeshSection so
+    // render_spawned_entities can add a 3-D visual mesh to this asteroid.
+    let config_cache = crate::config_cache::get_config_cache();
+    if let Some(entity_config) = config_cache.get(&spawn.config_path) {
+        if let Some(mesh) = &entity_config.mesh {
+            entity_cmd.insert(MeshSection(mesh.clone()));
+        }
+    }
+
+    let entity = entity_cmd.id();
 
     window.slots[slot_z][slot_x] = Some(AsteroidData {
         uuid: uuid.clone(),

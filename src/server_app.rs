@@ -168,10 +168,8 @@ pub fn add_simulation_plugins(app: &mut App) {
         TimerMode::Repeating,
     )))
     .add_systems(Startup, setup_world)
-    .add_systems(
-        OnEnter(GamePhase::InProgress),
-        (spawn_game_start_entities, render_spawned_entities),
-    )
+    .add_systems(OnEnter(GamePhase::InProgress), spawn_game_start_entities)
+    .add_systems(Update, render_spawned_entities)
     .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
     .insert_resource(GameOverReason(None))
     .add_systems(

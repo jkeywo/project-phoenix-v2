@@ -345,11 +345,14 @@ pub struct RedAlertVignetteMaterial {
     /// Set by the shield-flash system, decayed each frame.
     #[uniform(0)]
     pub flash_intensity: f32,
+    /// Aspect ratio (width / height) of the viewport. Used by the shader
+    /// to compute edge distances in pixel-space so the vignette has
+    /// uniform thickness on all four edges regardless of screen shape.
+    #[uniform(0)]
+    pub aspect_ratio: f32,
     /// Padding — keeps the uniform block 16-byte aligned on downlevel WebGL2.
     #[uniform(0)]
     _pad0: f32,
-    #[uniform(0)]
-    _pad1: f32,
 }
 
 impl UiMaterial for RedAlertVignetteMaterial {
@@ -426,9 +429,20 @@ fn load_viewscreen_assets(mut commands: Commands, asset_server: Res<AssetServer>
 fn spawn_border_on_startup(
     mut commands: Commands,
     assets: Res<ViewscreenAssets>,
+    window: Query<&Window>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
 ) {
-    let vignette = materials.add(RedAlertVignetteMaterial { intensity: 0.0, flash_intensity: 0.0, _pad0: 0.0, _pad1: 0.0 });
+    let aspect_ratio = window
+        .iter()
+        .next()
+        .map(|w| (w.width() / w.height()).max(0.01))
+        .unwrap_or(1.0);
+    let vignette = materials.add(RedAlertVignetteMaterial {
+        intensity: 0.0,
+        flash_intensity: 0.0,
+        aspect_ratio,
+        _pad0: 0.0,
+    });
     commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
     spawn_border_frame(&mut commands, &assets, vignette);
 }
@@ -603,6 +617,7 @@ fn apply_camera_shake(
 fn drive_vignette_intensity(
     time: Res<Time>,
     ship: Option<Res<ShipState>>,
+    window: Query<&Window>,
     handle: Option<Res<VignetteMaterialHandle>>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
     mut flash: ResMut<ShieldFlashState>,
@@ -621,6 +636,11 @@ fn drive_vignette_intensity(
         material.intensity,
         time.delta_secs(),
     );
+
+    // Keep aspect ratio in sync with the window (handles resize).
+    if let Some(window) = window.iter().next() {
+        material.aspect_ratio = (window.width() / window.height()).max(0.01);
+    }
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────

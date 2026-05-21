@@ -30,7 +30,7 @@ pub struct RedAlertIntensity(pub f32);
 
 /// Red-alert vignette material for the client (phone) app.
 ///
-/// Padded to 16 bytes (4×f32) for WGSL std140 alignment.  The shared WGSL
+/// Layout: 4×f32 = 16 bytes for WGSL std140 alignment.  The shared WGSL
 /// shader expects this layout.
 #[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
 pub struct RedAlertVignetteMaterial {
@@ -39,15 +39,16 @@ pub struct RedAlertVignetteMaterial {
     #[uniform(0)]
     pub flash_intensity: f32,
     #[uniform(0)]
-    pub _pad0: f32,
+    pub aspect_ratio: f32,
     #[uniform(0)]
-    pub _pad1: f32,
+    pub _pad0: f32,
 }
 
 impl RedAlertVignetteMaterial {
-    /// Create a new material with the given intensity (0.0–1.0).
+    /// Create a new material with the given intensity (0.0–1.0) and default
+    /// aspect ratio 1.0 (square).  Call [`set_aspect_ratio`] after creation.
     pub fn new(intensity: f32) -> Self {
-        Self { intensity, flash_intensity: 0.0, _pad0: 0.0, _pad1: 0.0 }
+        Self { intensity, flash_intensity: 0.0, aspect_ratio: 1.0, _pad0: 0.0 }
     }
 }
 
@@ -165,8 +166,8 @@ mod tests {
         let m = RedAlertVignetteMaterial {
             intensity: 0.0,
             flash_intensity: 0.0,
+            aspect_ratio: 1.0,
             _pad0: 0.0,
-            _pad1: 0.0,
         };
         assert_eq!(m.intensity, 0.0);
     }
@@ -176,9 +177,16 @@ mod tests {
         let m = RedAlertVignetteMaterial {
             intensity: 0.75,
             flash_intensity: 0.0,
+            aspect_ratio: 1.0,
             _pad0: 0.0,
-            _pad1: 0.0,
         };
         assert_eq!(m.intensity, 0.75);
+    }
+
+    #[test]
+    fn material_new_uses_aspect_ratio_1() {
+        let m = RedAlertVignetteMaterial::new(0.5);
+        assert_eq!(m.aspect_ratio, 1.0);
+        assert_eq!(m.intensity, 0.5);
     }
 }

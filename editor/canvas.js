@@ -179,7 +179,24 @@ export class CanvasManager {
     group.add(vLine);
     group.add(label);
 
-    // Drag wiring lands in commit C4.
+    // Drag: snapshot ONCE on dragstart (avoids the per-pixel snapshot anti-pattern
+    // used by spawn drag). dragmove mutates the anchor; dragend re-renders to
+    // refresh entity positions resolved via this anchor.
+    group.on('dragstart', () => {
+      snapshotForUndo(layer);
+    });
+    group.on('dragmove', () => {
+      const newX = group.x() / this.scale;
+      const newZ = -group.y() / this.scale;
+      const existing = layer.toml?.anchors?.[spec.name];
+      const preservedY = Array.isArray(existing) && existing.length >= 2 ? existing[1] : 0.0;
+      if (!layer.toml.anchors) layer.toml.anchors = {};
+      layer.toml.anchors[spec.name] = [newX, preservedY, newZ];
+      layer.isDirty = true;
+    });
+    group.on('dragend', () => {
+      this.renderAll();
+    });
 
     // Right-click menu (commits C5/C6).
     group.on('contextmenu', (e) => {

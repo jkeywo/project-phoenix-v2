@@ -121,6 +121,8 @@ pub enum HelpPanel {
     Power,
     Shields,
     Sensors,
+    Navigation,
+    Comms,
 }
 
 /// Marker for a help "?" button.
@@ -166,6 +168,15 @@ pub fn help_sections(panel: HelpPanel) -> &'static [(&'static str, &'static str)
         HelpPanel::Sensors => &[
             ("Long-Range Scan", "Extended-range radar overlay."),
             ("Target Hand-off", "Suggest targets to Tactical."),
+        ],
+        HelpPanel::Navigation => &[
+            ("System Chart", "Push the navigation chart to the viewscreen."),
+            ("Cancel Impulse", "Abort an active impulse drive charge."),
+        ],
+        HelpPanel::Comms => &[
+            ("Contacts", "List of hailable ships and stations."),
+            ("Messages", "Inbox of incoming transmissions."),
+            ("Objectives", "Current mission objectives."),
         ],
     }
 }

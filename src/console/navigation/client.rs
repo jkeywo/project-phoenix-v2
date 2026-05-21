@@ -11,6 +11,7 @@
 
 use bevy::prelude::*;
 
+use crate::client::console_shell::ConsoleShell;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
@@ -18,6 +19,7 @@ use crate::gui::{
     spawn_gui_button, ButtonPressed, ButtonSize, ReadoutValue, StateVisuals, TextReadout,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
+use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
 // ── Pure visibility helper ────────────────────────────────────────────
@@ -123,19 +125,24 @@ pub struct NavCancelImpulseButton;
 
 // ── Plugin ────────────────────────────────────────────────────────────
 
+/// Marker resource set once the navigation UI has been spawned.
+#[derive(Resource)]
+pub struct NavigationPanelSpawned;
+
 pub struct NavigationPanelPlugin;
 
 impl Plugin for NavigationPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_navigation_ui)
-            .add_systems(
-                Update,
-                (
-                    toggle_navigation_panel_visibility,
-                    refresh_navigation_panel,
-                    draw_nav_chart,
-                ),
-            );
+        app.add_systems(
+            Update,
+            (
+                spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
+                toggle_navigation_panel_visibility,
+                refresh_navigation_panel,
+                draw_nav_chart,
+                respawn_navigation_on_orientation_change,
+            ),
+        );
     }
 }
 
@@ -157,36 +164,67 @@ fn on_cancel_impulse_pressed(
     outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
 }
 
-// ── Setup ────────────────────────────────────────────────────────────
+// ── Spawn (ConsoleShell) ──────────────────────────────────────────────
 
-fn setup_navigation_ui(mut commands: Commands) {
-    let panel = commands
-        .spawn((
-            NavigationPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                right: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-            Visibility::Hidden,
-        ))
+fn spawn_navigation_ui(
+    mut commands: Commands,
+    assets: Option<Res<PhoneAssets>>,
+    old_panel: Query<Entity, With<NavigationPanel>>,
+    old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
+    orientation: Option<Res<DeviceOrientation>>,
+) {
+    let Some(assets) = assets else { return };
+    let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
+
+    for entity in old_panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    for (entity, overlay) in old_help.iter() {
+        if overlay.0 == crate::client::elements::HelpPanel::Navigation {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    commands.insert_resource(NavigationPanelSpawned);
+
+    let shell = ConsoleShell::spawn(
+        &mut commands,
+        assets.helm_panel_bg.clone(),
+        is_landscape,
+        crate::client::elements::HelpPanel::Navigation,
+        |commands: &mut Commands, primary: Entity| {
+            fill_navigation_chart(commands, primary);
+        },
+        |commands: &mut Commands, secondary: Entity| {
+            fill_navigation_controls(commands, secondary);
+        },
+        &assets,
+    );
+
+    commands.entity(shell.root).insert((NavigationPanel, Visibility::Hidden));
+}
+
+/// Primary slot: title + nav chart panel.
+fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
+    let col = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(8.0),
+            ..default()
+        })
         .id();
+    commands.entity(container).add_child(col);
 
-    commands.entity(panel).with_children(|p| {
+    commands.entity(col).with_children(|p| {
         p.spawn((
             Text::new("Navigation"),
             TextFont { font_size: 32.0, ..default() },
             TextColor(Color::srgb(0.5, 1.0, 0.8)),
         ));
-
-        // System chart display (gizmo-drawn via NavChartPanel bounds)
         p.spawn((
             NavChartPanel,
             Node {
@@ -199,8 +237,23 @@ fn setup_navigation_ui(mut commands: Commands) {
             BackgroundColor(Color::srgb(0.04, 0.06, 0.10)),
         ));
     });
+}
 
-    // Impulse status row: readout + cancel button
+/// Secondary slot: impulse status readout + cancel button + on-screen button.
+fn fill_navigation_controls(commands: &mut Commands, container: Entity) {
+    let col = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(12.0),
+            ..default()
+        })
+        .id();
+    commands.entity(container).add_child(col);
+
     let status_row = commands
         .spawn(Node {
             flex_direction: FlexDirection::Row,
@@ -209,16 +262,14 @@ fn setup_navigation_ui(mut commands: Commands) {
             ..default()
         })
         .id();
-    commands.entity(panel).add_child(status_row);
+    commands.entity(col).add_child(status_row);
 
-    // TextReadout for impulse status
-    let readout = TextReadout::spawn(&mut commands, "Impulse:", impulse_readout_visuals());
+    let readout = TextReadout::spawn(commands, "Impulse:", impulse_readout_visuals());
     commands.entity(readout).insert(NavImpulseReadout);
     commands.entity(status_row).add_child(readout);
 
-    // Cancel Impulse button (hidden when charge == 0)
     let cancel_btn = spawn_gui_button(
-        &mut commands,
+        commands,
         ButtonSize::Rect { width: 150.0, height: 36.0 },
         cancel_impulse_visuals(),
         None,
@@ -237,9 +288,8 @@ fn setup_navigation_ui(mut commands: Commands) {
     commands.entity(cancel_btn).observe(on_cancel_impulse_pressed);
     commands.entity(status_row).add_child(cancel_btn);
 
-    // On Screen button
     let on_screen_btn = spawn_gui_button(
-        &mut commands,
+        commands,
         ButtonSize::Rect { width: 120.0, height: 36.0 },
         on_screen_visuals(),
         None,
@@ -252,7 +302,24 @@ fn setup_navigation_ui(mut commands: Commands) {
         ));
     });
     commands.entity(on_screen_btn).observe(on_on_screen_pressed);
-    commands.entity(panel).add_child(on_screen_btn);
+    commands.entity(col).add_child(on_screen_btn);
+}
+
+// ── Orientation respawn ──────────────────────────────────────────────
+
+fn respawn_navigation_on_orientation_change(
+    orientation: Option<Res<DeviceOrientation>>,
+    panel: Query<Entity, With<NavigationPanel>>,
+    mut commands: Commands,
+) {
+    let Some(orientation) = orientation else { return };
+    if !orientation.is_changed() {
+        return;
+    }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    commands.remove_resource::<NavigationPanelSpawned>();
 }
 
 // ── Systems ──────────────────────────────────────────────────────────

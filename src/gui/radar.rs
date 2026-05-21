@@ -412,7 +412,7 @@ fn sync_radar_blip_nodes(
                         parent.spawn((
                             node,
                             ImageNode::new(h).with_color(color),
-                            ZIndex(0),
+                            ZIndex(10),
                             RadarBlipNode { source },
                         ));
                     } else {
@@ -420,7 +420,7 @@ fn sync_radar_blip_nodes(
                         parent.spawn((
                             node,
                             ImageNode::solid_color(color),
-                            ZIndex(0),
+                            ZIndex(10),
                             RadarBlipNode { source },
                         ));
                     }

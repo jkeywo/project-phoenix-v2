@@ -275,19 +275,26 @@ fn try_spawn_cell(
         crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])
     );
 
+    // Look up the entity config from the cache so the collider radius
+    // (and visual mesh) come from the TOML rather than a hard-coded value.
+    let config_cache = crate::config_cache::get_config_cache();
+    let entity_config = config_cache.get(&spawn.config_path);
+    let collider_radius = entity_config
+        .and_then(|c| c.collider.as_ref())
+        .map(|c| c.radius)
+        .unwrap_or(2.0);
+
     let mut entity_cmd = commands.spawn((
         Asteroid,
         AsteroidUuid(uuid.clone()),
         asteroid_hull,
         Transform::from_xyz(spawn.x, spawn.y, spawn.z),
-        bevy_rapier3d::prelude::Collider::ball(2.0),
+        bevy_rapier3d::prelude::Collider::ball(collider_radius),
         bevy_rapier3d::prelude::RigidBody::Fixed,
     ));
 
-    // Look up the entity config from the cache and attach MeshSection so
-    // render_spawned_entities can add a 3-D visual mesh to this asteroid.
-    let config_cache = crate::config_cache::get_config_cache();
-    if let Some(entity_config) = config_cache.get(&spawn.config_path) {
+    // Attach MeshSection so render_spawned_entities can add a 3-D visual mesh.
+    if let Some(entity_config) = entity_config {
         if let Some(mesh) = &entity_config.mesh {
             entity_cmd.insert(MeshSection(mesh.clone()));
         }

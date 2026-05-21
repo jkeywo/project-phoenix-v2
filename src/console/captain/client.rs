@@ -553,7 +553,7 @@ fn refresh_red_alert_ui(
     ship_view: Option<Res<ShipView>>,
     time: Res<Time>,
     mut ra_states: Query<&mut WidgetState, With<crate::gui::GuiButtonMarker>>,
-    mut glow_q: Query<(&mut BackgroundColor, &Parent), With<ArmedGlow>>,
+    mut glow_q: Query<(&mut BackgroundColor, &ChildOf), With<ArmedGlow>>,
 ) {
     let Some(ship_view) = ship_view else { return };
     if !ship_view.is_changed() && !ship_view.red_alert {
@@ -563,8 +563,7 @@ fn refresh_red_alert_ui(
     // Update WidgetState only for the button that has ArmedGlow as a child.
     // We identify the RA button by querying ArmedGlow and walking up to the parent.
     for (mut glow_bg, parent) in glow_q.iter_mut() {
-        // parent.get() gives the ArmedGlow's parent = the RA button entity
-        let ra_entity = parent.get();
+        let ra_entity = parent.0;
         if let Ok(mut state) = ra_states.get_mut(ra_entity) {
             state.active = ship_view.red_alert;
         }

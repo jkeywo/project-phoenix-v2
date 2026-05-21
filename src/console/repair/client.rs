@@ -663,10 +663,8 @@ mod tests {
     fn repairing_fills_bar_and_reports_active_console() {
         let d = row_data_for_slot(&TeamSlot::Repairing {
             console: Console::Tactical,
-            elapsed: 25.0,
         });
-        // 25 / 50 * 100 = 50 %
-        assert!((d.pct - 50.0).abs() < 0.01, "pct should be 50, got {}", d.pct);
+        assert!((d.pct - 100.0).abs() < 0.01, "pct should be 100, got {}", d.pct);
         assert!(d.fills, "Repairing should fill the bar");
         assert!(!d.is_idle);
         assert_eq!(d.active_console, Some(Console::Tactical));
@@ -845,7 +843,6 @@ mod tests {
     fn pct_to_progress_value_full() {
         let d = row_data_for_slot(&TeamSlot::Repairing {
             console: Console::Tactical,
-            elapsed: 9999.0,
         });
         let progress_value = (d.pct / 100.0).clamp(0.0, 1.0);
         assert_eq!(progress_value, 1.0);

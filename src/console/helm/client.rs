@@ -12,9 +12,10 @@ use crate::client_app::{HelmPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    spawn_gui_button, ButtonPressed, ButtonSize, GenericJoystick, GenericRadar, JoystickMoved,
-    OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
-    ReadoutValue, StateVisuals, TextReadout, Visual,
+    default_layer_colour, layer_to_icon, spawn_gui_button, tags_to_radar_layer, ButtonPressed,
+    ButtonSize, GenericJoystick, GenericRadar, JoystickMoved, OnRadar, OrientationMode,
+    RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer, ReadoutValue, StateVisuals,
+    TextReadout, Visual,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -213,21 +214,7 @@ fn sync_helm_radar_range(
 
 // ── Radar entity bridge ─────────────────────────────────────────────
 
-/// Map a `RadarLayer` to the icon used for its blip. `Missile` uses the
-/// torpedo icon since the wire layer for torpedoes is `Missile`.
-fn layer_to_icon(layer: RadarLayer) -> RadarIcon {
-    match layer {
-        RadarLayer::Ship => RadarIcon::Ship,
-        RadarLayer::Asteroid => RadarIcon::Asteroid,
-        RadarLayer::Station => RadarIcon::Station,
-        RadarLayer::Missile => RadarIcon::Torpedo,
-        RadarLayer::Planet => RadarIcon::Planet,
-        RadarLayer::Star => RadarIcon::Star,
-    }
-}
-
-/// Bridges `ClientSimState` entity snapshots into ECS entities with
-/// `OnRadar` / `RadarAppearance` for the `GenericRadar` widget.
+/// Build `OnRadar` / `RadarAppearance` for the `GenericRadar` widget.
 fn bridge_client_sim_to_radar_entities(
     mut commands: Commands,
     sim: Res<ClientSimState>,
@@ -295,35 +282,12 @@ fn bridge_client_sim_to_radar_entities(
             continue;
         }
 
-        let has_tag = |tag: &str| snapshot.tags.iter().any(|t| t == tag);
-        if has_tag("region") {
-            continue; // skip regions — not radar-relevant
-        }
-        let layer = if has_tag("ship") || has_tag("pirate") {
-            RadarLayer::Ship
-        } else if has_tag("asteroid") || has_tag("asteroid_field") {
-            RadarLayer::Asteroid
-        } else if has_tag("station") {
-            RadarLayer::Station
-        } else if has_tag("missile") || has_tag("torpedo") {
-            RadarLayer::Missile
-        } else if has_tag("planet") {
-            RadarLayer::Planet
-        } else if has_tag("star") {
-            RadarLayer::Star
-        } else {
-            continue; // unknown type
+        let Some(layer) = tags_to_radar_layer(&snapshot.tags) else {
+            continue; // skip regions and unknown types
         };
 
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
-        let default_color = match layer {
-            RadarLayer::Ship => Color::srgb(0.95, 0.95, 1.0),
-            RadarLayer::Asteroid => Color::srgb(0.85, 0.75, 0.45),
-            RadarLayer::Station => Color::srgb(0.3, 0.8, 0.6),
-            RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
-            RadarLayer::Planet => Color::srgb(0.0, 0.6, 1.0),
-            RadarLayer::Star => Color::srgb(1.0, 0.85, 0.3),
-        };
+        let default_color = default_layer_colour(layer);
         let icon = layer_to_icon(layer);
         // Prefer the authored radar override, then the physical radius,
         // then a fallback of 4.0 world units.

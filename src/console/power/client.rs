@@ -14,6 +14,7 @@
 
 use bevy::prelude::*;
 
+use crate::client::console_shell::ConsoleShell;
 use crate::client_app::{OutboundClientMessage, HideableElement};
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
@@ -22,6 +23,7 @@ use crate::gui::{
     ProgressValue, ReadoutValue, StateVisuals, TextReadout,
 };
 use crate::messages::{Console, GamePhase};
+use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
 // ── Pure visibility helper ────────────────────────────────────────────
@@ -138,74 +140,102 @@ struct BatteryReadout;
 
 // ── Plugin ───────────────────────────────────────────────────────────
 
+/// Marker resource set once the power UI has been spawned.
+#[derive(Resource)]
+pub struct PowerPanelSpawned;
+
+// ── Plugin ───────────────────────────────────────────────────────────
+
 /// Plugin that owns all Power console UI and systems.
 pub struct PowerPanelPlugin;
 
 impl Plugin for PowerPanelPlugin {
     fn build(&self, app: &mut App) {
         app
-            .add_systems(Startup, setup_power_ui)
             .add_systems(Update, (
+                spawn_power_ui.run_if(not(resource_exists::<PowerPanelSpawned>)),
                 toggle_power_panel_visibility,
                 refresh_power_panel,
+                respawn_power_on_orientation_change,
             ));
     }
 }
 
-// ── Setup ────────────────────────────────────────────────────────────
+// ── Spawn (ConsoleShell) ─────────────────────────────────────────────
 
-fn setup_power_ui(mut commands: Commands) {
-    // ── Root panel ────────────────────────────────────────────────────
-    let panel = commands
-        .spawn((
-            PowerPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left:   Val::Px(0.0),
-                top:    Val::Px(0.0),
-                right:  Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(12.0),
-                padding: UiRect::all(Val::Px(24.0)),
-                ..default()
-            },
-            Visibility::Hidden,
-        ))
-        .id();
+fn spawn_power_ui(
+    mut commands: Commands,
+    assets: Option<Res<PhoneAssets>>,
+    old_panel: Query<Entity, With<PowerPanel>>,
+    old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
+    orientation: Option<Res<DeviceOrientation>>,
+) {
+    let Some(assets) = assets else { return };
+    let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
-    // ── Title row ─────────────────────────────────────────────────────
-    let title_row = commands
+    for entity in old_panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    for (entity, overlay) in old_help.iter() {
+        if overlay.0 == crate::client::elements::HelpPanel::Power {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    commands.insert_resource(PowerPanelSpawned);
+
+    let shell = ConsoleShell::spawn(
+        &mut commands,
+        assets.helm_panel_bg.clone(),
+        is_landscape,
+        crate::client::elements::HelpPanel::Power,
+        |commands: &mut Commands, primary: Entity| {
+            fill_power_primary(commands, primary);
+        },
+        |_commands: &mut Commands, _secondary: Entity| {
+            // Power console uses a single column; secondary slot left empty.
+        },
+        &assets,
+    );
+
+    commands.entity(shell.root).insert((PowerPanel, Visibility::Hidden));
+}
+
+/// Primary slot: title + 3 power rows + overflow + battery.
+fn fill_power_primary(commands: &mut Commands, container: Entity) {
+    let col = commands
         .spawn(Node {
-            flex_direction: FlexDirection::Row,
+            flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(12.0),
+            padding: UiRect::all(Val::Px(8.0)),
             ..default()
         })
         .id();
-    commands.entity(title_row).with_children(|tr| {
-        tr.spawn((
+    commands.entity(container).add_child(col);
+
+    let title = commands
+        .spawn((
             Text::new("Power Console"),
             TextFont { font_size: 24.0, ..default() },
             TextColor(Color::srgb(0.3, 1.0, 0.8)),
-        ));
-        crate::client_elements::spawn_help_button(tr, crate::client_elements::HelpPanel::Power, 16.0);
-    });
-    commands.entity(panel).add_child(title_row);
+        ))
+        .id();
+    commands.entity(col).add_child(title);
 
-    // ── Three power rows: Helm, Weapons, Sensors ──────────────────────
     for (console, label) in [
         (Console::Helm, "Helm"),
         (Console::Tactical, "Weapons"),
         (Console::Sensors, "Sensors"),
     ] {
-        let row = spawn_power_row(&mut commands, console, label);
-        commands.entity(panel).add_child(row);
+        let row = spawn_power_row(commands, console, label);
+        commands.entity(col).add_child(row);
     }
 
-    // ── Overflow allocation controls ──────────────────────────────────
+    // Overflow row
     let overflow_row = commands
         .spawn((
             HideableElement("power_overflow_controls".into()),
@@ -225,9 +255,9 @@ fn setup_power_ui(mut commands: Commands) {
             TextColor(Color::srgb(0.6, 0.7, 0.5)),
         ));
     });
-    commands.entity(panel).add_child(overflow_row);
+    commands.entity(col).add_child(overflow_row);
 
-    // ── Battery section ───────────────────────────────────────────────
+    // Battery section
     let battery_section = commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -239,9 +269,8 @@ fn setup_power_ui(mut commands: Commands) {
         })
         .id();
 
-    // Battery progress bar (continuous)
     let bar = ProgressBar::spawn(
-        &mut commands,
+        commands,
         Vec2::new(280.0, 16.0),
         ProgressBarVariant::Continuous,
         battery_visuals(),
@@ -250,20 +279,33 @@ fn setup_power_ui(mut commands: Commands) {
     commands.entity(bar).insert(BatteryBar);
     commands.entity(battery_section).add_child(bar);
 
-    // Battery percentage text readout
     let battery_dim = Color::srgb(0.5, 0.8, 1.0);
     let bat_readout_visuals = StateVisuals::from_colors(
         battery_dim, battery_dim, battery_dim, battery_dim,
         Color::srgb(0.3, 0.3, 0.4),
     );
-    let bat_readout = TextReadout::spawn(&mut commands, "Battery", bat_readout_visuals);
+    let bat_readout = TextReadout::spawn(commands, "Battery", bat_readout_visuals);
     commands.entity(bat_readout).insert(BatteryReadout);
     commands.entity(battery_section).add_child(bat_readout);
 
-    commands.entity(panel).add_child(battery_section);
+    commands.entity(col).add_child(battery_section);
+}
 
-    // ── Help overlay ──────────────────────────────────────────────────
-    crate::client_elements::spawn_help_overlay_root(&mut commands, crate::client_elements::HelpPanel::Power);
+// ── Orientation respawn ──────────────────────────────────────────────
+
+fn respawn_power_on_orientation_change(
+    orientation: Option<Res<DeviceOrientation>>,
+    panel: Query<Entity, With<PowerPanel>>,
+    mut commands: Commands,
+) {
+    let Some(orientation) = orientation else { return };
+    if !orientation.is_changed() {
+        return;
+    }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    commands.remove_resource::<PowerPanelSpawned>();
 }
 
 /// Spawn one power allocation row (console label | dec button | level readout | inc button).

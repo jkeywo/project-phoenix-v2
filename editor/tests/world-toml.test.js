@@ -223,4 +223,57 @@ entity = "raider_alpha"
       expect(reparsed.entity.length).toEqual(parsed.entity.length);
     });
   });
+
+  describe('spawn override persistence (Slice 3)', () => {
+    // Slice 3 introduces `[entity.override]` as a per-spawn convention:
+    // the editor mutates `layer.toml.entity[i].override` in place and
+    // relies on smol-toml.stringify to round-trip it.  This test pins
+    // that contract — if the writer ever drops unknown keys, fix it
+    // before merging.
+    it('round-trips a primitive override on a spawn', () => {
+      const world = {
+        global: { seed: 7 },
+        anchors: { spot: [0, 0, 0] },
+        entity: [{
+          template_path: 'assets/entities/pirate_raider.toml',
+          name: 'raider_alpha',
+          anchor: 'spot',
+          override: { hull: { max: 80 } },
+        }],
+      };
+      const toml = stringifyWorldToml(world);
+      const reparsed = parseWorldToml(toml);
+      expect(reparsed.entity[0].override).toEqual({ hull: { max: 80 } });
+      expect(reparsed.entity[0].name).toBe('raider_alpha');
+    });
+
+    it('round-trips an array-valued override (REPLACE merge)', () => {
+      const world = {
+        global: { seed: 1 },
+        anchors: { a: [0, 0, 0] },
+        entity: [{
+          template_path: 'assets/entities/asteroid_large.toml',
+          name: 'big_rock',
+          override: { radar_appearance: { colour: [0.9, 0.1, 0.1] } },
+        }],
+      };
+      const toml = stringifyWorldToml(world);
+      const reparsed = parseWorldToml(toml);
+      expect(reparsed.entity[0].override.radar_appearance.colour)
+        .toEqual([0.9, 0.1, 0.1]);
+    });
+
+    it('a spawn without override has no override key after round-trip', () => {
+      const world = {
+        global: { seed: 1 },
+        anchors: { a: [0, 0, 0] },
+        entity: [{
+          template_path: 'assets/entities/asteroid_large.toml',
+          name: 'plain_rock',
+        }],
+      };
+      const reparsed = parseWorldToml(stringifyWorldToml(world));
+      expect('override' in reparsed.entity[0]).toBe(false);
+    });
+  });
 });

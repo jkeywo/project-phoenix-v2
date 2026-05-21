@@ -3,6 +3,7 @@ import { getColorForEntity } from './layers.js';
 import { loadEntityConfig, getEntityConfig } from './entity-cache.js';
 import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALLBACK } from './canvas-scenario.js';
 import { getRegionRenderSpec } from './canvas-region.js';
+import { getAnchorRenderSpecs } from './canvas-anchor.js';
 import { snapshotForUndo } from './undo-controller.js';
 
 export class CanvasManager {
@@ -110,58 +111,87 @@ export class CanvasManager {
     const layers = this.layerManager.getLayers();
     const allAnchors = [];
 
+    // First pass: aggregate anchors from all layers (used by spawn positioning).
+    for (const layer of layers) {
+      if (!layer.visible) continue;
+      allAnchors.push(...getAnchors(layer));
+    }
+
+    // Adapter for cross-layer pure modules (anchor-rename, anchor-delete).
+    const v2Layers = layers.map(l => ({ path: l.filename, worldState: l.toml }));
+
     for (const layer of layers) {
       if (!layer.visible) continue;
 
       const layerGroup = new Konva.Group();
       this.baseLayer.add(layerGroup);
 
-      const anchors = getAnchors(layer);
-      allAnchors.push(...anchors);
-
-      for (const anchor of anchors) {
-        const pos = this.worldToCanvas(anchor.position[0], anchor.position[2]);
-        const diamond = new Konva.Shape({
-          x: pos.x,
-          y: pos.y,
-          stroke: '#ffffff',
-          strokeWidth: 2,
-          sceneFunc: (ctx, shape) => {
-            const size = 8;
-            ctx.beginPath();
-            ctx.moveTo(size, 0);
-            ctx.lineTo(0, size);
-            ctx.lineTo(-size, 0);
-            ctx.lineTo(0, -size);
-            ctx.closePath();
-            ctx.stroke();
-          }
-        });
-
-        const label = new Konva.Text({
-          x: -30,
-          y: 12,
-          text: anchor.name,
-          fontSize: 10,
-          fill: '#ffffff',
-          width: 60,
-          align: 'center'
-        });
-
-        const group = new Konva.Group({ draggable: false });
-        group.add(diamond);
-        group.add(label);
-        layerGroup.add(group);
-      }
-
+      // Spawns first — region overlays + entity markers beneath anchors.
       const spawns = getSpawns(layer);
       for (const spawn of spawns) {
         this.renderSpawn(spawn, layer, layerGroup, allAnchors);
+      }
+
+      // Anchors LAST — drawn on top of entities for visibility + clickability.
+      const anchorSpecs = getAnchorRenderSpecs(layer.toml?.anchors || {});
+      for (const spec of anchorSpecs) {
+        this.renderAnchor(spec, layer, layerGroup, v2Layers);
       }
     }
 
     this.updateArrows();
     this.baseLayer.batchDraw();
+  }
+
+  renderAnchor(spec, layer, container, v2Layers) {
+    const pos = this.worldToCanvas(spec.x, spec.z);
+    const group = new Konva.Group({
+      x: pos.x,
+      y: pos.y,
+      draggable: true,
+      name: 'anchorGroup',
+    });
+
+    const size = spec.size;
+    // Cross-hair: horizontal + vertical lines, length spec.size*2.
+    const hLine = new Konva.Line({
+      points: [-size, 0, size, 0],
+      stroke: '#ffff66',
+      strokeWidth: 1.5,
+    });
+    const vLine = new Konva.Line({
+      points: [0, -size, 0, size],
+      stroke: '#ffff66',
+      strokeWidth: 1.5,
+    });
+
+    const label = new Konva.Text({
+      x: -40,
+      y: size + 4,
+      text: spec.name,
+      fontSize: 10,
+      fill: '#ffff66',
+      width: 80,
+      align: 'center',
+    });
+
+    group.add(hLine);
+    group.add(vLine);
+    group.add(label);
+
+    // Drag wiring lands in commit C4.
+
+    // Right-click menu (commits C5/C6).
+    group.on('contextmenu', (e) => {
+      e.evt.preventDefault();
+      this.showAnchorMenu(e.evt.clientX, e.evt.clientY, spec.name, layer);
+    });
+
+    container.add(group);
+  }
+
+  showAnchorMenu(_clientX, _clientY, _anchorName, _layer) {
+    // Wired in C5/C6.
   }
 
   renderSpawn(spawn, layer, container, allAnchors) {

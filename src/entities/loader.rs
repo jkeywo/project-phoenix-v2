@@ -77,6 +77,75 @@ mod tests {
         assert_eq!(config.tags, vec!["asteroid"]);
     }
 
+    /// Locks in the override-payload used by the tactical-fire-flow smoke test.
+    /// The smoke test appends a `[[entity]]` block to the world TOML referencing
+    /// the pirate-raider template plus `overrides = { behaviour = { initial_state
+    /// = "idle", transition = [] } }`. This keeps the raider stationary and
+    /// prevents the `hull_below` flee transition from carrying it out of the
+    /// player's 40-unit phaser range mid-kill (which makes the second beam
+    /// sever-by-range, the test then times out waiting for EntityDespawned).
+    #[test]
+    fn pirate_raider_override_for_smoke_test_disables_transitions() {
+        let template_toml = std::fs::read_to_string("assets/entities/pirate_raider.toml")
+            .expect("pirate_raider.toml must exist");
+        let cache = make_cache("assets/entities/pirate_raider.toml", &template_toml);
+
+        // Same payload the smoke test embeds in the world TOML it serves.
+        let override_value: toml::Value = toml::from_str(
+            r#"
+[behaviour]
+initial_state = "idle"
+transition = []
+"#,
+        )
+        .unwrap();
+
+        let inst = WorldEntity {
+            template_path: "assets/entities/pirate_raider.toml".to_string(),
+            overrides: Some(override_value),
+            ..Default::default()
+        };
+        let config = resolve_entity(&inst, &cache).unwrap();
+        let beh = config.behaviour.expect("raider must keep [behaviour] section");
+        assert_eq!(beh.initial_state, "idle", "initial_state must be overridden to idle");
+        assert!(beh.transition.is_empty(), "all transitions must be replaced with []");
+        assert!(!beh.state.is_empty(), "template state blocks must be preserved by name-merge");
+    }
+
+    /// End-to-end check that the smoke test's appended world TOML (inline-table
+    /// `overrides`) parses through `parse_world` → `resolve_entity` and yields
+    /// an idle raider with no transitions.
+    #[test]
+    fn smoke_test_world_inline_override_round_trips_to_idle_raider() {
+        let template_toml = std::fs::read_to_string("assets/entities/pirate_raider.toml")
+            .expect("pirate_raider.toml must exist");
+        let cache = make_cache("assets/entities/pirate_raider.toml", &template_toml);
+
+        // Mirrors the inline-table form the smoke test appends to its modified
+        // default.toml (see tests/smoke/tactical-fire-flow.spec.ts).
+        let world_toml = r#"
+[[entity]]
+template_path = "assets/entities/pirate_raider.toml"
+name          = "raider_alpha"
+position      = [150.0, 0.0, -20.0]
+overrides     = { behaviour = { initial_state = "idle", transition = [] } }
+"#;
+
+        let world = crate::world::config::parse_world(world_toml)
+            .expect("smoke-test world TOML must parse");
+        assert_eq!(world.entities.len(), 1, "expected exactly one [[entity]] block");
+
+        let inst = &world.entities[0];
+        assert!(inst.overrides.is_some(), "overrides must round-trip through parse_world");
+
+        let config = resolve_entity(inst, &cache).unwrap();
+        let beh = config.behaviour.expect("raider keeps behaviour section after merge");
+        assert_eq!(beh.initial_state, "idle");
+        assert!(beh.transition.is_empty(),
+                "smoke-test override must produce zero transitions; got {} transitions",
+                beh.transition.len());
+    }
+
     #[test]
     fn assign_uuid_returns_valid_uuid() {
         let id = assign_uuid();

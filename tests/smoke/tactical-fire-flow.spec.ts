@@ -17,25 +17,42 @@ import * as path from 'path';
 // Load the real default world and append a close-range raider entity so that
 // the test's SetTarget call passes the in-range gate. After PRD #337 the
 // unified `[[entity]]` block (with optional `name`) is the only spawn surface;
-// legacy `[[spawn]]` blocks are no longer parsed. We also strip the default
-// `raider_alpha` entity (positioned at the far patrol anchor) so there is
-// exactly one raider for the test to target.
+// legacy `[[spawn]]` blocks are no longer parsed.
+//
+// We also strip the default `raider_alpha` entity (positioned at the far
+// patrol anchor) so there is exactly one raider for the test to target.
+// The default block lists `template_path` BEFORE `name`, so the regex must
+// match a `[[entity]]` followed by ANY number of `key = value` lines and then
+// the `name = "raider_alpha"` line — anchored on a non-`[` line prefix to
+// avoid leaking across into the next block.
+//
+// We also override the raider's behaviour to idle with zero transitions so
+// that the `hull_below` (30 %) flee transition does not fire mid-kill. Without
+// this, the second beam triggers a flee → the raider exits the player's
+// 40-unit phaser range → beam severs by range → 6 s cooldown → raider is far
+// out of range by the time we can fire again → EntityDespawned never arrives
+// → test times out at 60 s.  The override is round-tripped through
+// `parse_world` and `resolve_entity` in `src/entities/loader.rs` tests, so
+// any change to the merge semantics will be caught there.
 const REAL_WORLD = fs.readFileSync(
   path.join(__dirname, '../../assets/worlds/default.toml'),
   'utf-8',
 );
 const WORLD_WITHOUT_FAR_RAIDER = REAL_WORLD.replace(
-  /\[\[entity\]\]\s*\nname\s*=\s*"raider_alpha"[\s\S]*?(?=\n\[\[|$)/,
+  /\[\[entity\]\]\s*\n(?:[^\[\n][^\n]*\n)*?name\s*=\s*"raider_alpha"[\s\S]*?(?=\n\[\[|$)/,
   '',
 );
 const CLOSE_RAIDER_WORLD = WORLD_WITHOUT_FAR_RAIDER + `
 
 # Smoke-test override: a raider 20 units in front of the player ship spawn.
 # Ship spawns at (150, 0, 0) per assets/worlds/default.toml; forward is -Z.
+# Override = idle with no transitions so the raider stays stationary and
+# cannot flee out of phaser range mid-kill.
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
 position      = [150.0, 0.0, -20.0]
+overrides     = { behaviour = { initial_state = "idle", transition = [] } }
 `;
 
 async function waitForStation(

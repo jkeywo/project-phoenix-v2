@@ -40,9 +40,14 @@ test('client WASM loads without asset 404s or JS errors', async ({ context }) =>
   const clientPage = await context.newPage();
   const pageErrors: string[] = [];
   const bevyWarnings: string[] = [];
+  // console.error messages from the browser page (e.g. console_error_panic_hook output).
+  const browserConsoleErrors: string[] = [];
   clientPage.on('pageerror', err => pageErrors.push(err.message));
-  // Capture Bevy log output: warn!() maps to console.warn in WASM builds.
   clientPage.on('console', msg => {
+    if (msg.type() === 'error') {
+      browserConsoleErrors.push(msg.text());
+    }
+    // Capture Bevy log output: warn!() maps to console.warn in WASM builds.
     if (msg.type() === 'warning') {
       const text = msg.text();
       // B0004 = Bevy hierarchy inconsistency (ChildOf without matching Children).
@@ -85,7 +90,10 @@ test('client WASM loads without asset 404s or JS errors', async ({ context }) =>
     'or ensure all copy-dir entries are present in client.html.',
   ).toEqual([]);
 
-  expect(pageErrors, 'JS errors during client WASM startup').toEqual([]);
+  const panicContext = browserConsoleErrors.length > 0
+    ? '\nBrowser console.error output (panic hook / WASM errors):\n' + browserConsoleErrors.join('\n')
+    : '';
+  expect(pageErrors, 'JS errors during client WASM startup' + panicContext).toEqual([]);
 
   expect(
     bevyWarnings,

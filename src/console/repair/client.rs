@@ -1,6 +1,11 @@
-//! Client-side Repair Panel plugin.
+//! Client-side Repair Panel plugin — migrated to `src/gui/` library widgets.
 //!
 //! Owns all Repair console UI: team status rows and console dispatch buttons.
+//! Uses `GuiButton` for dispatch buttons (observer callbacks), `ProgressBar`
+//! (continuous) with `ProgressValue` for team progress, and `TextReadout` with
+//! `ReadoutValue` for team status and hull status text.
+//!
+//! No per-button marker-component query systems remain.
 //! Compiled only when the `client` Cargo feature is enabled.
 
 use bevy::prelude::*;
@@ -8,6 +13,10 @@ use bevy::prelude::*;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
+use crate::gui::{
+    spawn_gui_button, ButtonPressed, ButtonSize, ProgressBar, ProgressBarVariant, ProgressValue,
+    ReadoutValue, StateVisuals, TextReadout, WidgetState,
+};
 use crate::messages::{Console, GamePhase, TeamSlot};
 
 // ── Pure visibility helper ────────────────────────────────────────────
@@ -121,41 +130,109 @@ pub fn row_data_for_slot(slot: &TeamSlot) -> RowData {
     row_data_for_slot_with_timings(slot, TRAVEL_DURATION_SECS, REPAIR_DURATION_SECS)
 }
 
+// ── Pure visual helpers ──────────────────────────────────────────────
+
+/// `StateVisuals` for a team progress bar in idle state.
+pub fn team_bar_idle_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.10, 0.20, 0.60), // idle
+        Color::srgb(0.10, 0.20, 0.60), // hover (non-interactive)
+        Color::srgb(0.10, 0.20, 0.60), // active
+        Color::srgb(0.10, 0.20, 0.60), // press
+        Color::srgb(0.05, 0.10, 0.20), // disabled
+    )
+}
+
+/// `StateVisuals` for a team progress bar in travelling state.
+pub fn team_bar_travelling_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.60, 0.60, 0.10), // idle
+        Color::srgb(0.60, 0.60, 0.10), // hover
+        Color::srgb(0.70, 0.70, 0.12), // active
+        Color::srgb(0.60, 0.60, 0.10), // press
+        Color::srgb(0.05, 0.10, 0.20), // disabled
+    )
+}
+
+/// `StateVisuals` for a team progress bar in repairing state.
+pub fn team_bar_repairing_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.10, 0.70, 0.20), // idle
+        Color::srgb(0.10, 0.70, 0.20), // hover
+        Color::srgb(0.12, 0.80, 0.22), // active
+        Color::srgb(0.10, 0.70, 0.20), // press
+        Color::srgb(0.05, 0.10, 0.20), // disabled
+    )
+}
+
+/// `StateVisuals` for a team progress bar in returning state.
+pub fn team_bar_returning_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.30, 0.30, 0.80), // idle
+        Color::srgb(0.30, 0.30, 0.80), // hover
+        Color::srgb(0.35, 0.35, 0.90), // active
+        Color::srgb(0.30, 0.30, 0.80), // press
+        Color::srgb(0.05, 0.10, 0.20), // disabled
+    )
+}
+
+/// `StateVisuals` for a team status `TextReadout`.
+pub fn team_status_readout_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.5, 0.7, 1.0),  // idle
+        Color::srgb(0.5, 0.7, 1.0),  // hover
+        Color::srgb(0.8, 0.9, 1.0),  // active
+        Color::srgb(0.5, 0.7, 1.0),  // press
+        Color::srgb(0.3, 0.3, 0.4),  // disabled
+    )
+}
+
+/// `StateVisuals` for the hull `TextReadout`.
+pub fn hull_readout_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.6, 0.8, 1.0), // idle
+        Color::srgb(0.6, 0.8, 1.0), // hover
+        Color::srgb(0.6, 0.8, 1.0), // active
+        Color::srgb(0.6, 0.8, 1.0), // press
+        Color::srgb(0.3, 0.3, 0.4), // disabled
+    )
+}
+
+/// `StateVisuals` for a dispatch button (idle = inactive, active = console highlighted).
+pub fn dispatch_button_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.10, 0.25, 0.15), // idle
+        Color::srgb(0.15, 0.35, 0.20), // hover
+        Color::srgb(0.20, 0.55, 0.30), // active (team heading here)
+        Color::srgb(0.25, 0.45, 0.25), // press
+        Color::srgb(0.05, 0.10, 0.08), // disabled
+    )
+}
+
 // ── Marker components ────────────────────────────────────────────────
 
 /// Marks the root of the repair console UI.
 #[derive(Component)]
 pub struct RepairPanel;
 
-/// Marks a team row container (index 0, 1, or 2).
-#[derive(Component)]
-#[allow(dead_code)]
-struct RepairTeamRow(usize);
+/// Marks a `ProgressBar` root for a specific team row (index 0, 1, or 2).
+#[derive(Component, Clone)]
+struct RepairTeamBar(usize);
 
-/// Marks the progress-bar fill inside a team row.
-#[derive(Component)]
-#[allow(dead_code)]
-struct RepairTeamFill(usize);
+/// Marks a `TextReadout` root for the team status (index 0, 1, or 2).
+#[derive(Component, Clone)]
+struct RepairTeamStatusReadout(usize);
 
-/// Marks the status text overlaid on a team row.
-#[derive(Component)]
-#[allow(dead_code)]
-struct RepairTeamStatusText(usize);
-
-/// Marks a console dispatch button. Carries the target console and team index.
-#[derive(Component)]
+/// Marks a dispatch `GuiButton`. Carries the target console and team index.
+#[derive(Component, Clone)]
 struct DispatchButton {
     console: Console,
     team_idx: usize,
 }
 
-/// Marks the aggregate hull display text node.
+/// Marks the hull `TextReadout` root.
 #[derive(Component)]
-struct RepairHullText;
-
-/// Marks the container for dynamic team rows.
-#[derive(Component)]
-struct RepairTeamContainer;
+struct RepairHullReadout;
 
 // ── Plugin ───────────────────────────────────────────────────────────
 
@@ -169,7 +246,6 @@ impl Plugin for RepairPanelPlugin {
             .add_systems(Update, (
                 toggle_repair_panel_visibility,
                 refresh_repair_panel,
-                handle_dispatch_button_press,
             ));
     }
 }
@@ -177,7 +253,7 @@ impl Plugin for RepairPanelPlugin {
 // ── Setup ────────────────────────────────────────────────────────────
 
 fn setup_repair_ui(mut commands: Commands) {
-    commands
+    let panel = commands
         .spawn((
             RepairPanel,
             Node {
@@ -195,41 +271,132 @@ fn setup_repair_ui(mut commands: Commands) {
             },
             Visibility::Hidden,
         ))
-        .with_children(|panel| {
-            panel.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+        .id();
+
+    // ── Title row ─────────────────────────────────────────────────────
+    let title_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
+        .id();
+    commands.entity(title_row).with_children(|tr| {
+        tr.spawn((
+            Text::new("Repair Console"),
+            TextFont { font_size: 24.0, ..default() },
+            TextColor(Color::srgb(0.3, 1.0, 0.5)),
+        ));
+        crate::client_elements::spawn_help_button(tr, crate::client_elements::HelpPanel::Repair, 16.0);
+    });
+    commands.entity(panel).add_child(title_row);
+
+    // ── Hull TextReadout ──────────────────────────────────────────────
+    let hull_readout = TextReadout::spawn(&mut commands, "Hull", hull_readout_visuals());
+    commands.entity(hull_readout).insert(RepairHullReadout);
+    commands.entity(panel).add_child(hull_readout);
+
+    // ── Three team rows ───────────────────────────────────────────────
+    for i in 0..3 {
+        let row = spawn_repair_team_row(&mut commands, i);
+        commands.entity(panel).add_child(row);
+    }
+
+    // ── Help overlay ──────────────────────────────────────────────────
+    crate::client_elements::spawn_help_overlay_root(&mut commands, crate::client_elements::HelpPanel::Repair);
+}
+
+/// Spawn a single static team row (progress bar, status readout, dispatch buttons).
+///
+/// Returns the row root entity.
+fn spawn_repair_team_row(commands: &mut Commands, team_idx: usize) -> Entity {
+    let row = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                width: Val::Percent(100.0),
+                padding: UiRect::all(Val::Px(4.0)),
+                row_gap: Val::Px(4.0),
                 ..default()
-            }).with_children(|title_row| {
-                title_row.spawn((
-                    Text::new("Repair Console"),
-                    TextFont { font_size: 24.0, ..default() },
-                    TextColor(Color::srgb(0.3, 1.0, 0.5)),
+            },
+            BackgroundColor(Color::srgb(0.05, 0.10, 0.20)),
+        ))
+        .id();
+
+    // ── Top sub-row: progress bar + status readout ────────────────────
+    let top_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            width: Val::Percent(100.0),
+            height: Val::Px(32.0),
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .id();
+
+    // Progress bar (continuous)
+    let bar = ProgressBar::spawn(
+        commands,
+        Vec2::new(150.0, 28.0),
+        ProgressBarVariant::Continuous,
+        team_bar_idle_visuals(),
+        None,
+    );
+    commands.entity(bar).insert(RepairTeamBar(team_idx));
+
+    // Status TextReadout
+    let status = TextReadout::spawn(commands, "", team_status_readout_visuals());
+    commands.entity(status).insert(RepairTeamStatusReadout(team_idx));
+
+    commands.entity(top_row).add_child(bar);
+    commands.entity(top_row).add_child(status);
+    commands.entity(row).add_child(top_row);
+
+    // ── Bottom sub-row: dispatch buttons ──────────────────────────────
+    let btn_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .id();
+
+    for (console, label) in [
+        (Console::Helm,     "HELM"),
+        (Console::Tactical, "TACTICAL"),
+        (Console::Power,    "POWER"),
+        (Console::Shields,  "SHIELDS"),
+    ] {
+        let btn = spawn_gui_button(
+            commands,
+            ButtonSize::Rect { width: 72.0, height: 28.0 },
+            dispatch_button_visuals(),
+            None,
+        );
+        let dispatch_info = DispatchButton { console: console.clone(), team_idx };
+        commands.entity(btn)
+            .insert(dispatch_info)
+            .with_children(|b| {
+                b.spawn((
+                    Text::new(label),
+                    TextFont { font_size: 11.0, ..default() },
+                    TextColor(Color::srgb(0.5, 1.0, 0.7)),
                 ));
-                crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Repair, 16.0);
+            })
+            .observe(move |_trigger: On<ButtonPressed>,
+                           mut outbound: MessageWriter<OutboundClientMessage>| {
+                outbound.write(OutboundClientMessage(
+                    crate::client_sim::dispatch_repair_team_message(team_idx as u8, console.clone()),
+                ));
             });
-            crate::client_elements::spawn_help_overlay(panel, crate::client_elements::HelpPanel::Repair);
+        commands.entity(btn_row).add_child(btn);
+    }
 
-            // Aggregate hull display
-            panel.spawn((
-                RepairHullText,
-                Text::new("Hull: --/--"),
-                TextFont { font_size: 18.0, ..default() },
-                TextColor(Color::srgb(0.6, 0.8, 1.0)),
-            ));
+    commands.entity(row).add_child(btn_row);
 
-            // Container for dynamic team rows (populated by refresh system)
-            panel.spawn((
-                RepairTeamContainer,
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    width: Val::Percent(100.0),
-                    ..default()
-                },
-            ));
-        });
+    row
 }
 
 // ── Systems ──────────────────────────────────────────────────────────
@@ -246,56 +413,37 @@ fn toggle_repair_panel_visibility(
     }
 }
 
-/// Refresh the repair panel: hull display and dynamic team rows with dispatch buttons.
+/// Refresh the repair panel each frame when `ClientSimState` or `LobbyState` changes:
+/// - Update `ReadoutValue` on the hull readout.
+/// - Update `ProgressValue` + `StateVisuals` on each team progress bar.
+/// - Update `ReadoutValue` on each team status readout.
+/// - Update `WidgetState` on each dispatch button to highlight the active target.
 fn refresh_repair_panel(
     sim: Res<ClientSimState>,
     lobby: Res<LobbyState>,
-    mut hull_text: Query<&mut Text, With<RepairHullText>>,
-    container: Query<Entity, With<RepairTeamContainer>>,
-    mut commands: Commands,
-    existing_rows: Query<Entity, With<RepairTeamRow>>,
+    mut hull_readout: Query<&mut ReadoutValue, With<RepairHullReadout>>,
+    mut team_bars: Query<(Entity, &mut ProgressValue, &mut StateVisuals, &RepairTeamBar)>,
+    mut team_statuses: Query<(&mut ReadoutValue, &RepairTeamStatusReadout)>,
+    mut dispatch_buttons: Query<(&mut WidgetState, &DispatchButton)>,
 ) {
     if !sim.is_changed() && !lobby.is_changed() {
         return;
     }
 
-    // Update aggregate hull display
-    if let Ok(mut text) = hull_text.single_mut() {
+    // Update hull readout
+    if let Ok(mut rv) = hull_readout.single_mut() {
         let total_current: f32 = sim.console_hull.iter().map(|h| h.current).sum();
         let total_max: f32 = sim.console_hull.iter().map(|h| h.max_hp).sum();
-        **text = format!("Hull: {:.0}/{}", total_current, total_max as u32);
+        rv.0 = format!("{:.0}/{}", total_current, total_max as u32);
     }
-
-    // Despawn all existing team rows (handles count changes cleanly).
-    // `.despawn()` removes the row entity AND its descendants recursively.
-    // (A previous fix used `despawn_related::<Children>()` here, which only
-    // detaches the children — leaving the empty row Node behind every refresh
-    // and accumulating thin coloured bars across the panel.)
-    for entity in existing_rows.iter() {
-        commands.entity(entity).despawn();
-    }
-
-    // Respawn team rows from current repair teams
-    let Ok(container_entity) = container.single() else {
-        return;
-    };
 
     // Server-broadcast repair pacing (sourced from [repair] in the ship TOML).
     let travel_secs = lobby.ship_config.repair_travel_secs;
     let repair_rate = lobby.ship_config.repair_rate_hp_per_sec;
 
-    // Pre-compute team row data via the pure `row_data_for_slot_with_timings` function.
-    struct RenderRow {
-        data: RowData,
-        bar_color: Color,
-        status_color: Color,
-    }
-
-    let rows: Vec<RenderRow> = sim.repair_teams.iter().map(|slot| {
+    for (i, slot) in sim.repair_teams.iter().enumerate() {
         // Derive "time to fully repair the target console" from the broadcast
-        // rate and the target console's max_hp (so a 50-HP console correctly
-        // takes twice as long to fill as a 25-HP one). Fall back to the first
-        // console_hull entry when the slot isn't pointing at a known console.
+        // rate and the target console's max_hp.
         let repair_secs = match slot {
             TeamSlot::Repairing { console, .. } | TeamSlot::Travelling { console, .. } => {
                 let max_hp = sim.console_hull
@@ -311,129 +459,46 @@ fn refresh_repair_panel(
             }
         };
         let data = row_data_for_slot_with_timings(slot, travel_secs, repair_secs);
-        let (bar_color, status_color) = if data.is_idle {
-            (Color::srgb(0.10, 0.20, 0.60), Color::srgb(0.5, 0.7, 1.0))
-        } else if data.fills {
-            // Travelling or Repairing — use warm colours
-            match slot {
-                TeamSlot::Repairing { .. } => (Color::srgb(0.10, 0.70, 0.20), Color::srgb(0.3, 1.0, 0.3)),
-                _ => (Color::srgb(0.60, 0.60, 0.10), Color::srgb(1.0, 0.9, 0.3)),
+
+        // Update progress bar value + visuals
+        for (_, mut pv, mut visuals, bar_marker) in team_bars.iter_mut() {
+            if bar_marker.0 != i {
+                continue;
             }
-        } else {
-            // Returning
-            (Color::srgb(0.30, 0.30, 0.80), Color::srgb(0.5, 0.5, 1.0))
-        };
-        RenderRow { data, bar_color, status_color }
-    }).collect();
+            // ProgressValue uses [0,1]
+            pv.0 = (data.pct / 100.0).clamp(0.0, 1.0);
 
-    let btn_bg = Color::srgb(0.10, 0.25, 0.15);
-    let btn_active_bg = Color::srgb(0.20, 0.55, 0.30);
-    let btn_text = Color::srgb(0.5, 1.0, 0.7);
-    let btn_text_active = Color::srgb(1.0, 1.0, 1.0);
-
-    commands.entity(container_entity).with_children(|parent| {
-        for (i, row) in rows.iter().enumerate() {
-            parent.spawn((
-                RepairTeamRow(i),
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(4.0)),
-                    row_gap: Val::Px(4.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.05, 0.10, 0.20)),
-            )).with_children(|rc| {
-                // Top row: progress bar + status label
-                rc.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    width: Val::Percent(100.0),
-                    height: Val::Px(32.0),
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                }).with_children(|top| {
-                    // Progress bar
-                    top.spawn((
-                        Node {
-                            width: Val::Percent(50.0),
-                            height: Val::Percent(100.0),
-                            position_type: PositionType::Relative,
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.02, 0.05, 0.10)),
-                    )).with_children(|bar_container| {
-                        bar_container.spawn((
-                            RepairTeamFill(i),
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(0.0),
-                                top: Val::Px(0.0),
-                                width: Val::Percent(row.data.pct),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            BackgroundColor(row.bar_color),
-                        ));
-                    });
-
-                    // Status label
-                    top.spawn((
-                        RepairTeamStatusText(i),
-                        Text::new(row.data.status.as_str()),
-                        TextFont { font_size: 14.0, ..default() },
-                        TextColor(row.status_color),
-                    ));
-                });
-
-                // Bottom row: dispatch buttons
-                rc.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                }).with_children(|bottom| {
-                    for (console, label) in [
-                        (Console::Helm, "HELM"),
-                        (Console::Tactical, "TACTICAL"),
-                        (Console::Power, "POWER"),
-                        (Console::Shields, "SHIELDS"),
-                    ] {
-                        let is_active = row.data.active_console.as_ref() == Some(&console);
-                        let bg = if is_active { btn_active_bg } else { btn_bg };
-                        let fg = if is_active { btn_text_active } else { btn_text };
-                        bottom.spawn((
-                            DispatchButton { console, team_idx: i },
-                            Button,
-                            Node {
-                                padding: UiRect::axes(Val::Px(8.0), Val::Px(6.0)),
-                                ..default()
-                            },
-                            BackgroundColor(bg),
-                        )).with_children(|btn| {
-                            btn.spawn((
-                                Text::new(label),
-                                TextFont { font_size: 12.0, ..default() },
-                                TextColor(fg),
-                            ));
-                        });
-                    }
-                });
-            });
+            let new_visuals = if data.is_idle {
+                team_bar_idle_visuals()
+            } else if data.fills {
+                match slot {
+                    TeamSlot::Repairing { .. } => team_bar_repairing_visuals(),
+                    _ => team_bar_travelling_visuals(),
+                }
+            } else {
+                team_bar_returning_visuals()
+            };
+            *visuals = new_visuals;
         }
-    });
-}
 
-/// Handle console dispatch button presses.
-/// Sends `DispatchRepairTeam` for any team state — the server handles redirect/recall logic.
-fn handle_dispatch_button_press(
-    interactions: Query<(&Interaction, &DispatchButton), Changed<Interaction>>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for (interaction, btn) in interactions.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
+        // Update team status readout
+        for (mut rv, status_marker) in team_statuses.iter_mut() {
+            if status_marker.0 != i {
+                continue;
+            }
+            rv.0 = data.status.clone();
         }
-        outbound.write(OutboundClientMessage(crate::client_sim::dispatch_repair_team_message(btn.team_idx as u8, btn.console.clone())));
+
+        // Update dispatch button WidgetState (highlight active target)
+        for (mut ws, btn) in dispatch_buttons.iter_mut() {
+            if btn.team_idx != i {
+                continue;
+            }
+            let should_be_active = data.active_console.as_ref() == Some(&btn.console);
+            if ws.active != should_be_active {
+                ws.active = should_be_active;
+            }
+        }
     }
 }
 
@@ -448,7 +513,7 @@ mod tests {
 
     fn lobby_with_repair_player(token: &str, phase: GamePhase) -> LobbyState {
         let mut lobby = LobbyState::default();
-        use crate::messages::{GameState, WorldData};
+        use crate::messages::GameState;
         lobby.apply(&crate::messages::ServerMessage::Welcome {
             state: GameState {
                 phase,
@@ -493,7 +558,7 @@ mod tests {
     #[test]
     fn repair_panel_visible_when_active_console_is_repair_multi_console() {
         let mut lobby = LobbyState::default();
-        use crate::messages::{GameState, WorldData};
+        use crate::messages::GameState;
         lobby.apply(&crate::messages::ServerMessage::Welcome {
             state: GameState {
                 phase: GamePhase::InProgress,
@@ -706,5 +771,90 @@ mod tests {
             0.0, 0.0,
         );
         assert!((d.pct - 50.0).abs() < 0.01, "should fall back to 5s travel, got {}", d.pct);
+    }
+
+    // ── Visual helpers ───────────────────────────────────────────────
+
+    #[test]
+    fn dispatch_button_visuals_active_differs_from_idle() {
+        use crate::gui::resolve_visual;
+        let v = dispatch_button_visuals();
+        let idle   = resolve_visual(&v, false, false, false, false).color;
+        let active = resolve_visual(&v, false, false, true, false).color;
+        assert_ne!(idle, active, "active dispatch button should look different from idle");
+    }
+
+    #[test]
+    fn dispatch_button_visuals_has_five_distinct_states() {
+        use crate::gui::resolve_visual;
+        let v = dispatch_button_visuals();
+        let idle     = resolve_visual(&v, false, false, false, false).color;
+        let hover    = resolve_visual(&v, false, false, false, true ).color;
+        let active   = resolve_visual(&v, false, false, true,  false).color;
+        let press    = resolve_visual(&v, false, true,  false, false).color;
+        let disabled = resolve_visual(&v, true,  false, false, false).color;
+        assert_ne!(idle, hover);
+        assert_ne!(idle, active);
+        assert_ne!(idle, press);
+        assert_ne!(idle, disabled);
+    }
+
+    #[test]
+    fn team_bar_idle_visuals_disabled_differs_from_idle() {
+        use crate::gui::resolve_visual;
+        let v = team_bar_idle_visuals();
+        let idle     = resolve_visual(&v, false, false, false, false).color;
+        let disabled = resolve_visual(&v, true,  false, false, false).color;
+        assert_ne!(idle, disabled);
+    }
+
+    #[test]
+    fn team_bar_repairing_visuals_differs_from_travelling() {
+        use crate::gui::resolve_visual;
+        let repairing  = team_bar_repairing_visuals();
+        let travelling = team_bar_travelling_visuals();
+        let rep_idle = resolve_visual(&repairing,  false, false, false, false).color;
+        let tra_idle = resolve_visual(&travelling, false, false, false, false).color;
+        assert_ne!(rep_idle, tra_idle, "repairing and travelling bar colours should differ");
+    }
+
+    #[test]
+    fn team_bar_returning_visuals_differs_from_repairing() {
+        use crate::gui::resolve_visual;
+        let returning  = team_bar_returning_visuals();
+        let repairing  = team_bar_repairing_visuals();
+        let ret_idle = resolve_visual(&returning, false, false, false, false).color;
+        let rep_idle = resolve_visual(&repairing, false, false, false, false).color;
+        assert_ne!(ret_idle, rep_idle);
+    }
+
+    // ── ProgressValue conversion ─────────────────────────────────────
+
+    #[test]
+    fn pct_to_progress_value_half() {
+        // row_data pct is 0–100; ProgressValue expects 0–1
+        let d = row_data_for_slot(&TeamSlot::Travelling {
+            console: Console::Helm,
+            elapsed: 2.5,
+        });
+        let progress_value = (d.pct / 100.0).clamp(0.0, 1.0);
+        assert!((progress_value - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn pct_to_progress_value_full() {
+        let d = row_data_for_slot(&TeamSlot::Repairing {
+            console: Console::Tactical,
+            elapsed: 9999.0,
+        });
+        let progress_value = (d.pct / 100.0).clamp(0.0, 1.0);
+        assert_eq!(progress_value, 1.0);
+    }
+
+    #[test]
+    fn pct_to_progress_value_zero() {
+        let d = row_data_for_slot(&TeamSlot::Idle);
+        let progress_value = (d.pct / 100.0).clamp(0.0, 1.0);
+        assert_eq!(progress_value, 0.0);
     }
 }

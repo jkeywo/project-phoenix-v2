@@ -22,7 +22,7 @@ describe('resolveEntityAppearance', () => {
       expect(result.hasFallback).toBe(false);
     });
 
-    it('station_axiom returns green colour, radius 18, Square shape', () => {
+    it('station_axiom returns green colour, radius 18, Diamond shape', () => {
       const entity = {
         tags: ['station', 'comms_contact', 'allied'],
         radar_appearance: { colour: [0.3, 0.8, 0.6], radius: 18.0 },
@@ -30,7 +30,7 @@ describe('resolveEntityAppearance', () => {
       const result = resolveEntityAppearance(entity);
       expect(result.colour).toEqual([0.3, 0.8, 0.6]);
       expect(result.radius).toBe(18.0);
-      expect(result.shape).toBe('Square');
+      expect(result.shape).toBe('Diamond');
       expect(result.hasFallback).toBe(false);
     });
 
@@ -46,7 +46,7 @@ describe('resolveEntityAppearance', () => {
       expect(result.hasFallback).toBe(false);
     });
 
-    it('planet_earth returns blue colour, radius 20, Dot shape', () => {
+    it('planet_earth returns blue colour, radius 20, Ring shape', () => {
       const entity = {
         tags: ['planet', 'habitable'],
         radar_appearance: { colour: [0.0, 0.6, 1.0], radius: 20.0 },
@@ -54,7 +54,7 @@ describe('resolveEntityAppearance', () => {
       const result = resolveEntityAppearance(entity);
       expect(result.colour).toEqual([0.0, 0.6, 1.0]);
       expect(result.radius).toBe(20.0);
-      expect(result.shape).toBe('Dot');
+      expect(result.shape).toBe('Ring');
       expect(result.hasFallback).toBe(false);
     });
 

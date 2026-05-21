@@ -132,6 +132,44 @@ export function drawEntityShape(group, Konva, appearance, selected = false) {
       group.add(square);
       break;
     }
+    case 'Diamond': {
+      // Square rotated 45°: a four-pointed kite centred on the entity.
+      // Used for stations to match the runtime "station" radar icon.
+      const r = radius * 1.0;
+      const diamond = new Konva.Line({
+        points: [0, -r, r, 0, 0, r, -r, 0],
+        closed: true,
+        fill: hexColour + '88',
+        stroke: strokeColour,
+        strokeWidth,
+      });
+      group.add(diamond);
+      break;
+    }
+    case 'Ring': {
+      // Hollow circle: stroke only, no fill. Used for planets so they read
+      // as a large bounded body rather than a small filled blip.
+      const r = Math.max(6, radius * 0.6);
+      const ring = new Konva.Circle({
+        radius: r,
+        fill: 'transparent',
+        stroke: hexColour,
+        strokeWidth: Math.max(2, strokeWidth),
+      });
+      group.add(ring);
+      if (selected) {
+        // Overlay a thin selection outline so selection state is still
+        // visible against the hollow ring.
+        const sel = new Konva.Circle({
+          radius: r + 2,
+          fill: 'transparent',
+          stroke: strokeColour,
+          strokeWidth: 1.5,
+        });
+        group.add(sel);
+      }
+      break;
+    }
     default: {
       // Dot
       const circle = new Konva.Circle({

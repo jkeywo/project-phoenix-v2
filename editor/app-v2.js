@@ -18,10 +18,24 @@ const saveFlow = new SaveFlow(
 
 let currentFilePath = null;
 
+// Per-mode restore callbacks. Cross-file decoupling: each mode (Scenario in
+// Slice 1; Entity/Definitions in later slices) registers a `(path, snapshot)`
+// handler that knows how to apply a snapshot back to that mode's V1 state.
+const restoreCallbacks = {};
+
+function registerRestore(mode, fn) {
+  restoreCallbacks[mode] = fn;
+}
+
 // Expose to V1 (app.js) and to dev consoles. This is the cross-file
 // integration point until Slice 2+ moves everything into V2 properly.
 if (typeof window !== 'undefined') {
-  window.__editorV2 = { modeShell, invalidationBus, saveFlow };
+  window.__editorV2 = {
+    modeShell,
+    invalidationBus,
+    saveFlow,
+    registerRestore,
+  };
 }
 
 async function init() {
@@ -150,15 +164,18 @@ function setupGlobalUndoShortcuts() {
     const path = modeShell.getActiveFile(mode);
     if (!path) return;
 
-    e.preventDefault();
+    const direction = e.shiftKey ? 'redo' : 'undo';
 
-    // Slice 1 just pops the stack; Slices 2/3/5/6 wire mode-specific
-    // restoration that consumes the entry returned here.
-    if (e.shiftKey) {
-      modeShell.redoActive(mode, path);
-    } else {
-      modeShell.undoActive(mode, path);
-    }
+    // Early-return without preventDefault when nothing to do, so the browser
+    // can still surface its own no-op.
+    if (direction === 'undo' && !modeShell.canUndoActive(mode, path)) return;
+    if (direction === 'redo' && !modeShell.canRedoActive(mode, path)) return;
+
+    const restore = restoreCallbacks[mode];
+    if (!restore) return;
+
+    e.preventDefault();
+    restore(modeShell, path, direction);
   });
 }
 

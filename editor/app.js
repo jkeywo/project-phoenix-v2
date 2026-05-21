@@ -4,6 +4,7 @@ import { PropertiesPanel } from './sidebar.js';
 import { EntityEditor } from './entity-editor.js';
 import { stringifyToml, getEntityPath } from './toml-utils.js';
 import { preloadEntityCache, loadEntityConfig } from './entity-cache.js';
+import { restoreScenarioLayer } from './undo-controller.js';
 
 const layerManager = new LayerManager();
 let canvasManager;
@@ -35,7 +36,42 @@ async function init() {
 
   setupToolbar();
   setupLayersPanel();
+  registerScenarioUndoRestore();
   renderAll();
+}
+
+function registerScenarioUndoRestore() {
+  const v2 = window.__editorV2;
+  if (!v2 || typeof v2.registerRestore !== 'function') return;
+
+  v2.registerRestore('Scenario', (modeShell, path, direction) => {
+    const layer = layerManager.getLayers().find((l) => l.filename === path);
+    if (!layer) return;
+
+    // Snapshot CURRENT (post-mutation) state so the opposite stack can
+    // restore it later. structuredClone keeps the undo entries independent
+    // of subsequent in-place edits.
+    const current = structuredClone(layer.toml);
+
+    const snapshot = direction === 'undo'
+      ? modeShell.swapUndoActive('Scenario', path, current)
+      : modeShell.swapRedoActive('Scenario', path, current);
+    if (!snapshot) return;
+
+    restoreScenarioLayer(layerManager, path, snapshot);
+
+    // Re-render canvas + layers panel and refresh the properties sidebar
+    // if a spawn is still selected (and still exists in the restored TOML).
+    renderAll();
+
+    const sel = canvasManager.selectedSpawn;
+    if (sel && sel.layer === layer) {
+      // The spawn object may have been replaced by structuredClone; clear
+      // selection to avoid pointing at a stale reference.
+      canvasManager.deselectSpawn();
+      propertiesPanel.render(null, null);
+    }
+  });
 }
 
 function onSpawnSelect(spawn, layer) {

@@ -116,9 +116,36 @@ export class ModeShell {
     return stack.redo();
   }
 
+  /**
+   * Snapshot-before-mutation swap variants. The caller passes the current
+   * external state so it gets parked on the opposite stack — see
+   * `undo-controller.js` for the contract.
+   */
+  swapUndoActive(mode, filePath, currentValue) {
+    const stack = this._getStack(mode, filePath, false);
+    if (!stack) return null;
+    return stack.swapUndo(currentValue);
+  }
+
+  swapRedoActive(mode, filePath, currentValue) {
+    const stack = this._getStack(mode, filePath, false);
+    if (!stack) return null;
+    return stack.swapRedo(currentValue);
+  }
+
   clearUndoHistory(mode, filePath) {
     const stack = this._getStack(mode, filePath, false);
     if (stack) stack.clear();
+  }
+
+  canUndoActive(mode, filePath) {
+    const stack = this._getStack(mode, filePath, false);
+    return !!stack && stack.canUndo();
+  }
+
+  canRedoActive(mode, filePath) {
+    const stack = this._getStack(mode, filePath, false);
+    return !!stack && stack.canRedo();
   }
 
   _getStack(mode, filePath, createIfMissing) {

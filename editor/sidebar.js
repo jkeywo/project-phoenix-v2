@@ -152,8 +152,8 @@ export class PropertiesPanel {
 
   _attachListeners(spawn, layer, allAnchors, pos, relative) {
     document.getElementById('propName').addEventListener('input', (e) => {
-      spawn.name = e.target.value;
       snapshotForUndo(layer);
+      spawn.name = e.target.value;
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -169,6 +169,7 @@ export class PropertiesPanel {
         document.getElementById('anchorPos').classList.toggle('hidden', mode !== 'anchor');
         document.getElementById('relativePos').classList.toggle('hidden', mode !== 'relative');
 
+        snapshotForUndo(layer);
         if (mode === 'absolute') {
           const x = parseFloat(document.getElementById('propX')?.value || '0');
           const z = parseFloat(document.getElementById('propZ')?.value || '0');
@@ -183,7 +184,6 @@ export class PropertiesPanel {
           const currentPos = getSpawnPosition(spawn, allAnchors);
           setSpawnPosition(spawn, currentPos.x, currentPos.z, 'relative', parentSelect?.value || null, { x: offsetX, z: offsetZ });
         }
-        snapshotForUndo(layer);
         layer.isDirty = true;
         this.canvasManager.renderAll();
       });
@@ -192,8 +192,8 @@ export class PropertiesPanel {
     document.getElementById('propX')?.addEventListener('input', (e) => {
       const x = parseFloat(e.target.value) || 0;
       const z = parseFloat(document.getElementById('propZ')?.value || '0');
-      setSpawnPosition(spawn, x, z, 'absolute');
       snapshotForUndo(layer);
+      setSpawnPosition(spawn, x, z, 'absolute');
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -201,15 +201,15 @@ export class PropertiesPanel {
     document.getElementById('propZ')?.addEventListener('input', (e) => {
       const x = parseFloat(document.getElementById('propX')?.value || '0');
       const z = parseFloat(e.target.value) || 0;
-      setSpawnPosition(spawn, x, z, 'absolute');
       snapshotForUndo(layer);
+      setSpawnPosition(spawn, x, z, 'absolute');
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
 
     document.getElementById('propAnchor')?.addEventListener('change', (e) => {
-      setSpawnPosition(spawn, 0, 0, 'anchor', e.target.value, null);
       snapshotForUndo(layer);
+      setSpawnPosition(spawn, 0, 0, 'anchor', e.target.value, null);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -218,8 +218,8 @@ export class PropertiesPanel {
       const parent = document.getElementById('propParent').value;
       const offsetX = parseFloat(document.getElementById('propOffsetX')?.value || '0');
       const offsetZ = parseFloat(document.getElementById('propOffsetZ')?.value || '0');
-      setSpawnPosition(spawn, pos.x, pos.z, 'relative', parent, { x: offsetX, z: offsetZ });
       snapshotForUndo(layer);
+      setSpawnPosition(spawn, pos.x, pos.z, 'relative', parent, { x: offsetX, z: offsetZ });
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -228,8 +228,8 @@ export class PropertiesPanel {
       const cur = getRelativeInfo(spawn);
       const offsetX = parseFloat(e.target.value) || 0;
       const offsetZ = parseFloat(document.getElementById('propOffsetZ')?.value || '0');
-      setSpawnPosition(spawn, 0, 0, 'relative', cur?.parent, { x: offsetX, z: offsetZ });
       snapshotForUndo(layer);
+      setSpawnPosition(spawn, 0, 0, 'relative', cur?.parent, { x: offsetX, z: offsetZ });
       layer.isDirty = true;
       this.canvasManager.updateArrows();
     });
@@ -238,33 +238,33 @@ export class PropertiesPanel {
       const cur = getRelativeInfo(spawn);
       const offsetX = parseFloat(document.getElementById('propOffsetX')?.value || '0');
       const offsetZ = parseFloat(e.target.value) || 0;
-      setSpawnPosition(spawn, 0, 0, 'relative', cur?.parent, { x: offsetX, z: offsetZ });
       snapshotForUndo(layer);
+      setSpawnPosition(spawn, 0, 0, 'relative', cur?.parent, { x: offsetX, z: offsetZ });
       layer.isDirty = true;
       this.canvasManager.updateArrows();
     });
 
     // Shape size fields
     document.getElementById('shapeRadius')?.addEventListener('input', (e) => {
+      snapshotForUndo(layer);
       if (!spawn.shape) spawn.shape = { type: 'sphere' };
       spawn.shape.radius = parseFloat(e.target.value) || 100;
-      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
 
     document.getElementById('shapeInnerRadius')?.addEventListener('input', (e) => {
+      snapshotForUndo(layer);
       if (!spawn.shape) spawn.shape = { type: 'torus' };
       spawn.shape.inner_radius = parseFloat(e.target.value) || 50;
-      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
 
     document.getElementById('shapeOuterRadius')?.addEventListener('input', (e) => {
+      snapshotForUndo(layer);
       if (!spawn.shape) spawn.shape = { type: 'torus' };
       spawn.shape.outer_radius = parseFloat(e.target.value) || 150;
-      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -273,8 +273,8 @@ export class PropertiesPanel {
       const arr = layer.kind === 'scenario' ? 'spawn' : 'entity';
       const idx = layer.toml[arr]?.indexOf(spawn);
       if (idx !== -1) {
-        layer.toml[arr].splice(idx, 1);
         snapshotForUndo(layer);
+        layer.toml[arr].splice(idx, 1);
         layer.isDirty = true;
         this.canvasManager.spawnGroups.delete(spawn);
         this.canvasManager.deselectSpawn();
@@ -286,12 +286,12 @@ export class PropertiesPanel {
       const errorEl = document.getElementById('spawnTomlError');
       try {
         const parsed = window.tomlParse(document.getElementById('spawnToml').value);
+        snapshotForUndo(layer);
         // Update spawn in-place
         for (const key of Object.keys(spawn)) {
           if (!key.startsWith('_')) delete spawn[key];
         }
         Object.assign(spawn, parsed);
-        snapshotForUndo(layer);
         layer.isDirty = true;
         errorEl.textContent = '';
         this.canvasManager.renderAll();

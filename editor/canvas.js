@@ -271,13 +271,13 @@ export class CanvasManager {
       if (this.placeMode) {
         setSpawnPosition(spawn, newX, newZ, 'absolute');
       } else {
+        snapshotForUndo(layer);
         if (relative) {
           setSpawnPosition(spawn, newX, newZ, 'relative', relative.parent, { x: newX - oldPos.x, z: newZ - oldPos.z });
         } else {
           setSpawnPosition(spawn, newX, newZ, 'absolute');
         }
         layer.isDirty = true;
-        snapshotForUndo(layer);
 
         if (this.selectedSpawn?.spawn === spawn) {
           this.onSpawnDrag(spawn, layer);
@@ -366,12 +366,12 @@ export class CanvasManager {
     const arr = activeLayer.kind === 'scenario' ? 'spawn' : 'entity';
     spawn[activeLayer.kind === 'scenario' ? 'entity_path' : 'template_path'] = this.placeEntityPath;
 
+    snapshotForUndo(activeLayer);
     if (!activeLayer.toml[arr]) {
       activeLayer.toml[arr] = [];
     }
     activeLayer.toml[arr].push(spawn);
     activeLayer.isDirty = true;
-    snapshotForUndo(activeLayer);
 
     this.onSpawnCreate(spawn, activeLayer);
     this.selectSpawn(spawn, activeLayer);

@@ -75,6 +75,23 @@ async function startGameWithTactical(context: BrowserContext) {
     route.fulfill({ contentType: 'text/plain', body: CLOSE_RAIDER_WORLD }),
   );
 
+  // Patch player_ship.toml: boost phaser DPS so one beam kills the 60 HP
+  // raider. Headless Chromium throttles requestAnimationFrame on the
+  // backgrounded server page (clients become foreground), so the Bevy sim
+  // runs at ~1/15 of wall-clock. The default 5 DPS / 6 s beam / 6 s
+  // cooldown would need two beam cycles (~3 min wall-clock), exceeding
+  // the 60 s waitForFunction timeout. With boosted DPS one 6 s beam deals
+  // 600 HP and destroys the raider before cooldown matters.
+  await context.route('**/assets/entities/player_ship.toml', async (route) => {
+    const response = await route.fetch();
+    const text = await response.text();
+    const patched = text.replace(
+      /beam_damage_per_sec\s*=\s*[\d.]+/,
+      'beam_damage_per_sec = 100.0',
+    );
+    await route.fulfill({ contentType: 'text/plain', body: patched });
+  });
+
   const serverPage = await context.newPage();
   await serverPage.goto('/');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });

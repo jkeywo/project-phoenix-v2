@@ -10,6 +10,7 @@
 
 use bevy::prelude::*;
 
+use crate::client::console_shell::ConsoleShell;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
@@ -18,6 +19,7 @@ use crate::gui::{
     ReadoutValue, StateVisuals, TextReadout, WidgetState,
 };
 use crate::messages::{Console, GamePhase, TeamSlot};
+use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 
 // ── Pure visibility helper ────────────────────────────────────────────
 
@@ -240,75 +242,117 @@ struct RepairHullReadout;
 
 // ── Plugin ───────────────────────────────────────────────────────────
 
+/// Marker resource set once the repair UI has been spawned.
+#[derive(Resource)]
+pub struct RepairPanelSpawned;
+
+// ── Plugin ───────────────────────────────────────────────────────────
+
 /// Plugin that owns all Repair console UI and systems.
 pub struct RepairPanelPlugin;
 
 impl Plugin for RepairPanelPlugin {
     fn build(&self, app: &mut App) {
         app
-            .add_systems(Startup, setup_repair_ui)
             .add_systems(Update, (
+                spawn_repair_ui.run_if(not(resource_exists::<RepairPanelSpawned>)),
                 toggle_repair_panel_visibility,
                 refresh_repair_panel,
+                respawn_repair_on_orientation_change,
             ));
     }
 }
 
-// ── Setup ────────────────────────────────────────────────────────────
+// ── Spawn (ConsoleShell) ─────────────────────────────────────────────
 
-fn setup_repair_ui(mut commands: Commands) {
-    let panel = commands
-        .spawn((
-            RepairPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left:   Val::Px(0.0),
-                top:    Val::Px(0.0),
-                right:  Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(12.0),
-                padding: UiRect::all(Val::Px(24.0)),
-                ..default()
-            },
-            Visibility::Hidden,
-        ))
-        .id();
+fn spawn_repair_ui(
+    mut commands: Commands,
+    assets: Option<Res<PhoneAssets>>,
+    old_panel: Query<Entity, With<RepairPanel>>,
+    old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
+    orientation: Option<Res<DeviceOrientation>>,
+) {
+    let Some(assets) = assets else { return };
+    let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
-    // ── Title row ─────────────────────────────────────────────────────
-    let title_row = commands
+    for entity in old_panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    for (entity, overlay) in old_help.iter() {
+        if overlay.0 == crate::client::elements::HelpPanel::Repair {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    commands.insert_resource(RepairPanelSpawned);
+
+    let shell = ConsoleShell::spawn(
+        &mut commands,
+        assets.helm_panel_bg.clone(),
+        is_landscape,
+        crate::client::elements::HelpPanel::Repair,
+        |commands: &mut Commands, primary: Entity| {
+            fill_repair_primary(commands, primary);
+        },
+        |_commands: &mut Commands, _secondary: Entity| {
+            // Repair console uses a single column; secondary slot left empty.
+        },
+        &assets,
+    );
+
+    commands.entity(shell.root).insert((RepairPanel, Visibility::Hidden));
+}
+
+/// Primary slot: title, hull readout, three team rows.
+fn fill_repair_primary(commands: &mut Commands, container: Entity) {
+    let col = commands
         .spawn(Node {
-            flex_direction: FlexDirection::Row,
+            flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(12.0),
+            padding: UiRect::all(Val::Px(8.0)),
             ..default()
         })
         .id();
-    commands.entity(title_row).with_children(|tr| {
-        tr.spawn((
+    commands.entity(container).add_child(col);
+
+    let title = commands
+        .spawn((
             Text::new("Repair Console"),
             TextFont { font_size: 24.0, ..default() },
             TextColor(Color::srgb(0.3, 1.0, 0.5)),
-        ));
-        crate::client_elements::spawn_help_button(tr, crate::client_elements::HelpPanel::Repair, 16.0);
-    });
-    commands.entity(panel).add_child(title_row);
+        ))
+        .id();
+    commands.entity(col).add_child(title);
 
-    // ── Hull TextReadout ──────────────────────────────────────────────
-    let hull_readout = TextReadout::spawn(&mut commands, "Hull", hull_readout_visuals());
+    let hull_readout = TextReadout::spawn(commands, "Hull", hull_readout_visuals());
     commands.entity(hull_readout).insert(RepairHullReadout);
-    commands.entity(panel).add_child(hull_readout);
+    commands.entity(col).add_child(hull_readout);
 
-    // ── Three team rows ───────────────────────────────────────────────
     for i in 0..3 {
-        let row = spawn_repair_team_row(&mut commands, i);
-        commands.entity(panel).add_child(row);
+        let row = spawn_repair_team_row(commands, i);
+        commands.entity(col).add_child(row);
     }
+}
 
-    // ── Help overlay ──────────────────────────────────────────────────
-    crate::client_elements::spawn_help_overlay_root(&mut commands, crate::client_elements::HelpPanel::Repair);
+// ── Orientation respawn ──────────────────────────────────────────────
+
+fn respawn_repair_on_orientation_change(
+    orientation: Option<Res<DeviceOrientation>>,
+    panel: Query<Entity, With<RepairPanel>>,
+    mut commands: Commands,
+) {
+    let Some(orientation) = orientation else { return };
+    if !orientation.is_changed() {
+        return;
+    }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    commands.remove_resource::<RepairPanelSpawned>();
 }
 
 /// Spawn a single static team row (progress bar, status readout, dispatch buttons).

@@ -12,6 +12,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::client::console_shell::ConsoleShell;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::set_science_target_message;
@@ -21,6 +22,7 @@ use crate::gui::{
     RadarIcon, RadarLayer, StateVisuals,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
+use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
 // ── Pure visibility helper ────────────────────────────────────────────
@@ -92,83 +94,100 @@ struct ScienceRadarEntities {
 
 // ── Plugin ────────────────────────────────────────────────────────────
 
+/// Marker resource set once the sensors UI has been spawned.
+#[derive(Resource)]
+pub struct SensorsPanelSpawned;
+
+// ── Plugin ────────────────────────────────────────────────────────────
+
 pub struct SensorsPanelPlugin;
 
 impl Plugin for SensorsPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ScienceRadarEntities>()
-            .add_systems(Startup, setup_sensors_ui)
             .add_systems(
                 Update,
                 (
+                    spawn_sensors_ui.run_if(not(resource_exists::<SensorsPanelSpawned>)),
                     toggle_sensors_panel_visibility,
                     refresh_cancel_impulse_visibility,
                     bridge_client_sim_to_science_radar,
+                    respawn_sensors_on_orientation_change,
                 ),
             );
     }
 }
 
-// ── Setup ────────────────────────────────────────────────────────────
+// ── Spawn (ConsoleShell) ──────────────────────────────────────────────
 
-fn setup_sensors_ui(mut commands: Commands) {
-    // ── Root panel ────────────────────────────────────────────────────
-    let panel = commands
-        .spawn((
-            SensorsPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                right: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-            Visibility::Hidden,
-        ))
-        .id();
+fn spawn_sensors_ui(
+    mut commands: Commands,
+    assets: Option<Res<PhoneAssets>>,
+    old_panel: Query<Entity, With<SensorsPanel>>,
+    old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
+    orientation: Option<Res<DeviceOrientation>>,
+) {
+    let Some(assets) = assets else { return };
+    let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
-    // ── Title row ─────────────────────────────────────────────────────
-    let title_row = commands
+    for entity in old_panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    for (entity, overlay) in old_help.iter() {
+        if overlay.0 == crate::client::elements::HelpPanel::Sensors {
+            commands.entity(entity).despawn();
+        }
+    }
+
+    commands.insert_resource(SensorsPanelSpawned);
+
+    let shell = ConsoleShell::spawn(
+        &mut commands,
+        assets.helm_panel_bg.clone(),
+        is_landscape,
+        crate::client::elements::HelpPanel::Sensors,
+        |commands: &mut Commands, primary: Entity| {
+            fill_sensors_radar(commands, primary);
+        },
+        |commands: &mut Commands, secondary: Entity| {
+            fill_sensors_buttons(commands, secondary);
+        },
+        &assets,
+    );
+
+    commands.entity(shell.root).insert((SensorsPanel, Visibility::Hidden));
+}
+
+/// Primary slot: title + long-range radar.
+fn fill_sensors_radar(commands: &mut Commands, container: Entity) {
+    let col = commands
         .spawn(Node {
-            flex_direction: FlexDirection::Row,
+            flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(8.0),
             ..default()
         })
         .id();
-    commands.entity(title_row).with_children(|row| {
-        row.spawn((
-            Text::new("Sensors"),
-            TextFont {
-                font_size: 32.0,
-                ..default()
-            },
-            TextColor(Color::srgb(0.8, 0.8, 1.0)),
-        ));
-        crate::client_elements::spawn_help_button(
-            row,
-            crate::client_elements::HelpPanel::Sensors,
-            16.0,
-        );
-    });
-    commands.entity(panel).add_child(title_row);
-    crate::client_elements::spawn_help_overlay_root(
-        &mut commands,
-        crate::client_elements::HelpPanel::Sensors,
-    );
+    commands.entity(container).add_child(col);
 
-    // ── Science long-range radar (GenericRadar, WorldFixed, Ships + Asteroids) ──
+    let title = commands
+        .spawn((
+            Text::new("Sensors"),
+            TextFont { font_size: 32.0, ..default() },
+            TextColor(Color::srgb(0.8, 0.8, 1.0)),
+        ))
+        .id();
+    commands.entity(col).add_child(title);
+
     let radar_filter = RadarFilter(std::collections::HashSet::from([
         RadarLayer::Ship,
         RadarLayer::Asteroid,
     ]));
     let radar = GenericRadar::spawn(
-        &mut commands,
+        commands,
         crate::client_sim::SCIENCE_RADAR_RANGE,
         OrientationMode::WorldFixed,
         radar_filter,
@@ -183,50 +202,50 @@ fn setup_sensors_ui(mut commands: Commands) {
         position_type: PositionType::Relative,
         ..default()
     });
-    commands.entity(panel).add_child(radar);
+    commands.entity(col).add_child(radar);
+}
 
-    // ── ON SCREEN button — pushes ScienceRadar to the viewscreen ──────
+/// Secondary slot: ON SCREEN + CANCEL IMPULSE buttons.
+fn fill_sensors_buttons(commands: &mut Commands, container: Entity) {
+    let col = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            row_gap: Val::Px(12.0),
+            ..default()
+        })
+        .id();
+    commands.entity(container).add_child(col);
+
     let on_screen_btn = spawn_gui_button(
-        &mut commands,
-        ButtonSize::Rect {
-            width: 160.0,
-            height: 36.0,
-        },
+        commands,
+        ButtonSize::Rect { width: 160.0, height: 36.0 },
         on_screen_visuals(),
         None,
     );
     commands.entity(on_screen_btn).with_children(|btn| {
         btn.spawn((
             Text::new("ON SCREEN"),
-            TextFont {
-                font_size: 14.0,
-                ..default()
-            },
+            TextFont { font_size: 14.0, ..default() },
             TextColor(Color::srgb(0.4, 1.0, 0.8)),
         ));
     });
-    commands
-        .entity(on_screen_btn)
-        .observe(on_on_screen_button_pressed);
-    commands.entity(panel).add_child(on_screen_btn);
+    commands.entity(on_screen_btn).observe(on_on_screen_button_pressed);
+    commands.entity(col).add_child(on_screen_btn);
 
-    // ── CANCEL IMPULSE button — hidden until impulse charge is active ──
     let cancel_btn = spawn_gui_button(
-        &mut commands,
-        ButtonSize::Rect {
-            width: 160.0,
-            height: 36.0,
-        },
+        commands,
+        ButtonSize::Rect { width: 160.0, height: 36.0 },
         cancel_impulse_visuals(),
         None,
     );
     commands.entity(cancel_btn).with_children(|btn| {
         btn.spawn((
             Text::new("CANCEL IMPULSE"),
-            TextFont {
-                font_size: 14.0,
-                ..default()
-            },
+            TextFont { font_size: 14.0, ..default() },
             TextColor(Color::srgb(1.0, 0.4, 0.4)),
         ));
     });
@@ -234,7 +253,24 @@ fn setup_sensors_ui(mut commands: Commands) {
         .entity(cancel_btn)
         .insert((ScienceCancelImpulseButton, Visibility::Hidden))
         .observe(on_cancel_impulse_button_pressed);
-    commands.entity(panel).add_child(cancel_btn);
+    commands.entity(col).add_child(cancel_btn);
+}
+
+// ── Orientation respawn ──────────────────────────────────────────────
+
+fn respawn_sensors_on_orientation_change(
+    orientation: Option<Res<DeviceOrientation>>,
+    panel: Query<Entity, With<SensorsPanel>>,
+    mut commands: Commands,
+) {
+    let Some(orientation) = orientation else { return };
+    if !orientation.is_changed() {
+        return;
+    }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn_related::<Children>();
+    }
+    commands.remove_resource::<SensorsPanelSpawned>();
 }
 
 // ── Button observers ──────────────────────────────────────────────────

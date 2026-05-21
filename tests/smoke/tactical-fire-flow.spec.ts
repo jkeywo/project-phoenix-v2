@@ -47,7 +47,7 @@ const CLOSE_RAIDER_WORLD = WORLD_WITHOUT_FAR_RAIDER + `
 # Smoke-test override: a raider 20 units in front of the player ship spawn.
 # Ship spawns at (150, 0, 0) per assets/worlds/default.toml; forward is -Z.
 # Override = idle with no transitions so the raider stays stationary and
-# cannot flee out of phaser range mid-kill.
+# doesn't move out of the 40-unit phaser range between beam cycles.
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"

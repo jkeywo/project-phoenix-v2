@@ -114,10 +114,9 @@ pub enum TeamSlot {
         console: Console,
         elapsed: f32,
     },
-    /// Team is at the console performing repairs. `elapsed` counts HP restored.
+    /// Team is at the console performing repairs.
     Repairing {
         console: Console,
-        elapsed: f32,
     },
     /// Team has finished and is returning to engineering.
     /// `remaining` counts down from 5s. `queued` holds the next console to

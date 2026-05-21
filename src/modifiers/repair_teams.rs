@@ -101,7 +101,7 @@ impl RepairTeams {
     /// Advance all active timers by `dt` seconds.
     ///
     /// - `Travelling` advances its `elapsed` toward `travel_duration`, then
-    ///   transitions to `Repairing { elapsed: 0.0 }`. If the target console is
+    ///   transitions to `Repairing { console }`. If the target console is
     ///   already at full HP on arrival, the team skips straight to `Returning`.
     /// - `Repairing` calls `hull.restore(console, dt * repair_rate_hp_per_sec)` each
     ///   tick. Once the console is at full HP, the team transitions to `Returning`.
@@ -121,14 +121,13 @@ impl RepairTeams {
                         if is_full {
                             *slot = TeamSlot::Returning { remaining: 0.0, queued: None };
                         } else {
-                            *slot = TeamSlot::Repairing { console, elapsed: 0.0 };
+                            *slot = TeamSlot::Repairing { console };
                         }
                     }
                 }
-                TeamSlot::Repairing { console, elapsed } => {
+                TeamSlot::Repairing { console } => {
                     let hp_to_restore = dt * repair_rate;
                     hull.restore(console.clone(), hp_to_restore);
-                    *elapsed += dt;
                     if hull.is_at_max(console) {
                         *slot = TeamSlot::Returning { remaining: travel_duration, queued: None };
                     }

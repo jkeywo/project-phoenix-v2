@@ -92,8 +92,8 @@ pub fn row_data_for_slot_with_timings(
             is_idle: false,
             active_console: Some(console.clone()),
         },
-        TeamSlot::Repairing { console, elapsed } => RowData {
-            pct: (elapsed / repair * 100.0).clamp(0.0, 100.0),
+        TeamSlot::Repairing { console } => RowData {
+            pct: 100.0,
             fills: true,
             status: format!("Repairing {}", console.display_name()),
             is_idle: false,
@@ -676,14 +676,14 @@ mod tests {
     }
 
     #[test]
-    fn repairing_pct_scales_with_broadcast_repair_duration() {
-        // With repair duration=100s (e.g. 50 HP / 0.5 HP/s), elapsed=25s → 25 %.
+    fn repairing_pct_is_always_full() {
+        // Repairing shows a full bar regardless of how long the team has been there.
         let d = row_data_for_slot_with_timings(
-            &TeamSlot::Repairing { console: Console::Tactical, elapsed: 25.0 },
-            5.0,   // travel unused
-            100.0, // broadcast repair duration
+            &TeamSlot::Repairing { console: Console::Tactical },
+            5.0,
+            100.0,
         );
-        assert!((d.pct - 25.0).abs() < 0.01, "pct should be 25, got {}", d.pct);
+        assert!((d.pct - 100.0).abs() < 0.01, "pct should be 100, got {}", d.pct);
     }
 
     #[test]

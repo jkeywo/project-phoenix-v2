@@ -2073,7 +2073,6 @@ mod tests {
             teams: vec![
                 TeamSlot::Repairing {
                     console: Console::Tactical,
-                    elapsed: 1.5,
                 },
                 TeamSlot::Returning {
                     remaining: 2.0,

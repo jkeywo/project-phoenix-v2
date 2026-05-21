@@ -628,7 +628,6 @@ mod tests {
                 },
                 TeamSlot::Repairing {
                     console: Console::Tactical,
-                    elapsed: 1.0,
                 },
                 TeamSlot::Returning {
                     remaining: 3.0,

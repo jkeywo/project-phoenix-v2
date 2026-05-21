@@ -1,6 +1,7 @@
 import { getSpawnName, getSpawnPosition, getEntityPath, getRelativeInfo, setSpawnPosition, getAllAnchors } from './toml-utils.js';
 import { getSpawnsFromAllLayers } from './toml-utils.js';
 import { snapshotForUndo } from './undo-controller.js';
+import { renderOverridePanel } from './override-view.js';
 
 export class PropertiesPanel {
   constructor(canvasManager, layerManager) {
@@ -104,9 +105,19 @@ export class PropertiesPanel {
           <span id="spawnTomlError" class="toml-error"></span>
         </div>
       </details>
+
+      <div id="overridePanelHost"></div>
     `;
 
     this._attachListeners(spawn, layer, allAnchors, pos, relative);
+
+    // Slice 3: resolved-template + override summary card below the V1 form.
+    renderOverridePanel(
+      document.getElementById('overridePanelHost'),
+      spawn,
+      layer,
+      { canvasManager: this.canvasManager },
+    );
   }
 
   _buildShapeHtml(spawn) {

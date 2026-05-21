@@ -35,8 +35,8 @@ pub use radar::{
     RadarIcon, RadarIconLookup, RadarLayer,
 };
 pub use radio::{
-    next_radio_selection, RadioButtonConfig, RadioGroup, RadioGroupMarker, RadioMember,
-    RadioSelected,
+    next_radio_selection, on_radio_member_pressed, RadioButtonConfig, RadioGroup, RadioGroupMarker,
+    RadioMember, RadioSelected,
 };
 pub use readout::{ReadoutValue, TextReadout, TextReadoutMarker};
 pub use vignette::{

@@ -118,7 +118,11 @@ impl RadioGroup {
 
 // ── Observer ──────────────────────────────────────────────────────────────────
 
-fn on_radio_member_pressed(
+/// Observer attached to every `RadioGroup` member button.  Public so that
+/// callers that manually add `RadioMember` to a `GuiButton` (e.g. when
+/// absolute positioning prevents using `RadioGroup::spawn` directly) can
+/// wire the same observer.
+pub fn on_radio_member_pressed(
     trigger: On<ButtonPressed>,
     members: Query<(Entity, &RadioMember)>,
     mut widget_states: Query<&mut WidgetState, With<GuiButtonMarker>>,

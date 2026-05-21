@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Prevent the entry HTML from being cached so users always pick up the
+       latest Trunk-hashed JS/WASM filenames after a deploy. The hashed
+       assets themselves remain cacheable forever via their content hash. -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Project Phoenix — View Screen</title>
 
   <!-- CDN deps loaded before our script so they're in scope synchronously -->

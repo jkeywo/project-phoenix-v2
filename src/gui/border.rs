@@ -230,7 +230,7 @@ impl GuiBorderWidget {
 
 /// Swaps all border corner/edge `ImageNode` handles between normal and alert
 /// variants whenever `RedAlertIntensity` crosses the zero threshold.
-fn update_border_textures(
+pub fn update_border_textures(
     intensity: Option<Res<RedAlertIntensity>>,
     assets: Option<Res<BorderAssets>>,
     mut corners: Query<(&CornerSlot, &mut ImageNode), Without<EdgeSlot>>,
@@ -255,8 +255,9 @@ fn update_border_textures(
 pub struct GuiBorderPlugin;
 
 impl Plugin for GuiBorderPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, update_border_textures);
+    fn build(&self, _app: &mut App) {
+        // update_border_textures is registered by PhoneBorderPlugin to
+        // ensure correct ordering relative to update_red_alert_intensity.
     }
 }
 

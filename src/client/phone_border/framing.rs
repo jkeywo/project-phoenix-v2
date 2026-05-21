@@ -19,8 +19,8 @@
 use bevy::prelude::*;
 
 use crate::gui::{
-    BorderAssets, BorderConfig, BorderContentArea, GuiBorderWidget, RadarIcon, RadarIconLookup,
-    RedAlertIntensity,
+    BorderAssets, BorderConfig, BorderContentArea, CornerSlot, EdgeSlot, GuiBorderWidget,
+    RadarIcon, RadarIconLookup, RedAlertIntensity,
 };
 use crate::ship_view::ShipView;
 
@@ -143,6 +143,7 @@ impl Plugin for PhoneBorderPlugin {
                     detect_orientation,
                     reparent_panels_into_bezel,
                     update_red_alert_intensity,
+                    swap_phone_border_textures,
                     refresh_alert_banner,
                     populate_radar_icon_lookup,
                 ),
@@ -405,6 +406,27 @@ fn refresh_alert_banner(
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+/// Swaps bezel corner/edge textures between normal and alert variants
+/// based on `ShipView::red_alert`.  Reads the game state directly
+/// (instead of going through `RedAlertIntensity`) so the swap is
+/// immediate — no one-frame lag.
+fn swap_phone_border_textures(
+    ship_view: Option<Res<ShipView>>,
+    assets: Option<Res<BorderAssets>>,
+    mut corners: Query<(&CornerSlot, &mut ImageNode), Without<EdgeSlot>>,
+    mut edges: Query<(&EdgeSlot, &mut ImageNode), Without<CornerSlot>>,
+) {
+    let Some(ship_view) = ship_view else { return };
+    let Some(assets) = assets else { return };
+    let alert = ship_view.red_alert;
+    for (slot, mut image) in corners.iter_mut() {
+        image.image = assets.corner(*slot, alert).clone();
+    }
+    for (slot, mut image) in edges.iter_mut() {
+        image.image = assets.edge(*slot, alert).clone();
     }
 }
 

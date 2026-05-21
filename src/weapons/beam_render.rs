@@ -1,15 +1,14 @@
-/// Pure beam-rendering geometry helpers.
-///
-/// These functions are Bevy-free and fully unit-testable.  The actual
-/// gizmo calls live in `renderer.rs`; this module provides the
-/// *positions* to draw from/to and the colour to use.
-///
-/// # Coordinate system
-/// World-space XZ plane (Y-up).  Ship heading at `yaw = 0` faces −Z.
-/// * Forward: `( sin(yaw), 0, −cos(yaw) )`
-/// * Right (starboard): `( cos(yaw), 0,  sin(yaw) )`
-/// * Left  (port):      `(−cos(yaw), 0, −sin(yaw) )`
-
+//! Pure beam-rendering geometry helpers.
+//!
+//! These functions are Bevy-free and fully unit-testable.  The actual
+//! gizmo calls live in `renderer.rs`; this module provides the
+//! *positions* to draw from/to and the colour to use.
+//!
+//! # Coordinate system
+//! World-space XZ plane (Y-up).  Ship heading at `yaw = 0` faces −Z.
+//! * Forward: `( sin(yaw), 0, −cos(yaw) )`
+//! * Right (starboard): `( cos(yaw), 0,  sin(yaw) )`
+//! * Left  (port):      `(−cos(yaw), 0, −sin(yaw) )`
 use crate::messages::PhaserBank;
 
 /// Lateral hull offset (world units) from the ship centre to the point

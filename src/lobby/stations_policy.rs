@@ -130,7 +130,7 @@ pub fn advance_on_join(
 ///    - The no-previous station holder first claims the leaver's slot via the
 ///      leaver's station's `previous` chain.
 ///    - Then all remaining players follow their own `previous` chain.
-///    If the leaver IS the no-previous station holder:
+///      If the leaver IS the no-previous station holder:
 ///    - Everyone else just follows their `previous` chain.
 /// 5. If a slot at N-1 remains empty after the cascade (possible when N was at
 ///    max_players), pop the front of the spectator queue into the bottom-of-chain

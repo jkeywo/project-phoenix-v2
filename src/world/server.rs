@@ -913,7 +913,7 @@ fn handle_ai_events(
                     }
                 }
                 TriggerAction::ApplyModifier { entity, tag, slot, bonus } => {
-                    if name_to_uuid.get(entity).is_none() {
+                    if !name_to_uuid.contains_key(entity) {
                         bevy::log::warn!(
                             "handle_ai_events: ApplyModifier: unknown entity name '{entity}'"
                         );
@@ -931,7 +931,7 @@ fn handle_ai_events(
                     }
                 }
                 TriggerAction::RemoveModifier { entity, tag, slot } => {
-                    if name_to_uuid.get(entity).is_none() {
+                    if !name_to_uuid.contains_key(entity) {
                         bevy::log::warn!(
                             "handle_ai_events: RemoveModifier: unknown entity name '{entity}'"
                         );
@@ -948,7 +948,7 @@ fn handle_ai_events(
                     }
                 }
                 TriggerAction::ApplyFlag { entity, tag, kind } => {
-                    if name_to_uuid.get(entity).is_none() {
+                    if !name_to_uuid.contains_key(entity) {
                         bevy::log::warn!(
                             "handle_ai_events: ApplyFlag: unknown entity name '{entity}'"
                         );
@@ -965,7 +965,7 @@ fn handle_ai_events(
                     }
                 }
                 TriggerAction::RemoveFlag { entity, tag, kind } => {
-                    if name_to_uuid.get(entity).is_none() {
+                    if !name_to_uuid.contains_key(entity) {
                         bevy::log::warn!(
                             "handle_ai_events: RemoveFlag: unknown entity name '{entity}'"
                         );
@@ -982,7 +982,7 @@ fn handle_ai_events(
                     }
                 }
                 TriggerAction::ApplyIntModifier { entity, tag, slot, bonus } => {
-                    if name_to_uuid.get(entity).is_none() {
+                    if !name_to_uuid.contains_key(entity) {
                         bevy::log::warn!(
                             "handle_ai_events: ApplyIntModifier: unknown entity name '{entity}'"
                         );
@@ -1000,7 +1000,7 @@ fn handle_ai_events(
                     }
                 }
                 TriggerAction::RemoveIntModifier { entity, tag, slot } => {
-                    if name_to_uuid.get(entity).is_none() {
+                    if !name_to_uuid.contains_key(entity) {
                         bevy::log::warn!(
                             "handle_ai_events: RemoveIntModifier: unknown entity name '{entity}'"
                         );

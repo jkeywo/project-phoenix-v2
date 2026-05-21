@@ -85,6 +85,7 @@ pub struct ActiveDialogue {
 /// Each trigger fires at most once (single-shot). When a trigger fires its
 /// `fired` flag is set to `true` and its actions are collected into a
 /// `FiredTrigger`.
+#[allow(clippy::ptr_arg)]
 pub fn evaluate_triggers(
     states: &mut Vec<TriggerState>,
     events: &[WorldEvent],
@@ -111,6 +112,7 @@ pub fn evaluate_triggers(
 /// Evaluate all comms templates in `states` against the given `events`.
 ///
 /// Each template fires at most once (single-shot).
+#[allow(clippy::ptr_arg)]
 pub fn evaluate_comms_templates(
     states: &mut Vec<CommsTemplateState>,
     events: &[WorldEvent],

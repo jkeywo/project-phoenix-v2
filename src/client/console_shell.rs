@@ -128,7 +128,7 @@ impl ConsoleShell {
             ))
             .with_children(|bezel| {
                 let _inset_id = bezel
-                    .spawn(
+                    .spawn((
                         Node {
                             position_type: PositionType::Absolute,
                             left: Val::Px(44.0),
@@ -138,85 +138,86 @@ impl ConsoleShell {
                             flex_direction: root_flex,
                             ..default()
                         },
-                    );
-            })
-            .with_children(|root| {
-                // ── Tab bar ─────────────────────────────────────────
-                // Leading padding leaves space for the absolutely-positioned
-                // help button in the top-left corner of the shell root.
-                let tab_pad_lead = Val::Px(36.0);
-                tab_bar_id = root
-                    .spawn((
-                        EmbeddedTabBar {
-                            is_vertical: is_landscape,
-                        },
-                        Node {
-                            width: tab_w,
-                            height: tab_h,
-                            flex_direction: tab_dir,
-                            column_gap: Val::Px(2.0),
-                            padding: if is_landscape {
-                                UiRect {
-                                    left: Val::Px(2.0),
-                                    right: Val::Px(2.0),
-                                    top: tab_pad_lead,
-                                    bottom: Val::Px(2.0),
-                                }
-                            } else {
-                                UiRect {
-                                    left: tab_pad_lead,
-                                    right: Val::Px(2.0),
-                                    top: Val::Px(2.0),
-                                    bottom: Val::Px(2.0),
-                                }
-                            },
-                            align_items: AlignItems::Center,
-                            overflow: Overflow::clip(),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.05, 0.05, 0.15, 0.92)),
-                        Visibility::Hidden,
                     ))
-                    .id();
+                    .with_children(|root| {
+                        // ── Tab bar ─────────────────────────────────────────
+                        // Leading padding leaves space for the absolutely-positioned
+                        // help button in the top-left corner of the shell root.
+                        let tab_pad_lead = Val::Px(36.0);
+                        tab_bar_id = root
+                            .spawn((
+                                EmbeddedTabBar {
+                                    is_vertical: is_landscape,
+                                },
+                                Node {
+                                    width: tab_w,
+                                    height: tab_h,
+                                    flex_direction: tab_dir,
+                                    column_gap: Val::Px(2.0),
+                                    padding: if is_landscape {
+                                        UiRect {
+                                            left: Val::Px(2.0),
+                                            right: Val::Px(2.0),
+                                            top: tab_pad_lead,
+                                            bottom: Val::Px(2.0),
+                                        }
+                                    } else {
+                                        UiRect {
+                                            left: tab_pad_lead,
+                                            right: Val::Px(2.0),
+                                            top: Val::Px(2.0),
+                                            bottom: Val::Px(2.0),
+                                        }
+                                    },
+                                    align_items: AlignItems::Center,
+                                    overflow: Overflow::clip(),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba(0.05, 0.05, 0.15, 0.92)),
+                                Visibility::Hidden,
+                            ))
+                            .id();
 
-                // ── Primary content ─────────────────────────────────
-                primary_id = root
-                    .spawn((Node {
-                        flex_grow: 2.0,
-                        width: if is_landscape {
-                            Val::Percent(100.0)
-                        } else {
-                            Val::Auto
-                        },
-                        height: if is_landscape {
-                            Val::Auto
-                        } else {
-                            Val::Percent(100.0)
-                        },
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },))
-                    .id();
+                        // ── Primary content ─────────────────────────────────
+                        primary_id = root
+                            .spawn((Node {
+                                flex_grow: 2.0,
+                                width: if is_landscape {
+                                    Val::Percent(100.0)
+                                } else {
+                                    Val::Auto
+                                },
+                                height: if is_landscape {
+                                    Val::Auto
+                                } else {
+                                    Val::Percent(100.0)
+                                },
+                                overflow: Overflow::clip(),
+                                ..default()
+                            },))
+                            .id();
 
-                // ── Secondary content ───────────────────────────────
-                secondary_id = root
-                    .spawn((Node {
-                        flex_shrink: 0.0,
-                        flex_grow: 1.0,
-                        width: if is_landscape {
-                            Val::Auto
-                        } else {
-                            Val::Percent(100.0)
-                        },
-                        height: if is_landscape {
-                            Val::Percent(100.0)
-                        } else {
-                            Val::Auto
-                        },
-                        overflow: Overflow::clip(),
-                        padding: UiRect::all(Val::Px(12.0)),
-                        ..default()
-                    },))
+                        // ── Secondary content ───────────────────────────────
+                        secondary_id = root
+                            .spawn((Node {
+                                flex_shrink: 0.0,
+                                flex_grow: 1.0,
+                                width: if is_landscape {
+                                    Val::Auto
+                                } else {
+                                    Val::Percent(100.0)
+                                },
+                                height: if is_landscape {
+                                    Val::Percent(100.0)
+                                } else {
+                                    Val::Auto
+                                },
+                                overflow: Overflow::clip(),
+                                padding: UiRect::all(Val::Px(12.0)),
+                                ..default()
+                            },))
+                            .id();
+                    })
                     .id();
             })
             .id();

@@ -1,12 +1,12 @@
-/// Bevy orchestrator for server-side console AI.
-///
-/// This plugin runs per-tick AI decision functions from `console_ai` and
-/// synthesises the same `InboundMessage` types that a human player would
-/// produce. AI only runs on **occupied** consoles whose complexity preset is
-/// currently "Low".
-///
-/// If the holder switches from "Low" to "Std" (or back), the complexity
-/// state is updated and AI immediately stops generating actions.
+//! Bevy orchestrator for server-side console AI.
+//!
+//! This plugin runs per-tick AI decision functions from `console_ai` and
+//! synthesises the same `InboundMessage` types that a human player would
+//! produce. AI only runs on **occupied** consoles whose complexity preset is
+//! currently "Low".
+//!
+//! If the holder switches from "Low" to "Std" (or back), the complexity
+//! state is updated and AI immediately stops generating actions.
 
 use bevy::prelude::*;
 use std::collections::HashMap;

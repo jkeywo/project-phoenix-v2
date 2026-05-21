@@ -27,6 +27,7 @@ impl EntityTag {
     ///
     /// Returns `None` for unrecognised strings so callers can gracefully
     /// ignore future extensions without breaking existing configs.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "asteroid" => Some(EntityTag::Asteroid),

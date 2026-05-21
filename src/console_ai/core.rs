@@ -1,10 +1,10 @@
-/// Pure AI decision functions for console automation.
-///
-/// This module is Bevy-free and platform-agnostic. It contains decision
-/// functions that replicate the actions a human player would take on a
-/// console set to "Low" complexity.
-///
-/// The Bevy orchestrator lives in `console_ai_plugin`.
+//! Pure AI decision functions for console automation.
+//!
+//! This module is Bevy-free and platform-agnostic. It contains decision
+//! functions that replicate the actions a human player would take on a
+//! console set to "Low" complexity.
+//!
+//! The Bevy orchestrator lives in `console_ai_plugin`.
 
 use crate::shield::ShieldFacingSnapshot;
 use crate::torpedo::TorpedoTubeId;

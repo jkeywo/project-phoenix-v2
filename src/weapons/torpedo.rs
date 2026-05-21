@@ -1,17 +1,17 @@
-/// Pure-Rust torpedo mechanics.
-///
-/// This module is platform-agnostic and Bevy-free. It models a torpedo system
-/// with three tubes:
-///   - Fore port (90° fire arc centred forward-port)
-///   - Fore starboard (90° fire arc centred forward-starboard)
-///   - Aft (90° fire arc centred aft)
-///
-/// Each tube has a configurable load time. When a torpedo is launched it
-/// tracks a target UUID with a limited turn rate. If the target is gone the
-/// torpedo flies straight. Torpedoes expire after a configurable lifespan.
-///
-/// Coordinate system: same as `ship_physics` / `radar` — XZ plane, Y-up.
-/// Ship forward is −Z when yaw = 0.
+//! Pure-Rust torpedo mechanics.
+//!
+//! This module is platform-agnostic and Bevy-free. It models a torpedo system
+//! with three tubes:
+//!   - Fore port (90° fire arc centred forward-port)
+//!   - Fore starboard (90° fire arc centred forward-starboard)
+//!   - Aft (90° fire arc centred aft)
+//!
+//! Each tube has a configurable load time. When a torpedo is launched it
+//! tracks a target UUID with a limited turn rate. If the target is gone the
+//! torpedo flies straight. Torpedoes expire after a configurable lifespan.
+//!
+//! Coordinate system: same as `ship_physics` / `radar` — XZ plane, Y-up.
+//! Ship forward is −Z when yaw = 0.
 
 use std::f32::consts::{PI, FRAC_PI_2};
 

@@ -1,30 +1,30 @@
-/// Pure-Rust phaser bank mechanics.
-///
-/// This module is platform-agnostic and Bevy-free. It models two independent
-/// phaser banks (port and starboard), each with:
-///   - A 270° fire arc (the 90° blind cone is on the *opposite* side).
-///   - A narrower 240° auto-fire arc (30° margin from the edge of the fire arc).
-///   - A cooldown timer.
-///   - Manual or Auto firing mode (shared across both banks).
-///
-/// Arc geometry
-/// ─────────────
-/// We reuse the ship-local coordinate system from `radar.rs`:
-///   radar_x = dot((dx,dz), right)   > 0 means starboard
-///   radar_y = dot((dx,dz), forward) > 0 means ahead
-///
-/// For the **port bank** the 90° blind cone is centred on pure starboard
-/// (radar_x > 0, |angle from right| < 45°).  Equivalently, the target is in
-/// the blind cone when `radar_x > |radar_y|` (using the L∞ approximation of a
-/// 90° sector).
-///
-/// For the **starboard bank** the blind cone is on the port side: `radar_x < -|radar_y|`.
-///
-/// For the auto-fire arc (240°, blind cone = 120°):
-///   Port bank blind: `radar_x > |radar_y| * tan(30°)`  (i.e. within 60° of right)
-///   Starboard bank blind: `radar_x < -|radar_y| * tan(30°)`
-///
-/// `tan(45°) = 1.0`, `tan(30°) ≈ 0.5774`.
+//! Pure-Rust phaser bank mechanics.
+//!
+//! This module is platform-agnostic and Bevy-free. It models two independent
+//! phaser banks (port and starboard), each with:
+//!   - A 270° fire arc (the 90° blind cone is on the *opposite* side).
+//!   - A narrower 240° auto-fire arc (30° margin from the edge of the fire arc).
+//!   - A cooldown timer.
+//!   - Manual or Auto firing mode (shared across both banks).
+//!
+//! Arc geometry
+//! ─────────────
+//! We reuse the ship-local coordinate system from `radar.rs`:
+//!   radar_x = dot((dx,dz), right)   > 0 means starboard
+//!   radar_y = dot((dx,dz), forward) > 0 means ahead
+//!
+//! For the **port bank** the 90° blind cone is centred on pure starboard
+//! (radar_x > 0, |angle from right| < 45°).  Equivalently, the target is in
+//! the blind cone when `radar_x > |radar_y|` (using the L∞ approximation of a
+//! 90° sector).
+//!
+//! For the **starboard bank** the blind cone is on the port side: `radar_x < -|radar_y|`.
+//!
+//! For the auto-fire arc (240°, blind cone = 120°):
+//!   Port bank blind: `radar_x > |radar_y| * tan(30°)`  (i.e. within 60° of right)
+//!   Starboard bank blind: `radar_x < -|radar_y| * tan(30°)`
+//!
+//! `tan(45°) = 1.0`, `tan(30°) ≈ 0.5774`.
 
 use std::f32::consts::PI;
 
@@ -225,10 +225,9 @@ fn ship_local(target_x: f32, target_z: f32, ship_x: f32, ship_z: f32, ship_yaw: 
 ///
 /// The arc is centred on:
 ///   - Port bank  → left side (radar_x < 0), centred at angle 270° from forward
-///                  (i.e. directly to port).  The *blind* cone is on the
-///                  starboard side.
+///     (i.e. directly to port).  The *blind* cone is on the starboard side.
 ///   - Starboard bank → centred at 90° from forward (directly to starboard).
-///                      Blind cone is on port side.
+///     Blind cone is on port side.
 ///
 /// We compute the half-angle of the *blind cone*:
 ///   blind_half = (360° - arc_deg) / 2  →  for 270° → 45°, for 240° → 60°.

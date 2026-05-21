@@ -8,9 +8,10 @@ pub const IMPULSE_CHARGE_DURATION: f32 = 3.0;
 pub const IMPULSE_SPEED_MULTIPLIER: f32 = 10.0;
 
 /// State of the impulse drive.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ImpulsePhase {
     /// Idle — not charging, not active.
+    #[default]
     Idle,
     /// Charging — progress from 0.0 to 1.0.
     Charging,
@@ -19,7 +20,7 @@ pub enum ImpulsePhase {
 }
 
 /// Impulse drive state.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ImpulseState {
     /// Current phase of the impulse drive.
     pub phase: ImpulsePhase,
@@ -30,10 +31,7 @@ pub struct ImpulseState {
 impl ImpulseState {
     /// Create a new, idle impulse state.
     pub fn new() -> Self {
-        Self {
-            phase: ImpulsePhase::Idle,
-            charge_progress: 0.0,
-        }
+        Self::default()
     }
 
     /// Begin charging the impulse drive. No-op if already charging or active.

@@ -5,8 +5,10 @@ import { EntityEditor } from './entity-editor.js';
 import { getEntityPath } from './toml-utils.js';
 import { preloadEntityCache, loadEntityConfig } from './entity-cache.js';
 import { restoreScenarioLayer } from './undo-controller.js';
+import { CrossReferenceIndex } from './cross-references.js';
 
 const layerManager = new LayerManager();
+const crossRefIndex = new CrossReferenceIndex();
 let canvasManager;
 let propertiesPanel;
 let entityEditor;
@@ -103,6 +105,11 @@ function onEntitySaved(entity) {
 }
 
 function renderAll() {
+  // Rebuild the cross-reference index from every open layer's worldState
+  // before any UI consumer reads from it (world-content panel, sidebar
+  // refCount fields, etc.).  Sub-millisecond for typical worlds.
+  crossRefIndex.indexLayers(canvasManager.buildV2Layers());
+
   renderLayersPanel(layerManager, renderAll, onSpawnSelectFromTree);
   canvasManager.renderAll();
   updateUnsavedIndicator();

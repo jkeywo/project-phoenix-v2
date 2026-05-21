@@ -1306,18 +1306,18 @@ form {
 
 /* File list */
 .entity-file-list { display: flex; flex-direction: column; gap: 1px; }
-.entity-file-row {
+.entity-file-list-row {
   display: flex; align-items: center; gap: 6px;
   padding: 4px 8px; border-radius: 3px;
   color: #ccc; font-size: 12px; cursor: pointer;
 }
-.entity-file-row:hover { background: #2a2d34; }
-.entity-file-row.active { background: #3a4a66; color: #fff; }
-.entity-file-row .dirty-dot {
+.entity-file-list-row:hover { background: #2a2d34; }
+.entity-file-list-row-active { background: #3a4a66; color: #fff; }
+.entity-file-list-row .dirty-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: #d6a64a; flex-shrink: 0;
 }
-.entity-file-row .entity-file-label {
+.entity-file-list-row .entity-file-list-label {
   flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 

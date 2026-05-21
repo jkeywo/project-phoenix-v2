@@ -60,8 +60,15 @@ export class BehaviourEditor {
 
     if (Array.isArray(b.transition)) {
       for (const t of b.transition) {
+        // `from` in TOML may be either a string (single source state) or
+        // an array of strings. Normalise to an array so [...t.from] in
+        // cloneTransition doesn't spread a string into characters.
+        const fromRaw = t.from;
+        const fromArr = Array.isArray(fromRaw)
+          ? fromRaw
+          : (fromRaw == null ? [] : [fromRaw]);
         this._transitions.push(cloneTransition({
-          from: t.from || [],
+          from: fromArr,
           to: t.to,
           condition: t.condition || { kind: null, parameters: {} },
         }));

@@ -31,6 +31,8 @@ import { renderEntitySelect } from './entity-select-view.js';
 import { worldCommsToEditor, editorCommsToWorld } from './comms-adapter.js';
 import { buildDefaultAction } from './trigger-view.js';
 import { CommsEditor } from './comms-editor.js';
+import { validateFile } from './validation.js';
+import { applyValidationResults } from './validation-badge.js';
 
 // `on_timer` is omitted here — comms templates cannot use it (see
 // pre-flight finding in the Slice 4b commit log).
@@ -124,6 +126,14 @@ export function renderCommsPanel(host, selection, deps) {
   panel.appendChild(responsesH4);
 
   panel.appendChild(renderResponsesForNode(editor, idx, [], deps, mutate));
+
+  // Slice 7: decorate fields whose validation path has a record.
+  try {
+    const results = validateFile(layer.filename, layer.toml);
+    applyValidationResults(panel, results);
+  } catch (err) {
+    console.warn('[comms-view] validation badge pass failed:', err?.message || err);
+  }
 
   host.appendChild(panel);
 }
@@ -293,10 +303,21 @@ function renderResponseCard(editor, templateIdx, nodePath, respIdx, resp, deps, 
 
   const actions = Array.isArray(resp.actions) ? resp.actions : [];
   const layer = nearestLayer(deps);
+  // Slice 7: only the top-level response array maps 1:1 to the
+  // indexed validator paths (`comms[i].response[r].action[j]`).
+  // Follow-up sub-trees use a different schema (see comms-adapter.js)
+  // and are not yet covered by validateWorldReferencesIndexed; leave
+  // basePath undefined so no badges are mis-attached there.
+  const isTopLevel = Array.isArray(nodePath) && nodePath.length === 0;
+  const actionBasePath = isTopLevel
+    ? `comms[${templateIdx}].response[${respIdx}].action`
+    : undefined;
   actions.forEach((action, actionIdx) => {
     renderActionCard(actionsHost, action, {
       worldState: layer?.toml || {},
       allLayers: deps.allLayers || [],
+      basePath: actionBasePath,
+      actionIndex: actionBasePath ? actionIdx : undefined,
       onChange: (updated) => {
         mutate(() => {
           editor.removeResponseAction(templateIdx, nodePath, respIdx, actionIdx);

@@ -48,6 +48,15 @@ import { renderEntitySelect } from './entity-select-view.js';
  * @param {(direction: 'up'|'down') => void} deps.onMove
  * @param {() => void} deps.onRemove
  * @param {(rootPath: string) => Promise<string|null>} deps.openFilePicker
+ * @param {string}  [deps.basePath]     Validation-path prefix for the
+ *                                      enclosing action array (e.g.
+ *                                      `'trigger[3].action'`). When set,
+ *                                      per-field rows tag themselves
+ *                                      with `data-validation-path` so
+ *                                      `applyValidationResults` can
+ *                                      attach badges.
+ * @param {number}  [deps.actionIndex]  Index of this card within its
+ *                                      enclosing action array.
  */
 export function renderActionCard(host, action, deps) {
   const schema = ACTION_SCHEMA[action.type];
@@ -95,6 +104,14 @@ export function renderActionCard(host, action, deps) {
 function renderField(action, field, deps) {
   const row = document.createElement('div');
   row.className = 'action-field';
+
+  // Slice 7: stamp a validation path on every field row when the
+  // caller threaded a basePath + actionIndex. The badge layer keys off
+  // `data-validation-path`.
+  if (typeof deps.basePath === 'string' && Number.isInteger(deps.actionIndex)) {
+    row.dataset.validationPath =
+      `${deps.basePath}[${deps.actionIndex}].${field.key}`;
+  }
 
   const label = document.createElement('label');
   label.textContent = field.key;

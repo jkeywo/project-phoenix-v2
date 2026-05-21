@@ -22,6 +22,8 @@ import { ACTION_SCHEMA } from './action-schema.js';
 import { renderActionCard } from './action-card-view.js';
 import { snapshotForUndo } from './undo-controller.js';
 import { renderEntitySelect } from './entity-select-view.js';
+import { validateFile } from './validation.js';
+import { applyValidationResults } from './validation-badge.js';
 
 const TRIGGER_CONDITIONS = ['on_destroyed', 'on_attacked', 'on_timer', 'on_hailed'];
 
@@ -92,10 +94,13 @@ export function renderTriggerPanel(host, selection, deps) {
   panel.appendChild(actionList);
 
   const actions = Array.isArray(trigger.action) ? trigger.action : [];
+  const basePath = `trigger[${triggerIndex}].action`;
   actions.forEach((action, actionIndex) => {
     renderActionCard(actionList, action, {
       worldState: layer.toml,
       allLayers: deps.allLayers || [],
+      basePath,
+      actionIndex,
       onChange: (updated) => {
         snapshotForUndo(layer);
         ensureActionArray(trigger);
@@ -126,6 +131,15 @@ export function renderTriggerPanel(host, selection, deps) {
 
   // ── + Add Action ──────────────────────────────────────────────────────
   panel.appendChild(makeAddActionRow(trigger, layer, deps, rerender));
+
+  // Slice 7: decorate fields whose validation path has a record.
+  try {
+    const results = validateFile(layer.filename, layer.toml);
+    applyValidationResults(panel, results);
+  } catch (err) {
+    // Validation must never block the panel from rendering.
+    console.warn('[trigger-view] validation badge pass failed:', err?.message || err);
+  }
 
   host.appendChild(panel);
 }

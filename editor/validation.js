@@ -3,6 +3,7 @@ import { validateEntityToml, validateEntitySections } from './entity-toml.js';
 import { validateStations } from './stations-validate.js';
 import { validateTriggerActions } from './action-schema.js';
 import { validateWorldReferences } from './world-references.js';
+import { validateWorldReferencesIndexed } from './world-references-indexed.js';
 
 function isEntityFile(filePath, parsed) {
   if (filePath && filePath.includes('assets/entities/')) return true;
@@ -183,6 +184,13 @@ export function validateFile(filePath, parsedContent) {
     // set of `[[entity]] name = "..."` declared in this world.
     const refResults = validateWorldReferences(parsedContent);
     results.push(...refResults);
+
+    // Slice 7: emit the same checks again with FULL INDEXED PATHS so
+    // the badge layer can decorate the specific input field that is
+    // broken (`world-references.js` keeps its human-readable context
+    // strings for the messages list).
+    const indexedRefResults = validateWorldReferencesIndexed(parsedContent);
+    results.push(...indexedRefResults);
   }
 
   return results;

@@ -1,16 +1,24 @@
-//! Client-side Sensors Panel plugin.
+//! Client-side Sensors Panel plugin — migrated to `src/gui/` library widgets.
 //!
-//! Owns the Sensors console UI: long-range radar display, science target
-//! designation, cancel-impulse button (visible only at impulse), and
-//! view-mode controls.
+//! Owns the Sensors console UI: long-range radar display (`GenericRadar`,
+//! WorldFixed, Ships + Asteroids filter), science target designation,
+//! cancel-impulse button (visible only at impulse), and view-mode controls.
+//!
+//! All button callbacks are wired via observers at spawn time.
+//! No per-button marker-component query systems remain.
 //!
 //! Compiled only when the `client` Cargo feature is enabled.
 
 use bevy::prelude::*;
+use std::collections::HashMap;
 
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::set_science_target_message;
+use crate::gui::{
+    spawn_gui_button, ButtonPressed, ButtonSize, GenericRadar, OnRadar, OrientationMode,
+    RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer, StateVisuals,
+};
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::ship_view::ShipView;
 
@@ -43,32 +51,43 @@ pub fn sensors_panel_visible(
 #[derive(Component)]
 pub struct SensorsPanel;
 
-/// Marks the long-range radar display panel (gizmo-drawn).
-#[derive(Component)]
-pub struct ScienceRadarPanel;
-
-/// Marks the "Radar" view-mode button.
-#[derive(Component)]
-pub struct ScienceRadarButton;
-
-/// Marks the "Cancel Impulse" button.
+/// Marks the "Cancel Impulse" `GuiButton` entity — used only for visibility
+/// toggling (shown/hidden based on impulse charge state).
 #[derive(Component)]
 pub struct ScienceCancelImpulseButton;
 
-/// Marks the "On Screen" button.
-#[derive(Component)]
-pub struct ScienceOnScreenButton;
+// ── State visuals helpers ─────────────────────────────────────────────
 
-// ── Constants ─────────────────────────────────────────────────────────
+/// Muted blue-green button visuals — used for ON SCREEN.
+fn on_screen_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.10, 0.30, 0.25), // idle
+        Color::srgb(0.15, 0.40, 0.32), // hover
+        Color::srgb(0.12, 0.50, 0.38), // active
+        Color::srgb(0.18, 0.55, 0.40), // press
+        Color::srgb(0.05, 0.15, 0.12), // disabled
+    )
+}
 
-const CANCEL_IMPULSE_BG: Color = Color::srgb(0.40, 0.05, 0.05);
-const CANCEL_IMPULSE_TEXT: Color = Color::srgb(1.0, 0.4, 0.4);
+/// Danger (red) button visuals — used for Cancel Impulse.
+fn cancel_impulse_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.40, 0.05, 0.05), // idle
+        Color::srgb(0.55, 0.08, 0.08), // hover
+        Color::srgb(0.60, 0.07, 0.07), // active
+        Color::srgb(0.70, 0.10, 0.10), // press
+        Color::srgb(0.15, 0.03, 0.03), // disabled
+    )
+}
 
-// Gizmo radar colours (same palette as weapons radar).
-const RADAR_OUTER_RING_COLOR: Color = Color::srgb(0.55, 0.70, 1.0);
-const RADAR_MID_RING_COLOR:   Color = Color::srgb(0.30, 0.40, 0.65);
-const RADAR_ASTEROID_COLOR:   Color = Color::srgb(0.85, 0.75, 0.45);
-const RADAR_SHIP_COLOR:       Color = Color::srgb(0.95, 0.95, 1.0);
+// ── Resources ────────────────────────────────────────────────────────
+
+/// Persistent entity IDs for science-specific radar components.
+#[derive(Resource, Default)]
+struct ScienceRadarEntities {
+    center: Option<Entity>,
+    blips: HashMap<String, Entity>,
+}
 
 // ── Plugin ────────────────────────────────────────────────────────────
 
@@ -76,16 +95,14 @@ pub struct SensorsPanelPlugin;
 
 impl Plugin for SensorsPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_sensors_ui)
+        app.init_resource::<ScienceRadarEntities>()
+            .add_systems(Startup, setup_sensors_ui)
             .add_systems(
                 Update,
                 (
                     toggle_sensors_panel_visibility,
                     refresh_cancel_impulse_visibility,
-                    handle_science_radar_button_press,
-                    handle_science_cancel_impulse_button_press,
-                    handle_science_on_screen_button_press,
-                    draw_science_radar,
+                    bridge_client_sim_to_science_radar,
                 ),
             );
     }
@@ -94,88 +111,147 @@ impl Plugin for SensorsPanelPlugin {
 // ── Setup ────────────────────────────────────────────────────────────
 
 fn setup_sensors_ui(mut commands: Commands) {
-    commands.spawn((
-        SensorsPanel,
-        Node {
-            position_type: PositionType::Absolute,
-            left:   Val::Px(0.0),
-            top:    Val::Px(0.0),
-            right:  Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },
-        Visibility::Hidden,
-    ))
-    .with_children(|panel| {
-        panel.spawn(Node {
+    // ── Root panel ────────────────────────────────────────────────────
+    let panel = commands
+        .spawn((
+            SensorsPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .id();
+
+    // ── Title row ─────────────────────────────────────────────────────
+    let title_row = commands
+        .spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
             ..default()
-        }).with_children(|title_row| {
-            title_row.spawn((
-                Text::new("Sensors"),
-                TextFont { font_size: 32.0, ..default() },
-                TextColor(Color::srgb(0.8, 0.8, 1.0)),
-            ));
-            crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Sensors, 16.0);
-        });
-        crate::client_elements::spawn_help_overlay(panel, crate::client_elements::HelpPanel::Sensors);
-
-        // Long-range radar display (gizmo-drawn via ScienceRadarPanel bounds)
-        panel.spawn((
-            ScienceRadarPanel,
-            Node {
-                width:  Val::Px(240.0),
-                height: Val::Px(240.0),
-                border: UiRect::all(Val::Px(1.0)),
+        })
+        .id();
+    commands.entity(title_row).with_children(|row| {
+        row.spawn((
+            Text::new("Sensors"),
+            TextFont {
+                font_size: 32.0,
                 ..default()
             },
-            BorderColor::all(Color::srgb(0.55, 0.70, 1.0)),
-            BackgroundColor(Color::srgb(0.04, 0.06, 0.12)),
+            TextColor(Color::srgb(0.8, 0.8, 1.0)),
         ));
-
-        // Radar view-mode button — pushes ScienceRadar to the viewscreen
-        panel.spawn((
-            ScienceRadarButton,
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(18.0), Val::Px(10.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.10, 0.30, 0.25)),
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                Text::new("ON SCREEN"),
-                TextFont { font_size: 14.0, ..default() },
-                TextColor(Color::srgb(0.4, 1.0, 0.8)),
-            ));
-        });
-
-        // Cancel Impulse button — starts hidden; shown only when impulse is active
-        panel.spawn((
-            ScienceCancelImpulseButton,
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
-                ..default()
-            },
-            BackgroundColor(CANCEL_IMPULSE_BG),
-            Visibility::Hidden,
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                Text::new("CANCEL IMPULSE"),
-                TextFont { font_size: 14.0, ..default() },
-                TextColor(CANCEL_IMPULSE_TEXT),
-            ));
-        });
+        crate::client_elements::spawn_help_button(
+            row,
+            crate::client_elements::HelpPanel::Sensors,
+            16.0,
+        );
     });
+    commands.entity(panel).add_child(title_row);
+    crate::client_elements::spawn_help_overlay_root(
+        &mut commands,
+        crate::client_elements::HelpPanel::Sensors,
+    );
+
+    // ── Science long-range radar (GenericRadar, WorldFixed, Ships + Asteroids) ──
+    let radar_filter = RadarFilter(std::collections::HashSet::from([
+        RadarLayer::Ship,
+        RadarLayer::Asteroid,
+    ]));
+    let radar = GenericRadar::spawn(
+        &mut commands,
+        crate::client_sim::SCIENCE_RADAR_RANGE,
+        OrientationMode::WorldFixed,
+        radar_filter,
+        None,
+        None,
+    );
+    commands.entity(radar).insert(Node {
+        width: Val::Px(240.0),
+        height: Val::Px(240.0),
+        border: UiRect::all(Val::Px(1.0)),
+        aspect_ratio: Some(1.0),
+        position_type: PositionType::Relative,
+        ..default()
+    });
+    commands.entity(panel).add_child(radar);
+
+    // ── ON SCREEN button — pushes ScienceRadar to the viewscreen ──────
+    let on_screen_btn = spawn_gui_button(
+        &mut commands,
+        ButtonSize::Rect {
+            width: 160.0,
+            height: 36.0,
+        },
+        on_screen_visuals(),
+        None,
+    );
+    commands.entity(on_screen_btn).with_children(|btn| {
+        btn.spawn((
+            Text::new("ON SCREEN"),
+            TextFont {
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.4, 1.0, 0.8)),
+        ));
+    });
+    commands
+        .entity(on_screen_btn)
+        .observe(on_on_screen_button_pressed);
+    commands.entity(panel).add_child(on_screen_btn);
+
+    // ── CANCEL IMPULSE button — hidden until impulse charge is active ──
+    let cancel_btn = spawn_gui_button(
+        &mut commands,
+        ButtonSize::Rect {
+            width: 160.0,
+            height: 36.0,
+        },
+        cancel_impulse_visuals(),
+        None,
+    );
+    commands.entity(cancel_btn).with_children(|btn| {
+        btn.spawn((
+            Text::new("CANCEL IMPULSE"),
+            TextFont {
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.4, 0.4)),
+        ));
+    });
+    commands
+        .entity(cancel_btn)
+        .insert((ScienceCancelImpulseButton, Visibility::Hidden))
+        .observe(on_cancel_impulse_button_pressed);
+    commands.entity(panel).add_child(cancel_btn);
+}
+
+// ── Button observers ──────────────────────────────────────────────────
+
+fn on_on_screen_button_pressed(
+    _trigger: On<ButtonPressed>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    outbound.write(OutboundClientMessage(ClientMessage::SetView {
+        mode: ViewMode::ScienceRadar,
+    }));
+}
+
+fn on_cancel_impulse_button_pressed(
+    _trigger: On<ButtonPressed>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
 }
 
 // ── Systems ──────────────────────────────────────────────────────────
@@ -188,7 +264,11 @@ fn toggle_sensors_panel_visibility(
 ) {
     let visible = sensors_panel_visible(&lobby, &token.0, &active);
     for mut vis in panel.iter_mut() {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -206,112 +286,126 @@ fn refresh_cancel_impulse_visibility(
     }
 }
 
-fn handle_science_radar_button_press(
-    interactions: Query<&Interaction, (Changed<Interaction>, With<Button>, With<ScienceRadarButton>)>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(
-                ClientMessage::SetView { mode: ViewMode::ScienceRadar },
-            ));
-        }
-    }
-}
+// ── Radar entity bridge ───────────────────────────────────────────────
 
-fn handle_science_cancel_impulse_button_press(
-    interactions: Query<&Interaction, (Changed<Interaction>, With<Button>, With<ScienceCancelImpulseButton>)>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
-        }
-    }
-}
-
-/// On Screen button — always pushes ScienceRadar to the viewscreen.
-fn handle_science_on_screen_button_press(
-    interactions: Query<&Interaction, (Changed<Interaction>, With<Button>, With<ScienceOnScreenButton>)>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(
-                ClientMessage::SetView { mode: ViewMode::ScienceRadar },
-            ));
-        }
-    }
-}
-
-/// Draw the Science long-range radar on the `ScienceRadarPanel` using gizmos.
-fn draw_science_radar(
-    mut gizmos: Gizmos,
-    panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<ScienceRadarPanel>>,
-    sensors_panel: Query<&Visibility, With<SensorsPanel>>,
+/// Bridges `ClientSimState` entity snapshots into ECS entities with
+/// `OnRadar` / `RadarAppearance` for the science `GenericRadar` widget.
+///
+/// Science radar shows ships and asteroids only.
+fn bridge_client_sim_to_science_radar(
+    mut commands: Commands,
     sim: Res<crate::client_sim::ClientSimState>,
     ship_view: Res<ShipView>,
-    windows: Query<&Window>,
+    mut radar: ResMut<ScienceRadarEntities>,
 ) {
-    if !sensors_panel
-        .iter()
-        .any(|v| matches!(v, Visibility::Visible | Visibility::Inherited))
-    {
-        return;
-    }
-    let Ok((node, gt, view_vis)) = panel.single() else { return };
-    if !view_vis.get() {
-        return;
-    }
-    let Ok(window) = windows.single() else { return };
-    let viewport_w = window.width();
-    let viewport_h = window.height();
-
-    let node_size = node.size();
-    let node_centre_screen = gt.translation().truncate();
-    let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
-    let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
-    let centre = Vec2::new(centre_world_x, centre_world_y);
-
-    let radius = node_size.x.min(node_size.y) * 0.5;
-    if radius <= 0.0 {
-        return;
-    }
-
-    // Draw outer and mid range rings
-    gizmos.circle_2d(centre, radius, RADAR_OUTER_RING_COLOR);
-    let range = crate::client_sim::science_radar_config().range;
-    let mid_ratio = crate::radar::RADAR_MID_RING / range;
-    gizmos.circle_2d(centre, radius * mid_ratio, RADAR_MID_RING_COLOR);
-
-    // Compute the long-range radar view
-    let radar_view = crate::client_sim::compute_science_long_range_radar_view(&sim, &ship_view);
-    for dot in &radar_view.dots {
-        let pos = centre + Vec2::new(dot.radar_x * radius, dot.radar_y * radius);
-        let pix_radius = (dot.scaled_radius * radius).max(2.0);
-        gizmos.circle_2d(pos, pix_radius, RADAR_ASTEROID_COLOR);
-    }
-
-    // Draw rings (asteroid fields, regions)
-    for ring in &radar_view.rings {
-        let pos = centre + Vec2::new(ring.centre_x * radius, ring.centre_y * radius);
-        let outer_r = ring.outer_r * radius;
-        gizmos.circle_2d(pos, outer_r, Color::srgb(0.3, 0.7, 0.4));
-        let inner_r = ring.inner_r * radius;
-        if inner_r > 0.0 {
-            gizmos.circle_2d(pos, inner_r, Color::srgb(0.2, 0.5, 0.3));
+    // ── Radar center (player ship) ────────────────────────────────────
+    let ship_appearance = RadarAppearance {
+        icon: RadarIcon::Ship,
+        world_size: 6.0,
+        color: Color::srgb(0.95, 0.95, 1.0),
+    };
+    match radar.center {
+        Some(e) => {
+            commands.entity(e).insert((
+                RadarCenter {
+                    world_x: ship_view.ship_x,
+                    world_z: ship_view.ship_z,
+                    yaw: ship_view.ship_yaw,
+                },
+                OnRadar(RadarLayer::Ship),
+                ship_appearance,
+                Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
+            ));
+        }
+        None => {
+            let e = commands
+                .spawn((
+                    RadarCenter {
+                        world_x: ship_view.ship_x,
+                        world_z: ship_view.ship_z,
+                        yaw: ship_view.ship_yaw,
+                    },
+                    OnRadar(RadarLayer::Ship),
+                    ship_appearance,
+                    Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
+                    GlobalTransform::default(),
+                ))
+                .id();
+            radar.center = Some(e);
         }
     }
 
-    // Ship triangle at centre
-    let nose_len  = radius * 0.10;
-    let half_base = radius * 0.06;
-    let nose  = centre + Vec2::new(0.0,  nose_len);
-    let left  = centre + Vec2::new(-half_base, -nose_len * 0.6);
-    let right = centre + Vec2::new( half_base, -nose_len * 0.6);
-    gizmos.line_2d(nose, left,  RADAR_SHIP_COLOR);
-    gizmos.line_2d(left, right, RADAR_SHIP_COLOR);
-    gizmos.line_2d(right, nose, RADAR_SHIP_COLOR);
+    // ── Entity blips ──────────────────────────────────────────────────
+    let mut seen = std::collections::HashSet::new();
+
+    for snapshot in &sim.world.entities {
+        let uuid = &snapshot.uuid;
+        if !seen.insert(uuid.clone()) {
+            continue;
+        }
+
+        let has_tag = |tag: &str| snapshot.tags.iter().any(|t| t == tag);
+        if has_tag("region") {
+            continue;
+        }
+
+        // Science radar shows ships and asteroids.
+        let (layer, icon, default_color) = if has_tag("ship") || has_tag("pirate") {
+            (
+                RadarLayer::Ship,
+                RadarIcon::Ship,
+                Color::srgb(0.95, 0.95, 1.0),
+            )
+        } else if has_tag("asteroid") || has_tag("asteroid_field") {
+            (
+                RadarLayer::Asteroid,
+                RadarIcon::Asteroid,
+                Color::srgb(0.85, 0.75, 0.45),
+            )
+        } else {
+            continue; // skip everything else
+        };
+
+        let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
+        let world_size = snapshot
+            .radar_world_size
+            .or(Some(snapshot.radius_or_zero()))
+            .filter(|s| *s > 0.0)
+            .unwrap_or(4.0);
+        let appearance = RadarAppearance {
+            icon,
+            world_size,
+            color: colour.unwrap_or(default_color),
+        };
+
+        if let Some(existing) = radar.blips.get(uuid) {
+            commands.entity(*existing).insert((
+                OnRadar(layer),
+                appearance,
+                Transform::from_xyz(snapshot.x(), 0.0, snapshot.z()),
+            ));
+        } else {
+            let blip = commands
+                .spawn((
+                    OnRadar(layer),
+                    appearance,
+                    Transform::from_xyz(snapshot.x(), 0.0, snapshot.z()),
+                    GlobalTransform::default(),
+                ))
+                .id();
+            radar.blips.insert(uuid.clone(), blip);
+        }
+    }
+
+    // Despawn blips no longer in sim state.
+    radar.blips.retain(|uuid, entity| {
+        if seen.contains(uuid) {
+            true
+        } else {
+            commands.entity(*entity).despawn();
+            false
+        }
+    });
 }
 
 /// Build the `ClientMessage` for designating a science target.
@@ -324,13 +418,51 @@ pub fn science_target_message(uuid: String) -> ClientMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client_lobby::{LobbyState, ActiveConsole};
-    use crate::messages::GamePhase;
+    use crate::client_lobby::{ActiveConsole, LobbyState};
+    use crate::messages::{GamePhase, GameState, Player, ServerMessage, ShipClientConfig};
+    use crate::stations_config::ShipStations;
+    use std::collections::HashMap;
 
-    fn lobby_in_progress() -> LobbyState {
+    fn player(token: &str, consoles: Vec<Console>) -> Player {
+        Player {
+            token: token.into(),
+            name: "test".into(),
+            consoles,
+            connected: true,
+        }
+    }
+
+    fn game_state(phase: GamePhase, players: Vec<Player>) -> GameState {
+        GameState {
+            phase,
+            players,
+            complexity: HashMap::new(),
+            world: None,
+        }
+    }
+
+    fn welcome(state: GameState) -> ServerMessage {
+        ServerMessage::Welcome {
+            state,
+            ship_stations: ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
+        }
+    }
+
+    fn in_progress_sensors_lobby(token: &str) -> LobbyState {
         let mut s = LobbyState::default();
-        s.phase = GamePhase::InProgress;
+        s.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player(token, vec![Console::Sensors])],
+        )));
         s
+    }
+
+    fn no_tab() -> ActiveConsole {
+        ActiveConsole(None)
+    }
+    fn tab(c: Console) -> ActiveConsole {
+        ActiveConsole(Some(c))
     }
 
     // ── sensors_panel_visible ─────────────────────────────────────────
@@ -338,15 +470,62 @@ mod tests {
     #[test]
     fn sensors_panel_not_visible_in_lobby_phase() {
         let lobby = LobbyState::default();
-        let active = ActiveConsole::default();
+        let active = no_tab();
         assert!(!sensors_panel_visible(&lobby, "tok", &active));
     }
 
     #[test]
     fn sensors_panel_not_visible_when_player_does_not_hold_sensors() {
-        let lobby = lobby_in_progress();
-        let active = ActiveConsole::default();
+        let lobby = {
+            let mut s = LobbyState::default();
+            s.apply(&welcome(game_state(
+                GamePhase::InProgress,
+                vec![player("tok", vec![Console::Helm])],
+            )));
+            s
+        };
+        let active = no_tab();
         assert!(!sensors_panel_visible(&lobby, "tok", &active));
+    }
+
+    #[test]
+    fn sensors_panel_visible_when_sole_console_and_no_tab() {
+        let lobby = in_progress_sensors_lobby("tok");
+        let active = no_tab();
+        assert!(sensors_panel_visible(&lobby, "tok", &active));
+    }
+
+    #[test]
+    fn sensors_panel_visible_when_multi_console_and_sensors_tab() {
+        let mut s = LobbyState::default();
+        s.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("tok", vec![Console::Sensors, Console::Helm])],
+        )));
+        let active = tab(Console::Sensors);
+        assert!(sensors_panel_visible(&s, "tok", &active));
+    }
+
+    #[test]
+    fn sensors_panel_hidden_when_multi_console_and_other_tab() {
+        let mut s = LobbyState::default();
+        s.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("tok", vec![Console::Sensors, Console::Helm])],
+        )));
+        let active = tab(Console::Helm);
+        assert!(!sensors_panel_visible(&s, "tok", &active));
+    }
+
+    #[test]
+    fn sensors_panel_hidden_when_multi_console_and_no_tab() {
+        let mut s = LobbyState::default();
+        s.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("tok", vec![Console::Sensors, Console::Helm])],
+        )));
+        let active = no_tab();
+        assert!(!sensors_panel_visible(&s, "tok", &active));
     }
 
     // ── science_target_message ────────────────────────────────────────
@@ -354,6 +533,98 @@ mod tests {
     #[test]
     fn science_target_message_produces_set_science_target() {
         let msg = science_target_message("entity-42".into());
-        assert_eq!(msg, ClientMessage::SetScienceTarget { uuid: "entity-42".into() });
+        assert_eq!(
+            msg,
+            ClientMessage::SetScienceTarget {
+                uuid: "entity-42".into()
+            }
+        );
+    }
+
+    // ── on_screen button sends ScienceRadar ViewMode ──────────────────
+
+    #[test]
+    fn on_screen_message_variant_is_set_view_science_radar() {
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::ScienceRadar,
+        };
+        assert!(matches!(
+            msg,
+            ClientMessage::SetView {
+                mode: ViewMode::ScienceRadar
+            }
+        ));
+    }
+
+    // ── cancel impulse message variant ───────────────────────────────
+
+    #[test]
+    fn cancel_impulse_message_variant_is_correct() {
+        let msg = ClientMessage::CancelImpulse;
+        assert!(matches!(msg, ClientMessage::CancelImpulse));
+    }
+
+    // ── Science radar filter includes ships and asteroids ─────────────
+
+    #[test]
+    fn science_radar_filter_includes_ships() {
+        use crate::gui::is_on_radar;
+        let filter = RadarFilter(std::collections::HashSet::from([
+            RadarLayer::Ship,
+            RadarLayer::Asteroid,
+        ]));
+        assert!(is_on_radar(&filter, RadarLayer::Ship));
+    }
+
+    #[test]
+    fn science_radar_filter_includes_asteroids() {
+        use crate::gui::is_on_radar;
+        let filter = RadarFilter(std::collections::HashSet::from([
+            RadarLayer::Ship,
+            RadarLayer::Asteroid,
+        ]));
+        assert!(is_on_radar(&filter, RadarLayer::Asteroid));
+    }
+
+    #[test]
+    fn science_radar_filter_excludes_missiles() {
+        use crate::gui::is_on_radar;
+        let filter = RadarFilter(std::collections::HashSet::from([
+            RadarLayer::Ship,
+            RadarLayer::Asteroid,
+        ]));
+        assert!(!is_on_radar(&filter, RadarLayer::Missile));
+    }
+
+    // ── StateVisuals: five widget states render distinctly ────────────
+
+    #[test]
+    fn on_screen_visuals_has_distinct_five_states() {
+        use crate::gui::resolve_visual;
+        let v = on_screen_visuals();
+        let idle = resolve_visual(&v, false, false, false, false).color;
+        let hover = resolve_visual(&v, false, false, false, true).color;
+        let active = resolve_visual(&v, false, false, true, false).color;
+        let press = resolve_visual(&v, false, true, false, false).color;
+        let disabled = resolve_visual(&v, true, false, false, false).color;
+        assert_ne!(idle, hover);
+        assert_ne!(idle, active);
+        assert_ne!(idle, press);
+        assert_ne!(idle, disabled);
+    }
+
+    #[test]
+    fn cancel_impulse_visuals_has_distinct_five_states() {
+        use crate::gui::resolve_visual;
+        let v = cancel_impulse_visuals();
+        let idle = resolve_visual(&v, false, false, false, false).color;
+        let hover = resolve_visual(&v, false, false, false, true).color;
+        let active = resolve_visual(&v, false, false, true, false).color;
+        let press = resolve_visual(&v, false, true, false, false).color;
+        let disabled = resolve_visual(&v, true, false, false, false).color;
+        assert_ne!(idle, hover);
+        assert_ne!(idle, active);
+        assert_ne!(idle, press);
+        assert_ne!(idle, disabled);
     }
 }

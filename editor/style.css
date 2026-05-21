@@ -1209,3 +1209,19 @@ form {
   color: #666;
   font-style: italic;
 }
+
+/* -- Slice 4a: trigger + action-card editor ------------------------ */
+.action-card { background:#1e1f24; border:1px solid #2c2f36; border-radius:4px; padding:8px; margin-bottom:8px; }
+.action-card-header { display:flex; justify-content:space-between; align-items:center; }
+.action-card-title { font-weight:bold; }
+.action-card-controls { display:flex; gap:4px; }
+.action-card-body { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+.action-field { display:flex; align-items:center; gap:6px; }
+.action-field label { min-width:80px; color:#aaa; font-size:12px; }
+.action-field input, .action-field select, .action-field textarea { flex:1; }
+.action-field-warning { color:#f55; font-size:12px; }
+.action-field-hint { color:#888; font-style:italic; font-size:12px; }
+.btn-icon { background:none; border:none; color:#aaa; cursor:pointer; font-size:14px; padding:2px 4px; }
+.btn-icon:hover { color:#fff; }
+.action-add-row { display:flex; gap:6px; margin-top:8px; }
+.trigger-panel h4 { color:#aaa; font-size:11px; text-transform:uppercase; margin:12px 0 6px 0; }

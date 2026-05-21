@@ -146,4 +146,66 @@ describe('CrossReferenceIndex', () => {
     expect(names[0].name).toBe('beta');
     expect(names[0].layerPath).toBe('second.toml');
   });
+
+  describe('hasEntity / allReferences (composition surface)', () => {
+    it('hasEntity returns true for declared entities and false for others', () => {
+      const idx = new CrossReferenceIndex();
+      idx.indexLayers([
+        { path: 'w.toml', worldState: { entity: [{ name: 'alpha' }, { name: 'beta' }] } },
+      ]);
+      expect(idx.hasEntity('alpha')).toBe(true);
+      expect(idx.hasEntity('beta')).toBe(true);
+      expect(idx.hasEntity('phantom')).toBe(false);
+    });
+
+    it('allReferences yields every recorded site with targetName + context', () => {
+      const idx = new CrossReferenceIndex();
+      idx.indexLayers([
+        {
+          path: 'w.toml',
+          worldState: {
+            entity: [{ name: 'alpha' }],
+            trigger: [{
+              condition: 'on_destroyed',
+              entity: 'alpha',
+              action: [{ type: 'set_ai_state', entity: 'phantom', state: 'patrol' }],
+            }],
+          },
+        },
+      ]);
+      const refs = Array.from(idx.allReferences());
+      const names = refs.map(r => r.targetName).sort();
+      expect(names).toContain('alpha');
+      expect(names).toContain('phantom');
+      // Every yielded object must carry the context string the index recorded.
+      for (const ref of refs) {
+        expect(typeof ref.context).toBe('string');
+        expect(ref.context.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('allReferences records trigger.action `entity` (not just target_entity)', () => {
+      const idx = new CrossReferenceIndex();
+      idx.indexLayers([
+        {
+          path: 'w.toml',
+          worldState: {
+            entity: [{ name: 'real' }],
+            trigger: [{
+              condition: 'on_attacked',
+              entity: 'real',
+              action: [
+                { type: 'apply_modifier', entity: 'mod_target', tag: 't', slot: 'MaxSpeed', bonus: 0.5 },
+                { type: 'set_ai_state', target_entity: 'tgt_target', state: 'flee' },
+              ],
+            }],
+          },
+        },
+      ]);
+      const refs = Array.from(idx.allReferences());
+      const names = refs.map(r => r.targetName);
+      expect(names).toContain('mod_target');
+      expect(names).toContain('tgt_target');
+    });
+  });
 });

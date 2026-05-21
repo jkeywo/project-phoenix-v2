@@ -54,6 +54,12 @@ export class CrossReferenceIndex {
             this._addRef(action.target_entity, path, 'action',
               `trigger.action target_entity`);
           }
+          // Some action schemas use `entity` instead of `target_entity`
+          // (e.g. set_ai_state, apply_modifier).  See action-schema.js.
+          if (action.entity) {
+            this._addRef(action.entity, path, 'action',
+              `trigger.action entity`);
+          }
           if (action.type === 'add_objective' && action.id) {
             if (!this._objectiveIds.has(action.id)) {
               this._objectiveIds.set(action.id, path);
@@ -81,6 +87,10 @@ export class CrossReferenceIndex {
               this._addRef(action.target_entity, path, 'action',
                 `comms.response.action target_entity`);
             }
+            if (action.entity) {
+              this._addRef(action.entity, path, 'action',
+                `comms.response.action entity`);
+            }
             if (action.type === 'add_objective' && action.id) {
               if (!this._objectiveIds.has(action.id)) {
                 this._objectiveIds.set(action.id, path);
@@ -101,6 +111,28 @@ export class CrossReferenceIndex {
 
   findReferences(targetName) {
     return this._references.get(targetName) || [];
+  }
+
+  /**
+   * Iterate every recorded reference as
+   *   { targetName, layerPath, type, context }
+   * objects.  Used by `world-references.js` to surface
+   * references whose `targetName` isn't a known entity.
+   */
+  *allReferences() {
+    for (const [targetName, refs] of this._references) {
+      for (const ref of refs) {
+        yield { targetName, ...ref };
+      }
+    }
+  }
+
+  /**
+   * True if `name` was recorded as a `[[entity]] name = "..."` during
+   * the last `indexLayers` call.
+   */
+  hasEntity(name) {
+    return this._entityNames.has(name);
   }
 
   getAllEntityNames() {

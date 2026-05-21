@@ -295,6 +295,10 @@ fn sync_radar_blip_nodes(
             ) else {
                 continue;
             };
+            // Circular clip: skip blips whose centre lies outside the radar circle.
+            if nx * nx + ny * ny > 1.0 {
+                continue;
+            }
             let size_px = world_size_to_px(appearance.world_size, widget.range, radar_radius_px);
             let half = size_px * 0.5;
             let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
@@ -341,7 +345,7 @@ fn sync_radar_blip_nodes(
                         parent.spawn((
                             node,
                             ImageNode::new(h).with_color(color),
-                            ZIndex(10),
+                            ZIndex(0),
                             RadarBlipNode { source },
                         ));
                     } else {
@@ -349,7 +353,7 @@ fn sync_radar_blip_nodes(
                         parent.spawn((
                             node,
                             ImageNode::solid_color(color),
-                            ZIndex(10),
+                            ZIndex(0),
                             RadarBlipNode { source },
                         ));
                     }

@@ -258,10 +258,16 @@ fn bridge_client_sim_to_radar_entities(
                 OnRadar(RadarLayer::Ship),
                 ship_appearance,
                 Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
+                GlobalTransform::from(Transform::from_xyz(
+                    ship_view.ship_x,
+                    0.0,
+                    ship_view.ship_z,
+                )),
             ));
             e
         }
         None => {
+            let t = Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z);
             let e = commands
                 .spawn((
                     RadarCenter {
@@ -271,8 +277,8 @@ fn bridge_client_sim_to_radar_entities(
                     },
                     OnRadar(RadarLayer::Ship),
                     ship_appearance,
-                    Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
-                    GlobalTransform::default(),
+                    t,
+                    GlobalTransform::from(t),
                 ))
                 .id();
             radar.center = Some(e);
@@ -333,18 +339,21 @@ fn bridge_client_sim_to_radar_entities(
         };
 
         if let Some(existing) = radar.blips.get(uuid) {
+            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z());
             commands.entity(*existing).insert((
                 OnRadar(layer),
                 appearance,
-                Transform::from_xyz(snapshot.x(), 0.0, snapshot.z()),
+                t,
+                GlobalTransform::from(t),
             ));
         } else {
+            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z());
             let blip = commands
                 .spawn((
                     OnRadar(layer),
                     appearance,
-                    Transform::from_xyz(snapshot.x(), 0.0, snapshot.z()),
-                    GlobalTransform::default(),
+                    t,
+                    GlobalTransform::from(t),
                 ))
                 .id();
             radar.blips.insert(uuid.clone(), blip);

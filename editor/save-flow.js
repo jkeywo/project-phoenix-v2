@@ -17,6 +17,24 @@ export class SaveFlow {
     this._writeFile = writeFile || (async () => {});
     this._invalidationBus = invalidationBus || null;
     this._contentCache = {};
+    /**
+     * Optional predicate keyed by `${mode}:${path}` returning true if the
+     * file should be EXCLUDED from getDirtyFiles (and therefore from
+     * Save All). Wired by Slice 4b for session-only triggerable-world
+     * layers — see `LayerManager.addInMemoryLayer({ sessionOnly: true })`.
+     * Set via `setSessionOnlyChecker`.
+     */
+    this._isSessionOnly = null;
+  }
+
+  /**
+   * Register a predicate `(mode, path) => boolean` that returns true for
+   * files which should be excluded from getDirtyFiles. Used so the
+   * Triggerable-Worlds panel can layer session-only worlds without
+   * Save All trying to write them back (they have no FSA handle).
+   */
+  setSessionOnlyChecker(fn) {
+    this._isSessionOnly = typeof fn === 'function' ? fn : null;
   }
 
   setContent(mode, filePath, parsedContent) {
@@ -108,6 +126,7 @@ export class SaveFlow {
       const files = this._modeShell.getOpenFiles(mode);
       if (!files) continue;
       for (const file of files) {
+        if (this._isSessionOnly && this._isSessionOnly(mode, file)) continue;
         if (this._modeShell.isDirty(mode, file)) {
           result.push({ mode, path: file });
         }

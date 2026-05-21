@@ -28,12 +28,12 @@ import {
   INT_MODIFIER_SLOTS,
 } from './action-schema.js';
 import {
-  getEntityNameOptions,
   getObjectiveIdOptions,
   getAiStateOptions,
   getModifierSlotOptions,
   getFlagKindOptions,
 } from './trigger-pickers.js';
+import { renderEntitySelect } from './entity-select-view.js';
 
 /**
  * Render an action card into `host`.
@@ -113,8 +113,12 @@ function renderField(action, field, deps) {
 
   // Entity-name picker.
   if (field.key === 'entity') {
-    const opts = getEntityNameOptions(deps.allLayers || []);
-    row.appendChild(renderEntityNameSelect(action, field, value, opts, deps));
+    renderEntitySelect(
+      row,
+      value,
+      deps.allLayers || [],
+      (newValue) => deps.onChange?.({ ...action, [field.key]: newValue }),
+    );
     return row;
   }
 
@@ -177,54 +181,6 @@ function renderField(action, field, deps) {
 }
 
 // ── Individual input renderers ──────────────────────────────────────────
-
-function renderEntityNameSelect(action, field, value, opts, deps) {
-  const wrap = document.createElement('span');
-  wrap.style.display = 'flex';
-  wrap.style.gap = '6px';
-  wrap.style.flex = '1';
-
-  const select = document.createElement('select');
-
-  // Placeholder for empty.
-  const empty = document.createElement('option');
-  empty.value = '';
-  empty.textContent = '(none)';
-  select.appendChild(empty);
-
-  const knownValues = new Set();
-  for (const o of opts) {
-    if (knownValues.has(o.value)) continue;
-    knownValues.add(o.value);
-    const opt = document.createElement('option');
-    opt.value = o.value;
-    opt.textContent = o.label;
-    select.appendChild(opt);
-  }
-
-  const isUnknown = value && !knownValues.has(value);
-  if (isUnknown) {
-    const opt = document.createElement('option');
-    opt.value = value;
-    opt.textContent = `${value} ⚠ unknown`;
-    select.appendChild(opt);
-  }
-
-  select.value = value ?? '';
-
-  select.addEventListener('change', (e) => {
-    deps.onChange?.({ ...action, [field.key]: e.target.value });
-  });
-  wrap.appendChild(select);
-
-  if (isUnknown) {
-    const warn = document.createElement('span');
-    warn.className = 'action-field-warning';
-    warn.textContent = '⚠ unknown';
-    wrap.appendChild(warn);
-  }
-  return wrap;
-}
 
 function renderAiStateSelect(action, field, value, deps) {
   const wrap = document.createElement('span');

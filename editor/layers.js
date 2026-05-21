@@ -44,6 +44,39 @@ export class LayerManager {
     }
   }
 
+  /**
+   * Add a layer whose TOML has already been parsed in-memory (e.g. a
+   * session-only "triggerable world" loaded via the side panel, with no
+   * dedicated `FileSystemFileHandle`). The layer is appended and becomes
+   * the active layer, matching `addLayer` behaviour.
+   *
+   * @param {string} filename — root-relative path used as the layer's id.
+   * @param {object} parsedToml — already-parsed TOML object.
+   * @param {object} [opts]
+   * @param {boolean} [opts.sessionOnly=false] — when true, marks the
+   *   layer with `_sessionOnly: true` so `SaveFlow.getDirtyFiles()` skips
+   *   it (the session loader has no write surface for these).
+   * @returns {object} the new layer
+   */
+  addInMemoryLayer(filename, parsedToml, opts = {}) {
+    const sessionOnly = !!opts.sessionOnly;
+    const layer = {
+      fileHandle: null,
+      filename,
+      toml: parsedToml,
+      kind: inferLayerKind(parsedToml),
+      visible: true,
+      active: false,
+      konvaLayer: null,
+      originalText: null,
+      isDirty: false,
+      _sessionOnly: sessionOnly,
+    };
+    this.layers.push(layer);
+    this.activeLayer = layer;
+    return layer;
+  }
+
   removeLayer(layer) {
     const idx = this.layers.indexOf(layer);
     if (idx !== -1) {

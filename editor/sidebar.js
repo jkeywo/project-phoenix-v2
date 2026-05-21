@@ -3,6 +3,7 @@ import { getSpawnsFromAllLayers } from './toml-utils.js';
 import { snapshotForUndo } from './undo-controller.js';
 import { renderOverridePanel } from './override-view.js';
 import { renderTriggerPanel } from './trigger-view.js';
+import { renderCommsPanel } from './comms-view.js';
 
 export class PropertiesPanel {
   constructor(canvasManager, layerManager) {
@@ -44,7 +45,12 @@ export class PropertiesPanel {
     if (selection.type === 'comms') {
       this.currentSpawn = null;
       this.currentLayer = selection.layer ?? null;
-      this.container.innerHTML = '<p class="placeholder">Comms editor coming in Slice 4b</p>';
+      this.container.innerHTML = '';
+      renderCommsPanel(this.container, selection, {
+        allLayers: this.canvasManager.buildV2Layers(),
+        canvasManager: this.canvasManager,
+        layerManager: this.layerManager,
+      });
       return;
     }
 

@@ -21,6 +21,7 @@
 import { ACTION_SCHEMA } from './action-schema.js';
 import { renderActionCard } from './action-card-view.js';
 import { snapshotForUndo } from './undo-controller.js';
+import { renderEntitySelect } from './entity-select-view.js';
 
 const TRIGGER_CONDITIONS = ['on_destroyed', 'on_attacked', 'on_timer', 'on_hailed'];
 
@@ -173,53 +174,17 @@ function makeEntityRow(trigger, layer, deps, rerender) {
   label.textContent = 'Entity:';
   group.appendChild(label);
 
-  const select = document.createElement('select');
-  select.id = 'trigEntity';
-
-  const empty = document.createElement('option');
-  empty.value = '';
-  empty.textContent = '(none)';
-  select.appendChild(empty);
-
-  // Gather every named entity from every open layer.
-  const seen = new Set();
-  for (const l of (deps.allLayers || [])) {
-    const ws = l.worldState;
-    if (!ws || !Array.isArray(ws.entity)) continue;
-    for (const ent of ws.entity) {
-      if (!ent.name || seen.has(ent.name)) continue;
-      seen.add(ent.name);
-      const opt = document.createElement('option');
-      opt.value = ent.name;
-      opt.textContent = ent.name;
-      select.appendChild(opt);
-    }
-  }
-
-  let unknown = false;
-  if (trigger.entity && !seen.has(trigger.entity)) {
-    unknown = true;
-    const opt = document.createElement('option');
-    opt.value = trigger.entity;
-    opt.textContent = `${trigger.entity} ⚠ unknown`;
-    select.appendChild(opt);
-  }
-  select.value = trigger.entity ?? '';
-
-  select.addEventListener('change', (e) => {
-    snapshotForUndo(layer);
-    trigger.entity = e.target.value;
-    layer.isDirty = true;
-    rerender();
-  });
-  group.appendChild(select);
-
-  if (unknown) {
-    const warn = document.createElement('span');
-    warn.className = 'action-field-warning';
-    warn.textContent = '⚠ unknown';
-    group.appendChild(warn);
-  }
+  renderEntitySelect(
+    group,
+    trigger.entity ?? '',
+    deps.allLayers || [],
+    (newValue) => {
+      snapshotForUndo(layer);
+      trigger.entity = newValue;
+      layer.isDirty = true;
+      rerender();
+    },
+  );
   return group;
 }
 

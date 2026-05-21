@@ -280,10 +280,12 @@ pub struct ConsoleShellPlugin;
 
 impl Plugin for ConsoleShellPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (rebuild_embedded_tab_bars, handle_embedded_tab_press),
-        );
+        // handle_embedded_tab_press stays in Update (only mutates ActiveConsole, no entity commands).
+        app.add_systems(Update, handle_embedded_tab_press)
+            // rebuild_embedded_tab_bars runs in PostUpdate so all recursive despawns from
+            // respawn_*_on_orientation_change (which remove EmbeddedTabBar as a descendant of
+            // the panel root) are fully applied before this system queries the world.
+            .add_systems(PostUpdate, rebuild_embedded_tab_bars);
     }
 }
 

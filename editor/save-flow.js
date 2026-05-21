@@ -48,6 +48,12 @@ export class SaveFlow {
     if (mode === 'Scenario') {
       return this._stringifyFunctions.world;
     }
+    if (mode === 'Definitions') {
+      // Backward-compat: tests / older callers that don't supply a
+      // `definitions` stringifier fall through to `entity`. This keeps
+      // pre-Slice-6 fixtures working unchanged.
+      return this._stringifyFunctions.definitions || this._stringifyFunctions.entity;
+    }
     return this._stringifyFunctions.entity;
   }
 
@@ -113,6 +119,13 @@ export class SaveFlow {
         this._invalidationBus.fireEntitySaved(path);
       } else if (mode === 'Scenario' && typeof this._invalidationBus.fireWorldSaved === 'function') {
         this._invalidationBus.fireWorldSaved(path);
+      } else if (
+        mode === 'Definitions' &&
+        typeof path === 'string' &&
+        path.startsWith('assets/factions/') &&
+        typeof this._invalidationBus.fireFactionSaved === 'function'
+      ) {
+        this._invalidationBus.fireFactionSaved(path);
       }
     }
 

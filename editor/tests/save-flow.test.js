@@ -341,4 +341,106 @@ describe('SaveFlow', () => {
       expect(fired).toEqual(['assets/entities/a.toml']);
     });
   });
+
+  describe('Definitions mode', () => {
+    it('dispatches to the `definitions` stringifier when provided', async () => {
+      const modeShell = new ModeShell();
+      modeShell.switchMode('Definitions');
+      modeShell.setOpenFiles('Definitions', ['assets/factions/federation.toml']);
+      modeShell.setActiveFile('Definitions', 'assets/factions/federation.toml');
+      modeShell.markDirty('Definitions', 'assets/factions/federation.toml', true);
+
+      const writeFile = vi.fn(async () => {});
+      const defStringify = vi.fn(() => 'DEFINITIONS_CONTENT');
+      const stringifyFns = {
+        world: () => 'W',
+        entity: () => 'E',
+        definitions: defStringify,
+      };
+
+      const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
+      saveFlow.setContent('Definitions', 'assets/factions/federation.toml', {
+        kind: 'faction',
+        data: { uuid: 'x', name: 'X', enemies: [] },
+      });
+
+      const result = await saveFlow.saveActive(null);
+      expect(result.ok).toBe(true);
+      expect(defStringify).toHaveBeenCalledTimes(1);
+      expect(defStringify.mock.calls[0][0]).toEqual({
+        kind: 'faction',
+        data: { uuid: 'x', name: 'X', enemies: [] },
+      });
+      expect(writeFile).toHaveBeenCalledWith('assets/factions/federation.toml', 'DEFINITIONS_CONTENT');
+    });
+
+    it('fires fireFactionSaved when saving a faction path in Definitions mode', async () => {
+      const modeShell = new ModeShell();
+      modeShell.switchMode('Definitions');
+      modeShell.setOpenFiles('Definitions', ['assets/factions/pirate.toml']);
+      modeShell.setActiveFile('Definitions', 'assets/factions/pirate.toml');
+      modeShell.markDirty('Definitions', 'assets/factions/pirate.toml', true);
+
+      const bus = new InvalidationBus();
+      const fired = [];
+      bus.onFactionSaved((p) => fired.push(p));
+
+      const stringifyFns = {
+        world: () => '',
+        entity: () => '',
+        definitions: () => 'X',
+      };
+      const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, bus);
+      saveFlow.setContent('Definitions', 'assets/factions/pirate.toml', {
+        kind: 'faction',
+        data: {},
+      });
+
+      await saveFlow.saveActive(null);
+      expect(fired).toEqual(['assets/factions/pirate.toml']);
+    });
+
+    it('does NOT fire fireFactionSaved for complexity paths in Definitions mode', async () => {
+      const modeShell = new ModeShell();
+      modeShell.switchMode('Definitions');
+      modeShell.setOpenFiles('Definitions', ['assets/complexity/tactical.toml']);
+      modeShell.setActiveFile('Definitions', 'assets/complexity/tactical.toml');
+      modeShell.markDirty('Definitions', 'assets/complexity/tactical.toml', true);
+
+      const bus = new InvalidationBus();
+      const fired = [];
+      bus.onFactionSaved((p) => fired.push(p));
+
+      const stringifyFns = {
+        world: () => '',
+        entity: () => '',
+        definitions: () => 'X',
+      };
+      const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, bus);
+      saveFlow.setContent('Definitions', 'assets/complexity/tactical.toml', {
+        kind: 'complexity',
+        data: [],
+      });
+
+      await saveFlow.saveActive(null);
+      expect(fired).toEqual([]);
+    });
+
+    it('backward-compat: falls back to `entity` stringifier when `definitions` is missing', async () => {
+      const modeShell = new ModeShell();
+      modeShell.switchMode('Definitions');
+      modeShell.setOpenFiles('Definitions', ['assets/factions/federation.toml']);
+      modeShell.setActiveFile('Definitions', 'assets/factions/federation.toml');
+      modeShell.markDirty('Definitions', 'assets/factions/federation.toml', true);
+
+      const entityStringify = vi.fn(() => 'FALLBACK');
+      const stringifyFns = { world: () => '', entity: entityStringify };
+      const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
+      saveFlow.setContent('Definitions', 'assets/factions/federation.toml', { foo: 'bar' });
+
+      const result = await saveFlow.saveActive(null);
+      expect(result.ok).toBe(true);
+      expect(entityStringify).toHaveBeenCalledTimes(1);
+    });
+  });
 });

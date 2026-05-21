@@ -2,16 +2,36 @@ import { isSupported, pickProjectRoot, getProjectRoot, readFile, writeFile } fro
 import { ModeShell } from './mode-shell.js';
 import { stringifyWorldToml } from './world-toml.js';
 import { stringifyEntityToml } from './entity-toml.js';
+import { stringifyFactionToml } from './faction-editor.js';
+import { stringifyComplexityToml } from './complexity-editor.js';
 import { InvalidationBus } from './invalidation-bus.js';
 import { SaveFlow } from './save-flow.js';
 
 const $ = (id) => document.getElementById(id);
 
+/**
+ * Definitions Mode wraps content as { kind: 'faction'|'complexity', data }.
+ * This stringifier routes to the per-kind serializer.
+ */
+function stringifyDefinitionsPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Definitions payload must be { kind, data }');
+  }
+  const { kind, data } = payload;
+  if (kind === 'faction') return stringifyFactionToml(data);
+  if (kind === 'complexity') return stringifyComplexityToml(data);
+  throw new Error(`Unknown definitions kind: ${kind}`);
+}
+
 const modeShell = new ModeShell();
 const invalidationBus = new InvalidationBus();
 const saveFlow = new SaveFlow(
   modeShell,
-  { world: stringifyWorldToml, entity: stringifyEntityToml },
+  {
+    world: stringifyWorldToml,
+    entity: stringifyEntityToml,
+    definitions: stringifyDefinitionsPayload,
+  },
   writeFile,
   invalidationBus,
 );

@@ -79,4 +79,24 @@ describe('InvalidationBus', () => {
       expect(() => bus.fireWorldSaved('anything.toml')).not.toThrow();
     });
   });
+
+  describe('fireFactionSaved', () => {
+    it('triggers registered callbacks with correct path', () => {
+      const bus = new InvalidationBus();
+      const calls = [];
+      bus.onFactionSaved((path) => calls.push(path));
+      bus.fireFactionSaved('assets/factions/federation.toml');
+      expect(calls).toEqual(['assets/factions/federation.toml']);
+    });
+
+    it('onFactionSaved returns unsubscribe handle that stops events', () => {
+      const bus = new InvalidationBus();
+      const calls = [];
+      const { unsubscribe } = bus.onFactionSaved((p) => calls.push(p));
+      bus.fireFactionSaved('a.toml');
+      unsubscribe();
+      bus.fireFactionSaved('b.toml');
+      expect(calls).toEqual(['a.toml']);
+    });
+  });
 });

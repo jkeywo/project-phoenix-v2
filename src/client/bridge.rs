@@ -103,6 +103,7 @@ impl Default for ClientRendererPlugin {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_client_init() {
+    console_error_panic_hook::set_once();
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(bevy::window::WindowPlugin {
         primary_window: Some(bevy::window::Window {

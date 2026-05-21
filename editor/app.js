@@ -6,6 +6,7 @@ import { getEntityPath } from './toml-utils.js';
 import { preloadEntityCache, loadEntityConfig } from './entity-cache.js';
 import { restoreScenarioLayer } from './undo-controller.js';
 import { CrossReferenceIndex } from './cross-references.js';
+import { renderWorldContentPanel } from './world-content-view.js';
 
 const layerManager = new LayerManager();
 const crossRefIndex = new CrossReferenceIndex();
@@ -112,6 +113,18 @@ function renderAll() {
 
   renderLayersPanel(layerManager, renderAll, onSpawnSelectFromTree);
   canvasManager.renderAll();
+
+  const activeLayer = layerManager.getActiveLayer();
+  renderWorldContentPanel({
+    worldState: activeLayer?.toml ?? null,
+    crossRefIndex,
+    activeLayerPath: activeLayer?.filename ?? null,
+    onSelectEntity: (name) => {
+      // C3 will wire this to CanvasManager.selectByEntityName.
+      // For now the click is a no-op so the tree renders cleanly.
+    },
+  });
+
   updateUnsavedIndicator();
 
   // Mirror the V1 active layer into ModeShell so V2 features (save,

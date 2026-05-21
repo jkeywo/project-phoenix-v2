@@ -5,6 +5,7 @@ import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALL
 import { getRegionRenderSpec } from './canvas-region.js';
 import { getAnchorRenderSpecs } from './canvas-anchor.js';
 import { analyzeAnchorRename } from './anchor-rename.js';
+import { canDeleteAnchor } from './anchor-delete.js';
 import { snapshotForUndo } from './undo-controller.js';
 
 export class CanvasManager {
@@ -338,8 +339,23 @@ export class CanvasManager {
     }
   }
 
-  deleteAnchor(_anchorName, _ownerLayer) {
-    // Wired in C6.
+  deleteAnchor(anchorName, ownerLayer) {
+    const v2Layers = this.buildV2Layers();
+    const result = canDeleteAnchor(anchorName, v2Layers, ownerLayer?.filename);
+    if (!result.canDelete) {
+      const list = result.blockers
+        .map(b => `- ${b.type} "${b.entityName ?? '(unnamed)'}" in ${b.layerPath}`)
+        .join('\n');
+      window.alert(`Cannot delete anchor "${anchorName}". It is referenced by:\n${list}`);
+      return;
+    }
+    if (!window.confirm(`Delete anchor "${anchorName}"?`)) return;
+
+    if (!ownerLayer || !ownerLayer.toml || !ownerLayer.toml.anchors) return;
+    snapshotForUndo(ownerLayer);
+    delete ownerLayer.toml.anchors[anchorName];
+    ownerLayer.isDirty = true;
+    this.renderAll();
   }
 
   renderSpawn(spawn, layer, container, allAnchors) {

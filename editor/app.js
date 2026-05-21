@@ -9,6 +9,7 @@ import { CrossReferenceIndex } from './cross-references.js';
 import { renderWorldContentPanel } from './world-content-view.js';
 import { renderTriggerableWorldsPanel } from './triggerable-worlds-panel.js';
 import { mountNewWorldButton } from './new-world-dialog.js';
+import { mountEntityMode } from './entity-mode-view.js';
 import { readFile, writeFile, listDirectory } from './project-root.js';
 
 const layerManager = new LayerManager();
@@ -39,6 +40,18 @@ async function init() {
 
   await preloadEntityCache();
   entityEditor.loadEntitiesPalette();
+
+  // Slice 5: mount Entity Mode three-pane shell into its placeholder.
+  const entityHost = document.getElementById('entity-mode-root');
+  const v2Boot = window.__editorV2;
+  if (entityHost && v2Boot && v2Boot.modeShell && v2Boot.saveFlow) {
+    mountEntityMode({
+      host: entityHost,
+      modeShell: v2Boot.modeShell,
+      saveFlow: v2Boot.saveFlow,
+      registerRestore: v2Boot.registerRestore,
+    });
+  }
 
   setupToolbar();
   setupLayersPanel();
@@ -287,9 +300,27 @@ function setupToolbar() {
 
   document.getElementById('saveLayerBtn').addEventListener('click', async () => {
     const v2 = window.__editorV2;
+    if (!v2 || !v2.saveFlow) {
+      console.warn('[editor] SaveFlow unavailable.');
+      return;
+    }
+    // Slice 5: Entity Mode owns its own save pipeline via mountEntityMode.
+    // The Save Layer button still triggers a save, but routes through the
+    // active mode rather than blindly grabbing the layer manager.
+    const currentMode = v2.modeShell && typeof v2.modeShell.getCurrentMode === 'function'
+      ? v2.modeShell.getCurrentMode()
+      : 'Scenario';
+    if (currentMode === 'Entity') {
+      const result = await v2.saveFlow.saveActive(null);
+      if (!result.ok) {
+        console.error('Entity save failed:', result.errors);
+      }
+      return;
+    }
+
     const activeLayer = layerManager.getActiveLayer();
-    if (!v2 || !v2.saveFlow || !activeLayer) {
-      console.warn('[editor] No active layer or SaveFlow unavailable.');
+    if (!activeLayer) {
+      console.warn('[editor] No active layer.');
       return;
     }
     // renderAll() already mirrored the parsed payload into saveFlow's cache,

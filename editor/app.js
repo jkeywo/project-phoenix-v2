@@ -7,6 +7,9 @@ import { preloadEntityCache, loadEntityConfig } from './entity-cache.js';
 import { restoreScenarioLayer } from './undo-controller.js';
 import { CrossReferenceIndex } from './cross-references.js';
 import { renderWorldContentPanel } from './world-content-view.js';
+import { renderTriggerableWorldsPanel } from './triggerable-worlds-panel.js';
+import { mountNewWorldButton } from './new-world-dialog.js';
+import { readFile, writeFile, listDirectory } from './project-root.js';
 
 const layerManager = new LayerManager();
 const crossRefIndex = new CrossReferenceIndex();
@@ -40,6 +43,26 @@ async function init() {
   setupToolbar();
   setupLayersPanel();
   registerScenarioUndoRestore();
+
+  // Slice 4b: + New World button next to addLayerBtn.
+  mountNewWorldButton({
+    layerManager,
+    writeFile,
+    tomlParse: window.tomlParse,
+    onCreated: renderAll,
+    getExistingPaths: () => layerManager.getLayers().map((l) => l.filename),
+  });
+
+  // Slice 4b: session-only triggerable layers must skip the save flow.
+  const v2 = window.__editorV2;
+  if (v2 && v2.saveFlow && typeof v2.saveFlow.setSessionOnlyChecker === 'function') {
+    v2.saveFlow.setSessionOnlyChecker((mode, path) => {
+      if (mode !== 'Scenario') return false;
+      const layer = layerManager.getLayers().find((l) => l.filename === path);
+      return !!(layer && layer._sessionOnly);
+    });
+  }
+
   renderAll();
 }
 
@@ -136,6 +159,18 @@ function renderAll() {
   });
 
   updateUnsavedIndicator();
+
+  // Slice 4b: Triggerable Worlds panel (async — fire and forget; the panel
+  // refreshes itself when listDirectory resolves).
+  renderTriggerableWorldsPanel({
+    layerManager,
+    onLayersChanged: renderAll,
+    readFile,
+    listDirectory,
+    tomlParse: window.tomlParse,
+  }).catch((err) => {
+    console.warn('[editor] triggerable-worlds panel render failed:', err?.message || err);
+  });
 
   // Mirror the V1 active layer into ModeShell so V2 features (save,
   // undo shortcuts, invalidation) target the right file.

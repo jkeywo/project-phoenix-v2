@@ -486,6 +486,37 @@ describe('EntityModeShell', () => {
     });
   });
 
+  describe('setSection + restoreParsed', () => {
+    beforeEach(() => {
+      shell.openFile('pirate_raider.toml', readEntity('pirate_raider.toml'));
+    });
+
+    it('setSection updates the active section and rebuilds cards', () => {
+      shell.setSection('hull', { captain_chair: 999.0 });
+      const card = shell.getCard('hull');
+      expect(card.data.captain_chair).toBe(999.0);
+    });
+
+    it('setSection with a brand-new section adds a card', () => {
+      expect(shell.getCard('shape')).toBeNull();
+      shell.setSection('shape', { type: 'sphere', radius: 50.0 });
+      expect(shell.getCard('shape')).not.toBeNull();
+    });
+
+    it('restoreParsed swaps the entire parsed object and rebuilds cards', () => {
+      const replacement = {
+        tags: ['region'],
+        shape: { type: 'sphere', radius: 100 },
+        effects: { comms_jammed: {} },
+      };
+      shell.restoreParsed(replacement);
+      expect(shell.getCard('hull')).toBeNull();
+      expect(shell.getCard('shape')).not.toBeNull();
+      expect(shell.getCard('effects')).not.toBeNull();
+      expect(shell.getParsedEntity()).toBe(replacement);
+    });
+  });
+
   describe('full integration scenario', () => {
     it('opens all shipped entities without error', () => {
       const filenames = listDir('assets/entities').filter((f) => f.endsWith('.toml'));

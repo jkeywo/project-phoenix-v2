@@ -288,6 +288,41 @@ export class EntityModeShell {
     return { ok: true, warnings };
   }
 
+  // ── Mutation: section update + parsed-state restoration ──────────────────
+
+  /**
+   * Replace one section's data in the active entity. The card list is
+   * rebuilt so any newly-present or newly-removed section shows up.
+   * No-ops if no file is open.
+   * @param {string} sectionKey
+   * @param {any} newData
+   */
+  setSection(sectionKey, newData) {
+    if (!this._parsedEntity) return;
+    if (newData === undefined || newData === null) {
+      delete this._parsedEntity[sectionKey];
+    } else {
+      this._parsedEntity[sectionKey] = newData;
+    }
+    this._cards = this._buildCards(this._parsedEntity);
+  }
+
+  /**
+   * Replace the entire parsed entity (used by the undo restore callback).
+   * Card list is rebuilt. No-ops if `parsed` is falsy.
+   * @param {object} parsed
+   */
+  restoreParsed(parsed) {
+    if (!parsed || typeof parsed !== 'object') return;
+    this._parsedEntity = parsed;
+    this._cards = this._buildCards(parsed);
+  }
+
+  /** Internal getter used by the view to read the live parsed object. */
+  getParsedEntity() {
+    return this._parsedEntity;
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
 
   /**

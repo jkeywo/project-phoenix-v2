@@ -1,8 +1,13 @@
-//! Client-side Power Panel plugin.
+//! Client-side Power Panel plugin — migrated to `src/gui/` library widgets.
 //!
 //! Owns all Power console UI: per-console power allocation rows
-//! (Helm/Weapons/Sensors), battery bar, lock state indicator, and overflow
-//! allocation controls (hidden in Low complexity).
+//! (Helm/Weapons/Sensors), battery `ProgressBar` (continuous), power level
+//! `TextReadout` widgets, lock state indicator, and overflow allocation
+//! controls (hidden in Low complexity).
+//!
+//! No per-button marker-component query systems remain.  All button callbacks
+//! are wired via observers at spawn time.  `ProgressValue` drives the battery
+//! bar; `ReadoutValue` drives the power level readouts.
 //!
 //! Extracted from `client/app.rs` as part of the "Client split" series.
 //! Compiled only when the `client` Cargo feature is enabled.
@@ -12,6 +17,10 @@ use bevy::prelude::*;
 use crate::client_app::{OutboundClientMessage, HideableElement};
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
+use crate::gui::{
+    spawn_gui_button, ButtonPressed, ButtonSize, Disabled, ProgressBar, ProgressBarVariant,
+    ProgressValue, ReadoutValue, StateVisuals, TextReadout,
+};
 use crate::messages::{Console, GamePhase};
 use crate::ship_view::ShipView;
 
@@ -45,16 +54,55 @@ pub fn power_panel_visible(
     }
 }
 
-// ── Colour constants ─────────────────────────────────────────────────
+// ── Pure helpers ──────────────────────────────────────────────────────
 
-const POWER_COL_INACTIVE: Color = Color::srgb(0.08, 0.08, 0.12);
-const POWER_COL_LOCKED: Color = Color::srgb(0.06, 0.06, 0.08);
-const POWER_INC_COLOR: Color = Color::srgb(0.10, 0.50, 0.30);
-const POWER_INC_LOCKED: Color = Color::srgb(0.06, 0.06, 0.10);
-const POWER_DEC_COLOR: Color = Color::srgb(0.50, 0.20, 0.10);
-const POWER_DEC_LOCKED: Color = Color::srgb(0.06, 0.06, 0.10);
-const POWER_BATTERY_BG: Color = Color::srgb(0.06, 0.06, 0.15);
-const POWER_BATTERY_FILL: Color = Color::srgb(0.10, 0.60, 0.80);
+/// Build `StateVisuals` for an increment button.
+///
+/// Active (enabled) = green; disabled = dim.
+pub fn inc_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.10, 0.50, 0.30), // idle
+        Color::srgb(0.14, 0.60, 0.35), // hover
+        Color::srgb(0.10, 0.65, 0.35), // active
+        Color::srgb(0.18, 0.70, 0.40), // press
+        Color::srgb(0.06, 0.06, 0.10), // disabled
+    )
+}
+
+/// Build `StateVisuals` for a decrement button.
+///
+/// Active (enabled) = red; disabled = dim.
+pub fn dec_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.50, 0.20, 0.10), // idle
+        Color::srgb(0.60, 0.24, 0.12), // hover
+        Color::srgb(0.65, 0.20, 0.10), // active
+        Color::srgb(0.75, 0.25, 0.12), // press
+        Color::srgb(0.06, 0.06, 0.10), // disabled
+    )
+}
+
+/// Build `StateVisuals` for the battery `ProgressBar`.
+pub fn battery_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.10, 0.60, 0.80), // idle
+        Color::srgb(0.10, 0.60, 0.80), // hover (unused — non-interactive)
+        Color::srgb(0.10, 0.60, 0.80), // active
+        Color::srgb(0.10, 0.60, 0.80), // press  (unused)
+        Color::srgb(0.15, 0.15, 0.25), // disabled (locked)
+    )
+}
+
+/// Build `StateVisuals` for a power level `TextReadout`.
+pub fn level_readout_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.9, 0.9, 1.0), // idle
+        Color::srgb(0.9, 0.9, 1.0), // hover
+        Color::srgb(0.3, 1.0, 0.8), // active (locked state)
+        Color::srgb(0.9, 0.9, 1.0), // press
+        Color::srgb(0.4, 0.4, 0.5), // disabled
+    )
+}
 
 // ── Marker components ────────────────────────────────────────────────
 
@@ -68,26 +116,26 @@ pub struct PowerPanel;
 #[allow(dead_code)]
 struct PowerRow(Console);
 
-/// Marks the label showing current level for a row (inside that row).
+/// Marks the `TextReadout` root for the power level display.
 /// Carries the console it represents for refresh matching.
 #[derive(Component)]
-struct PowerRowLevel(Console);
+struct PowerLevelReadout(Console);
 
-/// Marks the increment button for a power row. Carries the target console.
+/// Marks the increment `GuiButton` entity. Carries the target console.
 #[derive(Component)]
 struct PowerIncButton(Console);
 
-/// Marks the decrement button for a power row. Carries the target console.
+/// Marks the decrement `GuiButton` entity. Carries the target console.
 #[derive(Component)]
 struct PowerDecButton(Console);
 
-/// Marks the battery bar fill node.
+/// Marks the root of the battery `ProgressBar`.
 #[derive(Component)]
 struct BatteryBar;
 
-/// Marks the battery percentage text label.
+/// Marks the battery percentage `TextReadout`.
 #[derive(Component)]
-struct BatteryLabel;
+struct BatteryReadout;
 
 // ── Plugin ───────────────────────────────────────────────────────────
 
@@ -101,8 +149,6 @@ impl Plugin for PowerPanelPlugin {
             .add_systems(Update, (
                 toggle_power_panel_visibility,
                 refresh_power_panel,
-                handle_increase_power,
-                handle_decrease_power,
             ));
     }
 }
@@ -110,7 +156,8 @@ impl Plugin for PowerPanelPlugin {
 // ── Setup ────────────────────────────────────────────────────────────
 
 fn setup_power_ui(mut commands: Commands) {
-    commands
+    // ── Root panel ────────────────────────────────────────────────────
+    let panel = commands
         .spawn((
             PowerPanel,
             Node {
@@ -128,157 +175,201 @@ fn setup_power_ui(mut commands: Commands) {
             },
             Visibility::Hidden,
         ))
-        .with_children(|panel| {
-            // Title row with help button
-            panel.spawn(Node {
+        .id();
+
+    // ── Title row ─────────────────────────────────────────────────────
+    let title_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
+        .id();
+    commands.entity(title_row).with_children(|tr| {
+        tr.spawn((
+            Text::new("Power Console"),
+            TextFont { font_size: 24.0, ..default() },
+            TextColor(Color::srgb(0.3, 1.0, 0.8)),
+        ));
+        crate::client_elements::spawn_help_button(tr, crate::client_elements::HelpPanel::Power, 16.0);
+    });
+    commands.entity(panel).add_child(title_row);
+
+    // ── Three power rows: Helm, Weapons, Sensors ──────────────────────
+    for (console, label) in [
+        (Console::Helm, "Helm"),
+        (Console::Tactical, "Weapons"),
+        (Console::Sensors, "Sensors"),
+    ] {
+        let row = spawn_power_row(&mut commands, console, label);
+        commands.entity(panel).add_child(row);
+    }
+
+    // ── Overflow allocation controls ──────────────────────────────────
+    let overflow_row = commands
+        .spawn((
+            HideableElement("power_overflow_controls".into()),
+            Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                padding: UiRect::axes(Val::Px(16.0), Val::Px(4.0)),
+                ..default()
+            },
+        ))
+        .id();
+    commands.entity(overflow_row).with_children(|r| {
+        r.spawn((
+            Text::new("Overflow (pts 7-8): Manual"),
+            TextFont { font_size: 13.0, ..default() },
+            TextColor(Color::srgb(0.6, 0.7, 0.5)),
+        ));
+    });
+    commands.entity(panel).add_child(overflow_row);
+
+    // ── Battery section ───────────────────────────────────────────────
+    let battery_section = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(4.0),
+            width: Val::Percent(80.0),
+            max_width: Val::Px(300.0),
+            ..default()
+        })
+        .id();
+
+    // Battery progress bar (continuous)
+    let bar = ProgressBar::spawn(
+        &mut commands,
+        Vec2::new(280.0, 16.0),
+        ProgressBarVariant::Continuous,
+        battery_visuals(),
+        None,
+    );
+    commands.entity(bar).insert(BatteryBar);
+    commands.entity(battery_section).add_child(bar);
+
+    // Battery percentage text readout
+    let battery_dim = Color::srgb(0.5, 0.8, 1.0);
+    let bat_readout_visuals = StateVisuals::from_colors(
+        battery_dim, battery_dim, battery_dim, battery_dim,
+        Color::srgb(0.3, 0.3, 0.4),
+    );
+    let bat_readout = TextReadout::spawn(&mut commands, "Battery", bat_readout_visuals);
+    commands.entity(bat_readout).insert(BatteryReadout);
+    commands.entity(battery_section).add_child(bat_readout);
+
+    commands.entity(panel).add_child(battery_section);
+
+    // ── Help overlay ──────────────────────────────────────────────────
+    crate::client_elements::spawn_help_overlay_root(&mut commands, crate::client_elements::HelpPanel::Power);
+}
+
+/// Spawn one power allocation row (console label | dec button | level readout | inc button).
+///
+/// Returns the row root entity.
+fn spawn_power_row(commands: &mut Commands, console: Console, label: &str) -> Entity {
+    let row = commands
+        .spawn((
+            PowerRow(console.clone()),
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
+        ))
+        .id();
+
+    // Console name label
+    let name_label = commands
+        .spawn((
+            Text::new(label),
+            TextFont { font_size: 16.0, ..default() },
+            TextColor(Color::srgb(0.7, 0.9, 1.0)),
+            Node { width: Val::Px(80.0), ..default() },
+        ))
+        .id();
+    commands.entity(row).add_child(name_label);
+
+    // Decrement GuiButton
+    let dec_console = console.clone();
+    let dec_btn = spawn_gui_button(
+        commands,
+        ButtonSize::Square(36.0),
+        dec_visuals(),
+        None,
+    );
+    commands.entity(dec_btn)
+        .insert((PowerDecButton(dec_console.clone()), Disabled))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("-"),
+                TextFont { font_size: 22.0, ..default() },
+                TextColor(Color::srgb(0.9, 0.9, 1.0)),
+            ));
+        })
+        .observe(move |_trigger: On<ButtonPressed>,
+                       sim: Res<ClientSimState>,
+                       ship_view: Res<ShipView>,
+                       mut outbound: MessageWriter<OutboundClientMessage>| {
+            let locked = crate::client_sim::is_power_locked(&sim.power_state_payload);
+            if crate::client_sim::can_decrease_power(&ship_view.power_levels, &dec_console, locked) {
+                outbound.write(OutboundClientMessage(
+                    crate::client_sim::decrease_power_message(dec_console.clone()),
+                ));
+            }
+        });
+    commands.entity(row).add_child(dec_btn);
+
+    // Power level TextReadout
+    let level_readout = TextReadout::spawn(commands, "", level_readout_visuals());
+    commands.entity(level_readout)
+        .insert((
+            PowerLevelReadout(console.clone()),
+            Node {
+                min_width: Val::Px(36.0),
                 justify_content: JustifyContent::Center,
                 ..default()
-            }).with_children(|title_row| {
-                title_row.spawn((
-                    Text::new("Power Console"),
-                    TextFont { font_size: 24.0, ..default() },
-                    TextColor(Color::srgb(0.3, 1.0, 0.8)),
-                ));
-                crate::client_elements::spawn_help_button(title_row, crate::client_elements::HelpPanel::Power, 16.0);
-            });
+            },
+        ));
+    commands.entity(row).add_child(level_readout);
 
-            // Three power rows: Helm, Weapons, Sensors
-            for (console, label) in [
-                (Console::Helm, "Helm"),
-                (Console::Tactical, "Weapons"),
-                (Console::Sensors, "Sensors"),
-            ] {
-                panel.spawn((
-                    PowerRow(console.clone()),
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(12.0),
-                        padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
-                        ..default()
-                    },
-                    BackgroundColor(POWER_COL_INACTIVE),
-                )).with_children(|row| {
-                    // Console name
-                    row.spawn((
-                        Text::new(label),
-                        TextFont { font_size: 16.0, ..default() },
-                        TextColor(Color::srgb(0.7, 0.9, 1.0)),
-                        Node { width: Val::Px(80.0), ..default() },
-                    ));
-                    // Decrement button
-                    row.spawn((
-                        PowerDecButton(console.clone()),
-                        Button,
-                        Node {
-                            width: Val::Px(36.0), height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(POWER_DEC_COLOR),
-                    )).with_children(|btn| {
-                        btn.spawn((
-                            Text::new("-"),
-                            TextFont { font_size: 22.0, ..default() },
-                            TextColor(Color::srgb(0.9, 0.9, 1.0)),
-                        ));
-                    });
-                    // Level text
-                    row.spawn((
-                        PowerRowLevel(console.clone()),
-                        Text::new("2"),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::srgb(0.9, 0.9, 1.0)),
-                        Node { min_width: Val::Px(24.0), justify_content: JustifyContent::Center, ..default() },
-                    ));
-                    // Increment button
-                    row.spawn((
-                        PowerIncButton(console.clone()),
-                        Button,
-                        Node {
-                            width: Val::Px(36.0), height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(POWER_INC_COLOR),
-                    )).with_children(|btn| {
-                        btn.spawn((
-                            Text::new("+"),
-                            TextFont { font_size: 22.0, ..default() },
-                            TextColor(Color::srgb(0.9, 0.9, 1.0)),
-                        ));
-                    });
-                });
+    // Increment GuiButton
+    let inc_console = console.clone();
+    let inc_btn = spawn_gui_button(
+        commands,
+        ButtonSize::Square(36.0),
+        inc_visuals(),
+        None,
+    );
+    commands.entity(inc_btn)
+        .insert((PowerIncButton(inc_console.clone()), Disabled))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("+"),
+                TextFont { font_size: 22.0, ..default() },
+                TextColor(Color::srgb(0.9, 0.9, 1.0)),
+            ));
+        })
+        .observe(move |_trigger: On<ButtonPressed>,
+                       sim: Res<ClientSimState>,
+                       ship_view: Res<ShipView>,
+                       mut outbound: MessageWriter<OutboundClientMessage>| {
+            let locked = crate::client_sim::is_power_locked(&sim.power_state_payload);
+            if crate::client_sim::can_increase_power(&ship_view.power_levels, &inc_console, locked) {
+                outbound.write(OutboundClientMessage(
+                    crate::client_sim::increase_power_message(inc_console.clone()),
+                ));
             }
-
-            // Overflow allocation controls (hidden in Low complexity — AI manages points 7 & 8).
-            panel.spawn((
-                HideableElement("power_overflow_controls".into()),
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    padding: UiRect::axes(Val::Px(16.0), Val::Px(4.0)),
-                    ..default()
-                },
-            )).with_children(|overflow_row| {
-                overflow_row.spawn((
-                    Text::new("Overflow (pts 7-8): Manual"),
-                    TextFont { font_size: 13.0, ..default() },
-                    TextColor(Color::srgb(0.6, 0.7, 0.5)),
-                ));
-            });
-
-            // Battery bar section
-            panel.spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(4.0),
-                    width: Val::Percent(80.0),
-                    max_width: Val::Px(300.0),
-                    ..default()
-                },
-            )).with_children(|battery_section| {
-                // Battery bar background
-                battery_section.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Px(16.0),
-                        position_type: PositionType::Relative,
-                        ..default()
-                    },
-                    BackgroundColor(POWER_BATTERY_BG),
-                )).with_children(|bar_bg| {
-                    bar_bg.spawn((
-                        BatteryBar,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            top: Val::Px(0.0),
-                            width: Val::Percent(0.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        BackgroundColor(POWER_BATTERY_FILL),
-                    ));
-                });
-                // Battery percentage label
-                battery_section.spawn((
-                    BatteryLabel,
-                    Text::new("Battery: 0%"),
-                    TextFont { font_size: 14.0, ..default() },
-                    TextColor(Color::srgb(0.5, 0.8, 1.0)),
-                ));
-            });
-
-            // Help overlay (initially hidden, shown by ? button)
-            crate::client_elements::spawn_help_overlay(panel, crate::client_elements::HelpPanel::Power);
         });
+    commands.entity(row).add_child(inc_btn);
+
+    row
 }
 
 // ── Systems ──────────────────────────────────────────────────────────
@@ -295,104 +386,72 @@ fn toggle_power_panel_visibility(
     }
 }
 
-/// Refresh the power panel: power levels, button enable/disable, battery bar, lock state.
+/// Refresh the power panel each frame when `ClientSimState` or `ShipView` changes:
+/// - Update `ProgressValue` on the battery bar.
+/// - Update `ReadoutValue` on each power level readout.
+/// - Insert/remove `Disabled` on each inc/dec button.
 fn refresh_power_panel(
+    mut commands: Commands,
     sim: Res<ClientSimState>,
     ship_view: Res<ShipView>,
-    mut row_bg: Query<(&mut BackgroundColor, &PowerRow), (Without<PowerIncButton>, Without<PowerDecButton>)>,
-    mut level_labels: Query<(&mut Text, &PowerRowLevel), Without<BatteryLabel>>,
-    mut inc_buttons: Query<(&mut BackgroundColor, &PowerIncButton), (Without<PowerRow>, Without<PowerDecButton>)>,
-    mut dec_buttons: Query<(&mut BackgroundColor, &PowerDecButton), (Without<PowerRow>, Without<PowerIncButton>)>,
-    mut battery_bar: Query<&mut Node, With<BatteryBar>>,
-    mut battery_label: Query<&mut Text, (With<BatteryLabel>, Without<PowerRowLevel>)>,
+    mut battery_bar: Query<&mut ProgressValue, With<BatteryBar>>,
+    mut battery_readout: Query<&mut ReadoutValue, (With<BatteryReadout>, Without<PowerLevelReadout>)>,
+    mut level_readouts: Query<(Entity, &mut ReadoutValue, &PowerLevelReadout), Without<BatteryReadout>>,
+    inc_buttons: Query<(Entity, &PowerIncButton, Has<Disabled>)>,
+    dec_buttons: Query<(Entity, &PowerDecButton, Has<Disabled>)>,
 ) {
     if !sim.is_changed() && !ship_view.is_changed() {
         return;
     }
 
     let locked = crate::client_sim::is_power_locked(&sim.power_state_payload);
-    let battery_pct = crate::client_sim::battery_percentage(&sim.power_state_payload);
+    let battery_raw = crate::client_sim::battery_percentage(&sim.power_state_payload);
+    // battery_percentage returns a raw value in [0, capacity]; capacity is typically 100.
+    let battery_fraction = (battery_raw / 100.0).clamp(0.0, 1.0);
 
-    // Update battery bar width and label
-    for mut node in battery_bar.iter_mut() {
-        node.width = Val::Percent(battery_pct);
-    }
-    for mut text in battery_label.iter_mut() {
-        **text = format!("Battery: {:.0}%", battery_pct);
-    }
-
-    // Update each power row background + level text
-    for (mut bg, _row) in row_bg.iter_mut() {
-        bg.0 = if locked { POWER_COL_LOCKED } else { POWER_COL_INACTIVE };
+    // Update battery bar ProgressValue
+    for mut pv in battery_bar.iter_mut() {
+        pv.0 = battery_fraction;
     }
 
-    // Update level labels, matching by console
-    for (mut text, level_component) in level_labels.iter_mut() {
-        let lvl = match level_component.0 {
-            Console::Helm => ship_view.power_levels.0,
+    // Update battery percentage ReadoutValue
+    for mut rv in battery_readout.iter_mut() {
+        rv.0 = format!("{:.0}%", battery_raw);
+    }
+
+    // Update power level readouts
+    for (_entity, mut rv, level_comp) in level_readouts.iter_mut() {
+        let lvl = match level_comp.0 {
+            Console::Helm     => ship_view.power_levels.0,
             Console::Tactical => ship_view.power_levels.1,
-            Console::Sensors => ship_view.power_levels.2,
+            Console::Sensors  => ship_view.power_levels.2,
             _ => 0,
         };
-        **text = format!("{}", lvl);
+        rv.0 = format!("{}", lvl);
     }
 
-    // Update increment buttons by matching their console
-    for (mut bg, inc) in inc_buttons.iter_mut() {
+    // Sync Disabled on increment buttons
+    for (entity, inc, currently_disabled) in inc_buttons.iter() {
         let can_inc = crate::client_sim::can_increase_power(
             &ship_view.power_levels, &inc.0, locked,
         );
-        bg.0 = if can_inc { POWER_INC_COLOR } else { POWER_INC_LOCKED };
+        if can_inc && currently_disabled {
+            commands.entity(entity).remove::<Disabled>();
+        } else if !can_inc && !currently_disabled {
+            commands.entity(entity).insert(Disabled);
+        }
     }
 
-    // Update decrement buttons by matching their console
-    for (mut bg, dec) in dec_buttons.iter_mut() {
+    // Sync Disabled on decrement buttons
+    for (entity, dec, currently_disabled) in dec_buttons.iter() {
         let can_dec = crate::client_sim::can_decrease_power(
             &ship_view.power_levels, &dec.0, locked,
         );
-        bg.0 = if can_dec { POWER_DEC_COLOR } else { POWER_DEC_LOCKED };
-    }
-}
-
-/// Handle increment button presses on the Power console.
-fn handle_increase_power(
-    interactions: Query<(&Interaction, &PowerIncButton), Changed<Interaction>>,
-    sim: Res<ClientSimState>,
-    ship_view: Res<ShipView>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for (interaction, inc) in interactions.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
+        if can_dec && currently_disabled {
+            commands.entity(entity).remove::<Disabled>();
+        } else if !can_dec && !currently_disabled {
+            commands.entity(entity).insert(Disabled);
         }
-        let locked = crate::client_sim::is_power_locked(&sim.power_state_payload);
-        if !crate::client_sim::can_increase_power(&ship_view.power_levels, &inc.0, locked) {
-            continue;
-        }
-        outbound.write(OutboundClientMessage(
-            crate::client_sim::increase_power_message(inc.0.clone()),
-        ));
-    }
-}
-
-/// Handle decrement button presses on the Power console.
-fn handle_decrease_power(
-    interactions: Query<(&Interaction, &PowerDecButton), Changed<Interaction>>,
-    sim: Res<ClientSimState>,
-    ship_view: Res<ShipView>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for (interaction, dec) in interactions.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        let locked = crate::client_sim::is_power_locked(&sim.power_state_payload);
-        if !crate::client_sim::can_decrease_power(&ship_view.power_levels, &dec.0, locked) {
-            continue;
-        }
-        outbound.write(OutboundClientMessage(
-            crate::client_sim::decrease_power_message(dec.0.clone()),
-        ));
     }
 }
 
@@ -402,6 +461,7 @@ fn handle_decrease_power(
 mod tests {
     use super::*;
     use crate::client_lobby::{ActiveConsole, LobbyState};
+    use crate::gui::resolve_visual;
     use crate::messages::{Console, GamePhase, Player, ShipClientConfig};
     use std::collections::HashMap;
 
@@ -516,5 +576,146 @@ mod tests {
         });
         let active = ActiveConsole::default(); // None → auto → count != 1
         assert!(!power_panel_visible(&lobby, "tok", &active));
+    }
+
+    // ── inc_visuals / dec_visuals: five distinct states ───────────────
+
+    #[test]
+    fn inc_visuals_has_distinct_five_states() {
+        let v = inc_visuals();
+        let idle     = resolve_visual(&v, false, false, false, false).color;
+        let hover    = resolve_visual(&v, false, false, false, true ).color;
+        let active   = resolve_visual(&v, false, false, true,  false).color;
+        let press    = resolve_visual(&v, false, true,  false, false).color;
+        let disabled = resolve_visual(&v, true,  false, false, false).color;
+        assert_ne!(idle, hover);
+        assert_ne!(idle, active);
+        assert_ne!(idle, press);
+        assert_ne!(idle, disabled);
+    }
+
+    #[test]
+    fn dec_visuals_has_distinct_five_states() {
+        let v = dec_visuals();
+        let idle     = resolve_visual(&v, false, false, false, false).color;
+        let hover    = resolve_visual(&v, false, false, false, true ).color;
+        let active   = resolve_visual(&v, false, false, true,  false).color;
+        let press    = resolve_visual(&v, false, true,  false, false).color;
+        let disabled = resolve_visual(&v, true,  false, false, false).color;
+        assert_ne!(idle, hover);
+        assert_ne!(idle, active);
+        assert_ne!(idle, press);
+        assert_ne!(idle, disabled);
+    }
+
+    #[test]
+    fn battery_visuals_disabled_differs_from_idle() {
+        let v = battery_visuals();
+        let idle     = resolve_visual(&v, false, false, false, false).color;
+        let disabled = resolve_visual(&v, true,  false, false, false).color;
+        assert_ne!(idle, disabled);
+    }
+
+    // ── ReadoutValue helpers ─────────────────────────────────────────
+
+    #[test]
+    fn readout_value_formats_power_level() {
+        let rv = ReadoutValue(format!("{}", 3u8));
+        assert_eq!(rv.0, "3");
+    }
+
+    #[test]
+    fn battery_readout_formats_percentage() {
+        let battery_raw = 75.0_f32;
+        let text = format!("{:.0}%", battery_raw);
+        assert_eq!(text, "75%");
+    }
+
+    #[test]
+    fn battery_fraction_clamped_to_unit_interval() {
+        // battery_percentage returns raw value; clamping to [0,1] via /100
+        let raw = 120.0_f32;
+        let fraction = (raw / 100.0).clamp(0.0, 1.0);
+        assert_eq!(fraction, 1.0);
+
+        let raw_neg = -10.0_f32;
+        let fraction_neg = (raw_neg / 100.0).clamp(0.0, 1.0);
+        assert_eq!(fraction_neg, 0.0);
+    }
+
+    // ── can_increase / can_decrease integration with is_power_locked ─
+
+    #[test]
+    fn increase_blocked_when_locked() {
+        use crate::client_sim::{can_increase_power, is_power_locked};
+        let payload = Some((2u8, 2u8, 2u8, 50.0_f32, true));
+        let locked = is_power_locked(&payload);
+        assert!(!can_increase_power(&(2, 2, 2), &Console::Helm, locked));
+    }
+
+    #[test]
+    fn decrease_blocked_when_locked() {
+        use crate::client_sim::{can_decrease_power, is_power_locked};
+        let payload = Some((2u8, 2u8, 2u8, 50.0_f32, true));
+        let locked = is_power_locked(&payload);
+        assert!(!can_decrease_power(&(2, 2, 2), &Console::Helm, locked));
+    }
+
+    #[test]
+    fn increase_allowed_when_not_locked_and_under_cap() {
+        use crate::client_sim::{can_increase_power, is_power_locked};
+        let payload = Some((2u8, 2u8, 2u8, 50.0_f32, false));
+        let locked = is_power_locked(&payload);
+        assert!(can_increase_power(&(2, 2, 2), &Console::Helm, locked));
+    }
+
+    #[test]
+    fn decrease_allowed_when_not_locked_and_above_min() {
+        use crate::client_sim::{can_decrease_power, is_power_locked};
+        let payload = Some((3u8, 2u8, 2u8, 50.0_f32, false));
+        let locked = is_power_locked(&payload);
+        assert!(can_decrease_power(&(3, 2, 2), &Console::Helm, locked));
+    }
+
+    // ── increase_power_message / decrease_power_message ─────────────
+
+    #[test]
+    fn increase_power_message_produces_correct_variant() {
+        use crate::client_sim::increase_power_message;
+        use crate::messages::ClientMessage;
+        let msg = increase_power_message(Console::Helm);
+        assert_eq!(msg, ClientMessage::IncreasePower { console: Console::Helm });
+    }
+
+    #[test]
+    fn decrease_power_message_produces_correct_variant() {
+        use crate::client_sim::decrease_power_message;
+        use crate::messages::ClientMessage;
+        let msg = decrease_power_message(Console::Sensors);
+        assert_eq!(msg, ClientMessage::DecreasePower { console: Console::Sensors });
+    }
+
+    #[test]
+    fn increase_power_message_tactical() {
+        use crate::client_sim::increase_power_message;
+        use crate::messages::ClientMessage;
+        let msg = increase_power_message(Console::Tactical);
+        assert_eq!(msg, ClientMessage::IncreasePower { console: Console::Tactical });
+    }
+
+    #[test]
+    fn decrease_power_message_tactical() {
+        use crate::client_sim::decrease_power_message;
+        use crate::messages::ClientMessage;
+        let msg = decrease_power_message(Console::Tactical);
+        assert_eq!(msg, ClientMessage::DecreasePower { console: Console::Tactical });
+    }
+
+    #[test]
+    fn increase_power_message_sensors() {
+        use crate::client_sim::increase_power_message;
+        use crate::messages::ClientMessage;
+        let msg = increase_power_message(Console::Sensors);
+        assert_eq!(msg, ClientMessage::IncreasePower { console: Console::Sensors });
     }
 }

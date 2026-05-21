@@ -47,6 +47,29 @@ export async function writeFile(relativePath, content) {
   await writable.close();
 }
 
+/**
+ * List entries in a directory relative to the project root.
+ * Empty path means the root itself. Returns [{ name, kind }] where kind is
+ * 'file' or 'directory'. Throws if no project root has been selected.
+ */
+export async function listDirectory(relativePath = '') {
+  const handle = await requireRoot();
+  const parts = normalizePath(relativePath);
+  let dir = handle;
+  for (let i = 0; i < parts.length; i++) {
+    dir = await dir.getDirectoryHandle(parts[i]);
+  }
+  const results = [];
+  if (typeof dir.entries === 'function') {
+    for await (const [name, entry] of dir.entries()) {
+      const kind = entry.kind
+        || (typeof entry.getFile === 'function' ? 'file' : 'directory');
+      results.push({ name, kind });
+    }
+  }
+  return results;
+}
+
 /** For testing: inject a mock root handle */
 export function _setRootHandleForTest(handle) {
   rootHandle = handle;

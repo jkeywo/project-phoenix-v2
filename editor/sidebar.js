@@ -1,5 +1,6 @@
 import { getSpawnName, getSpawnPosition, getEntityPath, getRelativeInfo, setSpawnPosition, getAllAnchors } from './toml-utils.js';
 import { getSpawnsFromAllLayers } from './toml-utils.js';
+import { snapshotForUndo } from './undo-controller.js';
 
 export class PropertiesPanel {
   constructor(canvasManager, layerManager) {
@@ -152,6 +153,7 @@ export class PropertiesPanel {
   _attachListeners(spawn, layer, allAnchors, pos, relative) {
     document.getElementById('propName').addEventListener('input', (e) => {
       spawn.name = e.target.value;
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -181,6 +183,7 @@ export class PropertiesPanel {
           const currentPos = getSpawnPosition(spawn, allAnchors);
           setSpawnPosition(spawn, currentPos.x, currentPos.z, 'relative', parentSelect?.value || null, { x: offsetX, z: offsetZ });
         }
+        snapshotForUndo(layer);
         layer.isDirty = true;
         this.canvasManager.renderAll();
       });
@@ -190,6 +193,7 @@ export class PropertiesPanel {
       const x = parseFloat(e.target.value) || 0;
       const z = parseFloat(document.getElementById('propZ')?.value || '0');
       setSpawnPosition(spawn, x, z, 'absolute');
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -198,12 +202,14 @@ export class PropertiesPanel {
       const x = parseFloat(document.getElementById('propX')?.value || '0');
       const z = parseFloat(e.target.value) || 0;
       setSpawnPosition(spawn, x, z, 'absolute');
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
 
     document.getElementById('propAnchor')?.addEventListener('change', (e) => {
       setSpawnPosition(spawn, 0, 0, 'anchor', e.target.value, null);
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -213,6 +219,7 @@ export class PropertiesPanel {
       const offsetX = parseFloat(document.getElementById('propOffsetX')?.value || '0');
       const offsetZ = parseFloat(document.getElementById('propOffsetZ')?.value || '0');
       setSpawnPosition(spawn, pos.x, pos.z, 'relative', parent, { x: offsetX, z: offsetZ });
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -222,6 +229,7 @@ export class PropertiesPanel {
       const offsetX = parseFloat(e.target.value) || 0;
       const offsetZ = parseFloat(document.getElementById('propOffsetZ')?.value || '0');
       setSpawnPosition(spawn, 0, 0, 'relative', cur?.parent, { x: offsetX, z: offsetZ });
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.updateArrows();
     });
@@ -231,6 +239,7 @@ export class PropertiesPanel {
       const offsetX = parseFloat(document.getElementById('propOffsetX')?.value || '0');
       const offsetZ = parseFloat(e.target.value) || 0;
       setSpawnPosition(spawn, 0, 0, 'relative', cur?.parent, { x: offsetX, z: offsetZ });
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.updateArrows();
     });
@@ -239,6 +248,7 @@ export class PropertiesPanel {
     document.getElementById('shapeRadius')?.addEventListener('input', (e) => {
       if (!spawn.shape) spawn.shape = { type: 'sphere' };
       spawn.shape.radius = parseFloat(e.target.value) || 100;
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -246,6 +256,7 @@ export class PropertiesPanel {
     document.getElementById('shapeInnerRadius')?.addEventListener('input', (e) => {
       if (!spawn.shape) spawn.shape = { type: 'torus' };
       spawn.shape.inner_radius = parseFloat(e.target.value) || 50;
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -253,6 +264,7 @@ export class PropertiesPanel {
     document.getElementById('shapeOuterRadius')?.addEventListener('input', (e) => {
       if (!spawn.shape) spawn.shape = { type: 'torus' };
       spawn.shape.outer_radius = parseFloat(e.target.value) || 150;
+      snapshotForUndo(layer);
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
@@ -262,6 +274,7 @@ export class PropertiesPanel {
       const idx = layer.toml[arr]?.indexOf(spawn);
       if (idx !== -1) {
         layer.toml[arr].splice(idx, 1);
+        snapshotForUndo(layer);
         layer.isDirty = true;
         this.canvasManager.spawnGroups.delete(spawn);
         this.canvasManager.deselectSpawn();
@@ -278,6 +291,7 @@ export class PropertiesPanel {
           if (!key.startsWith('_')) delete spawn[key];
         }
         Object.assign(spawn, parsed);
+        snapshotForUndo(layer);
         layer.isDirty = true;
         errorEl.textContent = '';
         this.canvasManager.renderAll();

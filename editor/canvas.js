@@ -2,6 +2,7 @@ import { getSpawns, getAnchors, getSpawnPosition, getSpawnName, getEntityPath, g
 import { getColorForEntity } from './layers.js';
 import { loadEntityConfig, getEntityConfig } from './entity-cache.js';
 import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALLBACK } from './canvas-scenario.js';
+import { snapshotForUndo } from './undo-controller.js';
 
 export class CanvasManager {
   constructor(layerManager, onSpawnSelect, onSpawnUpdate, onSpawnCreate, onSpawnDrag) {
@@ -276,6 +277,7 @@ export class CanvasManager {
           setSpawnPosition(spawn, newX, newZ, 'absolute');
         }
         layer.isDirty = true;
+        snapshotForUndo(layer);
 
         if (this.selectedSpawn?.spawn === spawn) {
           this.onSpawnDrag(spawn, layer);
@@ -369,6 +371,7 @@ export class CanvasManager {
     }
     activeLayer.toml[arr].push(spawn);
     activeLayer.isDirty = true;
+    snapshotForUndo(activeLayer);
 
     this.onSpawnCreate(spawn, activeLayer);
     this.selectSpawn(spawn, activeLayer);

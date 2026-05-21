@@ -250,10 +250,21 @@ function makeStationDropdown(key, value, options, onChange) {
 }
 
 function attachInlineError(wrap, err) {
+  // Slice 7: dangling-next / dangling-previous / missing-* are
+  // recoverable references (the user can still save, the runtime falls
+  // back), so we surface them as yellow warning badges. Hard structural
+  // errors (duplicate-name, empty-consoles, etc.) stay red.
+  const type = err?.type || '';
+  const severity = /dangling|missing/i.test(type) ? 'warning' : 'error';
+
   const chip = document.createElement('span');
-  chip.className = 'entity-stations-inline-error';
-  chip.dataset.kind = err.type || '';
-  chip.textContent = err.type || 'error';
+  // Keep the legacy class (existing CSS + Slice 5 tests depend on it)
+  // and ADDITIVELY stamp the validation-badge classes so the new
+  // colour layer takes effect.
+  chip.className = `entity-stations-inline-error validation-badge validation-badge-${severity}`;
+  chip.dataset.kind = type;
+  chip.title = err?.message || type || 'error';
+  chip.textContent = type || 'error';
   wrap.appendChild(chip);
 }
 

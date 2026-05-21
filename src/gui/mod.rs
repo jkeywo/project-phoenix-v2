@@ -30,9 +30,10 @@ pub use progress::{
     SegmentCount,
 };
 pub use radar::{
-    blip_local_offset, is_on_radar, project_radar_entity, world_size_to_px, GenericRadar,
-    GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
-    RadarIcon, RadarIconLookup, RadarLayer,
+    blip_local_offset, default_layer_colour, is_on_radar, layer_to_icon, project_radar_entity,
+    tags_to_radar_layer, world_size_to_px, GenericRadar, GenericRadarWidget, OnRadar,
+    OrientationMode, RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarIconLookup,
+    RadarLayer,
 };
 pub use radio::{
     next_radio_selection, on_radio_member_pressed, RadioButtonConfig, RadioGroup, RadioGroupMarker,

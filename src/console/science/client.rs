@@ -16,8 +16,9 @@ use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::set_science_target_message;
 use crate::gui::{
-    spawn_gui_button, ButtonPressed, ButtonSize, GenericRadar, OnRadar, OrientationMode,
-    RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer, StateVisuals,
+    default_layer_colour, layer_to_icon, spawn_gui_button, tags_to_radar_layer, ButtonPressed,
+    ButtonSize, GenericRadar, OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
+    RadarIcon, RadarLayer, StateVisuals,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::ship_view::ShipView;
@@ -344,27 +345,14 @@ fn bridge_client_sim_to_science_radar(
             continue;
         }
 
-        let has_tag = |tag: &str| snapshot.tags.iter().any(|t| t == tag);
-        if has_tag("region") {
-            continue;
-        }
-
-        // Science radar shows ships and asteroids.
-        let (layer, icon, default_color) = if has_tag("ship") || has_tag("pirate") {
-            (
-                RadarLayer::Ship,
-                RadarIcon::Ship,
-                Color::srgb(0.95, 0.95, 1.0),
-            )
-        } else if has_tag("asteroid") || has_tag("asteroid_field") {
-            (
-                RadarLayer::Asteroid,
-                RadarIcon::Asteroid,
-                Color::srgb(0.85, 0.75, 0.45),
-            )
-        } else {
-            continue; // skip everything else
+        // Science radar shows ships and asteroids; everything else
+        // (stations, planets, stars, regions, missiles) is filtered out.
+        let layer = match tags_to_radar_layer(&snapshot.tags) {
+            Some(l @ (RadarLayer::Ship | RadarLayer::Asteroid)) => l,
+            _ => continue,
         };
+        let icon = layer_to_icon(layer);
+        let default_color = default_layer_colour(layer);
 
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
         let world_size = snapshot

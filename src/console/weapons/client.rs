@@ -22,8 +22,8 @@ use crate::client_sim::{
     is_fire_button_enabled, phaser_mode_label, ClientSimState,
 };
 use crate::gui::{
-    spawn_gui_button, ButtonPressed, ButtonSize, GenericRadar, OnRadar,
-    OrientationMode, RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
+    layer_to_icon, spawn_gui_button, tags_to_radar_layer, ButtonPressed, ButtonSize, GenericRadar,
+    OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
     StateVisuals, RadioButtonConfig, RadioGroup, RadioSelected,
     Disabled,
 };
@@ -823,18 +823,19 @@ fn bridge_client_sim_to_weapons_radar(
             continue;
         }
 
-        let has_tag = |tag: &str| snapshot.tags.iter().any(|t| t == tag);
-        if has_tag("region") {
-            continue;
-        }
-
-        // Weapons radar only shows ships and torpedoes.
-        let (layer, icon, default_color) = if has_tag("ship") || has_tag("pirate") {
-            (RadarLayer::Ship, RadarIcon::Ship, Color::srgb(1.0, 0.4, 0.4))
-        } else if has_tag("missile") || has_tag("torpedo") {
-            (RadarLayer::Missile, RadarIcon::Torpedo, Color::srgb(1.0, 0.4, 0.2))
-        } else {
-            continue; // skip everything else
+        // Weapons radar only shows ships and torpedoes; everything else
+        // (asteroids, stations, planets, stars, regions) is filtered out.
+        let layer = match tags_to_radar_layer(&snapshot.tags) {
+            Some(l @ (RadarLayer::Ship | RadarLayer::Missile)) => l,
+            _ => continue,
+        };
+        let icon = layer_to_icon(layer);
+        // Tactical paints ships and torpedoes in alert-red shades rather
+        // than the helm-default colours.
+        let default_color = match layer {
+            RadarLayer::Ship => Color::srgb(1.0, 0.4, 0.4),
+            RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
+            _ => unreachable!("filtered above"),
         };
 
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));

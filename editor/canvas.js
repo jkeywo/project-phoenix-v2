@@ -185,6 +185,9 @@ export class CanvasManager {
           outer_radius: entConfig.asteroid_field.outer_radius ?? 200,
         };
       }
+      // Region-entity fields needed by canvas-region renderer
+      if (!spawn.effects && entConfig.effects) spawn.effects = entConfig.effects;
+      if (!spawn.colour && entConfig.colour) spawn.colour = entConfig.colour;
     }
 
     const canvasPos = this.worldToCanvas(pos.x, pos.z);

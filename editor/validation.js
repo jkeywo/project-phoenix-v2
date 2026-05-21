@@ -1,6 +1,8 @@
 import { validateWorldToml } from './world-toml.js';
 import { validateEntityToml, validateEntitySections } from './entity-toml.js';
 import { validateStations } from './stations-validate.js';
+import { validateTriggerActions } from './action-schema.js';
+import { validateWorldReferences } from './world-references.js';
 
 function isEntityFile(filePath, parsed) {
   if (filePath && filePath.includes('assets/entities/')) return true;
@@ -138,6 +140,49 @@ export function validateFile(filePath, parsedContent) {
       else if (msg.includes('[anchors]')) path = 'anchors';
       results.push({ path, severity: 'error', message: msg });
     }
+
+    // Validate every `[[trigger.action]]` and `[[comms.response.action]]`
+    // against the action schema (mirrors TriggerAction in src/world/config.rs).
+    if (Array.isArray(parsedContent.trigger)) {
+      for (let i = 0; i < parsedContent.trigger.length; i++) {
+        const trigger = parsedContent.trigger[i];
+        if (Array.isArray(trigger?.action)) {
+          const r = validateTriggerActions(trigger.action);
+          for (const msg of r.errors) {
+            results.push({
+              path: `trigger[${i}].action`,
+              severity: 'error',
+              message: msg,
+            });
+          }
+        }
+      }
+    }
+    if (Array.isArray(parsedContent.comms)) {
+      for (let i = 0; i < parsedContent.comms.length; i++) {
+        const block = parsedContent.comms[i];
+        if (Array.isArray(block?.response)) {
+          for (let r = 0; r < block.response.length; r++) {
+            const resp = block.response[r];
+            if (Array.isArray(resp?.action)) {
+              const result = validateTriggerActions(resp.action);
+              for (const msg of result.errors) {
+                results.push({
+                  path: `comms[${i}].response[${r}].action`,
+                  severity: 'error',
+                  message: msg,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Resolve every entity reference in triggers and comms against the
+    // set of `[[entity]] name = "..."` declared in this world.
+    const refResults = validateWorldReferences(parsedContent);
+    results.push(...refResults);
   }
 
   return results;

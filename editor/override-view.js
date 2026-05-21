@@ -145,6 +145,14 @@ export function renderOverridePanel(hostEl, spawn, layer, deps) {
     deps.canvasManager.renderAll();
   };
 
+  const onClearAll = () => {
+    if (Object.keys(spawn.override ?? {}).length === 0) return;
+    snapshotForUndo(layer);
+    delete spawn.override;
+    layer.isDirty = true;
+    deps.canvasManager.renderAll();
+  };
+
   // Resolved-template form (read-only by default; click to edit a value).
   const resolved = editor.getResolvedView();
   const overrideKeys = new Set(editor.getOverridesSummary().map(s => s.path));
@@ -167,7 +175,7 @@ export function renderOverridePanel(hostEl, spawn, layer, deps) {
   hostEl.appendChild(formPanel);
 
   // Summary card.
-  hostEl.appendChild(buildSummaryCard(editor.getOverridesSummary(), onClear));
+  hostEl.appendChild(buildSummaryCard(editor.getOverridesSummary(), onClear, onClearAll));
 }
 
 function buildFieldRow(path, value, isOverridden, onEdit) {
@@ -227,7 +235,7 @@ function buildFieldRow(path, value, isOverridden, onEdit) {
   return row;
 }
 
-function buildSummaryCard(summary, onClear) {
+function buildSummaryCard(summary, onClear, onClearAll) {
   const card = document.createElement('div');
   card.className = 'override-summary-card';
   const h = document.createElement('h4');
@@ -255,6 +263,22 @@ function buildSummaryCard(summary, onClear) {
     row.appendChild(btn);
     card.appendChild(row);
   }
+
+  if (typeof onClearAll === 'function') {
+    const allRow = document.createElement('div');
+    allRow.className = 'override-summary-row';
+    const spacer = document.createElement('span');
+    spacer.className = 'osr-path';
+    allRow.appendChild(spacer);
+    const allBtn = document.createElement('button');
+    allBtn.className = 'osr-clear';
+    allBtn.textContent = 'reset all';
+    allBtn.title = 'Remove every override on this spawn';
+    allBtn.addEventListener('click', onClearAll);
+    allRow.appendChild(allBtn);
+    card.appendChild(allRow);
+  }
+
   return card;
 }
 

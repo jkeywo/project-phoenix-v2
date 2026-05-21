@@ -616,6 +616,36 @@ export class CanvasManager {
     this.onSpawnSelect(spawn, layer);
   }
 
+  /**
+   * Find a spawn by `entity.name` across every open layer and select it.
+   * First-match-wins; layers are scanned in `getLayers()` order.
+   * No-op (returns false) if no spawn carries that name.
+   *
+   * Used by the World Content panel to highlight a referenced entity on
+   * the canvas (Slice 3 PRD #350 AC #2).
+   *
+   * @param {string} name
+   * @returns {boolean}  true if a spawn was found and selected.
+   */
+  selectByEntityName(name) {
+    if (!name) return false;
+    for (const layer of this.layerManager.getLayers()) {
+      const arr = layer.kind === 'scenario' ? 'spawn' : 'entity';
+      const list = layer.toml?.[arr];
+      if (!Array.isArray(list)) continue;
+      const match = list.find(s => s && s.name === name);
+      if (match) {
+        // Activate the owning layer so subsequent panels (properties,
+        // world-content active-layer filtering) line up with the selection.
+        this.layerManager.setActiveLayer(layer);
+        this.selectSpawn(match, layer);
+        this.renderAll();
+        return true;
+      }
+    }
+    return false;
+  }
+
   deselectSpawn() {
     this.selectedSpawn = null;
     this.onSpawnSelect(null, null);

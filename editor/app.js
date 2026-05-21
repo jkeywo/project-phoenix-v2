@@ -120,8 +120,7 @@ function renderAll() {
     crossRefIndex,
     activeLayerPath: activeLayer?.filename ?? null,
     onSelectEntity: (name) => {
-      // C3 will wire this to CanvasManager.selectByEntityName.
-      // For now the click is a no-op so the tree renders cleanly.
+      canvasManager.selectByEntityName(name);
     },
   });
 

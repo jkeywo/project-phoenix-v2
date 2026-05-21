@@ -1,7 +1,11 @@
-//! Client-side Navigation Panel plugin.
+//! Client-side Navigation Panel plugin — migrated to `src/gui/` library widgets.
 //!
 //! Owns the Navigation console UI: system chart display (gizmo-drawn),
-//! impulse status text, cancel-impulse button, and on-screen viewscreen control.
+//! impulse status text readout (`TextReadout`), cancel-impulse button
+//! (`GuiButton`), and on-screen viewscreen control (`GuiButton`).
+//!
+//! All callbacks are wired via observers at spawn time.
+//! No per-button marker-component query systems remain.
 //!
 //! Compiled only when the `client` Cargo feature is enabled.
 
@@ -10,8 +14,93 @@ use bevy::prelude::*;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
+use crate::gui::{
+    spawn_gui_button, ButtonPressed, ButtonSize, ReadoutValue, StateVisuals, TextReadout,
+};
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::ship_view::ShipView;
+
+// ── Pure visibility helper ────────────────────────────────────────────
+
+/// Decide whether the navigation panel should be visible.
+///
+/// Rules:
+/// 1. Game phase must be `InProgress`.
+/// 2. The local player must hold `Console::Navigation`.
+/// 3. If holding **one console only**, show automatically.
+/// 4. If holding **multiple consoles**, show only when `ActiveConsole`
+///    is explicitly set to `Navigation`.
+pub fn navigation_panel_visible(
+    lobby: &LobbyState,
+    token: &str,
+    active: &ActiveConsole,
+) -> bool {
+    if lobby.phase != GamePhase::InProgress {
+        return false;
+    }
+    let view = LobbyView::new(lobby, token);
+    let consoles = view.my_consoles();
+    if !consoles.contains(&Console::Navigation) {
+        return false;
+    }
+    let count = consoles.len();
+    match &active.0 {
+        Some(c) => *c == Console::Navigation,
+        None => count == 1,
+    }
+}
+
+// ── Pure impulse-status helper ────────────────────────────────────────
+
+/// Derive the impulse status label from a charge progress value.
+///
+/// - `>= 1.0` → `"ACTIVE"`
+/// - `> 0.0`  → `"Charging"`
+/// - `<= 0.0` → `"Idle"`
+pub fn impulse_status_label(charge: f32) -> &'static str {
+    if charge >= 1.0 {
+        "ACTIVE"
+    } else if charge > 0.0 {
+        "Charging"
+    } else {
+        "Idle"
+    }
+}
+
+// ── State-visuals helpers ─────────────────────────────────────────────
+
+/// Cancel-Impulse button: danger red.
+fn cancel_impulse_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.40, 0.05, 0.05), // idle
+        Color::srgb(0.55, 0.08, 0.08), // hover
+        Color::srgb(0.60, 0.05, 0.05), // active
+        Color::srgb(0.70, 0.12, 0.12), // press
+        Color::srgb(0.15, 0.03, 0.03), // disabled
+    )
+}
+
+/// On Screen button: neutral green.
+fn on_screen_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.10, 0.30, 0.15), // idle
+        Color::srgb(0.14, 0.42, 0.20), // hover
+        Color::srgb(0.12, 0.50, 0.20), // active
+        Color::srgb(0.18, 0.55, 0.25), // press
+        Color::srgb(0.05, 0.15, 0.08), // disabled
+    )
+}
+
+/// Impulse status text readout visuals.
+fn impulse_readout_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.5, 1.0, 0.8), // idle
+        Color::srgb(0.5, 1.0, 0.8), // hover (unused for readout)
+        Color::srgb(0.2, 1.0, 0.5), // active (impulse active)
+        Color::srgb(0.5, 1.0, 0.8), // press  (unused for readout)
+        Color::srgb(0.3, 0.4, 0.4), // disabled
+    )
+}
 
 // ── Marker components ────────────────────────────────────────────────
 
@@ -19,21 +108,18 @@ use crate::ship_view::ShipView;
 #[derive(Component)]
 pub struct NavigationPanel;
 
-/// Marks the On Screen button; pressing it sends `SetView { NavigationChart }`.
-#[derive(Component)]
-pub struct NavOnScreenButton;
-
-/// Marks the Cancel Impulse button on the Navigation console.
-#[derive(Component)]
-pub struct NavCancelImpulseButton;
-
-/// Marks the impulse status text node.
-#[derive(Component)]
-pub struct NavImpulseStatusText;
-
 /// Marks the navigation chart display container (gizmo-drawn).
 #[derive(Component)]
 pub struct NavChartPanel;
+
+/// Marks the `TextReadout` root entity for the impulse status display.
+#[derive(Component)]
+pub struct NavImpulseReadout;
+
+/// Marks the Cancel Impulse `GuiButton` entity so the refresh system can
+/// show/hide it based on charge progress.
+#[derive(Component)]
+pub struct NavCancelImpulseButton;
 
 // ── Plugin ────────────────────────────────────────────────────────────
 
@@ -47,45 +133,64 @@ impl Plugin for NavigationPanelPlugin {
                 (
                     toggle_navigation_panel_visibility,
                     refresh_navigation_panel,
-                    handle_nav_on_screen_button_press,
-                    handle_nav_cancel_impulse_button_press,
                     draw_nav_chart,
                 ),
             );
     }
 }
 
+// ── Button observers ──────────────────────────────────────────────────
+
+fn on_on_screen_pressed(
+    _trigger: On<ButtonPressed>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    outbound.write(OutboundClientMessage(ClientMessage::SetView {
+        mode: ViewMode::NavigationChart,
+    }));
+}
+
+fn on_cancel_impulse_pressed(
+    _trigger: On<ButtonPressed>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
+}
+
 // ── Setup ────────────────────────────────────────────────────────────
 
 fn setup_navigation_ui(mut commands: Commands) {
-    commands.spawn((
-        NavigationPanel,
-        Node {
-            position_type: PositionType::Absolute,
-            left:   Val::Px(0.0),
-            top:    Val::Px(0.0),
-            right:  Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },
-        Visibility::Hidden,
-    ))
-    .with_children(|panel| {
-        panel.spawn((
+    let panel = commands
+        .spawn((
+            NavigationPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                right: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .id();
+
+    commands.entity(panel).with_children(|p| {
+        p.spawn((
             Text::new("Navigation"),
             TextFont { font_size: 32.0, ..default() },
             TextColor(Color::srgb(0.5, 1.0, 0.8)),
         ));
 
         // System chart display (gizmo-drawn via NavChartPanel bounds)
-        panel.spawn((
+        p.spawn((
             NavChartPanel,
             Node {
-                width:  Val::Px(240.0),
+                width: Val::Px(240.0),
                 height: Val::Px(240.0),
                 border: UiRect::all(Val::Px(1.0)),
                 ..default()
@@ -93,57 +198,61 @@ fn setup_navigation_ui(mut commands: Commands) {
             BorderColor::all(Color::srgb(0.3, 1.0, 0.5)),
             BackgroundColor(Color::srgb(0.04, 0.06, 0.10)),
         ));
+    });
 
-        // Impulse status row
-        panel.spawn(Node {
+    // Impulse status row: readout + cancel button
+    let status_row = commands
+        .spawn(Node {
             flex_direction: FlexDirection::Row,
             column_gap: Val::Px(12.0),
             align_items: AlignItems::Center,
             ..default()
         })
-        .with_children(|row| {
-            row.spawn((
-                NavImpulseStatusText,
-                Text::new("Impulse: Idle"),
-                TextFont { font_size: 16.0, ..default() },
-                TextColor(Color::srgb(0.5, 1.0, 0.8)),
-            ));
-            row.spawn((
-                NavCancelImpulseButton,
-                Button,
-                Node {
-                    padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.40, 0.05, 0.05)),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("CANCEL IMPULSE"),
-                    TextFont { font_size: 14.0, ..default() },
-                    TextColor(Color::srgb(1.0, 0.4, 0.4)),
-                ));
-            });
-        });
+        .id();
+    commands.entity(panel).add_child(status_row);
 
-        // On Screen button
-        panel.spawn((
-            NavOnScreenButton,
-            Button,
-            Node {
-                padding: UiRect::axes(Val::Px(18.0), Val::Px(10.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.10, 0.30, 0.15)),
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                Text::new("ON SCREEN"),
-                TextFont { font_size: 14.0, ..default() },
-                TextColor(Color::srgb(0.5, 1.0, 0.5)),
-            ));
-        });
+    // TextReadout for impulse status
+    let readout = TextReadout::spawn(&mut commands, "Impulse:", impulse_readout_visuals());
+    commands.entity(readout).insert(NavImpulseReadout);
+    commands.entity(status_row).add_child(readout);
+
+    // Cancel Impulse button (hidden when charge == 0)
+    let cancel_btn = spawn_gui_button(
+        &mut commands,
+        ButtonSize::Rect { width: 150.0, height: 36.0 },
+        cancel_impulse_visuals(),
+        None,
+    );
+    commands.entity(cancel_btn).insert((
+        NavCancelImpulseButton,
+        Visibility::Hidden,
+    ));
+    commands.entity(cancel_btn).with_children(|btn| {
+        btn.spawn((
+            Text::new("CANCEL IMPULSE"),
+            TextFont { font_size: 14.0, ..default() },
+            TextColor(Color::srgb(1.0, 0.4, 0.4)),
+        ));
     });
+    commands.entity(cancel_btn).observe(on_cancel_impulse_pressed);
+    commands.entity(status_row).add_child(cancel_btn);
+
+    // On Screen button
+    let on_screen_btn = spawn_gui_button(
+        &mut commands,
+        ButtonSize::Rect { width: 120.0, height: 36.0 },
+        on_screen_visuals(),
+        None,
+    );
+    commands.entity(on_screen_btn).with_children(|btn| {
+        btn.spawn((
+            Text::new("ON SCREEN"),
+            TextFont { font_size: 14.0, ..default() },
+            TextColor(Color::srgb(0.5, 1.0, 0.5)),
+        ));
+    });
+    commands.entity(on_screen_btn).observe(on_on_screen_pressed);
+    commands.entity(panel).add_child(on_screen_btn);
 }
 
 // ── Systems ──────────────────────────────────────────────────────────
@@ -154,71 +263,36 @@ fn toggle_navigation_panel_visibility(
     active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<NavigationPanel>>,
 ) {
-    let view = LobbyView::new(&lobby, &token.0);
-    let holds = lobby.phase == GamePhase::InProgress
-        && view.my_consoles().contains(&Console::Navigation);
-    let my_consoles_count = view.my_consoles().len();
-    let tab_active = match &active.0 {
-        Some(c) => *c == Console::Navigation,
-        None => my_consoles_count == 1,
-    };
-    let visible = holds && tab_active;
+    let visible = navigation_panel_visible(&lobby, &token.0, &active);
     for mut vis in panel.iter_mut() {
-        *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
 fn refresh_navigation_panel(
     ship_view: Res<ShipView>,
-    mut status_text: Query<&mut Text, With<NavImpulseStatusText>>,
-    mut cancel_btn: Query<&mut Visibility, With<NavCancelImpulseButton>>,
+    mut readout: Query<&mut ReadoutValue, With<NavImpulseReadout>>,
+    mut cancel_vis: Query<&mut Visibility, With<NavCancelImpulseButton>>,
 ) {
     if !ship_view.is_changed() {
         return;
     }
     let charge = ship_view.impulse_charge_progress;
-    for mut text in status_text.iter_mut() {
-        let label = if charge >= 1.0 {
-            "Impulse: ACTIVE"
-        } else if charge > 0.0 {
-            "Impulse: Charging"
+    let label = impulse_status_label(charge);
+
+    for mut value in readout.iter_mut() {
+        value.0 = label.to_string();
+    }
+    for mut vis in cancel_vis.iter_mut() {
+        *vis = if charge > 0.0 {
+            Visibility::Visible
         } else {
-            "Impulse: Idle"
+            Visibility::Hidden
         };
-        **text = label.to_string();
-    }
-    for mut vis in cancel_btn.iter_mut() {
-        *vis = if charge > 0.0 { Visibility::Visible } else { Visibility::Hidden };
-    }
-}
-
-fn handle_nav_on_screen_button_press(
-    mut interactions: Query<
-        &Interaction,
-        (Changed<Interaction>, With<Button>, With<NavOnScreenButton>),
-    >,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(
-                ClientMessage::SetView { mode: ViewMode::NavigationChart },
-            ));
-        }
-    }
-}
-
-fn handle_nav_cancel_impulse_button_press(
-    mut interactions: Query<
-        &Interaction,
-        (Changed<Interaction>, With<Button>, With<NavCancelImpulseButton>),
-    >,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
-        }
     }
 }
 
@@ -242,11 +316,15 @@ fn draw_nav_chart(
     {
         return;
     }
-    let Ok((node, gt, view_vis)) = panel.single() else { return };
+    let Ok((node, gt, view_vis)) = panel.single() else {
+        return;
+    };
     if !view_vis.get() {
         return;
     }
-    let Ok(window) = windows.single() else { return };
+    let Ok(window) = windows.single() else {
+        return;
+    };
     let viewport_w = window.width();
     let viewport_h = window.height();
 
@@ -254,7 +332,6 @@ fn draw_nav_chart(
     let node_centre_screen = gt.translation().truncate();
     let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
     let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
-    // `centre` is the screen position of the star (chart origin).
     let centre = Vec2::new(centre_world_x, centre_world_y);
 
     let radius = node_size.x.min(node_size.y) * 0.5;
@@ -272,7 +349,11 @@ fn draw_nav_chart(
     const ZOOM: f32 = 1.0;
 
     for ring in &chart_view.rings {
-        let pos = centre + Vec2::new(ring.centre_x * radius / ZOOM, ring.centre_y * radius / ZOOM);
+        let pos = centre
+            + Vec2::new(
+                ring.centre_x * radius / ZOOM,
+                ring.centre_y * radius / ZOOM,
+            );
         let outer_r = ring.outer_r * radius / ZOOM;
         gizmos.circle_2d(pos, outer_r, Color::srgb(0.3, 0.7, 0.4));
         let inner_r = ring.inner_r * radius / ZOOM;
@@ -281,10 +362,10 @@ fn draw_nav_chart(
         }
     }
 
-    // Separate ship dot from other dots; track ship position for triangle.
     let mut ship_radar_pos: Option<Vec2> = None;
     for dot in &chart_view.dots {
-        let pos = centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
+        let pos =
+            centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
         if dot.uuid == crate::radar::SHIP_DOT_UUID {
             ship_radar_pos = Some(pos);
         } else {
@@ -294,19 +375,216 @@ fn draw_nav_chart(
     }
 
     // Draw ship as a small heading triangle at its star-relative position.
-    // The triangle points in the ship's yaw direction (north-up: yaw=0 → up).
     let ship_pos = ship_radar_pos.unwrap_or(centre);
     let yaw = ship_view.ship_yaw;
-    let nose_len  = radius * 0.10;
+    let nose_len = radius * 0.10;
     let half_base = radius * 0.06;
-    // In north-up space: yaw=0 means forward = -Z = screen +Y.
-    // Rotate the canonical "up" triangle by ship yaw.
     let (sin_y, cos_y) = yaw.sin_cos();
-    let rotate = |v: Vec2| Vec2::new(v.x * cos_y + v.y * sin_y, -v.x * sin_y + v.y * cos_y);
-    let nose  = ship_pos + rotate(Vec2::new(0.0,  nose_len));
-    let left  = ship_pos + rotate(Vec2::new(-half_base, -nose_len * 0.6));
-    let right = ship_pos + rotate(Vec2::new( half_base, -nose_len * 0.6));
-    gizmos.line_2d(nose, left,  Color::srgb(0.5, 1.0, 0.8));
+    let rotate =
+        |v: Vec2| Vec2::new(v.x * cos_y + v.y * sin_y, -v.x * sin_y + v.y * cos_y);
+    let nose = ship_pos + rotate(Vec2::new(0.0, nose_len));
+    let left = ship_pos + rotate(Vec2::new(-half_base, -nose_len * 0.6));
+    let right = ship_pos + rotate(Vec2::new(half_base, -nose_len * 0.6));
+    gizmos.line_2d(nose, left, Color::srgb(0.5, 1.0, 0.8));
     gizmos.line_2d(left, right, Color::srgb(0.5, 1.0, 0.8));
     gizmos.line_2d(right, nose, Color::srgb(0.5, 1.0, 0.8));
+}
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_lobby::{ActiveConsole, LobbyState};
+    use crate::messages::{Console, GamePhase, GameState, Player, ServerMessage, ShipClientConfig};
+    use crate::stations_config::ShipStations;
+    use std::collections::HashMap;
+
+    fn player(token: &str, consoles: Vec<Console>) -> Player {
+        Player {
+            token: token.into(),
+            name: "test".into(),
+            consoles,
+            connected: true,
+        }
+    }
+
+    fn game_state(phase: GamePhase, players: Vec<Player>) -> GameState {
+        GameState {
+            phase,
+            players,
+            complexity: HashMap::new(),
+            world: None,
+        }
+    }
+
+    fn welcome(state: GameState) -> ServerMessage {
+        ServerMessage::Welcome {
+            state,
+            ship_stations: ShipStations::default(),
+            ship_config: ShipClientConfig::default(),
+        }
+    }
+
+    fn in_progress_navigation_lobby(token: &str) -> LobbyState {
+        let mut s = LobbyState::default();
+        s.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player(token, vec![Console::Navigation])],
+        )));
+        s
+    }
+
+    fn no_tab() -> ActiveConsole {
+        ActiveConsole(None)
+    }
+    fn tab(c: Console) -> ActiveConsole {
+        ActiveConsole(Some(c))
+    }
+
+    // ── navigation_panel_visible ──────────────────────────────────────
+
+    #[test]
+    fn navigation_panel_hidden_in_lobby_phase() {
+        let lobby = LobbyState::default();
+        let active = no_tab();
+        assert!(!navigation_panel_visible(&lobby, "tok", &active));
+    }
+
+    #[test]
+    fn navigation_panel_hidden_when_player_not_navigation() {
+        let mut lobby = LobbyState::default();
+        lobby.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("tok", vec![Console::Helm])],
+        )));
+        let active = no_tab();
+        assert!(!navigation_panel_visible(&lobby, "tok", &active));
+    }
+
+    #[test]
+    fn navigation_panel_visible_when_sole_console_and_no_tab() {
+        let lobby = in_progress_navigation_lobby("tok");
+        let active = no_tab();
+        assert!(navigation_panel_visible(&lobby, "tok", &active));
+    }
+
+    #[test]
+    fn navigation_panel_visible_when_multi_console_and_navigation_tab() {
+        let mut lobby = LobbyState::default();
+        lobby.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("tok", vec![Console::Navigation, Console::Helm])],
+        )));
+        let active = tab(Console::Navigation);
+        assert!(navigation_panel_visible(&lobby, "tok", &active));
+    }
+
+    #[test]
+    fn navigation_panel_hidden_when_multi_console_and_other_tab() {
+        let mut lobby = LobbyState::default();
+        lobby.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("tok", vec![Console::Navigation, Console::Helm])],
+        )));
+        let active = tab(Console::Helm);
+        assert!(!navigation_panel_visible(&lobby, "tok", &active));
+    }
+
+    #[test]
+    fn navigation_panel_hidden_when_multi_console_and_no_tab() {
+        let mut lobby = LobbyState::default();
+        lobby.apply(&welcome(game_state(
+            GamePhase::InProgress,
+            vec![player("tok", vec![Console::Navigation, Console::Helm])],
+        )));
+        let active = no_tab();
+        assert!(!navigation_panel_visible(&lobby, "tok", &active));
+    }
+
+    // ── impulse_status_label ──────────────────────────────────────────
+
+    #[test]
+    fn impulse_status_idle_when_zero_charge() {
+        assert_eq!(impulse_status_label(0.0), "Idle");
+    }
+
+    #[test]
+    fn impulse_status_charging_when_partial_charge() {
+        assert_eq!(impulse_status_label(0.5), "Charging");
+        assert_eq!(impulse_status_label(0.001), "Charging");
+        assert_eq!(impulse_status_label(0.999), "Charging");
+    }
+
+    #[test]
+    fn impulse_status_active_when_full_charge() {
+        assert_eq!(impulse_status_label(1.0), "ACTIVE");
+        assert_eq!(impulse_status_label(1.5), "ACTIVE");
+    }
+
+    #[test]
+    fn impulse_status_idle_when_negative_charge() {
+        assert_eq!(impulse_status_label(-0.1), "Idle");
+    }
+
+    // ── StateVisuals: five widget states ─────────────────────────────
+
+    #[test]
+    fn cancel_impulse_visuals_has_distinct_five_states() {
+        use crate::gui::resolve_visual;
+        let v = cancel_impulse_visuals();
+        let idle = resolve_visual(&v, false, false, false, false).color;
+        let hover = resolve_visual(&v, false, false, false, true).color;
+        let active = resolve_visual(&v, false, false, true, false).color;
+        let press = resolve_visual(&v, false, true, false, false).color;
+        let disabled = resolve_visual(&v, true, false, false, false).color;
+        assert_ne!(idle, hover);
+        assert_ne!(idle, active);
+        assert_ne!(idle, press);
+        assert_ne!(idle, disabled);
+    }
+
+    #[test]
+    fn on_screen_visuals_has_distinct_five_states() {
+        use crate::gui::resolve_visual;
+        let v = on_screen_visuals();
+        let idle = resolve_visual(&v, false, false, false, false).color;
+        let hover = resolve_visual(&v, false, false, false, true).color;
+        let active = resolve_visual(&v, false, false, true, false).color;
+        let press = resolve_visual(&v, false, true, false, false).color;
+        let disabled = resolve_visual(&v, true, false, false, false).color;
+        assert_ne!(idle, hover);
+        assert_ne!(idle, active);
+        assert_ne!(idle, press);
+        assert_ne!(idle, disabled);
+    }
+
+    #[test]
+    fn impulse_readout_visuals_idle_differs_from_active() {
+        use crate::gui::resolve_visual;
+        let v = impulse_readout_visuals();
+        let idle = resolve_visual(&v, false, false, false, false).color;
+        let active = resolve_visual(&v, false, false, true, false).color;
+        assert_ne!(idle, active);
+    }
+
+    // ── ClientMessage variants (compile-time correctness checks) ─────
+
+    #[test]
+    fn cancel_impulse_message_variant_exists() {
+        let msg = ClientMessage::CancelImpulse;
+        assert_eq!(msg, ClientMessage::CancelImpulse);
+    }
+
+    #[test]
+    fn set_view_navigation_chart_message_variant_exists() {
+        let msg = ClientMessage::SetView {
+            mode: ViewMode::NavigationChart,
+        };
+        if let ClientMessage::SetView { mode } = msg {
+            assert_eq!(mode, ViewMode::NavigationChart);
+        } else {
+            panic!("expected SetView variant");
+        }
+    }
 }

@@ -35,7 +35,6 @@ async function init() {
 
   setupToolbar();
   setupLayersPanel();
-  setupModeTabs();
   renderAll();
 }
 
@@ -71,6 +70,29 @@ function renderAll() {
   renderLayersPanel(layerManager, renderAll, onSpawnSelectFromTree);
   canvasManager.renderAll();
   updateUnsavedIndicator();
+
+  // Mirror the V1 active layer into ModeShell so V2 features (save,
+  // undo shortcuts, invalidation) target the right file.
+  const active = layerManager.getActiveLayer();
+  const editorV2 = window.__editorV2;
+  if (editorV2 && editorV2.modeShell && active && active.filename) {
+    editorV2.modeShell.setActiveFile('Scenario', active.filename);
+    editorV2.modeShell.setActiveLayer('Scenario', active.filename);
+
+    const openFilenames = layerManager.getLayers()
+      .map((l) => l.filename)
+      .filter(Boolean);
+    editorV2.modeShell.setOpenFiles('Scenario', openFilenames);
+
+    // Mirror the saveFlow content cache so V2's saveActive has a parsed
+    // payload to serialize when the toolbar Save buttons run.
+    if (editorV2.saveFlow) {
+      for (const layer of layerManager.getLayers()) {
+        if (!layer.filename) continue;
+        editorV2.saveFlow.setContent('Scenario', layer.filename, layer.toml);
+      }
+    }
+  }
 }
 
 function updateUnsavedIndicator() {
@@ -126,6 +148,11 @@ function setupToolbar() {
 
         layerManager.layers.push(layer);
         layerManager.activeLayer = layer;
+
+        console.warn(
+          `[editor] Layer "${file.name}" was opened via file picker, so its root-relative path is unknown. ` +
+          `Saving through the new SaveFlow will fail. Use "Pick Project Root" and reopen the file from there.`
+        );
       } catch (err) {
         console.error('Failed to parse file:', file.name, err);
       }
@@ -140,15 +167,41 @@ function setupToolbar() {
   });
 
   document.getElementById('saveAllBtn').addEventListener('click', async () => {
-    for (const layer of layerManager.getLayers()) {
-      await saveLayer(layer);
+    const v2 = window.__editorV2;
+    if (!v2 || !v2.saveFlow) {
+      console.warn('[editor] SaveFlow not yet initialised; cannot save.');
+      return;
     }
+    const results = await v2.saveFlow.saveAll(null);
+    for (const r of results) {
+      if (!r.ok) {
+        console.error(`Save failed for ${r.path}:`, r.errors);
+      } else {
+        const layer = layerManager.getLayers().find((l) => l.filename === r.path);
+        if (layer) layer.isDirty = false;
+      }
+    }
+    renderAll();
   });
 
   document.getElementById('saveLayerBtn').addEventListener('click', async () => {
+    const v2 = window.__editorV2;
     const activeLayer = layerManager.getActiveLayer();
-    if (activeLayer) {
-      await saveLayer(activeLayer);
+    if (!v2 || !v2.saveFlow || !activeLayer) {
+      console.warn('[editor] No active layer or SaveFlow unavailable.');
+      return;
+    }
+    // renderAll() already mirrored the parsed payload into saveFlow's cache,
+    // but call again here in case the user edited and clicked save before a
+    // render tick fired.
+    v2.saveFlow.setContent('Scenario', activeLayer.filename, activeLayer.toml);
+    v2.modeShell.setActiveFile('Scenario', activeLayer.filename);
+    const result = await v2.saveFlow.saveActive(null);
+    if (!result.ok) {
+      console.error(`Save failed for ${activeLayer.filename}:`, result.errors);
+    } else {
+      activeLayer.isDirty = false;
+      renderAll();
     }
   });
 
@@ -157,62 +210,9 @@ function setupToolbar() {
   });
 }
 
-async function saveLayer(layer) {
-  try {
-    const raw = stringifyToml(layer.toml);
-
-    if (layer.fileHandle.createWritable) {
-      const writable = await layer.fileHandle.createWritable();
-      await writable.write(raw);
-      await writable.close();
-    } else {
-      const blob = new Blob([raw], { type: 'application/toml' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = layer.filename;
-      a.click();
-      URL.revokeObjectURL(url);
-      console.log(`Downloaded: ${layer.filename} (save-as required)`);
-    }
-
-    layer.isDirty = false;
-    console.log(`Saved: ${layer.filename}`);
-  } catch (err) {
-    console.error(`Failed to save ${layer.filename}:`, err);
-  }
-}
-
 function setupLayersPanel() {
   document.getElementById('addLayerBtn').addEventListener('click', () => {
     fileInput.click();
-  });
-}
-
-function setupModeTabs() {
-  const tabs = document.querySelectorAll('.v2-mode-tab');
-  const propertiesPanel = document.getElementById('propertiesPanel');
-  const textPanel = document.getElementById('v2-text-panel');
-  const v2Toolbar = document.querySelector('.v2-text-toolbar');
-
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      const mode = tab.dataset.mode;
-
-      // Update active tab
-      tabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-
-      if (mode === 'Properties') {
-        propertiesPanel?.classList.remove('hidden');
-        textPanel?.classList.add('hidden');
-        v2Toolbar?.classList.add('hidden');
-      } else {
-        propertiesPanel?.classList.add('hidden');
-        textPanel?.classList.remove('hidden');
-        v2Toolbar?.classList.remove('hidden');
-      }
-    });
   });
 }
 

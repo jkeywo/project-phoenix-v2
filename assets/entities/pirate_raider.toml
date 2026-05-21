@@ -63,7 +63,7 @@ target_speed = 0.9
 [[behaviour.state]]
 name = "attack"
 kind = "attacking"
-maintain_range = 45.0
+maintain_range = 35.0
 target_speed = 0.8
 
 [[behaviour.state]]

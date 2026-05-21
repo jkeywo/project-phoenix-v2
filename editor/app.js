@@ -2,7 +2,7 @@ import { LayerManager, renderLayersPanel, inferLayerKind } from './layers.js';
 import { CanvasManager } from './canvas.js';
 import { PropertiesPanel } from './sidebar.js';
 import { EntityEditor } from './entity-editor.js';
-import { stringifyToml, getEntityPath } from './toml-utils.js';
+import { getEntityPath } from './toml-utils.js';
 import { preloadEntityCache, loadEntityConfig } from './entity-cache.js';
 import { restoreScenarioLayer } from './undo-controller.js';
 

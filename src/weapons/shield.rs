@@ -103,6 +103,9 @@ pub struct ShieldFacing {
     pub offline_remaining: f32,
     /// Whether this facing is the currently focused arc.
     pub is_focused: bool,
+    /// Sub-integer regen accumulator. Carries fractional HP across frames so
+    /// that regen rates below 1 HP/frame are applied correctly.
+    hp_frac: f32,
 }
 
 impl ShieldFacing {
@@ -115,6 +118,7 @@ impl ShieldFacing {
             offline_duration,
             offline_remaining: 0.0,
             is_focused: false,
+            hp_frac: 0.0,
         }
     }
 
@@ -154,13 +158,22 @@ impl ShieldFacing {
         if !self.is_online() {
             self.offline_remaining = (self.offline_remaining - dt).max(0.0);
             if self.is_online() {
-                // Just came back online — restore to full HP.
+                // Just came back online — restore to full HP and clear accumulator.
                 self.hp = self.max_hp;
+                self.hp_frac = 0.0;
             }
         } else {
-            // Regen while online.
-            let new_hp = (self.hp as f32 + self.regen_per_sec * dt) as i32;
-            self.hp = new_hp.min(self.max_hp);
+            // Regen while online, accumulating fractional HP across frames.
+            self.hp_frac += self.regen_per_sec * dt;
+            let whole = self.hp_frac as i32;
+            if whole > 0 {
+                self.hp = (self.hp + whole).min(self.max_hp);
+                self.hp_frac -= whole as f32;
+            }
+            // Keep hp_frac from drifting if already at max.
+            if self.hp >= self.max_hp {
+                self.hp_frac = 0.0;
+            }
         }
     }
 
@@ -309,10 +322,20 @@ impl ShieldSystem {
 
             if is_decaying {
                 // Apply focus decay toward effective max_hp (no regen while decaying).
-                let hp_f = facing.hp as f32;
-                let target = facing.max_hp as f32;
-                let reduction = (self.focus_config.decay_rate * dt).min(hp_f - target);
-                facing.hp = (hp_f - reduction).round() as i32;
+                // Accumulate fractional decay in hp_frac (negative while decaying) so
+                // sub-integer rates are applied correctly across frames.
+                facing.hp_frac -= self.focus_config.decay_rate * dt;
+                let whole = facing.hp_frac.abs() as i32;
+                if whole > 0 {
+                    let target = facing.max_hp;
+                    facing.hp = (facing.hp - whole).max(target);
+                    facing.hp_frac += whole as f32; // remove the consumed integer part
+                }
+                // Clear accumulator once we've reached (or gone below) the reduced max.
+                if facing.hp <= facing.max_hp {
+                    facing.hp = facing.max_hp;
+                    facing.hp_frac = 0.0;
+                }
                 // Still tick offline timer if applicable.
                 if !facing.is_online() {
                     facing.offline_remaining = (facing.offline_remaining - dt).max(0.0);

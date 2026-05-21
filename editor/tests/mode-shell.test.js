@@ -272,6 +272,64 @@ describe('mode-shell', () => {
     });
   });
 
+  describe('undoActive / redoActive / clearUndoHistory (UndoStack integration)', () => {
+    it('undoActive pops the most recent entry', () => {
+      const shell = new ModeShell();
+      shell.pushUndoEntry('Scenario', 'a.toml', { v: 1 });
+      shell.pushUndoEntry('Scenario', 'a.toml', { v: 2 });
+
+      const popped = shell.undoActive('Scenario', 'a.toml');
+      expect(popped).toEqual({ v: 2 });
+      expect(shell.getUndoHistory('Scenario', 'a.toml')).toEqual([{ v: 1 }]);
+    });
+
+    it('undoActive returns null with no history', () => {
+      const shell = new ModeShell();
+      expect(shell.undoActive('Scenario', 'a.toml')).toBeNull();
+    });
+
+    it('redoActive restores the last undone entry', () => {
+      const shell = new ModeShell();
+      shell.pushUndoEntry('Scenario', 'a.toml', { v: 1 });
+      shell.undoActive('Scenario', 'a.toml');
+
+      const restored = shell.redoActive('Scenario', 'a.toml');
+      expect(restored).toEqual({ v: 1 });
+      expect(shell.getUndoHistory('Scenario', 'a.toml')).toEqual([{ v: 1 }]);
+    });
+
+    it('redoActive returns null with empty redo stack', () => {
+      const shell = new ModeShell();
+      shell.pushUndoEntry('Scenario', 'a.toml', { v: 1 });
+      // No undo yet → nothing to redo.
+      expect(shell.redoActive('Scenario', 'a.toml')).toBeNull();
+    });
+
+    it('pushUndoEntry after undo clears the redo stack', () => {
+      const shell = new ModeShell();
+      shell.pushUndoEntry('Scenario', 'a.toml', { v: 1 });
+      shell.undoActive('Scenario', 'a.toml');
+      shell.pushUndoEntry('Scenario', 'a.toml', { v: 99 });
+      // Redo should now be empty.
+      expect(shell.redoActive('Scenario', 'a.toml')).toBeNull();
+    });
+
+    it('clearUndoHistory empties both stacks for that file', () => {
+      const shell = new ModeShell();
+      shell.pushUndoEntry('Scenario', 'a.toml', { v: 1 });
+      shell.pushUndoEntry('Scenario', 'a.toml', { v: 2 });
+      shell.clearUndoHistory('Scenario', 'a.toml');
+      expect(shell.getUndoHistory('Scenario', 'a.toml')).toEqual([]);
+      expect(shell.undoActive('Scenario', 'a.toml')).toBeNull();
+      expect(shell.redoActive('Scenario', 'a.toml')).toBeNull();
+    });
+
+    it('clearUndoHistory on unknown file is a no-op', () => {
+      const shell = new ModeShell();
+      expect(() => shell.clearUndoHistory('Scenario', 'never.toml')).not.toThrow();
+    });
+  });
+
   describe('full persistence scenario (AC integration test)', () => {
     it('open file A in Scenario → switch to Entity → open file B → switch back → file A is still open and active', () => {
       const shell = new ModeShell();

@@ -1,5 +1,7 @@
 const DEFAULT_MODES = ['Scenario', 'Entity', 'Definitions'];
 
+import { UndoStack } from './undo-stack.js';
+
 export class ModeShell {
   constructor(modes = DEFAULT_MODES) {
     this._modes = [...modes];
@@ -90,15 +92,42 @@ export class ModeShell {
   }
 
   getUndoHistory(mode, filePath) {
-    if (!this._undoHistory[mode]) return [];
-    return this._undoHistory[mode][filePath] || [];
+    const stack = this._getStack(mode, filePath, false);
+    if (!stack) return [];
+    // Preserve legacy contract: callers (and tests) expect a raw array.
+    return stack._undoStack;
   }
 
   pushUndoEntry(mode, filePath, entry) {
-    if (!this._undoHistory[mode]) return;
-    if (!this._undoHistory[mode][filePath]) {
-      this._undoHistory[mode][filePath] = [];
+    const stack = this._getStack(mode, filePath, true);
+    if (!stack) return;
+    stack.push(entry);
+  }
+
+  undoActive(mode, filePath) {
+    const stack = this._getStack(mode, filePath, false);
+    if (!stack) return null;
+    return stack.undo();
+  }
+
+  redoActive(mode, filePath) {
+    const stack = this._getStack(mode, filePath, false);
+    if (!stack) return null;
+    return stack.redo();
+  }
+
+  clearUndoHistory(mode, filePath) {
+    const stack = this._getStack(mode, filePath, false);
+    if (stack) stack.clear();
+  }
+
+  _getStack(mode, filePath, createIfMissing) {
+    if (!this._undoHistory[mode]) return null;
+    let stack = this._undoHistory[mode][filePath];
+    if (!stack && createIfMissing) {
+      stack = new UndoStack();
+      this._undoHistory[mode][filePath] = stack;
     }
-    this._undoHistory[mode][filePath].push(entry);
+    return stack || null;
   }
 }

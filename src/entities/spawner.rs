@@ -125,7 +125,7 @@ pub fn spawn_entity(
         entity_commands.insert((
             rapier_collider,
             RigidBody::KinematicPositionBased,
-            ActiveCollisionTypes::KINEMATIC_STATIC,
+            ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
             ColliderSection(collider.clone()),
         ));
     }

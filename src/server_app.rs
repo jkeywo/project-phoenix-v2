@@ -187,8 +187,8 @@ pub fn add_simulation_plugins(app: &mut App) {
             handle_set_sensors_target.in_set(crate::sim_sets::SimSet::Input),
             handle_set_shield_focus.in_set(crate::sim_sets::SimSet::Input),
             tick_shields.in_set(crate::sim_sets::SimSet::Physics),
-            handle_collisions.in_set(crate::sim_sets::SimSet::Physics),
             broadcast_shield_status.in_set(crate::sim_sets::SimSet::Broadcast),
+            handle_collisions.in_set(crate::sim_sets::SimSet::Damage),
             sim_processing_anchor,
         )
             .after(crate::lobby::process_lobby),
@@ -502,6 +502,8 @@ fn handle_collisions(
         .flatten();
 
     if contact.is_some() {
+        ship.forward_speed = 0.0;
+
         if cooldown.remaining_secs > 0.0 {
             return;
         }
@@ -552,7 +554,6 @@ fn handle_collisions(
                 },
             ));
         }
-        ship.forward_speed = 0.0;
         cooldown.remaining_secs = 1.0;
     }
 }

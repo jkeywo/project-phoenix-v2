@@ -3,7 +3,7 @@ import { CanvasManager } from './canvas.js';
 import { PropertiesPanel } from './sidebar.js';
 import { EntityEditor } from './entity-editor.js';
 import { getEntityPath } from './toml-utils.js';
-import { preloadEntityCache, loadEntityConfig } from './entity-cache.js';
+import { preloadEntityCache, loadEntityConfig, invalidateEntity } from './entity-cache.js';
 import { restoreScenarioLayer } from './undo-controller.js';
 import { CrossReferenceIndex } from './cross-references.js';
 import { renderWorldContentPanel } from './world-content-view.js';
@@ -42,9 +42,26 @@ async function init() {
   await preloadEntityCache();
   entityEditor.loadEntitiesPalette();
 
+  // Slice 7 AC#4: when Entity Mode saves an entity TOML, the Scenario
+  // canvas keeps a stale `entity-cache` row. Subscribe to the
+  // cross-mode invalidation bus so the cache is dropped + re-fetched
+  // and the canvas re-rendered with the fresh config.
+  const v2Boot = window.__editorV2;
+  if (v2Boot && v2Boot.invalidationBus
+      && typeof v2Boot.invalidationBus.onEntitySaved === 'function') {
+    v2Boot.invalidationBus.onEntitySaved(async (savedPath) => {
+      try {
+        invalidateEntity(savedPath);
+        await loadEntityConfig(savedPath);
+        canvasManager.renderAll();
+      } catch (err) {
+        console.warn('[app] entity-saved refresh failed:', err?.message || err);
+      }
+    });
+  }
+
   // Slice 5: mount Entity Mode three-pane shell into its placeholder.
   const entityHost = document.getElementById('entity-mode-root');
-  const v2Boot = window.__editorV2;
   if (entityHost && v2Boot && v2Boot.modeShell && v2Boot.saveFlow) {
     mountEntityMode({
       host: entityHost,

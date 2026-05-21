@@ -2,6 +2,7 @@
 //   - TrunkApplicationStarted fires and all wasm_client_* bindings are wired
 //   - All assets referenced by the Rust client code are present in dist/client
 //   - No page-level JS errors (panics, bad WASM linkage)
+//   - No Bevy hierarchy warnings (B0004) in the browser console
 //
 // Asset presence is checked proactively (HEAD requests from within the page),
 // not reactively, so the test catches missing copy-dir entries even when
@@ -38,7 +39,16 @@ test('client WASM loads without asset 404s or JS errors', async ({ context }) =>
 
   const clientPage = await context.newPage();
   const pageErrors: string[] = [];
+  const bevyWarnings: string[] = [];
   clientPage.on('pageerror', err => pageErrors.push(err.message));
+  // Capture Bevy log output: warn!() maps to console.warn in WASM builds.
+  clientPage.on('console', msg => {
+    if (msg.type() === 'warning') {
+      const text = msg.text();
+      // B0004 = Bevy hierarchy inconsistency (ChildOf without matching Children).
+      if (text.includes('B0004')) bevyWarnings.push(text);
+    }
+  });
 
   await clientPage.goto(`/client/#${hostId}`);
 
@@ -47,6 +57,10 @@ test('client WASM loads without asset 404s or JS errors', async ({ context }) =>
     () => typeof (window as any).wasm_client_init === 'function',
     { timeout: 15_000 },
   );
+
+  // Give Bevy a few frames to run its startup systems so hierarchy warnings
+  // have a chance to fire before we assert.
+  await clientPage.waitForTimeout(2_000);
 
   // Proactively verify all required asset files are reachable.
   // We use HEAD requests so Bevy doesn't need to be running yet — this catches
@@ -72,4 +86,10 @@ test('client WASM loads without asset 404s or JS errors', async ({ context }) =>
   ).toEqual([]);
 
   expect(pageErrors, 'JS errors during client WASM startup').toEqual([]);
+
+  expect(
+    bevyWarnings,
+    'Bevy B0004 hierarchy warnings during client startup.\n' +
+    'An entity has a ChildOf component whose parent lacks Children — fix despawn/reparent logic.',
+  ).toEqual([]);
 });

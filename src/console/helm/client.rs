@@ -353,7 +353,7 @@ fn spawn_phone_helm_ui(
     let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
-        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).despawn();
     }
     // Despawn any stale Helm help-overlay from a previous spawn (e.g. an
     // orientation respawn) before ConsoleShell::spawn creates a fresh one.

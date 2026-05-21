@@ -153,7 +153,7 @@ fn spawn_captain_ui(
     let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
-        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).despawn();
     }
     // Despawn any stale Captain help-overlay from a previous spawn (e.g. an
     // orientation respawn) before ConsoleShell::spawn creates a fresh one.
@@ -636,11 +636,11 @@ fn respawn_captain_on_orientation_change(
     panel: Query<Entity, With<CaptainPanel>>,
     mut commands: Commands,
 ) {
-    if !orientation.is_changed() {
+    if !orientation.is_changed() || orientation.is_added() {
         return;
     }
     for entity in panel.iter() {
-        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).despawn();
     }
     commands.remove_resource::<CaptainPanelSpawned>();
 }

@@ -200,7 +200,7 @@ fn spawn_weapons_ui(
     let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
-        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).despawn();
     }
     for (entity, overlay) in old_help.iter() {
         if overlay.0 == crate::client::elements::HelpPanel::Tactical {
@@ -558,11 +558,11 @@ fn respawn_weapons_on_orientation_change(
     mut commands: Commands,
 ) {
     let Some(orientation) = orientation else { return };
-    if !orientation.is_changed() {
+    if !orientation.is_changed() || orientation.is_added() {
         return;
     }
     for entity in panel.iter() {
-        commands.entity(entity).despawn_related::<Children>();
+        commands.entity(entity).despawn();
     }
     commands.remove_resource::<WeaponsPanelSpawned>();
 }

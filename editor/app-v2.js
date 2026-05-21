@@ -1,12 +1,28 @@
 import { isSupported, pickProjectRoot, getProjectRoot, readFile, writeFile } from './project-root.js';
 import { ModeShell } from './mode-shell.js';
-import { parseWorldToml, stringifyWorldToml, validateWorldToml } from './world-toml.js';
-import { parseEntityToml, stringifyEntityToml, validateEntityToml } from './entity-toml.js';
+import { stringifyWorldToml } from './world-toml.js';
+import { stringifyEntityToml } from './entity-toml.js';
+import { InvalidationBus } from './invalidation-bus.js';
+import { SaveFlow } from './save-flow.js';
 
 const $ = (id) => document.getElementById(id);
 
 const modeShell = new ModeShell();
+const invalidationBus = new InvalidationBus();
+const saveFlow = new SaveFlow(
+  modeShell,
+  { world: stringifyWorldToml, entity: stringifyEntityToml },
+  writeFile,
+  invalidationBus,
+);
+
 let currentFilePath = null;
+
+// Expose to V1 (app.js) and to dev consoles. This is the cross-file
+// integration point until Slice 2+ moves everything into V2 properly.
+if (typeof window !== 'undefined') {
+  window.__editorV2 = { modeShell, invalidationBus, saveFlow };
+}
 
 async function init() {
   if (!isSupported()) {
@@ -19,6 +35,7 @@ async function init() {
   setupChangeRoot();
   setupOpenFile();
   setupSaveFile();
+  setupGlobalUndoShortcuts();
 
   // V1 map editor (canvas + layers) is the default view.
   // V2 text editor stays hidden; it's shown only when the user triggers it
@@ -31,22 +48,26 @@ function showBanner() {
   $('browser-not-supported').classList.remove('hidden');
 }
 
-function showPicker() {
-  $('root-picker').classList.remove('hidden');
-}
-
-function showEditor() {
-  $('v2-editor').classList.remove('hidden');
-  $('v2-root-label').textContent = 'Project root: selected';
-}
+const MODE_PANE_IDS = {
+  Scenario: 'scenario-mode-root',
+  Entity: 'entity-mode-root',
+  Definitions: 'definitions-mode-root',
+};
 
 function setupModeSwitcher() {
   document.querySelectorAll('.v2-mode-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const mode = tab.dataset.mode;
-      modeShell.switchMode(mode);
+      if (!modeShell.switchMode(mode)) return;
+
       document.querySelectorAll('.v2-mode-tab').forEach((t) => t.classList.remove('active'));
       tab.classList.add('active');
+
+      for (const [m, id] of Object.entries(MODE_PANE_IDS)) {
+        const pane = document.getElementById(id);
+        if (!pane) continue;
+        pane.classList.toggle('hidden', m !== mode);
+      }
     });
   });
 }
@@ -55,7 +76,7 @@ function setupPickRoot() {
   $('pickRootBtn').addEventListener('click', async () => {
     try {
       await pickProjectRoot();
-      showEditor();
+      $('root-picker').classList.add('hidden');
     } catch (err) {
       $('v2-status').textContent = `Error picking root: ${err.message}`;
     }
@@ -113,6 +134,30 @@ function setupSaveFile() {
       $('v2-status').textContent = `Saved: ${currentFilePath}`;
     } catch (err) {
       $('v2-status').textContent = `Error: ${err.message}`;
+    }
+  });
+}
+
+function setupGlobalUndoShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    // Don't hijack native textarea/input undo.
+    const tag = e.target?.tagName;
+    if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key !== 'z' && e.key !== 'Z') return;
+
+    const mode = modeShell.getCurrentMode();
+    const path = modeShell.getActiveFile(mode);
+    if (!path) return;
+
+    e.preventDefault();
+
+    // Slice 1 just pops the stack; Slices 2/3/5/6 wire mode-specific
+    // restoration that consumes the entry returned here.
+    if (e.shiftKey) {
+      modeShell.redoActive(mode, path);
+    } else {
+      modeShell.undoActive(mode, path);
     }
   });
 }

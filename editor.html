@@ -49,8 +49,7 @@
         <button id="saveLayerBtn">Save Layer</button>
       </div>
       <div class="toolbar-group v2-mode-group">
-        <button class="v2-mode-tab active" data-mode="Properties">Properties</button>
-        <button class="v2-mode-tab" data-mode="Scenario">Scenario</button>
+        <button class="v2-mode-tab active" data-mode="Scenario">Scenario</button>
         <button class="v2-mode-tab" data-mode="Entity">Entity</button>
         <button class="v2-mode-tab" data-mode="Definitions">Definitions</button>
       </div>
@@ -69,43 +68,56 @@
 
     <!-- Main Content -->
     <div id="main">
-      <!-- Left Panel -->
-      <div id="leftPanel">
-        <!-- Layers Section -->
-        <div id="layersSection">
-          <h3>LAYERS</h3>
-          <div id="layersList"></div>
-          <button id="addLayerBtn">+ Add Layer</button>
-        </div>
+      <!-- Scenario Mode (V1 canvas + layers + properties) -->
+      <div id="scenario-mode-root" class="mode-pane">
+        <!-- Left Panel -->
+        <div id="leftPanel">
+          <!-- Layers Section -->
+          <div id="layersSection">
+            <h3>LAYERS</h3>
+            <div id="layersList"></div>
+            <button id="addLayerBtn">+ Add Layer</button>
+          </div>
 
-        <!-- Entities Palette -->
-        <div id="entitiesSection">
-          <h3>ENTITIES</h3>
-          <div id="entitiesList"></div>
-          <button id="newEntityBtn">+ New</button>
-        </div>
-      </div>
-
-      <!-- Canvas -->
-      <div id="canvasContainer">
-        <div id="canvas"></div>
-        <div id="canvasControls">
-          <span id="zoomLevel">100%</span>
-        </div>
-      </div>
-
-      <!-- Right Panel (Properties / Text Editor) -->
-      <div id="rightPanel">
-        <div id="propertiesPanel">
-          <h3>PROPERTIES</h3>
-          <div id="propertiesPanelContent">
-            <p class="placeholder">Select a spawn to edit properties</p>
+          <!-- Entities Palette -->
+          <div id="entitiesSection">
+            <h3>ENTITIES</h3>
+            <div id="entitiesList"></div>
+            <button id="newEntityBtn">+ New</button>
           </div>
         </div>
-        <div id="v2-text-panel" class="hidden">
-          <h3>TEXT EDITOR</h3>
-          <textarea id="v2-file-content" class="v2-editor-textarea" spellcheck="false" placeholder="Open a TOML file to edit…"></textarea>
+
+        <!-- Canvas -->
+        <div id="canvasContainer">
+          <div id="canvas"></div>
+          <div id="canvasControls">
+            <span id="zoomLevel">100%</span>
+          </div>
         </div>
+
+        <!-- Right Panel (Properties / Text Editor) -->
+        <div id="rightPanel">
+          <div id="propertiesPanel">
+            <h3>PROPERTIES</h3>
+            <div id="propertiesPanelContent">
+              <p class="placeholder">Select a spawn to edit properties</p>
+            </div>
+          </div>
+          <div id="v2-text-panel" class="hidden">
+            <h3>TEXT EDITOR</h3>
+            <textarea id="v2-file-content" class="v2-editor-textarea" spellcheck="false" placeholder="Open a TOML file to edit…"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Entity Mode (Slice 5 will populate) -->
+      <div id="entity-mode-root" class="mode-pane hidden">
+        <p class="placeholder">Entity Mode — wired in a later slice.</p>
+      </div>
+
+      <!-- Definitions Mode (Slice 6 will populate) -->
+      <div id="definitions-mode-root" class="mode-pane hidden">
+        <p class="placeholder">Definitions Mode — wired in a later slice.</p>
       </div>
     </div>
   </div>

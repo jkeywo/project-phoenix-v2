@@ -1,9 +1,9 @@
-// Red Alert vignette — inset radial gradient.
+// Red Alert vignette — inset rectangular glow.
 //
 // Driven by the `RedAlertVignetteMaterial` UiMaterial (PRD #180, slice
-// #183). The single `intensity` uniform fades the whole effect from
-// invisible (0.0) to fully bright (1.0); the per-frame ramp + sine
-// pulse is computed in Rust by `viewscreen_border::pulse_intensity`.
+// #183). The `intensity` uniform fades the whole effect from invisible
+// (0.0) to fully bright (1.0); the per-frame ramp + sine pulse is
+// computed in Rust by `viewscreen_border::pulse_intensity`.
 //
 // The visual matches the original CSS box-shadow + radial-gradient
 // recipe in `server.html`:
@@ -14,18 +14,17 @@
 //   completely well before the middle of the viewport (mimicking the
 //   two-stop radial-gradient from 65% → 85% → 100%).
 //
-// Geometry uses the UiVertexOutput.uv (range 0..1 across the node), so
-// the vignette is independent of node aspect ratio. We compute a radial
-// distance from the centre normalised to the corner, then build two
-// inset-from-the-edge falloffs by working with `1 - r`.
+// Edge distance is computed in pixel-space (scaled by the aspect_ratio
+// uniform), so the vignette has uniform pixel thickness on all four
+// edges regardless of viewport shape.
 
 #import bevy_ui::ui_vertex_output::UiVertexOutput
 
 struct RedAlertVignetteMaterial {
     intensity: f32,
     flash_intensity: f32,
+    aspect_ratio: f32,
     _pad0: f32,
-    _pad1: f32,
 };
 
 // UiMaterial: group(0) is reserved for the view/globals uniforms; custom
@@ -47,12 +46,15 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     // Centre-relative coordinates in [-1, 1].
     let p = in.uv * 2.0 - vec2<f32>(1.0, 1.0);
 
-    // Inset distance from the nearest screen edge, using a Chebyshev
-    // metric (min of horizontal + vertical distance-to-edge). This
-    // gives a uniform rectangular border glow — equal thickness on all
-    // four edges — instead of the elliptical glow that `length(p)`
-    // produces (which hugs corners and leaves mid-edges weaker).
-    let edge_dist = min(1.0 - abs(p.x), 1.0 - abs(p.y));
+    // Inset distance from the nearest screen edge, scaled into
+    // pixel-space by the aspect ratio so the Chebyshev metric
+    // represents the same pixel distance on all four edges. Without
+    // this scaling, a widescreen viewport would have visibly thicker
+    // glow on the left/right than on the top/bottom.
+    let edge_dist = min(
+        (1.0 - abs(p.x)) * material.aspect_ratio,
+        1.0 - abs(p.y),
+    );
     let inset = clamp(edge_dist, 0.0, 1.0);
 
     // Outer falloff — soft red glow leaking inward through ~40% of the

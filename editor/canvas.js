@@ -4,6 +4,7 @@ import { loadEntityConfig, getEntityConfig } from './entity-cache.js';
 import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALLBACK } from './canvas-scenario.js';
 import { getRegionRenderSpec } from './canvas-region.js';
 import { getAnchorRenderSpecs } from './canvas-anchor.js';
+import { analyzeAnchorRename } from './anchor-rename.js';
 import { snapshotForUndo } from './undo-controller.js';
 
 export class CanvasManager {
@@ -207,8 +208,138 @@ export class CanvasManager {
     container.add(group);
   }
 
-  showAnchorMenu(_clientX, _clientY, _anchorName, _layer) {
-    // Wired in C5/C6.
+  showAnchorMenu(clientX, clientY, anchorName, ownerLayer) {
+    // Tear down any prior menu.
+    this.dismissAnchorMenu();
+
+    const menu = document.createElement('div');
+    menu.style.cssText = [
+      'position:fixed',
+      `left:${clientX}px`,
+      `top:${clientY}px`,
+      'z-index:9999',
+      'background:#2a2a2a',
+      'border:1px solid #555',
+      'border-radius:4px',
+      'padding:4px 0',
+      'box-shadow:0 4px 8px rgba(0,0,0,0.6)',
+      'font-family:sans-serif',
+      'font-size:12px',
+      'color:#eee',
+      'min-width:120px',
+    ].join(';');
+
+    const makeItem = (label, onClick) => {
+      const item = document.createElement('div');
+      item.textContent = label;
+      item.style.cssText = 'padding:6px 12px;cursor:pointer';
+      item.addEventListener('mouseenter', () => { item.style.background = '#444'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('click', () => {
+        this.dismissAnchorMenu();
+        onClick();
+      });
+      return item;
+    };
+
+    menu.appendChild(makeItem('Rename', () => this.renameAnchor(anchorName, ownerLayer)));
+    menu.appendChild(makeItem('Delete', () => this.deleteAnchor(anchorName, ownerLayer)));
+
+    document.body.appendChild(menu);
+    this._anchorMenu = menu;
+
+    // Dismiss on next outside click.
+    const dismissOnClick = (ev) => {
+      if (!menu.contains(ev.target)) {
+        this.dismissAnchorMenu();
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', dismissOnClick, { once: true }), 0);
+    this._anchorMenuDismiss = () => document.removeEventListener('mousedown', dismissOnClick);
+  }
+
+  dismissAnchorMenu() {
+    if (this._anchorMenu && this._anchorMenu.parentNode) {
+      this._anchorMenu.parentNode.removeChild(this._anchorMenu);
+    }
+    if (this._anchorMenuDismiss) {
+      this._anchorMenuDismiss();
+      this._anchorMenuDismiss = null;
+    }
+    this._anchorMenu = null;
+  }
+
+  buildV2Layers() {
+    return this.layerManager.getLayers().map(l => ({ path: l.filename, worldState: l.toml }));
+  }
+
+  renameAnchor(currentName, ownerLayer) {
+    const newName = window.prompt('Rename anchor', currentName);
+    if (newName == null || newName === '' || newName === currentName) return;
+
+    const v2Layers = this.buildV2Layers();
+    const result = analyzeAnchorRename(currentName, newName, v2Layers);
+    if (!result.allowed) {
+      window.alert(result.error || 'Rename blocked.');
+      return;
+    }
+    if (result.crossLayerReferences.length > 0) {
+      const proceed = window.confirm(
+        `Anchor "${currentName}" is referenced in ${result.crossLayerReferences.length} other layer(s). These will also be rewritten. Proceed?`
+      );
+      if (!proceed) return;
+    }
+
+    const layersByPath = new Map(this.layerManager.getLayers().map(l => [l.filename, l]));
+
+    // Snapshot + rewrite owner layers (anchor key + in-layer references).
+    for (const pair of result.rewritePairs) {
+      const ownerL = layersByPath.get(pair.layerPath);
+      if (!ownerL || !ownerL.toml) continue;
+      snapshotForUndo(ownerL);
+      const anchors = ownerL.toml.anchors;
+      if (anchors && anchors[currentName] != null) {
+        anchors[newName] = anchors[currentName];
+        delete anchors[currentName];
+      }
+      this.rewriteAnchorRefsInLayer(ownerL.toml, currentName, newName);
+      ownerL.isDirty = true;
+    }
+
+    // Snapshot + rewrite cross-layer references (no anchor key change).
+    const crossPaths = new Set(result.crossLayerReferences.map(r => r.layerPath));
+    for (const crossPath of crossPaths) {
+      const crossL = layersByPath.get(crossPath);
+      if (!crossL || !crossL.toml) continue;
+      snapshotForUndo(crossL);
+      this.rewriteAnchorRefsInLayer(crossL.toml, currentName, newName);
+      crossL.isDirty = true;
+    }
+
+    this.renderAll();
+  }
+
+  rewriteAnchorRefsInLayer(toml, oldName, newName) {
+    if (!toml || typeof toml !== 'object') return;
+    if (Array.isArray(toml.entity)) {
+      for (const ent of toml.entity) {
+        if (ent && ent.anchor === oldName) ent.anchor = newName;
+      }
+    }
+    if (Array.isArray(toml.trigger)) {
+      for (const trig of toml.trigger) {
+        if (!trig || !Array.isArray(trig.action)) continue;
+        for (const action of trig.action) {
+          if (action && typeof action === 'object' && action.anchor === oldName) {
+            action.anchor = newName;
+          }
+        }
+      }
+    }
+  }
+
+  deleteAnchor(_anchorName, _ownerLayer) {
+    // Wired in C6.
   }
 
   renderSpawn(spawn, layer, container, allAnchors) {

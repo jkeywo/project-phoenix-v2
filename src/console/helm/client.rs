@@ -77,7 +77,7 @@ pub const HELM_PAD_SIZE: f32 = 200.0;
 /// sent a `Welcome` with a `ShipClientConfig.helm_radar_range`. The real
 /// runtime value comes from `LobbyState.ship_config.helm_radar_range`,
 /// sourced from `[helm_console.radar] range` in `player_ship.toml`.
-pub const HELM_RADAR_RANGE_FALLBACK: f32 = 500.0;
+pub const HELM_RADAR_RANGE_FALLBACK: f32 = 250.0;
 
 /// Convert ship yaw (radians, CCW from +Z) to a 3-digit heading string
 /// (degrees, 0–360, 0 = ship-forward = "north" on the compass).

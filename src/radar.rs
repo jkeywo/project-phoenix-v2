@@ -13,18 +13,18 @@ use crate::radar_config::RadarConfig;
 
 /// Range, in world units, that the radar covers from its centre to the
 /// outer ring. Anything beyond is clipped.
-pub const RADAR_RANGE: f32 = 50.0;
+pub const RADAR_RANGE: f32 = 250.0;
 
 /// Maximum firing range, in world units, for the phaser weapon.
 pub const PHASER_RANGE: f32 = 40.0;
 
 /// Inner reference ring drawn at this fraction of the outer ring.
-pub const RADAR_MID_RING: f32 = 25.0;
+pub const RADAR_MID_RING: f32 = 125.0;
 
 /// The Weapons console radar range — asteroids within this distance of the
 /// ship can be locked as targets. Distinct from `RADAR_RANGE` (the helm's
 /// situational-awareness view) so each console can be tuned independently.
-pub const WEAPONS_RADAR_RANGE: f32 = 60.0;
+pub const WEAPONS_RADAR_RANGE: f32 = 300.0;
 
 /// Project a world-space point onto the radar's unit square, relative to
 /// the ship's position and yaw.
@@ -401,7 +401,7 @@ pub fn compute_science_radar_view(
 pub const SYSTEM_CHART_RANGE: f32 = 500.0;
 
 /// Maximum range for the Science console long-range radar at full power.
-pub const SCIENCE_RADAR_RANGE: f32 = 200.0;
+pub const SCIENCE_RADAR_RANGE: f32 = 500.0;
 
 pub const NAVIGATION_CHART_RANGE: f32 = 500.0;
 
@@ -591,25 +591,25 @@ mod tests {
 
     #[test]
     fn point_directly_ahead_at_yaw_zero_maps_to_positive_y() {
-        // Ship at origin, yaw=0 means facing -Z. A point at (0, -25) is
+        // Ship at origin, yaw=0 means facing -Z. A point at (0, -125) is
         // directly ahead: half the radar range, so radar_y = +0.5.
-        let p = project_to_radar(0.0, -25.0, 0.0, 0.0, 0.0).unwrap();
+        let p = project_to_radar(0.0, -125.0, 0.0, 0.0, 0.0).unwrap();
         close(p.0, 0.0);
         close(p.1, 0.5);
     }
 
     #[test]
     fn point_to_starboard_at_yaw_zero_maps_to_positive_x() {
-        // Yaw=0 (facing -Z), a point at (+25, 0) is on the right wing.
-        let p = project_to_radar(25.0, 0.0, 0.0, 0.0, 0.0).unwrap();
+        // Yaw=0 (facing -Z), a point at (+125, 0) is on the right wing.
+        let p = project_to_radar(125.0, 0.0, 0.0, 0.0, 0.0).unwrap();
         close(p.0, 0.5);
         close(p.1, 0.0);
     }
 
     #[test]
     fn point_outside_range_returns_none() {
-        // 51 > RADAR_RANGE
-        assert!(project_to_radar(51.0, 0.0, 0.0, 0.0, 0.0).is_none());
+        // 251 > RADAR_RANGE
+        assert!(project_to_radar(251.0, 0.0, 0.0, 0.0, 0.0).is_none());
     }
 
     #[test]
@@ -624,16 +624,16 @@ mod tests {
     fn ship_yaw_rotates_world_to_keep_forward_pointing_up() {
         // Yaw = π/2: ship faces +X (forward = (sin(π/2), -cos(π/2)) = (1, 0) in XZ).
         // The ship's starboard (right) vector = forward × world_up = +Z direction.
-        // So 25 units to starboard is world (x=0, z=+25).
+        // So 125 units to starboard is world (x=0, z=+125).
         // That point should map to radar_x=+0.5, radar_y=0.
         let yaw = std::f32::consts::FRAC_PI_2;
-        let p = project_to_radar(0.0, 25.0, 0.0, 0.0, yaw).unwrap();
+        let p = project_to_radar(0.0, 125.0, 0.0, 0.0, yaw).unwrap();
         close(p.0, 0.5);
         close(p.1, 0.0);
 
-        // Also verify: a point directly ahead at yaw=π/2 is at world (+25, 0).
+        // Also verify: a point directly ahead at yaw=π/2 is at world (+125, 0).
         // It should map to radar_x=0, radar_y=+0.5.
-        let q = project_to_radar(25.0, 0.0, 0.0, 0.0, yaw).unwrap();
+        let q = project_to_radar(125.0, 0.0, 0.0, 0.0, yaw).unwrap();
         close(q.0, 0.0);
         close(q.1, 0.5);
     }
@@ -647,15 +647,16 @@ mod tests {
 
     #[test]
     fn project_entity_as_asteroid_outside_range_returns_none() {
-        let a = EntitySnapshot::asteroid("", 100.0, 100.0, 2.0);
+        // (200, 200) is ~283 units away, outside RADAR_RANGE=250.
+        let a = EntitySnapshot::asteroid("", 200.0, 200.0, 2.0);
         assert!(project_entity_as_asteroid(&a, 0.0, 0.0, 0.0).is_none());
     }
 
     #[test]
     fn radar_constants_have_expected_values() {
         // PRD pinned values; locking these in protects the ring renderer.
-        assert_eq!(RADAR_RANGE, 50.0);
-        assert_eq!(RADAR_MID_RING, 25.0);
+        assert_eq!(RADAR_RANGE, 250.0);
+        assert_eq!(RADAR_MID_RING, 125.0);
     }
 
     fn entity_at(x: f32, z: f32, tags: &[&str]) -> EntitySnapshot {
@@ -686,7 +687,7 @@ mod tests {
 
     #[test]
     fn radar_dots_skips_out_of_range_asteroids() {
-        let far = entity_at(100.0, 100.0, &["asteroid"]);
+        let far = entity_at(200.0, 200.0, &["asteroid"]);
         let near = entity_at(0.0, -10.0, &["asteroid"]);
         let dots: Vec<_> = radar_dots(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(dots.len(), 1);
@@ -746,7 +747,7 @@ mod tests {
 
     #[test]
     fn radar_dots_filtered_skips_out_of_range_even_if_tag_matches() {
-        let far = entity_at(100.0, 100.0, &["asteroid"]);
+        let far = entity_at(200.0, 200.0, &["asteroid"]);
         let filter = vec![EntityTag::Asteroid];
         let dots: Vec<_> = radar_dots_filtered(&[far], 0.0, 0.0, 0.0, &filter).collect();
         assert!(dots.is_empty());
@@ -816,7 +817,7 @@ mod tests {
 
     fn helm_config() -> RadarConfig {
         RadarConfig {
-            range: 50.0,
+            range: RADAR_RANGE,
             shows: vec![EntityTag::Asteroid],
         }
     }
@@ -824,8 +825,8 @@ mod tests {
     #[test]
     fn config_project_ahead_matches_fixed_function() {
         let cfg = helm_config();
-        let fixed = project_to_radar(0.0, -25.0, 0.0, 0.0, 0.0).unwrap();
-        let with_cfg = project_to_radar_with_config(0.0, -25.0, 0.0, 0.0, 0.0, &cfg).unwrap();
+        let fixed = project_to_radar(0.0, -125.0, 0.0, 0.0, 0.0).unwrap();
+        let with_cfg = project_to_radar_with_config(0.0, -125.0, 0.0, 0.0, 0.0, &cfg).unwrap();
         close(with_cfg.0, fixed.0);
         close(with_cfg.1, fixed.1);
     }
@@ -936,7 +937,7 @@ mod tests {
 
     #[test]
     fn project_entity_as_field_ahead_maps_to_positive_y() {
-        let field = field_entity(0.0, -25.0, 5.0, 10.0);
+        let field = field_entity(0.0, -125.0, 5.0, 10.0);
         let (cx, cy, _ir, _or) = project_entity_as_field(&field, 0.0, 0.0, 0.0).unwrap();
         close(cx, 0.0);
         close(cy, 0.5);
@@ -944,22 +945,22 @@ mod tests {
 
     #[test]
     fn project_entity_as_field_fully_out_of_range_returns_none() {
-        // Field centre at 100 units, outer radius 5 → nearest edge at 95 > 50.
-        let field = field_entity(100.0, 0.0, 3.0, 5.0);
+        // Field centre at 260 units, outer radius 5 → nearest edge at 255 > 250.
+        let field = field_entity(260.0, 0.0, 3.0, 5.0);
         assert!(project_entity_as_field(&field, 0.0, 0.0, 0.0).is_none());
     }
 
     #[test]
     fn project_entity_as_field_partially_in_range_returns_some() {
-        // Field centre at 55 units, outer radius 10 → near edge at 45 < 50.
-        let field = field_entity(55.0, 0.0, 5.0, 10.0);
+        // Field centre at 255 units, outer radius 10 → near edge at 245 < 250.
+        let field = field_entity(255.0, 0.0, 5.0, 10.0);
         assert!(project_entity_as_field(&field, 0.0, 0.0, 0.0).is_some());
     }
 
     #[test]
     fn radar_rings_skips_fully_out_of_range_fields() {
-        let far = field_entity(200.0, 0.0, 5.0, 10.0);
-        let near = field_entity(0.0, -25.0, 5.0, 10.0);
+        let far = field_entity(270.0, 0.0, 5.0, 10.0);
+        let near = field_entity(0.0, -125.0, 5.0, 10.0);
         let rings: Vec<_> = radar_rings(&[far, near.clone()], 0.0, 0.0, 0.0).collect();
         assert_eq!(rings.len(), 1);
         let expected = project_entity_as_field(&near, 0.0, 0.0, 0.0).unwrap();

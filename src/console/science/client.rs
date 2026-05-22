@@ -190,6 +190,9 @@ fn fill_sensors_radar(commands: &mut Commands, container: Entity) {
         RadarLayer::Ship,
         RadarLayer::Asteroid,
         RadarLayer::AsteroidField,
+        RadarLayer::Station,
+        RadarLayer::Planet,
+        RadarLayer::Star,
     ]));
     let radar = GenericRadar::spawn(
         commands,
@@ -389,10 +392,15 @@ fn bridge_client_sim_to_science_radar(
             continue;
         }
 
-        // Science radar shows ships, asteroids, and asteroid-field regions;
-        // everything else (stations, planets, stars, missiles) is filtered out.
         let layer = match tags_to_radar_layer(&snapshot.tags) {
-            Some(l @ (RadarLayer::Ship | RadarLayer::Asteroid | RadarLayer::AsteroidField)) => l,
+            Some(
+                l @ (RadarLayer::Ship
+                    | RadarLayer::Asteroid
+                    | RadarLayer::AsteroidField
+                    | RadarLayer::Station
+                    | RadarLayer::Planet
+                    | RadarLayer::Star),
+            ) => l,
             _ => continue,
         };
         let icon = layer_to_icon(layer);

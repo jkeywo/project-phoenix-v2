@@ -32,8 +32,8 @@ pub use progress::{
 pub use radar::{
     blip_local_offset, default_layer_colour, is_on_radar, layer_to_icon, project_radar_entity,
     tags_to_radar_layer, world_size_to_px, AutoScaleRadar, GenericRadar, GenericRadarWidget,
-    HelmRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
-    RadarIcon, RadarIconLookup, RadarLayer, WorldCentredRadar,
+    HelmRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarBlipClicked, RadarCenter,
+    RadarFilter, RadarIcon, RadarIconLookup, RadarLayer, WorldCentredRadar,
 };
 pub use radio::{
     next_radio_selection, on_radio_member_pressed, RadioButtonConfig, RadioGroup, RadioGroupMarker,

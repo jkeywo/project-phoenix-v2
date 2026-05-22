@@ -24,11 +24,11 @@ use crate::client_sim::{
 };
 use crate::gui::{
     layer_to_icon, spawn_gui_button, tags_to_radar_layer, ButtonPressed, ButtonSize, GenericRadar,
-    OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
-    StateVisuals, RadioButtonConfig, RadioGroup, RadioSelected,
+    OnRadar, OrientationMode, RadarAppearance, RadarBlipClicked, RadarCenter, RadarFilter,
+    RadarIcon, RadarLayer, StateVisuals, RadioButtonConfig, RadioGroup, RadioSelected,
     Disabled,
 };
-use crate::messages::{Console, GamePhase, TorpedoTube};
+use crate::messages::{ClientMessage, Console, GamePhase, TorpedoTube};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
@@ -183,7 +183,8 @@ impl Plugin for WeaponsPanelPlugin {
                 refresh_torpedo_ui,
                 bridge_client_sim_to_weapons_radar,
                 respawn_weapons_on_orientation_change,
-            ));
+            ))
+            .add_observer(handle_radar_blip_clicked);
     }
 }
 
@@ -256,6 +257,7 @@ fn fill_tactical_radar(commands: &mut Commands, container: Entity) {
     let radar_filter = RadarFilter(std::collections::HashSet::from([
         RadarLayer::Ship,
         RadarLayer::Missile,
+        RadarLayer::Station,
     ]));
     let radar = GenericRadar::spawn(
         commands,
@@ -875,18 +877,18 @@ fn bridge_client_sim_to_weapons_radar(
             continue;
         }
 
-        // Weapons radar only shows ships and torpedoes; everything else
-        // (asteroids, stations, planets, stars, regions) is filtered out.
+        // Weapons radar shows ships, torpedoes, and stations.
         let layer = match tags_to_radar_layer(&snapshot.tags) {
-            Some(l @ (RadarLayer::Ship | RadarLayer::Missile)) => l,
+            Some(l @ (RadarLayer::Ship | RadarLayer::Missile | RadarLayer::Station)) => l,
             _ => continue,
         };
         let icon = layer_to_icon(layer);
-        // Tactical paints ships and torpedoes in alert-red shades rather
-        // than the helm-default colours.
+        // Tactical paints ships and torpedoes in alert-red shades; stations
+        // use the standard teal from default_layer_colour.
         let default_color = match layer {
             RadarLayer::Ship => Color::srgb(1.0, 0.4, 0.4),
             RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
+            RadarLayer::Station => Color::srgb(0.3, 0.8, 0.6),
             _ => unreachable!("filtered above"),
         };
 
@@ -930,6 +932,22 @@ fn bridge_client_sim_to_weapons_radar(
             false
         }
     });
+}
+
+// ── Radar blip click → target ─────────────────────────────────────────
+
+/// Handles a click on any radar blip: reverse-looks up the triggered entity in
+/// `WeaponsRadarEntities` to find its UUID, then sends `SetTarget`.
+fn handle_radar_blip_clicked(
+    trigger: On<RadarBlipClicked>,
+    radar: Res<WeaponsRadarEntities>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    let source = trigger.0.entity();
+    let Some(uuid) = radar.blips.iter().find_map(|(k, &v)| (v == source).then(|| k.clone())) else {
+        return;
+    };
+    outbound.write(OutboundClientMessage(ClientMessage::SetTarget { uuid }));
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────

@@ -140,6 +140,11 @@ struct RadarBlipNode {
     source: Entity,
 }
 
+/// Triggered on a radar blip UI node when the player clicks it.
+/// The payload is the source ECS entity stored in `RadarBlipNode::source`.
+#[derive(EntityEvent, Clone, Debug)]
+pub struct RadarBlipClicked(pub Entity);
+
 // ── Pure tag → layer / icon mapping ──────────────────────────────────────────
 
 /// Map an entity's `tags` list to a `RadarLayer`. Returns `None` for tags
@@ -527,6 +532,8 @@ fn sync_radar_blip_nodes(
                             ImageNode::new(h).with_color(color),
                             ZIndex(10),
                             RadarBlipNode { source },
+                            Button,
+                            Interaction::default(),
                         ));
                     } else {
                         // Defensive fallback: coloured square when icon missing.
@@ -535,6 +542,8 @@ fn sync_radar_blip_nodes(
                             ImageNode::solid_color(color),
                             ZIndex(10),
                             RadarBlipNode { source },
+                            Button,
+                            Interaction::default(),
                         ));
                     }
                 }
@@ -545,13 +554,28 @@ fn sync_radar_blip_nodes(
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
+/// Detects press transitions on `RadarBlipNode` UI nodes and triggers
+/// `RadarBlipClicked` on the source ECS blip entity.
+fn detect_radar_blip_press(
+    query: Query<(&Interaction, &RadarBlipNode), Changed<Interaction>>,
+    mut commands: Commands,
+) {
+    for (interaction, blip) in query.iter() {
+        if *interaction == Interaction::Pressed {
+            // Trigger on blip.source so the entity event payload carries the
+            // correct ECS blip entity (not the transient UI node entity).
+            commands.entity(blip.source).trigger(RadarBlipClicked);
+        }
+    }
+}
+
 /// Sub-plugin for the radar widget.  Registered automatically by `GuiPlugin`.
 pub struct GuiRadarPlugin;
 
 impl Plugin for GuiRadarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RadarIconLookup>()
-            .add_systems(Update, sync_radar_blip_nodes);
+            .add_systems(Update, (sync_radar_blip_nodes, detect_radar_blip_press));
     }
 }
 

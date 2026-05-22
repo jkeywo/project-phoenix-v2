@@ -143,6 +143,11 @@ pub struct GenericRadarWidget {
     pub orientation: OrientationMode,
     pub filter: RadarFilter,
     pub clip_mode: RadarClipMode,
+    /// Fraction of the widget's inscribed-circle radius that corresponds to the
+    /// visual radar face.  `1.0` means the radar circle fills the full widget;
+    /// values < 1.0 scale blip positions and the per-pixel clip boundary inward
+    /// to match a background image whose circular face is smaller than the node.
+    pub face_fraction: f32,
 }
 
 // ── Per-widget behaviour overrides ────────────────────────────────────────────
@@ -466,6 +471,12 @@ impl GenericRadar {
     /// - `clip_mode` — `Circle`, `Square`, or `None`. Stored on the widget component.
     ///   `Circle` clips blips per-pixel in the fragment shader; no extra image needed.
     ///   `Square` clips via `overflow: Overflow::clip()` on the spawned node.
+    /// - `overlay_fraction` — fraction of the widget at which the overlay image is
+    ///   rendered (`1.0` = full size; `0.875` centres a 560 px image inside a 640 px
+    ///   widget). Pass `1.0` when no overlay image is used.
+    /// - `face_fraction` — fraction of the widget's inscribed-circle radius that
+    ///   the visible radar face occupies.  Blip positions and the circular clip mask
+    ///   are scaled by this value.  Pass `1.0` for image-free radars.
     ///
     /// Returns the UI node entity.
     pub fn spawn(
@@ -476,6 +487,8 @@ impl GenericRadar {
         bg_image: Option<Handle<Image>>,
         overlay_image: Option<Handle<Image>>,
         clip_mode: RadarClipMode,
+        overlay_fraction: f32,
+        face_fraction: f32,
     ) -> Entity {
         let mut node = commands.spawn((
             GenericRadarWidget {
@@ -483,6 +496,7 @@ impl GenericRadar {
                 orientation,
                 filter,
                 clip_mode,
+                face_fraction,
             },
             Node {
                 width: Val::Percent(100.0),
@@ -497,14 +511,15 @@ impl GenericRadar {
         let entity = node.id();
 
         if let Some(overlay) = overlay_image {
+            let margin_pct = (1.0 - overlay_fraction) * 50.0;
             commands.entity(entity).with_children(|parent| {
                 parent.spawn((
                     Node {
                         position_type: PositionType::Absolute,
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        top: Val::Px(0.0),
-                        left: Val::Px(0.0),
+                        width: Val::Percent(overlay_fraction * 100.0),
+                        height: Val::Percent(overlay_fraction * 100.0),
+                        top: Val::Percent(margin_pct),
+                        left: Val::Percent(margin_pct),
                         ..default()
                     },
                     ImageNode::new(overlay),
@@ -586,7 +601,7 @@ fn sync_radar_blip_nodes(
         let size = computed.size();
         let center_x_px = size.x * 0.5;
         let center_y_px = size.y * 0.5;
-        let radar_radius_px = size.x.min(size.y) * 0.5;
+        let radar_radius_px = size.x.min(size.y) * 0.5 * widget.face_fraction;
         if radar_radius_px <= 0.0 {
             continue;
         }

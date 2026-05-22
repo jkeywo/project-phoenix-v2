@@ -246,6 +246,8 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
         None,
         None,
         RadarClipMode::Square,
+        1.0,
+        1.0,
     );
     commands.entity(radar).insert((
         WorldCentredRadar,

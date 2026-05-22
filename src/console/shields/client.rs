@@ -267,6 +267,7 @@ fn fill_shields_hp_rows(commands: &mut Commands, container: Entity) {
             .spawn(Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
                 width: Val::Percent(90.0),
                 column_gap: Val::Px(8.0),
                 ..default()

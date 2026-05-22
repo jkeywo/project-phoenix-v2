@@ -188,3 +188,132 @@ across the codebase did not need to be touched.
 - Issue [#245](https://github.com/jkeywo/project-phoenix-v2/issues/245)
 - [Console Plugin Pattern](./console-plugin-pattern.md)
 - [Broadcaster Seam](./broadcaster-seam.md)
+
+## Per-bank phasers and per-tube torpedoes (2026-05)
+
+The single-phaser / three-hardcoded-tube model was replaced with a
+data-driven loadout. The ship's TOML now declares every bank and tube
+explicitly, and the entire wire / server / client / UI stack reads from
+that loadout. There is no fallback to a hardcoded `"port"` bank or to
+`fore_port|fore_starboard|aft` tubes once the new schema is in effect.
+
+### TOML schema
+
+```toml
+[weapons_console]
+beam_range = 40.0
+beam_damage_per_sec = 5.0
+beam_duration_secs = 6.0
+cooldown_secs = 6.0
+beam_color = [1.0, 0.4, 0.1, 1.0]
+torpedo_arc_color = [1.0, 0.55, 0.2, 1.0]
+
+[[weapons_console.phaser_banks]]
+id = "port"
+facing_deg = -90.0
+fire_arc_deg = 90.0
+auto_arc_deg = 90.0     # auto_arc_deg ≤ fire_arc_deg (validator)
+
+[[weapons_console.phaser_banks]]
+id = "starboard"
+facing_deg = 90.0
+fire_arc_deg = 90.0
+auto_arc_deg = 90.0
+
+[torpedoes]
+count = 10              # shared ammo pool across all tubes
+load_time = 10.0
+
+[[torpedoes.tubes]]
+id = "fore_port"
+facing_deg = -30.0
+fire_arc_deg = 90.0
+
+[[torpedoes.tubes]]
+id = "fore_starboard"
+facing_deg = 30.0
+fire_arc_deg = 90.0
+
+[[torpedoes.tubes]]
+id = "aft"
+facing_deg = 180.0
+fire_arc_deg = 90.0
+```
+
+- `PhaserBankConfig` lives at `src/entities/config.rs:268` with validator
+  `validate_phaser_banks` enforcing `auto_arc_deg ∈ (0, fire_arc_deg]`
+  and `fire_arc_deg ∈ (0, 360]`.
+- `TorpedoTubeConfig` lives at `src/entities/config.rs:289`.
+
+### Wire shape
+
+`WeaponsUpdate` is now per-bank and per-tube:
+
+```rust
+WeaponsUpdate {
+    target_uuid: Option<String>,
+    banks: Vec<PhaserBankState>,    // id, fire_ready, on_cooldown, cooldown_remaining
+    tubes: Vec<TorpedoTubeState>,   // id, loaded, reload_secs
+    torpedo_count: u32,             // shared ammo pool
+    phaser_mode: PhaserMode,
+}
+
+ClientMessage::FirePhaser { bank: String }
+ClientMessage::FireTorpedo { tube: String, target_uuid: String }
+```
+
+`ShipClientConfig` in `Welcome` ships the bank and tube layouts plus the
+two render colours so the client can render fire-arc overlays without
+knowing the server-side `auto_arc_deg`:
+
+```rust
+ShipClientConfig {
+    phaser_banks: Vec<PhaserBankClientConfig>,     // id, facing_deg, fire_arc_deg
+    torpedo_tubes: Vec<TorpedoTubeClientConfig>,   // id, facing_deg, fire_arc_deg
+    phaser_beam_color: [f32; 4],
+    torpedo_arc_color: [f32; 4],
+    ...
+}
+```
+
+Populated by `lobby/server.rs::update_session_with_config` from the
+ship's `[weapons_console]` and `[torpedoes]` blocks.
+
+### Client UI
+
+`src/console/weapons/client.rs` spawns the Tactical panel dynamically
+from `lobby.ship_config`. A `WeaponsPanelLayoutKey { banks, tubes }`
+resource caches the spawned layout; `respawn_weapons_on_layout_change`
+despawns and rebuilds the panel when the lobby's ship config no longer
+matches it (mirrors `respawn_weapons_on_orientation_change`). Marker
+components carry stable ids: `FirePhaserButton(String)`,
+`FirePhaserLabel(String)`, `TubeStatusLabel(TorpedoTube)`,
+`TubeRadioGroup(Vec<String>)`. Fire-button enablement and tube reload
+display delegate to per-id helpers on `ClientSimState`
+(`is_fire_button_enabled`, `is_tube_loaded`, `tube_reload_secs`).
+
+Radar fire arcs are attached at panel-spawn time as a `RadarArcs`
+component on the `WeaponsRadarWidget` entity. Each arc carries
+`{ id: "phaser:<bank>" | "torpedo:<tube>", facing_deg, fire_arc_deg,
+color }`. A `RadarTargetHighlight(Option<String>)` component on the
+same widget tracks `ClientSimState::last_phaser_target`, and every blip
+spawned by `bridge_client_sim_to_weapons_radar` carries
+`RadarEntityUuid(uuid)` so the arc renderer can locate the highlighted
+target by id.
+
+### Drift guards and tests
+
+- `validate_phaser_banks` / `validate_torpedo_tubes` reject empty lists,
+  duplicate ids, and out-of-range arcs.
+- `phaser.rs` and `torpedo.rs` stay Bevy-free and test their per-id state
+  machines directly.
+- `tests/smoke/tactical-fire-flow.spec.ts` exercises `FirePhaser { bank }`
+  on the live wire and aggregates `WeaponsUpdate.banks` for fire-ready
+  detection.
+
+### Legacy HTML compat
+
+`client.html`'s legacy weapons UI (predates the Bevy tactical panel)
+aggregates `WeaponsUpdate.banks` to derive a single `fire_ready` /
+`on_cooldown` indicator and sends `FirePhaser { bank: <first ready> }`.
+This is purely backwards-compat; the Bevy panel is the authoritative UI.

@@ -118,6 +118,7 @@ Open (planned work):
 - **[README.md](./sources/repo-readme.md)** — User-facing overview.
 - **[AGENTS.md](./sources/repo-agents.md)** — Agent operating manual.
 - **[CONTEXT.md](./sources/repo-context.md)** — Domain vocabulary.
+- **[player_ship.toml](./sources/player_ship_toml.md)** — Player ship config (hull, weapons, banks, tubes, stations, …).
 
 ## Roadmap
 

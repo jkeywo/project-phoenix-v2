@@ -178,6 +178,25 @@ fn tube_visuals() -> StateVisuals {
 #[derive(Resource)]
 pub struct WeaponsPanelSpawned;
 
+/// Cached layout-key for the currently-spawned weapons panel. When the
+/// `LobbyState::ship_config` reports a different list of bank/tube ids, the
+/// panel is torn down and respawned so the per-bank/per-tube UI matches.
+#[derive(Resource, Clone, PartialEq, Eq, Debug)]
+pub struct WeaponsPanelLayoutKey {
+    pub banks: Vec<String>,
+    pub tubes: Vec<String>,
+}
+
+impl WeaponsPanelLayoutKey {
+    /// Build a layout key from a `ShipClientConfig`.
+    pub fn from_ship_config(cfg: &crate::messages::ShipClientConfig) -> Self {
+        Self {
+            banks: cfg.phaser_banks.iter().map(|b| b.id.clone()).collect(),
+            tubes: cfg.torpedo_tubes.iter().map(|t| t.id.clone()).collect(),
+        }
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────
 
 /// Plugin that owns all Tactical console UI and systems.
@@ -197,6 +216,7 @@ impl Plugin for WeaponsPanelPlugin {
                 refresh_torpedo_ui,
                 bridge_client_sim_to_weapons_radar,
                 respawn_weapons_on_orientation_change,
+                respawn_weapons_on_layout_change,
             ));
     }
 }
@@ -206,11 +226,18 @@ impl Plugin for WeaponsPanelPlugin {
 fn spawn_weapons_ui(
     mut commands: Commands,
     assets: Option<Res<PhoneAssets>>,
+    lobby: Res<LobbyState>,
     old_panel: Query<Entity, With<WeaponsPanel>>,
     old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
     orientation: Option<Res<DeviceOrientation>>,
 ) {
     let Some(assets) = assets else { return };
+
+    // Gate: wait until ship_config has been populated by Welcome.
+    if lobby.ship_config.phaser_banks.is_empty() {
+        return;
+    }
+
     let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
@@ -223,17 +250,27 @@ fn spawn_weapons_ui(
     }
 
     commands.insert_resource(WeaponsPanelSpawned);
+    commands.insert_resource(WeaponsPanelLayoutKey::from_ship_config(&lobby.ship_config));
+
+    let banks = lobby.ship_config.phaser_banks.clone();
+    let tubes = lobby.ship_config.torpedo_tubes.clone();
+    let beam_color = lobby.ship_config.phaser_beam_color;
+    let torp_color = lobby.ship_config.torpedo_arc_color;
 
     let shell = ConsoleShell::spawn(
         &mut commands,
         assets.helm_panel_bg.clone(),
         is_landscape,
         crate::client::elements::HelpPanel::Tactical,
-        |commands: &mut Commands, primary: Entity| {
-            fill_tactical_radar(commands, primary);
+        {
+            let banks_r = banks.clone();
+            let tubes_r = tubes.clone();
+            move |commands: &mut Commands, primary: Entity| {
+                fill_tactical_radar(commands, primary, &banks_r, &tubes_r, beam_color, torp_color);
+            }
         },
-        |commands: &mut Commands, secondary: Entity| {
-            fill_tactical_controls(commands, secondary);
+        move |commands: &mut Commands, secondary: Entity| {
+            fill_tactical_controls(commands, secondary, &banks, &tubes);
         },
         &assets,
     );
@@ -244,7 +281,14 @@ fn spawn_weapons_ui(
 // ── Fill helpers ──────────────────────────────────────────────────────
 
 /// Primary slot: tactical radar (GenericRadar, WorldFixed, Ships + Torpedoes).
-fn fill_tactical_radar(commands: &mut Commands, container: Entity) {
+fn fill_tactical_radar(
+    commands: &mut Commands,
+    container: Entity,
+    banks: &[PhaserBankClientConfig],
+    tubes: &[TorpedoTubeClientConfig],
+    beam_color: [f32; 4],
+    torp_color: [f32; 4],
+) {
     let col = commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -281,14 +325,41 @@ fn fill_tactical_radar(commands: &mut Commands, container: Entity) {
         None,
         RadarClipMode::Circle,
     );
-    commands.entity(radar).insert((Node {
-        width:  Val::Px(240.0),
-        height: Val::Px(240.0),
-        border: UiRect::all(Val::Px(1.0)),
-        aspect_ratio: Some(1.0),
-        position_type: PositionType::Relative,
-        ..default()
-    }, TacticalRadarTapTarget));
+    let beam = Color::srgba(beam_color[0], beam_color[1], beam_color[2], beam_color[3]);
+    let torp = Color::srgba(torp_color[0], torp_color[1], torp_color[2], torp_color[3]);
+    let mut arcs: Vec<RadarArc> = Vec::new();
+    for bank in banks {
+        arcs.push(RadarArc {
+            id: format!("phaser:{}", bank.id),
+            kind: RadarArcKind::Phaser,
+            facing_deg: bank.facing_deg,
+            fire_arc_deg: bank.fire_arc_deg,
+            color: beam,
+        });
+    }
+    for tube in tubes {
+        arcs.push(RadarArc {
+            id: format!("torpedo:{}", tube.id),
+            kind: RadarArcKind::Torpedo,
+            facing_deg: tube.facing_deg,
+            fire_arc_deg: tube.fire_arc_deg,
+            color: torp,
+        });
+    }
+    commands.entity(radar).insert((
+        Node {
+            width:  Val::Px(240.0),
+            height: Val::Px(240.0),
+            border: UiRect::all(Val::Px(1.0)),
+            aspect_ratio: Some(1.0),
+            position_type: PositionType::Relative,
+            ..default()
+        },
+        TacticalRadarTapTarget,
+        WeaponsRadarWidget,
+        RadarArcs(arcs),
+        RadarTargetHighlight(None),
+    ));
     commands.entity(radar).observe(on_tactical_radar_tap);
     commands.entity(col).add_child(radar);
 }
@@ -403,8 +474,14 @@ fn on_tactical_radar_tap(
 }
 
 /// Secondary slot: torpedo section + phaser mode + fire phasers + repair label
-/// + complexity controls.
-fn fill_tactical_controls(commands: &mut Commands, container: Entity) {
+/// + complexity controls. Dynamically spawns per-bank fire buttons from `banks`
+/// and per-tube radio buttons + status labels from `tubes`.
+fn fill_tactical_controls(
+    commands: &mut Commands,
+    container: Entity,
+    banks: &[PhaserBankClientConfig],
+    tubes: &[TorpedoTubeClientConfig],
+) {
     let col = commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -418,105 +495,100 @@ fn fill_tactical_controls(commands: &mut Commands, container: Entity) {
         .id();
     commands.entity(container).add_child(col);
 
-    // ── Torpedo section container (hideable as "torpedo_tube_selector") ──
-    let torpedo_container = commands
-        .spawn((
-            HideableElement("torpedo_tube_selector".into()),
-            Node {
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-        ))
-        .id();
-    commands.entity(col).add_child(torpedo_container);
-
-    // Torpedo count label
-    let count_label = commands
-        .spawn((
-            TorpedoCountLabel,
-            Text::new("Torpedoes: 10"),
-            TextFont { font_size: 16.0, ..default() },
-            TextColor(Color::srgb(0.8, 0.8, 0.2)),
-        ))
-        .id();
-    commands.entity(torpedo_container).add_child(count_label);
-
-    // Torpedo tube RadioGroup
-    let tube_btn_configs: Vec<RadioButtonConfig> = (0..3)
-        .map(|_| RadioButtonConfig {
-            size: ButtonSize::Rect { width: 80.0, height: 36.0 },
-            click_sound: None,
-        })
-        .collect();
-
-    let radio_group = RadioGroup::spawn(
-        commands,
-        tube_btn_configs,
-        tube_visuals(),
-        None,
-    );
-    commands.entity(radio_group)
-        .insert(TubeRadioGroup(vec![
-            "fore_port".to_string(),
-            "fore_starboard".to_string(),
-            "aft".to_string(),
-        ]))
-        .observe(on_tube_selected);
-    commands.entity(torpedo_container).add_child(radio_group);
-
-    commands.insert_resource(TubeButtonLabelsPending);
-
-    // Tube status labels row
-    let status_row = commands
-        .spawn(Node {
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(8.0),
-            ..default()
-        })
-        .id();
-    for tube in [
-        "fore_port".to_string(),
-        "fore_starboard".to_string(),
-        "aft".to_string(),
-    ] {
-        let label = commands
+    // ── Torpedo section (only if there are tubes) ─────────────────────
+    if !tubes.is_empty() {
+        let torpedo_container = commands
             .spawn((
-                TubeStatusLabel(tube),
-                Text::new("LOADED"),
-                TextFont { font_size: 12.0, ..default() },
-                TextColor(Color::srgb(0.3, 1.0, 0.3)),
+                HideableElement("torpedo_tube_selector".into()),
                 Node {
-                    min_width: Val::Px(70.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(8.0),
                     ..default()
                 },
             ))
             .id();
-        commands.entity(status_row).add_child(label);
-    }
-    commands.entity(torpedo_container).add_child(status_row);
+        commands.entity(col).add_child(torpedo_container);
 
-    // Fire Torpedo button
-    let fire_torpedo_btn = spawn_gui_button(
-        commands,
-        ButtonSize::Rect { width: 200.0, height: 52.0 },
-        torpedo_fire_visuals(),
-        None,
-    );
-    let fire_torpedo_label = commands
-        .spawn((
-            FireTorpedoLabel,
-            Text::new("SELECT TUBE"),
-            TextFont { font_size: 22.0, ..default() },
-            TextColor(Color::srgb(0.5, 0.5, 0.5)),
-        ))
-        .id();
-    commands.entity(fire_torpedo_btn)
-        .insert((FireTorpedoButton, Disabled))
-        .add_child(fire_torpedo_label)
-        .observe(on_fire_torpedo_pressed);
-    commands.entity(torpedo_container).add_child(fire_torpedo_btn);
+        // Torpedo count label
+        let count_label = commands
+            .spawn((
+                TorpedoCountLabel,
+                Text::new("Torpedoes: 10"),
+                TextFont { font_size: 16.0, ..default() },
+                TextColor(Color::srgb(0.8, 0.8, 0.2)),
+            ))
+            .id();
+        commands.entity(torpedo_container).add_child(count_label);
+
+        // Torpedo tube RadioGroup (one button per tube)
+        let tube_btn_configs: Vec<RadioButtonConfig> = (0..tubes.len())
+            .map(|_| RadioButtonConfig {
+                size: ButtonSize::Rect { width: 80.0, height: 36.0 },
+                click_sound: None,
+            })
+            .collect();
+
+        let radio_group = RadioGroup::spawn(
+            commands,
+            tube_btn_configs,
+            tube_visuals(),
+            None,
+        );
+        let tube_ids: Vec<String> = tubes.iter().map(|t| t.id.clone()).collect();
+        commands.entity(radio_group)
+            .insert(TubeRadioGroup(tube_ids.clone()))
+            .observe(on_tube_selected);
+        commands.entity(torpedo_container).add_child(radio_group);
+
+        commands.insert_resource(TubeButtonLabelsPending);
+
+        // Tube status labels row
+        let status_row = commands
+            .spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .id();
+        for tube in tubes {
+            let label = commands
+                .spawn((
+                    TubeStatusLabel(tube.id.clone()),
+                    Text::new("LOADED"),
+                    TextFont { font_size: 12.0, ..default() },
+                    TextColor(Color::srgb(0.3, 1.0, 0.3)),
+                    Node {
+                        min_width: Val::Px(70.0),
+                        ..default()
+                    },
+                ))
+                .id();
+            commands.entity(status_row).add_child(label);
+        }
+        commands.entity(torpedo_container).add_child(status_row);
+
+        // Fire Torpedo button
+        let fire_torpedo_btn = spawn_gui_button(
+            commands,
+            ButtonSize::Rect { width: 200.0, height: 52.0 },
+            torpedo_fire_visuals(),
+            None,
+        );
+        let fire_torpedo_label = commands
+            .spawn((
+                FireTorpedoLabel,
+                Text::new("SELECT TUBE"),
+                TextFont { font_size: 22.0, ..default() },
+                TextColor(Color::srgb(0.5, 0.5, 0.5)),
+            ))
+            .id();
+        commands.entity(fire_torpedo_btn)
+            .insert((FireTorpedoButton, Disabled))
+            .add_child(fire_torpedo_label)
+            .observe(on_fire_torpedo_pressed);
+        commands.entity(torpedo_container).add_child(fire_torpedo_btn);
+    }
 
     // ── Phaser Mode toggle button (hideable as "phaser_mode_selector") ──
     let mode_btn = spawn_gui_button(
@@ -539,26 +611,29 @@ fn fill_tactical_controls(commands: &mut Commands, container: Entity) {
         .observe(on_phaser_mode_pressed);
     commands.entity(col).add_child(mode_btn);
 
-    // ── Fire Phasers button ───────────────────────────────────────────
-    let fire_phaser_btn = spawn_gui_button(
-        commands,
-        ButtonSize::Rect { width: 200.0, height: 52.0 },
-        fire_visuals(),
-        None,
-    );
-    let fire_phaser_label = commands
-        .spawn((
-            FirePhaserLabel("port".to_string()),
-            Text::new("FIRE PHASERS"),
-            TextFont { font_size: 22.0, ..default() },
-            TextColor(Color::srgb(1.0, 0.5, 0.2)),
-        ))
-        .id();
-    commands.entity(fire_phaser_btn)
-        .insert(FirePhaserButton("port".to_string()))
-        .add_child(fire_phaser_label)
-        .observe(on_fire_phaser_pressed);
-    commands.entity(col).add_child(fire_phaser_btn);
+    // ── Per-bank Fire Phasers buttons ─────────────────────────────────
+    for bank in banks {
+        let fire_phaser_btn = spawn_gui_button(
+            commands,
+            ButtonSize::Rect { width: 200.0, height: 52.0 },
+            fire_visuals(),
+            None,
+        );
+        let label_text = format!("FIRE {}", bank.id.to_uppercase());
+        let fire_phaser_label = commands
+            .spawn((
+                FirePhaserLabel(bank.id.clone()),
+                Text::new(label_text),
+                TextFont { font_size: 22.0, ..default() },
+                TextColor(Color::srgb(1.0, 0.5, 0.2)),
+            ))
+            .id();
+        commands.entity(fire_phaser_btn)
+            .insert(FirePhaserButton(bank.id.clone()))
+            .add_child(fire_phaser_label)
+            .observe(on_fire_phaser_pressed);
+        commands.entity(col).add_child(fire_phaser_btn);
+    }
 
     // ── Repair icon label ─────────────────────────────────────────────
     let repair_label = commands
@@ -695,6 +770,28 @@ fn respawn_weapons_on_orientation_change(
         commands.entity(entity).despawn();
     }
     commands.remove_resource::<WeaponsPanelSpawned>();
+    commands.remove_resource::<WeaponsPanelLayoutKey>();
+}
+
+/// Compares the current `WeaponsPanelLayoutKey` against the lobby's
+/// `ship_config`. If the bank or tube id lists differ, despawn the panel and
+/// clear the spawn marker so `spawn_weapons_ui` rebuilds it next frame.
+fn respawn_weapons_on_layout_change(
+    lobby: Res<LobbyState>,
+    layout: Option<Res<WeaponsPanelLayoutKey>>,
+    panel: Query<Entity, With<WeaponsPanel>>,
+    mut commands: Commands,
+) {
+    let Some(layout) = layout else { return };
+    let want = WeaponsPanelLayoutKey::from_ship_config(&lobby.ship_config);
+    if *layout == want {
+        return;
+    }
+    for entity in panel.iter() {
+        commands.entity(entity).despawn();
+    }
+    commands.remove_resource::<WeaponsPanelSpawned>();
+    commands.remove_resource::<WeaponsPanelLayoutKey>();
 }
 
 // ── Tube button labels post-setup ─────────────────────────────────────
@@ -704,26 +801,28 @@ fn respawn_weapons_on_orientation_change(
 struct TubeButtonLabelsPending;
 
 /// One-shot system: once the RadioGroup children exist (deferred spawn),
-/// add text label children to each member button.
+/// add text label children to each member button using the tube ids stored on
+/// the `TubeRadioGroup` component.
 fn add_tube_button_labels(
     mut commands: Commands,
     pending: Option<Res<TubeButtonLabelsPending>>,
-    groups: Query<&Children, With<TubeRadioGroup>>,
+    groups: Query<(&Children, &TubeRadioGroup)>,
 ) {
     if pending.is_none() {
         return;
     }
-    let tube_labels = ["FWD PORT", "FWD STBD", "AFT"];
-    for children in groups.iter() {
-        if children.len() < 3 {
+    for (children, group) in groups.iter() {
+        let want = group.0.len();
+        if want == 0 || children.len() < want {
             // Children not yet resolved — try again next frame.
             return;
         }
-        for (idx, child) in children.iter().take(3).enumerate() {
-            if let Some(&label_text) = tube_labels.get(idx) {
+        for (idx, child) in children.iter().take(want).enumerate() {
+            if let Some(label_text) = group.0.get(idx) {
+                let label = tube_label_short(label_text);
                 commands.entity(child).with_children(|btn| {
                     btn.spawn((
-                        Text::new(label_text),
+                        Text::new(label),
                         TextFont { font_size: 14.0, ..default() },
                         TextColor(Color::srgb(0.6, 0.8, 1.0)),
                     ));
@@ -732,6 +831,18 @@ fn add_tube_button_labels(
         }
         commands.remove_resource::<TubeButtonLabelsPending>();
         return;
+    }
+}
+
+/// Human-readable short label for a torpedo tube id. Hardcodes friendly
+/// abbreviations for the canonical fore_port/fore_starboard/aft trio and
+/// falls back to upper-casing the raw id for unknown tubes.
+fn tube_label_short(tube_id: &str) -> String {
+    match tube_id {
+        "fore_port"      => "FWD PORT".to_string(),
+        "fore_starboard" => "FWD STBD".to_string(),
+        "aft"            => "AFT".to_string(),
+        other            => other.to_uppercase().replace('_', " "),
     }
 }
 
@@ -751,25 +862,21 @@ fn toggle_weapons_panel_visibility(
 
 // ── RadioGroup → SelectedTube observer ───────────────────────────────
 
-/// Observer on the `TubeRadioGroup` entity: maps selected member to a
-/// `TorpedoTube` by children order and updates `SelectedTube`.
+/// Observer on the `TubeRadioGroup` entity: maps the selected member entity
+/// to a `TorpedoTube` id (looking up the index in `children` and indexing into
+/// the stored tube-id list on `TubeRadioGroup`) and updates `SelectedTube`.
 fn on_tube_selected(
     trigger: On<RadioSelected>,
-    children_q: Query<&Children>,
+    groups: Query<(&Children, &TubeRadioGroup)>,
     mut selected: ResMut<SelectedTube>,
 ) {
     let group = trigger.entity;
     let member = trigger.event().member;
 
-    let tubes = [
-        "fore_port".to_string(),
-        "fore_starboard".to_string(),
-        "aft".to_string(),
-    ];
-    if let Ok(children) = children_q.get(group) {
+    if let Ok((children, tube_group)) = groups.get(group) {
         for (idx, child) in children.iter().enumerate() {
             if child == member {
-                if let Some(tube) = tubes.get(idx) {
+                if let Some(tube) = tube_group.0.get(idx) {
                     selected.0 = Some(tube.clone());
                     return;
                 }
@@ -954,7 +1061,9 @@ fn refresh_torpedo_ui(
 // ── Radar entity bridge ───────────────────────────────────────────────
 
 /// Bridges `ClientSimState` entity snapshots into ECS entities with
-/// `OnRadar` / `RadarAppearance` for the `GenericRadar` widget.
+/// `OnRadar` / `RadarAppearance` for the `GenericRadar` widget. Also pushes
+/// the current phaser target into `RadarTargetHighlight` on the widget so the
+/// arc renderer can highlight the locked blip.
 ///
 /// Weapons radar shows ships (other vessels) and torpedoes (missiles).
 fn bridge_client_sim_to_weapons_radar(
@@ -962,7 +1071,14 @@ fn bridge_client_sim_to_weapons_radar(
     sim: Res<ClientSimState>,
     ship_view: Res<ShipView>,
     mut radar: ResMut<WeaponsRadarEntities>,
+    mut widget: Query<&mut RadarTargetHighlight, With<WeaponsRadarWidget>>,
 ) {
+    // ── Target highlight ──────────────────────────────────────────────
+    for mut hl in widget.iter_mut() {
+        if hl.0 != sim.last_phaser_target {
+            hl.0 = sim.last_phaser_target.clone();
+        }
+    }
     // ── Radar center (player ship) ────────────────────────────────────
     let ship_appearance = RadarAppearance {
         icon: RadarIcon::Ship,
@@ -1047,10 +1163,21 @@ fn bridge_client_sim_to_weapons_radar(
             let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((OnRadar(layer), appearance, t));
+                commands.entity(*existing).insert((
+                    OnRadar(layer),
+                    appearance,
+                    t,
+                    RadarEntityUuid(uuid.clone()),
+                ));
             } else {
                 let blip = commands
-                    .spawn((OnRadar(layer), appearance, t, GlobalTransform::default()))
+                    .spawn((
+                        OnRadar(layer),
+                        appearance,
+                        t,
+                        GlobalTransform::default(),
+                        RadarEntityUuid(uuid.clone()),
+                    ))
                     .id();
                 radar.blips.insert(uuid.clone(), blip);
             }
@@ -1078,10 +1205,21 @@ fn bridge_client_sim_to_weapons_radar(
             let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((OnRadar(layer), appearance, t));
+                commands.entity(*existing).insert((
+                    OnRadar(layer),
+                    appearance,
+                    t,
+                    RadarEntityUuid(uuid.clone()),
+                ));
             } else {
                 let blip = commands
-                    .spawn((OnRadar(layer), appearance, t, GlobalTransform::default()))
+                    .spawn((
+                        OnRadar(layer),
+                        appearance,
+                        t,
+                        GlobalTransform::default(),
+                        RadarEntityUuid(uuid.clone()),
+                    ))
                     .id();
                 radar.blips.insert(uuid.clone(), blip);
             }

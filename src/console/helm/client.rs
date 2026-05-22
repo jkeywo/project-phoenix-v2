@@ -21,6 +21,12 @@ use crate::gui::{
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
+use crate::console::helm::joystick::{
+    format_impulse_status, impulse_ui_visibility, should_send_helm_input,
+};
+use crate::gui::{
+    reset_joystick_drag, JoystickDragState, JoystickResendTimer,
+};
 
 // ── Pure helpers ─────────────────────────────────────────────────────
 
@@ -87,6 +93,43 @@ pub fn yaw_to_heading(yaw_rad: f32) -> String {
     format!("{:03}°", heading.round() as u32)
 }
 
+// ── Impulse UI markers ───────────────────────────────────────────────
+
+/// Marks the joystick pad so we can hide it while the impulse drive is
+/// charging or active (autopilot mode).
+#[derive(Component)]
+struct HelmJoystickPad;
+
+/// Marks the inner `GenericJoystick` pad entity (the entity that owns
+/// `JoystickDragState` + `JoystickResendTimer`). Used to pause the 10 Hz
+/// resend timer and reset drag state when impulse engages, so stale
+/// `last_dx`/`last_dy` can't leak through the impulse barrier.
+#[derive(Component)]
+struct HelmJoystickPadEntity;
+
+/// Marks the column overlay that hosts the cancel button + progress bar
+/// shown in place of the joystick while the impulse drive is charging or
+/// active. Toggled as a single unit so children stay laid out.
+#[derive(Component)]
+struct HelmImpulseOverlay;
+
+/// Marks the "Cancel Impulse" button shown in place of the joystick while
+/// the impulse drive is charging or active.
+#[derive(Component)]
+struct HelmCancelImpulseButton;
+
+/// Marks the wrapper of the impulse charging progress bar (hidden when idle).
+#[derive(Component)]
+struct HelmImpulseProgressBar;
+
+/// Marks the fill node of the impulse charging progress bar.
+#[derive(Component)]
+struct HelmImpulseProgressFill;
+
+/// Marks the text node showing the charging countdown / "ENGAGED" status.
+#[derive(Component)]
+struct HelmImpulseStatusText;
+
 // ── Plugin ───────────────────────────────────────────────────────────
 
 pub struct HelmPanelPlugin;
@@ -107,6 +150,7 @@ impl Plugin for HelmPanelPlugin {
                 update_helm_readouts,
                 sync_helm_radar_range,
                 bridge_client_sim_to_radar_entities,
+                refresh_helm_impulse_state,
             ),
         );
     }
@@ -142,8 +186,16 @@ fn toggle_helm_panel_visibility(
 
 fn on_helm_joystick_moved(
     trigger: On<JoystickMoved>,
+    ship_view: Res<ShipView>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
+    // Suppress joystick output (including 10 Hz resends) while the impulse
+    // drive is charging or active — the autopilot is steering the ship and
+    // a stale knob value must not override it, nor snap the ship the
+    // instant the drive disengages.
+    if !should_send_helm_input(ship_view.impulse_charge_progress) {
+        return;
+    }
     let moved = trigger.event();
     let thrust = -moved.dy;
     let steering = moved.dx;
@@ -169,6 +221,125 @@ fn on_impulse_button_pressed(
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     outbound.write(OutboundClientMessage(ClientMessage::StartImpulseCharge));
+}
+
+fn on_cancel_impulse_pressed(
+    _trigger: On<ButtonPressed>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+) {
+    outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
+}
+
+// ── Impulse overlay state ────────────────────────────────────────────
+
+/// Each frame: derive joystick / cancel-overlay visibility, progress-bar
+/// fill, status text, and joystick-resend gating from
+/// `ShipView.impulse_charge_progress`.
+///
+/// Compare-then-write on `Visibility` and `Node.width` to avoid change-
+/// detection churn each frame.
+///
+/// On the rising edge (Idle → Charging/Active) we also reset the pad's
+/// `JoystickDragState` so stale `last_dx`/`last_dy` can't be resent (the
+/// `paused` gate plugs the periodic resend, and `reset_joystick_drag`
+/// plugs the value that would have been resent).
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn refresh_helm_impulse_state(
+    ship_view: Res<ShipView>,
+    lobby: Res<LobbyState>,
+    mut prev_progress: Local<f32>,
+    mut joystick: Query<
+        &mut Visibility,
+        (
+            With<HelmJoystickPad>,
+            Without<HelmImpulseOverlay>,
+            Without<HelmImpulseProgressFill>,
+        ),
+    >,
+    mut overlay: Query<
+        &mut Visibility,
+        (
+            With<HelmImpulseOverlay>,
+            Without<HelmJoystickPad>,
+            Without<HelmImpulseProgressFill>,
+        ),
+    >,
+    mut fill: Query<
+        &mut Node,
+        (
+            With<HelmImpulseProgressFill>,
+            Without<HelmJoystickPad>,
+            Without<HelmImpulseOverlay>,
+        ),
+    >,
+    mut status: Query<&mut Text, With<HelmImpulseStatusText>>,
+    mut pad_state: Query<
+        (&mut JoystickDragState, &mut JoystickResendTimer),
+        With<HelmJoystickPadEntity>,
+    >,
+) {
+    let progress = ship_view.impulse_charge_progress;
+    let (joystick_visible, cancel_visible) = impulse_ui_visibility(progress);
+    let to_vis = |b: bool| {
+        if b {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        }
+    };
+
+    // Visibility: compare-then-write to avoid Changed<Visibility> spam.
+    let want_joystick = to_vis(joystick_visible);
+    for mut v in joystick.iter_mut() {
+        if *v != want_joystick {
+            *v = want_joystick;
+        }
+    }
+    let want_overlay = to_vis(cancel_visible);
+    for mut v in overlay.iter_mut() {
+        if *v != want_overlay {
+            *v = want_overlay;
+        }
+    }
+
+    // Progress bar fill width: compare-then-write.
+    let pct = progress.clamp(0.0, 1.0) * 100.0;
+    let want_width = Val::Percent(pct);
+    for mut node in fill.iter_mut() {
+        if node.width != want_width {
+            node.width = want_width;
+        }
+    }
+
+    // Status text: pull charge_duration from the server-supplied ship
+    // client config when available; fall back to the wire default.
+    let charge_duration = if lobby.ship_config.impulse_charge_duration > 0.0 {
+        lobby.ship_config.impulse_charge_duration
+    } else {
+        crate::impulse::IMPULSE_CHARGE_DURATION
+    };
+    let want_text = format_impulse_status(progress, charge_duration).unwrap_or_default();
+    for mut text in status.iter_mut() {
+        if text.0 != want_text {
+            text.0 = want_text.clone();
+        }
+    }
+
+    // Joystick gate: pause the 10 Hz resend whenever impulse is non-zero,
+    // and on the rising edge zero the cached drag so the gate's plug
+    // doesn't merely freeze a stale value in place.
+    let now_active = progress > 0.0;
+    let was_active = *prev_progress > 0.0;
+    let want_pause = now_active;
+    for (mut drag, mut timer) in pad_state.iter_mut() {
+        if timer.paused != want_pause {
+            timer.paused = want_pause;
+        }
+        if now_active && !was_active {
+            reset_joystick_drag(&mut drag);
+        }
+    }
+    *prev_progress = progress;
 }
 
 // ── Readout update system ────────────────────────────────────────────
@@ -680,13 +851,16 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
 
     // ── Column wrapper to stack joystick elements vertically ──
     let col = commands
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            row_gap: Val::Px(4.0),
-            ..default()
-        })
+        .spawn((
+            HelmJoystickPad,
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+        ))
         .id();
     commands.entity(container).add_child(col);
 
@@ -743,6 +917,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
         joystick_knob_visuals,
     );
     commands.entity(pad).observe(on_helm_joystick_moved);
+    commands.entity(pad).insert(HelmJoystickPadEntity);
     commands.entity(joystick_center_row).add_child(pad);
 
     // Right directional chevron
@@ -787,6 +962,112 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
         row.spawn((Text::new("STBD"), mono(9.0), TextColor(muted)));
     });
     commands.entity(col).add_child(port_stbd_row);
+
+    // ── Impulse overlay: visible only while the impulse drive is charging
+    // or active. Sits as a sibling of `col` (the joystick column) inside
+    // `container`; visibility is toggled mutually-exclusively in
+    // `refresh_helm_impulse_visibility`.
+    let overlay = commands
+        .spawn((
+            HelmImpulseOverlay,
+            Node {
+                width: Val::Px(HELM_PAD_SIZE),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(10.0),
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(container).add_child(overlay);
+
+    // Cancel button (color-only, no PNG art).
+    let cancel_btn = spawn_gui_button(
+        commands,
+        ButtonSize::Rect {
+            width: 160.0,
+            height: 44.0,
+        },
+        StateVisuals {
+            idle: Visual {
+                image: None,
+                color: Color::srgba(0.45, 0.05, 0.05, 0.85),
+            },
+            hover: Visual {
+                image: None,
+                color: Color::srgba(0.65, 0.10, 0.10, 0.95),
+            },
+            active: Visual {
+                image: None,
+                color: Color::srgba(0.65, 0.10, 0.10, 0.95),
+            },
+            press: Visual {
+                image: None,
+                color: Color::srgba(0.85, 0.15, 0.15, 1.0),
+            },
+            disabled: Visual {
+                image: None,
+                color: Color::srgba(0.20, 0.05, 0.05, 0.5),
+            },
+        },
+        None,
+    );
+    commands
+        .entity(cancel_btn)
+        .insert(HelmCancelImpulseButton)
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("CANCEL IMPULSE"),
+                mono(12.0),
+                TextColor(Color::srgb(1.0, 0.85, 0.85)),
+            ));
+        })
+        .observe(on_cancel_impulse_pressed);
+    commands.entity(overlay).add_child(cancel_btn);
+
+    // Charge progress bar: wrapper + fill node. Fill width is driven each
+    // frame by `refresh_helm_impulse_visibility` from
+    // `ShipView.impulse_charge_progress`.
+    let bar = commands
+        .spawn((
+            HelmImpulseProgressBar,
+            Node {
+                width: Val::Px(HELM_PAD_SIZE),
+                height: Val::Px(10.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.10, 0.15, 0.20, 0.85)),
+        ))
+        .id();
+    let fill = commands
+        .spawn((
+            HelmImpulseProgressFill,
+            Node {
+                width: Val::Percent(0.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.40, 0.85, 1.0)),
+        ))
+        .id();
+    commands.entity(bar).add_child(fill);
+    commands.entity(overlay).add_child(bar);
+
+    // Status text: "X.X / Y.Y s" while charging, "ENGAGED" once active.
+    // Empty by default; driven by `refresh_helm_impulse_state` via the
+    // pure `format_impulse_status` helper.
+    let status = commands
+        .spawn((
+            HelmImpulseStatusText,
+            Text::new(""),
+            mono(11.0),
+            TextColor(Color::srgb(0.85, 0.95, 1.0)),
+            Node::default(),
+        ))
+        .id();
+    commands.entity(overlay).add_child(status);
 }
 
 // ── Orientation respawn ──────────────────────────────────────────────

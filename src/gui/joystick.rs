@@ -73,9 +73,29 @@ pub struct JoystickDragState {
 }
 
 /// Per-joystick 10 Hz resend timer — lives on the pad entity.
+///
+/// `paused` is toggled by consumers (e.g. the helm console while impulse
+/// is charging/active) to suspend the 10 Hz heartbeat. Pure decision
+/// logic lives in `should_emit_resend`.
 #[derive(Component)]
 pub struct JoystickResendTimer {
     pub timer: Timer,
+    pub paused: bool,
+}
+
+/// Pure helper: should the resend tick emit a `JoystickMoved` this frame?
+/// Returns `true` only when the timer just finished AND the pad is not
+/// paused. Used by `tick_joystick_resend` and unit-tested in isolation.
+pub fn should_emit_resend(just_finished: bool, paused: bool) -> bool {
+    just_finished && !paused
+}
+
+/// Pure helper: zero a `JoystickDragState` so the knob recentres and any
+/// stale `last_dx`/`last_dy` can't be resent. Used when the consumer
+/// needs to forcibly release the joystick (e.g. helm-side impulse
+/// engages: stale steering must not leak through the impulse barrier).
+pub fn reset_joystick_drag(state: &mut JoystickDragState) {
+    *state = JoystickDragState::default();
 }
 
 // ── Spawn helper ──────────────────────────────────────────────────────────────
@@ -125,6 +145,7 @@ fn spawn_generic_joystick(
         JoystickDragState::default(),
         JoystickResendTimer {
             timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+            paused: false,
         },
     ));
     if let Some(bg) = bg_image {
@@ -260,7 +281,7 @@ fn tick_joystick_resend(
 ) {
     for (entity, mut resend, state) in pads.iter_mut() {
         resend.timer.tick(time.delta());
-        if resend.timer.just_finished() {
+        if should_emit_resend(resend.timer.just_finished(), resend.paused) {
             let (dx, dy) = (state.last_dx, state.last_dy);
             commands.entity(entity).trigger(|e| JoystickMoved { entity: e, dx, dy });
         }
@@ -365,5 +386,44 @@ mod tests {
     fn half_radius_right_gives_half_dx() {
         let (dx, _) = normalize_joystick(50.0, 0.0, 100.0);
         assert!((dx - 0.5).abs() < 1e-5, "expected dx 0.5, got {dx}");
+    }
+
+    // ── should_emit_resend ───────────────────────────────────────────────────
+
+    #[test]
+    fn resend_fires_on_tick_when_unpaused() {
+        assert!(should_emit_resend(true, false));
+    }
+
+    #[test]
+    fn resend_silent_when_timer_not_finished() {
+        assert!(!should_emit_resend(false, false));
+        assert!(!should_emit_resend(false, true));
+    }
+
+    #[test]
+    fn resend_silent_when_paused_even_if_timer_finished() {
+        // Defence in depth: pausing the resend timer must suppress the
+        // 10 Hz heartbeat even if the timer would otherwise fire.
+        assert!(!should_emit_resend(true, true));
+    }
+
+    // ── reset_joystick_drag ──────────────────────────────────────────────────
+
+    #[test]
+    fn reset_joystick_drag_zeroes_all_fields() {
+        let mut state = JoystickDragState {
+            active: true,
+            knob_px_dx: 12.5,
+            knob_px_dy: -8.0,
+            last_dx: 0.7,
+            last_dy: -0.4,
+        };
+        reset_joystick_drag(&mut state);
+        assert!(!state.active, "drag must clear active flag");
+        assert_eq!(state.knob_px_dx, 0.0);
+        assert_eq!(state.knob_px_dy, 0.0);
+        assert_eq!(state.last_dx, 0.0, "last_dx must zero so resend can't replay");
+        assert_eq!(state.last_dy, 0.0, "last_dy must zero so resend can't replay");
     }
 }

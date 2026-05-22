@@ -1154,6 +1154,7 @@ fn spawn_game_start_entities(
                     .map(|hc| crate::ship_plugin::ImpulseConfigResource {
                         charge_duration: hc.impulse_charge_duration,
                         speed_multiplier: hc.impulse_speed_multiplier,
+                        acceleration_multiplier: hc.impulse_acceleration_multiplier,
                     });
             commands.insert_resource(impulse_cfg.unwrap_or_default());
         }

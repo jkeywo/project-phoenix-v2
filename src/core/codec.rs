@@ -1064,6 +1064,7 @@ mod tests {
             helm_radar_range: 700.0,
             repair_travel_secs: 9.0,
             repair_rate_hp_per_sec: 1.5,
+            impulse_charge_duration: 4.5,
         };
         let msg = ServerMessage::Welcome {
             state: state(),
@@ -1077,6 +1078,7 @@ mod tests {
                 assert_eq!(ship_config.repair_travel_secs, 9.0);
                 assert_eq!(ship_config.repair_rate_hp_per_sec, 1.5);
                 assert_eq!(ship_config.helm_radar_range, 700.0);
+                assert_eq!(ship_config.impulse_charge_duration, 4.5);
             }
             _ => panic!("expected Welcome"),
         }

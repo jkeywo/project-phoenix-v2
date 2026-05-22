@@ -7,6 +7,12 @@ pub const IMPULSE_CHARGE_DURATION: f32 = 3.0;
 /// Speed multiplier applied during impulse.
 pub const IMPULSE_SPEED_MULTIPLIER: f32 = 10.0;
 
+/// Acceleration multiplier applied to the ship's base acceleration while
+/// the impulse drive is active. The autopilot runs at full thrust during
+/// the Active phase, and this boost lets it ramp to the boosted top speed
+/// quickly without rewriting the steady-state acceleration curve.
+pub const IMPULSE_ACCELERATION_MULTIPLIER: f32 = 5.0;
+
 /// State of the impulse drive.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ImpulsePhase {

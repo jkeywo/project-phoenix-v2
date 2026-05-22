@@ -328,6 +328,12 @@ pub struct ShipClientConfig {
     /// target console's `max_hp`.
     #[serde(default = "default_repair_rate_hp_per_sec")]
     pub repair_rate_hp_per_sec: f32,
+    /// Seconds the impulse drive takes to fully charge. Sourced from
+    /// `[helm_console] impulse_charge_duration` in the ship TOML. Used by
+    /// the client helm panel to render the charging progress bar at the
+    /// correct rate.
+    #[serde(default = "default_impulse_charge_duration")]
+    pub impulse_charge_duration: f32,
 }
 
 fn default_helm_radar_range() -> f32 {
@@ -342,12 +348,17 @@ fn default_repair_rate_hp_per_sec() -> f32 {
     0.5
 }
 
+fn default_impulse_charge_duration() -> f32 {
+    3.0
+}
+
 impl Default for ShipClientConfig {
     fn default() -> Self {
         Self {
             helm_radar_range: default_helm_radar_range(),
             repair_travel_secs: default_repair_travel_secs(),
             repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
+            impulse_charge_duration: default_impulse_charge_duration(),
         }
     }
 }

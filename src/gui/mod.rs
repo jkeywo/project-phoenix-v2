@@ -18,8 +18,9 @@ pub use foundation::{
     resolve_visual, resolve_visuals_system, Disabled, StateVisuals, Visual, WidgetState,
 };
 pub use joystick::{
-    normalize_joystick, GenericJoystick, GenericJoystickKnob, GenericJoystickPad,
-    JoystickDragState, JoystickMoved, JoystickResendTimer,
+    normalize_joystick, reset_joystick_drag, should_emit_resend, GenericJoystick,
+    GenericJoystickKnob, GenericJoystickPad, JoystickDragState, JoystickMoved,
+    JoystickResendTimer,
 };
 pub use light::{
     effective_interval, FlickerLight, FlickerLightConfig, FlickerLightMarker, FlickerLightState,

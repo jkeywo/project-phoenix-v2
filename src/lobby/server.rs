@@ -106,6 +106,10 @@ fn update_session_with_config(
             if range > 0.0 {
                 next.helm_radar_range = range;
             }
+            // Push the configured impulse charge duration to the client so
+            // the helm progress bar advances at the same rate the server
+            // is ticking.
+            next.impulse_charge_duration = hc.impulse_charge_duration;
         }
         // [repair] block — pushes repair-team timings to the client so the
         // Repair panel can derive its progress-bar durations without knowing

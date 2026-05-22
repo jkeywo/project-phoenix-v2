@@ -152,6 +152,54 @@ pub fn press_impulse_button(state: &ImpulseState) -> Option<ClientMessage> {
     }
 }
 
+/// Visibility derivation for the helm panel's impulse-related controls.
+///
+/// `progress > 0.0` means the impulse drive is either charging or fully
+/// active (`charge_progress` ∈ `(0.0, 1.0]`). In both cases the player must
+/// not be able to steer (the server is autopiloting during Active, and
+/// during Charging the drive is committing to the manoeuvre) — so the
+/// joystick hides and a Cancel button takes its place.
+///
+/// Returns `(joystick_visible, cancel_visible)`.
+pub fn impulse_ui_visibility(progress: f32) -> (bool, bool) {
+    if progress > 0.0 {
+        (false, true)
+    } else {
+        (true, false)
+    }
+}
+
+/// Returns `true` iff a `HelmInput` message should be sent given the
+/// current impulse charge progress. While the drive is charging or active
+/// (`progress > 0.0`) the periodic 10 Hz joystick resend must be suppressed
+/// so stale knob values can't override the autopilot or stall it the
+/// instant it disengages.
+pub fn should_send_helm_input(impulse_charge_progress: f32) -> bool {
+    impulse_charge_progress <= 0.0
+}
+
+/// Format the impulse status readout shown next to the charging progress
+/// bar on the helm panel.
+///
+/// * `progress` — `ShipView.impulse_charge_progress` ∈ `[0.0, 1.0]`.
+/// * `charge_duration` — `ShipClientConfig.impulse_charge_duration` (s).
+///
+/// Returns `None` when the drive is idle (progress ≤ 0). Returns
+/// `Some("ENGAGED")` once the drive reaches Active (progress ≥ 1.0). In
+/// between, returns `Some("X.X / Y.Y s")` reflecting elapsed / total
+/// charge time, so the player sees a live countdown.
+pub fn format_impulse_status(progress: f32, charge_duration: f32) -> Option<String> {
+    if progress <= 0.0 {
+        return None;
+    }
+    if progress >= 1.0 {
+        return Some("ENGAGED".to_string());
+    }
+    let total = charge_duration.max(0.0);
+    let elapsed = (progress * total).clamp(0.0, total);
+    Some(format!("{:.1} / {:.1} s", elapsed, total))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,5 +380,72 @@ mod tests {
         s.start_charge();
         s.tick(crate::impulse::IMPULSE_CHARGE_DURATION, crate::impulse::IMPULSE_CHARGE_DURATION);
         assert_eq!(impulse_button_view(&s), ImpulseButtonView::Active);
+    }
+
+    // --- impulse_ui_visibility ---
+
+    #[test]
+    fn impulse_ui_visibility_idle_shows_joystick_hides_cancel() {
+        let (joystick, cancel) = impulse_ui_visibility(0.0);
+        assert!(joystick, "joystick must be visible when idle");
+        assert!(!cancel, "cancel must be hidden when idle");
+    }
+
+    #[test]
+    fn impulse_ui_visibility_charging_hides_joystick_shows_cancel() {
+        let (joystick, cancel) = impulse_ui_visibility(0.5);
+        assert!(!joystick, "joystick must be hidden while charging");
+        assert!(cancel, "cancel must be visible while charging");
+    }
+
+    #[test]
+    fn impulse_ui_visibility_active_hides_joystick_shows_cancel() {
+        let (joystick, cancel) = impulse_ui_visibility(1.0);
+        assert!(!joystick, "joystick must be hidden when active");
+        assert!(cancel, "cancel must be visible when active");
+    }
+
+    // --- should_send_helm_input ---
+
+    #[test]
+    fn helm_input_sent_when_impulse_idle() {
+        assert!(should_send_helm_input(0.0));
+    }
+
+    #[test]
+    fn helm_input_suppressed_while_charging() {
+        assert!(!should_send_helm_input(0.25));
+        assert!(!should_send_helm_input(0.99));
+    }
+
+    #[test]
+    fn helm_input_suppressed_while_active() {
+        assert!(!should_send_helm_input(1.0));
+    }
+
+    // --- format_impulse_status ---
+
+    #[test]
+    fn impulse_status_none_when_idle() {
+        assert_eq!(format_impulse_status(0.0, 3.0), None);
+        assert_eq!(format_impulse_status(-0.1, 3.0), None);
+    }
+
+    #[test]
+    fn impulse_status_engaged_when_charge_full() {
+        assert_eq!(format_impulse_status(1.0, 3.0), Some("ENGAGED".to_string()));
+        assert_eq!(format_impulse_status(1.5, 3.0), Some("ENGAGED".to_string()));
+    }
+
+    #[test]
+    fn impulse_status_shows_elapsed_over_total_while_charging() {
+        assert_eq!(format_impulse_status(0.5, 3.0), Some("1.5 / 3.0 s".to_string()));
+        assert_eq!(format_impulse_status(0.25, 4.0), Some("1.0 / 4.0 s".to_string()));
+    }
+
+    #[test]
+    fn impulse_status_handles_zero_duration_gracefully() {
+        // No division by zero, no NaN: just shows 0.0 / 0.0.
+        assert_eq!(format_impulse_status(0.5, 0.0), Some("0.0 / 0.0 s".to_string()));
     }
 }

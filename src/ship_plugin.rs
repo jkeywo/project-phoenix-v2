@@ -32,6 +32,7 @@ pub struct ShipPhysicsConfigResource(pub crate::ship_physics::ShipPhysicsConfig)
 pub struct ImpulseConfigResource {
     pub charge_duration: f32,
     pub speed_multiplier: f32,
+    pub acceleration_multiplier: f32,
 }
 
 impl Default for ImpulseConfigResource {
@@ -39,6 +40,7 @@ impl Default for ImpulseConfigResource {
         Self {
             charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
             speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+            acceleration_multiplier: crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER,
         }
     }
 }
@@ -79,7 +81,24 @@ fn process_helm_inputs(
     mut last_input: ResMut<LastHelmInput>,
     modifiers: Res<ShipModifiers>,
     ship_physics_config: Option<Res<ShipPhysicsConfigResource>>,
+    impulse: Res<ShipImpulse>,
+    impulse_config: Res<ImpulseConfigResource>,
+    mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
+    // Edge-detect Idle → Charging (or any → Charging) and zero out the
+    // last cached helm input so a stale steering/thrust value can't
+    // resurface the moment impulse cancels or the autopilot disengages.
+    // Mirrors the `prev_phase` Local pattern in
+    // `modifiers/coordination.rs::translate_impulse_modifiers`.
+    let current_phase = impulse.0.phase;
+    if Some(current_phase) != *prev_phase {
+        if current_phase == crate::impulse::ImpulsePhase::Charging {
+            last_input.thrust = 0.0;
+            last_input.steering = 0.0;
+        }
+        *prev_phase = Some(current_phase);
+    }
+
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
@@ -110,9 +129,15 @@ fn process_helm_inputs(
         yaw: ship.yaw,
         forward_speed: ship.forward_speed,
     };
-    let input = ShipPhysicsInput {
-        thrust: last_input.thrust,
-        steering: last_input.steering,
+    let impulse_active = impulse.0.is_active();
+    let input = if impulse_active {
+        // Autopilot: full forward thrust, zero steering. Player input is ignored.
+        ShipPhysicsInput { thrust: 1.0, steering: 0.0 }
+    } else {
+        ShipPhysicsInput {
+            thrust: last_input.thrust,
+            steering: last_input.steering,
+        }
     };
     let mut config = match ship_physics_config.as_deref() {
         Some(cfg) => cfg.0.clone(),
@@ -121,6 +146,17 @@ fn process_helm_inputs(
     config.max_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
     config.max_reverse_speed *= modifiers.get(&ModifierSlot::MaxSpeed);
     config.max_yaw_rate *= modifiers.get(&ModifierSlot::MaxYawRate);
+    if impulse_active {
+        // Mirror `ship/impulse.rs::apply_to_physics`: a non-positive
+        // multiplier (e.g. an unset TOML field defaulting to 0) falls
+        // back to the const instead of nuking acceleration entirely.
+        let mult = if impulse_config.acceleration_multiplier > 0.0 {
+            impulse_config.acceleration_multiplier
+        } else {
+            crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
+        };
+        config.acceleration *= mult;
+    }
     let result = compute_physics(state, input, dt, &config);
 
     ship.x = result.x;
@@ -490,6 +526,177 @@ mod tests {
             app.world().resource::<ShipImpulse>().0.phase,
             ImpulsePhase::Charging,
             "StartImpulseCharge should work when outside BlocksImpulse region"
+        );
+    }
+
+    // ── Impulse autopilot tests ───────────────────────────────────────
+
+    /// While the impulse drive is Active, the server should ignore any helm
+    /// input from the player and autopilot the ship: full forward thrust,
+    /// zero steering. The configured `acceleration_multiplier` boosts the
+    /// base acceleration so the ship ramps up to the boosted top speed.
+    #[test]
+    fn active_impulse_autopilots_with_boosted_acceleration() {
+        let mut app = test_app();
+        // 5x boost: base accel = 25/3 ≈ 8.33; boosted = ~41.67 per second.
+        // Timer fires every 100ms, so the very first tick advances physics by
+        // dt = 0.1s → expected forward_speed ≈ 4.17.
+        app.insert_resource(ImpulseConfigResource {
+            charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
+            speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+            acceleration_multiplier: 5.0,
+        });
+        start_game_with_helm_and_science(&mut app);
+
+        // Activate impulse directly (bypass charge).
+        {
+            let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
+            imp.0.start_charge();
+            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        }
+
+        // Player tries to fight the autopilot: zero thrust, hard right steer.
+        // The server must ignore both and force thrust=1.0, steering=0.0.
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::HelmInput { thrust: 0.0, steering: 1.0 },
+        );
+        tick(&mut app);
+
+        let ship = app.world().resource::<ShipState>();
+        // With a 5x boost and dt=0.1s, expect roughly +4.17 forward.
+        // Without the boost we'd expect ~+0.83; require >=3.0 to clearly
+        // distinguish the boosted path.
+        assert!(
+            ship.forward_speed >= 3.0,
+            "active impulse should autopilot with boosted accel; got forward_speed={}",
+            ship.forward_speed
+        );
+        // Steering must be ignored — yaw should be essentially unchanged.
+        assert!(
+            ship.yaw.abs() < 1e-3,
+            "active impulse must zero steering; got yaw={}",
+            ship.yaw
+        );
+    }
+
+    /// While the impulse drive is Idle, the configured
+    /// `acceleration_multiplier` must have no effect — it applies only
+    /// during the Active phase.
+    #[test]
+    fn idle_impulse_does_not_boost_acceleration() {
+        let mut app = test_app();
+        app.insert_resource(ImpulseConfigResource {
+            charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
+            speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+            acceleration_multiplier: 5.0,
+        });
+        start_game_with_helm_and_science(&mut app);
+
+        // Impulse stays Idle; helm asks for full thrust.
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::HelmInput { thrust: 1.0, steering: 0.0 },
+        );
+        tick(&mut app);
+
+        let ship = app.world().resource::<ShipState>();
+        // Base accel ≈ 8.33, dt = 0.1 → expected ≈ 0.83. Cap at 2.0 to
+        // catch any accidental boost.
+        assert!(
+            ship.forward_speed < 2.0,
+            "idle impulse must not boost accel; got forward_speed={}",
+            ship.forward_speed
+        );
+    }
+
+    /// A non-positive `acceleration_multiplier` (e.g. an unconfigured TOML
+    /// field that defaults to 0.0) must fall back to the const
+    /// `IMPULSE_ACCELERATION_MULTIPLIER` instead of nuking acceleration
+    /// during impulse. Mirrors the `speed_multiplier <= 0` fallback in
+    /// `ship/impulse.rs::apply_to_physics`.
+    #[test]
+    fn zero_acceleration_multiplier_falls_back_to_const() {
+        let mut app = test_app();
+        app.insert_resource(ImpulseConfigResource {
+            charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
+            speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+            acceleration_multiplier: 0.0,
+        });
+        start_game_with_helm_and_science(&mut app);
+
+        // Activate impulse directly (bypass charge).
+        {
+            let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
+            imp.0.start_charge();
+            imp.0.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        }
+        tick(&mut app);
+
+        let ship = app.world().resource::<ShipState>();
+        // Const is 5.0 → expect ≈ +4.17/tick. Without the fallback,
+        // forward_speed would be ~0 (0× accel during impulse).
+        assert!(
+            ship.forward_speed >= 3.0,
+            "zero acceleration_multiplier must fall back to const; \
+             got forward_speed={}",
+            ship.forward_speed
+        );
+    }
+
+    /// REGRESSION (review finding #1 / #5): when impulse starts charging,
+    /// the server's `LastHelmInput` must be cleared so a stale steering
+    /// value can't immediately fly the ship the moment impulse cancels
+    /// (or in the post-active autopilot-disengage frame).
+    ///
+    /// Reproduce: send `HelmInput { steering: 1.0 }`, then
+    /// `StartImpulseCharge`, then `CancelImpulse`, then tick. Without the
+    /// fix the post-cancel tick will read the stale `steering=1.0` and
+    /// rotate the ship.
+    #[test]
+    fn stale_helm_steering_cleared_when_impulse_starts_charging() {
+        let mut app = test_app();
+        start_game_with_helm_and_science(&mut app);
+
+        // Player jams the steering hard right before pressing IMPULSE.
+        push(
+            &mut app,
+            "helm",
+            ClientMessage::HelmInput { thrust: 0.0, steering: 1.0 },
+        );
+        tick(&mut app);
+
+        // Press IMPULSE → starts charging. `LastHelmInput` must be cleared.
+        push(&mut app, "helm", ClientMessage::StartImpulseCharge);
+        tick(&mut app);
+        assert_eq!(
+            app.world().resource::<ShipImpulse>().0.phase,
+            ImpulsePhase::Charging,
+            "impulse should be charging after StartImpulseCharge"
+        );
+        let last = app.world().resource::<LastHelmInput>();
+        assert_eq!(
+            (last.thrust, last.steering),
+            (0.0, 0.0),
+            "LastHelmInput must be zeroed on Charging transition; got \
+             thrust={}, steering={}",
+            last.thrust,
+            last.steering
+        );
+
+        // Snapshot yaw, then cancel and tick once. With the bug, the
+        // post-cancel tick replays steering=1.0 and yaw changes.
+        let yaw_before = app.world().resource::<ShipState>().yaw;
+        push(&mut app, "helm", ClientMessage::CancelImpulse);
+        tick(&mut app);
+        let yaw_after = app.world().resource::<ShipState>().yaw;
+        assert!(
+            (yaw_after - yaw_before).abs() < 1e-3,
+            "post-cancel tick must not autopilot a phantom turn; \
+             yaw drifted by {}",
+            yaw_after - yaw_before
         );
     }
 }

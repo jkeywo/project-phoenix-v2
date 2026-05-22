@@ -454,4 +454,48 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
         assert_eq!(mods.get(&ModifierSlot::HullDamageTaken), 1.0);
         assert_eq!(mods.get(&ModifierSlot::RepairRate), 1.0);
     }
+
+    /// Verifies that `translate_impulse_modifiers` reads `speed_multiplier`
+    /// from `ImpulseConfigResource` rather than the `IMPULSE_SPEED_MULTIPLIER`
+    /// const. With a custom 3.0× multiplier (vs. the 10.0× default), the
+    /// MaxSpeed modifier must reflect the resource value.
+    #[test]
+    fn translate_impulse_modifiers_reads_speed_multiplier_from_resource() {
+        use crate::ship_plugin::ImpulseConfigResource;
+        use crate::simulation::ShipImpulse;
+        use crate::impulse::ImpulseState;
+
+        let mut app = App::new();
+        app.init_resource::<ShipModifiers>();
+
+        // Activate the impulse drive directly.
+        let mut impulse = ImpulseState::new();
+        impulse.start_charge();
+        impulse.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
+        assert!(impulse.is_active(), "test fixture: impulse should be active");
+        app.insert_resource(ShipImpulse(impulse));
+
+        // Configure a non-default speed multiplier (3.0 instead of 10.0).
+        // The MaxSpeed modifier must reflect this — proving the system
+        // reads the resource rather than the const fallback.
+        app.insert_resource(ImpulseConfigResource {
+            charge_duration: IMPULSE_CHARGE_DURATION,
+            speed_multiplier: 3.0,
+            acceleration_multiplier: 1.0,
+        });
+
+        app.add_systems(Update, translate_impulse_modifiers);
+        app.update();
+
+        let mods = app.world().resource::<ShipModifiers>();
+        let max_speed = mods.get(&ModifierSlot::MaxSpeed);
+        assert!(
+            (max_speed - 3.0).abs() < 1e-6,
+            "expected MaxSpeed=3.0 from resource speed_multiplier, got {max_speed}"
+        );
+        assert!(
+            (max_speed - IMPULSE_SPEED_MULTIPLIER).abs() > 0.5,
+            "MaxSpeed must not fall back to IMPULSE_SPEED_MULTIPLIER const"
+        );
+    }
 }

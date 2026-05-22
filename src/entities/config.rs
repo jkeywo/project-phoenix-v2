@@ -209,6 +209,10 @@ pub struct HelmConsoleConfig {
     /// Defaults to `IMPULSE_SPEED_MULTIPLIER` (10.0) when absent.
     #[serde(default = "default_impulse_speed_multiplier")]
     pub impulse_speed_multiplier: f32,
+    /// Acceleration multiplier applied while impulse drive is active.
+    /// Defaults to `IMPULSE_ACCELERATION_MULTIPLIER` (5.0) when absent.
+    #[serde(default = "default_impulse_acceleration_multiplier")]
+    pub impulse_acceleration_multiplier: f32,
 }
 
 impl HelmConsoleConfig {
@@ -229,6 +233,10 @@ fn default_impulse_charge_duration() -> f32 {
 
 fn default_impulse_speed_multiplier() -> f32 {
     crate::impulse::IMPULSE_SPEED_MULTIPLIER
+}
+
+fn default_impulse_acceleration_multiplier() -> f32 {
+    crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -99,9 +99,12 @@ the effective max reflects the slow-zone modifier.
 | Ordering | `.after(handle_impulse_messages)` |
 
 When `ImpulsePhase::Active`, registers a `MaxSpeed` modifier with bonus
-`IMPULSE_SPEED_MULTIPLIER - 1.0` under `ModifierSource::ImpulseDrive`. When
-idle or charging, removes that modifier so the cache returns to the identity
-multiplier.
+`speed_multiplier - 1.0` under `ModifierSource::ImpulseDrive`. The
+`speed_multiplier` value is read from `ImpulseConfigResource` (populated from
+`[helm_console].impulse_speed_multiplier` in `assets/entities/player_ship.toml`);
+the `IMPULSE_SPEED_MULTIPLIER` const is kept only as the resource `Default`.
+When idle or charging, the modifier is removed so the cache returns to the
+identity multiplier.
 
 The system uses `Local<Option<ImpulsePhase>>` to change-detect on phase
 transitions, avoiding redundant modifier events when the phase hasn't changed.
@@ -126,13 +129,16 @@ idempotent — `add_or_update` replaces the previous entry rather than stacking.
 slice of `RegionEffectKind` and registers the corresponding modifiers and flags
 under `ModifierSource::RegionEffect { uuid: region_uuid }`.
 
-### `apply_impulse_to(modifiers, impulse)`
+### `apply_impulse_to(modifiers, impulse, speed_multiplier)`
 
 `src/modifiers/coordination.rs:155`. Non-Bevy, fully unit-tested. When the
 impulse drive is active (`is_active()`), writes a `MaxSpeed` modifier with
-bonus `IMPULSE_SPEED_MULTIPLIER - 1.0` under `ModifierSource::ImpulseDrive`.
-When idle or charging, removes that modifier so the cache returns to the
-identity multiplier.
+bonus `speed_multiplier - 1.0` under `ModifierSource::ImpulseDrive`. When
+idle or charging, removes that modifier so the cache returns to the
+identity multiplier. Note: the per-tick **acceleration** boost is applied
+separately inside `process_helm_inputs` (`src/ship_plugin.rs`) by multiplying
+`ShipPhysicsConfig.acceleration` by `ImpulseConfigResource.acceleration_multiplier`;
+it does not flow through `ShipModifiers`.
 
 ## Read interface for consumers
 

@@ -10,7 +10,7 @@ import {
  * Slice 7 AC#4: cross-mode entity invalidation.
  *
  * When SaveFlow writes an Entity-mode TOML and the InvalidationBus
- * fires `entitySaved`, the Scenario canvas (app.js init) registers a
+ * fires `entitySaved`, the World canvas (app.js init) registers a
  * listener that:
  *   1. drops the stale row from entity-cache
  *   2. re-loads the entity config
@@ -22,7 +22,7 @@ import {
  * the cache after a save.
  */
 
-describe('Slice 7 AC#4: scenario canvas subscribes to entity-saved invalidations', () => {
+describe('Slice 7 AC#4: world canvas subscribes to entity-saved invalidations', () => {
   beforeEach(() => {
     invalidateAll();
   });

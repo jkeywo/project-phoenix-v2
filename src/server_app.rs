@@ -720,15 +720,6 @@ fn reconcile_runtime_entities(
                 };
                 if let Some(shape) = region_shape {
                     snapshot.shape = Some(shape_to_wire(shape));
-                    match &shape.0 {
-                        crate::region_shape::RegionShape::Torus { inner_radius, .. } => {
-                            snapshot.inner_radius = Some(*inner_radius);
-                        }
-                        crate::region_shape::RegionShape::Box { half_extents, .. } => {
-                            snapshot.half_extents = Some(*half_extents);
-                        }
-                        crate::region_shape::RegionShape::Sphere { .. } => {}
-                    }
                 }
                 if let Some(ra) = radar_appearance {
                     if ra.0.colour.len() >= 3 {
@@ -765,15 +756,6 @@ fn reconcile_runtime_entities(
                 };
                 if let Some(shape) = region_shape {
                     snapshot.shape = Some(shape_to_wire(shape));
-                    match &shape.0 {
-                        crate::region_shape::RegionShape::Torus { inner_radius, .. } => {
-                            snapshot.inner_radius = Some(*inner_radius);
-                        }
-                        crate::region_shape::RegionShape::Box { half_extents, .. } => {
-                            snapshot.half_extents = Some(*half_extents);
-                        }
-                        crate::region_shape::RegionShape::Sphere { .. } => {}
-                    }
                 }
                 if let Some(ra) = radar_appearance {
                     if ra.0.colour.len() >= 3 {
@@ -940,6 +922,7 @@ fn spawn_game_start_entities(
     let config_cache = crate::config_cache::get_config_cache();
 
     let mut ship_spawned = false;
+    let named_positions = crate::world::config::build_named_entity_positions(mc);
     for entity_inst in &mc.entities {
         if entity_inst.spawn_on != crate::world::config::WorldEntitySpawnOn::GameStart {
             continue;
@@ -957,14 +940,20 @@ fn spawn_game_start_entities(
         };
 
         let uuid = crate::entity_loader::assign_uuid();
-        let pos = if entity_inst.position.len() >= 3 {
-            Vec3::new(
-                entity_inst.position[0],
-                entity_inst.position[1],
-                entity_inst.position[2],
-            )
-        } else {
-            Vec3::ZERO
+        let pos = match crate::world::config::resolve_entity_position_with(
+            entity_inst,
+            &mc.anchors,
+            &named_positions,
+        ) {
+            Ok(p) => Vec3::new(p[0], p[1], p[2]),
+            Err(e) => {
+                bevy::log::error!(
+                    "Failed to resolve GameStart entity '{}': {}",
+                    entity_inst.template_path,
+                    e
+                );
+                continue;
+            }
         };
 
         let spawned = crate::entity_spawner::spawn_entity(
@@ -1150,20 +1139,23 @@ fn spawn_game_start_entities(
     *has_spawned = true;
 }
 
-/// Add visual meshes and materials to spawned entities that have StarSection
-/// or PlanetSection but no mesh yet.
+/// Add visual meshes and materials to spawned entities that have a `[mesh]`
+/// section but no `Mesh3d` yet. Additionally, if the entity carries a `Lights`
+/// component (from one or more `[[light]]` TOML entries), attach the matching
+/// `PointLight`/`DirectionalLight` components (single light → inline, multiple
+/// → spawned as child entities).
 fn render_spawned_entities(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     entities: Query<
-        (Entity, &crate::entity_spawner::MeshSection, Option<&crate::entity_spawner::StarSection>),
+        (Entity, &crate::entity_spawner::MeshSection, Option<&crate::entity_spawner::Lights>),
         Without<Mesh3d>,
     >,
 ) {
     use crate::entity_config::MeshShape;
 
-    for (entity, mesh_sec, star_sec) in entities.iter() {
+    for (entity, mesh_sec, lights_opt) in entities.iter() {
         let cfg = &mesh_sec.0;
 
         let color = if cfg.colour.len() >= 3 {
@@ -1172,11 +1164,8 @@ fn render_spawned_entities(
             Color::srgb(0.6, 0.6, 0.6)
         };
 
-        let emissive = if star_sec.is_some() {
-            LinearRgba::from(color) * 2.0
-        } else {
-            LinearRgba::from(color) * 0.4
-        };
+        let emissive_mul = cfg.emissive.unwrap_or(0.4);
+        let emissive = LinearRgba::from(color) * emissive_mul;
 
         let mesh = match cfg.shape {
             MeshShape::Sphere => meshes.add(Sphere { radius: cfg.radius.max(0.1) }),
@@ -1199,20 +1188,65 @@ fn render_spawned_entities(
         let mut ec = commands.entity(entity);
         ec.insert((Mesh3d(mesh), MeshMaterial3d(mat)));
 
-        if let Some(star) = star_sec {
-            let light_color = star
-                .0
-                .light_colour
-                .as_ref()
-                .filter(|c| c.len() >= 3)
-                .map(|c| Color::srgb(c[0], c[1], c[2]))
-                .unwrap_or(Color::WHITE);
-            let range = star.0.light_range.unwrap_or(cfg.radius * 60.0);
-            let intensity = star.0.light_intensity.unwrap_or(cfg.radius * 2000.0);
+        // Attach lights, if any.
+        if let Some(lights_comp) = lights_opt {
+            let lights = &lights_comp.0;
+            match lights.len() {
+                0 => {}
+                1 => insert_light(&mut ec, &lights[0]),
+                _ => {
+                    ec.with_children(|parent| {
+                        for light in lights {
+                            spawn_child_light(parent, light);
+                        }
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn insert_light(ec: &mut bevy::ecs::system::EntityCommands, light: &crate::entity_config::LightConfig) {
+    use crate::entity_config::LightKind;
+    let color = Color::srgb(light.colour[0], light.colour[1], light.colour[2]);
+    match light.kind {
+        LightKind::Point => {
             ec.insert(PointLight {
-                color: light_color,
-                intensity,
-                range,
+                color,
+                intensity: light.intensity,
+                range: light.range.unwrap_or(50.0),
+                shadows_enabled: false,
+                ..default()
+            });
+        }
+        LightKind::Directional => {
+            ec.insert(DirectionalLight {
+                color,
+                illuminance: light.intensity,
+                shadows_enabled: false,
+                ..default()
+            });
+        }
+    }
+}
+
+fn spawn_child_light(parent: &mut bevy::ecs::relationship::RelatedSpawnerCommands<ChildOf>, light: &crate::entity_config::LightConfig) {
+    use crate::entity_config::LightKind;
+    let color = Color::srgb(light.colour[0], light.colour[1], light.colour[2]);
+    match light.kind {
+        LightKind::Point => {
+            parent.spawn(PointLight {
+                color,
+                intensity: light.intensity,
+                range: light.range.unwrap_or(50.0),
+                shadows_enabled: false,
+                ..default()
+            });
+        }
+        LightKind::Directional => {
+            parent.spawn(DirectionalLight {
+                color,
+                illuminance: light.intensity,
                 shadows_enabled: false,
                 ..default()
             });
@@ -2055,8 +2089,8 @@ mod tests {
     #[test]
     fn asteroid_outside_weapons_range_replies_with_target_lock_rejected() {
         let mut app = test_app();
-        // Asteroid at (310, 0) — 310 units away, outside 300-unit Weapons range.
-        setup_weapons_world(&mut app, 310.0, 0.0);
+        // Asteroid at (80, 0) â€" 80 units away, outside 60-unit Weapons range.
+        setup_weapons_world(&mut app, 80.0, 0.0);
         start_game_with_weapons(&mut app);
 
         push(

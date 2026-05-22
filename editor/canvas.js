@@ -1,7 +1,7 @@
 import { getSpawns, getAnchors, getSpawnPosition, getSpawnName, getEntityPath, getRelativeInfo, setSpawnPosition } from './toml-utils.js';
 import { getColorForEntity } from './layers.js';
 import { loadEntityConfig, getEntityConfig } from './entity-cache.js';
-import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALLBACK } from './canvas-scenario.js';
+import { resolveEntityAppearance, drawEntityShape, colourToHex, RADAR_SHAPE_FALLBACK } from './canvas-world.js';
 import { getRegionRenderSpec } from './canvas-region.js';
 import { getAnchorRenderSpecs } from './canvas-anchor.js';
 import { analyzeAnchorRename } from './anchor-rename.js';
@@ -324,7 +324,9 @@ export class CanvasManager {
     if (!toml || typeof toml !== 'object') return;
     if (Array.isArray(toml.entity)) {
       for (const ent of toml.entity) {
-        if (ent && ent.anchor === oldName) ent.anchor = newName;
+        if (ent && ent.transform && ent.transform.anchor === oldName) {
+          ent.transform.anchor = newName;
+        }
       }
     }
     if (Array.isArray(toml.trigger)) {
@@ -364,8 +366,8 @@ export class CanvasManager {
     const relative = getRelativeInfo(spawn);
 
     // Merge entity-template fields into spawn if not already set
-    const entConfig = spawn.entity_path || spawn.template_path
-      ? getEntityConfig(spawn.entity_path || spawn.template_path)
+    const entConfig = spawn.template_path
+      ? getEntityConfig(spawn.template_path)
       : null;
     if (entConfig) {
       if (!spawn.tags && entConfig.tags) spawn.tags = entConfig.tags;
@@ -593,14 +595,13 @@ export class CanvasManager {
 
     setSpawnPosition(spawn, worldPos.x, worldPos.z, 'absolute');
 
-    const arr = activeLayer.kind === 'scenario' ? 'spawn' : 'entity';
-    spawn[activeLayer.kind === 'scenario' ? 'entity_path' : 'template_path'] = this.placeEntityPath;
+    spawn.template_path = this.placeEntityPath;
 
     snapshotForUndo(activeLayer);
-    if (!activeLayer.toml[arr]) {
-      activeLayer.toml[arr] = [];
+    if (!activeLayer.toml.entity) {
+      activeLayer.toml.entity = [];
     }
-    activeLayer.toml[arr].push(spawn);
+    activeLayer.toml.entity.push(spawn);
     activeLayer.isDirty = true;
 
     this.onSpawnCreate(spawn, activeLayer);
@@ -630,8 +631,7 @@ export class CanvasManager {
   selectByEntityName(name) {
     if (!name) return false;
     for (const layer of this.layerManager.getLayers()) {
-      const arr = layer.kind === 'scenario' ? 'spawn' : 'entity';
-      const list = layer.toml?.[arr];
+      const list = layer.toml?.entity;
       if (!Array.isArray(list)) continue;
       const match = list.find(s => s && s.name === name);
       if (match) {

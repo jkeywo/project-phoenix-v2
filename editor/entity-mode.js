@@ -15,6 +15,20 @@ import { COMPONENT_SCHEMA, ENTITY_CONFIG_SECTIONS } from './component-schema.js'
 import { getComboTemplate, getRawSectionDefaults } from './component-templates.js';
 import { computeEntityPreview } from './entity-preview.js';
 
+/**
+ * Deep-clone a default value so subsequent mutations on the returned card
+ * data don't leak back into the shared template defaults table.
+ * Falls back to JSON clone if structuredClone is unavailable.
+ * @param {any} value
+ * @returns {any}
+ */
+function cloneDefaults(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== 'object') return value;
+  if (typeof structuredClone === 'function') return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+}
+
 // ── Component Card ────────────────────────────────────────────────────────────
 
 /**
@@ -248,8 +262,11 @@ export class EntityModeShell {
       return { ok: false, warning: msg };
     }
 
-    const defaults = getRawSectionDefaults(sectionKey) ?? {};
+    const defaults = cloneDefaults(getRawSectionDefaults(sectionKey) ?? {});
     const schema = COMPONENT_SCHEMA[sectionKey] ?? null;
+    if (this._parsedEntity) {
+      this._parsedEntity[sectionKey] = defaults;
+    }
     const card = new ComponentCard(sectionKey, defaults, schema);
     this._cards.push(card);
     return { ok: true };
@@ -281,7 +298,11 @@ export class EntityModeShell {
         continue;
       }
       const schema = COMPONENT_SCHEMA[key] ?? null;
-      const card = new ComponentCard(key, { ...defaults }, schema);
+      const data = cloneDefaults(defaults);
+      if (this._parsedEntity) {
+        this._parsedEntity[key] = data;
+      }
+      const card = new ComponentCard(key, data, schema);
       this._cards.push(card);
     }
 
@@ -340,7 +361,6 @@ export class EntityModeShell {
       const hasTags = section === 'tags' && Array.isArray(value);
       const hasSection = value !== undefined && value !== null;
       if (!hasTags && !hasSection) continue;
-      if (section === 'tags' && Array.isArray(value) && value.length === 0) continue;
 
       const schema = COMPONENT_SCHEMA[section] ?? null;
       cards.push(new ComponentCard(section, value, schema));

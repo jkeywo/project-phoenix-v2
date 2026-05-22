@@ -136,17 +136,6 @@ export const COMPONENT_SCHEMA = {
     ],
   },
 
-  science_console: {
-    section: 'science_console',
-    label: 'Science Console',
-    fields: [
-      { key: 'power_multipliers', type: 'array', items: 'number', optional: true },
-      { key: 'long_range_radar', type: 'object', optional: true },
-      { key: 'system_map', type: 'object', optional: true },
-      { key: 'complexity_toml', type: 'path-complexity', optional: true, dropdownSource: 'complexity' },
-    ],
-  },
-
   sensors_console: {
     section: 'sensors_console',
     label: 'Sensors Console',
@@ -170,31 +159,51 @@ export const COMPONENT_SCHEMA = {
     ],
   },
 
-  star: {
-    section: 'star',
-    label: 'Star',
+  name: {
+    section: 'name',
+    label: 'Name',
     fields: [
       { key: 'name', type: 'string', default: '' },
-      { key: 'radius', type: 'number' },
-      { key: 'colour', type: 'array', items: 'number' },
-      { key: 'position', type: 'array', items: 'number', optional: true, default: [] },
-      { key: 'tags', type: 'array', items: 'string', optional: true, default: [] },
-      { key: 'light_range', type: 'number', optional: true },
-      { key: 'light_intensity', type: 'number', optional: true },
-      { key: 'light_colour', type: 'array', items: 'number', optional: true },
     ],
   },
 
-  planet: {
-    section: 'planet',
-    label: 'Planet',
+  mesh: {
+    section: 'mesh',
+    label: 'Mesh',
     fields: [
-      { key: 'name', type: 'string', default: '' },
-      { key: 'radius', type: 'number' },
+      { key: 'shape', type: 'string', enum: ['sphere', 'cuboid', 'torus'] },
       { key: 'colour', type: 'array', items: 'number' },
-      { key: 'position', type: 'array', items: 'number', optional: true, default: [] },
-      { key: 'tags', type: 'array', items: 'string', optional: true, default: [] },
+      { key: 'radius', type: 'number', optional: true, default: 0 },
+      { key: 'size', type: 'array', items: 'number', optional: true },
+      { key: 'minor_radius', type: 'number', optional: true, default: 0 },
+      { key: 'emissive', type: 'number', optional: true },
     ],
+  },
+
+  // Array-of-tables: maps to TOML `[[light]]` blocks (Vec<LightConfig>).
+  // Runtime card data is a bare array of entry objects, not a wrapping object.
+  // `entryFields` describes the schema for each entry.
+  light: {
+    section: 'light',
+    label: 'Lights',
+    arrayOfTables: true,
+    fields: [
+      { key: 'kind', type: 'string', enum: ['point', 'directional'] },
+      { key: 'colour', type: 'array', items: 'number' },
+      { key: 'intensity', type: 'number' },
+      { key: 'range', type: 'number', optional: true },
+    ],
+    entryFields: [
+      { key: 'kind', type: 'string', enum: ['point', 'directional'] },
+      { key: 'colour', type: 'array', items: 'number' },
+      { key: 'intensity', type: 'number' },
+      { key: 'range', type: 'number', optional: true },
+    ],
+    entryDefaults: {
+      kind: 'point',
+      colour: [1.0, 1.0, 1.0],
+      intensity: 1000.0,
+    },
   },
 
   asteroid_field: {
@@ -239,17 +248,6 @@ export const COMPONENT_SCHEMA = {
     ],
   },
 
-  station: {
-    section: 'station',
-    label: 'Station',
-    fields: [
-      { key: 'name', type: 'string' },
-      { key: 'shape', type: 'string', enum: ['sphere', 'cylinder', 'torus'] },
-      { key: 'radius', type: 'number' },
-      { key: 'hull_integrity', type: 'number' },
-    ],
-  },
-
   behaviour: {
     section: 'behaviour',
     label: 'Behaviour',
@@ -275,26 +273,25 @@ export const COMPONENT_SCHEMA = {
  * Used by completeness tests.
  */
 export const ENTITY_CONFIG_SECTIONS = [
+  'name',
   'tags',
   'faction',
   'hull',
   'collider',
   'appearance',
+  'mesh',
+  'light',
   'radar_appearance',
   'helm_console',
   'weapons_console',
   'engineering_console',
   'captain_console',
   'power',
-  'science_console',
   'sensors_console',
   'shields_console',
-  'star',
-  'planet',
   'asteroid_field',
   'shape',
   'effects',
-  'station',
   'behaviour',
   'stations',
 ];

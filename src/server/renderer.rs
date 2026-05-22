@@ -82,6 +82,14 @@ impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TorpedoEntityMap>()
             .add_systems(Startup, setup)
+            .add_systems(
+                PostStartup,
+                // Explicit `.after` for documentation: PostStartup naturally
+                // runs after Startup (where `insert_world_config_resource`
+                // lives), but the annotation makes the ordering contract
+                // visible at the registration site.
+                spawn_world_ambient_light.after(crate::world::server::insert_world_config_resource),
+            )
             .add_systems(Update, (
                 update_fps_counter,
                 update_camera_aspect,
@@ -134,13 +142,9 @@ fn setup(
         Camera { is_active: false, order: 1, ..default() },
     ));
 
-    // Ambient light — stars provide per-system point lights, so the directional
-    // sky light is replaced by a warm ambient fill.
-    commands.spawn(AmbientLight {
-        color: Color::srgb(0.6, 0.55, 0.5),
-        brightness: 300.0,
-        ..default()
-    });
+    // Ambient light is now spawned by `spawn_world_ambient_light` in
+    // `PostStartup`, which reads `WorldConfig.ambient_light` if present and
+    // falls back to the default warm fill otherwise.
 
     // View-screen crew roster — visible only during InProgress phase.
     commands.spawn((
@@ -197,6 +201,30 @@ fn setup(
 }
 
 // ── Systems ───────────────────────────────────────────────────────
+
+/// PostStartup: spawn the scene's ambient light. Reads the optional
+/// `[ambient_light]` block from `WorldConfig` if present; otherwise falls
+/// back to a warm fill (`Color::srgb(0.6, 0.55, 0.5)`, `brightness = 300.0`).
+/// Stars contribute per-system point lights on top of this fill.
+fn spawn_world_ambient_light(
+    mut commands: Commands,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+) {
+    let (color, brightness) = world_config
+        .as_ref()
+        .and_then(|wc| wc.ambient_light.as_ref())
+        .map(|al| {
+            let c = al.color.unwrap_or([0.6, 0.55, 0.5]);
+            (Color::srgb(c[0], c[1], c[2]), al.brightness.unwrap_or(300.0))
+        })
+        .unwrap_or_else(|| (Color::srgb(0.6, 0.55, 0.5), 300.0));
+
+    commands.spawn(AmbientLight {
+        color,
+        brightness,
+        ..default()
+    });
+}
 
 /// Compute and display FPS using Bevy's Time + Local — works on native and WASM.
 fn update_fps_counter(

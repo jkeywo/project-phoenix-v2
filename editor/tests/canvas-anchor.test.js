@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { getAnchorMarkers, getAnchorRenderSpecs, moveAnchor, resolveEntityPosition, serializeWorldWithAnchor } from '../canvas-anchor.js';
 import { parseWorldToml } from '../world-toml.js';
 
-// Tests for the pure anchor-logic module used by Scenario Mode canvas.
+// Tests for the pure anchor-logic module used by World Mode canvas.
 
 describe('getAnchorMarkers', () => {
   it('returns an empty array for null/undefined input', () => {
@@ -157,34 +157,34 @@ describe('resolveEntityPosition', () => {
   });
 
   it('uses inline position when present', () => {
-    const entity = { position: [100.0, 0.0, -200.0] };
+    const entity = { transform: { position: [100.0, 0.0, -200.0] } };
     expect(resolveEntityPosition(entity, anchors)).toEqual({ x: 100.0, z: -200.0 });
   });
 
   it('extracts x from position[0] and z from position[2]', () => {
-    const entity = { position: [10.0, 999.0, 20.0] };
+    const entity = { transform: { position: [10.0, 999.0, 20.0] } };
     const result = resolveEntityPosition(entity, anchors);
     expect(result.x).toBe(10.0);
     expect(result.z).toBe(20.0);
   });
 
   it('resolves anchor when entity has no inline position', () => {
-    const entity = { anchor: 'starbase_alpha' };
+    const entity = { transform: { anchor: 'starbase_alpha' } };
     expect(resolveEntityPosition(entity, anchors)).toEqual({ x: 500.0, z: 0.0 });
   });
 
   it('resolves patrol_alpha anchor correctly', () => {
-    const entity = { anchor: 'patrol_alpha' };
+    const entity = { transform: { anchor: 'patrol_alpha' } };
     expect(resolveEntityPosition(entity, anchors)).toEqual({ x: 300.0, z: -300.0 });
   });
 
   it('prefers inline position over anchor when both present', () => {
-    const entity = { position: [1.0, 0.0, 2.0], anchor: 'starbase_alpha' };
+    const entity = { transform: { position: [1.0, 0.0, 2.0], anchor: 'starbase_alpha' } };
     expect(resolveEntityPosition(entity, anchors)).toEqual({ x: 1.0, z: 2.0 });
   });
 
   it('returns {x:0, z:0} when anchor name is not found', () => {
-    const entity = { anchor: 'nonexistent_anchor' };
+    const entity = { transform: { anchor: 'nonexistent_anchor' } };
     expect(resolveEntityPosition(entity, anchors)).toEqual({ x: 0, z: 0 });
   });
 
@@ -194,12 +194,12 @@ describe('resolveEntityPosition', () => {
   });
 
   it('returns {x:0, z:0} when anchors map is null', () => {
-    const entity = { anchor: 'starbase_alpha' };
+    const entity = { transform: { anchor: 'starbase_alpha' } };
     expect(resolveEntityPosition(entity, null)).toEqual({ x: 0, z: 0 });
   });
 
   it('returns {x:0, z:0} when anchors map is empty', () => {
-    const entity = { anchor: 'starbase_alpha' };
+    const entity = { transform: { anchor: 'starbase_alpha' } };
     expect(resolveEntityPosition(entity, {})).toEqual({ x: 0, z: 0 });
   });
 
@@ -208,7 +208,7 @@ describe('resolveEntityPosition', () => {
       global: { seed: 42 },
       anchors: { patrol_alpha: [300.0, 0.0, -300.0] },
     };
-    const entity = { anchor: 'patrol_alpha' };
+    const entity = { transform: { anchor: 'patrol_alpha' } };
 
     const before = resolveEntityPosition(entity, worldState.anchors);
     expect(before).toEqual({ x: 300.0, z: -300.0 });

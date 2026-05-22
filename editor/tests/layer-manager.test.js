@@ -13,7 +13,7 @@ const rootContent = {
   global: { seed: 42 },
   anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
   entity: [
-    { template_path: 'assets/entities/star_sun.toml', position: [0.0, 0.0, 0.0] },
+    { template_path: 'assets/entities/star_sun.toml', transform: { position: [0.0, 0.0, 0.0] } },
   ],
 };
 
@@ -21,7 +21,7 @@ const childAContent = {
   global: { seed: 1 },
   anchors: { patrol_alpha: [300.0, 0.0, -300.0] },
   entity: [
-    { template_path: 'assets/entities/pirate_raider.toml', name: 'raider_alpha', anchor: 'patrol_alpha' },
+    { template_path: 'assets/entities/pirate_raider.toml', name: 'raider_alpha', transform: { anchor: 'patrol_alpha' } },
   ],
 };
 
@@ -210,13 +210,13 @@ describe('markDirty', () => {
 // ── addSpawn ──────────────────────────────────────────────────────────────────
 
 describe('addSpawn', () => {
-  const newSpawn = { template_path: 'assets/entities/player_ship.toml', position: [0.0, 0.0, 0.0] };
+  const newSpawn = { template_path: 'assets/entities/player_ship.toml', transform: { position: [0.0, 0.0, 0.0] } };
 
   it('adds spawn to active layer (root by default)', () => {
     const lm = LayerManager.openRoot(ROOT_PATH, rootContent, extraWorldContents)
       .addSpawn(newSpawn);
     const ws = lm.getWorldState(ROOT_PATH);
-    const found = ws.entity.find(e => e.template_path === newSpawn.template_path && e.position);
+    const found = ws.entity.find(e => e.template_path === newSpawn.template_path && e.transform);
     expect(found).toBeDefined();
   });
 
@@ -336,7 +336,7 @@ describe('integration: load root with two extra_worlds', () => {
   });
 
   it('setActiveLayer(child) → new spawn lands in child entity list', () => {
-    const newSpawn = { template_path: 'assets/entities/pirate_raider.toml', name: 'new_raider', position: [0.0, 0.0, 0.0] };
+    const newSpawn = { template_path: 'assets/entities/pirate_raider.toml', name: 'new_raider', transform: { position: [0.0, 0.0, 0.0] } };
     const initialChildEntityCount = childAContent.entity.length;
 
     const lm = LayerManager.openRoot(ROOT_PATH, rootContent, extraWorldContents)
@@ -353,7 +353,7 @@ describe('integration: load root with two extra_worlds', () => {
   });
 
   it('dirty indicator updates correctly per layer', () => {
-    const spawn = { template_path: 'assets/entities/star_sun.toml', position: [0.0, 0.0, 0.0] };
+    const spawn = { template_path: 'assets/entities/star_sun.toml', transform: { position: [0.0, 0.0, 0.0] } };
     const lm = LayerManager.openRoot(ROOT_PATH, rootContent, extraWorldContents)
       .setActiveLayer(CHILD_A_PATH)
       .addSpawn(spawn);

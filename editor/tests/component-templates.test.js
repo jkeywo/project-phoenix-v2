@@ -33,6 +33,16 @@ function roundTripCombo(comboName) {
   if (obj.tags && typeof obj.tags === 'object' && !Array.isArray(obj.tags) && Array.isArray(obj.tags.tags)) {
     obj.tags = obj.tags.tags;
   }
+  // name section: defaults is { name: 'string' }; entity-toml expects the
+  // top-level `name` key to hold the scalar string directly.
+  if (obj.name && typeof obj.name === 'object' && typeof obj.name.name === 'string') {
+    obj.name = obj.name.name;
+  }
+  // light section: defaults is { light: [...] }; entity-toml expects the
+  // top-level `light` key to hold the array directly.
+  if (obj.light && typeof obj.light === 'object' && !Array.isArray(obj.light) && Array.isArray(obj.light.light)) {
+    obj.light = obj.light.light;
+  }
 
   const tomlText = stringifyEntityToml(obj);
   const reparsed = parseEntityToml(tomlText);
@@ -75,12 +85,16 @@ describe('getComboTemplate', () => {
     expect(getComboTemplate('UnknownThing')).toBeNull();
   });
 
-  it('every section in every combo has a non-empty key and a defaults object', () => {
+  it('every section in every combo has a non-empty key and defaults defined', () => {
     for (const name of getAllComboNames()) {
       const tpl = getComboTemplate(name);
       for (const sec of tpl.sections) {
         expect(sec.key, `${name}: section missing key`).toBeTruthy();
-        expect(typeof sec.defaults, `${name}.${sec.key} defaults is not an object`).toBe('object');
+        // Defaults may be a bare scalar (e.g. `name = "Sun"`), an array
+        // (e.g. `tags = [...]`, `[[light]]` entries), or an object (e.g.
+        // `hull`, `helm_console`). All three shapes are valid; we just
+        // require that defaults is defined.
+        expect(sec.defaults, `${name}.${sec.key} defaults is undefined`).toBeDefined();
       }
     }
   });
@@ -89,11 +103,14 @@ describe('getComboTemplate', () => {
 // ── getRawSectionDefaults ─────────────────────────────────────────────────────
 
 describe('getRawSectionDefaults', () => {
-  it('returns an object for every known schema section', () => {
+  it('returns a non-null defaults value for every known schema section', () => {
     for (const key of Object.keys(COMPONENT_SCHEMA)) {
       const defaults = getRawSectionDefaults(key);
+      // Some top-level scalar sections (e.g. `name`, `faction`) return a
+      // bare string or undefined when no default is defined; arrayOfTables
+      // sections (e.g. `light`) return a bare []; structured sections
+      // return an object. Only null is reserved (for unknown sections).
       expect(defaults, `${key} returned null`).not.toBeNull();
-      expect(typeof defaults).toBe('object');
     }
   });
 
@@ -136,10 +153,12 @@ describe('combo round-trip via entity-toml.js', () => {
     expect(reparsed.helm_console.max_speed).toBe(50.0);
   });
 
-  it('Station combo produces station section after round-trip', () => {
+  it('Station combo produces hull section (not legacy [station]) after round-trip', () => {
     const { reparsed } = roundTripCombo('Station');
-    expect(reparsed).toHaveProperty('station');
-    expect(reparsed.station.hull_integrity).toBe(200.0);
+    expect(reparsed).not.toHaveProperty('station');
+    expect(reparsed).toHaveProperty('hull');
+    expect(reparsed.hull.hull_integrity).toBe(200.0);
+    expect(reparsed.tags).toContain('station');
   });
 
   it('Region combo produces shape and effects sections after round-trip', () => {
@@ -167,16 +186,27 @@ describe('combo round-trip via entity-toml.js', () => {
     expect(reparsed.asteroid_field.inner_radius).toBe(100.0);
   });
 
-  it('Star combo produces star section after round-trip', () => {
+  it('Star combo produces name, mesh, and light sections after round-trip', () => {
     const { reparsed } = roundTripCombo('Star');
-    expect(reparsed).toHaveProperty('star');
-    expect(reparsed.star.radius).toBe(50.0);
+    expect(reparsed).not.toHaveProperty('star');
+    expect(reparsed.name).toBe('New Star');
+    expect(reparsed).toHaveProperty('mesh');
+    expect(reparsed.mesh.shape).toBe('sphere');
+    expect(reparsed.mesh.radius).toBe(50.0);
+    expect(reparsed.mesh.emissive).toBe(2.0);
+    expect(reparsed).toHaveProperty('light');
+    expect(Array.isArray(reparsed.light)).toBe(true);
+    expect(reparsed.light[0].kind).toBe('point');
+    expect(reparsed.light[0].intensity).toBe(150000.0);
   });
 
-  it('Planet combo produces planet section after round-trip', () => {
+  it('Planet combo produces name and mesh sections after round-trip', () => {
     const { reparsed } = roundTripCombo('Planet');
-    expect(reparsed).toHaveProperty('planet');
-    expect(reparsed.planet.radius).toBe(20.0);
+    expect(reparsed).not.toHaveProperty('planet');
+    expect(reparsed.name).toBe('New Planet');
+    expect(reparsed).toHaveProperty('mesh');
+    expect(reparsed.mesh.shape).toBe('sphere');
+    expect(reparsed.mesh.radius).toBe(20.0);
   });
 });
 
@@ -259,7 +289,8 @@ describe('EntityModeShell.addCombo', () => {
     shell.addCombo('Station');
     const sections = shell.getComponentCards().map((c) => c.section);
     expect(sections).toContain('tags');
-    expect(sections).toContain('station');
+    expect(sections).toContain('hull');
+    expect(sections).not.toContain('station');
     expect(sections).toContain('radar_appearance');
   });
 
@@ -297,8 +328,10 @@ describe('EntityModeShell.addCombo', () => {
   it('adds all sections for the Star combo', () => {
     shell.addCombo('Star');
     const sections = shell.getComponentCards().map((c) => c.section);
+    expect(sections).toContain('name');
     expect(sections).toContain('tags');
-    expect(sections).toContain('star');
+    expect(sections).toContain('mesh');
+    expect(sections).toContain('light');
     expect(sections).toContain('collider');
     expect(sections).toContain('radar_appearance');
   });
@@ -306,8 +339,9 @@ describe('EntityModeShell.addCombo', () => {
   it('adds all sections for the Planet combo', () => {
     shell.addCombo('Planet');
     const sections = shell.getComponentCards().map((c) => c.section);
+    expect(sections).toContain('name');
     expect(sections).toContain('tags');
-    expect(sections).toContain('planet');
+    expect(sections).toContain('mesh');
     expect(sections).toContain('collider');
     expect(sections).toContain('radar_appearance');
   });

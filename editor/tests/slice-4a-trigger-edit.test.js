@@ -151,7 +151,7 @@ function makeWorld() {
       {
         template_path: 'assets/entities/pirate_raider.toml',
         name: 'raider_alpha',
-        anchor: 'patrol_alpha',
+        transform: { anchor: 'patrol_alpha' },
       },
     ],
     trigger: [
@@ -240,7 +240,7 @@ describe('Slice 4a: trigger editor + action-card', () => {
     expect(layer.toml.trigger[0].action[0].id).toBe('obj-raider-destroyed');
     expect(layer.isDirty).toBe(true);
 
-    const undoEntries = modeShell.getUndoHistory('Scenario', layer.filename);
+    const undoEntries = modeShell.getUndoHistory('World', layer.filename);
     expect(undoEntries.length).toBe(1);
     // The snapshot is the PRE-mutation state — the original text.
     expect(undoEntries[0].trigger[0].action[0].text).toBe('Destroy the raider patrol');

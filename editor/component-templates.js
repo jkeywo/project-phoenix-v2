@@ -18,16 +18,43 @@ import { COMPONENT_SCHEMA, ENTITY_CONFIG_SECTIONS } from './component-schema.js'
 // ── Raw section defaults ──────────────────────────────────────────────────────
 
 /**
- * Build a default data object for a section from its schema fields.
- * Fields with a `default` value contribute that value; optional fields without
- * a default are omitted.
+ * Build a default data value for a section from its schema fields.
+ *
+ * Returns a bare scalar / array for top-level scalar sections (where the
+ * single field's key matches the section name — e.g. `name = "Sun"`,
+ * `tags = ["..."]`, `faction = "uuid"`) so the data shape matches what TOML
+ * parsing produces. Returns an empty array `[]` for `arrayOfTables` sections
+ * (e.g. `[[light]]` → bare array of entry objects). Otherwise returns an
+ * object keyed by field name with each field's `default` value (optional
+ * fields without a default are omitted).
  *
  * @param {string} sectionKey
- * @returns {object|null} defaults object, or null if the section is unknown
+ * @returns {any|null} defaults value, or null if the section is unknown
  */
 export function getRawSectionDefaults(sectionKey) {
   const schema = COMPONENT_SCHEMA[sectionKey];
   if (!schema) return null;
+
+  // Array-of-tables top-level section (e.g. light → [[light]]). Card data
+  // is a bare array of entry objects.
+  if (schema.arrayOfTables) return [];
+
+  // Top-level scalar/array section: section name === single field's key.
+  // The runtime data is the bare value, not a wrapping object.
+  if (
+    schema.fields.length === 1 &&
+    schema.fields[0].key === sectionKey
+  ) {
+    const f = schema.fields[0];
+    if ('default' in f) {
+      // Defensive clone for arrays/objects so callers can mutate freely.
+      const d = f.default;
+      if (Array.isArray(d)) return [...d];
+      if (d && typeof d === 'object') return { ...d };
+      return d;
+    }
+    return undefined;
+  }
 
   const obj = {};
   for (const field of schema.fields) {
@@ -55,7 +82,7 @@ export const COMBO_TEMPLATES = {
     sections: [
       {
         key: 'tags',
-        defaults: { tags: ['ship'] },
+        defaults: ['ship'],
       },
       {
         key: 'collider',
@@ -90,14 +117,11 @@ export const COMBO_TEMPLATES = {
     sections: [
       {
         key: 'tags',
-        defaults: { tags: ['station'] },
+        defaults: ['station'],
       },
       {
-        key: 'station',
+        key: 'hull',
         defaults: {
-          name: 'New Station',
-          shape: 'torus',
-          radius: 18.0,
           hull_integrity: 200.0,
         },
       },
@@ -112,7 +136,7 @@ export const COMBO_TEMPLATES = {
     sections: [
       {
         key: 'tags',
-        defaults: { tags: ['region'] },
+        defaults: ['region'],
       },
       {
         key: 'shape',
@@ -129,7 +153,7 @@ export const COMBO_TEMPLATES = {
     sections: [
       {
         key: 'tags',
-        defaults: { tags: ['ship', 'npc'] },
+        defaults: ['ship', 'npc'],
       },
       {
         key: 'collider',
@@ -168,7 +192,7 @@ export const COMBO_TEMPLATES = {
     sections: [
       {
         key: 'tags',
-        defaults: { tags: ['asteroid', 'gameplay'] },
+        defaults: ['asteroid', 'gameplay'],
       },
       {
         key: 'collider',
@@ -185,7 +209,7 @@ export const COMBO_TEMPLATES = {
     sections: [
       {
         key: 'tags',
-        defaults: { tags: ['asteroid_field'] },
+        defaults: ['asteroid_field'],
       },
       {
         key: 'asteroid_field',
@@ -206,18 +230,32 @@ export const COMBO_TEMPLATES = {
   Star: {
     sections: [
       {
-        key: 'tags',
-        defaults: { tags: ['star'] },
+        key: 'name',
+        defaults: 'New Star',
       },
       {
-        key: 'star',
+        key: 'tags',
+        defaults: ['star'],
+      },
+      {
+        key: 'mesh',
         defaults: {
-          name: 'New Star',
-          radius: 50.0,
+          shape: 'sphere',
           colour: [1.0, 0.8, 0.0],
-          position: [0.0, 0.0, 0.0],
-          tags: [],
+          radius: 50.0,
+          emissive: 2.0,
         },
+      },
+      {
+        key: 'light',
+        defaults: [
+          {
+            kind: 'point',
+            colour: [1.0, 0.95, 0.85],
+            intensity: 150000.0,
+            range: 5000.0,
+          },
+        ],
       },
       {
         key: 'collider',
@@ -233,17 +271,19 @@ export const COMBO_TEMPLATES = {
   Planet: {
     sections: [
       {
-        key: 'tags',
-        defaults: { tags: ['planet'] },
+        key: 'name',
+        defaults: 'New Planet',
       },
       {
-        key: 'planet',
+        key: 'tags',
+        defaults: ['planet'],
+      },
+      {
+        key: 'mesh',
         defaults: {
-          name: 'New Planet',
-          radius: 20.0,
+          shape: 'sphere',
           colour: [0.0, 0.5, 1.0],
-          position: [0.0, 0.0, 0.0],
-          tags: [],
+          radius: 20.0,
         },
       },
       {

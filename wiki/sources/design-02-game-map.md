@@ -4,10 +4,12 @@ type: source
 tags: [draft, design, map, solar-system, asteroid-field, deterministic]
 source_path: docs/2. Draft Design - Game Map.md
 status: draft
-updated: 2026-05-08
+updated: 2026-05-22
 ---
 
 # Draft 2 — Game Map
+
+> **Status (2026-05-22) — as shipped:** Worlds are now defined as a single TOML (`assets/worlds/*.toml`) parsed by `parse_world` (`src/world/config.rs`) into a `WorldConfig` carrying anchors, `[[entity]]` instances, `[[trigger]]` blocks, and `[[comms]]` templates. Per-instance placement uses a single `transform = { ... }` table (`TransformConfig` at `src/world/config.rs:48`) with `position` / `anchor` / `relative_to` + `offset` / `rotation` (XYZ Euler radians) / `scale` (default `[1, 1, 1]`); resolution precedence is `relative_to+offset` > `anchor` > `position` > origin (`resolve_entity_position_with` at `src/world/config.rs:752`). An optional top-level `[ambient_light] { color, brightness }` block (`AmbientLightConfig` at `src/world/config.rs:115`) is applied by `spawn_world_ambient_light` (`src/server/renderer.rs:209`, `PostStartup`). Streaming asteroid lifecycle landed via PRD #191 (`src/asteroids/window.rs`). The original "damaged not tracked, destroyed tracked" rule was inverted in the shipped grid: destroyed asteroids respawn fresh when the player leaves and returns to a cell — see [Asteroid Field](../concepts/asteroid-field.md).
 
 Each solar system defined by a file. Entities can be inline or reference an entity-type file ([Draft 1](./design-01-entity-config-files.md)).
 

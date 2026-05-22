@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { resolveEntityAppearance, RADAR_SHAPE_FALLBACK } from '../canvas-scenario.js';
+import { resolveEntityAppearance, RADAR_SHAPE_FALLBACK } from '../canvas-world.js';
 
-// Tests for the pure logic that drives canvas rendering of scenario-mode entities.
+// Tests for the pure logic that drives canvas rendering of world-mode entities.
 // resolveEntityAppearance(entity) returns { colour, radius, shape, hasFallback }
 //   - colour: [r, g, b] normalised 0-1 floats (from radar_appearance.colour)
 //   - radius: positive number (from radar_appearance.radius)
@@ -157,7 +157,7 @@ describe('resolveEntityAppearance', () => {
       const entity = {
         tags: ['ship'],
         radar_appearance: { colour: [1.0, 0.0, 0.0], radius: 4.0 },
-        position: [100.0, 0.0, -200.0],
+        transform: { position: [100.0, 0.0, -200.0] },
       };
       const result = resolveEntityAppearance(entity, {});
       expect(result.x).toBe(100.0);
@@ -171,7 +171,7 @@ describe('resolveEntityAppearance', () => {
       const entity = {
         tags: ['ship', 'npc'],
         radar_appearance: { colour: [1.0, 0.2, 0.2], radius: 4.0 },
-        anchor: 'patrol_alpha',
+        transform: { anchor: 'patrol_alpha' },
       };
       const result = resolveEntityAppearance(entity, anchors);
       expect(result.x).toBe(300.0);

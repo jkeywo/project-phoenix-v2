@@ -1,4 +1,4 @@
-import { getSpawnName, getSpawnPosition, getEntityPath, getRelativeInfo, setSpawnPosition, getAllAnchors } from './toml-utils.js';
+import { getSpawnName, getSpawnPosition, getEntityPath, getRelativeInfo, setSpawnPosition, getAllAnchors, getSpawnRotation, setSpawnRotation, getSpawnScale, setSpawnScale } from './toml-utils.js';
 import { getSpawnsFromAllLayers } from './toml-utils.js';
 import { snapshotForUndo } from './undo-controller.js';
 import { renderOverridePanel } from './override-view.js';
@@ -81,10 +81,12 @@ export class PropertiesPanel {
 
     let positionMode = 'absolute';
     if (relative) positionMode = 'relative';
-    else if (spawn.anchor) positionMode = 'anchor';
+    else if (spawn.transform && spawn.transform.anchor) positionMode = 'anchor';
 
     const shapeHtml = this._buildShapeHtml(spawn);
     const spawnToml = this._spawnToToml(spawn);
+    const rot = getSpawnRotation(spawn);
+    const scl = getSpawnScale(spawn);
 
     this.container.innerHTML = `
       <div class="property-group">
@@ -123,7 +125,7 @@ export class PropertiesPanel {
       <div class="property-group${positionMode !== 'anchor' ? ' hidden' : ''}" id="anchorPos">
         <label>Anchor</label>
         <select id="propAnchor">
-          ${allAnchors.map(a => `<option value="${a.name}" ${spawn.anchor === a.name ? 'selected' : ''}>${a.name}</option>`).join('')}
+          ${allAnchors.map(a => `<option value="${a.name}" ${spawn.transform?.anchor === a.name ? 'selected' : ''}>${a.name}</option>`).join('')}
         </select>
       </div>
 
@@ -146,10 +148,46 @@ export class PropertiesPanel {
 
       ${shapeHtml}
 
+      <div class="property-group">
+        <label>Rotation (radians, XYZ)</label>
+        <div class="input-row">
+          <div>
+            <label>X</label>
+            <input type="number" id="propRotX" step="0.01" value="${rot[0]}">
+          </div>
+          <div>
+            <label>Y</label>
+            <input type="number" id="propRotY" step="0.01" value="${rot[1]}">
+          </div>
+          <div>
+            <label>Z</label>
+            <input type="number" id="propRotZ" step="0.01" value="${rot[2]}">
+          </div>
+        </div>
+      </div>
+
+      <div class="property-group">
+        <label>Scale (XYZ)</label>
+        <div class="input-row">
+          <div>
+            <label>X</label>
+            <input type="number" id="propScaleX" step="0.1" value="${scl[0]}">
+          </div>
+          <div>
+            <label>Y</label>
+            <input type="number" id="propScaleY" step="0.1" value="${scl[1]}">
+          </div>
+          <div>
+            <label>Z</label>
+            <input type="number" id="propScaleZ" step="0.1" value="${scl[2]}">
+          </div>
+        </div>
+      </div>
+
       <button id="deleteSpawnBtn" style="margin-top: 8px;">Delete Spawn</button>
 
       <details class="spawn-toml-details">
-        <summary>Scenario Entry (TOML)</summary>
+        <summary>World Entry (TOML)</summary>
         <textarea id="spawnToml" rows="10" spellcheck="false">${spawnToml}</textarea>
         <div class="spawn-toml-actions">
           <button id="applySpawnToml">Apply</button>
@@ -331,12 +369,38 @@ export class PropertiesPanel {
       this.canvasManager.renderAll();
     });
 
+    const readRot = () => [
+      parseFloat(document.getElementById('propRotX')?.value || '0') || 0,
+      parseFloat(document.getElementById('propRotY')?.value || '0') || 0,
+      parseFloat(document.getElementById('propRotZ')?.value || '0') || 0,
+    ];
+    const readScale = () => [
+      parseFloat(document.getElementById('propScaleX')?.value || '1') || 0,
+      parseFloat(document.getElementById('propScaleY')?.value || '1') || 0,
+      parseFloat(document.getElementById('propScaleZ')?.value || '1') || 0,
+    ];
+    for (const id of ['propRotX', 'propRotY', 'propRotZ']) {
+      document.getElementById(id)?.addEventListener('input', () => {
+        snapshotForUndo(layer);
+        setSpawnRotation(spawn, readRot());
+        layer.isDirty = true;
+        this.canvasManager.renderAll();
+      });
+    }
+    for (const id of ['propScaleX', 'propScaleY', 'propScaleZ']) {
+      document.getElementById(id)?.addEventListener('input', () => {
+        snapshotForUndo(layer);
+        setSpawnScale(spawn, readScale());
+        layer.isDirty = true;
+        this.canvasManager.renderAll();
+      });
+    }
+
     document.getElementById('deleteSpawnBtn').addEventListener('click', () => {
-      const arr = layer.kind === 'scenario' ? 'spawn' : 'entity';
-      const idx = layer.toml[arr]?.indexOf(spawn);
+      const idx = layer.toml.entity?.indexOf(spawn);
       if (idx !== -1) {
         snapshotForUndo(layer);
-        layer.toml[arr].splice(idx, 1);
+        layer.toml.entity.splice(idx, 1);
         layer.isDirty = true;
         this.canvasManager.spawnGroups.delete(spawn);
         this.canvasManager.deselectSpawn();

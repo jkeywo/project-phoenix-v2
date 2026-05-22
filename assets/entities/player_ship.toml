@@ -56,8 +56,8 @@ load_time = 10.0
 power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 
 [sensors_console.long_range_radar]
-range = 500.0
-shows = ["region", "asteroid_field", "asteroid", "ship", "station", "planet", "star"]
+range = 200.0
+shows = ["region", "asteroid_field", "asteroid", "ship"]
 
 [power]
 capacity = 100.0
@@ -75,7 +75,7 @@ impulse_charge_duration = 3.0
 impulse_speed_multiplier = 10.0
 
 [helm_console.radar]
-range = 250.0
+range = 500.0
 shows = ["asteroid", "ship", "station", "planet", "star"]
 
 [navigation_console]

@@ -32,7 +32,8 @@ export function canDeleteAnchor(anchorName, layers, anchorOwnerLayer) {
 
     if (Array.isArray(worldState.entity)) {
       for (const ent of worldState.entity) {
-        if (ent && ent.anchor === anchorName) {
+        const entAnchor = ent && ent.transform && ent.transform.anchor;
+        if (entAnchor === anchorName) {
           blockers.push({
             layerPath: path,
             entityName: ent.name || null,

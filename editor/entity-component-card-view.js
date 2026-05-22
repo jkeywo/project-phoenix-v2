@@ -163,6 +163,11 @@ function renderRawTextarea(body, card, deps) {
 
 function renderSchemaFields(body, card, deps) {
   const data = card.data;
+  // Array-of-tables top-level section (e.g. light → [[light]]).
+  if (card.schema?.arrayOfTables) {
+    renderArrayOfTablesSection(body, card, deps);
+    return;
+  }
   // Top-level scalar (e.g. `faction = "uuid"`): the section name IS the key.
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {
     renderScalarSection(body, card, deps);
@@ -173,6 +178,70 @@ function renderSchemaFields(body, card, deps) {
     const row = renderField(card, field, deps);
     if (row) body.appendChild(row);
   }
+}
+
+function renderArrayOfTablesSection(body, card, deps) {
+  const entries = Array.isArray(card.data) ? card.data : [];
+  const entryFields = card.schema.entryFields ?? [];
+  const entryDefaults = card.schema.entryDefaults ?? {};
+
+  entries.forEach((entry, idx) => {
+    const entryWrap = document.createElement('div');
+    entryWrap.className = 'entity-card-array-entry';
+
+    const entryHeader = document.createElement('div');
+    entryHeader.className = 'entity-card-array-entry-header';
+    const tag = document.createElement('span');
+    tag.textContent = `[[${card.section}]] #${idx + 1}`;
+    entryHeader.appendChild(tag);
+    const rmBtn = makeIconButton('✕', () => {
+      const next = entries.slice();
+      next.splice(idx, 1);
+      deps.onEdit(card.section, next);
+    }, 'delete');
+    entryHeader.appendChild(rmBtn);
+    entryWrap.appendChild(entryHeader);
+
+    for (const field of entryFields) {
+      const row = document.createElement('div');
+      row.className = 'entity-card-field';
+      const label = document.createElement('label');
+      label.textContent = field.key;
+      row.appendChild(label);
+      const value = entry?.[field.key];
+      const input = makeInputForField(field, value, deps, (newValue) => {
+        const nextEntry = { ...entry };
+        if (newValue === undefined || newValue === null || newValue === '') {
+          delete nextEntry[field.key];
+        } else {
+          nextEntry[field.key] = newValue;
+        }
+        const next = entries.slice();
+        next[idx] = nextEntry;
+        deps.onEdit(card.section, next);
+      });
+      row.appendChild(input);
+      entryWrap.appendChild(row);
+    }
+    body.appendChild(entryWrap);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'entity-card-btn entity-card-array-add';
+  addBtn.textContent = `+ entry`;
+  addBtn.addEventListener('click', () => {
+    const next = entries.slice();
+    next.push(cloneEntryDefaults(entryDefaults));
+    deps.onEdit(card.section, next);
+  });
+  body.appendChild(addBtn);
+}
+
+function cloneEntryDefaults(value) {
+  if (value === null || typeof value !== 'object') return value;
+  if (typeof structuredClone === 'function') return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
 }
 
 function renderScalarSection(body, card, deps) {

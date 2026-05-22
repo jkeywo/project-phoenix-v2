@@ -57,15 +57,6 @@ pub struct BehaviourConfig {
     pub transition: Vec<crate::ai::TransitionConfig>,
 }
 
-/// Visual/render shape for station entities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum StationShape {
-    Sphere,
-    Cylinder,
-    Torus,
-}
-
 /// Shape variant for the `[mesh]` section of an entity TOML.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -94,15 +85,34 @@ pub struct MeshConfig {
     /// Tube radius for a `torus` mesh.
     #[serde(default)]
     pub minor_radius: f32,
+    /// Emissive multiplier (the renderer multiplies `colour` by this and feeds
+    /// the result into `StandardMaterial::emissive`). When `None`, the renderer
+    /// applies its own default (typically `0.4` for general-purpose entities).
+    #[serde(default)]
+    pub emissive: Option<f32>,
 }
 
-/// Configuration for a station entity (space station, outpost, etc.).
+/// Kind of a `[[light]]` entry: a point light or a directional light.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LightKind {
+    Point,
+    Directional,
+}
+
+/// One `[[light]]` entry from an entity template. Renderer-only data.
+///
+/// Replaces the per-section light fields that used to live on `[star]`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StationConfig {
-    pub name: String,
-    pub shape: StationShape,
-    pub radius: f32,
-    pub hull_integrity: f32,
+pub struct LightConfig {
+    pub kind: LightKind,
+    /// RGB colour `[r, g, b]` in linear 0–1 range.
+    pub colour: [f32; 3],
+    /// Light intensity (candela for point lights, illuminance for directional).
+    pub intensity: f32,
+    /// Range in world units. Required for point lights; ignored for directional.
+    #[serde(default)]
+    pub range: Option<f32>,
 }
 
 /// One entry in the `[[hull.console_hull]]` TOML array.
@@ -275,19 +285,6 @@ pub struct PowerConfigSection {
     pub capacity: f32,
     pub rates: [f32; 6],
     pub emergency_threshold: f32,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ScienceConsoleConfig {
-    #[serde(default)]
-    pub power_multipliers: Option<[f32; 4]>,
-    #[serde(default)]
-    pub long_range_radar: crate::radar_config::RadarConfig,
-    #[serde(default)]
-    pub system_map: crate::radar_config::RadarConfig,
-    /// Path to a complexity TOML file for this console.
-    #[serde(default)]
-    pub complexity_toml: Option<String>,
 }
 
 /// Config block for the Shields console focus bonuses/penalties.
@@ -638,6 +635,9 @@ pub struct SensorsConsoleConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct EntityConfig {
+    /// Display name (top-level scalar). Informational for most entities; used
+    /// by triggers/comms to identify named instances.
+    pub name: Option<String>,
     pub tags: Vec<String>,
     pub hull: Option<HullConfig>,
     pub collider: Option<ColliderConfig>,
@@ -647,7 +647,6 @@ pub struct EntityConfig {
     pub engineering_console: Option<EngineeringConsoleConfig>,
     pub captain_console: Option<CaptainConsoleConfig>,
     pub power: Option<PowerConfigSection>,
-    pub science_console: Option<ScienceConsoleConfig>,
     pub sensors_console: Option<SensorsConsoleConfig>,
     /// Shields console focus config.
     pub shields_console: Option<ShieldsConsoleConfig>,
@@ -655,18 +654,12 @@ pub struct EntityConfig {
     pub torpedoes: Option<TorpedoesConfig>,
     /// Repair team timings (travel duration, repair rate).
     pub repair: Option<RepairConfig>,
-    /// Star section from entity template (name, radius, colour, etc.)
-    pub star: Option<StarConfig>,
-    /// Planet section from entity template (name, radius, colour, etc.)
-    pub planet: Option<PlanetConfig>,
     /// Asteroid field section from entity template (donut params, grid, etc.)
     pub asteroid_field: Option<AsteroidFieldConfig>,
     /// Region shape section — present for region entities.
     pub shape: Option<RegionShape>,
     /// Region effects section — present for region entities with effects.
     pub effects: Option<RegionEffectsConfig>,
-    /// Station section — present for station entities.
-    pub station: Option<StationConfig>,
     /// Optional faction UUID this entity belongs to.
     #[serde(default)]
     pub faction: Option<Uuid>,
@@ -679,10 +672,15 @@ pub struct EntityConfig {
     /// 3-D mesh definition. When present the entity receives a visual on the viewscreen.
     #[serde(default)]
     pub mesh: Option<MeshConfig>,
+    /// Renderer light sources attached to this entity.
+    #[serde(default)]
+    pub light: Vec<LightConfig>,
 }
 
 #[derive(Deserialize)]
 struct TomlConfig {
+    #[serde(default)]
+    name: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
     hull: Option<HullConfig>,
@@ -693,21 +691,19 @@ struct TomlConfig {
     engineering_console: Option<EngineeringConsoleConfig>,
     captain_console: Option<CaptainConsoleConfig>,
     power: Option<PowerConfigSection>,
-    science_console: Option<ScienceConsoleConfig>,
     sensors_console: Option<SensorsConsoleConfig>,
     shields_console: Option<ShieldsConsoleConfig>,
     torpedoes: Option<TorpedoesConfig>,
     repair: Option<RepairConfig>,
-    star: Option<StarConfig>,
-    planet: Option<PlanetConfig>,
     asteroid_field: Option<AsteroidFieldConfig>,
     shape: Option<RegionShape>,
     effects: Option<RegionEffectsConfig>,
-    station: Option<StationConfig>,
     faction: Option<Uuid>,
     behaviour: Option<BehaviourConfig>,
     radar_appearance: Option<RadarAppearanceConfig>,
     mesh: Option<MeshConfig>,
+    #[serde(default)]
+    light: Vec<LightConfig>,
 }
 
 impl EntityConfig {
@@ -730,11 +726,6 @@ impl EntityConfig {
             }
         }
         if let Some(ref c) = self.captain_console {
-            if let Some(ref p) = c.complexity_toml {
-                paths.push(p.clone());
-            }
-        }
-        if let Some(ref c) = self.science_console {
             if let Some(ref p) = c.complexity_toml {
                 paths.push(p.clone());
             }
@@ -773,6 +764,7 @@ impl EntityConfig {
         });
 
         Ok(EntityConfig {
+            name: raw.name,
             tags: raw.tags,
             hull: raw.hull,
             collider: raw.collider,
@@ -782,21 +774,18 @@ impl EntityConfig {
             engineering_console: raw.engineering_console,
             captain_console: raw.captain_console,
             power: raw.power,
-            science_console: raw.science_console,
             shields_console: raw.shields_console,
             sensors_console: raw.sensors_console,
             torpedoes: raw.torpedoes,
             repair: raw.repair,
-            star: raw.star,
-            planet: raw.planet,
             asteroid_field: raw.asteroid_field,
             shape: raw.shape,
             effects: raw.effects,
-            station: raw.station,
             faction: raw.faction,
             behaviour,
             radar_appearance: raw.radar_appearance,
             mesh: raw.mesh,
+            light: raw.light,
         })
     }
 }
@@ -1095,61 +1084,6 @@ emergency_threshold = 30.0
     }
 
     #[test]
-    fn science_console_parses_with_power_multipliers() {
-        let toml_str = r##"
-[science_console]
-power_multipliers = [-1.0, 0.0, 1.0, 2.0]
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let s = config
-            .science_console
-            .expect("science_console must be Some");
-        assert_eq!(s.power_multipliers, Some([-1.0, 0.0, 1.0, 2.0]));
-    }
-
-    #[test]
-    fn science_console_omitted_when_not_in_toml() {
-        let config = EntityConfig::from_toml("").expect("parse must succeed");
-        assert!(config.science_console.is_none());
-    }
-
-    #[test]
-    fn science_console_with_radar_configs_parses_long_range_and_system_map() {
-        let toml_str = r##"
-tags = ["player", "ship"]
-
-[science_console]
-power_multipliers = [-0.5, 0.0, 0.25, 0.5]
-
-[science_console.long_range_radar]
-range = 200.0
-shows = ["region", "asteroid_field", "asteroid", "ship"]
-
-[science_console.system_map]
-range = 500.0
-shows = ["region", "asteroid_field", "star", "planet"]
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let science = config
-            .science_console
-            .expect("science_console must be Some");
-        assert_eq!(science.power_multipliers, Some([-0.5, 0.0, 0.25, 0.5]));
-        assert_eq!(science.long_range_radar.range, 200.0);
-        assert!(science.long_range_radar.shows.contains(&EntityTag::Region));
-        assert!(science
-            .long_range_radar
-            .shows
-            .contains(&EntityTag::AsteroidField));
-        assert!(science
-            .long_range_radar
-            .shows
-            .contains(&EntityTag::Asteroid));
-        assert_eq!(science.system_map.range, 500.0);
-        assert!(science.system_map.shows.contains(&EntityTag::Region));
-        assert!(science.system_map.shows.contains(&EntityTag::AsteroidField));
-    }
-
-    #[test]
     fn sensors_console_parses_with_long_range_radar() {
         let toml_str = r##"
 tags = ["player", "ship"]
@@ -1288,22 +1222,6 @@ complexity_toml = "assets/complexity/captain.toml"
     }
 
     #[test]
-    fn science_console_complexity_toml_parses() {
-        let toml_str = r##"
-[science_console]
-complexity_toml = "assets/complexity/science.toml"
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let s = config
-            .science_console
-            .expect("science_console must be Some");
-        assert_eq!(
-            s.complexity_toml.as_deref(),
-            Some("assets/complexity/science.toml")
-        );
-    }
-
-    #[test]
     fn complexity_toml_defaults_to_none_when_omitted() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.weapons_console.is_none());
@@ -1333,17 +1251,14 @@ complexity_toml = "assets/complexity/tactical.toml"
 complexity_toml = "assets/complexity/repair.toml"
 [captain_console]
 complexity_toml = "assets/complexity/captain.toml"
-[science_console]
-complexity_toml = "assets/complexity/science.toml"
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let paths = config.complexity_toml_paths();
-        assert_eq!(paths.len(), 5);
+        assert_eq!(paths.len(), 4);
         assert!(paths.contains(&"assets/complexity/helm.toml".to_string()));
         assert!(paths.contains(&"assets/complexity/tactical.toml".to_string()));
         assert!(paths.contains(&"assets/complexity/repair.toml".to_string()));
         assert!(paths.contains(&"assets/complexity/captain.toml".to_string()));
-        assert!(paths.contains(&"assets/complexity/science.toml".to_string()));
     }
 
     #[test]
@@ -1352,45 +1267,7 @@ complexity_toml = "assets/complexity/science.toml"
         assert!(config.complexity_toml_paths().is_empty());
     }
 
-    // ── Star / Planet / AsteroidField section tests ────────────────────────
-
-    #[test]
-    fn star_section_parses_from_template() {
-        let toml_str = r##"
-tags = ["star", "center"]
-
-[star]
-name = "Sun"
-radius = 50.0
-colour = [1.0, 0.8, 0.0]
-position = [0.0, 0.0, 0.0]
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        assert_eq!(config.tags, vec!["star", "center"]);
-        let star = config.star.expect("star must be Some");
-        assert_eq!(star.name, "Sun");
-        assert!((star.radius - 50.0).abs() < 1e-6);
-        assert_eq!(star.colour, vec![1.0, 0.8, 0.0]);
-    }
-
-    #[test]
-    fn planet_section_parses_from_template() {
-        let toml_str = r##"
-tags = ["planet", "habitable"]
-
-[planet]
-name = "Earth"
-radius = 20.0
-colour = [0.0, 0.5, 1.0]
-position = [200.0, 0.0, 200.0]
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        assert_eq!(config.tags, vec!["planet", "habitable"]);
-        let planet = config.planet.expect("planet must be Some");
-        assert_eq!(planet.name, "Earth");
-        assert!((planet.radius - 20.0).abs() < 1e-6);
-        assert_eq!(planet.colour, vec![0.0, 0.5, 1.0]);
-    }
+    // ── AsteroidField section tests ────────────────────────────────────────
 
     #[test]
     fn asteroid_field_section_parses_from_template() {
@@ -1414,41 +1291,93 @@ cosmetic_type_paths = ["assets/entities/asteroid_cosmetic.toml"]
     }
 
     #[test]
-    fn star_section_parses_with_light_config() {
-        let toml_str = r##"
-[star]
-name = "Sun"
-radius = 50.0
-colour = [1.0, 0.8, 0.0]
-light_range = 5000.0
-light_intensity = 150000.0
-light_colour = [1.0, 0.95, 0.85]
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let star = config.star.expect("star must be Some");
-        assert_eq!(star.name, "Sun");
-        assert!((star.radius - 50.0).abs() < 1e-6);
-        assert_eq!(star.light_range, Some(5000.0));
-        assert_eq!(star.light_intensity, Some(150000.0));
-        assert_eq!(star.light_colour, Some(vec![1.0, 0.95, 0.85]));
-    }
-
-    #[test]
-    fn star_section_omitted_when_not_in_toml() {
-        let config = EntityConfig::from_toml("").expect("parse must succeed");
-        assert!(config.star.is_none());
-    }
-
-    #[test]
-    fn planet_section_omitted_when_not_in_toml() {
-        let config = EntityConfig::from_toml("").expect("parse must succeed");
-        assert!(config.planet.is_none());
-    }
-
-    #[test]
     fn asteroid_field_section_omitted_when_not_in_toml() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.asteroid_field.is_none());
+    }
+
+    // ── name / mesh.emissive / [[light]] tests (PRD: schema refactor slice 3) ──
+
+    #[test]
+    fn name_field_parses() {
+        let toml_str = r#"name = "Sun""#;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        assert_eq!(config.name.as_deref(), Some("Sun"));
+    }
+
+    #[test]
+    fn name_field_defaults_to_none() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.name.is_none());
+    }
+
+    #[test]
+    fn mesh_emissive_field_parses() {
+        let toml_str = r##"
+[mesh]
+shape = "sphere"
+colour = [1.0, 0.8, 0.0]
+radius = 50.0
+emissive = 2.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let mesh = config.mesh.expect("mesh must be Some");
+        assert_eq!(mesh.emissive, Some(2.0));
+    }
+
+    #[test]
+    fn mesh_emissive_defaults_to_none() {
+        let toml_str = r##"
+[mesh]
+shape = "sphere"
+colour = [1.0, 1.0, 1.0]
+radius = 1.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let mesh = config.mesh.expect("mesh must be Some");
+        assert!(mesh.emissive.is_none());
+    }
+
+    #[test]
+    fn light_array_parses_multiple_entries() {
+        let toml_str = r##"
+[[light]]
+kind = "point"
+colour = [1.0, 0.95, 0.85]
+intensity = 150000.0
+range = 5000.0
+
+[[light]]
+kind = "point"
+colour = [0.5, 0.5, 1.0]
+intensity = 1000.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        assert_eq!(config.light.len(), 2);
+        assert_eq!(config.light[0].kind, LightKind::Point);
+        assert_eq!(config.light[0].colour, [1.0, 0.95, 0.85]);
+        assert!((config.light[0].intensity - 150000.0).abs() < 1e-3);
+        assert_eq!(config.light[0].range, Some(5000.0));
+        assert_eq!(config.light[1].range, None);
+    }
+
+    #[test]
+    fn light_defaults_to_empty_vec() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.light.is_empty());
+    }
+
+    #[test]
+    fn light_directional_kind_parses() {
+        let toml_str = r##"
+[[light]]
+kind = "directional"
+colour = [1.0, 1.0, 1.0]
+intensity = 10000.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        assert_eq!(config.light.len(), 1);
+        assert_eq!(config.light[0].kind, LightKind::Directional);
     }
 
     // ── Region shape tests ───────────────────────────────────────────────
@@ -1572,88 +1501,37 @@ radius = 100.0
         assert!(config.effects.is_none());
     }
 
-    // ── Station section tests ─────────────────────────────────────────────
+    // ── Station hull tests (post-[station] removal; PRD slice 2) ──────────
 
     #[test]
-    fn station_section_parses_with_shape_and_hull_integrity() {
-        let toml_str = r##"
-tags = ["station"]
-
-[station]
-name = "Deep Space 9"
-shape = "cylinder"
-radius = 15.0
-hull_integrity = 200.0
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let station = config.station.expect("station must be Some");
-        assert_eq!(station.name, "Deep Space 9");
-        assert_eq!(station.shape, StationShape::Cylinder);
-        assert!((station.radius - 15.0).abs() < 1e-6);
-        assert!((station.hull_integrity - 200.0).abs() < 1e-6);
+    fn station_axiom_template_parses_hull_integrity() {
+        let toml_str = include_str!("../../assets/entities/station_axiom.toml");
+        let config = EntityConfig::from_toml(toml_str).expect("station_axiom.toml must parse");
+        let hull = config.hull.as_ref().expect("must have [hull]");
+        assert!((hull.hull_integrity - 200.0).abs() < 1e-6);
     }
 
     #[test]
-    fn station_section_parses_sphere_shape() {
-        let toml_str = r##"
-[station]
-name = "Relay Station"
-shape = "sphere"
-radius = 8.0
-hull_integrity = 80.0
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let station = config.station.expect("station must be Some");
-        assert_eq!(station.shape, StationShape::Sphere);
-    }
-
-    #[test]
-    fn station_section_parses_torus_shape() {
-        let toml_str = r##"
-[station]
-name = "Ring Station"
-shape = "torus"
-radius = 20.0
-hull_integrity = 150.0
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let station = config.station.expect("station must be Some");
-        assert_eq!(station.shape, StationShape::Torus);
-    }
-
-    #[test]
-    fn station_section_absent_when_not_in_toml() {
-        let config = EntityConfig::from_toml("").expect("parse must succeed");
-        assert!(config.station.is_none());
-    }
-
-    #[test]
-    fn station_outpost_template_parses_with_station_section() {
+    fn station_outpost_template_parses_hull_integrity() {
         let toml_str = include_str!("../../assets/entities/station_outpost.toml");
         let config = EntityConfig::from_toml(toml_str).expect("station_outpost.toml must parse");
-        let station = config.station.as_ref().expect("must have [station]");
-        assert_eq!(station.name, "Outpost Alpha");
-        assert_eq!(station.shape, StationShape::Cylinder);
-        assert!((station.radius - 12.0).abs() < 1e-6);
-        assert!((station.hull_integrity - 200.0).abs() < 1e-6);
+        let hull = config.hull.as_ref().expect("must have [hull]");
+        assert!((hull.hull_integrity - 200.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn station_research_outpost_template_parses_hull_integrity() {
+        let toml_str = include_str!("../../assets/entities/station_research_outpost.toml");
+        let config = EntityConfig::from_toml(toml_str)
+            .expect("station_research_outpost.toml must parse");
+        let hull = config.hull.as_ref().expect("must have [hull]");
+        assert!((hull.hull_integrity - 60.0).abs() < 1e-6);
     }
 
     #[test]
     fn all_sections_parsed_in_full_template() {
         let toml_str = r##"
 tags = ["full"]
-
-[star]
-name = "Sun"
-radius = 50.0
-colour = [1.0, 0.8, 0.0]
-position = [0.0, 0.0, 0.0]
-
-[planet]
-name = "Earth"
-radius = 20.0
-colour = [0.0, 0.5, 1.0]
-position = [200.0, 0.0, 200.0]
 
 [asteroid_field]
 inner_radius = 100.0
@@ -1664,8 +1542,6 @@ density = 0.005
 hull_integrity = 100
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        assert!(config.star.is_some(), "star should be Some");
-        assert!(config.planet.is_some(), "planet should be Some");
         assert!(
             config.asteroid_field.is_some(),
             "asteroid_field should be Some"
@@ -1680,19 +1556,14 @@ hull_integrity = 100
     // the build fails if a referenced template is missing or malformed.
 
     #[test]
-    fn star_sun_template_parses_with_star_and_collider_section() {
+    fn star_sun_template_parses_with_mesh_and_lights() {
         let toml_str = include_str!("../../assets/entities/star_sun.toml");
         let config = EntityConfig::from_toml(toml_str).expect("star_sun.toml must parse");
-        let star = config
-            .star
-            .as_ref()
-            .expect("star_sun.toml must have [star]");
-        assert_eq!(star.name, "Sun");
-        assert!((star.radius - 50.0).abs() < 1e-6);
-        assert_eq!(star.colour, vec![1.0, 0.8, 0.0]);
-        assert_eq!(star.light_range, Some(5000.0));
-        assert_eq!(star.light_intensity, Some(150000.0));
-        assert_eq!(star.light_colour, Some(vec![1.0, 0.95, 0.85]));
+        assert_eq!(config.name.as_deref(), Some("Sun"));
+        let mesh = config.mesh.as_ref().expect("star_sun.toml must have [mesh]");
+        assert!(mesh.emissive.is_some(), "star_sun.toml must set [mesh].emissive");
+        assert!(!config.light.is_empty(), "star_sun.toml must have at least one [[light]]");
+        assert_eq!(config.light[0].kind, LightKind::Point);
         let collider = config
             .collider
             .as_ref()
@@ -1702,15 +1573,11 @@ hull_integrity = 100
     }
 
     #[test]
-    fn planet_earth_template_parses_with_planet_and_collider_section() {
+    fn planet_earth_template_parses_with_mesh_and_collider() {
         let toml_str = include_str!("../../assets/entities/planet_earth.toml");
         let config = EntityConfig::from_toml(toml_str).expect("planet_earth.toml must parse");
-        let planet = config
-            .planet
-            .as_ref()
-            .expect("planet_earth.toml must have [planet]");
-        assert_eq!(planet.name, "Earth");
-        assert!((planet.radius - 20.0).abs() < 1e-6);
+        assert_eq!(config.name.as_deref(), Some("Earth"));
+        assert!(config.mesh.is_some(), "planet_earth.toml must have [mesh]");
         let collider = config
             .collider
             .as_ref()
@@ -2375,38 +2242,6 @@ impl Default for GlobalConfig {
 
 fn default_global_seed() -> u64 {
     42
-}
-
-/// Configuration for a star entity.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct StarConfig {
-    #[serde(default)]
-    pub name: String,
-    pub radius: f32,
-    pub colour: Vec<f32>,
-    #[serde(default)]
-    pub position: Vec<f32>,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    #[serde(default)]
-    pub light_range: Option<f32>,
-    #[serde(default)]
-    pub light_intensity: Option<f32>,
-    #[serde(default)]
-    pub light_colour: Option<Vec<f32>>,
-}
-
-/// Configuration for a planet entity.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct PlanetConfig {
-    #[serde(default)]
-    pub name: String,
-    pub radius: f32,
-    pub colour: Vec<f32>,
-    #[serde(default)]
-    pub position: Vec<f32>,
-    #[serde(default)]
-    pub tags: Vec<String>,
 }
 
 /// Configuration for the grid-based asteroid spawner.

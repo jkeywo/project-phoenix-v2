@@ -1,4 +1,4 @@
-﻿// Unified world parser — single-pass deserialization for the merged
+// Unified world parser — single-pass deserialization for the merged
 // map/scenario world TOML (PRD #337/#341).
 //
 // This module owns the entire world TOML schema: anchors, `[[entity]]`
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use crate::entity_config::GlobalConfig;
 
-// ── World-tree entity instance types ───────────────────────────────────────
+// -- World-tree entity instance types ---------------------------------------
 
 /// When to spawn a `WorldEntity` declared in the world TOML.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -33,9 +33,97 @@ impl Default for WorldEntitySpawnOn {
     }
 }
 
+/// Positioning, rotation, and scale for a `WorldEntity`.
+///
+/// All fields are optional. Resolution precedence in `resolve()`:
+/// 1. `relative_to` + `offset` (relative to another named entity's
+///    already-resolved position)
+/// 2. `anchor` (looked up in the world's `[anchors]` table)
+/// 3. `position` (inline `[x, y, z]`)
+/// 4. Origin `[0, 0, 0]` when nothing is supplied.
+///
+/// `rotation` is XYZ Euler in radians and is converted to a `Quat` via
+/// `quat()`. `scale` defaults to `[1, 1, 1]` via `scale_vec()`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TransformConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<[f32; 3]>,
+    /// XYZ Euler rotation in radians (pitch, yaw, roll).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<[f32; 3]>,
+    /// Per-axis scale factors; defaults to `[1, 1, 1]` via `scale_vec()`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<[f32; 3]>,
+}
+
+impl TransformConfig {
+    /// XYZ Euler rotation as a `Quat`; identity when `rotation` is `None`.
+    pub fn quat(&self) -> bevy::math::Quat {
+        let [x, y, z] = self.rotation.unwrap_or([0.0, 0.0, 0.0]);
+        bevy::math::Quat::from_euler(bevy::math::EulerRot::XYZ, x, y, z)
+    }
+
+    /// Per-axis scale as a `Vec3`; `Vec3::ONE` when `scale` is `None`.
+    pub fn scale_vec(&self) -> bevy::math::Vec3 {
+        let [x, y, z] = self.scale.unwrap_or([1.0, 1.0, 1.0]);
+        bevy::math::Vec3::new(x, y, z)
+    }
+
+    /// Resolve this transform's world-space position.
+    ///
+    /// `template_path` is used only to make error messages informative when
+    /// an `anchor` or `relative_to` reference doesn't resolve.
+    pub fn resolve(
+        &self,
+        template_path: &str,
+        anchors: &HashMap<String, [f32; 3]>,
+        entities_by_name: &HashMap<String, [f32; 3]>,
+    ) -> Result<[f32; 3], String> {
+        if let Some(name) = self.relative_to.as_ref() {
+            let base = entities_by_name.get(name).ok_or_else(|| {
+                format!(
+                    "Entity (template '{}') references unknown relative_to entity '{}' \
+                     (must be a previously-declared named entity in the same world)",
+                    template_path, name
+                )
+            })?;
+            let off = self.offset.unwrap_or([0.0, 0.0, 0.0]);
+            return Ok([base[0] + off[0], base[1] + off[1], base[2] + off[2]]);
+        }
+        if let Some(name) = self.anchor.as_ref() {
+            let pos = anchors.get(name).ok_or_else(|| {
+                format!(
+                    "Entity (template '{}') references unknown anchor '{}'",
+                    template_path, name
+                )
+            })?;
+            return Ok(*pos);
+        }
+        Ok(self.position.unwrap_or([0.0, 0.0, 0.0]))
+    }
+}
+
+/// World-level ambient light override. Applied by the renderer at startup;
+/// missing sub-fields fall back to renderer-supplied constants.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct AmbientLightConfig {
+    /// Linear sRGB colour `[r, g, b]` in 0.0–1.0 range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f32; 3]>,
+    /// Ambient brightness in Bevy units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<f32>,
+}
+
 /// A concrete entity instance declared in the world TOML — a reference to an
 /// entity template (under `assets/entities/`) plus instance-level metadata
-/// (position / anchor, spawn timing, optional name for trigger/comms binding,
+/// (transform sub-table, spawn timing, optional name for trigger/comms binding,
 /// inline overrides).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WorldEntity {
@@ -46,28 +134,12 @@ pub struct WorldEntity {
     pub id: Option<String>,
     /// Optional named identity for the entity. When present, the entity
     /// becomes trigger- and comms-eligible: `spawn_world_entities` assigns
-    /// it a stable UUID and registers `name → uuid` in `WorldConfig.name_to_uuid`.
+    /// it a stable UUID and registers `name ? uuid` in `WorldConfig.name_to_uuid`.
     #[serde(default)]
     pub name: Option<String>,
-    /// World-space position [x, y, z].
-    #[serde(default)]
-    pub position: Vec<f32>,
-    /// Named anchor reference (from `[anchors]` in the world TOML). Mutually
-    /// exclusive with `position`. Resolved by `resolve_entity_position` at
-    /// spawn time.
-    #[serde(default)]
-    pub anchor: Option<String>,
-    /// Named reference to another `[[entity]]` (by `name`) whose resolved
-    /// position this entity is positioned relative to. Combined with
-    /// `offset`. Resolved by `resolve_entity_position_with` at spawn time
-    /// after sibling positions are known. Takes precedence over `anchor` /
-    /// `position` when set.
-    #[serde(default)]
-    pub relative_to: Option<String>,
-    /// Offset [x, y, z] added to the `relative_to` entity's resolved position.
-    /// Ignored unless `relative_to` is set. Missing components default to 0.
-    #[serde(default)]
-    pub offset: Vec<f32>,
+    /// Positioning, rotation and scale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<TransformConfig>,
     /// When this entity should be spawned.
     #[serde(default)]
     pub spawn_on: WorldEntitySpawnOn,
@@ -76,7 +148,7 @@ pub struct WorldEntity {
     pub overrides: Option<toml::Value>,
 }
 
-// ── TOML-facing raw types ──────────────────────────────────────────────────
+// -- TOML-facing raw types --------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 struct RawTriggerEntry {
@@ -166,9 +238,12 @@ pub struct RawWorld {
     /// Paths to additional world TOML files to load additively at startup.
     #[serde(default)]
     pub extra_worlds: Vec<String>,
+    /// Optional world-level ambient light override.
+    #[serde(default)]
+    pub ambient_light: Option<AmbientLightConfig>,
 }
 
-// ── Trigger / comms pure config types ──────────────────────────────────────
+// -- Trigger / comms pure config types --------------------------------------
 
 /// A condition that a trigger can check against incoming world events.
 #[derive(Clone, Debug, PartialEq)]
@@ -238,7 +313,7 @@ pub struct CommsTemplate {
     pub node: CommsDialogueNode,
 }
 
-// ── Parser helpers ─────────────────────────────────────────────────────────
+// -- Parser helpers ---------------------------------------------------------
 
 fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String> {
     use crate::messages::ModifierSlot;
@@ -395,7 +470,7 @@ fn parse_trigger_condition_from_string(
     }
 }
 
-// ── Public typed config ────────────────────────────────────────────────────
+// -- Public typed config ----------------------------------------------------
 
 /// Parsed unified world configuration.
 ///
@@ -412,13 +487,16 @@ pub struct WorldConfig {
     pub triggers: Vec<Trigger>,
     /// Ordered list of comms dialogue templates declared in the world.
     pub comms: Vec<CommsTemplate>,
-    /// Map of `name → uuid` for entities spawned via `[[entity]] name = "..."`.
+    /// Map of `name ? uuid` for entities spawned via `[[entity]] name = "..."`.
     /// Populated by `spawn_world_entities` (PRD #337/#339 slice 2); read by
     /// trigger and comms lookup paths that resolve a name to a live UUID.
     pub name_to_uuid: HashMap<String, String>,
     /// Paths of additional world TOML files to load additively at startup
     /// (issue #352 — `extra_worlds` field).
     pub extra_worlds: Vec<String>,
+    /// Optional world-level ambient light override; `None` means the
+    /// renderer falls back to its built-in constants.
+    pub ambient_light: Option<AmbientLightConfig>,
 }
 
 impl WorldConfig {
@@ -437,7 +515,7 @@ impl WorldConfig {
     }
 }
 
-// ── Parser ─────────────────────────────────────────────────────────────────
+// -- Parser -----------------------------------------------------------------
 
 /// Parse a unified world TOML string in a single pass.
 ///
@@ -506,10 +584,11 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         comms,
         name_to_uuid: HashMap::new(),
         extra_worlds: raw.extra_worlds,
+        ambient_light: raw.ambient_light,
     })
 }
 
-/// Build a `name → uuid` map for the named entries in an `[[entity]]` slice.
+/// Build a `name ? uuid` map for the named entries in an `[[entity]]` slice.
 ///
 /// PRD #337/#339 slice 2: anonymous `[[entity]]` instances stay unaddressable;
 /// `[[entity]]` instances carrying a `name` field become trigger- and
@@ -539,7 +618,7 @@ where
 /// PRD #337 routes two kinds of entries through the unified pipeline:
 /// * **Slice 1**: any entry whose resolved template is an asteroid field.
 /// * **Slice 2**: any entry carrying a `name` field — the unified pipeline
-///   assigns the UUID so `name → uuid` is single-sourced.
+///   assigns the UUID so `name ? uuid` is single-sourced.
 ///
 /// Both call sites (legacy + unified) call this helper with the same
 /// `is_asteroid_field` lookup to guarantee no entry is spawned twice.
@@ -615,7 +694,7 @@ where
 ///
 /// Precedence:
 /// 1. `anchor = "name"` — look up the anchor; error if missing.
-/// 2. `position = [x, y, z]` — return as-is when length ≥ 3.
+/// 2. `position = [x, y, z]` — return as-is when length = 3.
 /// 3. Neither — `[0, 0, 0]`.
 ///
 /// `anchor` and `position` are not strictly mutually exclusive at parse
@@ -625,7 +704,7 @@ where
 /// PRD #337 slice 3: lifts anchor positioning from the scenario half into
 /// the unified `[[entity]]` pipeline so NPCs can be migrated off
 /// `[[spawn]]`. Pure function — tested without Bevy.
-/// Build a map of `name → resolved_position` for every named `[[entity]]`
+/// Build a map of `name ? resolved_position` for every named `[[entity]]`
 /// instance in the world, used as the lookup table for `relative_to`
 /// references during spawning.
 ///
@@ -644,7 +723,12 @@ pub fn build_named_entity_positions(world: &WorldConfig) -> HashMap<String, [f32
         let Some(name) = ent.name.as_ref() else { continue };
         // Skip entities whose own position is relative_to-based — their
         // position isn't valid as a base for further relative_to lookups.
-        if ent.relative_to.is_some() {
+        if ent
+            .transform
+            .as_ref()
+            .and_then(|t| t.relative_to.as_ref())
+            .is_some()
+        {
             continue;
         }
         if let Ok(pos) = resolve_entity_position(ent, &world.anchors) {
@@ -663,53 +747,29 @@ pub fn resolve_entity_position(
 
 /// Extended position resolver supporting `relative_to`+`offset`.
 ///
-/// `entities_by_name` maps already-resolved named entity positions; callers
-/// performing two-pass spawning populate it with results from the first pass.
-/// Resolution precedence: `relative_to` → `anchor` → inline `position` →
-/// origin. A `relative_to` that doesn't appear in `entities_by_name` (forward
-/// reference or typo) is an error.
+/// Thin wrapper over `TransformConfig::resolve` that supplies a default
+/// transform when none is present on the entity.
 pub fn resolve_entity_position_with(
     entity_inst: &crate::world::config::WorldEntity,
     anchors: &HashMap<String, [f32; 3]>,
     entities_by_name: &HashMap<String, [f32; 3]>,
 ) -> Result<[f32; 3], String> {
-    if let Some(name) = entity_inst.relative_to.as_ref() {
-        let base = entities_by_name.get(name).ok_or_else(|| {
-            format!(
-                "Entity (template '{}') references unknown relative_to entity '{}' \
-                 (must be a previously-declared named entity in the same world)",
-                entity_inst.template_path, name
-            )
-        })?;
-        let ox = entity_inst.offset.first().copied().unwrap_or(0.0);
-        let oy = entity_inst.offset.get(1).copied().unwrap_or(0.0);
-        let oz = entity_inst.offset.get(2).copied().unwrap_or(0.0);
-        return Ok([base[0] + ox, base[1] + oy, base[2] + oz]);
-    }
-    if let Some(name) = entity_inst.anchor.as_ref() {
-        let pos = anchors.get(name).ok_or_else(|| {
-            format!(
-                "Entity (template '{}') references unknown anchor '{}'",
-                entity_inst.template_path, name
-            )
-        })?;
-        return Ok(*pos);
-    }
-    if entity_inst.position.len() >= 3 {
-        return Ok([
-            entity_inst.position[0],
-            entity_inst.position[1],
-            entity_inst.position[2],
-        ]);
-    }
-    Ok([0.0, 0.0, 0.0])
+    let default_xf;
+    let xf = match entity_inst.transform.as_ref() {
+        Some(t) => t,
+        None => {
+            default_xf = TransformConfig::default();
+            &default_xf
+        }
+    };
+    xf.resolve(&entity_inst.template_path, anchors, entities_by_name)
 }
 
 /// Three-way partition of immediate `[[entity]]` instances.
 ///
 /// PRD #339 slice 2: the unified pipeline owns BOTH asteroid-field templates
 /// AND any entry carrying a `name` field (so the entity that triggers / comms
-/// resolve through `name → uuid` is actually spawned with that UUID). The
+/// resolve through `name ? uuid` is actually spawned with that UUID). The
 /// complementary `setup_world` path in `server_app.rs` only spawns the third
 /// bucket (anonymous non-asteroid entries).
 ///
@@ -745,7 +805,7 @@ where
     (fields, named, anon)
 }
 
-// ── Unit Tests ─────────────────────────────────────────────────────────────
+// -- Unit Tests -------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -799,17 +859,20 @@ busted = [1.0]
         let toml = r#"
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
-position = [100.0, 0.0, -200.0]
+transform = { position = [100.0, 0.0, -200.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.entities.len(), 2);
         assert_eq!(cfg.entities[0].template_path, "assets/entities/star_sun.toml");
         assert_eq!(cfg.entities[1].template_path, "assets/entities/asteroid_field_main.toml");
-        assert_eq!(cfg.entities[1].position, vec![100.0, 0.0, -200.0]);
+        assert_eq!(
+            cfg.entities[1].transform.as_ref().and_then(|t| t.position),
+            Some([100.0, 0.0, -200.0])
+        );
     }
 
     #[test]
@@ -817,7 +880,7 @@ position = [100.0, 0.0, -200.0]
         let toml = r#"
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.entities[0].spawn_on, WorldEntitySpawnOn::Immediate);
@@ -826,7 +889,7 @@ position = [0.0, 0.0, 0.0]
     #[test]
     fn world_config_default_has_empty_name_to_uuid() {
         // PRD #337/#339 slice 2: the unified WorldConfig owns the
-        // `name → uuid` map that `spawn_world_entities` populates and
+        // `name ? uuid` map that `spawn_world_entities` populates and
         // trigger/comms lookup reads. Starts empty.
         let cfg = WorldConfig::default();
         assert!(cfg.name_to_uuid.is_empty());
@@ -835,7 +898,7 @@ position = [0.0, 0.0, 0.0]
 
     #[test]
     fn assign_named_entity_uuids_collects_named_only_with_stable_uuids() {
-        // PRD #337/#339 slice 2: a pure helper builds the `name → uuid`
+        // PRD #337/#339 slice 2: a pure helper builds the `name ? uuid`
         // map from a slice of WorldEntity. Anonymous entries are skipped;
         // a caller-supplied generator yields the UUIDs (so tests can be
         // deterministic without dragging real RNG in).
@@ -942,11 +1005,11 @@ position = [0.0, 0.0, 0.0]
 [[entity]]
 template_path = "assets/entities/station_outpost.toml"
 name = "Starbase Alpha"
-position = [500.0, 0.0, 0.0]
+transform = { position = [500.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.entities.len(), 2);
@@ -969,18 +1032,25 @@ patrol_alpha = [300.0, 0.0, -300.0]
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name = "raider_alpha"
-anchor = "patrol_alpha"
+transform = { anchor = "patrol_alpha" }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.entities.len(), 1);
-        assert_eq!(cfg.entities[0].anchor.as_deref(), Some("patrol_alpha"));
+        assert_eq!(
+            cfg.entities[0].transform.as_ref().and_then(|t| t.anchor.as_deref()),
+            Some("patrol_alpha")
+        );
         assert!(
-            cfg.entities[0].position.is_empty(),
+            cfg.entities[0]
+                .transform
+                .as_ref()
+                .and_then(|t| t.position)
+                .is_none(),
             "no inline position when anchor is supplied"
         );
     }
 
-    // ── resolve_entity_position (PRD #337 slice 3) ────────────────────────
+    // -- resolve_entity_position (PRD #337 slice 3) ------------------------
 
     fn anchor_table(entries: &[(&str, [f32; 3])]) -> HashMap<String, [f32; 3]> {
         entries
@@ -989,13 +1059,20 @@ anchor = "patrol_alpha"
             .collect()
     }
 
+    fn entity_with(template_path: &str, xf: TransformConfig) -> WorldEntity {
+        WorldEntity {
+            template_path: template_path.into(),
+            transform: Some(xf),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn resolve_entity_position_uses_anchor_when_set() {
-        let entity = WorldEntity {
-            template_path: "assets/entities/pirate_raider.toml".into(),
-            anchor: Some("patrol_alpha".into()),
-            ..Default::default()
-        };
+        let entity = entity_with(
+            "assets/entities/pirate_raider.toml",
+            TransformConfig { anchor: Some("patrol_alpha".into()), ..Default::default() },
+        );
         let anchors = anchor_table(&[("patrol_alpha", [300.0, 0.0, -300.0])]);
         let pos = resolve_entity_position(&entity, &anchors).unwrap();
         assert_eq!(pos, [300.0, 0.0, -300.0]);
@@ -1003,40 +1080,40 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_falls_back_to_inline_position() {
-        let entity = WorldEntity {
-            template_path: "assets/entities/star_sun.toml".into(),
-            position: vec![10.0, 0.0, 20.0],
-            ..Default::default()
-        };
+        let entity = entity_with(
+            "assets/entities/star_sun.toml",
+            TransformConfig { position: Some([10.0, 0.0, 20.0]), ..Default::default() },
+        );
         let pos = resolve_entity_position(&entity, &HashMap::new()).unwrap();
         assert_eq!(pos, [10.0, 0.0, 20.0]);
     }
 
     #[test]
     fn resolve_entity_position_errors_on_unknown_anchor() {
-        let entity = WorldEntity {
-            template_path: "assets/entities/pirate_raider.toml".into(),
-            anchor: Some("ghost".into()),
-            ..Default::default()
-        };
+        let entity = entity_with(
+            "assets/entities/pirate_raider.toml",
+            TransformConfig { anchor: Some("ghost".into()), ..Default::default() },
+        );
         let err = resolve_entity_position(&entity, &HashMap::new()).unwrap_err();
         assert!(err.contains("ghost"), "error must mention missing anchor: {err}");
     }
 
     #[test]
     fn resolve_entity_position_anchor_wins_over_inline_position() {
-        let entity = WorldEntity {
-            template_path: "x.toml".into(),
-            anchor: Some("a".into()),
-            position: vec![999.0, 999.0, 999.0],
-            ..Default::default()
-        };
+        let entity = entity_with(
+            "x.toml",
+            TransformConfig {
+                anchor: Some("a".into()),
+                position: Some([999.0, 999.0, 999.0]),
+                ..Default::default()
+            },
+        );
         let anchors = anchor_table(&[("a", [1.0, 2.0, 3.0])]);
         let pos = resolve_entity_position(&entity, &anchors).unwrap();
         assert_eq!(pos, [1.0, 2.0, 3.0]);
     }
 
-    // ── relative_to + offset (PRD #337 — closing AC) ──────────────────────
+    // -- relative_to + offset (PRD #337 — closing AC) ----------------------
 
     fn resolved_table(entries: &[(&str, [f32; 3])]) -> HashMap<String, [f32; 3]> {
         entries
@@ -1047,12 +1124,14 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_relative_to_adds_offset_to_referenced_entity() {
-        let entity = WorldEntity {
-            template_path: "assets/entities/pirate_raider.toml".into(),
-            relative_to: Some("starbase_alpha".into()),
-            offset: vec![10.0, 0.0, -5.0],
-            ..Default::default()
-        };
+        let entity = entity_with(
+            "assets/entities/pirate_raider.toml",
+            TransformConfig {
+                relative_to: Some("starbase_alpha".into()),
+                offset: Some([10.0, 0.0, -5.0]),
+                ..Default::default()
+            },
+        );
         let resolved = resolved_table(&[("starbase_alpha", [100.0, 0.0, 200.0])]);
         let pos = resolve_entity_position_with(&entity, &HashMap::new(), &resolved).unwrap();
         assert_eq!(pos, [110.0, 0.0, 195.0]);
@@ -1060,11 +1139,10 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_relative_to_with_missing_offset_uses_zero() {
-        let entity = WorldEntity {
-            template_path: "x.toml".into(),
-            relative_to: Some("origin".into()),
-            ..Default::default()
-        };
+        let entity = entity_with(
+            "x.toml",
+            TransformConfig { relative_to: Some("origin".into()), ..Default::default() },
+        );
         let resolved = resolved_table(&[("origin", [5.0, 6.0, 7.0])]);
         let pos = resolve_entity_position_with(&entity, &HashMap::new(), &resolved).unwrap();
         assert_eq!(pos, [5.0, 6.0, 7.0]);
@@ -1072,11 +1150,10 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_relative_to_errors_on_unknown_reference() {
-        let entity = WorldEntity {
-            template_path: "x.toml".into(),
-            relative_to: Some("ghost".into()),
-            ..Default::default()
-        };
+        let entity = entity_with(
+            "x.toml",
+            TransformConfig { relative_to: Some("ghost".into()), ..Default::default() },
+        );
         let err = resolve_entity_position_with(&entity, &HashMap::new(), &HashMap::new())
             .unwrap_err();
         assert!(
@@ -1087,14 +1164,16 @@ anchor = "patrol_alpha"
 
     #[test]
     fn resolve_entity_position_relative_to_wins_over_anchor_and_position() {
-        let entity = WorldEntity {
-            template_path: "x.toml".into(),
-            anchor: Some("a".into()),
-            position: vec![999.0, 999.0, 999.0],
-            relative_to: Some("base".into()),
-            offset: vec![1.0, 1.0, 1.0],
-            ..Default::default()
-        };
+        let entity = entity_with(
+            "x.toml",
+            TransformConfig {
+                anchor: Some("a".into()),
+                position: Some([999.0, 999.0, 999.0]),
+                relative_to: Some("base".into()),
+                offset: Some([1.0, 1.0, 1.0]),
+                ..Default::default()
+            },
+        );
         let anchors = anchor_table(&[("a", [50.0, 50.0, 50.0])]);
         let resolved = resolved_table(&[("base", [10.0, 0.0, 0.0])]);
         let pos = resolve_entity_position_with(&entity, &anchors, &resolved).unwrap();
@@ -1107,18 +1186,18 @@ anchor = "patrol_alpha"
 [[entity]]
 template_path = "assets/entities/starbase_alpha.toml"
 name          = "starbase_alpha"
-position      = [100.0, 0.0, 200.0]
+transform     = { position = [100.0, 0.0, 200.0] }
 
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
-relative_to   = "starbase_alpha"
-offset        = [10.0, 0.0, -5.0]
+transform     = { relative_to = "starbase_alpha", offset = [10.0, 0.0, -5.0] }
 "#;
         let world = parse_world(toml).expect("parse");
         assert_eq!(world.entities.len(), 2);
         let raider = &world.entities[1];
-        assert_eq!(raider.relative_to.as_deref(), Some("starbase_alpha"));
-        assert_eq!(raider.offset, vec![10.0, 0.0, -5.0]);
+        let xf = raider.transform.as_ref().expect("transform present");
+        assert_eq!(xf.relative_to.as_deref(), Some("starbase_alpha"));
+        assert_eq!(xf.offset, Some([10.0, 0.0, -5.0]));
     }
 
     #[test]
@@ -1127,7 +1206,7 @@ offset        = [10.0, 0.0, -5.0]
 [[entity]]
 template_path = "assets/entities/player_ship.toml"
 id = "player-ship"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 "#;
         let cfg = parse_world(toml).expect("must parse");
@@ -1135,7 +1214,7 @@ spawn_on = "game_start"
         assert_eq!(cfg.entities[0].id.as_deref(), Some("player-ship"));
     }
 
-    // ── Triggers & comms (PRD #341) ───────────────────────────────────────
+    // -- Triggers & comms (PRD #341) ---------------------------------------
 
     #[test]
     fn parse_world_reads_on_destroyed_trigger_with_actions() {
@@ -1250,7 +1329,7 @@ condition = "on_zombie"
         assert!(cfg.comms.is_empty());
     }
 
-    // ── entity_template_paths ─────────────────────────────────────────────
+    // -- entity_template_paths ---------------------------------------------
 
     #[test]
     fn entity_template_paths_returns_empty_for_no_entities() {
@@ -1263,15 +1342,15 @@ condition = "on_zombie"
         let toml = r#"
 [[entity]]
 template_path = "assets/entities/asteroid_large.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/asteroid_large.toml"
-position = [10.0, 0.0, 10.0]
+transform = { position = [10.0, 0.0, 10.0] }
 
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
-position = [100.0, 0.0, 0.0]
+transform = { position = [100.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         let paths = entity_template_paths(&cfg);
@@ -1285,19 +1364,19 @@ position = [100.0, 0.0, 0.0]
         let toml = r#"
 [[entity]]
 template_path = "first.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "second.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "first.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "third.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         let paths = entity_template_paths(&cfg);
@@ -1308,22 +1387,22 @@ position = [0.0, 0.0, 0.0]
         );
     }
 
-    // ── partition_immediate_entities ──────────────────────────────────────
+    // -- partition_immediate_entities --------------------------------------
 
     #[test]
     fn partition_immediate_entities_routes_asteroid_fields_separately() {
         let toml = r#"
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
-position = [100.0, 0.0, 0.0]
+transform = { position = [100.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/asteroid_field_outer.toml"
-position = [500.0, 0.0, 500.0]
+transform = { position = [500.0, 0.0, 500.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         let (fields, others) = partition_immediate_entities(&cfg, |path| {
@@ -1339,11 +1418,11 @@ position = [500.0, 0.0, 500.0]
         let toml = r#"
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/player_ship.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 "#;
         let cfg = parse_world(toml).expect("must parse");
@@ -1362,7 +1441,7 @@ spawn_on = "game_start"
         assert!(others.is_empty());
     }
 
-    // ── extra_worlds (issue #352) ─────────────────────────────────────────
+    // -- extra_worlds (issue #352) -----------------------------------------
 
     #[test]
     fn parse_world_extra_worlds_defaults_to_empty() {
@@ -1414,7 +1493,7 @@ extra_worlds = ["assets/worlds/patrol.toml"]
         assert_eq!(cfg.extra_worlds, vec!["assets/worlds/patrol.toml".to_string()]);
     }
 
-    // ── LoadWorld / UnloadWorld trigger actions (issue #352) ─────────────
+    // -- LoadWorld / UnloadWorld trigger actions (issue #352) -------------
 
     #[test]
     fn parse_world_load_world_action_parses() {
@@ -1498,15 +1577,194 @@ after_secs = 10.0
         let toml = r#"
 [[entity]]
 template_path = "a.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "b.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         let (fields, others) = partition_immediate_entities(&cfg, |_| false);
         assert!(fields.is_empty());
         assert_eq!(others.len(), 2);
+    }
+
+    // ── TransformConfig (Slice 4) ─────────────────────────────────────────
+
+    #[test]
+    fn transform_config_parses_inline_table_with_position() {
+        let toml = r#"
+[[entity]]
+template_path = "x.toml"
+transform = { position = [1.0, 2.0, 3.0] }
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let xf = cfg.entities[0].transform.as_ref().expect("transform present");
+        assert_eq!(xf.position, Some([1.0, 2.0, 3.0]));
+        assert!(xf.anchor.is_none() && xf.relative_to.is_none());
+        assert!(xf.rotation.is_none() && xf.scale.is_none());
+    }
+
+    #[test]
+    fn transform_config_parses_subtable_form_with_rotation_and_scale() {
+        let toml = r#"
+[[entity]]
+template_path = "x.toml"
+
+[entity.transform]
+position = [10.0, 0.0, 20.0]
+rotation = [0.0, 1.5707963, 0.0]
+scale    = [2.0, 2.0, 2.0]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let xf = cfg.entities[0].transform.as_ref().expect("transform present");
+        assert_eq!(xf.position, Some([10.0, 0.0, 20.0]));
+        assert_eq!(xf.rotation, Some([0.0, 1.5707963, 0.0]));
+        assert_eq!(xf.scale, Some([2.0, 2.0, 2.0]));
+    }
+
+    #[test]
+    fn transform_config_anchor_and_relative_to_round_trip() {
+        let toml = r#"
+[[entity]]
+template_path = "a.toml"
+transform = { anchor = "spawn_point" }
+
+[[entity]]
+template_path = "b.toml"
+transform = { relative_to = "leader", offset = [0.0, 0.0, -10.0] }
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let xa = cfg.entities[0].transform.as_ref().unwrap();
+        assert_eq!(xa.anchor.as_deref(), Some("spawn_point"));
+        let xb = cfg.entities[1].transform.as_ref().unwrap();
+        assert_eq!(xb.relative_to.as_deref(), Some("leader"));
+        assert_eq!(xb.offset, Some([0.0, 0.0, -10.0]));
+    }
+
+    #[test]
+    fn transform_config_missing_transform_means_none() {
+        let toml = r#"
+[[entity]]
+template_path = "x.toml"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert!(cfg.entities[0].transform.is_none());
+    }
+
+    #[test]
+    fn transform_config_serde_round_trip_via_toml() {
+        let xf = TransformConfig {
+            position: Some([1.0, 2.0, 3.0]),
+            anchor: None,
+            relative_to: None,
+            offset: None,
+            rotation: Some([0.1, 0.2, 0.3]),
+            scale: Some([1.5, 1.5, 1.5]),
+        };
+        let s = toml::to_string(&xf).expect("serialize");
+        let back: TransformConfig = toml::from_str(&s).expect("deserialize");
+        assert_eq!(back, xf);
+    }
+
+    #[test]
+    fn transform_config_quat_defaults_to_identity_when_no_rotation() {
+        let xf = TransformConfig::default();
+        let q = xf.quat();
+        assert!((q.length() - 1.0).abs() < 1e-5);
+        assert!((q.w - 1.0).abs() < 1e-5);
+        assert!(q.x.abs() < 1e-5 && q.y.abs() < 1e-5 && q.z.abs() < 1e-5);
+    }
+
+    #[test]
+    fn transform_config_quat_matches_from_euler_xyz() {
+        let xf = TransformConfig {
+            rotation: Some([0.5, 1.0, -0.25]),
+            ..Default::default()
+        };
+        let expected =
+            bevy::math::Quat::from_euler(bevy::math::EulerRot::XYZ, 0.5, 1.0, -0.25);
+        assert!(xf.quat().abs_diff_eq(expected, 1e-6));
+    }
+
+    #[test]
+    fn transform_config_scale_vec_defaults_to_one() {
+        let xf = TransformConfig::default();
+        assert_eq!(xf.scale_vec(), bevy::math::Vec3::ONE);
+    }
+
+    #[test]
+    fn transform_config_scale_vec_reads_explicit_scale() {
+        let xf = TransformConfig {
+            scale: Some([2.0, 3.0, 4.0]),
+            ..Default::default()
+        };
+        assert_eq!(xf.scale_vec(), bevy::math::Vec3::new(2.0, 3.0, 4.0));
+    }
+
+    #[test]
+    fn transform_config_resolve_precedence_relative_to_wins() {
+        let xf = TransformConfig {
+            position: Some([99.0, 99.0, 99.0]),
+            anchor: Some("a".into()),
+            relative_to: Some("base".into()),
+            offset: Some([1.0, 2.0, 3.0]),
+            ..Default::default()
+        };
+        let anchors = anchor_table(&[("a", [50.0, 50.0, 50.0])]);
+        let resolved = resolved_table(&[("base", [10.0, 0.0, 0.0])]);
+        let pos = xf.resolve("x.toml", &anchors, &resolved).unwrap();
+        assert_eq!(pos, [11.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn transform_config_resolve_falls_back_to_origin_when_nothing_set() {
+        let xf = TransformConfig::default();
+        let pos = xf.resolve("x.toml", &HashMap::new(), &HashMap::new()).unwrap();
+        assert_eq!(pos, [0.0, 0.0, 0.0]);
+    }
+
+    // ── AmbientLightConfig (Slice 4) ──────────────────────────────────────
+
+    #[test]
+    fn ambient_light_config_round_trip_via_toml() {
+        let cfg = AmbientLightConfig {
+            color: Some([0.6, 0.55, 0.5]),
+            brightness: Some(300.0),
+        };
+        let s = toml::to_string(&cfg).expect("serialize");
+        let back: AmbientLightConfig = toml::from_str(&s).expect("deserialize");
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn parse_world_reads_top_level_ambient_light_block() {
+        let toml = r#"
+[ambient_light]
+color      = [0.6, 0.55, 0.5]
+brightness = 300.0
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let al = cfg.ambient_light.as_ref().expect("ambient_light present");
+        assert_eq!(al.color, Some([0.6, 0.55, 0.5]));
+        assert_eq!(al.brightness, Some(300.0));
+    }
+
+    #[test]
+    fn parse_world_omits_ambient_light_when_block_missing() {
+        let cfg = parse_world("").expect("empty TOML parses");
+        assert!(cfg.ambient_light.is_none());
+    }
+
+    #[test]
+    fn parse_world_ambient_light_accepts_partial_fields() {
+        let toml = r#"
+[ambient_light]
+brightness = 150.0
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let al = cfg.ambient_light.as_ref().expect("ambient_light present");
+        assert!(al.color.is_none());
+        assert_eq!(al.brightness, Some(150.0));
     }
 }

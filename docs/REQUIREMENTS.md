@@ -676,7 +676,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 
 ### Entity TOML (`assets/entities/*.toml`)
 - Component-bag: each `[section]` present produces a Bevy component on the spawned entity.
-- Console-as-feature-flag: `[captain_console]`, `[helm_console]`, `[weapons_console]`, `[sensors_console]`, `[shields_console]`, `[navigation_console]`, `[repair_console]`, `[power_console]`, `[comms_console]` presence determines which consoles a ship exposes. (`[science_console]` from earlier PRDs is replaced by separate `[sensors_console]` / `[shields_console]` / `[navigation_console]` sections.)
+- Console-as-feature-flag: `[captain_console]`, `[helm_console]`, `[weapons_console]`, `[sensors_console]`, `[shields_console]`, `[navigation_console]`, `[repair_console]`, `[power_console]`, `[comms_console]` presence determines which consoles a ship exposes.
 - Physical: `[hull]`, `[collider] kind="capsule|sphere" radius length`, `[appearance]`, `[shape]` (for regions: Sphere/Box/Torus).
 - Helm console parameters: `[helm_console]` — max forward/reverse speed, acceleration, deceleration, turn speed, plus `[helm_console.radar] range, shows = [tags...]`.
 - Tactical console parameters: `[weapons_console]` — per-bank `cooldown_secs`, `auto_fire_range`, `fire_arc_deg`, `auto_arc_deg`, beam colour, plus torpedo tube config and `[weapons_console.radar]`.

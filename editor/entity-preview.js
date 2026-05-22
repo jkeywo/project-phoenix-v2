@@ -1,5 +1,5 @@
 import { tagShape } from './tag-shape-map.js';
-import { RADAR_SHAPE_FALLBACK } from './canvas-scenario.js';
+import { RADAR_SHAPE_FALLBACK } from './canvas-world.js';
 
 const CONSOLE_SECTIONS = [
   'helm_console',

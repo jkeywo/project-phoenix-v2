@@ -149,7 +149,7 @@ impl Plugin for WorldPlugin {
 /// On native (no WASM bridge) `get_world_config()` returns `None` and this
 /// system is a no-op; `setup_fallback_world` handles that case via its
 /// `run_if(not(resource_exists::<WorldConfig>))` gate.
-fn insert_world_config_resource(mut commands: Commands) {
+pub(crate) fn insert_world_config_resource(mut commands: Commands) {
     if let Some(world_config) = crate::config_cache::get_world_config() {
         commands.insert_resource(world_config);
     }
@@ -369,6 +369,7 @@ fn setup_fallback_world(
     // no-WorldConfig fallback path; the [[entity]]/spawn_game_start path is
     // preferred and runs whenever a WorldConfig is loaded.
     let ship_config = crate::entity_config::EntityConfig {
+        name: None,
         tags: vec!["player".to_string(), "ship".to_string()],
         collider: Some(crate::entity_config::ColliderConfig {
             shape: crate::entity_config::ColliderShape::Capsule,
@@ -382,21 +383,18 @@ fn setup_fallback_world(
         engineering_console: None,
         captain_console: None,
         power: None,
-        science_console: None,
-            sensors_console: None,
+        sensors_console: None,
         shields_console: None,
         torpedoes: None,
         repair: None,
-        star: None,
-        planet: None,
         asteroid_field: None,
         shape: None,
         effects: None,
-        station: None,
         faction: None,
         behaviour: None,
         radar_appearance: None,
         mesh: None,
+        light: Vec::new(),
     };
     let ship_uuid = crate::entity_loader::assign_uuid();
     let ship_entity = crate::entity_spawner::spawn_entity(
@@ -1990,13 +1988,19 @@ mod tests {
         world_cfg.entities.push(WorldEntity {
             template_path: "assets/entities/station_outpost.toml".into(),
             name: Some("starbase_alpha".into()),
-            position: vec![500.0, 0.0, 0.0],
+            transform: Some(crate::world::config::TransformConfig {
+                position: Some([500.0, 0.0, 0.0]),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         world_cfg.entities.push(WorldEntity {
             template_path: "assets/entities/star_sun.toml".into(),
             name: None,
-            position: vec![0.0, 0.0, 0.0],
+            transform: Some(crate::world::config::TransformConfig {
+                position: Some([0.0, 0.0, 0.0]),
+                ..Default::default()
+            }),
             ..Default::default()
         });
 
@@ -2118,14 +2122,20 @@ mod tests {
         world_cfg.entities.push(WorldEntity {
             template_path: "fixture/station.toml".into(),
             name: Some("starbase_alpha".into()),
-            position: vec![500.0, 0.0, 0.0],
+            transform: Some(crate::world::config::TransformConfig {
+                position: Some([500.0, 0.0, 0.0]),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         // An anonymous entry must NOT be spawned by the unified pipeline
         // (the complementary `setup_world` in `server_app.rs` owns it).
         world_cfg.entities.push(WorldEntity {
             template_path: "fixture/star.toml".into(),
-            position: vec![0.0, 0.0, 0.0],
+            transform: Some(crate::world::config::TransformConfig {
+                position: Some([0.0, 0.0, 0.0]),
+                ..Default::default()
+            }),
             ..Default::default()
         });
 
@@ -2195,7 +2205,10 @@ mod tests {
         world_cfg.entities.push(WorldEntity {
             template_path: "fixture/raider.toml".into(),
             name: Some("raider_alpha".into()),
-            anchor: Some("patrol_alpha".into()),
+            transform: Some(crate::world::config::TransformConfig {
+                anchor: Some("patrol_alpha".into()),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         world_cfg
@@ -2259,7 +2272,10 @@ transition = []
         world_cfg.entities.push(WorldEntity {
             template_path: "fixture/raider.toml".into(),
             name: Some("raider_alpha".into()),
-            anchor: Some("patrol_alpha".into()),
+            transform: Some(crate::world::config::TransformConfig {
+                anchor: Some("patrol_alpha".into()),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         world_cfg

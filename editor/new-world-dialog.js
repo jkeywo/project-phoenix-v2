@@ -16,7 +16,7 @@ import {
   prepareNewWorld,
   getDefaultNewWorldPath,
 } from './new-world.js';
-import { inferLayerKind } from './layers.js';
+import { isMapLayer } from './layers.js';
 
 /**
  * Mount the "+ New World" button.
@@ -108,7 +108,7 @@ async function handleClick(deps) {
     fileHandle: null,
     filename: path,
     toml: parsed,
-    kind: inferLayerKind(parsed),
+    isMap: isMapLayer(parsed),
     visible: true,
     active: true,
     konvaLayer: null,

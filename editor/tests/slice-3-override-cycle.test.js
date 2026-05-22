@@ -41,7 +41,7 @@ function makeWorld() {
     entity: [{
       template_path: 'assets/entities/pirate_raider.toml',
       name: 'raider_alpha',
-      anchor: 'patrol_alpha',
+      transform: { anchor: 'patrol_alpha' },
     }],
     trigger: [{
       condition: 'on_destroyed',

@@ -178,7 +178,7 @@ src/
     effects.rs        — Region effect components (blocks_impulse, damage_zone, comms_jammed, etc.).
     shape.rs          — RegionShape types (Sphere, Box, Torus, all in XZ plane).
   entities/
-    config.rs         — TOML entity config types (EntityConfig, asteroid/ship/station/region fields). Also owns the leaf scene-shape types (`GlobalConfig`, `StarConfig`, `PlanetConfig`, `GridConfig`, `AsteroidFieldConfig`) that are reused by `WorldConfig` (PRD #341 — formerly in the deleted `entities/map_config.rs`).
+    config.rs         — TOML entity config types (`EntityConfig`, asteroid/ship/region/mesh/hull/collider/appearance fields). Now carries a top-level `name: Option<String>` and a `[mesh].emissive: Option<f32>` (renderer default 0.4). Lights are an array-of-tables `[[light]]` parsed as `Vec<LightConfig>` (`kind = "point" | "directional"`, `colour`, `intensity`, optional `range`). Also owns the leaf scene-shape types (`GlobalConfig`, `GridConfig`, `AsteroidFieldConfig`) reused by `WorldConfig` (PRD #341 — formerly in the deleted `entities/map_config.rs`). The old per-section types `StarConfig`, `PlanetConfig`, `StationConfig`, and `ScienceConsoleConfig` have been deleted (2026-05 entity-schema refactor); stars are now ordinary entities with `[mesh]` + `[[light]]`, planets are `[mesh]` + optional `[collider]`, stations are `[mesh]` + `[hull]` (hull damage via `[hull].hull_integrity`).
     config_cache.rs   — ConfigCachePlugin: preloads world + entity TOML via JS fetch on WASM. Exposes `wasm_load_world` as the single JS-facing world loader: parses the world TOML once via `world::config::parse_world` into the `WORLD_CONFIG` thread-local (PRD #341 — legacy `wasm_load_map` / `wasm_load_world_content` and the `MAP_CONFIG` / `WORLD_CONTENT_CONFIG` thread-locals are gone). Path queueing is deduped via `queue_and_fire`.
     tags.rs           — String-tag helpers for tags=[...] lookups.
     spawner.rs        — Entity spawning from EntityConfig (ECS + wire snapshot).
@@ -406,7 +406,7 @@ Console input handlers use `.in_set(SimSet::Input)`, physics uses `SimSet::Physi
 | `regions/server` | Bevy plugin: containment, RegionEntered/RegionExited Observers | Yes |
 | `regions/effects` | Region effect components | No |
 | `regions/shape` | RegionShape types | No |
-| `entities/config` | TOML entity config types. Also owns the leaf scene-shape types (`GlobalConfig`, `StarConfig`, `PlanetConfig`, `GridConfig`, `AsteroidFieldConfig`) reused by `WorldConfig` (PRD #341). | No |
+| `entities/config` | TOML entity config types (`EntityConfig` with top-level `name`, `[mesh].emissive`, `[[light]]` array-of-tables). Also owns the leaf scene-shape types (`GlobalConfig`, `GridConfig`, `AsteroidFieldConfig`) reused by `WorldConfig`. Deleted (2026-05): `StarConfig`, `PlanetConfig`, `StationConfig`, `ScienceConsoleConfig` — stars/planets/stations are now plain entities; station hull lives under `[hull].hull_integrity`. | No |
 | `entities/config_cache` | Bevy plugin: TOML preload via JS fetch on WASM. Single JS-facing world entry point `wasm_load_world` populates the `WORLD_CONFIG` thread-local via `parse_world` (PRD #341) | Yes |
 | `entities/tags` | String-tag helpers | No |
 | `entities/spawner` | ECS entity spawning from EntityConfig | Yes |

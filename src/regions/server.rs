@@ -15,7 +15,7 @@ use crate::simulation::GameOverReason;
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
 pub struct RegionMembership {
-    /// Maps ship entity → set of region entities the ship is currently inside.
+    /// Maps ship entity Ã¢â€ â€™ set of region entities the ship is currently inside.
     pub inside: HashMap<Entity, HashSet<Entity>>,
     /// Cached UUIDs for region entities (persists after entity despawn).
     pub region_uuids: HashMap<Entity, String>,
@@ -89,7 +89,7 @@ pub(crate) fn update_region_membership(
     let prev_inside = membership.inside.get(&ship_entity).cloned().unwrap_or_default();
 
     // Detect exits: were in prev_inside but not in current_inside
-    // (also catches despawned regions — despawned entities don't appear in region_query)
+    // (also catches despawned regions Ã¢â‚¬â€ despawned entities don't appear in region_query)
     for entity in prev_inside.difference(&current_inside) {
         commands.trigger(RegionExited {
             subject: ship_entity,
@@ -109,7 +109,7 @@ pub(crate) fn update_region_membership(
 }
 
 /// Applies continuous damage from `DamageZone` regions to the ship each tick.
-/// Damage bypasses shields — it goes directly to the hull via `apply_hull_damage`.
+/// Damage bypasses shields Ã¢â‚¬â€ it goes directly to the hull via `apply_hull_damage`.
 /// Damaged regions are tracked via `RegionMembership`.
 fn apply_damage_zone_damage(
     time: Res<Time>,
@@ -202,7 +202,7 @@ fn handle_blocks_impulse_region_enter(
 
 /// Clamps the ship's forward speed to the effective maximum when entering a
 /// slow zone region. The modifier registration is handled by the coordinator's
-/// `translate_region_modifiers` system — this system only clamps speed.
+/// `translate_region_modifiers` system Ã¢â‚¬â€ this system only clamps speed.
 ///
 /// This is a non-modifier side effect that must run after the coordinator so
 /// the effective max reflects the updated modifier state.
@@ -259,9 +259,11 @@ mod tests {
     }
 
     /// Spawn a region entity at the given position with the given shape.
-    /// Does NOT call app.update() internally — caller must flush afterwards.
+    /// Does NOT call app.update() internally Ã¢â‚¬â€ caller must flush afterwards.
     fn spawn_region(app: &mut App, x: f32, z: f32, shape: RegionShape) -> Entity {
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(shape),
             effects: None,
@@ -273,15 +275,11 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -308,7 +306,7 @@ mod tests {
         ship.z = z;
     }
 
-    // ── Entry tests ───────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Entry tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn ship_enters_region_when_moving_inside() {
@@ -316,7 +314,7 @@ mod tests {
         let region = spawn_region(&mut app, 100.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         // Flush so region entity is queryable + system runs once
         app.update();
-        // Ship at (0,0) is outside region at (100,0) with radius 50 → no entry
+        // Ship at (0,0) is outside region at (100,0) with radius 50 Ã¢â€ â€™ no entry
         assert!(!is_inside(&mut app, region), "ship should start outside region");
 
         // Move ship inside the region
@@ -327,14 +325,14 @@ mod tests {
             "ship should enter region when moving inside");
     }
 
-    // ── Exit tests ────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Exit tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn ship_exits_region_when_moving_outside() {
         let mut app = test_app();
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 20.0, 0.0); // inside
-        app.update(); // flush + system run → enters
+        app.update(); // flush + system run Ã¢â€ â€™ enters
         assert!(is_inside(&mut app, region), "ship should be inside after moving in");
 
         // Move ship outside
@@ -345,30 +343,30 @@ mod tests {
             "ship should exit region when moving outside");
     }
 
-    // ── No-duplicate-while-inside test ────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ No-duplicate-while-inside test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn no_duplicate_entered_while_staying_inside() {
         let mut app = test_app();
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 10.0, 0.0); // inside
-        app.update(); // flush + system run → enters
+        app.update(); // flush + system run Ã¢â€ â€™ enters
         assert!(is_inside(&mut app, region), "ship should be inside after first tick");
 
-        // Stay inside — tick again; membership should remain stable
+        // Stay inside Ã¢â‚¬â€ tick again; membership should remain stable
         app.update();
         assert!(is_inside(&mut app, region),
             "ship should remain inside without duplicate entry");
     }
 
-    // ── Despawn-implicit-exit test ────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Despawn-implicit-exit test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn region_despawn_while_inside_emits_implicit_exit() {
         let mut app = test_app();
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 10.0, 0.0); // inside
-        app.update(); // flush + system run → enters
+        app.update(); // flush + system run Ã¢â€ â€™ enters
         assert!(is_inside(&mut app, region), "ship should be inside before despawn");
 
         // Despawn the region entity
@@ -379,7 +377,7 @@ mod tests {
             "ship should exit region when region is despawned");
     }
 
-    // ── Edge: ship outside from start ─────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Edge: ship outside from start Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn ship_outside_from_start_does_not_enter() {
@@ -392,7 +390,7 @@ mod tests {
             "ship outside region should not enter");
     }
 
-    // ── Enter and exit across multiple regions ────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Enter and exit across multiple regions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn ship_enters_and_exits_two_regions_independently() {
@@ -414,7 +412,7 @@ mod tests {
         assert!(is_inside(&mut app, r1), "should enter r1");
         assert!(!is_inside(&mut app, r2), "should NOT enter r2");
 
-        // Move to r2 — should exit r1, enter r2
+        // Move to r2 Ã¢â‚¬â€ should exit r1, enter r2
         set_ship_pos(&mut app, 110.0, 0.0);
         app.update();
 
@@ -422,7 +420,7 @@ mod tests {
         assert!(!is_inside(&mut app, r1), "should exit r1");
     }
 
-    // ── Damage Zone tests ────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Damage Zone tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     use std::time::Duration;
     use crate::region_effects::{DamageZoneEffect, RegionEffectsConfig as EffectsCfg};
@@ -430,7 +428,7 @@ mod tests {
     fn damage_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(RegionPlugin);
-        // Manually control time — no TimePlugin. Bevy 0.18 Time is generic;
+        // Manually control time Ã¢â‚¬â€ no TimePlugin. Bevy 0.18 Time is generic;
         // we insert Time<()> ourselves and use advance_by() before each update.
         app.insert_resource(Time::<()>::default());
         app.insert_resource(ShipState::new());
@@ -464,6 +462,8 @@ mod tests {
 
     fn spawn_blocks_impulse_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -478,15 +478,11 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -499,6 +495,8 @@ mod tests {
 
     fn spawn_damage_zone(app: &mut App, x: f32, z: f32, radius: f32, dps: f32) -> Entity {
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -513,15 +511,11 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -610,7 +604,7 @@ mod tests {
         );
     }
 
-    // ── BlocksImpulse tests ─────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ BlocksImpulse tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     fn set_impulse_charging(app: &mut App) {
         let mut imp = app.world_mut().resource_mut::<ShipImpulse>();
@@ -641,7 +635,7 @@ mod tests {
         set_impulse_charging(&mut app);
         assert_impulse_phase(&app, ImpulsePhase::Charging);
 
-        // Tick — should trigger RegionEntered and cancel impulse
+        // Tick Ã¢â‚¬â€ should trigger RegionEntered and cancel impulse
         tick_with_dt(&mut app, 0.016);
 
         assert_impulse_phase(&app, ImpulsePhase::Idle);
@@ -679,7 +673,7 @@ mod tests {
         assert_impulse_phase(&app, ImpulsePhase::Charging);
     }
 
-    // ── Radar Dampening tests ───────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Radar Dampening tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     fn radar_dampening_test_app() -> App {
         let mut app = App::new();
@@ -693,6 +687,8 @@ mod tests {
 
     fn spawn_radar_dampening_region(app: &mut App, x: f32, z: f32, radius: f32, multiplier: f32) -> Entity {
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -707,15 +703,11 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -782,7 +774,7 @@ mod tests {
         set_ship_pos(&mut app, 0.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-        // Both bonuses sum to -0.8 → 1/(1+0.8) = 0.5556
+        // Both bonuses sum to -0.8 Ã¢â€ â€™ 1/(1+0.8) = 0.5556
         let modifiers = app.world().resource::<ShipModifiers>();
         let expected_both = 1.0 / (1.0 + 0.3 + 0.5);
         assert!(
@@ -808,7 +800,7 @@ mod tests {
         );
     }
 
-    // ── Slow Zone tests ─────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Slow Zone tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     fn slow_zone_test_app() -> App {
         let mut app = App::new();
@@ -823,6 +815,8 @@ mod tests {
     fn spawn_slow_zone(app: &mut App, x: f32, z: f32, radius: f32, thrust_modifier: Option<f32>, yaw_rate_modifier: Option<f32>) -> Entity {
         use crate::region_effects::RegionEffectsConfig as EffectsCfg;
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -837,15 +831,11 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -873,7 +863,7 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
 
-        // -0.5 bonus → 1/(1+0.5) = 0.6667
+        // -0.5 bonus Ã¢â€ â€™ 1/(1+0.5) = 0.6667
         check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
     }
 
@@ -885,7 +875,7 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
 
-        // -0.3 bonus → 1/(1+0.3) = 0.7692
+        // -0.3 bonus Ã¢â€ â€™ 1/(1+0.3) = 0.7692
         check_modifier(&app, ModifierSlot::MaxYawRate, 1.0 / 1.3);
     }
 
@@ -984,7 +974,7 @@ mod tests {
         let mut app = slow_zone_test_app();
         let _region = spawn_slow_zone(&mut app, 0.0, 0.0, 50.0, Some(-0.5), None);
 
-        // Start with 50 speed, enter → clamped to ~16.667
+        // Start with 50 speed, enter Ã¢â€ â€™ clamped to ~16.667
         let mut ship = app.world_mut().resource_mut::<ShipState>();
         ship.forward_speed = 50.0;
         ship.x = 10.0; // inside region
@@ -1015,7 +1005,7 @@ mod tests {
         );
     }
 
-    // ── Flag effect tests (CommsJam / SensorBlind) ─────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Flag effect tests (CommsJam / SensorBlind) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     use crate::flag_kind::FlagKind;
     use crate::region_effects::{CommsJamEffect, SensorBlindEffect};
@@ -1033,6 +1023,8 @@ mod tests {
     /// Spawn a region with the CommsJam effect at the given position.
     fn spawn_comms_jam_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1041,13 +1033,12 @@ mod tests {
             }),
             hull: None, collider: None, appearance: None,
             helm_console: None, weapons_console: None, engineering_console: None,
-            captain_console: None, power: None, science_console: None,
+            captain_console: None, power: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None, planet: None, asteroid_field: None,
-            station: None,
+            asteroid_field: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1061,6 +1052,8 @@ mod tests {
     /// Spawn a region with the SensorBlind effect at the given position.
     fn spawn_sensor_blind_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
@@ -1069,13 +1062,12 @@ mod tests {
             }),
             hull: None, collider: None, appearance: None,
             helm_console: None, weapons_console: None, engineering_console: None,
-            captain_console: None, power: None, science_console: None,
+            captain_console: None, power: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None, planet: None, asteroid_field: None,
-            station: None,
+            asteroid_field: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -1149,7 +1141,7 @@ mod tests {
 
 
 
-        // Exit B: move to (-40,0) — still inside A (dist 40 < 80), outside B (dist 100 > 80)
+        // Exit B: move to (-40,0) Ã¢â‚¬â€ still inside A (dist 40 < 80), outside B (dist 100 > 80)
         set_ship_pos(&mut app, -40.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
@@ -1158,7 +1150,7 @@ mod tests {
 
 
 
-        // Exit A: move far away — outside both
+        // Exit A: move far away Ã¢â‚¬â€ outside both
         set_ship_pos(&mut app, -200.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 

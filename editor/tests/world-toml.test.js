@@ -171,7 +171,7 @@ entity = "raider_alpha"
       const obj = {
         global: { seed: 1 },
         anchors: { a: [0.0, 0.0, 0.0] },
-        entity: [{ template_path: 'assets/entities/star_sun.toml', position: [0.0, 0.0, 0.0] }],
+        entity: [{ template_path: 'assets/entities/star_sun.toml', transform: { position: [0.0, 0.0, 0.0] } }],
         trigger: [
           {
             condition: 'on_destroyed',
@@ -237,7 +237,7 @@ entity = "raider_alpha"
         entity: [{
           template_path: 'assets/entities/pirate_raider.toml',
           name: 'raider_alpha',
-          anchor: 'spot',
+          transform: { anchor: 'spot' },
           override: { hull: { max: 80 } },
         }],
       };

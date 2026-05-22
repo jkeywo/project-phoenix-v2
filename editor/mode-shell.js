@@ -1,4 +1,4 @@
-const DEFAULT_MODES = ['Scenario', 'Entity', 'Definitions'];
+const DEFAULT_MODES = ['World', 'Entity', 'Definitions'];
 
 import { UndoStack } from './undo-stack.js';
 

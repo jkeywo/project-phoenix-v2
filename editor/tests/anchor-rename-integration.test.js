@@ -31,7 +31,7 @@ describe('anchor rename integration (cross-layer)', () => {
     layerB = {
       filename: 'worlds/b.toml',
       toml: {
-        entity: [{ name: 'patrol', template_path: 'entities/raider.toml', anchor: 'X' }],
+        entity: [{ name: 'patrol', template_path: 'entities/raider.toml', transform: { anchor: 'X' } }],
       },
       isDirty: false,
     };
@@ -60,7 +60,7 @@ describe('anchor rename integration (cross-layer)', () => {
 
     snapshotForUndo(layerB);
     for (const ent of layerB.toml.entity) {
-      if (ent.anchor === 'X') ent.anchor = 'Y';
+      if (ent.transform && ent.transform.anchor === 'X') ent.transform.anchor = 'Y';
     }
     layerB.isDirty = true;
 
@@ -68,17 +68,17 @@ describe('anchor rename integration (cross-layer)', () => {
     expect(layerA.toml.anchors.Y).toEqual([10, 0, 20]);
     expect(layerA.toml.anchors.X).toBeUndefined();
     // Cross layer: entity's anchor was rewritten.
-    expect(layerB.toml.entity[0].anchor).toBe('Y');
+    expect(layerB.toml.entity[0].transform.anchor).toBe('Y');
 
-    // Both layers were snapshotted onto the Scenario undo stack.
-    const undoEntryA = modeShell.swapUndoActive('Scenario', 'worlds/a.toml', layerA.toml);
+    // Both layers were snapshotted onto the World undo stack.
+    const undoEntryA = modeShell.swapUndoActive('World', 'worlds/a.toml', layerA.toml);
     expect(undoEntryA).toBeTruthy();
     expect(undoEntryA.anchors.X).toEqual([10, 0, 20]);
     expect(undoEntryA.anchors.Y).toBeUndefined();
 
-    const undoEntryB = modeShell.swapUndoActive('Scenario', 'worlds/b.toml', layerB.toml);
+    const undoEntryB = modeShell.swapUndoActive('World', 'worlds/b.toml', layerB.toml);
     expect(undoEntryB).toBeTruthy();
-    expect(undoEntryB.entity[0].anchor).toBe('X');
+    expect(undoEntryB.entity[0].transform.anchor).toBe('X');
 
     // Both layers marked dirty.
     expect(layerA.isDirty).toBe(true);

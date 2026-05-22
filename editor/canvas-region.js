@@ -1,5 +1,5 @@
 /**
- * canvas-region.js — Pure logic for rendering region entities on the scenario canvas.
+ * canvas-region.js — Pure logic for rendering region entities on the world canvas.
  *
  * Decouples appearance resolution from Konva/DOM so it is unit-testable.
  */
@@ -60,9 +60,10 @@ export function getRegionRenderSpec(entity) {
   const colour = entity.colour || DEFAULT_COLOUR;
   const effects = entity.effects || {};
 
-  // Resolve centre position from XZ plane
-  const cx = Array.isArray(entity.position) ? entity.position[0] : 0;
-  const cz = Array.isArray(entity.position) ? entity.position[2] : 0;
+  // Resolve centre position from XZ plane via nested `transform.position`.
+  const tPos = entity.transform && entity.transform.position;
+  const cx = Array.isArray(tPos) ? tPos[0] : 0;
+  const cz = Array.isArray(tPos) ? tPos[2] : 0;
 
   // Collect active effects
   const activeEffects = EFFECT_KEYS.filter(key => effects[key] != null);

@@ -12,7 +12,7 @@ describe('getRegionRenderSpec', () => {
   describe('sphere region', () => {
     const sphereEntity = {
       tags: ['region', 'nebula'],
-      position: [100.0, 0.0, -200.0],
+      transform: { position: [100.0, 0.0, -200.0] },
       shape: { type: 'sphere', radius: 150.0 },
       colour: [0.4, 0.6, 1.0],
       effects: {},
@@ -36,7 +36,7 @@ describe('getRegionRenderSpec', () => {
 
     it('defaults cx/cz to 0 when no position', () => {
       const entity = { ...sphereEntity };
-      delete entity.position;
+      delete entity.transform;
       const spec = getRegionRenderSpec(entity);
       expect(spec.cx).toBe(0);
       expect(spec.cz).toBe(0);
@@ -48,7 +48,7 @@ describe('getRegionRenderSpec', () => {
   describe('box region', () => {
     const boxEntity = {
       tags: ['region', 'exclusion_zone'],
-      position: [50.0, 0.0, 75.0],
+      transform: { position: [50.0, 0.0, 75.0] },
       shape: { type: 'box', half_extents: [80.0, 20.0, 40.0] },
       colour: [1.0, 0.3, 0.3],
       effects: { damage_zone: { damage_per_second: 5.0 } },
@@ -81,7 +81,7 @@ describe('getRegionRenderSpec', () => {
   describe('torus region', () => {
     const torusEntity = {
       tags: ['region', 'asteroid_belt'],
-      position: [0.0, 0.0, 0.0],
+      transform: { position: [0.0, 0.0, 0.0] },
       shape: { type: 'torus', inner_radius: 100.0, outer_radius: 250.0 },
       colour: [0.8, 0.6, 0.2],
       effects: { blocks_impulse: {} },
@@ -356,7 +356,7 @@ describe('getRegionRenderSpec', () => {
     it('region_radiation_zone renders as circle with damage_zone', () => {
       const entity = {
         tags: ['region', 'damage_zone', 'weapon_effect'],
-        position: [300.0, 0.0, -150.0],
+        transform: { position: [300.0, 0.0, -150.0] },
         shape: { type: 'sphere', radius: 120.0 },
         colour: [1.0, 0.2, 0.0],
         effects: { damage_zone: { damage_per_second: 8.0 } },

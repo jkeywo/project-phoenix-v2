@@ -4,10 +4,12 @@ type: source
 tags: [draft, design, science, radar, impulse, system-chart]
 source_path: docs/3. Draft Design - Science Console.md
 status: draft
-updated: 2026-05-08
+updated: 2026-05-22
 ---
 
 # Draft 3 — Science Console
+
+> **Status (2026-05-22) — as shipped:** The Science console was split into three consoles (`Sensors`, `Shields`, `Navigation`) plus a separate `Comms` console; see [Module Map in AGENTS.md](../../AGENTS.md). The early `[science_console]` block on `EntityConfig` (and its `ScienceConsoleConfig` type) was **deleted** in the 2026-05 entity-schema refactor — consoles are code-driven plugins, not data-driven entity sub-configs. The original design intent below still reads as the source of record for the long-range-radar / impulse-cancel / system-chart split that ultimately landed across Sensors + Shields + Navigation.
 
 A new console with three responsibilities: long-range scanning, target designation, and a navigation aid.
 

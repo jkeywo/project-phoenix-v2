@@ -51,10 +51,6 @@ describe('entity-toml extended', () => {
         if (parsed.collider) {
           expect(reparsed.collider).toEqual(parsed.collider);
         }
-        // station equality
-        if (parsed.station) {
-          expect(reparsed.station).toEqual(parsed.station);
-        }
         // asteroid_field.grid survives
         if (parsed.asteroid_field?.grid) {
           expect(reparsed.asteroid_field.grid).toBeDefined();
@@ -184,7 +180,10 @@ describe('component-schema', () => {
     it('returns schema for known sections', () => {
       expect(getComponentSchema('hull')).toBeDefined();
       expect(getComponentSchema('helm_console')).toBeDefined();
-      expect(getComponentSchema('station')).toBeDefined();
+    });
+
+    it('returns null for the removed legacy station section', () => {
+      expect(getComponentSchema('station')).toBeNull();
     });
 
     it('returns null for unknown sections', () => {
@@ -199,7 +198,7 @@ describe('component-schema', () => {
       expect(sections).toContain('weapons_console');
       expect(sections).toContain('engineering_console');
       expect(sections).toContain('captain_console');
-      expect(sections).toContain('science_console');
+      expect(sections).not.toContain('science_console');
       expect(sections).toContain('sensors_console');
       expect(sections).toContain('shields_console');
     });
@@ -295,9 +294,10 @@ describe('EntityModeShell', () => {
       expect(sections).toContain('faction');
     });
 
-    it('creates a card for station section in station_axiom.toml', () => {
+    it('creates a hull card (no legacy [station] card) for station_axiom.toml', () => {
       shell.openFile('station_axiom.toml', readEntity('station_axiom.toml'));
-      expect(shell.getCard('station')).not.toBeNull();
+      expect(shell.getCard('station')).toBeNull();
+      expect(shell.getCard('hull')).not.toBeNull();
     });
 
     it('creates cards for shape and effects in region_nebula.toml', () => {

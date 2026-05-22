@@ -252,16 +252,20 @@ same `[[entity]]` block.
 **Parser:** `src/entities/config.rs` → `EntityConfig::from_toml`.
 
 `EntityConfig` is a single universal struct. The *presence* of optional
-sub-tables (`[star]`, `[planet]`, `[ship]`, `[shape]+[effects]`, `[station]`,
-`[asteroid_field]`, console blocks) determines what kind of entity is spawned.
+sub-tables (`[mesh]`, `[ship]`, `[shape]+[effects]`, `[asteroid_field]`,
+console blocks) and arrays (`[[light]]`) determines what kind of entity is
+spawned. Stars and planets are no longer dedicated sections — they are simply
+entities with `[mesh]` (and, for stars, `[[light]]`).
 
 ### 2.1 Common top-level fields (any entity)
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `name` | string | `""` | Display name (currently informational). |
+| `name` | string | `""` | Display name (used by trigger/comms targeting and shown in the editor). |
 | `tags` | array of strings | `[]` | Used for filtering (radar `shows`, AI faction lookups, etc.). Known tags: `asteroid`, `asteroid_field`, `ship`, `star`, `planet`, `region`, `station`. Free-form tags are also allowed. |
 | `faction` | UUID string | none | Faction UUID this entity belongs to (matched against `assets/factions/*.toml`). |
+| `[mesh]` | table | none | Visual mesh + material. See **§2.1.4**. |
+| `[[light]]` | array of tables | `[]` | Point or directional lights attached to the entity. See **§2.1.5**. |
 | `[collider]` | table | none | Rapier collider. See below. |
 | `[appearance]` | table | none | Visual hints (colour, size range). |
 | `[hull]` | table | none | Hull integrity. See below. |
@@ -294,6 +298,32 @@ kind.
 | `captain_chair` | f32 | none | HP for a single `CaptainChair` console slot. Used by NPC ships. Takes precedence over `hull_integrity` when set. |
 | `[[hull.console_hull]]` | array | `[]` | **Per-console hull slots.** Required for player ships. Each entry has `console = "<Console name>"` and `max_hp = <f32>`. Console names match the `Console` enum: `CaptainChair`, `Helm`, `Tactical`, `Repair`, `Sensors`, `Shields`, `Navigation`, `Power`, `Comms`. |
 | `repair_team_count` | u32 | `0` | Number of dispatchable repair teams (player ship typically 2). |
+
+### 2.1.4 `[mesh]`
+
+The viewscreen visual for an entity. Entities without `[mesh]` are not rendered
+in 3-D (they still exist on radar and participate in collisions).
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `shape` | `"sphere"` \| `"cuboid"` \| `"torus"` | **required** | Mesh primitive. |
+| `colour` | `[f32; 3]` | **required** | Linear RGB (0–1). |
+| `radius` | f32 | `0.0` | Sphere radius, or torus major radius. Ignored for `cuboid`. |
+| `size` | `[f32; 3]` | none | Full XYZ dimensions for `cuboid`. |
+| `minor_radius` | f32 | none | Torus minor radius. |
+| `emissive` | f32 | `0.4` | Emissive multiplier. Set high (e.g. `2.0`) for self-lit objects like stars. |
+
+### 2.1.5 `[[light]]`
+
+Zero or more lights attached to the entity. A single light is inlined as a child
+of the entity transform; multiple lights are spawned as children.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `kind` | `"point"` \| `"directional"` | **required** | Light type. |
+| `colour` | `[f32; 3]` | **required** | Linear RGB. |
+| `intensity` | f32 | **required** | Candela (point) or lux (directional). |
+| `range` | f32 | `50.0` | Effective falloff range. Point lights only; ignored for `directional`. |
 
 ### 2.2 Ships
 
@@ -369,14 +399,8 @@ Tunes the four-quadrant shield *focus* mechanic.
 | `focus_decay_rate` | f32 | `10.0` | HP/s decay applied to non-focused facings when above reduced max. |
 | `complexity_toml` | string | none | |
 
-#### `[science_console]` (legacy — superseded by Sensors/Navigation/Shields)
-
-Still parsed for back-compat. Same shape as `[sensors_console]` plus a
-`system_map` RadarConfig.
-
 #### `[navigation_console]` and `[navigation_console.system_chart]`
 
-Parsed via the `science_console`-shaped config when present in `player_ship.toml`.
 The `system_chart` sub-table is a `RadarConfig` (**§6.1**) describing the
 chart pushed to the viewscreen.
 
@@ -473,32 +497,44 @@ initial_state = "patrol"
 
 ### 2.3 Stations
 
-A station entity has a `[station]` block.
+A station entity is identified by the `"station"` tag. It has no bespoke
+section — hull HP lives in the standard `[hull]` block, and the visual /
+radar / collider come from the standard `[mesh]`, `[radar_appearance]`,
+and `[collider]` blocks. Stations are static (no `[helm_console]`, no
+physics integration), but a `[collider]` is recommended so weapons and
+ship collisions register hits — and now that `[hull].hull_integrity` is
+read by the spawner, those hits actually deplete station HP.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `name` | string | **required** | Display name (e.g. `"Starbase Alpha"`). |
-| `shape` | `"sphere"` \| `"cylinder"` \| `"torus"` | **required** | Visual shape. |
-| `radius` | f32 | **required** | Visual radius. |
-| `hull_integrity` | f32 | **required** | HP (uses legacy single-value hull). |
-
-Stations also typically have a `[collider]` for hit testing.
+| `tags` | array of strings | — | Must contain `"station"`. |
+| `[hull].hull_integrity` | f32 | **required** | Station HP. Consumed by the live runtime (collision + weapons damage). |
+| `[mesh]` | table | optional | Visual mesh — typically `shape = "torus"` or `"sphere"`. |
+| `[radar_appearance]` | table | optional | Radar dot colour / radius. |
+| `[collider]` | table | optional but recommended | Hit-testing. |
 
 #### Example — `assets/entities/station_outpost.toml`
 
 ```toml
 tags = ["station", "destructible"]
 
-[station]
-name = "Outpost Alpha"
-shape = "cylinder"
-radius = 12.0
+[hull]
 hull_integrity = 200.0
 
 [collider]
 shape = "Ball"
 radius = 12.0
 length = 0.0
+
+[radar_appearance]
+colour = [0.3, 0.8, 0.6]
+radius = 12.0
+
+[mesh]
+shape = "torus"
+radius = 12.0
+minor_radius = 3.0
+colour = [0.3, 0.8, 0.6]
 ```
 
 ### 2.4 Asteroid fields
@@ -583,45 +619,49 @@ hull_integrity = 100
 
 ### 2.6 Stars
 
-A star entity has a `[star]` block.
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `name` | string | `""` | Display name. |
-| `radius` | f32 | **required** | Visual radius. |
-| `colour` | `[f32; 3]` | **required** | RGB visual colour. |
-| `position` | `[f32; 3]` | `[]` | Override position (usually set by the map `[[entity]]`). |
-| `light_range` | f32 | `radius * 60` | Point light range. |
-| `light_intensity` | f32 | `radius * 2000` | Candela. |
-| `light_colour` | `[f32; 3]` | `[1,1,1]` | RGB light colour (typically whiter than visual). |
-| `tags` | array | `[]` | Extra tags. |
+Stars are ordinary entities composed of a `[mesh]` with a high `emissive` and
+one or more `[[light]]` blocks. There is no dedicated `[star]` section.
 
 #### Example
 
 ```toml
+name = "Sun"
 tags = ["star", "center"]
 
-[star]
-name = "Sun"
-radius = 50.0
+[mesh]
+shape = "sphere"
 colour = [1.0, 0.8, 0.0]
-position = [0.0, 0.0, 0.0]
-light_range = 5000.0
-light_intensity = 150000.0
-light_colour = [1.0, 0.95, 0.85]
+radius = 50.0
+emissive = 2.0
+
+[[light]]
+kind = "point"
+colour = [1.0, 0.95, 0.85]
+intensity = 150000.0
+range = 5000.0
 ```
 
 ### 2.7 Planets
 
-A planet entity has a `[planet]` block.
+Planets are ordinary entities composed of a `[mesh]` (typically a sphere) and,
+optionally, a `[collider]`. There is no dedicated `[planet]` section.
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `name` | string | `""` | Display name. |
-| `radius` | f32 | **required** | Visual radius. |
-| `colour` | `[f32; 3]` | **required** | RGB. |
-| `position` | `[f32; 3]` | `[]` | Override position. |
-| `tags` | array | `[]` | |
+#### Example
+
+```toml
+name = "Earth"
+tags = ["planet"]
+
+[mesh]
+shape = "sphere"
+colour = [0.0, 0.5, 1.0]
+radius = 20.0
+
+[collider]
+shape = "Ball"
+radius = 20.0
+length = 0.0
+```
 
 ### 2.8 Regions
 
@@ -774,9 +814,8 @@ These appear inside multiple file types.
 
 ### 6.1 RadarConfig
 
-Used by `[sensors_console.long_range_radar]`,
-`[navigation_console.system_chart]`, `[science_console.long_range_radar]`,
-`[science_console.system_map]`.
+Used by `[sensors_console.long_range_radar]` and
+`[navigation_console.system_chart]`.
 
 **Parser:** `src/radar_config.rs`.
 
@@ -931,11 +970,11 @@ matching section in this document. The authoritative sources are:
 
 | Section | Source |
 |---|---|
-| Maps | `src/entities/map_config.rs` |
-| Entity templates | `src/entities/config.rs` |
+| Worlds (anchors, `[[entity]]`, `[ambient_light]`, scene shape) | `src/world/config.rs` |
+| Entity templates (`[mesh]`, `[hull]`, `[[light]]`, etc.) | `src/entities/config.rs` |
 | Region shape / effects | `src/regions/shape.rs`, `src/regions/effects.rs` |
 | RadarConfig | `src/radar_config.rs` |
-| Scenarios | `src/world/content.rs` |
+| Triggers / comms templates / objectives | `src/world/content.rs` |
 | Factions | `src/ai/faction.rs` |
 | Complexity presets | `src/console_ai/complexity.rs` |
 | Behaviour states / transitions | `src/ai/core.rs` |

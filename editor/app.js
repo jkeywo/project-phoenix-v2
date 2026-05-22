@@ -1,10 +1,10 @@
-import { LayerManager, renderLayersPanel, inferLayerKind } from './layers.js';
+import { LayerManager, renderLayersPanel, isMapLayer } from './layers.js';
 import { CanvasManager } from './canvas.js';
 import { PropertiesPanel } from './sidebar.js';
 import { EntityEditor } from './entity-editor.js';
 import { getEntityPath } from './toml-utils.js';
 import { preloadEntityCache, loadEntityConfig, invalidateEntity } from './entity-cache.js';
-import { restoreScenarioLayer } from './undo-controller.js';
+import { restoreWorldLayer } from './undo-controller.js';
 import { CrossReferenceIndex } from './cross-references.js';
 import { renderWorldContentPanel } from './world-content-view.js';
 import { renderTriggerableWorldsPanel } from './triggerable-worlds-panel.js';
@@ -42,7 +42,7 @@ async function init() {
   await preloadEntityCache();
   entityEditor.loadEntitiesPalette();
 
-  // Slice 7 AC#4: when Entity Mode saves an entity TOML, the Scenario
+  // Slice 7 AC#4: when Entity Mode saves an entity TOML, the World
   // canvas keeps a stale `entity-cache` row. Subscribe to the
   // cross-mode invalidation bus so the cache is dropped + re-fetched
   // and the canvas re-rendered with the fresh config.
@@ -87,7 +87,7 @@ async function init() {
 
   setupToolbar();
   setupLayersPanel();
-  registerScenarioUndoRestore();
+  registerWorldUndoRestore();
 
   // Slice 4b: + New World button next to addLayerBtn.
   mountNewWorldButton({
@@ -102,7 +102,7 @@ async function init() {
   const v2 = window.__editorV2;
   if (v2 && v2.saveFlow && typeof v2.saveFlow.setSessionOnlyChecker === 'function') {
     v2.saveFlow.setSessionOnlyChecker((mode, path) => {
-      if (mode !== 'Scenario') return false;
+      if (mode !== 'World') return false;
       const layer = layerManager.getLayers().find((l) => l.filename === path);
       return !!(layer && layer._sessionOnly);
     });
@@ -111,11 +111,11 @@ async function init() {
   renderAll();
 }
 
-function registerScenarioUndoRestore() {
+function registerWorldUndoRestore() {
   const v2 = window.__editorV2;
   if (!v2 || typeof v2.registerRestore !== 'function') return;
 
-  v2.registerRestore('Scenario', (modeShell, path, direction) => {
+  v2.registerRestore('World', (modeShell, path, direction) => {
     const layer = layerManager.getLayers().find((l) => l.filename === path);
     if (!layer) return;
 
@@ -125,11 +125,11 @@ function registerScenarioUndoRestore() {
     const current = structuredClone(layer.toml);
 
     const snapshot = direction === 'undo'
-      ? modeShell.swapUndoActive('Scenario', path, current)
-      : modeShell.swapRedoActive('Scenario', path, current);
+      ? modeShell.swapUndoActive('World', path, current)
+      : modeShell.swapRedoActive('World', path, current);
     if (!snapshot) return;
 
-    restoreScenarioLayer(layerManager, path, snapshot);
+    restoreWorldLayer(layerManager, path, snapshot);
 
     // Re-render canvas + layers panel and refresh the properties sidebar
     // if a spawn is still selected (and still exists in the restored TOML).
@@ -222,20 +222,20 @@ function renderAll() {
   const active = layerManager.getActiveLayer();
   const editorV2 = window.__editorV2;
   if (editorV2 && editorV2.modeShell && active && active.filename) {
-    editorV2.modeShell.setActiveFile('Scenario', active.filename);
-    editorV2.modeShell.setActiveLayer('Scenario', active.filename);
+    editorV2.modeShell.setActiveFile('World', active.filename);
+    editorV2.modeShell.setActiveLayer('World', active.filename);
 
     const openFilenames = layerManager.getLayers()
       .map((l) => l.filename)
       .filter(Boolean);
-    editorV2.modeShell.setOpenFiles('Scenario', openFilenames);
+    editorV2.modeShell.setOpenFiles('World', openFilenames);
 
     // Mirror the saveFlow content cache so V2's saveActive has a parsed
     // payload to serialize when the toolbar Save buttons run.
     if (editorV2.saveFlow) {
       for (const layer of layerManager.getLayers()) {
         if (!layer.filename) continue;
-        editorV2.saveFlow.setContent('Scenario', layer.filename, layer.toml);
+        editorV2.saveFlow.setContent('World', layer.filename, layer.toml);
       }
     }
   }
@@ -278,13 +278,13 @@ function setupToolbar() {
       try {
         const text = await file.text();
         const toml = await window.tomlParse(text);
-        const kind = inferLayerKind(toml);
+        const isMap = isMapLayer(toml);
 
         const layer = {
           fileHandle: file,
           filename: file.name,
           toml,
-          kind,
+          isMap,
           visible: true,
           active: false,
           konvaLayer: null,
@@ -307,7 +307,7 @@ function setupToolbar() {
     fileInput.value = '';
   });
 
-  document.getElementById('openMapScenario').addEventListener('click', (e) => {
+  document.getElementById('openMapWorld').addEventListener('click', (e) => {
     e.preventDefault();
     fileInput.click();
   });
@@ -341,7 +341,7 @@ function setupToolbar() {
     // active mode rather than blindly grabbing the layer manager.
     const currentMode = v2.modeShell && typeof v2.modeShell.getCurrentMode === 'function'
       ? v2.modeShell.getCurrentMode()
-      : 'Scenario';
+      : 'World';
     if (currentMode === 'Entity') {
       const result = await v2.saveFlow.saveActive(null);
       if (!result.ok) {
@@ -358,8 +358,8 @@ function setupToolbar() {
     // renderAll() already mirrored the parsed payload into saveFlow's cache,
     // but call again here in case the user edited and clicked save before a
     // render tick fired.
-    v2.saveFlow.setContent('Scenario', activeLayer.filename, activeLayer.toml);
-    v2.modeShell.setActiveFile('Scenario', activeLayer.filename);
+    v2.saveFlow.setContent('World', activeLayer.filename, activeLayer.toml);
+    v2.modeShell.setActiveFile('World', activeLayer.filename);
     const result = await v2.saveFlow.saveActive(null);
     if (!result.ok) {
       console.error(`Save failed for ${activeLayer.filename}:`, result.errors);

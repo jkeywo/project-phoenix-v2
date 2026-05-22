@@ -12,7 +12,7 @@ export function getWorldContentData(worldState, crossRefIndex, activeLayerPath) 
   if (worldState.anchors && typeof worldState.anchors === 'object') {
     for (const [name, position] of Object.entries(worldState.anchors)) {
       const refCount = Array.isArray(worldState.entity)
-        ? worldState.entity.filter(e => e.anchor === name).length
+        ? worldState.entity.filter(e => e.transform && e.transform.anchor === name).length
         : 0;
       anchors.push({ name, position, refCount });
     }

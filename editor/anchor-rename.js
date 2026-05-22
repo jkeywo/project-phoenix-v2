@@ -70,7 +70,8 @@ export function analyzeAnchorRename(oldName, newName, layers) {
 
     if (Array.isArray(worldState.entity)) {
       for (const ent of worldState.entity) {
-        if (ent && ent.anchor === oldName) {
+        const entAnchor = ent && ent.transform && ent.transform.anchor;
+        if (entAnchor === oldName) {
           const ref = {
             layerPath: path,
             entityName: ent.name || '(unnamed)',

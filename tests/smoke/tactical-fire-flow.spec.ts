@@ -49,7 +49,7 @@ const CLOSE_RAIDER_WORLD = WORLD_WITHOUT_FAR_RAIDER + `
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
-position      = [150.0, 0.0, -20.0]
+transform     = { position = [150.0, 0.0, -20.0] }
 `;
 
 async function waitForStation(

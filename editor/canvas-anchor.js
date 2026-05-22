@@ -1,5 +1,5 @@
 /**
- * canvas-anchor.js — Pure logic for anchor markers on the Scenario Mode canvas.
+ * canvas-anchor.js — Pure logic for anchor markers on the World Mode canvas.
  *
  * Anchors in the world TOML are stored as:
  *   [anchors]
@@ -72,23 +72,25 @@ export function moveAnchor(worldState, anchorName, newX, newZ) {
  * an optional anchor reference.
  *
  * Resolution order:
- *   1. entity.position ([x, y, z] array) — used as-is
- *   2. entity.anchor — looked up in the anchors flat TOML map
+ *   1. entity.transform.position ([x, y, z] array) — used as-is
+ *   2. entity.transform.anchor — looked up in the anchors flat TOML map
  *   3. fallback { x: 0, z: 0 }
  *
- * @param {Object} entity   - Parsed entity object (may have .position or .anchor).
+ * @param {Object} entity   - Parsed entity object (may have .transform with .position or .anchor).
  * @param {Object} anchors  - The `worldState.anchors` flat map `{ name: [x,y,z] }`.
  * @returns {{ x: number, z: number }}
  */
 export function resolveEntityPosition(entity, anchors) {
-  if (!entity) return { x: 0, z: 0 };
+  if (!entity || !entity.transform) return { x: 0, z: 0 };
 
-  if (entity.position && Array.isArray(entity.position) && entity.position.length >= 3) {
-    return { x: entity.position[0], z: entity.position[2] };
+  const t = entity.transform;
+
+  if (t.position && Array.isArray(t.position) && t.position.length >= 3) {
+    return { x: t.position[0], z: t.position[2] };
   }
 
-  if (entity.anchor && anchors && typeof anchors === 'object') {
-    const pos = anchors[entity.anchor];
+  if (t.anchor && anchors && typeof anchors === 'object') {
+    const pos = anchors[t.anchor];
     if (Array.isArray(pos) && pos.length >= 3) {
       return { x: pos[0], z: pos[2] };
     }

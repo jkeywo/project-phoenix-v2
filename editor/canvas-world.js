@@ -1,5 +1,5 @@
 /**
- * canvas-scenario.js — Pure logic for scenario-mode canvas rendering.
+ * canvas-world.js — Pure logic for world-mode canvas rendering.
  *
  * Decouples appearance resolution from Konva/DOM so it is unit-testable.
  */
@@ -38,18 +38,21 @@ export function resolveEntityAppearance(entity, anchors = {}) {
     ? radarApp.radius
     : 8.0; // neutral fallback radius
 
-  // Resolve position
+  // Resolve position — entities carry positioning under nested `transform`.
   let x = 0;
   let z = 0;
 
-  if (entity.position && Array.isArray(entity.position)) {
-    x = entity.position[0];
-    z = entity.position[2];
-  } else if (entity.anchor && anchors && typeof anchors === 'object') {
-    const pos = anchors[entity.anchor];
-    if (Array.isArray(pos) && pos.length >= 3) {
-      x = pos[0];
-      z = pos[2];
+  const t = entity.transform;
+  if (t) {
+    if (t.position && Array.isArray(t.position)) {
+      x = t.position[0];
+      z = t.position[2];
+    } else if (t.anchor && anchors && typeof anchors === 'object') {
+      const pos = anchors[t.anchor];
+      if (Array.isArray(pos) && pos.length >= 3) {
+        x = pos[0];
+        z = pos[2];
+      }
     }
   }
 

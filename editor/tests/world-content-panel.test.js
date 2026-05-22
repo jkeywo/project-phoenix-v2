@@ -62,8 +62,8 @@ describe('getWorldContentData', () => {
     const worldState = {
       anchors: { starbase_alpha: [500, 0, 0] },
       entity: [
-        { name: 'Starbase Alpha', template_path: 'station.toml', anchor: 'starbase_alpha' },
-        { name: 'raider', template_path: 'raider.toml', anchor: 'starbase_alpha' },
+        { name: 'Starbase Alpha', template_path: 'station.toml', transform: { anchor: 'starbase_alpha' } },
+        { name: 'raider', template_path: 'raider.toml', transform: { anchor: 'starbase_alpha' } },
       ],
       trigger: [
         { condition: 'on_attacked', entity: 'Starbase Alpha', action: [] },

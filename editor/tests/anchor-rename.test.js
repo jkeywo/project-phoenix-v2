@@ -59,7 +59,7 @@ describe('analyzeAnchorRename', () => {
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
         entity: [
-          { name: 'Starbase Alpha', anchor: 'starbase_alpha' },
+          { name: 'Starbase Alpha', transform: { anchor: 'starbase_alpha' } },
         ],
       }),
     ];
@@ -82,7 +82,7 @@ describe('analyzeAnchorRename', () => {
       layer('worlds/patrol.toml', {
         anchors: { patrol_alpha: [300.0, 0.0, -300.0] },
         entity: [
-          { name: 'raider_alpha', anchor: 'starbase_alpha' },
+          { name: 'raider_alpha', transform: { anchor: 'starbase_alpha' } },
         ],
       }),
     ];
@@ -102,12 +102,12 @@ describe('analyzeAnchorRename', () => {
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
         entity: [
-          { name: 'Starbase Alpha', anchor: 'starbase_alpha' },
+          { name: 'Starbase Alpha', transform: { anchor: 'starbase_alpha' } },
         ],
       }),
       layer('worlds/patrol.toml', {
         entity: [
-          { name: 'raider_alpha', anchor: 'starbase_alpha' },
+          { name: 'raider_alpha', transform: { anchor: 'starbase_alpha' } },
         ],
       }),
     ];
@@ -165,7 +165,7 @@ describe('analyzeAnchorRename', () => {
       layer('worlds/patrol.toml', {
         anchors: { patrol_alpha: [300.0, 0.0, -300.0] },
         entity: [
-          { name: 'raider_alpha', anchor: 'patrol_alpha' },
+          { name: 'raider_alpha', transform: { anchor: 'patrol_alpha' } },
         ],
       }),
     ];
@@ -204,7 +204,7 @@ describe('analyzeAnchorRename', () => {
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
         entity: [
-          { anchor: 'starbase_alpha' },
+          { transform: { anchor: 'starbase_alpha' } },
         ],
       }),
     ];

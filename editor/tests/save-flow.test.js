@@ -10,9 +10,9 @@ describe('SaveFlow', () => {
   describe('saveActive', () => {
     it('returns ok when file is serializable', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
       const stringifyFns = {
         world: (obj) => `serialized: ${obj.name}`,
@@ -20,7 +20,7 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {
         name: 'Test World',
         global: {},
         anchors: {},
@@ -33,9 +33,9 @@ describe('SaveFlow', () => {
 
     it('returns error when file cannot be serialized', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
       const stringifyFns = {
         world: () => {
@@ -45,7 +45,7 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {
         name: 'Test World',
       });
 
@@ -57,9 +57,9 @@ describe('SaveFlow', () => {
 
     it('returns warnings for validation errors but does not block', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/invalid.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/invalid.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/invalid.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/invalid.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/invalid.toml');
+      modeShell.markDirty('World', 'assets/worlds/invalid.toml', true);
 
       const stringifyFns = {
         world: (obj) => 'serialized content',
@@ -67,7 +67,7 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/invalid.toml', {
+      saveFlow.setContent('World', 'assets/worlds/invalid.toml', {
         name: 'Bad World',
       });
 
@@ -79,9 +79,9 @@ describe('SaveFlow', () => {
 
     it('marks file as clean after successful save', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
       const stringifyFns = {
         world: (obj) => 'serialized',
@@ -89,14 +89,14 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {
         global: {},
         anchors: {},
       });
 
-      expect(modeShell.isDirty('Scenario', 'assets/worlds/test.toml')).toBe(true);
+      expect(modeShell.isDirty('World', 'assets/worlds/test.toml')).toBe(true);
       await saveFlow.saveActive(null);
-      expect(modeShell.isDirty('Scenario', 'assets/worlds/test.toml')).toBe(false);
+      expect(modeShell.isDirty('World', 'assets/worlds/test.toml')).toBe(false);
     });
 
     it('with no active file returns error', async () => {
@@ -114,11 +114,11 @@ describe('SaveFlow', () => {
   describe('saveAll', () => {
     it('saves all dirty files', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/a.toml']);
+      modeShell.setOpenFiles('World', ['assets/worlds/a.toml']);
       modeShell.setOpenFiles('Entity', ['assets/entities/b.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/a.toml');
+      modeShell.setActiveFile('World', 'assets/worlds/a.toml');
       modeShell.setActiveFile('Entity', 'assets/entities/b.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/a.toml', true);
+      modeShell.markDirty('World', 'assets/worlds/a.toml', true);
       modeShell.markDirty('Entity', 'assets/entities/b.toml', true);
 
       const stringifyFns = {
@@ -127,7 +127,7 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/a.toml', {
+      saveFlow.setContent('World', 'assets/worlds/a.toml', {
         global: {},
         anchors: {},
       });
@@ -140,9 +140,9 @@ describe('SaveFlow', () => {
 
     it('returns per-file results', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/a.toml']);
+      modeShell.setOpenFiles('World', ['assets/worlds/a.toml']);
       modeShell.setOpenFiles('Entity', ['assets/entities/b.toml']);
-      modeShell.markDirty('Scenario', 'assets/worlds/a.toml', true);
+      modeShell.markDirty('World', 'assets/worlds/a.toml', true);
       modeShell.markDirty('Entity', 'assets/entities/b.toml', true);
 
       const stringifyFns = {
@@ -153,7 +153,7 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/a.toml', { name: 'test' });
+      saveFlow.setContent('World', 'assets/worlds/a.toml', { name: 'test' });
       saveFlow.setContent('Entity', 'assets/entities/b.toml', { tags: ['test'] });
 
       const results = await saveFlow.saveAll(null);
@@ -166,9 +166,9 @@ describe('SaveFlow', () => {
 
     it('marks each file clean on success', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/a.toml']);
+      modeShell.setOpenFiles('World', ['assets/worlds/a.toml']);
       modeShell.setOpenFiles('Entity', ['assets/entities/b.toml']);
-      modeShell.markDirty('Scenario', 'assets/worlds/a.toml', true);
+      modeShell.markDirty('World', 'assets/worlds/a.toml', true);
       modeShell.markDirty('Entity', 'assets/entities/b.toml', true);
 
       const stringifyFns = {
@@ -177,14 +177,14 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/a.toml', {
+      saveFlow.setContent('World', 'assets/worlds/a.toml', {
         global: {},
         anchors: {},
       });
       saveFlow.setContent('Entity', 'assets/entities/b.toml', { tags: ['test'] });
 
       await saveFlow.saveAll(null);
-      expect(modeShell.isDirty('Scenario', 'assets/worlds/a.toml')).toBe(false);
+      expect(modeShell.isDirty('World', 'assets/worlds/a.toml')).toBe(false);
       expect(modeShell.isDirty('Entity', 'assets/entities/b.toml')).toBe(false);
     });
   });
@@ -192,9 +192,9 @@ describe('SaveFlow', () => {
   describe('getDirtyFiles', () => {
     it('returns list of dirty files', () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['a.toml', 'b.toml']);
+      modeShell.setOpenFiles('World', ['a.toml', 'b.toml']);
       modeShell.setOpenFiles('Entity', ['c.toml']);
-      modeShell.markDirty('Scenario', 'a.toml', true);
+      modeShell.markDirty('World', 'a.toml', true);
       modeShell.markDirty('Entity', 'c.toml', true);
 
       const saveFlow = new SaveFlow(modeShell, {
@@ -204,7 +204,7 @@ describe('SaveFlow', () => {
 
       const dirty = saveFlow.getDirtyFiles();
       expect(dirty).toHaveLength(2);
-      expect(dirty).toContainEqual({ mode: 'Scenario', path: 'a.toml' });
+      expect(dirty).toContainEqual({ mode: 'World', path: 'a.toml' });
       expect(dirty).toContainEqual({ mode: 'Entity', path: 'c.toml' });
     });
   });
@@ -212,13 +212,13 @@ describe('SaveFlow', () => {
   describe('cross-reference warnings', () => {
     it('do not block save (never-refuse-valid-TOML)', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
       const stringifyFns = { world: () => 'content', entity: () => '' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
       const result = await saveFlow.saveActive(null);
       expect(result.ok).toBe(true);
@@ -229,9 +229,9 @@ describe('SaveFlow', () => {
   describe('writeFile integration', () => {
     it('calls writeFile with (path, stringified content)', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
       const writeFile = vi.fn(async () => {});
       const stringifyFns = {
@@ -240,7 +240,7 @@ describe('SaveFlow', () => {
       };
 
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
       await saveFlow.saveActive(null);
       expect(writeFile).toHaveBeenCalledTimes(1);
@@ -249,27 +249,27 @@ describe('SaveFlow', () => {
 
     it('returns ok: false when writeFile rejects', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
       const writeFile = async () => { throw new Error('disk full'); };
       const stringifyFns = { world: () => 'X', entity: () => '' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
       const result = await saveFlow.saveActive(null);
       expect(result.ok).toBe(false);
       expect(result.errors[0]).toMatch(/disk full/);
       // Still dirty — write failed.
-      expect(modeShell.isDirty('Scenario', 'assets/worlds/test.toml')).toBe(true);
+      expect(modeShell.isDirty('World', 'assets/worlds/test.toml')).toBe(true);
     });
 
     it('does not write or mark clean if serialization throws', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
       const writeFile = vi.fn(async () => {});
       const stringifyFns = {
@@ -277,38 +277,38 @@ describe('SaveFlow', () => {
         entity: () => '',
       };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
       const result = await saveFlow.saveActive(null);
       expect(result.ok).toBe(false);
       expect(writeFile).not.toHaveBeenCalled();
-      expect(modeShell.isDirty('Scenario', 'assets/worlds/test.toml')).toBe(true);
+      expect(modeShell.isDirty('World', 'assets/worlds/test.toml')).toBe(true);
     });
   });
 
   describe('undo + invalidation on save', () => {
     it('clears undo history on successful save', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
-      modeShell.pushUndoEntry('Scenario', 'assets/worlds/test.toml', { v: 1 });
-      modeShell.pushUndoEntry('Scenario', 'assets/worlds/test.toml', { v: 2 });
-      expect(modeShell.getUndoHistory('Scenario', 'assets/worlds/test.toml')).toHaveLength(2);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
+      modeShell.pushUndoEntry('World', 'assets/worlds/test.toml', { v: 1 });
+      modeShell.pushUndoEntry('World', 'assets/worlds/test.toml', { v: 2 });
+      expect(modeShell.getUndoHistory('World', 'assets/worlds/test.toml')).toHaveLength(2);
 
       const stringifyFns = { world: () => 'X', entity: () => '' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
       await saveFlow.saveActive(null);
-      expect(modeShell.getUndoHistory('Scenario', 'assets/worlds/test.toml')).toEqual([]);
+      expect(modeShell.getUndoHistory('World', 'assets/worlds/test.toml')).toEqual([]);
     });
 
-    it('fires fireWorldSaved on Scenario mode save', async () => {
+    it('fires fireWorldSaved on World mode save', async () => {
       const modeShell = new ModeShell();
-      modeShell.setOpenFiles('Scenario', ['assets/worlds/test.toml']);
-      modeShell.setActiveFile('Scenario', 'assets/worlds/test.toml');
-      modeShell.markDirty('Scenario', 'assets/worlds/test.toml', true);
+      modeShell.setOpenFiles('World', ['assets/worlds/test.toml']);
+      modeShell.setActiveFile('World', 'assets/worlds/test.toml');
+      modeShell.markDirty('World', 'assets/worlds/test.toml', true);
 
       const bus = new InvalidationBus();
       const fired = [];
@@ -316,7 +316,7 @@ describe('SaveFlow', () => {
 
       const stringifyFns = { world: () => 'X', entity: () => '' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, bus);
-      saveFlow.setContent('Scenario', 'assets/worlds/test.toml', {});
+      saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
       await saveFlow.saveActive(null);
       expect(fired).toEqual(['assets/worlds/test.toml']);

@@ -107,6 +107,7 @@ Open (planned work):
 - **[Draft 9 — AI and Behaviour](./sources/design-09-ai-and-behaviour.md)** — State-machine NPCs.
 - **[Draft 10 — Region Entities](./sources/design-10-region-entities.md)** — Invisible trigger volumes (radar dampening, damage zones, impulse blockers).
 - **[Draft 11 — Console Complexity](./sources/design-11-console-complexity.md)** — Per-console Low / Full complexity toggle.
+- **[Refactor 2026-05 — Entity Schema](./sources/refactor-2026-05-entity-schema.md)** — Four-slice consolidation: deleted Star/Planet/Station/ScienceConsole configs; added `TransformConfig`, `AmbientLightConfig`, `[[light]]`, `[mesh].emissive`, `EntityConfig.name`.
 - **[Architecture Improvement Notes](./sources/notes-architecture-improvements.md)** — Per-console message subscriptions.
 
 ### Project documents

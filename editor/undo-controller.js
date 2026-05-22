@@ -16,12 +16,12 @@
  * they push the popped entry onto the opposite stack rather than the
  * caller-supplied current state.
  *
- * `restoreScenarioLayer` is exported as a pure function so the integration
+ * `restoreWorldLayer` is exported as a pure function so the integration
  * test can drive it without DOM, Konva, or window globals.
  */
 
 /**
- * Push the current (pre-mutation) layer state onto the Scenario undo stack.
+ * Push the current (pre-mutation) layer state onto the World undo stack.
  * Callers MUST invoke this BEFORE mutating `layer.toml`.
  *
  * @param {{ filename: string, toml: object }} layer
@@ -32,8 +32,8 @@ export function snapshotForUndo(layer) {
   if (!editorV2 || !editorV2.modeShell) return;
   try {
     const snapshot = structuredClone(layer.toml);
-    editorV2.modeShell.pushUndoEntry('Scenario', layer.filename, snapshot);
-    editorV2.modeShell.markDirty('Scenario', layer.filename, true);
+    editorV2.modeShell.pushUndoEntry('World', layer.filename, snapshot);
+    editorV2.modeShell.markDirty('World', layer.filename, true);
   } catch (err) {
     console.warn('[undo-controller] snapshot failed:', err?.message || err);
   }
@@ -49,7 +49,7 @@ export function snapshotForUndo(layer) {
  * @param {object} snapshot
  * @returns {object | null}
  */
-export function restoreScenarioLayer(layerManager, path, snapshot) {
+export function restoreWorldLayer(layerManager, path, snapshot) {
   if (!layerManager || !path) return null;
   const layers = layerManager.getLayers();
   const layer = layers.find((l) => l.filename === path);

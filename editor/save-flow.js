@@ -52,7 +52,7 @@ export class SaveFlow {
   }
 
   _getStringifyFn(mode) {
-    if (mode === 'Scenario') {
+    if (mode === 'World') {
       return this._stringifyFunctions.world;
     }
     if (mode === 'Definitions') {
@@ -131,7 +131,7 @@ export class SaveFlow {
     if (this._invalidationBus) {
       if (mode === 'Entity' && typeof this._invalidationBus.fireEntitySaved === 'function') {
         this._invalidationBus.fireEntitySaved(path);
-      } else if (mode === 'Scenario' && typeof this._invalidationBus.fireWorldSaved === 'function') {
+      } else if (mode === 'World' && typeof this._invalidationBus.fireWorldSaved === 'function') {
         this._invalidationBus.fireWorldSaved(path);
       } else if (
         mode === 'Definitions' &&

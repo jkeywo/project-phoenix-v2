@@ -127,7 +127,7 @@ transition = []
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
-position      = [150.0, 0.0, -20.0]
+transform     = { position = [150.0, 0.0, -20.0] }
 overrides     = { behaviour = { initial_state = "idle", transition = [] } }
 "#;
 

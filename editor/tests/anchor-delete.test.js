@@ -12,7 +12,7 @@ describe('canDeleteAnchor', () => {
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
         entity: [
-          { name: 'Some Station', anchor: 'other_anchor' },
+          { name: 'Some Station', transform: { anchor: 'other_anchor' } },
         ],
       }),
     ];
@@ -26,7 +26,7 @@ describe('canDeleteAnchor', () => {
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
         entity: [
-          { name: 'Starbase Alpha', anchor: 'starbase_alpha' },
+          { name: 'Starbase Alpha', transform: { anchor: 'starbase_alpha' } },
         ],
       }),
     ];
@@ -47,7 +47,7 @@ describe('canDeleteAnchor', () => {
       }),
       layer('worlds/patrol.toml', {
         entity: [
-          { name: 'raider_alpha', anchor: 'starbase_alpha' },
+          { name: 'raider_alpha', transform: { anchor: 'starbase_alpha' } },
         ],
       }),
     ];
@@ -66,13 +66,13 @@ describe('canDeleteAnchor', () => {
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
         entity: [
-          { name: 'Starbase Alpha', anchor: 'starbase_alpha' },
+          { name: 'Starbase Alpha', transform: { anchor: 'starbase_alpha' } },
         ],
       }),
       layer('worlds/alternate.toml', {
         entity: [
-          { name: 'Waypoint_1', anchor: 'starbase_alpha' },
-          { name: 'Waypoint_2', anchor: 'starbase_alpha' },
+          { name: 'Waypoint_1', transform: { anchor: 'starbase_alpha' } },
+          { name: 'Waypoint_2', transform: { anchor: 'starbase_alpha' } },
         ],
       }),
     ];
@@ -132,7 +132,7 @@ describe('canDeleteAnchor', () => {
       layer('worlds/default.toml', {
         anchors: { other_anchor: [100.0, 0.0, 0.0] },
         entity: [
-          { name: 'Something', anchor: 'other_anchor' },
+          { name: 'Something', transform: { anchor: 'other_anchor' } },
         ],
       }),
     ];
@@ -146,7 +146,7 @@ describe('canDeleteAnchor', () => {
       layer('worlds/default.toml', {
         anchors: { starbase_alpha: [500.0, 0.0, 0.0] },
         entity: [
-          { anchor: 'starbase_alpha' },
+          { transform: { anchor: 'starbase_alpha' } },
         ],
       }),
     ];

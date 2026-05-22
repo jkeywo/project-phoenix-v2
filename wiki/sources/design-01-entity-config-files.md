@@ -4,10 +4,12 @@ type: source
 tags: [draft, design, config, data-driven, entity, asteroid, ship]
 source_path: docs/1. Draft Design - Entity config files.md
 status: draft
-updated: 2026-05-08
+updated: 2026-05-22
 ---
 
 # Draft 1 — Entity Config Files
+
+> **Status (2026-05-22) — as shipped:** Data-driven entities landed via PRD #153 and were further consolidated by the 2026-05 entity-schema refactor. `EntityConfig` (`src/entities/config.rs:637`) now carries an optional top-level `name`, an optional `[mesh].emissive`, and an `[[light]]` array-of-tables. The per-section blocks `[star]`, `[planet]`, `[station]`, and `[science_console]` (and their backing `StarConfig` / `PlanetConfig` / `StationConfig` / `ScienceConsoleConfig` types) have been **deleted** — stars, planets, and stations are now ordinary entities composed from `[mesh]` + `[collider]` + `[hull]` + `[[light]]`. Station hull damage is tracked via `[hull].hull_integrity`. The original design intent below remains the source of record for the data-driven principle; the concrete schema lives in [refactor-2026-05-entity-schema](./refactor-2026-05-entity-schema.md).
 
 Proposes that entities be defined by data files rather than hard-coded constants.
 

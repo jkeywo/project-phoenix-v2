@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Scenario Editor</title>
+  <title>World Editor</title>
   <link rel="stylesheet" href="editor/style.css">
   <script src="https://unpkg.com/konva@9/konva.min.js"></script>
   <script type="importmap">
@@ -22,12 +22,12 @@
 <body>
   <!-- V2: Browser not supported banner -->
   <div id="browser-not-supported" class="v2-banner v2-banner-error hidden">
-    <strong>Browser not supported.</strong> The Scenario Editor requires the File System Access API, which is only available in Chromium-based browsers (Chrome, Edge, Opera). Use a supported browser to edit files.
+    <strong>Browser not supported.</strong> The World Editor requires the File System Access API, which is only available in Chromium-based browsers (Chrome, Edge, Opera). Use a supported browser to edit files.
   </div>
 
   <!-- V2: Root picker -->
   <div id="root-picker" class="v2-splash hidden">
-    <h1>Project Phoenix — Scenario Editor</h1>
+    <h1>Project Phoenix — World Editor</h1>
     <p>Select your project root folder to enable editing of world and entity files.</p>
     <button id="pickRootBtn">Pick Project Root…</button>
   </div>
@@ -41,7 +41,7 @@
         <div class="dropdown">
           <button id="openFileBtn">Open File ▾</button>
           <div class="dropdown-menu" id="openFileMenu">
-            <a href="#" id="openMapScenario">Open map/scenario…</a>
+            <a href="#" id="openMapWorld">Open map/world…</a>
             <a href="#" id="openEntitiesFolder">Open entities folder…</a>
           </div>
         </div>
@@ -49,7 +49,7 @@
         <button id="saveLayerBtn">Save Layer</button>
       </div>
       <div class="toolbar-group v2-mode-group">
-        <button class="v2-mode-tab active" data-mode="Scenario">Scenario</button>
+        <button class="v2-mode-tab active" data-mode="World">World</button>
         <button class="v2-mode-tab" data-mode="Entity">Entity</button>
         <button class="v2-mode-tab" data-mode="Definitions">Definitions</button>
       </div>
@@ -68,8 +68,8 @@
 
     <!-- Main Content -->
     <div id="main">
-      <!-- Scenario Mode (V1 canvas + layers + properties) -->
-      <div id="scenario-mode-root" class="mode-pane">
+      <!-- World Mode (V1 canvas + layers + properties) -->
+      <div id="world-mode-root" class="mode-pane">
         <!-- Left Panel -->
         <div id="leftPanel">
           <!-- World Content Tree (Slice 3) -->

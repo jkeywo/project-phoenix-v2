@@ -1,11 +1,5 @@
-export function inferLayerKind(toml) {
-  if (toml.spawn && Array.isArray(toml.spawn)) {
-    return 'scenario';
-  }
-  if (toml.anchors || (toml.entity && Array.isArray(toml.entity))) {
-    return 'map';
-  }
-  return 'unknown';
+export function isMapLayer(toml) {
+  return !!(toml.anchors || (toml.entity && Array.isArray(toml.entity)));
 }
 
 import { getSpawns, getSpawnName, getEntityPath } from './toml-utils.js';
@@ -21,13 +15,13 @@ export class LayerManager {
       const file = await fileHandle.getFile();
       const text = await file.text();
       const toml = await window.tomlParse(text);
-      const kind = inferLayerKind(toml);
+      const isMap = isMapLayer(toml);
 
       const layer = {
         fileHandle,
         filename: file.name,
         toml,
-        kind,
+        isMap,
         visible: true,
         active: false,
         konvaLayer: null,
@@ -64,7 +58,7 @@ export class LayerManager {
       fileHandle: null,
       filename,
       toml: parsedToml,
-      kind: inferLayerKind(parsedToml),
+      isMap: isMapLayer(parsedToml),
       visible: true,
       active: false,
       konvaLayer: null,

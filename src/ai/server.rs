@@ -1,4 +1,4 @@
-/// Bevy plugin: AI controller lifecycle — attaches `AiController` components
+/// Bevy plugin: AI controller lifecycle Ã¢â‚¬â€ attaches `AiController` components
 /// to entities that declare a `[behaviour]` block, mints synthetic
 /// `ai:<entity_uuid>` session tokens, and ticks controllers during
 /// `InProgress` phase.
@@ -25,18 +25,18 @@ use crate::entity_spawner::{BehaviourSection, EntityUuid};
 
 use crate::config_cache::FactionRegistryResource;
 
-// ── AiTokenRegistry ───────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ AiTokenRegistry Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-/// Maps entity UUID → synthetic token string (`"ai:<uuid>"`).
+/// Maps entity UUID Ã¢â€ â€™ synthetic token string (`"ai:<uuid>"`).
 /// The simulation's token-to-entity lookup falls back to this registry when
 /// a player session lookup misses.
 #[derive(Resource, Default)]
 pub struct AiTokenRegistry {
-    /// entity_uuid → token string
+    /// entity_uuid Ã¢â€ â€™ token string
     by_entity: HashMap<String, String>,
-    /// token string → entity_uuid (reverse lookup)
+    /// token string Ã¢â€ â€™ entity_uuid (reverse lookup)
     by_token: HashMap<String, String>,
-    /// Bevy Entity id → entity_uuid (for despawn handler)
+    /// Bevy Entity id Ã¢â€ â€™ entity_uuid (for despawn handler)
     by_bevy_entity: HashMap<Entity, String>,
 }
 
@@ -97,7 +97,7 @@ impl AiTokenRegistry {
     }
 }
 
-// ── AiControllerComponent ────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ AiControllerComponent Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /// Marker component wrapping an `AiController` (the pure state machine).
 /// Also carries the entity UUID so the despawn handler can unregister
@@ -156,7 +156,7 @@ pub struct WarpOutMarker {
 pub struct AttackerThisTick(pub uuid::Uuid);
 
 /// Component: tracks the hull integrity fraction [0.0, 1.0] of an NPC entity.
-/// Default 1.0 (full health). When it reaches ≤ 0.0 the `detect_npc_hull_zero`
+/// Default 1.0 (full health). When it reaches Ã¢â€°Â¤ 0.0 the `detect_npc_hull_zero`
 /// system emits an `AiEntityDestroyed` event and despawns the entity.
 #[derive(Component, Clone, Debug)]
 pub struct NpcHullFraction(pub f32);
@@ -167,7 +167,7 @@ impl Default for NpcHullFraction {
     }
 }
 
-// ── Events ────────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Events Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /// Marker component added to an AI entity when its owning scenario is unloaded.
 ///
@@ -193,7 +193,7 @@ pub struct AiEntityAttacked {
     pub attacker_uuid: uuid::Uuid,
 }
 
-/// Emitted by the AI plugin when an NPC entity's hull reaches ≤ 0.0.
+/// Emitted by the AI plugin when an NPC entity's hull reaches Ã¢â€°Â¤ 0.0.
 ///
 /// The world plugin observes this event to evaluate `on_entity_destroyed`
 /// trigger conditions without a direct dependency on the AI module.
@@ -202,7 +202,7 @@ pub struct AiEntityDestroyed {
     pub entity_uuid: String,
 }
 
-// ── Plugin ───────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Plugin Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 pub struct AiPlugin;
 
@@ -224,7 +224,7 @@ impl Plugin for AiPlugin {
     }
 }
 
-// ── Systems ───────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Systems Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /// Attach an `AiControllerComponent` (and register a synthetic token) when a
 /// newly-spawned entity carries a `BehaviourSection` but no controller yet.
@@ -459,7 +459,7 @@ fn tick_ai_controllers(
 }
 
 /// Emit `AiEntityDestroyed` and despawn any NPC entity whose `NpcHullFraction`
-/// has dropped to ≤ 0.0.
+/// has dropped to Ã¢â€°Â¤ 0.0.
 fn detect_npc_hull_zero(
     mut commands: Commands,
     query: Query<(Entity, &EntityUuid, &NpcHullFraction), Changed<NpcHullFraction>>,
@@ -499,13 +499,13 @@ fn unregister_on_despawn(
     }
 }
 
-// ── Unit Tests ────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Unit Tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ── anchors_from_world_config (PRD #337/#338 slice 1) ────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ anchors_from_world_config (PRD #337/#338 slice 1) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn anchors_from_world_config_clones_anchor_table() {
@@ -525,7 +525,7 @@ mod tests {
         assert!(anchors_from_world_config(&world).is_empty());
     }
 
-    // ── AiTokenRegistry unit tests ────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ AiTokenRegistry unit tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn register_produces_ai_prefixed_token() {
@@ -608,7 +608,7 @@ mod tests {
         assert_eq!(reg.token_for_entity("beta"), Some("ai:beta"));
     }
 
-    // ── Bevy integration tests ────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Bevy integration tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     use crate::entity_config::{BehaviourConfig, StateConfig};
     use crate::entity_spawner::EntityUuid;
@@ -739,7 +739,7 @@ mod tests {
         );
     }
 
-    // ── AiEntityAttacked event ────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ AiEntityAttacked event Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     fn build_on_attacked_behaviour() -> BehaviourConfig {
         BehaviourConfig {
@@ -789,7 +789,7 @@ mod tests {
         );
     }
 
-    // ── AiEntityDestroyed event ───────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ AiEntityDestroyed event Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn ai_entity_destroyed_event_emitted_when_hull_reaches_zero() {
@@ -843,7 +843,7 @@ mod tests {
         );
     }
 
-    // ── scenario_unloaded flag in WorldView ────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ scenario_unloaded flag in WorldView Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     // When ScenarioUnloadedMarker is on an entity, it fires on_scenario_unloaded transition.
     #[test]
@@ -881,7 +881,7 @@ mod tests {
         // Mark entity as scenario-unloaded via component
         app.world_mut().entity_mut(entity).insert(ScenarioUnloadedMarker);
 
-        app.update(); // tick — should fire transition
+        app.update(); // tick Ã¢â‚¬â€ should fire transition
 
         let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
         assert_eq!(
@@ -924,7 +924,7 @@ mod tests {
 
         app.update();
 
-        // A different entity gets the marker — this entity should not transition
+        // A different entity gets the marker Ã¢â‚¬â€ this entity should not transition
         // (simulates: only owned entities get ScenarioUnloadedMarker)
         let _other = app.world_mut().spawn(Transform::from_xyz(0.0, 0.0, 0.0)).id();
 
@@ -937,7 +937,7 @@ mod tests {
         );
     }
 
-    // ── Issue #314: WorldView population from components ─────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Issue #314: WorldView population from components Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     fn make_weapons_console_config(beam_range: f32) -> crate::entity_config::WeaponsConsoleConfig {
         crate::entity_config::WeaponsConsoleConfig {
@@ -998,7 +998,7 @@ mod tests {
         let entity = spawn_behaviour_entity(&mut app, "ent-phaser-001");
         app.update(); // attach controller + tick
 
-        // No WeaponsConsoleSection → entity_phaser_ready should never have been true;
+        // No WeaponsConsoleSection Ã¢â€ â€™ entity_phaser_ready should never have been true;
         // the controller stays idle with no inputs.
         let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
         assert_eq!(ctrl.controller.current_state, crate::ai::AiState::Idle,
@@ -1022,7 +1022,7 @@ mod tests {
                 transition: vec![],
             }),
             WeaponsConsoleSection(make_weapons_console_config(40.0)),
-            EntityPhaserState::default(), // cooldown 0 → ready
+            EntityPhaserState::default(), // cooldown 0 Ã¢â€ â€™ ready
         )).id();
 
         app.update(); // attach controller + first tick
@@ -1069,6 +1069,8 @@ mod tests {
 
         // Build a minimal EntityConfig with a weapons_console section.
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             faction: None,
             hull: None,
             weapons_console: Some(make_weapons_console_config(80.0)),
@@ -1078,19 +1080,15 @@ mod tests {
             captain_console: None,
             collider: None,
             appearance: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
             tags: vec![],
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            station: None,
             radar_appearance: None,
             mesh: None,
         };
@@ -1110,14 +1108,14 @@ mod tests {
         assert!((wc.unwrap().0.beam_range - 80.0).abs() < 0.01, "beam_range must match config");
     }
 
-    // ── PRD #307: FactionRegistryResource must be accessible as Res (not Option) ──
+    // Ã¢â€â‚¬Ã¢â€â‚¬ PRD #307: FactionRegistryResource must be accessible as Res (not Option) Ã¢â€â‚¬Ã¢â€â‚¬
 
     /// A minimal system that takes `Res<FactionRegistryResource>` (non-Option).
     /// If the resource is not present, Bevy panics with a missing-resource error.
-    /// This test verifies that `build_test_app` — which calls `insert_faction_registry`
-    /// via the unconditional path — makes the resource available on native.
+    /// This test verifies that `build_test_app` Ã¢â‚¬â€ which calls `insert_faction_registry`
+    /// via the unconditional path Ã¢â‚¬â€ makes the resource available on native.
     fn read_faction_registry_system(reg: Res<FactionRegistryResource>) {
-        // Just accessing it is enough — the test verifies the resource exists.
+        // Just accessing it is enough Ã¢â‚¬â€ the test verifies the resource exists.
         let _ = &reg.0;
     }
 

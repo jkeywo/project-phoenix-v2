@@ -40,7 +40,7 @@ const saveFlow = new SaveFlow(
 
 let currentFilePath = null;
 
-// Per-mode restore callbacks. Cross-file decoupling: each mode (Scenario in
+// Per-mode restore callbacks. Cross-file decoupling: each mode (World in
 // Slice 1; Entity/Definitions in later slices) registers a `(path, snapshot)`
 // handler that knows how to apply a snapshot back to that mode's V1 state.
 const restoreCallbacks = {};
@@ -86,7 +86,7 @@ function showBanner() {
 }
 
 const MODE_PANE_IDS = {
-  Scenario: 'scenario-mode-root',
+  World: 'world-mode-root',
   Entity: 'entity-mode-root',
   Definitions: 'definitions-mode-root',
 };

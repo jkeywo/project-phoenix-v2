@@ -225,7 +225,7 @@ describe('Slice 4b: comms editor', () => {
     expect(layer.toml.comms[0].message).toBe('New hail message.');
     expect(layer.isDirty).toBe(true);
 
-    const undoEntries = modeShell.getUndoHistory('Scenario', layer.filename);
+    const undoEntries = modeShell.getUndoHistory('World', layer.filename);
     expect(undoEntries.length).toBe(1);
     // Snapshot is PRE-mutation → original message.
     expect(undoEntries[0].comms[0].message).toContain('Please state your business.');
@@ -246,7 +246,7 @@ describe('Slice 4b: comms editor', () => {
     expect(actions[1].type).toBe('complete_objective');
     expect(layer.isDirty).toBe(true);
 
-    const undoEntries = modeShell.getUndoHistory('Scenario', layer.filename);
+    const undoEntries = modeShell.getUndoHistory('World', layer.filename);
     expect(undoEntries.length).toBe(1);
   });
 
@@ -265,7 +265,7 @@ describe('Slice 4b: comms editor', () => {
     expect(follow.response === undefined || Array.isArray(follow.response)).toBe(true);
     expect(layer.isDirty).toBe(true);
 
-    const undoEntries = modeShell.getUndoHistory('Scenario', layer.filename);
+    const undoEntries = modeShell.getUndoHistory('World', layer.filename);
     expect(undoEntries.length).toBe(1);
   });
 
@@ -279,7 +279,7 @@ describe('Slice 4b: comms editor', () => {
     expect(layer.toml.comms[0].from).toBe('Federation Command');
     expect(layer.isDirty).toBe(true);
 
-    const undoEntries = modeShell.getUndoHistory('Scenario', layer.filename);
+    const undoEntries = modeShell.getUndoHistory('World', layer.filename);
     expect(undoEntries.length).toBe(1);
   });
 });

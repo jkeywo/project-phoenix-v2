@@ -15,6 +15,10 @@
 [global]
 seed = 42
 
+[ambient_light]
+color      = [0.6, 0.55, 0.5]
+brightness = 300.0
+
 [anchors]
 starbase_alpha = [500.0, 0.0, 0.0]
 patrol_alpha   = [300.0, 0.0, -300.0]
@@ -25,42 +29,42 @@ patrol_gamma   = [0.0, 0.0, -500.0]
 
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/planet_earth.toml"
 id = "earth"
 name = "earth"
-position = [200.0, 0.0, 200.0]
+transform = { position = [200.0, 0.0, 200.0] }
 
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/player_ship.toml"
 id = "player-ship"
-position = [150.0, 0.0, 0.0]
+transform = { position = [150.0, 0.0, 0.0] }
 spawn_on = "game_start"
 
 [[entity]]
 template_path = "assets/entities/region_nebula.toml"
 id = "nebula-1"
-position = [300.0, 0.0, -200.0]
+transform = { position = [300.0, 0.0, -200.0] }
 
 # ── Named entities (trigger / comms-eligible) ────────────────────────────────
 #
 # `[[entity]] name = "..."` is the unified spawn surface (PRD #337). The
 # pipeline assigns a UUID at spawn time and registers it in
 # `WorldConfig.name_to_uuid` so triggers, comms, and `relative_to` lookups
-# can resolve the name. Position may be supplied via inline `position`,
-# `anchor = "..."` (resolved from `[anchors]`), or
+# can resolve the name. Positioning lives under `[entity.transform]` and may
+# use inline `position`, `anchor = "..."` (resolved from `[anchors]`), or
 # `relative_to = "..." + offset = [x,y,z]` (relative to another named entity).
 
 [[entity]]
 template_path = "assets/entities/station_outpost.toml"
 name = "Starbase Alpha"
-anchor = "starbase_alpha"
+transform = { anchor = "starbase_alpha" }
 
 # ── Named NPC entities (trigger-eligible) ─────────────────────────────────────
 #
@@ -71,7 +75,7 @@ anchor = "starbase_alpha"
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
-anchor        = "patrol_alpha"
+transform     = { anchor = "patrol_alpha" }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 

@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::entity_config::EntityConfig;
-use crate::entity_config::{StarConfig, PlanetConfig, AsteroidFieldConfig};
+use crate::entity_config::{AsteroidFieldConfig, LightConfig};
 use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectKind;
 
-// ── Marker Components ──────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Marker Components Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /// Every entity spawned by the generic spawner carries a UUID.
 #[derive(Component, Clone, Debug)]
@@ -16,13 +16,16 @@ pub struct EntityUuid(pub String);
 #[derive(Component, Clone, Debug)]
 pub struct EntityId(pub String);
 
-/// Present when the EntityConfig had a [star] section.
+/// Display name from the top-level `name = "..."` scalar in the entity TOML.
+/// Used by the renderer for HUD labels and by triggers/comms for named instances.
 #[derive(Component, Clone, Debug)]
-pub struct StarSection(pub StarConfig);
+pub struct EntityName(pub String);
 
-/// Present when the EntityConfig had a [planet] section.
+/// Present when the EntityConfig had one or more `[[light]]` entries.
+/// The renderer reads this component to spawn `PointLight` / `DirectionalLight`
+/// components (either on the entity itself or as children for multi-light setups).
 #[derive(Component, Clone, Debug)]
-pub struct PlanetSection(pub PlanetConfig);
+pub struct Lights(pub Vec<LightConfig>);
 
 /// Present when the EntityConfig had a [asteroid_field] section.
 #[derive(Component, Clone, Debug)]
@@ -37,8 +40,8 @@ pub struct ColliderSection(pub crate::entity_config::ColliderConfig);
 pub struct AppearanceSection(pub crate::entity_config::AppearanceConfig);
 
 /// Present when the EntityConfig has a [mesh] section.
-/// Drives all 3-D viewscreen rendering — the renderer creates a Bevy mesh and
-/// material from this data, ignoring PlanetSection/StarSection for visual shape.
+/// Drives all 3-D viewscreen rendering Ã¢â‚¬â€ the renderer creates a Bevy mesh and
+/// material from this data.
 #[derive(Component, Clone, Debug)]
 pub struct MeshSection(pub crate::entity_config::MeshConfig);
 
@@ -85,12 +88,12 @@ pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfi
 #[derive(Component, Clone, Debug)]
 pub struct EntityConsoleHull(pub crate::damage::ConsoleHull);
 
-// ── Spawner ────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Spawner Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 /// Spawn an entity from a resolved EntityConfig.
 ///
 /// Walks each optional section and inserts a component if present.
-/// No type dispatch — just checks Option::is_some for each field.
+/// No type dispatch Ã¢â‚¬â€ just checks Option::is_some for each field.
 ///
 /// Returns the spawned Entity. Callers must flush commands (e.g. via app.update())
 /// before querying components on the returned entity.
@@ -112,7 +115,7 @@ pub fn spawn_entity(
         entity_commands.insert(EntityId(human_id));
     }
 
-    // Collider section → Rapier collider + rigid body
+    // Collider section Ã¢â€ â€™ Rapier collider + rigid body
     if let Some(collider) = &config.collider {
         let rapier_collider = match collider.shape {
             crate::entity_config::ColliderShape::Ball => {
@@ -140,14 +143,14 @@ pub fn spawn_entity(
         entity_commands.insert(MeshSection(mesh.clone()));
     }
 
-    // Star section
-    if let Some(star) = &config.star {
-        entity_commands.insert(StarSection(star.clone()));
+    // Top-level name scalar
+    if let Some(name) = &config.name {
+        entity_commands.insert(EntityName(name.clone()));
     }
 
-    // Planet section
-    if let Some(planet) = &config.planet {
-        entity_commands.insert(PlanetSection(planet.clone()));
+    // Lights array Ã¢â‚¬â€ present when one or more [[light]] entries were declared.
+    if !config.light.is_empty() {
+        entity_commands.insert(Lights(config.light.clone()));
     }
 
     // Asteroid field section
@@ -167,12 +170,12 @@ pub fn spawn_entity(
         }
     }
 
-    // Behaviour section — signals to ai_plugin to attach an AiController
+    // Behaviour section Ã¢â‚¬â€ signals to ai_plugin to attach an AiController
     if let Some(behaviour) = &config.behaviour {
         entity_commands.insert(BehaviourSection(behaviour.clone()));
     }
 
-    // Tags — mirror TOML tags onto the entity for snapshot builders.
+    // Tags Ã¢â‚¬â€ mirror TOML tags onto the entity for snapshot builders.
     if !config.tags.is_empty() {
         entity_commands.insert(EntityTagsSection(config.tags.clone()));
     }
@@ -182,17 +185,17 @@ pub fn spawn_entity(
         entity_commands.insert(RadarAppearanceSection(radar_appearance.clone()));
     }
 
-    // Faction — attach a FactionComponent so the AI can read faction from ECS.
+    // Faction Ã¢â‚¬â€ attach a FactionComponent so the AI can read faction from ECS.
     if let Some(faction_uuid) = config.faction {
         entity_commands.insert(FactionComponent(faction_uuid));
     }
 
-    // WeaponsConsole — attach a WeaponsConsoleSection so the AI can read weapons config from ECS.
+    // WeaponsConsole Ã¢â‚¬â€ attach a WeaponsConsoleSection so the AI can read weapons config from ECS.
     if let Some(wc) = &config.weapons_console {
         entity_commands.insert(WeaponsConsoleSection(wc.clone()));
     }
 
-    // Hull — attach an EntityConsoleHull component if the config has hull data.
+    // Hull Ã¢â‚¬â€ attach an EntityConsoleHull component if the config has hull data.
     // Per-console entries (console_hull) take precedence; if absent, the legacy
     // hull_integrity value is mapped to a single CaptainChair slot.
     if let Some(hull) = &config.hull {
@@ -217,7 +220,7 @@ pub fn spawn_entity(
                 hull.hull_integrity,
             )])
         } else {
-            // Empty hull section — skip.
+            // Empty hull section Ã¢â‚¬â€ skip.
             entity_commands.insert(EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[])));
             return entity_commands.id();
         };
@@ -232,7 +235,6 @@ pub fn spawn_entity(
 mod tests {
     use super::*;
     use crate::entity_config::*;
-    use crate::entity_config::StarConfig;
 
     /// Helper: build a minimal Bevy app for spawning tests.
     fn test_app() -> App {
@@ -259,21 +261,13 @@ mod tests {
     }
 
     #[test]
-    fn spawn_entity_with_hull_and_star_has_both_components() {
+    fn spawn_entity_with_name_inserts_entity_name_component() {
         let mut app = test_app();
         let config = EntityConfig {
-            tags: vec!["test".to_string()],
-            hull: Some(HullConfig { hull_integrity: 100.0, ..Default::default() }),
-            star: Some(StarConfig {
-                name: "TestStar".to_string(),
-                radius: 10.0,
-                colour: vec![1.0, 1.0, 1.0],
-                position: vec![0.0, 0.0, 0.0],
-                tags: vec![],
-                light_range: None,
-                light_intensity: None,
-                light_colour: None,
-            }),
+            name: Some("Sun".to_string()),
+            light: Vec::new(),
+            tags: vec![],
+            hull: None,
             collider: None,
             appearance: None,
             helm_console: None,
@@ -281,16 +275,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -301,15 +292,51 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
 
         let world = app.world_mut();
-        assert!(world.get::<EntityUuid>(spawned).is_some(), "should have EntityUuid");
-        assert!(world.get::<StarSection>(spawned).is_some(), "should have StarSection");
-        assert_eq!(world.get::<StarSection>(spawned).unwrap().0.name, "TestStar");
+        let name_comp = world.get::<EntityName>(spawned).expect("should have EntityName");
+        assert_eq!(name_comp.0, "Sun");
+    }
+
+    #[test]
+    fn spawn_entity_without_name_omits_entity_name_component() {
+        let mut app = test_app();
+        let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
+            tags: vec![],
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            sensors_console: None,
+            shields_console: None,
+            torpedoes: None,
+            repair: None,
+            asteroid_field: None,
+            shape: None,
+            effects: None,
+            faction: None,
+            behaviour: None,
+            radar_appearance: None,
+            mesh: None,
+        };
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+
+        let world = app.world_mut();
+        assert!(world.get::<EntityName>(spawned).is_none());
     }
 
     #[test]
     fn spawn_entity_with_collider_has_rapier_components() {
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec![],
             collider: Some(ColliderConfig {
                 shape: ColliderShape::Ball,
@@ -323,17 +350,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -350,17 +373,19 @@ mod tests {
     }
 
     #[test]
-    fn spawn_entity_with_planet_section() {
+    fn spawn_entity_with_lights_inserts_lights_component() {
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: vec![
+                LightConfig {
+                    kind: LightKind::Point,
+                    colour: [1.0, 0.95, 0.85],
+                    intensity: 150000.0,
+                    range: Some(5000.0),
+                },
+            ],
             tags: vec![],
-            planet: Some(PlanetConfig {
-                name: "TestPlanet".to_string(),
-                radius: 15.0,
-                colour: vec![0.0, 0.5, 1.0],
-                position: vec![100.0, 0.0, 100.0],
-                tags: vec![],
-            }),
             hull: None,
             collider: None,
             appearance: None,
@@ -369,16 +394,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -386,12 +408,13 @@ mod tests {
         };
 
         let uuid = uuid::Uuid::new_v4().to_string();
-        let spawned = spawn_and_flush(&mut app, &config, Vec3::new(100.0, 0.0, 100.0), uuid, None);
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
 
         let world = app.world_mut();
-        let planet_section = world.get::<PlanetSection>(spawned).expect("should have PlanetSection");
-        assert!((planet_section.0.radius - 15.0).abs() < 1e-6);
-        assert_eq!(planet_section.0.name, "TestPlanet");
+        let lights = world.get::<Lights>(spawned).expect("should have Lights");
+        assert_eq!(lights.0.len(), 1);
+        assert_eq!(lights.0[0].kind, LightKind::Point);
+        assert_eq!(lights.0[0].range, Some(5000.0));
     }
 
     #[test]
@@ -399,6 +422,8 @@ mod tests {
         use crate::entity_config::AsteroidFieldConfig;
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["field".to_string()],
             asteroid_field: Some(AsteroidFieldConfig {
                 inner_radius: 100.0,
@@ -419,16 +444,12 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -447,6 +468,8 @@ mod tests {
     fn spawn_entity_with_appearance_section() {
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec![],
             appearance: Some(AppearanceConfig {
                 colour: "#ff0000".to_string(),
@@ -460,17 +483,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -514,6 +533,8 @@ mod tests {
     fn spawn_entity_with_region_shape_and_effects() {
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string(), "nebula".to_string()],
             shape: Some(RegionShape::Sphere { radius: 150.0 }),
             effects: Some(crate::region_effects::RegionEffectsConfig {
@@ -529,15 +550,11 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -563,6 +580,8 @@ mod tests {
     fn spawn_entity_with_shape_alone_has_no_effects_comp() {
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius: 100.0 }),
             effects: None,
@@ -574,15 +593,11 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -602,6 +617,8 @@ mod tests {
         let mut app = test_app();
         let faction_id = uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec![],
             faction: Some(faction_id),
             hull: None,
@@ -612,17 +629,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             behaviour: None,
             radar_appearance: None,
             mesh: None,
@@ -658,12 +671,14 @@ mod tests {
         assert_eq!(transform.translation.z, -7.0);
     }
 
-    // ── EntityConsoleHull component tests ───────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬ EntityConsoleHull component tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
     #[test]
     fn spawn_entity_with_legacy_hull_integrity_attaches_captain_chair_slot() {
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
                 hull_integrity: 60.0,
@@ -676,17 +691,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -718,6 +729,8 @@ mod tests {
     fn npc_captain_chair_field_maps_to_captain_chair_console_slot() {
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec!["npc".to_string()],
             hull: Some(crate::entity_config::HullConfig {
                 captain_chair: Some(60.0),
@@ -730,17 +743,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -760,9 +769,11 @@ mod tests {
 
     #[test]
     fn legacy_hull_integrity_still_maps_to_captain_chair_slot() {
-        // Stations and asteroids still use hull_integrity in TOML — must keep working.
+        // Stations and asteroids still use hull_integrity in TOML Ã¢â‚¬â€ must keep working.
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
                 hull_integrity: 200.0,
@@ -775,17 +786,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,
@@ -806,6 +813,8 @@ mod tests {
         // If both are set, captain_chair wins.
         let mut app = test_app();
         let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
             tags: vec![],
             hull: Some(crate::entity_config::HullConfig {
                 captain_chair: Some(80.0),
@@ -819,17 +828,13 @@ mod tests {
             engineering_console: None,
             captain_console: None,
             power: None,
-            science_console: None,
             sensors_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,
-            star: None,
-            planet: None,
             asteroid_field: None,
             shape: None,
             effects: None,
-            station: None,
             faction: None,
             behaviour: None,
             radar_appearance: None,

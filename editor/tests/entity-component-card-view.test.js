@@ -132,7 +132,7 @@ describe('renderEntityComponentCard', () => {
   });
 
   it('renders a string input that coerces to a string', () => {
-    const card = new ComponentCard('station', { name: 'Axiom', shape: 'torus', radius: 18, hull_integrity: 200 }, COMPONENT_SCHEMA.station);
+    const card = new ComponentCard('name', { name: 'Axiom' }, COMPONENT_SCHEMA.name);
     const { deps, edits } = makeDeps();
     renderEntityComponentCard(host, card, deps);
 
@@ -140,6 +140,7 @@ describe('renderEntityComponentCard', () => {
     const nameInp = inputs.find((i) => i.parentElement?.children[0]?.textContent === 'name');
     expect(nameInp).toBeDefined();
     fireInput(nameInp, 'New Name');
+    expect(edits[0].section).toBe('name');
     expect(edits[0].data.name).toBe('New Name');
   });
 

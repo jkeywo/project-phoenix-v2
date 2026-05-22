@@ -127,16 +127,18 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
   // Lock the raider as the tactical target.
   await tactical.send('SetTarget', { uuid: raiderUuid });
 
-  // Wait for WeaponsUpdate confirming fire_ready (target locked + in range).
+  // Wait for WeaponsUpdate confirming a bank is fire_ready (target locked + in range).
   await tactical.page.waitForFunction(
     () => (window as any).__messages?.some(
-      (m: any) => m.type === 'WeaponsUpdate' && m.data.fire_ready === true,
+      (m: any) => m.type === 'WeaponsUpdate'
+        && Array.isArray(m.data.banks)
+        && m.data.banks.some((b: any) => b.fire_ready === true),
     ),
     { timeout: 5_000 },
   );
 
-  // Fire phasers.
-  await tactical.send('FirePhaser');
+  // Fire phasers — port bank is defined first in player_ship.toml.
+  await tactical.send('FirePhaser', { bank: 'port' });
 
   // BeamStarted must be broadcast to all clients.
   const beamStarted = await tactical.waitForMessage('BeamStarted', 5_000) as any;
@@ -158,11 +160,13 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
   expect(raider, 'raider entity must appear in WorldSetup').toBeDefined();
   const raiderUuid: string = raider.uuid;
 
-  // Lock target and wait for fire_ready.
+  // Lock target and wait for fire_ready on any bank.
   await tactical.send('SetTarget', { uuid: raiderUuid });
   await tactical.page.waitForFunction(
     () => (window as any).__messages?.some(
-      (m: any) => m.type === 'WeaponsUpdate' && m.data.fire_ready === true,
+      (m: any) => m.type === 'WeaponsUpdate'
+        && Array.isArray(m.data.banks)
+        && m.data.banks.some((b: any) => b.fire_ready === true),
     ),
     { timeout: 5_000 },
   );
@@ -184,7 +188,7 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
   }, raiderUuid);
 
   // Fire phasers.
-  await tactical.send('FirePhaser');
+  await tactical.send('FirePhaser', { bank: 'port' });
   await tactical.waitForMessage('BeamStarted', 5_000);
 
   // Wait for a SimState where the raider's hull_fraction is lower than initial.
@@ -225,23 +229,34 @@ test('tactical fire-flow: EntityDespawned received when NPC hull reaches 0', asy
   await tactical.send('SetTarget', { uuid: raiderUuid });
   await tactical.page.waitForFunction(
     () => (window as any).__messages?.some(
-      (m: any) => m.type === 'WeaponsUpdate' && m.data.fire_ready === true,
+      (m: any) => m.type === 'WeaponsUpdate'
+        && Array.isArray(m.data.banks)
+        && m.data.banks.some((b: any) => b.fire_ready === true),
     ),
     { timeout: 5_000 },
   );
 
   // Keep firing phasers on cooldown cycles until EntityDespawned arrives.
   // The raider has 60 HP; beam_damage_per_sec=5, beam_duration=6s → ~30 HP per shot.
-  // Two shots should destroy it.  We fire on each WeaponsUpdate where fire_ready=true,
-  // waiting up to 60 s total to account for cooldowns and CI latency.
+  // Two shots should destroy it.  We fire on each WeaponsUpdate where any bank is
+  // fire_ready, waiting up to 60 s total to account for cooldowns and CI latency.
   await tactical.page.evaluate(() => {
     (window as any).__fireInterval = setInterval(() => {
       const msgs: any[] = (window as any).__messages || [];
       const despawned = msgs.some((m: any) => m.type === 'EntityDespawned');
       if (despawned) { clearInterval((window as any).__fireInterval); return; }
-      const ready = msgs.some((m: any) => m.type === 'WeaponsUpdate' && m.data.fire_ready === true);
-      if (ready) {
-        (window as any).__conn.send(JSON.stringify({ type: 'FirePhaser' }));
+      // Find the most recent WeaponsUpdate and pick the first fire-ready bank.
+      let readyBank: string | null = null;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m.type !== 'WeaponsUpdate') continue;
+        const banks: any[] = Array.isArray(m.data.banks) ? m.data.banks : [];
+        const found = banks.find((b: any) => b.fire_ready === true);
+        if (found) { readyBank = found.id; }
+        break;
+      }
+      if (readyBank) {
+        (window as any).__conn.send(JSON.stringify({ type: 'FirePhaser', data: { bank: readyBank } }));
       }
     }, 200);
   });

@@ -261,7 +261,7 @@
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false,
+      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
@@ -644,12 +644,15 @@
       canvas.addEventListener('click', onTap);
       canvas.addEventListener('touchstart', e => { e.preventDefault(); onTap(e); }, { passive: false });
 
-      // Fire button sends FirePhaser.
+      // Fire button sends FirePhaser with the first fire-ready bank id.
       const fireBtn = $('weapons-fire-btn');
       if (fireBtn) {
         fireBtn.addEventListener('click', () => {
           if (state.weaponsFireReady && !state.weaponsOnCooldown && !state.weaponsFiring) {
-            send('FirePhaser');
+            const bank = state.weaponsReadyBankId;
+            if (bank) {
+              send('FirePhaser', { bank });
+            }
           }
         });
       }
@@ -831,9 +834,22 @@
           return;
         }
         case 'WeaponsUpdate': {
-          const { target_uuid, fire_ready, on_cooldown } = msg.data;
+          // Per-bank wire format: aggregate across banks so the legacy
+          // HTML weapons UI keeps showing a single fire-ready indicator.
+          // `fire_ready` is true if *any* bank can fire; `on_cooldown` is
+          // true only if *all* banks are on cooldown.
+          const { target_uuid, banks } = msg.data;
+          const bankList = Array.isArray(banks) ? banks : [];
+          const fire_ready = bankList.some(b => b.fire_ready);
+          const on_cooldown = bankList.length > 0 && bankList.every(b => b.on_cooldown);
+          // Remember the first fire-ready bank id so the fire button can
+          // address it. Falls back to the first bank or null.
+          const readyBank = bankList.find(b => b.fire_ready)
+            || bankList[0]
+            || null;
+          state.weaponsReadyBankId = readyBank ? readyBank.id : null;
           state.weaponsFireReady = fire_ready;
-          state.weaponsOnCooldown = !!on_cooldown;
+          state.weaponsOnCooldown = on_cooldown;
           const el = $('weapons-lock-status');
           if (target_uuid) {
             state.weaponsTarget = target_uuid;

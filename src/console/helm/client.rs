@@ -293,8 +293,8 @@ fn bridge_client_sim_to_radar_entities(
         let entity_yaw = snapshot.yaw.unwrap_or(0.0);
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
 
-        if layer == RadarLayer::Region {
-            // ── Region entity: render as shape ────────────────────────────────
+        if layer == RadarLayer::Region || layer == RadarLayer::AsteroidField {
+            // ── Region / field entity: render as shape ────────────────────────
             let region_colour = colour.unwrap_or(default_layer_colour(layer));
             let region_shape = region_shape_from_snapshot(snapshot);
             let world_size = snapshot
@@ -303,9 +303,9 @@ fn bridge_client_sim_to_radar_entities(
                 .filter(|s| *s > 0.0)
                 .unwrap_or(4.0);
             let appearance = RadarAppearance {
-                icon: RadarIcon::Star,
+                icon: layer_to_icon(layer),
                 world_size,
-                color: Color::WHITE,
+                color: region_colour,
                 region_colour: Some(region_colour),
                 region_shape,
             };

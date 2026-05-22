@@ -38,6 +38,14 @@ shape = "cuboid"
 size = [4.0, 1.5, 6.0]
 colour = [1.0, 0.2, 0.2]
 
+# Small ship comms — shorter range than stations or the player ship, but
+# tuned so the raider's distress hails stay audible across the typical
+# phaser engagement envelope (~300–400 units). Above min combat range
+# (maintain_range = 35) and player phaser beam_range / behaviour radii so
+# range loss only happens during the disengagement / warp-out phase.
+[comms]
+range = 400.0
+
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 
 [behaviour]

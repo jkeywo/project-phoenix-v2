@@ -37,6 +37,22 @@ beam_damage_per_sec = 5.0
 beam_duration_secs = 6.0
 cooldown_secs = 6.0
 beam_color = [1.0, 0.4, 0.1, 1.0]
+torpedo_arc_color = [1.0, 0.55, 0.2, 1.0]
+
+# Port phaser bank: covers the port hemisphere (forward arc to aft arc).
+# Auto-fire window is narrower than the manual fire arc.
+[[weapons_console.phaser_banks]]
+id = "port"
+facing_deg = -90.0
+fire_arc_deg = 90.0
+auto_arc_deg = 90.0
+
+# Starboard phaser bank: mirror of port.
+[[weapons_console.phaser_banks]]
+id = "starboard"
+facing_deg = 90.0
+fire_arc_deg = 90.0
+auto_arc_deg = 90.0
 
 [torpedoes]
 count = 10
@@ -46,6 +62,24 @@ speed = 30.0
 turn_rate_deg_per_sec = 45.0
 lifespan = 20.0
 load_time = 10.0
+
+# Forward port tube: angled 30° to port of the bow.
+[[torpedoes.tubes]]
+id = "fore_port"
+facing_deg = -30.0
+fire_arc_deg = 90.0
+
+# Forward starboard tube: mirror of fore_port.
+[[torpedoes.tubes]]
+id = "fore_starboard"
+facing_deg = 30.0
+fire_arc_deg = 90.0
+
+# Aft tube: rear-facing torpedo launcher.
+[[torpedoes.tubes]]
+id = "aft"
+facing_deg = 180.0
+fire_arc_deg = 90.0
 
 [sensors_console]
 power_multipliers = [-0.5, 0.0, 0.25, 0.5]
@@ -69,6 +103,7 @@ deceleration = 25.0
 max_yaw_rate = 0.5
 impulse_charge_duration = 3.0
 impulse_speed_multiplier = 10.0
+impulse_acceleration_multiplier = 5.0
 
 [helm_console.radar]
 range = 250.0
@@ -79,6 +114,12 @@ shows = ["asteroid", "ship", "station", "planet", "star"]
 [navigation_console.system_chart]
 range = 800.0
 shows = ["region", "asteroid_field", "star", "planet", "station"]
+
+# Comms range — within this radius the player ship can hail / be hailed.
+# Scale matches helm radar / system chart so default-world entities are
+# generally reachable but distant contacts drop offline.
+[comms]
+range = 1200.0
 
 [shields_console]
 focus_bonus_max_hp = 50

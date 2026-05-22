@@ -211,7 +211,9 @@ fn full_rebuild(
         commands.entity(entity).despawn();
     }
     entity_map.0.clear();
-    world.0.entities.clear();
+    // Only remove asteroid snapshots from WorldResource; preserve named entities
+    // (stations, raiders, player ship) spawned by world/server.rs and game-start systems.
+    world.0.entities.retain(|e| !e.tags.iter().any(|t| t == "asteroid"));
 
     // Sync window extents from grid config so TOML-specified values take effect.
     window.spawn_cells = grid.spawn_cells;

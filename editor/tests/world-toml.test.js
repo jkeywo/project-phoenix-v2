@@ -24,7 +24,7 @@ describe('world-toml', () => {
       const text = readWorld('default.toml');
       const result = parseWorldToml(text);
       expect(result.global.seed).toBe(42);
-      expect(result.anchors.starbase_alpha).toEqual([500.0, 0.0, 0.0]);
+      expect(result.anchors.starbase_alpha).toEqual([1000.0, 0.0, 0.0]);
       expect(Array.isArray(result.entity)).toBe(true);
       expect(result.entity.length).toBeGreaterThanOrEqual(5);
       expect(Array.isArray(result.trigger)).toBe(true);
@@ -35,7 +35,7 @@ describe('world-toml', () => {
       const text = readWorld('patrol.toml');
       const result = parseWorldToml(text);
       expect(result.global.seed).toBe(42);
-      expect(result.anchors.patrol_alpha).toEqual([300.0, 0.0, -300.0]);
+      expect(result.anchors.patrol_alpha).toEqual([600.0, 0.0, -600.0]);
       expect(result.entity.length).toBe(4);
     });
 

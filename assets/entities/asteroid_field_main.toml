@@ -1,8 +1,8 @@
 tags = ["field", "main", "asteroid_field"]
 
 [asteroid_field]
-inner_radius = 150.0
-outer_radius = 200.0
+inner_radius = 300.0
+outer_radius = 350.0
 density = 0.005
 spawn_distance = 250.0
 despawn_distance = 300.0
@@ -18,11 +18,11 @@ tags = ["field", "main", "asteroid_field"]
 [asteroid_field.grid]
 resolution = 25.0
 fill_gameplay = 0.4
-fill_cosmetic = 0.15
+fill_cosmetic = 0.2
 uniformity = 0.3
 noise_freq = 0.02
 noise_octaves = 3
 density_noise_freq = 0.01
 density_noise_octaves = 2
-jitter = 10.0
+jitter = 20.0
 cosmetic_y_offset = 15.0

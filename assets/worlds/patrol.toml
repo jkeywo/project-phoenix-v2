@@ -10,9 +10,9 @@
 seed = 42
 
 [anchors]
-patrol_alpha = [300.0, 0.0, -300.0]
-patrol_beta  = [-300.0, 0.0, -200.0]
-patrol_gamma = [0.0, 0.0, -500.0]
+patrol_alpha = [600.0, 0.0, -600.0]
+patrol_beta  = [-600.0, 0.0, -400.0]
+patrol_gamma = [0.0, 0.0, -1000.0]
 
 # ── Static map entities ───────────────────────────────────────────────────────
 

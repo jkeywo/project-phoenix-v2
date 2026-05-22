@@ -2089,8 +2089,8 @@ mod tests {
     #[test]
     fn asteroid_outside_weapons_range_replies_with_target_lock_rejected() {
         let mut app = test_app();
-        // Asteroid at (80, 0) â€" 80 units away, outside 60-unit Weapons range.
-        setup_weapons_world(&mut app, 80.0, 0.0);
+        // Asteroid at (400, 0) — 400 units away, outside 300-unit Weapons range.
+        setup_weapons_world(&mut app, 400.0, 0.0);
         start_game_with_weapons(&mut app);
 
         push(

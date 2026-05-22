@@ -3,10 +3,10 @@ tags = ["asteroid", "cosmetic"]
 
 [collider]
 shape = "Ball"
-radius = 1.0
+radius = 0.5
 length = 0.0
 
 [mesh]
 shape = "sphere"
-radius = 1.0
+radius = 0.5
 colour = [0.50, 0.45, 0.38]

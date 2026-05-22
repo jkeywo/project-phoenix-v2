@@ -49,7 +49,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-d3cefce25bcc7088.js" crossorigin="anonymous" integrity="sha384-YIlvfZQgb9LpaBeq56K9UVh/FsLmpTEACwIgjldmnRxilcXarjyK1MKYMrxGFotz"><link rel="preload" href="./project-phoenix-d3cefce25bcc7088_bg.wasm" crossorigin="anonymous" integrity="sha384-FyRHXQsODaxWI1r7VnuknIXwq1bIBXvYoH5WYFvC9KON1mZAJWIQcmw/dSaZfyug" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-9e6074519ef917a8.js" crossorigin="anonymous" integrity="sha384-stMhjuZRGKUrI3f/oPVFkG+1fRm82PmXUQZnztE15lIa3LOjUMk2jcJhgaCfLfgi"><link rel="preload" href="./project-phoenix-9e6074519ef917a8_bg.wasm" crossorigin="anonymous" integrity="sha384-ZQJipMbK5WWvQ+v5Bix3syUUZjNwqI2qkZLs9d6CjI4GyCFR0nQtwd2i0Vy3lSg8" as="fetch" type="application/wasm"></head>
 <body>
   <audio id="bg-hum" src="assets/sounds/background_hum.mp3" loop></audio>
   <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.mp3"></audio>
@@ -85,8 +85,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-d3cefce25bcc7088.js';
-const wasm = await init({ module_or_path: './project-phoenix-d3cefce25bcc7088_bg.wasm' });
+import init, * as bindings from './project-phoenix-9e6074519ef917a8.js';
+const wasm = await init({ module_or_path: './project-phoenix-9e6074519ef917a8_bg.wasm' });
 
 
 window.wasmBindings = bindings;

@@ -19,7 +19,8 @@ describe('undo integration (world mode)', () => {
   let layer;
   let layerManager;
 
-  // Drive snapshotForUndo through window.__editorV2 the same way app.js does.
+  // Drive snapshotForUndo through window.__editorV2 the same way
+  // app-v2.js wires it up at module init time.
   beforeEach(() => {
     modeShell = new ModeShell();
     layer = {
@@ -33,9 +34,9 @@ describe('undo integration (world mode)', () => {
     globalThis.window = { __editorV2: { modeShell } };
   });
 
-  // Mirror of app.js's registerWorldUndoRestore callback. This lets the
-  // test exercise the exact swap-then-restore flow that the keydown handler
-  // triggers in production.
+  // Mirror of scenario-mode.js's registerWorldUndoRestore callback. This
+  // lets the test exercise the exact swap-then-restore flow that the
+  // keydown handler triggers in production.
   function performUndo(mode, path) {
     const layerObj = layerManager.getLayers().find((l) => l.filename === path);
     if (!layerObj) return null;

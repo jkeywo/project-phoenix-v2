@@ -75,7 +75,7 @@ describe('Slice 5: Entity Mode full cycle', () => {
 
     const path = 'assets/entities/pirate_raider.toml';
     ctx.modeShell.setActiveFile('Entity', path);
-    const result = await ctx.saveFlow.saveActive(null);
+    const result = await ctx.saveFlow.saveActive();
 
     expect(result.ok).toBe(true);
     expect(ctx.writeFileCalls.length).toBe(1);

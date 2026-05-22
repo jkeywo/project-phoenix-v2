@@ -26,7 +26,7 @@ describe('SaveFlow', () => {
         anchors: {},
       });
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(true);
       expect(result.errors).toEqual([]);
     });
@@ -49,7 +49,7 @@ describe('SaveFlow', () => {
         name: 'Test World',
       });
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(false);
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]).toContain('failed');
@@ -71,7 +71,7 @@ describe('SaveFlow', () => {
         name: 'Bad World',
       });
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(true);
       expect(result.errors).toEqual([]);
       expect(result.warnings.length).toBeGreaterThan(0);
@@ -95,7 +95,7 @@ describe('SaveFlow', () => {
       });
 
       expect(modeShell.isDirty('World', 'assets/worlds/test.toml')).toBe(true);
-      await saveFlow.saveActive(null);
+      await saveFlow.saveActive();
       expect(modeShell.isDirty('World', 'assets/worlds/test.toml')).toBe(false);
     });
 
@@ -104,7 +104,7 @@ describe('SaveFlow', () => {
       const stringifyFns = { world: () => '', entity: () => '' };
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(false);
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]).toContain('No active file');
@@ -133,7 +133,7 @@ describe('SaveFlow', () => {
       });
       saveFlow.setContent('Entity', 'assets/entities/b.toml', { tags: ['test'] });
 
-      const results = await saveFlow.saveAll(null);
+      const results = await saveFlow.saveAll();
       expect(results).toHaveLength(2);
       expect(results.every((r) => r.ok)).toBe(true);
     });
@@ -156,7 +156,7 @@ describe('SaveFlow', () => {
       saveFlow.setContent('World', 'assets/worlds/a.toml', { name: 'test' });
       saveFlow.setContent('Entity', 'assets/entities/b.toml', { tags: ['test'] });
 
-      const results = await saveFlow.saveAll(null);
+      const results = await saveFlow.saveAll();
       expect(results).toHaveLength(2);
       expect(results[0].path).toBe('assets/worlds/a.toml');
       expect(results[0].ok).toBe(false);
@@ -183,7 +183,7 @@ describe('SaveFlow', () => {
       });
       saveFlow.setContent('Entity', 'assets/entities/b.toml', { tags: ['test'] });
 
-      await saveFlow.saveAll(null);
+      await saveFlow.saveAll();
       expect(modeShell.isDirty('World', 'assets/worlds/a.toml')).toBe(false);
       expect(modeShell.isDirty('Entity', 'assets/entities/b.toml')).toBe(false);
     });
@@ -220,7 +220,7 @@ describe('SaveFlow', () => {
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
       saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(true);
       expect(result.warnings).toBeDefined();
     });
@@ -242,7 +242,7 @@ describe('SaveFlow', () => {
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
       saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
-      await saveFlow.saveActive(null);
+      await saveFlow.saveActive();
       expect(writeFile).toHaveBeenCalledTimes(1);
       expect(writeFile).toHaveBeenCalledWith('assets/worlds/test.toml', 'WORLD_CONTENT');
     });
@@ -258,7 +258,7 @@ describe('SaveFlow', () => {
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
       saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(false);
       expect(result.errors[0]).toMatch(/disk full/);
       // Still dirty — write failed.
@@ -279,7 +279,7 @@ describe('SaveFlow', () => {
       const saveFlow = new SaveFlow(modeShell, stringifyFns, writeFile, noopBus);
       saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(false);
       expect(writeFile).not.toHaveBeenCalled();
       expect(modeShell.isDirty('World', 'assets/worlds/test.toml')).toBe(true);
@@ -300,7 +300,7 @@ describe('SaveFlow', () => {
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
       saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
-      await saveFlow.saveActive(null);
+      await saveFlow.saveActive();
       expect(modeShell.getUndoHistory('World', 'assets/worlds/test.toml')).toEqual([]);
     });
 
@@ -318,7 +318,7 @@ describe('SaveFlow', () => {
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, bus);
       saveFlow.setContent('World', 'assets/worlds/test.toml', {});
 
-      await saveFlow.saveActive(null);
+      await saveFlow.saveActive();
       expect(fired).toEqual(['assets/worlds/test.toml']);
     });
 
@@ -337,7 +337,7 @@ describe('SaveFlow', () => {
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, bus);
       saveFlow.setContent('Entity', 'assets/entities/a.toml', {});
 
-      await saveFlow.saveActive(null);
+      await saveFlow.saveActive();
       expect(fired).toEqual(['assets/entities/a.toml']);
     });
   });
@@ -364,7 +364,7 @@ describe('SaveFlow', () => {
         data: { uuid: 'x', name: 'X', enemies: [] },
       });
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(true);
       expect(defStringify).toHaveBeenCalledTimes(1);
       expect(defStringify.mock.calls[0][0]).toEqual({
@@ -396,7 +396,7 @@ describe('SaveFlow', () => {
         data: {},
       });
 
-      await saveFlow.saveActive(null);
+      await saveFlow.saveActive();
       expect(fired).toEqual(['assets/factions/pirate.toml']);
     });
 
@@ -422,7 +422,7 @@ describe('SaveFlow', () => {
         data: [],
       });
 
-      await saveFlow.saveActive(null);
+      await saveFlow.saveActive();
       expect(fired).toEqual([]);
     });
 
@@ -438,7 +438,7 @@ describe('SaveFlow', () => {
       const saveFlow = new SaveFlow(modeShell, stringifyFns, noopWriter, noopBus);
       saveFlow.setContent('Definitions', 'assets/factions/federation.toml', { foo: 'bar' });
 
-      const result = await saveFlow.saveActive(null);
+      const result = await saveFlow.saveActive();
       expect(result.ok).toBe(true);
       expect(entityStringify).toHaveBeenCalledTimes(1);
     });

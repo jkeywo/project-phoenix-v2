@@ -10,15 +10,15 @@ import {
  * Slice 7 AC#4: cross-mode entity invalidation.
  *
  * When SaveFlow writes an Entity-mode TOML and the InvalidationBus
- * fires `entitySaved`, the World canvas (app.js init) registers a
- * listener that:
+ * fires `entitySaved`, the World canvas (scenario-mode.js init) registers
+ * a listener that:
  *   1. drops the stale row from entity-cache
  *   2. re-loads the entity config
  *   3. re-renders the canvas
  *
  * The full init path requires Konva + the DOM tree, so this test
- * verifies the EFFECT: a listener wired exactly like app.js's runs
- * invalidate → loadEntityConfig → renderAll in order, and recovers
+ * verifies the EFFECT: a listener wired exactly like scenario-mode.js's
+ * runs invalidate → loadEntityConfig → renderAll in order, and recovers
  * the cache after a save.
  */
 
@@ -41,7 +41,7 @@ describe('Slice 7 AC#4: world canvas subscribes to entity-saved invalidations', 
     };
     const fakeRender = () => { calls.push('render'); };
 
-    // Mirror the app.js wiring exactly.
+    // Mirror the scenario-mode.js wiring exactly.
     bus.onEntitySaved(async (savedPath) => {
       invalidateEntity(savedPath);
       calls.push(`invalidate:${savedPath}`);
@@ -87,9 +87,9 @@ describe('Slice 7 AC#4: world canvas subscribes to entity-saved invalidations', 
     bus.onEntitySaved(() => { throw new Error('boom'); });
     bus.onEntitySaved(() => { secondCalled = true; });
 
-    // The InvalidationBus rethrows synchronous errors; the app.js
-    // wiring wraps its handler in try/catch. Verify the contract by
-    // catching here.
+    // The InvalidationBus rethrows synchronous errors; the
+    // scenario-mode.js wiring wraps its handler in try/catch. Verify
+    // the contract by catching here.
     try {
       bus.fireEntitySaved('x');
     } catch (_) { /* expected */ }

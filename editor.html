@@ -14,7 +14,7 @@
   }
   </script>
   <script type="module">
-    import { parse, stringify } from 'https://esm.sh/smol-toml@1.3.1';
+    import { parse, stringify } from 'https://esm.sh/smol-toml@1.6.1';
     window.tomlParse = parse;
     window.tomlStringify = stringify;
   </script>
@@ -38,13 +38,6 @@
     <!-- Toolbar -->
     <div id="toolbar">
       <div class="toolbar-group">
-        <div class="dropdown">
-          <button id="openFileBtn">Open File ▾</button>
-          <div class="dropdown-menu" id="openFileMenu">
-            <a href="#" id="openMapWorld">Open map/world…</a>
-            <a href="#" id="openEntitiesFolder">Open entities folder…</a>
-          </div>
-        </div>
         <button id="saveAllBtn">Save All</button>
         <button id="saveLayerBtn">Save Layer</button>
       </div>
@@ -53,9 +46,7 @@
         <button class="v2-mode-tab" data-mode="Entity">Entity</button>
         <button class="v2-mode-tab" data-mode="Definitions">Definitions</button>
       </div>
-      <div class="toolbar-group v2-text-toolbar hidden">
-        <button id="v2-open-btn">Open File…</button>
-        <button id="v2-save-btn">Save</button>
+      <div class="toolbar-group">
         <span id="v2-status"></span>
         <div class="v2-root-status-inline">
           <button id="v2-change-root-btn">Change root</button>
@@ -90,7 +81,6 @@
           <div id="layersSection">
             <h3>LAYERS</h3>
             <div id="layersList"></div>
-            <button id="addLayerBtn">+ Add Layer</button>
             <button id="newWorldBtn">+ New World</button>
           </div>
 
@@ -117,10 +107,6 @@
             <div id="propertiesPanelContent">
               <p class="placeholder">Select a spawn to edit properties</p>
             </div>
-          </div>
-          <div id="v2-text-panel" class="hidden">
-            <h3>TEXT EDITOR</h3>
-            <textarea id="v2-file-content" class="v2-editor-textarea" spellcheck="false" placeholder="Open a TOML file to edit…"></textarea>
           </div>
         </div>
       </div>
@@ -247,6 +233,5 @@
 
   <!-- Scripts -->
   <script type="module" src="editor/app-v2.js"></script>
-  <script type="module" src="editor/app.js"></script>
 </body>
 </html>

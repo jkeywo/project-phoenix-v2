@@ -101,7 +101,7 @@ describe('Slice 6: Definitions Mode', () => {
     expect(undoEntries[0].data.name).toBe('Federation');
 
     ctx.modeShell.setActiveFile('Definitions', path);
-    const result = await ctx.saveFlow.saveActive(null);
+    const result = await ctx.saveFlow.saveActive();
     expect(result.ok).toBe(true);
     expect(ctx.writeFileCalls.length).toBe(1);
     expect(ctx.writeFileCalls[0].path).toBe(path);

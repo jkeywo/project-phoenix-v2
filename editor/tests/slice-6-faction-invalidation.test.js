@@ -94,7 +94,7 @@ describe('Slice 6: faction-save invalidation refreshes Entity Mode', () => {
       data: { uuid: 'uuid-1', name: 'United Federation', enemies: [] },
     });
 
-    await saveFlow.saveActive(null);
+    await saveFlow.saveActive();
 
     // Subscriber's discover() is async; flush microtasks.
     for (let i = 0; i < 10; i += 1) await Promise.resolve();

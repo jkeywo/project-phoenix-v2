@@ -1,13 +1,14 @@
 /**
  * new-world-dialog.js
  *
- * Mounts a "+ New World" button next to `#addLayerBtn`. On click:
+ * Wires up the "+ New World" button (`#newWorldBtn`, owned by the editor
+ * template). On click:
  *   1. prompt() for a filename (default "new_world.toml").
  *   2. Derive `assets/worlds/<name>`.
  *   3. validateNewWorldPath against the existing paths set.
  *   4. prepareNewWorld(path) → { content, parsedContent }.
  *   5. writeFile(path, content).
- *   6. Push the layer onto layerManager (mirroring app.js layer shape).
+ *   6. Push the layer onto layerManager.
  *   7. Invoke onCreated() so the host can renderAll().
  */
 
@@ -28,28 +29,14 @@ import { isMapLayer } from './layers.js';
  * @param {() => void} deps.onCreated
  * @param {() => string[]} [deps.getExistingPaths]
  * @param {string} [deps.buttonId='newWorldBtn']
- * @param {string} [deps.siblingId='addLayerBtn']
- * @returns {HTMLButtonElement|null} the mounted button, or null when DOM
- *   structure is missing.
+ * @returns {HTMLButtonElement|null} the mounted button, or null when the
+ *   template button is missing from the DOM.
  */
 export function mountNewWorldButton(deps) {
   const buttonId = deps.buttonId || 'newWorldBtn';
-  const siblingId = deps.siblingId || 'addLayerBtn';
 
-  let btn = document.getElementById(buttonId);
-
-  // If the editor.html template already provides the button, reuse it.
-  // Otherwise create + insert it next to addLayerBtn for runtime back-compat
-  // with older template snapshots.
-  if (!btn) {
-    const sibling = document.getElementById(siblingId);
-    if (!sibling) return null;
-    btn = document.createElement('button');
-    btn.id = buttonId;
-    btn.type = 'button';
-    btn.textContent = '+ New World';
-    sibling.parentElement?.appendChild(btn);
-  }
+  const btn = document.getElementById(buttonId);
+  if (!btn) return null;
 
   btn.addEventListener('click', () => handleClick(deps));
   return btn;

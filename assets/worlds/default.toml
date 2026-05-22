@@ -94,8 +94,8 @@ condition = "on_attacked"
 entity    = "raider_alpha"
 
   [[trigger.action]]
-  type          = "load_scenario"
-  load_scenario = "assets/worlds/patrol.toml"
+  type = "load_world"
+  path = "assets/worlds/patrol.toml"
 
 # ── Comms templates ──────────────────────────────────────────────────────────
 

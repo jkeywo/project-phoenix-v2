@@ -78,8 +78,10 @@ describe('Slice 4b: new-world-dialog', () => {
     parent = new FakeElement('div');
     sibling = new FakeElement('button');
     sibling.parentElement = parent;
+    sibling.textContent = '+ New World';
     parent.children.push(sibling);
-    document.register('addLayerBtn', sibling);
+    // Template-provided #newWorldBtn — the dialog reuses it directly.
+    document.register('newWorldBtn', sibling);
 
     layerManager = new LayerManager();
     writeCalls = [];

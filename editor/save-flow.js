@@ -11,18 +11,24 @@ export class SaveFlow {
    *           fireWorldSaved?: (path: string) => void }} [invalidationBus]
    *   Notified on successful save. Optional for the same back-compat reason.
    * @param {(content: string) => boolean} [commentConfirm]
-   *   Optional gate: called with the stringified TOML before writing. If
-   *   it returns `false` the save is aborted with `{ ok: false, ... }`.
-   *   When omitted (or null) no gate is applied. Slice 7 wires this to
-   *   `confirmSaveIfCommented` so comment-bearing TOML prompts once per
-   *   session.
+   *   Optional gate: called with the ON-DISK file text (read via
+   *   `readFile`) before writing, if and only if that text contains a
+   *   line whose first non-whitespace character is `#` — i.e. an actual
+   *   TOML comment that would be lost by the editor's normalised
+   *   write. If it returns `false` the save is aborted with
+   *   `{ ok: false, ... }`. When omitted (or null) no gate is applied.
+   * @param {(path: string) => Promise<string>} [readFile]
+   *   Optional reader for the on-disk file content. Required for the
+   *   comment gate to fire — without it the gate is skipped (back-
+   *   compat for older tests / callers).
    */
-  constructor(modeShell, stringifyFunctions, writeFile, invalidationBus, commentConfirm) {
+  constructor(modeShell, stringifyFunctions, writeFile, invalidationBus, commentConfirm, readFile) {
     this._modeShell = modeShell;
     this._stringifyFunctions = stringifyFunctions;
     this._writeFile = writeFile || (async () => {});
     this._invalidationBus = invalidationBus || null;
     this._commentConfirm = typeof commentConfirm === 'function' ? commentConfirm : null;
+    this._readFile = typeof readFile === 'function' ? readFile : null;
     this._contentCache = {};
     /**
      * Optional predicate keyed by `${mode}:${path}` returning true if the
@@ -73,7 +79,7 @@ export class SaveFlow {
     return this._contentCache[mode]?.[filePath];
   }
 
-  async saveActive(crossRefIndex) {
+  async saveActive() {
     const mode = this._modeShell.getCurrentMode();
     const path = this._modeShell.getActiveFile(mode);
 
@@ -84,7 +90,7 @@ export class SaveFlow {
     return this._saveOne(mode, path);
   }
 
-  async saveAll(crossRefIndex) {
+  async saveAll() {
     const dirtyFiles = this.getDirtyFiles();
     const results = [];
 
@@ -112,10 +118,18 @@ export class SaveFlow {
     const validationResults = validateFile(path, parsedContent);
     const warnings = validationResults.map((r) => r.message);
 
-    if (this._commentConfirm && typeof content === 'string' && content.includes('#')) {
-      const ok = this._commentConfirm(content);
-      if (!ok) {
-        return { ok: false, errors: ['Save aborted: file contains comments'], warnings };
+    if (this._commentConfirm && this._readFile) {
+      let onDisk = null;
+      try {
+        onDisk = await this._readFile(path);
+      } catch {
+        // Missing/new file → nothing to lose. Skip gate.
+      }
+      if (typeof onDisk === 'string' && /^\s*#/m.test(onDisk)) {
+        const ok = this._commentConfirm(onDisk);
+        if (!ok) {
+          return { ok: false, errors: ['Save aborted: file contains comments'], warnings };
+        }
       }
     }
 

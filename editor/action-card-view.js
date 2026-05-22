@@ -19,8 +19,7 @@
  *            options list, but still allows save.
  *   - AC #3: `complete_objective` / `fail_objective` use a dropdown for
  *            their `id` field, sourced from same-world `add_objective`s.
- *   - AC #4: `load_world` / `unload_world` (path) and `load_scenario`
- *            (load_scenario) fields use a file picker stub.
+ *   - AC #4: `load_world` / `unload_world` (path) fields use a file picker stub.
  */
 
 import {
@@ -121,8 +120,7 @@ function renderField(action, field, deps) {
 
   // Path-style fields (file picker).
   if (
-    (field.key === 'path' && (action.type === 'load_world' || action.type === 'unload_world')) ||
-    (field.key === 'load_scenario' && action.type === 'load_scenario')
+    field.key === 'path' && (action.type === 'load_world' || action.type === 'unload_world')
   ) {
     row.appendChild(renderFilePickerField(action, field, value, deps));
     return row;

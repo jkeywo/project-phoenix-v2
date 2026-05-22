@@ -1,4 +1,4 @@
-import { isSupported, pickProjectRoot, getProjectRoot, readFile, writeFile, onRootChanged } from './project-root.js';
+import { isSupported, pickProjectRoot, getProjectRoot, readFile, writeFile, listDirectory, onRootChanged } from './project-root.js';
 import { ModeShell } from './mode-shell.js';
 import { stringifyWorldToml } from './world-toml.js';
 import { stringifyEntityToml } from './entity-toml.js';
@@ -7,6 +7,9 @@ import { stringifyComplexityToml } from './complexity-editor.js';
 import { InvalidationBus } from './invalidation-bus.js';
 import { SaveFlow } from './save-flow.js';
 import { confirmSaveIfCommented, resetCommentWarningOnRootChange } from './save-confirm.js';
+import { mountScenarioMode } from './scenario-mode.js';
+import { mountEntityMode } from './entity-mode-view.js';
+import { mountDefinitionsMode } from './definitions-mode-view.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -36,28 +39,25 @@ const saveFlow = new SaveFlow(
   writeFile,
   invalidationBus,
   (content) => confirmSaveIfCommented(content),
+  readFile,
 );
 
-let currentFilePath = null;
-
-// Per-mode restore callbacks. Cross-file decoupling: each mode (World in
-// Slice 1; Entity/Definitions in later slices) registers a `(path, snapshot)`
-// handler that knows how to apply a snapshot back to that mode's V1 state.
+// Per-mode restore callbacks. Each mode registers a `(path, snapshot)`
+// handler that knows how to apply a snapshot back to that mode's state.
 const restoreCallbacks = {};
 
 function registerRestore(mode, fn) {
   restoreCallbacks[mode] = fn;
 }
 
-// Expose to V1 (app.js) and to dev consoles. This is the cross-file
-// integration point until Slice 2+ moves everything into V2 properly.
+// Internal binding for cross-module helpers that need access to the
+// ModeShell without taking it as a parameter (notably `snapshotForUndo`
+// in `undo-controller.js`, which is invoked from ~20 leaf editor modules
+// — refactoring those to dependency-inject the ModeShell is out of scope
+// for the V1/V2 shell collapse). This is NOT the V1↔V2 boot handoff
+// it used to be; mode mounting now takes deps explicitly.
 if (typeof window !== 'undefined') {
-  window.__editorV2 = {
-    modeShell,
-    invalidationBus,
-    saveFlow,
-    registerRestore,
-  };
+  window.__editorV2 = { modeShell };
 }
 
 async function init() {
@@ -69,15 +69,42 @@ async function init() {
   setupModeSwitcher();
   setupPickRoot();
   setupChangeRoot();
-  setupOpenFile();
-  setupSaveFile();
   setupGlobalUndoShortcuts();
   resetCommentWarningOnRootChange({ onRootChanged });
 
-  // V1 map editor (canvas + layers) is the default view.
-  // V2 text editor stays hidden; it's shown only when the user triggers it
-  // from the V1 toolbar. The root handle (if persisted) is available for
-  // V2's File System Access API read/write when needed.
+  // Mount each mode's UI directly — no V1/V2 dual-shell handoff.
+  mountScenarioMode({
+    modeShell,
+    saveFlow,
+    registerRestore,
+    invalidationBus,
+    io: { readFile, writeFile, listDirectory },
+  });
+
+  const entityHost = document.getElementById('entity-mode-root');
+  if (entityHost) {
+    mountEntityMode({
+      host: entityHost,
+      modeShell,
+      saveFlow,
+      registerRestore,
+      invalidationBus,
+    });
+  }
+
+  const definitionsHost = document.getElementById('definitions-mode-root');
+  if (definitionsHost) {
+    mountDefinitionsMode({
+      host: definitionsHost,
+      modeShell,
+      saveFlow,
+      registerRestore,
+      invalidationBus,
+      io: { readFile, listDirectory },
+    });
+  }
+
+  // Make the persisted root handle available for FSA reads/writes.
   await getProjectRoot();
 }
 
@@ -127,50 +154,6 @@ function setupChangeRoot() {
       $('v2-status').textContent = 'Root changed';
     } catch (err) {
       $('v2-status').textContent = `Error changing root: ${err.message}`;
-    }
-  });
-}
-
-function setupOpenFile() {
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.accept = '.toml';
-  fileInput.multiple = false;
-  fileInput.style.display = 'none';
-  document.body.appendChild(fileInput);
-
-  fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const content = await file.text();
-      currentFilePath = file.name;
-      $('v2-file-content').value = content;
-      $('v2-status').textContent = `Loaded: ${file.name}`;
-    } catch (err) {
-      $('v2-status').textContent = `Error: ${err.message}`;
-    }
-    fileInput.value = '';
-  });
-
-  $('v2-open-btn').addEventListener('click', () => {
-    fileInput.click();
-  });
-}
-
-function setupSaveFile() {
-  $('v2-save-btn').addEventListener('click', async () => {
-    if (!currentFilePath) {
-      $('v2-status').textContent = 'No file open';
-      return;
-    }
-
-    try {
-      const content = $('v2-file-content').value;
-      await writeFile(currentFilePath, content);
-      $('v2-status').textContent = `Saved: ${currentFilePath}`;
-    } catch (err) {
-      $('v2-status').textContent = `Error: ${err.message}`;
     }
   });
 }

@@ -136,14 +136,6 @@ export const ACTION_SCHEMA = {
     ],
   },
 
-  load_scenario: {
-    type: 'load_scenario',
-    label: 'Load Scenario',
-    fields: [
-      { key: 'load_scenario', type: 'string', required: true },
-    ],
-  },
-
   load_world: {
     type: 'load_world',
     label: 'Load World',

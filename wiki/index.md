@@ -24,6 +24,7 @@ People, things, and game objects.
 - **[Asteroid](./entities/asteroid.md)** — Static obstacle in the field. Sphere collider.
 - **[World Data](./entities/world-data.md)** — Fixed asteroid layout for a session. Deterministic.
 - **[Bridge Crew Stations (planned)](./entities/bridge-crew-stations-planned.md)** — Weapons, Engineering, Science, Comms.
+- **[Editor](./entities/editor.md)** — In-browser TOML authoring tool (Scenario / Entity / Definitions modes) over the File System Access API. Vitest-tested deep modules. Not part of the game runtime.
 
 ## Concepts
 
@@ -93,6 +94,7 @@ Open (planned work):
 - **[PRD #116 — Save/Load Game Sessions](./sources/prd-116-save-load-sessions.md)** — `localStorage` save slots; `save.rs` is the second sanctioned `serde_json` surface.
 - **[PRD #119 — Stations, Scenarios & Comms](./sources/prd-119-stations-scenarios-comms.md)** — TOML scenario engine, station entities, `Console::Comms`. Builds on PRD #153's entity pipeline.
 - **[PRD #142 — AI and Behaviour System](./sources/prd-142-ai-and-behaviour.md)** — Data-driven state-machine NPCs that emit the same input messages as players. Depends on #119.
+- **[PRD #350 — Scenario Editor Rewrite](./sources/prd-350-scenario-editor-rewrite.md)** — Three-mode in-browser TOML editor (World / Entity / Definitions) over the FSA. Adds `extra_worlds` + `load_world`/`unload_world` trigger actions. Slices 1–6 = v1.
 
 ### Design drafts (`docs/`)
 

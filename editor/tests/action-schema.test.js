@@ -22,7 +22,6 @@ describe('ACTION_SCHEMA', () => {
       'apply_int_modifier',
       'remove_int_modifier',
       'game_over',
-      'load_scenario',
       'load_world',
       'unload_world',
     ];
@@ -171,17 +170,11 @@ describe('validateAction', () => {
     expect(result.errors[0]).toContain('BadSlot');
   });
 
-  it('load_scenario with load_scenario field returns valid', () => {
+  it('load_scenario is rejected as an unknown action type (deleted in PRD #350)', () => {
     const action = { type: 'load_scenario', load_scenario: 'assets/worlds/story.toml' };
     const result = validateAction(action);
-    expect(result.valid).toBe(true);
-  });
-
-  it('load_scenario missing load_scenario field returns error', () => {
-    const action = { type: 'load_scenario' };
-    const result = validateAction(action);
     expect(result.valid).toBe(false);
-    expect(result.errors[0]).toContain('load_scenario');
+    expect(result.errors[0]).toContain('Unknown action type');
   });
 
   it('unload_world with path returns valid', () => {

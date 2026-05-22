@@ -243,8 +243,11 @@ struct RepairHullReadout;
 // ── Plugin ───────────────────────────────────────────────────────────
 
 /// Marker resource set once the repair UI has been spawned.
+/// Carries the team count used at spawn time so we can detect changes.
 #[derive(Resource)]
-pub struct RepairPanelSpawned;
+pub struct RepairPanelSpawned {
+    team_count: usize,
+}
 
 // ── Plugin ───────────────────────────────────────────────────────────
 
@@ -259,6 +262,7 @@ impl Plugin for RepairPanelPlugin {
                 toggle_repair_panel_visibility,
                 refresh_repair_panel,
                 respawn_repair_on_orientation_change,
+                respawn_repair_on_team_count_change,
             ));
     }
 }
@@ -271,8 +275,15 @@ fn spawn_repair_ui(
     old_panel: Query<Entity, With<RepairPanel>>,
     old_help: Query<(Entity, &crate::client::elements::HelpOverlay)>,
     orientation: Option<Res<DeviceOrientation>>,
+    sim: Res<ClientSimState>,
 ) {
     let Some(assets) = assets else { return };
+
+    let team_count = sim.repair_teams.len();
+    if team_count == 0 {
+        return; // wait until the server broadcasts the team roster
+    }
+
     let is_landscape = crate::phone_border::framing::is_landscape(orientation.as_deref());
 
     for entity in old_panel.iter() {
@@ -284,15 +295,15 @@ fn spawn_repair_ui(
         }
     }
 
-    commands.insert_resource(RepairPanelSpawned);
+    commands.insert_resource(RepairPanelSpawned { team_count });
 
     let shell = ConsoleShell::spawn(
         &mut commands,
         assets.helm_panel_bg.clone(),
         is_landscape,
         crate::client::elements::HelpPanel::Repair,
-        |commands: &mut Commands, primary: Entity| {
-            fill_repair_primary(commands, primary);
+        move |commands: &mut Commands, primary: Entity| {
+            fill_repair_primary(commands, primary, team_count);
         },
         |_commands: &mut Commands, _secondary: Entity| {
             // Repair console uses a single column; secondary slot left empty.
@@ -303,8 +314,8 @@ fn spawn_repair_ui(
     commands.entity(shell.root).insert((RepairPanel, Visibility::Hidden));
 }
 
-/// Primary slot: title, hull readout, three team rows.
-fn fill_repair_primary(commands: &mut Commands, container: Entity) {
+/// Primary slot: title, hull readout, one row per repair team.
+fn fill_repair_primary(commands: &mut Commands, container: Entity, team_count: usize) {
     let col = commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -332,13 +343,31 @@ fn fill_repair_primary(commands: &mut Commands, container: Entity) {
     commands.entity(hull_readout).insert(RepairHullReadout);
     commands.entity(col).add_child(hull_readout);
 
-    for i in 0..3 {
+    for i in 0..team_count {
         let row = spawn_repair_team_row(commands, i);
         commands.entity(col).add_child(row);
     }
 }
 
 // ── Orientation respawn ──────────────────────────────────────────────
+
+fn respawn_repair_on_team_count_change(
+    sim: Res<ClientSimState>,
+    spawned: Option<Res<RepairPanelSpawned>>,
+    panel: Query<Entity, With<RepairPanel>>,
+    mut commands: Commands,
+) {
+    let Some(spawned) = spawned else { return };
+    if !sim.is_changed() {
+        return;
+    }
+    if sim.repair_teams.len() != spawned.team_count {
+        for entity in panel.iter() {
+            commands.entity(entity).despawn();
+        }
+        commands.remove_resource::<RepairPanelSpawned>();
+    }
+}
 
 fn respawn_repair_on_orientation_change(
     orientation: Option<Res<DeviceOrientation>>,
@@ -406,6 +435,8 @@ fn spawn_repair_team_row(commands: &mut Commands, team_idx: usize) -> Entity {
     let btn_row = commands
         .spawn(Node {
             flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::Center,
+            width: Val::Percent(100.0),
             column_gap: Val::Px(6.0),
             ..default()
         })

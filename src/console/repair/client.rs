@@ -406,6 +406,7 @@ fn spawn_repair_team_row(commands: &mut Commands, team_idx: usize) -> Entity {
         .spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
             width: Val::Percent(100.0),
             height: Val::Px(32.0),
             column_gap: Val::Px(8.0),
@@ -436,7 +437,6 @@ fn spawn_repair_team_row(commands: &mut Commands, team_idx: usize) -> Entity {
         .spawn(Node {
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Center,
-            width: Val::Percent(100.0),
             column_gap: Val::Px(6.0),
             ..default()
         })

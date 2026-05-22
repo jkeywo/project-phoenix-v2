@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::lobby::{GameStateCache, WorldResource};
 use crate::messages::{GamePhase, PhaserBank, ViewDirection, ViewMode};
-use crate::radar;
 use crate::ship_state::ShipState;
 use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource};
 use crate::beam_render;
@@ -278,7 +277,15 @@ fn toggle_cameras(
         return;
     }
     let in_game = state.get() == &GamePhase::InProgress;
-    let radar_active = in_game && matches!(ship.view_mode, ViewMode::Radar | ViewMode::ScienceRadar | ViewMode::SystemChart | ViewMode::NavigationChart);
+    let radar_active = in_game
+        && matches!(
+            ship.view_mode,
+            ViewMode::Radar
+                | ViewMode::ScienceRadar
+                | ViewMode::SensorsRadar
+                | ViewMode::SystemChart
+                | ViewMode::NavigationChart
+        );
     let game_active  = in_game && !radar_active;
 
     // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
@@ -379,43 +386,75 @@ fn update_view_direction_label(
 /// Pixel radius of the radar disc on screen.
 const RADAR_PIXEL_RADIUS: f32 = 220.0;
 
-/// Draws the radar overlay (outer ring, mid ring, ship triangle, asteroid pips)
-/// using gizmos in the RadarCamera's 2D space. Only emits when InProgress and
-/// the ship's view mode is Radar; otherwise it does nothing (so the gizmo
-/// buffer is empty and nothing is rendered).
+/// Draws the radar overlay (outer ring, mid ring, ship triangle, entity pips,
+/// asteroid-field rings) using gizmos in the RadarCamera's 2D space. Active
+/// whenever the ship's view mode is one of the radar views; otherwise nothing
+/// is emitted (gizmo buffer stays empty).
+///
+/// Per view mode the tag filter is taken from the matching client console's
+/// `RadarConfig` so the viewscreen and the phone show the same entities:
+///
+/// - `Radar`          → `helm_radar_config()`        (asteroids + stars + planets, ship range)
+/// - `ScienceRadar` / `SensorsRadar` → `science_radar_config()` (long range, ships + fields + stars + planets)
+/// - `SystemChart`    → `system_chart_config()`      (stars, planets, fields, regions)
+/// - `NavigationChart`→ `navigation_chart_config()`  (stars, planets, fields, regions)
 fn draw_radar_overlay(
     ship: Res<ShipState>,
     world: Option<Res<WorldResource>>,
     mut gizmos: Gizmos,
 ) {
-    if !matches!(ship.view_mode, ViewMode::Radar) {
-        return;
-    }
-    let centre = Vec2::ZERO;
-    let outer  = Color::srgba(0.4, 0.9, 0.5, 0.9);
-    let mid    = Color::srgba(0.4, 0.9, 0.5, 0.45);
-    let ship_c = Color::srgba(0.6, 1.0, 0.7, 1.0);
-    let aster  = Color::srgba(0.85, 0.7, 0.55, 0.95);
+    use crate::client_sim::{helm_radar_config, science_radar_config, system_chart_config};
+    use crate::radar::{compute_science_radar_view, navigation_chart_config};
 
-    // Outer ring (full radar range) and mid ring (half range).
+    let config = match ship.view_mode {
+        ViewMode::Radar => helm_radar_config(),
+        ViewMode::ScienceRadar | ViewMode::SensorsRadar => science_radar_config(),
+        ViewMode::SystemChart => system_chart_config(),
+        ViewMode::NavigationChart => navigation_chart_config(),
+        ViewMode::Camera(_) | ViewMode::Comms => return,
+    };
+
+    let centre = Vec2::ZERO;
+    let outer = Color::srgba(0.4, 0.9, 0.5, 0.9);
+    let mid = Color::srgba(0.4, 0.9, 0.5, 0.45);
+    let ship_c = Color::srgba(0.6, 1.0, 0.7, 1.0);
+    let aster = Color::srgba(0.85, 0.7, 0.55, 0.95);
+    let field_c = Color::srgba(0.6, 0.55, 0.4, 0.5);
+
+    // Outer ring (full range) and a mid reference ring at half range.
     gizmos.circle_2d(centre, RADAR_PIXEL_RADIUS, outer);
-    let mid_ratio = radar::RADAR_MID_RING / radar::RADAR_RANGE;
-    gizmos.circle_2d(centre, RADAR_PIXEL_RADIUS * mid_ratio, mid);
+    gizmos.circle_2d(centre, RADAR_PIXEL_RADIUS * 0.5, mid);
 
     // Ship triangle at centre, pointing up (forward = +y on the radar).
-    let tip   = Vec2::new(0.0,  10.0);
-    let left  = Vec2::new(-7.0, -8.0);
-    let right = Vec2::new( 7.0, -8.0);
-    gizmos.line_2d(tip,  left,  ship_c);
+    let tip = Vec2::new(0.0, 10.0);
+    let left = Vec2::new(-7.0, -8.0);
+    let right = Vec2::new(7.0, -8.0);
+    gizmos.line_2d(tip, left, ship_c);
     gizmos.line_2d(left, right, ship_c);
-    gizmos.line_2d(right, tip,  ship_c);
+    gizmos.line_2d(right, tip, ship_c);
 
-    // Asteroid pips, projected through pure radar math.
-    if let Some(world) = world {
-        for (rx, ry, rr) in radar::radar_dots(&world.0.entities, ship.x, ship.z, ship.yaw) {
-            let pos = Vec2::new(rx * RADAR_PIXEL_RADIUS, ry * RADAR_PIXEL_RADIUS);
-            let pix_radius = (rr * RADAR_PIXEL_RADIUS).max(2.0);
-            gizmos.circle_2d(pos, pix_radius, aster);
+    let Some(world) = world else { return };
+    let view = compute_science_radar_view(
+        &world.0.entities,
+        ship.x,
+        ship.z,
+        ship.yaw,
+        &config,
+    );
+
+    for dot in &view.dots {
+        let pos = Vec2::new(dot.radar_x * RADAR_PIXEL_RADIUS, dot.radar_y * RADAR_PIXEL_RADIUS);
+        let pix_radius = (dot.scaled_radius * RADAR_PIXEL_RADIUS).max(2.0);
+        gizmos.circle_2d(pos, pix_radius, aster);
+    }
+
+    for ring in &view.rings {
+        let pos = Vec2::new(ring.centre_x * RADAR_PIXEL_RADIUS, ring.centre_y * RADAR_PIXEL_RADIUS);
+        let outer_pix = (ring.outer_r * RADAR_PIXEL_RADIUS).max(2.0);
+        gizmos.circle_2d(pos, outer_pix, field_c);
+        if ring.inner_r > 0.0 {
+            let inner_pix = (ring.inner_r * RADAR_PIXEL_RADIUS).max(1.0);
+            gizmos.circle_2d(pos, inner_pix, field_c);
         }
     }
 }

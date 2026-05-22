@@ -30,14 +30,9 @@ max_hp = 25.0
 console = "Shields"
 max_hp = 25.0
 
-[weapons]
-phaser_range = 200.0
-phaser_damage = 10
-phaser_cooldown = 0.5
-
 [weapons_console]
 power_multipliers = [-0.5, 0.0, 0.25, 0.5]
-beam_range = 40.0
+beam_range = 100.0
 beam_damage_per_sec = 5.0
 beam_duration_secs = 6.0
 cooldown_secs = 6.0

@@ -21,8 +21,8 @@ use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    ProgressBar, ProgressBarVariant, ProgressValue, RadioButtonConfig, RadioGroup, RadioSelected,
-    ReadoutValue, SegmentCount, StateVisuals, TextReadout,
+    spawn_gui_button, ButtonPressed, ButtonSize, ProgressBar, ProgressBarVariant, ProgressValue,
+    ReadoutValue, SegmentCount, StateVisuals, TextReadout, WidgetState,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewDirection};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -160,9 +160,9 @@ pub struct ShieldsPanel;
 #[derive(Resource)]
 pub struct ShieldsPanelSpawned;
 
-/// Marks the `RadioGroup` entity used for shield focus selection.
+/// Marks an individual focus button; carries the facing index (0-3).
 #[derive(Component)]
-struct ShieldFocusRadio;
+struct ShieldFocusButton(usize);
 
 /// Marks the Clear-focus button entity.
 #[derive(Component)]
@@ -237,9 +237,9 @@ fn spawn_shields_ui(
 
 // ── Fill helpers ─────────────────────────────────────────────────────
 
-/// Build the four HP rows (Fore/Port/Aft/Stbd) into the primary container.
+/// Build the four HP rows (Fore/Port/Aft/Stbd) into the primary container,
+/// with an inline focus button per row and a Clear button below all rows.
 fn fill_shields_hp_rows(commands: &mut Commands, container: Entity) {
-    // Column wrapper so rows centre vertically.
     let col = commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -262,7 +262,7 @@ fn fill_shields_hp_rows(commands: &mut Commands, container: Entity) {
         .id();
     commands.entity(col).add_child(title);
 
-    for (idx, label) in FACING_LABELS.iter().enumerate() {
+    for (idx, (label, dir)) in FACING_LABELS.iter().zip(FOCUS_DIRECTIONS.iter()).enumerate() {
         let row = commands
             .spawn(Node {
                 flex_direction: FlexDirection::Row,
@@ -306,57 +306,39 @@ fn fill_shields_hp_rows(commands: &mut Commands, container: Entity) {
             ));
         commands.entity(row).add_child(readout);
 
+        let dir_clone = dir.clone();
+        let focus_btn = spawn_gui_button(
+            commands,
+            ButtonSize::Rect { width: 52.0, height: 24.0 },
+            focus_button_visuals(),
+            None,
+        );
+        commands
+            .entity(focus_btn)
+            .insert(ShieldFocusButton(idx))
+            .with_children(|b| {
+                b.spawn((
+                    Text::new("Focus"),
+                    TextFont { font_size: 10.0, ..default() },
+                    TextColor(Color::srgb(0.6, 0.8, 1.0)),
+                ));
+            })
+            .observe(move |_trigger: On<ButtonPressed>,
+                           mut buttons: Query<(&mut WidgetState, &ShieldFocusButton)>,
+                           mut outbound: MessageWriter<OutboundClientMessage>| {
+                for (mut ws, btn) in buttons.iter_mut() {
+                    ws.active = btn.0 == idx;
+                }
+                outbound.write(OutboundClientMessage(ClientMessage::SetShieldFocus {
+                    facing: Some(dir_clone.clone()),
+                }));
+            });
+        commands.entity(row).add_child(focus_btn);
+
         commands.entity(col).add_child(row);
     }
-}
 
-/// Build the focus `RadioGroup` + Clear button into the secondary container.
-fn fill_shields_focus_controls(commands: &mut Commands, container: Entity) {
-    let col = commands
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            row_gap: Val::Px(10.0),
-            ..default()
-        })
-        .id();
-    commands.entity(container).add_child(col);
-
-    let focus_label = commands
-        .spawn((
-            Text::new("Focus:"),
-            TextFont { font_size: 12.0, ..default() },
-            TextColor(Color::srgb(0.6, 0.8, 1.0)),
-        ))
-        .id();
-    commands.entity(col).add_child(focus_label);
-
-    let btn_configs: Vec<RadioButtonConfig> = (0..4)
-        .map(|_| RadioButtonConfig {
-            size: crate::gui::ButtonSize::Rect { width: 62.0, height: 32.0 },
-            click_sound: None,
-        })
-        .collect();
-
-    let radio_group = RadioGroup::spawn(
-        commands,
-        btn_configs,
-        focus_button_visuals(),
-        None,
-    );
-    commands
-        .entity(radio_group)
-        .insert(ShieldFocusRadio)
-        .observe(on_focus_selected);
-    commands.entity(col).add_child(radio_group);
-
-    // Add text labels to each radio member button.
-    commands.insert_resource(FocusButtonLabelsPending);
-
-    // ── Clear-focus button ─────────────────────────────────────────────
+    // Clear button centred below all four rows.
     let clear_visuals = clear_button_visuals();
     let clear_btn = commands
         .spawn((
@@ -384,47 +366,14 @@ fn fill_shields_focus_controls(commands: &mut Commands, container: Entity) {
     commands.entity(col).add_child(clear_btn);
 }
 
-// ── Focus button label post-setup ─────────────────────────────────────
+/// Secondary slot — focus controls are now inline in the primary HP rows.
+fn fill_shields_focus_controls(_commands: &mut Commands, _container: Entity) {}
 
-/// Resource flag: focus button labels have not been added yet.
-#[derive(Resource)]
-struct FocusButtonLabelsPending;
-
-/// One-shot system: once the RadioGroup children exist (deferred spawn),
-/// add text label children to each member button.
 fn refresh_shields_panel(
-    pending: Option<Res<FocusButtonLabelsPending>>,
-    mut commands: Commands,
-    groups: Query<&Children, With<ShieldFocusRadio>>,
     sim: Res<ClientSimState>,
     mut hp_bars: Query<(&ShieldHpBar, &mut ProgressValue)>,
     mut hp_readouts: Query<(&ShieldHpReadout, &mut ReadoutValue)>,
 ) {
-    // ── One-shot: add text labels to focus buttons ─────────────────────
-    if pending.is_some() {
-        let labels = ["Fore", "Port", "Aft", "Stbd"];
-        for children in groups.iter() {
-            if children.len() < 4 {
-                // Children not resolved yet — retry next frame.
-                return;
-            }
-            for (idx, child) in children.iter().take(4).enumerate() {
-                if let Some(&label_text) = labels.get(idx) {
-                    commands.entity(child).with_children(|btn| {
-                        btn.spawn((
-                            Text::new(label_text),
-                            TextFont { font_size: 11.0, ..default() },
-                            TextColor(Color::srgb(0.6, 0.8, 1.0)),
-                        ));
-                    });
-                }
-            }
-            commands.remove_resource::<FocusButtonLabelsPending>();
-            break;
-        }
-    }
-
-    // ── HP bars + readouts ─────────────────────────────────────────────
     if !sim.is_changed() {
         return;
     }
@@ -464,13 +413,18 @@ fn toggle_shields_panel_visibility(
     }
 }
 
-/// Sends `SetShieldFocus { facing: None }` when the Clear button is pressed.
+/// Sends `SetShieldFocus { facing: None }` when the Clear button is pressed,
+/// and deactivates all focus buttons.
 fn handle_clear_focus_press(
     interactions: Query<&Interaction, (Changed<Interaction>, With<ClearFocusButton>)>,
+    mut focus_buttons: Query<&mut WidgetState, With<ShieldFocusButton>>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     for interaction in interactions.iter() {
         if *interaction == Interaction::Pressed {
+            for mut ws in focus_buttons.iter_mut() {
+                ws.active = false;
+            }
             outbound.write(OutboundClientMessage(ClientMessage::SetShieldFocus {
                 facing: None,
             }));
@@ -493,32 +447,6 @@ fn respawn_shields_on_orientation_change(
         commands.entity(entity).despawn();
     }
     commands.remove_resource::<ShieldsPanelSpawned>();
-}
-
-// ── RadioGroup observer ───────────────────────────────────────────────
-
-/// Observer on the `ShieldFocusRadio` group entity.
-/// Maps the selected member index to a `ViewDirection` and emits
-/// `SetShieldFocus`.
-fn on_focus_selected(
-    trigger: On<RadioSelected>,
-    children_q: Query<&Children>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    let group = trigger.entity;
-    let member = trigger.event().member;
-
-    if let Ok(children) = children_q.get(group) {
-        for (idx, child) in children.iter().enumerate() {
-            if child == member {
-                let facing = FOCUS_DIRECTIONS.get(idx).cloned();
-                outbound.write(OutboundClientMessage(ClientMessage::SetShieldFocus {
-                    facing,
-                }));
-                return;
-            }
-        }
-    }
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────

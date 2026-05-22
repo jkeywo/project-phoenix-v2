@@ -728,6 +728,8 @@ pub enum ServerMessage {
         aft_loaded: bool,
         /// Reload remaining for the aft tube (0.0 when loaded).
         aft_reload_secs: f32,
+        /// Current phaser firing mode (Auto or Manual).
+        phaser_mode: PhaserMode,
     },
     /// Broadcast when a phaser beam starts. Sent to all players so the renderer
     /// can draw the beam on the viewscreen.

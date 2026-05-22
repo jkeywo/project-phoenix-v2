@@ -306,6 +306,7 @@ impl ClientSimState {
                 fore_starboard_reload_secs,
                 aft_loaded,
                 aft_reload_secs,
+                phaser_mode,
                 ..
             } => {
                 self.fire_ready = *fire_ready;
@@ -317,6 +318,7 @@ impl ClientSimState {
                 self.fore_starboard_reload_secs = *fore_starboard_reload_secs;
                 self.aft_loaded = *aft_loaded;
                 self.aft_reload_secs = *aft_reload_secs;
+                self.phaser_mode = *phaser_mode;
             }
             ServerMessage::ScienceTargetSuggestion { uuid } => {
                 self.science_target_suggestion = Some(uuid.clone());
@@ -1755,6 +1757,7 @@ mod tests {
             fore_starboard_reload_secs: 0.0,
             aft_loaded: true,
             aft_reload_secs: 0.0,
+            phaser_mode: PhaserMode::Auto,
         });
         assert!(s.fire_ready);
         assert!(!s.on_cooldown);
@@ -1770,6 +1773,7 @@ mod tests {
             fore_starboard_reload_secs: 0.0,
             aft_loaded: true,
             aft_reload_secs: 0.0,
+            phaser_mode: PhaserMode::Auto,
         });
         assert!(!s.fire_ready);
         assert!(s.on_cooldown);
@@ -1886,6 +1890,7 @@ mod tests {
             fore_starboard_reload_secs: 0.0,
             aft_loaded: false,
             aft_reload_secs: 3.2,
+            phaser_mode: PhaserMode::Auto,
         });
 
         assert_eq!(s.torpedo_count, 8);
@@ -1895,6 +1900,42 @@ mod tests {
         assert_eq!(s.fore_starboard_reload_secs, 0.0);
         assert!(!s.aft_loaded);
         assert_eq!(s.aft_reload_secs, 3.2);
+    }
+
+    #[test]
+    fn weapons_update_phaser_mode_updates_client_state() {
+        let mut s = ClientSimState::default();
+        assert_eq!(s.phaser_mode, PhaserMode::Auto, "default should be Auto");
+
+        s.apply(&ServerMessage::WeaponsUpdate {
+            target_uuid: None,
+            fire_ready: false,
+            on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true,
+            fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: true,
+            aft_reload_secs: 0.0,
+            phaser_mode: PhaserMode::Manual,
+        });
+        assert_eq!(s.phaser_mode, PhaserMode::Manual);
+
+        s.apply(&ServerMessage::WeaponsUpdate {
+            target_uuid: None,
+            fire_ready: false,
+            on_cooldown: false,
+            torpedo_count: 10,
+            fore_port_loaded: true,
+            fore_port_reload_secs: 0.0,
+            fore_starboard_loaded: true,
+            fore_starboard_reload_secs: 0.0,
+            aft_loaded: true,
+            aft_reload_secs: 0.0,
+            phaser_mode: PhaserMode::Auto,
+        });
+        assert_eq!(s.phaser_mode, PhaserMode::Auto);
     }
 
     #[test]

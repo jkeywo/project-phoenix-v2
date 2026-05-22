@@ -534,6 +534,7 @@ mod tests {
             fore_starboard_reload_secs: 0.0,
             aft_loaded: true,
             aft_reload_secs: 0.0,
+            phaser_mode: crate::messages::PhaserMode::Auto,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -552,6 +553,7 @@ mod tests {
             fore_starboard_reload_secs: 0.0,
             aft_loaded: false,
             aft_reload_secs: 3.2,
+            phaser_mode: crate::messages::PhaserMode::Manual,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
@@ -570,6 +572,7 @@ mod tests {
             fore_starboard_reload_secs: 5.0,
             aft_loaded: false,
             aft_reload_secs: 2.0,
+            phaser_mode: crate::messages::PhaserMode::Manual,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

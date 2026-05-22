@@ -658,6 +658,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             let torpedo_sys = world.resource::<TorpedoSystemResource>();
             let modifiers = world.resource::<crate::modifiers::ShipModifiers>();
             let combat_config = world.resource::<PhaserCombatConfigResource>();
+            let phaser_mode = world.resource::<CurrentPhaserMode>().0;
 
             let effective_phaser_range = combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
             let fire_ready = match &weapons_target.0 {
@@ -682,6 +683,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 fore_starboard_reload_secs: ts.fore_starboard.reload_remaining,
                 aft_loaded: ts.aft.is_loaded(),
                 aft_reload_secs: ts.aft.reload_remaining,
+                phaser_mode,
             }]
         },
     )

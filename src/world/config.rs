@@ -190,8 +190,6 @@ struct RawActionEntry {
     #[serde(default)]
     message: Option<String>,
     #[serde(default)]
-    load_scenario: Option<String>,
-    #[serde(default)]
     path: Option<String>,
 }
 
@@ -272,8 +270,6 @@ pub enum TriggerAction {
     ApplyIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot, bonus: i32 },
     RemoveIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot },
     GameOver { message: Option<String> },
-    /// Load a new scenario, replacing the current world.
-    LoadScenario { path: String },
     /// Additively load a sub-world from `path` into the running world layer map.
     LoadWorld { path: String },
     /// Unload a previously loaded sub-world identified by `path`.
@@ -416,9 +412,6 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                 }
             }
             "game_over" => TriggerAction::GameOver { message: raw_action.message.clone() },
-            "load_scenario" => TriggerAction::LoadScenario {
-                path: raw_action.load_scenario.clone().ok_or_else(|| "Action 'load_scenario' requires a 'load_scenario' field".to_string())?,
-            },
             "load_world" => TriggerAction::LoadWorld {
                 path: raw_action.path.clone().ok_or_else(|| "Action 'load_world' requires a 'path' field".to_string())?,
             },
@@ -1569,6 +1562,27 @@ after_secs = 10.0
         assert!(
             err.contains("unload_world") && err.contains("path"),
             "error must mention unload_world and path: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_rejects_load_scenario_action_as_unknown() {
+        // PRD #341 removed the `load_scenario` action; `load_world` is the
+        // replacement. Any lingering `load_scenario` in a world TOML must be
+        // rejected as an unknown action rather than silently parsed.
+        let toml = r#"
+[[trigger]]
+condition = "on_timer"
+after_secs = 10.0
+
+  [[trigger.action]]
+  type = "load_scenario"
+  load_scenario = "assets/worlds/patrol.toml"
+"#;
+        let err = parse_world(toml).expect_err("load_scenario must be rejected as unknown action");
+        assert!(
+            err.contains("Unknown trigger action") && err.contains("load_scenario"),
+            "error must flag load_scenario as unknown: {err}"
         );
     }
 

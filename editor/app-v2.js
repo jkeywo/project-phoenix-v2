@@ -50,16 +50,6 @@ function registerRestore(mode, fn) {
   restoreCallbacks[mode] = fn;
 }
 
-// Internal binding for cross-module helpers that need access to the
-// ModeShell without taking it as a parameter (notably `snapshotForUndo`
-// in `undo-controller.js`, which is invoked from ~20 leaf editor modules
-// — refactoring those to dependency-inject the ModeShell is out of scope
-// for the V1/V2 shell collapse). This is NOT the V1↔V2 boot handoff
-// it used to be; mode mounting now takes deps explicitly.
-if (typeof window !== 'undefined') {
-  window.__editorV2 = { modeShell };
-}
-
 async function init() {
   if (!isSupported()) {
     showBanner();
@@ -73,7 +63,9 @@ async function init() {
   resetCommentWarningOnRootChange({ onRootChanged });
 
   // Mount each mode's UI directly — no V1/V2 dual-shell handoff.
+  const worldHost = document.getElementById('world-mode-root');
   mountScenarioMode({
+    host: worldHost,
     modeShell,
     saveFlow,
     registerRestore,

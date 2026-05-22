@@ -10,9 +10,10 @@
  * uniformly via `mount*Mode(...)` calls — mirroring the shape of
  * `mountEntityMode` and `mountDefinitionsMode`.
  *
- * The old `window.__editorV2` cross-file handoff is no longer used by this
- * module: every cross-mode collaborator (modeShell, saveFlow,
- * registerRestore, invalidationBus) is passed in explicitly.
+ * Every cross-mode collaborator (modeShell, saveFlow, registerRestore,
+ * invalidationBus) is passed in explicitly, and the undo controller is
+ * constructed here from the injected ModeShell and threaded into the leaf
+ * views (CanvasManager, PropertiesPanel) as a normal dependency.
  *
  * The V1 legacy file-picker fallback (the path that produced "unsavable"
  * layers and emitted the "Saving through the new SaveFlow will fail"
@@ -30,7 +31,7 @@ import {
   loadEntityConfig,
   invalidateEntity,
 } from './entity-cache.js';
-import { restoreWorldLayer } from './undo-controller.js';
+import { restoreWorldLayer, createUndoController } from './undo-controller.js';
 import { CrossReferenceIndex } from './cross-references.js';
 import { renderWorldContentPanel as defaultRenderWorldContent } from './world-content-view.js';
 import { renderTriggerableWorldsPanel as defaultRenderTriggerableWorlds } from './triggerable-worlds-panel.js';
@@ -43,6 +44,23 @@ import {
 
 /**
  * @param {object} opts
+ * @param {HTMLElement} [opts.host]
+ *   The `#world-mode-root` element that contains the Scenario Mode pane.
+ *   DOM IDs that live INSIDE this root (e.g. `#newEntityBtn` in the
+ *   entities-palette section) are looked up via `host.querySelector` so
+ *   the mode is self-contained.
+ *
+ *   IDs that live OUTSIDE the root — the shared top-level toolbar buttons
+ *   (`#saveAllBtn`, `#saveLayerBtn`) and the toolbar status text
+ *   (`#unsavedIndicator`) — remain `document.getElementById` lookups
+ *   because they are shared across all modes, not owned by the Scenario
+ *   pane. This mirrors how `mountEntityMode` / `mountDefinitionsMode`
+ *   treat their hosts: scoped where it makes sense, global where the DOM
+ *   is genuinely global.
+ *
+ *   `host` is optional for backwards-compatibility with older callers and
+ *   tests; when omitted the host-scoped lookups also fall back to
+ *   `document.getElementById`.
  * @param {import('./mode-shell.js').ModeShell} opts.modeShell
  * @param {import('./save-flow.js').SaveFlow} opts.saveFlow
  * @param {(mode:string, fn:(modeShell, path, direction)=>void)=>void} opts.registerRestore
@@ -64,6 +82,7 @@ import {
  * }}
  */
 export function mountScenarioMode({
+  host,
   modeShell,
   saveFlow,
   registerRestore,
@@ -71,6 +90,12 @@ export function mountScenarioMode({
   io,
   deps,
 } = {}) {
+  // Look up an ID under `host` when provided, otherwise fall back to
+  // a global lookup. Used for elements that live INSIDE #world-mode-root.
+  const findInHost = (id) =>
+    (host && typeof host.querySelector === 'function'
+      ? host.querySelector(`#${id}`)
+      : null) || document.getElementById(id);
   const ioDeps = {
     readFile:      io?.readFile      || defaultReadFile,
     writeFile:     io?.writeFile     || defaultWriteFile,
@@ -88,16 +113,18 @@ export function mountScenarioMode({
 
   const layerManager = new LayerManager();
   const crossRefIndex = new CrossReferenceIndex();
+  const undoController = createUndoController({ modeShell });
   const canvasManager = new CanvasManager(
     layerManager,
     onSpawnSelect,
     onSpawnUpdate,
     onSpawnCreate,
     onSpawnDrag,
+    undoController,
   );
   canvasManager.init();
 
-  const propertiesPanel = new PropertiesPanel(canvasManager, layerManager);
+  const propertiesPanel = new PropertiesPanel(canvasManager, layerManager, undoController);
 
   const entityEditor = new EntityEditor(canvasManager, layerManager, onEntitySaved);
   entityEditor.init();
@@ -272,9 +299,13 @@ export function mountScenarioMode({
   // ── Toolbar ────────────────────────────────────────────────────────────
 
   function setupToolbar() {
+    // `saveAllBtn` / `saveLayerBtn` / `unsavedIndicator` live in the
+    // shared top-level toolbar (outside #world-mode-root) and are reused
+    // across all modes — keep them `document`-scoped.
+    // `newEntityBtn` lives inside #world-mode-root → scope under `host`.
     const saveAllBtn   = document.getElementById('saveAllBtn');
     const saveLayerBtn = document.getElementById('saveLayerBtn');
-    const newEntityBtn = document.getElementById('newEntityBtn');
+    const newEntityBtn = findInHost('newEntityBtn');
 
     if (saveAllBtn) {
       saveAllBtn.addEventListener('click', async () => {

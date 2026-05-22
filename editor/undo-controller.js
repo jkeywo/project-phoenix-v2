@@ -3,8 +3,9 @@
  *
  * Contract: snapshot-BEFORE-mutation.
  *
- *   snapshotForUndo(layer);   // records layer.toml as the PRE-mutation state
- *   layer.toml.something = newValue;  // mutate
+ *   const undoController = createUndoController({ modeShell });
+ *   undoController.snapshotForUndo(layer);   // records layer.toml as the PRE-mutation state
+ *   layer.toml.something = newValue;          // mutate
  *
  * The undo stack therefore holds *pre-mutation* states. To restore on Cmd+Z
  * we pop the pre-mutation snapshot AND push the current (post-mutation)
@@ -18,25 +19,41 @@
  *
  * `restoreWorldLayer` is exported as a pure function so the integration
  * test can drive it without DOM, Konva, or window globals.
+ *
+ * The controller is constructed once in `scenario-mode.js` next to the
+ * ModeShell + SaveFlow and threaded as a normal dependency into the
+ * leaf views (canvas, sidebar, trigger-view, comms-view, override-view).
  */
 
 /**
- * Push the current (pre-mutation) layer state onto the World undo stack.
- * Callers MUST invoke this BEFORE mutating `layer.toml`.
+ * Create an undo controller bound to a specific ModeShell.
  *
- * @param {{ filename: string, toml: object }} layer
+ * @param {{ modeShell: import('./mode-shell.js').ModeShell }} deps
+ * @returns {{ snapshotForUndo: (layer: { filename: string, toml: object }) => void }}
  */
-export function snapshotForUndo(layer) {
-  if (!layer || !layer.filename) return;
-  const editorV2 = (typeof window !== 'undefined') ? window.__editorV2 : null;
-  if (!editorV2 || !editorV2.modeShell) return;
-  try {
-    const snapshot = structuredClone(layer.toml);
-    editorV2.modeShell.pushUndoEntry('World', layer.filename, snapshot);
-    editorV2.modeShell.markDirty('World', layer.filename, true);
-  } catch (err) {
-    console.warn('[undo-controller] snapshot failed:', err?.message || err);
+export function createUndoController({ modeShell } = {}) {
+  if (!modeShell) {
+    throw new Error('createUndoController: modeShell is required');
   }
+
+  return {
+    /**
+     * Push the current (pre-mutation) layer state onto the World undo stack.
+     * Callers MUST invoke this BEFORE mutating `layer.toml`.
+     *
+     * @param {{ filename: string, toml: object }} layer
+     */
+    snapshotForUndo(layer) {
+      if (!layer || !layer.filename) return;
+      try {
+        const snapshot = structuredClone(layer.toml);
+        modeShell.pushUndoEntry('World', layer.filename, snapshot);
+        modeShell.markDirty('World', layer.filename, true);
+      } catch (err) {
+        console.warn('[undo-controller] snapshot failed:', err?.message || err);
+      }
+    },
+  };
 }
 
 /**

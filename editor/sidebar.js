@@ -1,14 +1,17 @@
 import { getSpawnName, getSpawnPosition, getEntityPath, getRelativeInfo, setSpawnPosition, getAllAnchors, getSpawnRotation, setSpawnRotation, getSpawnScale, setSpawnScale } from './toml-utils.js';
 import { getSpawnsFromAllLayers } from './toml-utils.js';
-import { snapshotForUndo } from './undo-controller.js';
 import { renderOverridePanel } from './override-view.js';
 import { renderTriggerPanel } from './trigger-view.js';
 import { renderCommsPanel } from './comms-view.js';
 
 export class PropertiesPanel {
-  constructor(canvasManager, layerManager) {
+  constructor(canvasManager, layerManager, undoController) {
+    if (!undoController || typeof undoController.snapshotForUndo !== 'function') {
+      throw new Error('PropertiesPanel: undoController with snapshotForUndo is required');
+    }
     this.canvasManager = canvasManager;
     this.layerManager = layerManager;
+    this.undoController = undoController;
     this.container = document.getElementById('propertiesPanelContent');
     this.currentSpawn = null;
     this.currentLayer = null;
@@ -38,6 +41,7 @@ export class PropertiesPanel {
         allLayers: this.canvasManager.buildV2Layers(),
         canvasManager: this.canvasManager,
         layerManager: this.layerManager,
+        undoController: this.undoController,
       });
       return;
     }
@@ -50,6 +54,7 @@ export class PropertiesPanel {
         allLayers: this.canvasManager.buildV2Layers(),
         canvasManager: this.canvasManager,
         layerManager: this.layerManager,
+        undoController: this.undoController,
       });
       return;
     }
@@ -205,7 +210,7 @@ export class PropertiesPanel {
       document.getElementById('overridePanelHost'),
       spawn,
       layer,
-      { canvasManager: this.canvasManager },
+      { canvasManager: this.canvasManager, undoController: this.undoController },
     );
   }
 
@@ -252,7 +257,7 @@ export class PropertiesPanel {
 
   _attachListeners(spawn, layer, allAnchors, pos, relative) {
     document.getElementById('propName').addEventListener('input', (e) => {
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       spawn.name = e.target.value;
       layer.isDirty = true;
       this.canvasManager.renderAll();
@@ -269,7 +274,7 @@ export class PropertiesPanel {
         document.getElementById('anchorPos').classList.toggle('hidden', mode !== 'anchor');
         document.getElementById('relativePos').classList.toggle('hidden', mode !== 'relative');
 
-        snapshotForUndo(layer);
+        this.undoController.snapshotForUndo(layer);
         if (mode === 'absolute') {
           const x = parseFloat(document.getElementById('propX')?.value || '0');
           const z = parseFloat(document.getElementById('propZ')?.value || '0');
@@ -292,7 +297,7 @@ export class PropertiesPanel {
     document.getElementById('propX')?.addEventListener('input', (e) => {
       const x = parseFloat(e.target.value) || 0;
       const z = parseFloat(document.getElementById('propZ')?.value || '0');
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       setSpawnPosition(spawn, x, z, 'absolute');
       layer.isDirty = true;
       this.canvasManager.renderAll();
@@ -301,14 +306,14 @@ export class PropertiesPanel {
     document.getElementById('propZ')?.addEventListener('input', (e) => {
       const x = parseFloat(document.getElementById('propX')?.value || '0');
       const z = parseFloat(e.target.value) || 0;
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       setSpawnPosition(spawn, x, z, 'absolute');
       layer.isDirty = true;
       this.canvasManager.renderAll();
     });
 
     document.getElementById('propAnchor')?.addEventListener('change', (e) => {
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       setSpawnPosition(spawn, 0, 0, 'anchor', e.target.value, null);
       layer.isDirty = true;
       this.canvasManager.renderAll();
@@ -318,7 +323,7 @@ export class PropertiesPanel {
       const parent = document.getElementById('propParent').value;
       const offsetX = parseFloat(document.getElementById('propOffsetX')?.value || '0');
       const offsetZ = parseFloat(document.getElementById('propOffsetZ')?.value || '0');
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       setSpawnPosition(spawn, pos.x, pos.z, 'relative', parent, { x: offsetX, z: offsetZ });
       layer.isDirty = true;
       this.canvasManager.renderAll();
@@ -328,7 +333,7 @@ export class PropertiesPanel {
       const cur = getRelativeInfo(spawn);
       const offsetX = parseFloat(e.target.value) || 0;
       const offsetZ = parseFloat(document.getElementById('propOffsetZ')?.value || '0');
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       setSpawnPosition(spawn, 0, 0, 'relative', cur?.parent, { x: offsetX, z: offsetZ });
       layer.isDirty = true;
       this.canvasManager.updateArrows();
@@ -338,7 +343,7 @@ export class PropertiesPanel {
       const cur = getRelativeInfo(spawn);
       const offsetX = parseFloat(document.getElementById('propOffsetX')?.value || '0');
       const offsetZ = parseFloat(e.target.value) || 0;
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       setSpawnPosition(spawn, 0, 0, 'relative', cur?.parent, { x: offsetX, z: offsetZ });
       layer.isDirty = true;
       this.canvasManager.updateArrows();
@@ -346,7 +351,7 @@ export class PropertiesPanel {
 
     // Shape size fields
     document.getElementById('shapeRadius')?.addEventListener('input', (e) => {
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       if (!spawn.shape) spawn.shape = { type: 'sphere' };
       spawn.shape.radius = parseFloat(e.target.value) || 100;
       layer.isDirty = true;
@@ -354,7 +359,7 @@ export class PropertiesPanel {
     });
 
     document.getElementById('shapeInnerRadius')?.addEventListener('input', (e) => {
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       if (!spawn.shape) spawn.shape = { type: 'torus' };
       spawn.shape.inner_radius = parseFloat(e.target.value) || 50;
       layer.isDirty = true;
@@ -362,7 +367,7 @@ export class PropertiesPanel {
     });
 
     document.getElementById('shapeOuterRadius')?.addEventListener('input', (e) => {
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
       if (!spawn.shape) spawn.shape = { type: 'torus' };
       spawn.shape.outer_radius = parseFloat(e.target.value) || 150;
       layer.isDirty = true;
@@ -381,7 +386,7 @@ export class PropertiesPanel {
     ];
     for (const id of ['propRotX', 'propRotY', 'propRotZ']) {
       document.getElementById(id)?.addEventListener('input', () => {
-        snapshotForUndo(layer);
+        this.undoController.snapshotForUndo(layer);
         setSpawnRotation(spawn, readRot());
         layer.isDirty = true;
         this.canvasManager.renderAll();
@@ -389,7 +394,7 @@ export class PropertiesPanel {
     }
     for (const id of ['propScaleX', 'propScaleY', 'propScaleZ']) {
       document.getElementById(id)?.addEventListener('input', () => {
-        snapshotForUndo(layer);
+        this.undoController.snapshotForUndo(layer);
         setSpawnScale(spawn, readScale());
         layer.isDirty = true;
         this.canvasManager.renderAll();
@@ -399,7 +404,7 @@ export class PropertiesPanel {
     document.getElementById('deleteSpawnBtn').addEventListener('click', () => {
       const idx = layer.toml.entity?.indexOf(spawn);
       if (idx !== -1) {
-        snapshotForUndo(layer);
+        this.undoController.snapshotForUndo(layer);
         layer.toml.entity.splice(idx, 1);
         layer.isDirty = true;
         this.canvasManager.spawnGroups.delete(spawn);
@@ -412,7 +417,7 @@ export class PropertiesPanel {
       const errorEl = document.getElementById('spawnTomlError');
       try {
         const parsed = window.tomlParse(document.getElementById('spawnToml').value);
-        snapshotForUndo(layer);
+        this.undoController.snapshotForUndo(layer);
         // Update spawn in-place
         for (const key of Object.keys(spawn)) {
           if (!key.startsWith('_')) delete spawn[key];

@@ -26,7 +26,6 @@
 
 import { OverrideEditor } from './override-editor.js';
 import { getEntityConfig, loadEntityConfig } from './entity-cache.js';
-import { snapshotForUndo } from './undo-controller.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -99,6 +98,11 @@ function escapeHtml(s) {
 export function renderOverridePanel(hostEl, spawn, layer, deps) {
   if (!hostEl) return;
   hostEl.innerHTML = '';
+
+  if (!deps?.undoController || typeof deps.undoController.snapshotForUndo !== 'function') {
+    throw new Error('renderOverridePanel: deps.undoController is required');
+  }
+  const snapshotForUndo = (l) => deps.undoController.snapshotForUndo(l);
 
   const templatePath = spawn?.template_path;
   if (!templatePath) {

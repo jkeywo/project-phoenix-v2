@@ -26,7 +26,6 @@
 
 import { ACTION_SCHEMA } from './action-schema.js';
 import { renderActionCard } from './action-card-view.js';
-import { snapshotForUndo } from './undo-controller.js';
 import { renderEntitySelect } from './entity-select-view.js';
 import { worldCommsToEditor, editorCommsToWorld } from './comms-adapter.js';
 import { buildDefaultAction } from './trigger-view.js';
@@ -65,6 +64,11 @@ export function renderCommsPanel(host, selection, deps) {
     host.innerHTML = '<p class="placeholder">Comms template no longer exists</p>';
     return;
   }
+
+  if (!deps.undoController || typeof deps.undoController.snapshotForUndo !== 'function') {
+    throw new Error('renderCommsPanel: deps.undoController is required');
+  }
+  const snapshotForUndo = (l) => deps.undoController.snapshotForUndo(l);
 
   // Load the editor model from the live TOML each render so we always see
   // the freshest data after a re-render or undo.

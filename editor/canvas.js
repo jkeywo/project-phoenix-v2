@@ -6,15 +6,17 @@ import { getRegionRenderSpec } from './canvas-region.js';
 import { getAnchorRenderSpecs } from './canvas-anchor.js';
 import { analyzeAnchorRename } from './anchor-rename.js';
 import { canDeleteAnchor } from './anchor-delete.js';
-import { snapshotForUndo } from './undo-controller.js';
-
 export class CanvasManager {
-  constructor(layerManager, onSpawnSelect, onSpawnUpdate, onSpawnCreate, onSpawnDrag) {
+  constructor(layerManager, onSpawnSelect, onSpawnUpdate, onSpawnCreate, onSpawnDrag, undoController) {
+    if (!undoController || typeof undoController.snapshotForUndo !== 'function') {
+      throw new Error('CanvasManager: undoController with snapshotForUndo is required');
+    }
     this.layerManager = layerManager;
     this.onSpawnSelect = onSpawnSelect;
     this.onSpawnUpdate = onSpawnUpdate;
     this.onSpawnCreate = onSpawnCreate;
     this.onSpawnDrag = onSpawnDrag;
+    this.undoController = undoController;
 
     this.stage = null;
     this.baseLayer = null;
@@ -185,7 +187,7 @@ export class CanvasManager {
     // used by spawn drag). dragmove mutates the anchor; dragend re-renders to
     // refresh entity positions resolved via this anchor.
     group.on('dragstart', () => {
-      snapshotForUndo(layer);
+      this.undoController.snapshotForUndo(layer);
     });
     group.on('dragmove', () => {
       const newX = group.x() / this.scale;
@@ -297,7 +299,7 @@ export class CanvasManager {
     for (const pair of result.rewritePairs) {
       const ownerL = layersByPath.get(pair.layerPath);
       if (!ownerL || !ownerL.toml) continue;
-      snapshotForUndo(ownerL);
+      this.undoController.snapshotForUndo(ownerL);
       const anchors = ownerL.toml.anchors;
       if (anchors && anchors[currentName] != null) {
         anchors[newName] = anchors[currentName];
@@ -312,7 +314,7 @@ export class CanvasManager {
     for (const crossPath of crossPaths) {
       const crossL = layersByPath.get(crossPath);
       if (!crossL || !crossL.toml) continue;
-      snapshotForUndo(crossL);
+      this.undoController.snapshotForUndo(crossL);
       this.rewriteAnchorRefsInLayer(crossL.toml, currentName, newName);
       crossL.isDirty = true;
     }
@@ -354,7 +356,7 @@ export class CanvasManager {
     if (!window.confirm(`Delete anchor "${anchorName}"?`)) return;
 
     if (!ownerLayer || !ownerLayer.toml || !ownerLayer.toml.anchors) return;
-    snapshotForUndo(ownerLayer);
+    this.undoController.snapshotForUndo(ownerLayer);
     delete ownerLayer.toml.anchors[anchorName];
     ownerLayer.isDirty = true;
     this.renderAll();
@@ -503,7 +505,7 @@ export class CanvasManager {
       if (this.placeMode) {
         setSpawnPosition(spawn, newX, newZ, 'absolute');
       } else {
-        snapshotForUndo(layer);
+        this.undoController.snapshotForUndo(layer);
         if (relative) {
           setSpawnPosition(spawn, newX, newZ, 'relative', relative.parent, { x: newX - oldPos.x, z: newZ - oldPos.z });
         } else {
@@ -597,7 +599,7 @@ export class CanvasManager {
 
     spawn.template_path = this.placeEntityPath;
 
-    snapshotForUndo(activeLayer);
+    this.undoController.snapshotForUndo(activeLayer);
     if (!activeLayer.toml.entity) {
       activeLayer.toml.entity = [];
     }

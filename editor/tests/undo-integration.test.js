@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ModeShell } from '../mode-shell.js';
-import { snapshotForUndo, restoreWorldLayer } from '../undo-controller.js';
+import { createUndoController, restoreWorldLayer } from '../undo-controller.js';
 
 /**
  * End-to-end undo/redo for the World mode. Exercises the contract
@@ -16,13 +16,15 @@ import { snapshotForUndo, restoreWorldLayer } from '../undo-controller.js';
  */
 describe('undo integration (world mode)', () => {
   let modeShell;
+  let undoController;
+  let snapshotForUndo;
   let layer;
   let layerManager;
 
-  // Drive snapshotForUndo through window.__editorV2 the same way
-  // app-v2.js wires it up at module init time.
   beforeEach(() => {
     modeShell = new ModeShell();
+    undoController = createUndoController({ modeShell });
+    snapshotForUndo = undoController.snapshotForUndo;
     layer = {
       filename: 'worlds/test.toml',
       toml: { name: 'original', entity: [{ name: 'sun' }] },
@@ -31,7 +33,6 @@ describe('undo integration (world mode)', () => {
     layerManager = {
       getLayers: () => [layer],
     };
-    globalThis.window = { __editorV2: { modeShell } };
   });
 
   // Mirror of scenario-mode.js's registerWorldUndoRestore callback. This

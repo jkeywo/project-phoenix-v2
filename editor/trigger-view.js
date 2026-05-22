@@ -20,7 +20,6 @@
 
 import { ACTION_SCHEMA } from './action-schema.js';
 import { renderActionCard } from './action-card-view.js';
-import { snapshotForUndo } from './undo-controller.js';
 import { renderEntitySelect } from './entity-select-view.js';
 import { validateFile } from './validation.js';
 import { applyValidationResults } from './validation-badge.js';
@@ -54,6 +53,11 @@ export function renderTriggerPanel(host, selection, deps) {
     return;
   }
 
+  if (!deps.undoController || typeof deps.undoController.snapshotForUndo !== 'function') {
+    throw new Error('renderTriggerPanel: deps.undoController is required');
+  }
+  const snapshotForUndo = (l) => deps.undoController.snapshotForUndo(l);
+
   const openFilePicker = deps.openFilePicker || defaultFilePicker;
 
   // Re-render the entire panel on any change.  Triggers are small; the
@@ -72,16 +76,16 @@ export function renderTriggerPanel(host, selection, deps) {
   panel.appendChild(h4);
 
   // Condition.
-  panel.appendChild(makeConditionRow(trigger, layer, rerender));
+  panel.appendChild(makeConditionRow(trigger, layer, rerender, snapshotForUndo));
 
   // Entity (hidden for on_timer).
   if (trigger.condition !== 'on_timer') {
-    panel.appendChild(makeEntityRow(trigger, layer, deps, rerender));
+    panel.appendChild(makeEntityRow(trigger, layer, deps, rerender, snapshotForUndo));
   }
 
   // after_secs (only for on_timer).
   if (trigger.condition === 'on_timer') {
-    panel.appendChild(makeAfterSecsRow(trigger, layer, rerender));
+    panel.appendChild(makeAfterSecsRow(trigger, layer, rerender, snapshotForUndo));
   }
 
   // ── Actions ───────────────────────────────────────────────────────────
@@ -130,7 +134,7 @@ export function renderTriggerPanel(host, selection, deps) {
   });
 
   // ── + Add Action ──────────────────────────────────────────────────────
-  panel.appendChild(makeAddActionRow(trigger, layer, deps, rerender));
+  panel.appendChild(makeAddActionRow(trigger, layer, deps, rerender, snapshotForUndo));
 
   // Slice 7: decorate fields whose validation path has a record.
   try {
@@ -146,7 +150,7 @@ export function renderTriggerPanel(host, selection, deps) {
 
 // ── Row builders ────────────────────────────────────────────────────────
 
-function makeConditionRow(trigger, layer, rerender) {
+function makeConditionRow(trigger, layer, rerender, snapshotForUndo) {
   const group = document.createElement('div');
   group.className = 'property-group';
 
@@ -180,7 +184,7 @@ function makeConditionRow(trigger, layer, rerender) {
   return group;
 }
 
-function makeEntityRow(trigger, layer, deps, rerender) {
+function makeEntityRow(trigger, layer, deps, rerender, snapshotForUndo) {
   const group = document.createElement('div');
   group.className = 'property-group';
 
@@ -202,7 +206,7 @@ function makeEntityRow(trigger, layer, deps, rerender) {
   return group;
 }
 
-function makeAfterSecsRow(trigger, layer, rerender) {
+function makeAfterSecsRow(trigger, layer, rerender, snapshotForUndo) {
   const group = document.createElement('div');
   group.className = 'property-group';
 
@@ -225,7 +229,7 @@ function makeAfterSecsRow(trigger, layer, rerender) {
   return group;
 }
 
-function makeAddActionRow(trigger, layer, deps, rerender) {
+function makeAddActionRow(trigger, layer, deps, rerender, snapshotForUndo) {
   const wrap = document.createElement('div');
   wrap.className = 'action-add-row';
 

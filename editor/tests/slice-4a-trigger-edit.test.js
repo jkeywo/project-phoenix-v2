@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ModeShell } from '../mode-shell.js';
+import { createUndoController } from '../undo-controller.js';
 
 /**
  * Slice 4a integration test: trigger editor.
@@ -175,6 +176,7 @@ function makeWorld() {
 
 describe('Slice 4a: trigger editor + action-card', () => {
   let modeShell;
+  let undoController;
   let layer;
   let host;
   let renderTriggerPanel;
@@ -182,7 +184,7 @@ describe('Slice 4a: trigger editor + action-card', () => {
   beforeEach(async () => {
     installDom();
     modeShell = new ModeShell();
-    globalThis.window = { __editorV2: { modeShell } };
+    undoController = createUndoController({ modeShell });
 
     layer = {
       filename: 'assets/worlds/default.toml',
@@ -201,6 +203,7 @@ describe('Slice 4a: trigger editor + action-card', () => {
       allLayers: [{ path: layer.filename, worldState: layer.toml }],
       canvasManager: { renderAll: () => {} },
       layerManager: { getLayers: () => [layer] },
+      undoController,
       ...overrides,
     };
   }

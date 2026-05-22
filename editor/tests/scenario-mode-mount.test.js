@@ -100,7 +100,7 @@ function installDocumentWithIds(ids) {
 }
 
 describe('mountScenarioMode', () => {
-  let modeShell, saveFlow, invalidationBus, restoreRegistrations, elements, mod;
+  let modeShell, saveFlow, invalidationBus, restoreRegistrations, elements, mod, host;
 
   beforeEach(async () => {
     elements = installDocumentWithIds([
@@ -112,6 +112,14 @@ describe('mountScenarioMode', () => {
     ]);
     globalThis.window = { tomlParse: () => ({}) };
 
+    // Build a #world-mode-root host that contains the elements that live
+    // inside it in real editor.html (just `newEntityBtn` for now). The
+    // toolbar IDs (`saveAllBtn`, `saveLayerBtn`, `unsavedIndicator`) stay
+    // at document scope.
+    host = new FakeElement('div');
+    host.id = 'world-mode-root';
+    host.appendChild(elements.newEntityBtn);
+
     modeShell = new FakeModeShell();
     saveFlow = new FakeSaveFlow();
     invalidationBus = new FakeInvalidationBus();
@@ -122,6 +130,7 @@ describe('mountScenarioMode', () => {
 
   function mount(overrides = {}) {
     return mod.mountScenarioMode({
+      host,
       modeShell,
       saveFlow,
       registerRestore: (mode, fn) => restoreRegistrations.push({ mode, fn }),

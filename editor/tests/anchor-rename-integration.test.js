@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ModeShell } from '../mode-shell.js';
 import { analyzeAnchorRename } from '../anchor-rename.js';
-import { snapshotForUndo } from '../undo-controller.js';
+import { createUndoController } from '../undo-controller.js';
 
 /**
  * End-to-end integration: cross-layer anchor rename.
@@ -15,12 +15,14 @@ import { snapshotForUndo } from '../undo-controller.js';
  */
 describe('anchor rename integration (cross-layer)', () => {
   let modeShell;
+  let snapshotForUndo;
   let layerA;
   let layerB;
   let layerManager;
 
   beforeEach(() => {
     modeShell = new ModeShell();
+    snapshotForUndo = createUndoController({ modeShell }).snapshotForUndo;
     layerA = {
       filename: 'worlds/a.toml',
       toml: {
@@ -38,7 +40,6 @@ describe('anchor rename integration (cross-layer)', () => {
     layerManager = {
       getLayers: () => [layerA, layerB],
     };
-    globalThis.window = { __editorV2: { modeShell } };
   });
 
   it('rewrites the anchor key and the cross-layer reference, snapshotting both layers', () => {

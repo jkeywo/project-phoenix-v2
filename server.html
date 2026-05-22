@@ -376,7 +376,7 @@ function startServer() {
 
   set_message_callback(routeOutbound);
 
-  // Register the runtime world-fetch callback so LoadScenario triggers can
+  // Register the runtime world-fetch callback so load_world triggers can
   // additively load a world TOML (e.g. patrol.toml) during gameplay.
   if (typeof wasmBindings.set_world_fetch_callback === 'function') {
     wasmBindings.set_world_fetch_callback(function(path) {

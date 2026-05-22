@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ModeShell } from '../mode-shell.js';
+import { createUndoController } from '../undo-controller.js';
 
 /**
  * Slice 4b integration test: comms editor.
@@ -161,6 +162,7 @@ function makeWorld() {
 
 describe('Slice 4b: comms editor', () => {
   let modeShell;
+  let undoController;
   let layer;
   let host;
   let renderCommsPanel;
@@ -168,7 +170,7 @@ describe('Slice 4b: comms editor', () => {
   beforeEach(async () => {
     installDom();
     modeShell = new ModeShell();
-    globalThis.window = { __editorV2: { modeShell } };
+    undoController = createUndoController({ modeShell });
 
     layer = {
       filename: 'assets/worlds/default.toml',
@@ -185,6 +187,7 @@ describe('Slice 4b: comms editor', () => {
       allLayers: [{ path: layer.filename, worldState: layer.toml }],
       canvasManager: { renderAll: () => {} },
       layerManager: { getLayers: () => [layer], getActiveLayer: () => layer },
+      undoController,
     };
   }
 

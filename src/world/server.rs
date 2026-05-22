@@ -41,7 +41,7 @@ pub struct WorldContentRuntime {
     /// inbox itself hasn't changed.
     pub needs_broadcast: bool,
     /// Paths of world TOML files already merged into this runtime, used to
-    /// de-duplicate `LoadScenario` actions (no-op if path already active).
+    /// de-duplicate additive world loads (no-op if path already active).
     pub loaded_scenario_paths: HashSet<String>,
 }
 
@@ -59,9 +59,9 @@ pub struct ObjectiveManagerRes(pub ObjectiveManager);
 
 /// Queue of world TOML paths to load additively into the live `WorldContentRuntime`.
 ///
-/// When a `TriggerAction::LoadScenario { path }` fires, `handle_ai_events` pushes
-/// the path here. The `apply_pending_scenario_loads` system drains it each frame,
-/// parses the TOML, and merges the new triggers/comms into the runtime.
+/// The `apply_pending_scenario_loads` system drains it each frame, parses the
+/// TOML, and merges the new triggers/comms into the runtime. (Currently no
+/// trigger action enqueues into this; retained as the merge-side plumbing.)
 #[derive(Resource, Default)]
 pub struct PendingScenarioLoad(pub Vec<String>);
 
@@ -641,10 +641,9 @@ fn handle_respond_to_message(
                 | TriggerAction::ApplyIntModifier { .. }
                 | TriggerAction::RemoveIntModifier { .. }
                 | TriggerAction::GameOver { .. }
-                | TriggerAction::LoadScenario { .. }
                 | TriggerAction::LoadWorld { .. }
                 | TriggerAction::UnloadWorld { .. } => {
-                    // Modifier/flag/game-over/load-scenario/load-world/unload-world
+                    // Modifier/flag/game-over/load-world/unload-world
                     // actions are handled by the AI-event trigger or damage systems.
                     // No-op in the comms response path.
                 }
@@ -790,7 +789,7 @@ fn handle_ai_events(
     mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
-    mut pending: Option<ResMut<PendingScenarioLoad>>,
+    _pending: Option<ResMut<PendingScenarioLoad>>,
     mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
 ) {
 
@@ -1007,11 +1006,6 @@ fn handle_ai_events(
                     }
                     if let Some(ref mut ns) = next_state {
                         ns.set(GamePhase::GameOver);
-                    }
-                }
-                TriggerAction::LoadScenario { path } => {
-                    if let Some(ref mut p) = pending {
-                        p.0.push(path.clone());
                     }
                 }
                 TriggerAction::LoadWorld { path } => {

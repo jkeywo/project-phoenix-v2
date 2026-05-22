@@ -23,10 +23,10 @@ use crate::client_sim::{
     is_fire_button_enabled, phaser_mode_label, ClientSimState,
 };
 use crate::gui::{
-    layer_to_icon, region_shape_from_snapshot, spawn_gui_button, tags_to_radar_layer, ButtonPressed,
-    ButtonSize, GenericRadar, OnRadar, OrientationMode, RadarAppearance, RadarBlipClicked,
-    RadarCenter, RadarFilter, RadarIcon, RadarLayer, StateVisuals, RadioButtonConfig, RadioGroup,
-    RadioSelected, Disabled,
+    default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
+    tags_to_radar_layer, ButtonPressed, ButtonSize, GenericRadar, OnRadar, OrientationMode,
+    RadarAppearance, RadarBlipClicked, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
+    StateVisuals, RadioButtonConfig, RadioGroup, RadioSelected, Disabled,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, TorpedoTube};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};

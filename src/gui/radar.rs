@@ -178,9 +178,10 @@ struct RadarBlipNode {
 /// region shape. Holds the source `Entity` and shape data so the
 /// diff can reconcile and render the correct geometry.
 #[derive(Component)]
-struct RadarRegionNode {
-    source: Entity,
-    shape: RegionRadarShape,
+pub struct RadarRegionNode {
+    pub source: Entity,
+    #[allow(dead_code)]
+    pub shape: RegionRadarShape,
 }
 
 /// Triggered on a radar blip UI node when the player clicks it.
@@ -467,7 +468,6 @@ fn sync_radar_blip_nodes(
             &mut Node,
             &mut BackgroundColor,
             &mut BorderColor,
-            &mut BorderRadius,
             &RadarRegionNode,
         ),
         Without<RadarBlipNode>,
@@ -631,7 +631,7 @@ fn sync_radar_blip_nodes(
                     } else {
                         commands.entity(child).despawn();
                     }
-                } else if let Ok((mut node, mut bg, mut border_color, mut border_radius, tag)) =
+                } else if let Ok((mut node, mut bg, mut border_color, tag)) =
                     existing_region_nodes.get_mut(child)
                 {
                     if let Some((nx, ny, colour, shape, _)) =
@@ -641,7 +641,6 @@ fn sync_radar_blip_nodes(
                             &mut node,
                             &mut bg,
                             &mut border_color,
-                            &mut border_radius,
                             nx,
                             ny,
                             colour,
@@ -664,7 +663,7 @@ fn sync_radar_blip_nodes(
                     (left, top, size_px, color, icon_handle, icon_angle),
                 ) in intended.drain()
                 {
-                    let mut node = Node {
+                    let node = Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(left),
                         top: Val::Px(top),
@@ -696,7 +695,7 @@ fn sync_radar_blip_nodes(
                     }
                 }
                 for (source, (nx, ny, colour, shape, _)) in intended_regions.drain() {
-                    let (node, bg, border_color, border_radius) = region_shape_node(
+                    let (node, bg, border_color) = region_shape_node(
                         source,
                         nx,
                         ny,
@@ -709,7 +708,6 @@ fn sync_radar_blip_nodes(
                         node,
                         bg,
                         border_color,
-                        border_radius,
                         ZIndex(10),
                         RadarRegionNode {
                             source,
@@ -742,7 +740,6 @@ fn update_region_node(
     node: &mut Node,
     bg: &mut BackgroundColor,
     border_color: &mut BorderColor,
-    border_radius: &mut BorderRadius,
     nx: f32,
     ny: f32,
     colour: Color,
@@ -762,8 +759,8 @@ fn update_region_node(
             node.height = Val::Px(diameter_px);
             node.border = UiRect::default();
             bg.0 = colour.with_alpha(0.3);
-            border_color.0 = colour;
-            *border_radius = BorderRadius::all(Val::Percent(50.0));
+            *border_color = BorderColor::all(colour);
+            node.border_radius = BorderRadius::all(Val::Percent(50.0));
         }
         RegionRadarShape::Torus {
             inner_radius,
@@ -781,8 +778,8 @@ fn update_region_node(
             node.height = Val::Px(outer_px);
             node.border = UiRect::all(Val::Px(border_px));
             bg.0 = Color::NONE;
-            border_color.0 = colour;
-            *border_radius = BorderRadius::all(Val::Percent(50.0));
+            *border_color = BorderColor::all(colour);
+            node.border_radius = BorderRadius::all(Val::Percent(50.0));
         }
         RegionRadarShape::Box {
             half_extents_x,
@@ -803,8 +800,8 @@ fn update_region_node(
             node.height = Val::Px(height_px);
             node.border = UiRect::default();
             bg.0 = colour.with_alpha(0.3);
-            border_color.0 = colour;
-            *border_radius = BorderRadius::ZERO;
+            *border_color = BorderColor::all(colour);
+            node.border_radius = BorderRadius::ZERO;
         }
     }
 }
@@ -818,24 +815,18 @@ fn region_shape_node(
     shape: &RegionRadarShape,
     range: f32,
     radar_radius_px: f32,
-) -> (Node, BackgroundColor, BorderColor, BorderRadius) {
+) -> (Node, BackgroundColor, BorderColor) {
     let mut node = Node {
         position_type: PositionType::Absolute,
         ..default()
     };
-    let bg = BackgroundColor(Color::NONE);
-    let border_color = BorderColor(colour);
-    let border_radius = BorderRadius::ZERO;
-
     // Delegate to update to fill in the node layout fields
     let mut bg_mut = BackgroundColor(Color::NONE);
-    let mut border_color_mut = BorderColor(colour);
-    let mut border_radius_mut = BorderRadius::ZERO;
+    let mut border_color_mut = BorderColor::all(colour);
     update_region_node(
         &mut node,
         &mut bg_mut,
         &mut border_color_mut,
-        &mut border_radius_mut,
         nx,
         ny,
         colour,
@@ -844,7 +835,7 @@ fn region_shape_node(
         radar_radius_px,
     );
 
-    (node, bg_mut, border_color_mut, border_radius_mut)
+    (node, bg_mut, border_color_mut)
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────

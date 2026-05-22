@@ -19,7 +19,8 @@ use crate::ship_state::ShipState;
 use bevy_rapier3d::prelude::ReadRapierContext;
 
 use crate::entity_spawner::{
-    EntityId, EntityTagsSection, EntityUuid, RadarAppearanceSection, RegionShapeSection,
+    AsteroidFieldSection, EntityId, EntityTagsSection, EntityUuid, RadarAppearanceSection,
+    RegionShapeSection,
 };
 use crate::impulse::ImpulseState;
 use crate::messages::ModifierSlot;
@@ -699,6 +700,7 @@ fn reconcile_runtime_entities(
             Option<&RegionShapeSection>,
             Option<&EntityTagsSection>,
             Option<&RadarAppearanceSection>,
+            Option<&AsteroidFieldSection>,
         ),
         Without<Asteroid>,
     >,
@@ -707,7 +709,7 @@ fn reconcile_runtime_entities(
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _, _, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _, _, _, _)| (u.0.clone(), e))
         .collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
@@ -727,7 +729,7 @@ fn reconcile_runtime_entities(
     if !registry.seeded {
         for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance)) =
+            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance, asteroid_field)) =
                 query.get(*entity)
             {
                 let mut snapshot = EntitySnapshot {
@@ -752,6 +754,13 @@ fn reconcile_runtime_entities(
                         snapshot.radius = Some(r);
                     }
                     snapshot.radar_world_size = ra.0.world_size;
+                }
+                if snapshot.shape.is_none() {
+                    if let Some(field) = asteroid_field {
+                        snapshot.shape = Some("torus".to_string());
+                        snapshot.radius = Some(field.0.outer_radius);
+                        snapshot.inner_radius = Some(field.0.inner_radius);
+                    }
                 }
                 world.0.entities.push(snapshot);
             }
@@ -763,7 +772,7 @@ fn reconcile_runtime_entities(
     // Emit EntitySpawned for new entities.
     for (uuid, entity) in &current {
         if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance)) =
+            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance, asteroid_field)) =
                 query.get(*entity)
             {
                 let mut snapshot = EntitySnapshot {
@@ -788,6 +797,13 @@ fn reconcile_runtime_entities(
                         snapshot.radius = Some(r);
                     }
                     snapshot.radar_world_size = ra.0.world_size;
+                }
+                if snapshot.shape.is_none() {
+                    if let Some(field) = asteroid_field {
+                        snapshot.shape = Some("torus".to_string());
+                        snapshot.radius = Some(field.0.outer_radius);
+                        snapshot.inner_radius = Some(field.0.inner_radius);
+                    }
                 }
                 world.0.entities.push(snapshot.clone());
                 outbox

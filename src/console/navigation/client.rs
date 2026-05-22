@@ -15,10 +15,12 @@ use bevy::prelude::*;
 use crate::client::console_shell::ConsoleShell;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
+use crate::client_sim::ClientSimState;
 use crate::gui::{
-    spawn_gui_button, AutoScaleRadar, ButtonPressed, ButtonSize, GenericRadar, OrientationMode,
-    RadarClipMode, RadarFilter, RadarLayer, ReadoutValue, StateVisuals, TextReadout,
-    WorldCentredRadar,
+    default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
+    tags_to_radar_layer, AutoScaleRadar, ButtonPressed, ButtonSize, GenericRadar, OnRadar,
+    OrientationMode, RadarAppearance, RadarCenter, RadarClipMode, RadarFilter, RadarIcon,
+    RadarLayer, ReadoutValue, StateVisuals, TextReadout, WorldCentredRadar,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -106,6 +108,16 @@ fn impulse_readout_visuals() -> StateVisuals {
     )
 }
 
+// ── Resources ────────────────────────────────────────────────────────
+
+/// Persistent ECS entity IDs for navigation radar blips, mirroring
+/// the pattern used by the science and weapons console bridges.
+#[derive(Resource, Default)]
+struct NavRadarEntities {
+    center: Option<Entity>,
+    blips: std::collections::HashMap<String, Entity>,
+}
+
 // ── Marker components ────────────────────────────────────────────────
 
 /// Marks the root of the Navigation console UI.
@@ -131,15 +143,17 @@ pub struct NavigationPanelPlugin;
 
 impl Plugin for NavigationPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
-                toggle_navigation_panel_visibility,
-                refresh_navigation_panel,
-                respawn_navigation_on_orientation_change,
-            ),
-        );
+        app.init_resource::<NavRadarEntities>()
+            .add_systems(
+                Update,
+                (
+                    spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
+                    toggle_navigation_panel_visibility,
+                    refresh_navigation_panel,
+                    respawn_navigation_on_orientation_change,
+                    bridge_client_sim_to_nav_radar,
+                ),
+            );
     }
 }
 
@@ -190,7 +204,7 @@ fn spawn_navigation_ui(
         is_landscape,
         crate::client::elements::HelpPanel::Navigation,
         |commands: &mut Commands, primary: Entity| {
-            fill_navigation_chart(commands, primary);
+            fill_navigation_chart(commands, primary, is_landscape);
         },
         |commands: &mut Commands, secondary: Entity| {
             fill_navigation_controls(commands, secondary);
@@ -201,14 +215,17 @@ fn spawn_navigation_ui(
     commands.entity(shell.root).insert((NavigationPanel, Visibility::Hidden));
 }
 
-/// Primary slot: title + system chart (`GenericRadar`, world-centred, auto-scaled).
+/// Primary slot: system chart (`GenericRadar`, world-centred, north-up, auto-scaled).
 ///
 /// The chart is centred at world origin (0, 0), north-up (no ship-yaw
 /// rotation), and automatically zooms each frame to fit all visible blips
 /// plus a 10 % margin.  It shows the player ship, stations, planets, stars,
 /// and asteroid-field region boundaries — but not individual asteroids or
 /// NPC ships.
-fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
+///
+/// Sizing mirrors the helm console: landscape → constrain by height, portrait
+/// → constrain by width.  `aspect_ratio: 1.0` derives the other axis.
+fn fill_navigation_chart(commands: &mut Commands, container: Entity, is_landscape: bool) {
     let col = commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -216,20 +233,10 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
             justify_content: JustifyContent::Center,
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
-            row_gap: Val::Px(8.0),
             ..default()
         })
         .id();
     commands.entity(container).add_child(col);
-
-    let title = commands
-        .spawn((
-            Text::new("Navigation"),
-            TextFont { font_size: 32.0, ..default() },
-            TextColor(Color::srgb(0.5, 1.0, 0.8)),
-        ))
-        .id();
-    commands.entity(col).add_child(title);
 
     let radar_filter = RadarFilter(std::collections::HashSet::from([
         RadarLayer::PlayerShip,
@@ -253,8 +260,8 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
         WorldCentredRadar,
         AutoScaleRadar { margin: 1.1, min_range: 50.0 },
         Node {
-            width: Val::Px(240.0),
-            height: Val::Px(240.0),
+            width: if is_landscape { Val::Auto } else { Val::Percent(100.0) },
+            height: if is_landscape { Val::Percent(100.0) } else { Val::Auto },
             border: UiRect::all(Val::Px(1.0)),
             aspect_ratio: Some(1.0),
             position_type: PositionType::Relative,
@@ -263,6 +270,22 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
         },
     ));
     commands.entity(col).add_child(radar);
+
+    // Title as an absolute overlay so it doesn't compete with the radar for space.
+    let title = commands
+        .spawn((
+            Text::new("Navigation"),
+            TextFont { font_size: 24.0, ..default() },
+            TextColor(Color::srgba(0.5, 1.0, 0.8, 0.85)),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(4.0),
+                left: Val::Px(6.0),
+                ..default()
+            },
+        ))
+        .id();
+    commands.entity(radar).add_child(title);
 }
 
 /// Secondary slot: impulse status readout + cancel button + on-screen button.
@@ -387,6 +410,129 @@ fn refresh_navigation_panel(
             Visibility::Hidden
         };
     }
+}
+
+/// Bridges `ClientSimState` entity snapshots into ECS entities with
+/// `OnRadar` / `RadarAppearance` for the navigation `GenericRadar` widget.
+///
+/// Shows the player ship, stations, planets, stars, and asteroid-field
+/// region boundaries.  Individual asteroids and NPC ships are excluded —
+/// the navigation chart is a strategic overview, not a tactical display.
+fn bridge_client_sim_to_nav_radar(
+    mut commands: Commands,
+    sim: Res<ClientSimState>,
+    ship_view: Res<ShipView>,
+    mut radar: ResMut<NavRadarEntities>,
+) {
+    // ── Player ship ───────────────────────────────────────────────────
+    let ship_yaw = ship_view.ship_yaw;
+    let ship_t = Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z)
+        .with_rotation(Quat::from_rotation_y(ship_yaw));
+    let ship_appearance = RadarAppearance {
+        icon: RadarIcon::Ship,
+        world_size: 6.0,
+        color: Color::srgb(0.95, 0.95, 1.0),
+        region_colour: None,
+        region_shape: None,
+    };
+    match radar.center {
+        Some(e) => {
+            commands.entity(e).insert((
+                RadarCenter { world_x: ship_view.ship_x, world_z: ship_view.ship_z, yaw: ship_yaw },
+                OnRadar(RadarLayer::PlayerShip),
+                ship_appearance,
+                ship_t,
+            ));
+        }
+        None => {
+            let e = commands
+                .spawn((
+                    RadarCenter {
+                        world_x: ship_view.ship_x,
+                        world_z: ship_view.ship_z,
+                        yaw: ship_yaw,
+                    },
+                    OnRadar(RadarLayer::PlayerShip),
+                    ship_appearance,
+                    ship_t,
+                    GlobalTransform::default(),
+                ))
+                .id();
+            radar.center = Some(e);
+        }
+    }
+
+    // ── World entities ────────────────────────────────────────────────
+    let mut seen = std::collections::HashSet::new();
+    for snapshot in &sim.world.entities {
+        let uuid = &snapshot.uuid;
+        if !seen.insert(uuid.clone()) {
+            continue;
+        }
+
+        let layer = match tags_to_radar_layer(&snapshot.tags) {
+            Some(
+                l @ (RadarLayer::AsteroidField
+                    | RadarLayer::Station
+                    | RadarLayer::Planet
+                    | RadarLayer::Star),
+            ) => l,
+            _ => continue,
+        };
+
+        let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
+        let entity_yaw = snapshot.yaw.unwrap_or(0.0);
+
+        let appearance = if layer == RadarLayer::AsteroidField {
+            let region_colour = colour.unwrap_or(default_layer_colour(layer));
+            let region_shape = region_shape_from_snapshot(snapshot);
+            let world_size = snapshot
+                .radar_world_size
+                .or(Some(snapshot.radius_or_zero()))
+                .filter(|s| *s > 0.0)
+                .unwrap_or(4.0);
+            RadarAppearance {
+                icon: layer_to_icon(layer),
+                world_size,
+                color: region_colour,
+                region_colour: Some(region_colour),
+                region_shape,
+            }
+        } else {
+            let world_size = snapshot
+                .radar_world_size
+                .or(Some(snapshot.radius_or_zero()))
+                .filter(|s| *s > 0.0)
+                .unwrap_or(4.0);
+            RadarAppearance {
+                icon: layer_to_icon(layer),
+                world_size,
+                color: colour.unwrap_or(default_layer_colour(layer)),
+                region_colour: None,
+                region_shape: None,
+            }
+        };
+
+        let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
+            .with_rotation(Quat::from_rotation_y(entity_yaw));
+        if let Some(existing) = radar.blips.get(uuid) {
+            commands.entity(*existing).insert((OnRadar(layer), appearance, t));
+        } else {
+            let blip = commands
+                .spawn((OnRadar(layer), appearance, t, GlobalTransform::default()))
+                .id();
+            radar.blips.insert(uuid.clone(), blip);
+        }
+    }
+
+    // Despawn blips for entities no longer in world data.
+    radar.blips.retain(|uuid, &mut entity| {
+        if seen.contains(uuid) {
+            return true;
+        }
+        commands.entity(entity).despawn();
+        false
+    });
 }
 
 // ── Tests ────────────────────────────────────────────────────────────

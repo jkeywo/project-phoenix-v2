@@ -18,6 +18,12 @@ pub struct ClientCommsState {
     pub contacts: Vec<CommsContact>,
     /// The message the operator has currently selected (opened in chat view).
     pub selected_message_id: Option<String>,
+    /// Monotonically-increasing version number incremented on each `apply()`.
+    /// Used by the refresh systems to detect state changes.
+    pub version: u64,
+    /// The last version that was "cleaned" — UI refresh systems set this after
+    /// repopulating. `is_dirty()` returns `version != clean_version`.
+    clean_version: u64,
 }
 
 impl ClientCommsState {
@@ -34,6 +40,7 @@ impl ClientCommsState {
                     self.selected_message_id = None;
                 }
             }
+            self.version += 1;
         }
     }
 
@@ -42,6 +49,7 @@ impl ClientCommsState {
     pub fn select_message(&mut self, id: &str) {
         if self.messages.iter().any(|m| m.id == id) {
             self.selected_message_id = Some(id.to_string());
+            self.version += 1;
         }
     }
 
@@ -70,6 +78,36 @@ impl ClientCommsState {
             Some(msg) => msg.selected_response.is_none() && !msg.responses.is_empty() && !msg.is_orphaned,
             None => false,
         }
+    }
+
+    /// Returns `true` if the state has changed since the last `mark_clean()`.
+    pub fn is_dirty(&self) -> bool {
+        self.version != self.clean_version
+    }
+
+    /// Mark the state as clean (no pending UI refresh needed).
+    pub fn mark_clean(&mut self) {
+        self.clean_version = self.version;
+    }
+
+    /// Clear the currently selected message.
+    pub fn clear_selection(&mut self) {
+        if self.selected_message_id.is_some() {
+            self.selected_message_id = None;
+            self.version += 1;
+        }
+    }
+
+    /// Returns messages sorted: unread first, then chronological (by id descending).
+    pub fn sorted_messages(&self) -> Vec<&CommsMessage> {
+        let mut msgs: Vec<_> = self.messages.iter().collect();
+        msgs.sort_by(|a, b| {
+            let a_read = a.is_read as u8;
+            let b_read = b.is_read as u8;
+            a_read.cmp(&b_read)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        msgs
     }
 }
 
@@ -337,5 +375,103 @@ mod tests {
         s.apply(&comms_state(vec![m], vec![]));
         s.select_message("m1");
         assert!(!s.response_buttons_enabled());
+    }
+
+    // ── version / dirty tracking ──────────────────────────────────────────
+
+    #[test]
+    fn version_starts_at_zero() {
+        let s = ClientCommsState::default();
+        assert_eq!(s.version, 0);
+    }
+
+    #[test]
+    fn apply_increments_version() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![msg("m1")], vec![]));
+        assert_eq!(s.version, 1);
+    }
+
+    #[test]
+    fn non_comms_message_does_not_increment_version() {
+        let mut s = ClientCommsState::default();
+        s.apply(&ServerMessage::GameStarted);
+        assert_eq!(s.version, 0);
+    }
+
+    #[test]
+    fn is_dirty_returns_true_after_apply() {
+        let mut s = ClientCommsState::default();
+        assert!(!s.is_dirty());
+        s.apply(&comms_state(vec![msg("m1")], vec![]));
+        assert!(s.is_dirty());
+    }
+
+    #[test]
+    fn mark_clean_clears_dirty() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![msg("m1")], vec![]));
+        assert!(s.is_dirty());
+        s.mark_clean();
+        assert!(!s.is_dirty());
+    }
+
+    // ── clear_selection ────────────────────────────────────────────────────
+
+    #[test]
+    fn clear_selection_deselects_current_message() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![msg("m1")], vec![]));
+        s.select_message("m1");
+        assert!(s.selected_message_id.is_some());
+        s.clear_selection();
+        assert!(s.selected_message_id.is_none());
+    }
+
+    #[test]
+    fn clear_selection_is_noop_when_nothing_selected() {
+        let mut s = ClientCommsState::default();
+        s.clear_selection();
+        assert!(s.selected_message_id.is_none());
+    }
+
+    // ── sorted_messages ────────────────────────────────────────────────────
+
+    fn read_msg(id: &str) -> CommsMessage {
+        let mut m = msg(id);
+        m.is_read = true;
+        m
+    }
+
+    #[test]
+    fn sorted_messages_returns_unread_first() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![read_msg("m1"), msg("m2")], vec![]));
+        let sorted = s.sorted_messages();
+        assert_eq!(sorted.len(), 2);
+        assert_eq!(sorted[0].id, "m2");
+        assert!(!sorted[0].is_read);
+        assert_eq!(sorted[1].id, "m1");
+        assert!(sorted[1].is_read);
+    }
+
+    #[test]
+    fn sorted_messages_preserves_order_within_group() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![msg("m1"), msg("m2"), msg("m3")], vec![]));
+        let sorted = s.sorted_messages();
+        assert_eq!(sorted.len(), 3);
+        for w in sorted.windows(2) {
+            assert!(!w[0].is_read || w[1].is_read);
+        }
+    }
+
+    #[test]
+    fn sorted_messages_all_unread_maintains_order() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![msg("m1"), msg("m2")], vec![]));
+        let sorted = s.sorted_messages();
+        assert_eq!(sorted[0].id, "m1");
+        assert_eq!(sorted[1].id, "m2");
     }
 }

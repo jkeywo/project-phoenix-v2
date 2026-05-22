@@ -1,26 +1,23 @@
 //! Client-side Comms Panel plugin.
 //!
 //! Renders a two-panel inbox layout:
-//! - **Left panel** — message list (sender name + subject line).
-//! - **Right panel** — expanded chat view when a message is selected.
+//! - **Primary** (left/top) — contacts strip + message inbox list.
+//! - **Secondary** (right/bottom) — chat panel + objectives footer.
 //!
-//! This plugin drives `ClientCommsState` from inbound `ServerMessage`s and
-//! wires response buttons back to `ClientMessage` outbound events. The
-//! response buttons are rendered but inert in this slice (no scenario-driven
-//! message production yet); they will be activated in the next slice.
+//! The plugin drives `ClientCommsState` from inbound `ServerMessage`s and
+//! wires response buttons back to `ClientMessage` outbound events via
+//! the central `detect_comms_clicks` system.
 //!
 //! **Not unit-tested** — visual / Bevy layer. See `client_comms.rs` for the
 //! pure, tested logic that backs this plugin.
-//!
-//! Replaces `src/comms_plugin.rs` (folded in here). Compiled only when the
-//! `client` Cargo feature is enabled.
 
 use bevy::prelude::*;
 
 use crate::client::console_shell::ConsoleShell;
+use crate::client_app::OutboundClientMessage;
 use crate::client_comms::ClientCommsState;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
-use crate::messages::{Console, GamePhase};
+use crate::messages::{ClientMessage, Console, GamePhase};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 
 // ── Pure visibility helper ────────────────────────────────────────────
@@ -53,19 +50,6 @@ pub fn comms_panel_visible(
     }
 }
 
-// ── Resources ────────────────────────────────────────────────────────
-
-/// Tracks which sub-view the Comms console is currently showing.
-///
-/// This is a placeholder resource until PRD #119 fills in the full
-/// Comms console design.
-#[derive(Resource, Clone, Debug, PartialEq, Eq, Default)]
-pub enum CommsView {
-    /// Default inbox list view.
-    #[default]
-    Inbox,
-}
-
 // ── Marker components ────────────────────────────────────────────────
 
 /// Marks the root of the Comms console UI; shown only when the local
@@ -73,24 +57,66 @@ pub enum CommsView {
 #[derive(Component)]
 pub struct CommsPanel;
 
+/// Marks the horizontal scrollable contacts strip (top of primary).
+#[derive(Component)]
+pub struct CommsContactsStrip;
+
+/// Marks the vertical scrollable inbox list container.
+#[derive(Component)]
+pub struct CommsInboxList;
+
+/// Marks the chat panel container (body + responses).
+#[derive(Component)]
+pub struct CommsChatPanel;
+
+/// Marks the objectives footer strip at the bottom of secondary.
+#[derive(Component)]
+pub struct CommsObjectivesFooter;
+
+/// Marks the "Clear All" button.
+#[derive(Component)]
+pub struct CommsClearButton;
+
+/// Marks the "Back" button in the chat panel.
+#[derive(Component)]
+pub struct CommsBackButton;
+
+/// Marker + data for a contact pill: carries the target entity UUID.
+#[derive(Component)]
+pub struct CommsContactPill {
+    pub target_uuid: String,
+}
+
+/// Marker + data for an inbox row: carries the message ID.
+#[derive(Component)]
+pub struct CommsMessageRow {
+    pub message_id: String,
+}
+
+/// Marker + data for a response button: carries (response_index, message_id).
+#[derive(Component)]
+pub struct CommsResponseButton {
+    pub response_index: usize,
+    pub message_id: String,
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────
 
 /// Marker resource set once the comms UI has been spawned.
 #[derive(Resource)]
 pub struct CommsPanelSpawned;
 
-// ── Plugin ────────────────────────────────────────────────────────────
-
 pub struct CommsPanelPlugin;
 
 impl Plugin for CommsPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ClientCommsState>()
-            .init_resource::<CommsView>()
             .add_systems(Update, (
                 spawn_comms_ui.run_if(not(resource_exists::<CommsPanelSpawned>)),
                 toggle_comms_panel_visibility,
                 respawn_comms_on_orientation_change,
+                refresh_all_comms_ui,
+                detect_comms_clicks,
             ));
     }
 }
@@ -124,28 +150,133 @@ fn spawn_comms_ui(
         is_landscape,
         crate::client::elements::HelpPanel::Comms,
         |commands: &mut Commands, primary: Entity| {
+            // Primary: vertical column — contacts strip + inbox list
             let col = commands
                 .spawn(Node {
                     flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
                     width: Val::Percent(100.0),
                     height: Val::Percent(100.0),
-                    row_gap: Val::Px(8.0),
                     ..default()
                 })
                 .id();
             commands.entity(primary).add_child(col);
-            commands.entity(col).with_children(|p| {
-                p.spawn((
-                    Text::new("Comms"),
-                    TextFont { font_size: 32.0, ..default() },
-                    TextColor(Color::srgb(0.8, 0.7, 1.0)),
-                ));
-            });
+
+            // Contacts strip (horizontal, scrollable)
+            let contacts_strip = commands
+                .spawn((
+                    CommsContactsStrip,
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        width: Val::Percent(100.0),
+                        height: Val::Px(40.0),
+                        overflow: Overflow::scroll(),
+                        column_gap: Val::Px(6.0),
+                        padding: UiRect::horizontal(Val::Px(6.0)),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                ))
+                .id();
+            commands.entity(col).add_child(contacts_strip);
+
+            // Inbox header row: label + Clear All button
+            let inbox_header = commands
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        width: Val::Percent(100.0),
+                        height: Val::Px(26.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
+                        padding: UiRect::horizontal(Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb_u8(25, 25, 35)),
+                ))
+                .with_child((
+                    Text::new("INBOX"),
+                    TextFont { font_size: 11.0, ..default() },
+                    TextColor(Color::srgb(0.5, 0.5, 0.6)),
+                ))
+                .with_child((
+                    CommsClearButton,
+                    Button,
+                    Node {
+                        padding: UiRect::horizontal(Val::Px(8.0)),
+                        height: Val::Px(22.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb_u8(60, 40, 40)),
+                    Text::new("Clear All"),
+                    TextFont { font_size: 11.0, ..default() },
+                    TextColor(Color::srgb(0.9, 0.5, 0.5)),
+                ))
+                .id();
+            commands.entity(col).add_child(inbox_header);
+
+            // Inbox list (vertical, scrollable, flex_grow)
+            let inbox_list = commands
+                .spawn((
+                    CommsInboxList,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        width: Val::Percent(100.0),
+                        flex_grow: 1.0,
+                        overflow: Overflow::scroll(),
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                ))
+                .id();
+            commands.entity(col).add_child(inbox_list);
         },
-        |_commands: &mut Commands, _secondary: Entity| {
-            // Comms UI is a placeholder; secondary slot empty.
+        |commands: &mut Commands, secondary: Entity| {
+            // Secondary: vertical column — chat panel + objectives footer
+            let col = commands
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                })
+                .id();
+            commands.entity(secondary).add_child(col);
+
+            // Chat panel (flex_grow, scrollable)
+            let chat_panel = commands
+                .spawn((
+                    CommsChatPanel,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        width: Val::Percent(100.0),
+                        flex_grow: 1.0,
+                        overflow: Overflow::scroll(),
+                        row_gap: Val::Px(4.0),
+                        padding: UiRect::all(Val::Px(4.0)),
+                        ..default()
+                    },
+                ))
+                .id();
+            commands.entity(col).add_child(chat_panel);
+
+            // Objectives footer (fixed height)
+            let objectives_footer = commands
+                .spawn((
+                    CommsObjectivesFooter,
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        width: Val::Percent(100.0),
+                        height: Val::Px(28.0),
+                        overflow: Overflow::scroll(),
+                        column_gap: Val::Px(8.0),
+                        padding: UiRect::horizontal(Val::Px(6.0)),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                ))
+                .id();
+            commands.entity(col).add_child(objectives_footer);
         },
         &assets,
     );
@@ -170,7 +301,7 @@ fn respawn_comms_on_orientation_change(
     commands.remove_resource::<CommsPanelSpawned>();
 }
 
-// ── Systems ──────────────────────────────────────────────────────────
+// ── Visibility ───────────────────────────────────────────────────────
 
 fn toggle_comms_panel_visibility(
     lobby: Res<LobbyState>,
@@ -182,6 +313,303 @@ fn toggle_comms_panel_visibility(
     for mut vis in panel.iter_mut() {
         *vis = if visible { Visibility::Visible } else { Visibility::Hidden };
     }
+}
+
+// ── Central click router ─────────────────────────────────────────────
+
+/// Detects `Interaction::Pressed` on comms interactive entities and
+/// writes the corresponding `OutboundClientMessage`.
+fn detect_comms_clicks(
+    contacts: Query<(&Interaction, &CommsContactPill), Changed<Interaction>>,
+    messages: Query<(&Interaction, &CommsMessageRow), Changed<Interaction>>,
+    responses: Query<(&Interaction, &CommsResponseButton), Changed<Interaction>>,
+    clears: Query<&Interaction, (Changed<Interaction>, With<CommsClearButton>)>,
+    backs: Query<&Interaction, (Changed<Interaction>, With<CommsBackButton>)>,
+    mut outbound: MessageWriter<OutboundClientMessage>,
+    mut state: ResMut<ClientCommsState>,
+) {
+    for (interaction, pill) in contacts.iter() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(
+                ClientMessage::Hail { target_uuid: pill.target_uuid.clone() },
+            ));
+        }
+    }
+    for (interaction, row) in messages.iter() {
+        if *interaction == Interaction::Pressed {
+            state.select_message(&row.message_id);
+            outbound.write(OutboundClientMessage(
+                ClientMessage::SelectCommsMessage { message_id: row.message_id.clone() },
+            ));
+        }
+    }
+    for (interaction, btn) in responses.iter() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(
+                ClientMessage::RespondToMessage {
+                    message_id: btn.message_id.clone(),
+                    response_index: btn.response_index,
+                },
+            ));
+        }
+    }
+    for interaction in clears.iter() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(ClientMessage::ClearComms));
+        }
+    }
+    for interaction in backs.iter() {
+        if *interaction == Interaction::Pressed {
+            state.clear_selection();
+        }
+    }
+}
+
+// ── Refresh (single combined system) ─────────────────────────────────
+
+/// Helper: despawn all children of a container.
+fn clear_children(children: &Children, commands: &mut Commands) {
+    for child in children.iter() {
+        commands.entity(child).despawn();
+    }
+}
+
+/// Helper: spawn an empty-state label into a container.
+fn spawn_empty_label(container: Entity, text: &str, commands: &mut Commands) {
+    commands.entity(container).with_children(|p| {
+        p.spawn((
+            Text::new(text.to_string()),
+            TextFont { font_size: 14.0, ..default() },
+            TextColor(Color::srgb(0.5, 0.5, 0.5)),
+        ));
+    });
+}
+
+/// Refreshes all four comms UI sections when state is dirty, then marks clean.
+fn refresh_all_comms_ui(
+    mut state: ResMut<ClientCommsState>,
+    contacts_strip_q: Query<Entity, With<CommsContactsStrip>>,
+    inbox_list_q: Query<Entity, With<CommsInboxList>>,
+    chat_panel_q: Query<Entity, With<CommsChatPanel>>,
+    objectives_footer_q: Query<Entity, With<CommsObjectivesFooter>>,
+    children: Query<&Children>,
+    mut commands: Commands,
+) {
+    if !state.is_dirty() { return; }
+
+    // ── Contacts strip ──────────────────────────────────────────────────
+    if let Ok(container) = contacts_strip_q.single() {
+        if let Ok(existing) = children.get(container) {
+            clear_children(existing, &mut commands);
+        }
+        if state.contacts.is_empty() {
+            spawn_empty_label(container, "No contacts", &mut commands);
+        } else {
+            for contact in state.contacts.iter() {
+                commands.entity(container).with_children(|p| {
+                    p.spawn((
+                        CommsContactPill { target_uuid: contact.uuid.clone() },
+                        Button,
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            padding: UiRect::horizontal(Val::Px(8.0)),
+                            height: Val::Px(30.0),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb_u8(60, 60, 80)),
+                        Text::new(contact.name.clone()),
+                        TextFont { font_size: 13.0, ..default() },
+                        TextColor(Color::srgb(0.8, 0.8, 1.0)),
+                    ));
+                });
+            }
+        }
+    }
+
+    // ── Inbox list ──────────────────────────────────────────────────────
+    if let Ok(container) = inbox_list_q.single() {
+        if let Ok(existing) = children.get(container) {
+            clear_children(existing, &mut commands);
+        }
+        let messages = state.sorted_messages();
+        if messages.is_empty() {
+            spawn_empty_label(container, "Inbox empty", &mut commands);
+        } else {
+            for msg in messages {
+                let sender_text = if msg.is_orphaned {
+                    format!("{} (disconnected)", msg.sender_name)
+                } else {
+                    msg.sender_name.clone()
+                };
+                let subject_text = if msg.subject.len() > 32 {
+                    format!("{}...", &msg.subject[..32])
+                } else {
+                    msg.subject.clone()
+                };
+                let row_label = format!("{} \u{2014} {}", sender_text, subject_text);
+                let (bg, fg) = if msg.is_read {
+                    (Color::srgb_u8(30, 30, 40), Color::srgb(0.4, 0.4, 0.5))
+                } else {
+                    (Color::srgb_u8(40, 40, 55), Color::srgb(0.9, 0.9, 1.0))
+                };
+                commands.entity(container).with_children(|p| {
+                    p.spawn((
+                        CommsMessageRow { message_id: msg.id.clone() },
+                        Button,
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            padding: UiRect::all(Val::Px(6.0)),
+                            width: Val::Percent(100.0),
+                            min_height: Val::Px(32.0),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(bg),
+                        Text::new(row_label),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(fg),
+                    ));
+                });
+            }
+        }
+    }
+
+    // ── Chat panel ──────────────────────────────────────────────────────
+    if let Ok(container) = chat_panel_q.single() {
+        if let Ok(existing) = children.get(container) {
+            clear_children(existing, &mut commands);
+        }
+        if let Some(msg) = state.selected_message() {
+            // Back button
+            commands.entity(container).with_children(|p| {
+                p.spawn((
+                    CommsBackButton,
+                    Button,
+                    Node {
+                        padding: UiRect::all(Val::Px(4.0)),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb_u8(50, 50, 70)),
+                    Text::new("\u{2190} Back"),
+                    TextFont { font_size: 12.0, ..default() },
+                    TextColor(Color::srgb(0.7, 0.7, 0.9)),
+                ));
+            });
+
+            // Sender name header
+            commands.entity(container).with_children(|p| {
+                p.spawn((
+                    Text::new(msg.sender_name.clone()),
+                    TextFont { font_size: 16.0, ..default() },
+                    TextColor(Color::srgb(0.8, 0.7, 1.0)),
+                ));
+            });
+
+            // Body text
+            commands.entity(container).with_children(|p| {
+                p.spawn((
+                    Text::new(msg.body.clone()),
+                    TextFont { font_size: 13.0, ..default() },
+                    TextColor(Color::srgb(0.8, 0.8, 0.9)),
+                    Node {
+                        margin: UiRect::vertical(Val::Px(6.0)),
+                        ..default()
+                    },
+                ));
+            });
+
+            // Response area
+            if msg.is_orphaned {
+                commands.entity(container).with_children(|p| {
+                    p.spawn((
+                        Text::new("Transmission ended \u{2014} source no longer available."),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(Color::srgb(0.6, 0.4, 0.4)),
+                    ));
+                });
+            } else if let Some(selected_idx) = msg.selected_response {
+                let response_text = msg.responses.get(selected_idx)
+                    .map(|s| format!("Response sent: {}", s))
+                    .unwrap_or_else(|| "Response sent.".to_string());
+                commands.entity(container).with_children(|p| {
+                    p.spawn((
+                        Text::new(response_text),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(Color::srgb(0.5, 0.8, 0.5)),
+                    ));
+                });
+            } else {
+                for (idx, response) in msg.responses.iter().enumerate() {
+                    commands.entity(container).with_children(|p| {
+                        p.spawn((
+                            CommsResponseButton {
+                                response_index: idx,
+                                message_id: msg.id.clone(),
+                            },
+                            Button,
+                            Node {
+                                padding: UiRect::all(Val::Px(6.0)),
+                                margin: UiRect::top(Val::Px(2.0)),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb_u8(50, 60, 80)),
+                            Text::new(response.clone()),
+                            TextFont { font_size: 13.0, ..default() },
+                            TextColor(Color::srgb(0.7, 0.9, 1.0)),
+                        ));
+                    });
+                }
+            }
+        } else {
+            spawn_empty_label(container, "Select a message", &mut commands);
+        }
+    }
+
+    // ── Objectives footer ───────────────────────────────────────────────
+    if let Ok(container) = objectives_footer_q.single() {
+        if let Ok(existing) = children.get(container) {
+            clear_children(existing, &mut commands);
+        }
+        if state.objectives.is_empty() {
+            spawn_empty_label(container, "No active objectives", &mut commands);
+        } else {
+            for obj in state.objectives.iter() {
+                let status_str = match obj.status {
+                    crate::messages::ObjectiveStatus::Active => "ACTIVE",
+                    crate::messages::ObjectiveStatus::Completed => "DONE",
+                    crate::messages::ObjectiveStatus::Failed => "FAILED",
+                };
+                let status_color = match obj.status {
+                    crate::messages::ObjectiveStatus::Active => Color::srgb(0.3, 0.8, 0.3),
+                    crate::messages::ObjectiveStatus::Completed => Color::srgb(0.5, 0.5, 0.5),
+                    crate::messages::ObjectiveStatus::Failed => Color::srgb(0.8, 0.3, 0.3),
+                };
+                let label = if obj.text.len() > 40 {
+                    format!("{}...", &obj.text[..40])
+                } else {
+                    obj.text.clone()
+                };
+                commands.entity(container).with_children(|p| {
+                    p.spawn((
+                        Text::new(format!("[{}]", status_str)),
+                        TextFont { font_size: 11.0, ..default() },
+                        TextColor(status_color),
+                    ));
+                    p.spawn((
+                        Text::new(label),
+                        TextFont { font_size: 11.0, ..default() },
+                        TextColor(Color::srgb(0.7, 0.7, 0.8)),
+                    ));
+                });
+            }
+        }
+    }
+
+    state.mark_clean();
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -210,11 +638,5 @@ mod tests {
         let lobby = lobby_in_progress();
         let active = ActiveConsole::default();
         assert!(!comms_panel_visible(&lobby, "tok", &active));
-    }
-
-    #[test]
-    fn comms_view_default_is_inbox() {
-        let v = CommsView::default();
-        assert_eq!(v, CommsView::Inbox);
     }
 }

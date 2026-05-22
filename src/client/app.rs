@@ -17,6 +17,7 @@ use crate::client_lobby::{
     LobbyState, LobbyView, LocalPlayerToken, ActiveConsole,
 };
 use crate::client_sim::ClientSimState;
+use crate::client_comms::ClientCommsState;
 use crate::client_complexity::{self, ComplexityStore};
 use crate::client_elements::{
     handle_help_button_press, handle_help_overlay_dismiss, HideableElementRegistry,
@@ -602,6 +603,7 @@ fn apply_inbound_messages(
     mut reader: MessageReader<InboundServerMessage>,
     mut lobby: ResMut<LobbyState>,
     mut sim: ResMut<ClientSimState>,
+    mut comms: ResMut<ClientCommsState>,
     mut complexity: ResMut<ComplexityStore>,
     token: Res<LocalPlayerToken>,
     mut active: ResMut<ActiveConsole>,
@@ -625,6 +627,7 @@ fn apply_inbound_messages(
         }
         lobby.apply(&ev.0);
         sim.apply(&ev.0);
+        comms.apply(&ev.0);
         // ShipView is updated by ShipViewPlugin's own system.
     }
 }

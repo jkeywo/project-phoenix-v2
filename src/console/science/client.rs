@@ -202,7 +202,6 @@ fn fill_sensors_radar(commands: &mut Commands, container: Entity) {
         None,
         None,
         RadarClipMode::Circle,
-        None,
     );
     commands.entity(radar).insert(Node {
         width: Val::Px(240.0),

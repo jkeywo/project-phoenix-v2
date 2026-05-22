@@ -491,7 +491,6 @@ fn fill_helm_radar(
         Some(assets.radar_surround.clone()),
         Some(assets.radar_bg.clone()),
         RadarClipMode::Circle,
-        Some(assets.radar_surround.clone()),
     );
     // HelmRadarWidget marks this widget so sync_helm_radar_range only
     // updates it, not other consoles' radar widgets.

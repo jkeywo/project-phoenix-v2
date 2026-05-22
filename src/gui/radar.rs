@@ -8,6 +8,9 @@
 //! occluded by the opaque radar dial image).
 
 use bevy::prelude::*;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
+use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 use std::collections::{HashMap, HashSet};
 
 use crate::messages::EntitySnapshot;
@@ -122,9 +125,8 @@ pub enum RadarClipMode {
     /// No clipping — blips may overflow the node's bounds.
     #[default]
     None,
-    /// Blips are visually clipped to the inscribed circle of the radar widget.
-    /// Pass a `clip_image` to `GenericRadar::spawn` whose opaque pixels cover
-    /// the area outside the circular dial; transparent pixels show blips through.
+    /// Blips are visually clipped to the inscribed circle of the radar widget
+    /// via per-pixel shader discard in `RadarBlipMaterial`. No extra image needed.
     Circle,
     /// Blips are clipped to the rectangular bounds of the radar widget.
     /// Requires `overflow: Overflow::Clip` on the spawned node (set it after
@@ -205,6 +207,52 @@ pub struct RadarRegionNode {
 /// The payload is the source ECS entity stored in `RadarBlipNode::source`.
 #[derive(EntityEvent, Clone, Debug)]
 pub struct RadarBlipClicked(pub Entity);
+
+// ── Blip shader material ──────────────────────────────────────────────────────
+
+/// Per-blip `UiMaterial` that tints the icon texture and clips pixels to the
+/// radar's circular boundary when `clip_circle > 0.5`.
+///
+/// Binding layout matches `assets/shaders/radar_blip.wgsl`:
+///   0 = icon texture, 1 = icon sampler, 2 = uniform struct.
+#[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
+pub struct RadarBlipMaterial {
+    #[texture(0)]
+    #[sampler(1)]
+    pub icon: Handle<Image>,
+    #[uniform(2)]
+    pub color_r: f32,
+    #[uniform(2)]
+    pub color_g: f32,
+    #[uniform(2)]
+    pub color_b: f32,
+    #[uniform(2)]
+    pub color_a: f32,
+    #[uniform(2)]
+    pub radar_nx: f32,
+    #[uniform(2)]
+    pub radar_ny: f32,
+    #[uniform(2)]
+    pub size_frac: f32,
+    /// Non-zero enables per-pixel circular clip in the fragment shader.
+    #[uniform(2)]
+    pub clip_circle: f32,
+}
+
+impl UiMaterial for RadarBlipMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/radar_blip.wgsl".into()
+    }
+}
+
+/// 1×1 white pixel image used as the fallback icon for blips whose real
+/// icon texture has not loaded yet, ensuring the tint colour still renders.
+#[derive(Resource)]
+pub struct RadarBlipFallbackIcon(pub Handle<Image>);
+
+fn setup_radar_blip_fallback(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    commands.insert_resource(RadarBlipFallbackIcon(images.add(Image::default())));
+}
 
 // ── Pure tag → layer / icon mapping ──────────────────────────────────────────
 
@@ -416,9 +464,8 @@ impl GenericRadar {
     /// - `filter` — which `RadarLayer` values to draw.
     /// - `bg_image` (back layer) / `overlay_image` (front layer) — optional images.
     /// - `clip_mode` — `Circle`, `Square`, or `None`. Stored on the widget component.
-    /// - `clip_image` — when `Some`, spawned as a child at `ZIndex(50)` (above all
-    ///   blips). For circular clipping, pass an image whose opaque pixels cover the
-    ///   area outside the inscribed circle while the centre is transparent.
+    ///   `Circle` clips blips per-pixel in the fragment shader; no extra image needed.
+    ///   `Square` clips via `overflow: Overflow::clip()` on the spawned node.
     ///
     /// Returns the UI node entity.
     pub fn spawn(
@@ -429,7 +476,6 @@ impl GenericRadar {
         bg_image: Option<Handle<Image>>,
         overlay_image: Option<Handle<Image>>,
         clip_mode: RadarClipMode,
-        clip_image: Option<Handle<Image>>,
     ) -> Entity {
         let mut node = commands.spawn((
             GenericRadarWidget {
@@ -467,28 +513,26 @@ impl GenericRadar {
             });
         }
 
-        if let Some(clip) = clip_image {
-            commands.entity(entity).with_children(|parent| {
-                parent.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        top: Val::Px(0.0),
-                        left: Val::Px(0.0),
-                        ..default()
-                    },
-                    ImageNode::new(clip),
-                    ZIndex(50),
-                ));
-            });
-        }
-
         entity
     }
 }
 
 // ── Sync system ───────────────────────────────────────────────────────────────
+
+/// Layout data and shader uniforms for a single radar blip, collected
+/// during one reconciliation frame.
+struct BlipIntent {
+    left: f32,
+    top: f32,
+    size_px: f32,
+    color: Color,
+    icon: Option<Handle<Image>>,
+    angle: f32,
+    nx: f32,
+    ny: f32,
+    size_frac: f32,
+    clip_circle: f32,
+}
 
 /// Each frame: for every visible `GenericRadarWidget`, project all
 /// `OnRadar` + `RadarAppearance` entities passing the filter into child UI
@@ -514,7 +558,7 @@ fn sync_radar_blip_nodes(
     blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform)>,
     centers: Query<&RadarCenter>,
     mut existing_blip_nodes: Query<
-        (&mut Node, &mut ImageNode, &mut Transform, &RadarBlipNode),
+        (&mut Node, &MaterialNode<RadarBlipMaterial>, &mut Transform, &RadarBlipNode),
         Without<RadarRegionNode>,
     >,
     mut existing_region_nodes: Query<
@@ -527,6 +571,8 @@ fn sync_radar_blip_nodes(
         Without<RadarBlipNode>,
     >,
     icons: Res<RadarIconLookup>,
+    mut blip_materials: ResMut<Assets<RadarBlipMaterial>>,
+    fallback: Option<Res<RadarBlipFallbackIcon>>,
 ) {
     // Cache the global RadarCenter once; only used for ship-centred widgets.
     let global_center = centers.iter().next();
@@ -586,11 +632,7 @@ fn sync_radar_blip_nodes(
         let range = widget.range;
 
         // ── Build intended blip set (point entities) ─────────────────────────
-        // source entity → (left_px, top_px, size_px, color, icon_handle, icon_angle)
-        let mut intended: HashMap<
-            Entity,
-            (f32, f32, f32, Color, Option<Handle<Image>>, f32),
-        > = HashMap::new();
+        let mut intended: HashMap<Entity, BlipIntent> = HashMap::new();
 
         // ── Build intended region set (region shape entities) ────────────────
         // source entity → (nx, ny, colour, shape, outer_size_px)
@@ -659,31 +701,49 @@ fn sync_radar_blip_nodes(
                 let half = size_px * 0.5;
                 let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
                 let icon_handle = icons.0.get(&appearance.icon).cloned();
-                intended.insert(
-                    src,
-                    (left, top, size_px, appearance.color, icon_handle, icon_angle),
-                );
+                let size_frac = half / radar_radius_px;
+                let clip_circle = if widget.clip_mode == RadarClipMode::Circle { 1.0_f32 } else { 0.0_f32 };
+                intended.insert(src, BlipIntent {
+                    left,
+                    top,
+                    size_px,
+                    color: appearance.color,
+                    icon: icon_handle,
+                    angle: icon_angle,
+                    nx,
+                    ny,
+                    size_frac,
+                    clip_circle,
+                });
             }
         }
 
         // ── Reconcile existing children ───────────────────────────────────────
         if let Some(children) = children {
             for child in children.iter() {
-                if let Ok((mut node, mut image, mut transform, tag)) =
+                if let Ok((mut node, mat_node, mut transform, tag)) =
                     existing_blip_nodes.get_mut(child)
                 {
-                    if let Some((left, top, size_px, color, icon_handle, icon_angle)) =
-                        intended.remove(&tag.source)
-                    {
-                        node.left = Val::Px(left);
-                        node.top = Val::Px(top);
-                        node.width = Val::Px(size_px);
-                        node.height = Val::Px(size_px);
-                        if let Some(h) = icon_handle {
-                            image.image = h;
+                    if let Some(intent) = intended.remove(&tag.source) {
+                        node.left = Val::Px(intent.left);
+                        node.top = Val::Px(intent.top);
+                        node.width = Val::Px(intent.size_px);
+                        node.height = Val::Px(intent.size_px);
+                        transform.rotation = Quat::from_rotation_z(intent.angle);
+                        if let Some(mat) = blip_materials.get_mut(&mat_node.0) {
+                            let LinearRgba { red, green, blue, alpha } = intent.color.to_linear();
+                            mat.color_r = red;
+                            mat.color_g = green;
+                            mat.color_b = blue;
+                            mat.color_a = alpha;
+                            mat.radar_nx = intent.nx;
+                            mat.radar_ny = intent.ny;
+                            mat.size_frac = intent.size_frac;
+                            mat.clip_circle = intent.clip_circle;
+                            if let Some(h) = intent.icon {
+                                mat.icon = h;
+                            }
                         }
-                        image.color = color;
-                        transform.rotation = Quat::from_rotation_z(icon_angle);
                     } else {
                         commands.entity(child).despawn();
                     }
@@ -715,42 +775,41 @@ fn sync_radar_blip_nodes(
 
         // ── Spawn new blip nodes ─────────────────────────────────────────────
         if !intended.is_empty() || !intended_regions.is_empty() {
+            let fallback_icon: Handle<Image> =
+                fallback.as_ref().map(|f| f.0.clone()).unwrap_or_default();
             commands.entity(radar_entity).with_children(|parent| {
-                for (
-                    source,
-                    (left, top, size_px, color, icon_handle, icon_angle),
-                ) in intended.drain()
-                {
+                for (source, intent) in intended.drain() {
+                    let icon_handle = intent.icon.unwrap_or_else(|| fallback_icon.clone());
+                    let LinearRgba { red, green, blue, alpha } = intent.color.to_linear();
+                    let mat_handle = blip_materials.add(RadarBlipMaterial {
+                        icon: icon_handle,
+                        color_r: red,
+                        color_g: green,
+                        color_b: blue,
+                        color_a: alpha,
+                        radar_nx: intent.nx,
+                        radar_ny: intent.ny,
+                        size_frac: intent.size_frac,
+                        clip_circle: intent.clip_circle,
+                    });
                     let node = Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(left),
-                        top: Val::Px(top),
-                        width: Val::Px(size_px),
-                        height: Val::Px(size_px),
+                        left: Val::Px(intent.left),
+                        top: Val::Px(intent.top),
+                        width: Val::Px(intent.size_px),
+                        height: Val::Px(intent.size_px),
                         ..default()
                     };
-                    let transform = Transform::from_rotation(Quat::from_rotation_z(icon_angle));
-                    if let Some(h) = icon_handle {
-                        parent.spawn((
-                            node,
-                            ImageNode::new(h).with_color(color),
-                            transform,
-                            ZIndex(10),
-                            RadarBlipNode { source },
-                            Button,
-                            Interaction::default(),
-                        ));
-                    } else {
-                        parent.spawn((
-                            node,
-                            ImageNode::solid_color(color),
-                            transform,
-                            ZIndex(10),
-                            RadarBlipNode { source },
-                            Button,
-                            Interaction::default(),
-                        ));
-                    }
+                    let transform = Transform::from_rotation(Quat::from_rotation_z(intent.angle));
+                    parent.spawn((
+                        node,
+                        MaterialNode(mat_handle),
+                        transform,
+                        ZIndex(10),
+                        RadarBlipNode { source },
+                        Button,
+                        Interaction::default(),
+                    ));
                 }
                 for (source, (nx, ny, colour, shape, _)) in intended_regions.drain() {
                     let (node, bg, border_color) = region_shape_node(
@@ -923,7 +982,9 @@ pub struct GuiRadarPlugin;
 
 impl Plugin for GuiRadarPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RadarIconLookup>()
+        app.add_plugins(UiMaterialPlugin::<RadarBlipMaterial>::default())
+            .init_resource::<RadarIconLookup>()
+            .add_systems(Startup, setup_radar_blip_fallback)
             .add_systems(Update, (sync_radar_blip_nodes, detect_radar_blip_press));
     }
 }

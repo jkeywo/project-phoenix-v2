@@ -25,9 +25,9 @@ use crate::client_sim::{
     is_fire_button_enabled, phaser_mode_label, ClientSimState,
 };
 use crate::gui::{
-    default_layer_colour, layer_to_icon, project_radar_entity, region_shape_from_snapshot,
-    spawn_gui_button, tags_to_radar_layer, ButtonPressed, ButtonSize, GenericRadar,
-    GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
+    default_layer_colour, is_on_radar, layer_to_icon, project_radar_entity,
+    region_shape_from_snapshot, spawn_gui_button, tags_to_radar_layer, ButtonPressed, ButtonSize,
+    GenericRadar, GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
     RadarIcon, RadarLayer, StateVisuals, RadioButtonConfig, RadioGroup, RadioSelected, Disabled,
 };
 use crate::messages::{Console, GamePhase, TorpedoTube};
@@ -351,14 +351,14 @@ fn on_tactical_radar_tap(
     // blip centres: blip centre = (radius + nx*radius, radius - ny*radius).
     let click_local = (tap.x, tap.y);
 
-    // Project every ship/missile in the sim world to radar-local pixels.
+    // Project every entity matching the radar's filter to radar-local pixels.
     let projected: Vec<(String, f32, f32)> = sim
         .world
         .entities
         .iter()
         .filter_map(|snap| {
             let layer = tags_to_radar_layer(&snap.tags)?;
-            if !matches!(layer, RadarLayer::Ship | RadarLayer::Missile) {
+            if !is_on_radar(&widget.filter, layer) {
                 return None;
             }
             let (nx, ny) = project_radar_entity(

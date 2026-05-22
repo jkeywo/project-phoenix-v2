@@ -6,15 +6,22 @@ use super::vignette::RedAlertIntensity;
 // ── Layout ────────────────────────────────────────────────────────────────
 
 /// Configuration for the 9-slice border frame.
+///
+/// Corners are non-square: `corner_width` is the horizontal extent and
+/// `corner_height` is the vertical extent.  Edges sit between the corners
+/// and are `edge_thickness` pixels thick.  Content is inset by
+/// `edge_thickness` on every side (corners are transparent overlays, so
+/// content can show behind their outer regions).
 #[derive(Resource, Clone, Debug)]
 pub struct BorderConfig {
-    pub corner_size: f32,
+    pub corner_width: f32,
+    pub corner_height: f32,
     pub edge_thickness: f32,
 }
 
 impl Default for BorderConfig {
     fn default() -> Self {
-        Self { corner_size: 40.0, edge_thickness: 16.0 }
+        Self { corner_width: 120.0, corner_height: 72.0, edge_thickness: 22.0 }
     }
 }
 
@@ -127,7 +134,8 @@ impl GuiBorderWidget {
         config: &BorderConfig,
         alert: bool,
     ) -> Entity {
-        let cs = config.corner_size;
+        let cw = config.corner_width;
+        let ch = config.corner_height;
         let et = config.edge_thickness;
 
         commands
@@ -143,24 +151,26 @@ impl GuiBorderWidget {
                 },
             ))
             .with_children(|parent| {
-                // Safe content area
+                // Safe content area — inset by edge_thickness on all sides.
+                // Corner images are transparent overlays so content can show
+                // behind their outer regions.
                 parent.spawn((
                     BorderContentArea,
                     Node {
                         position_type: PositionType::Absolute,
-                        top: Val::Px(cs),
+                        top: Val::Px(et),
                         left: Val::Px(et),
                         right: Val::Px(et),
-                        bottom: Val::Px(cs),
+                        bottom: Val::Px(et),
                         overflow: Overflow::clip(),
                         ..default()
                     },
                 ));
 
-                // 4 corners
+                // 4 corners (corner_width × corner_height, non-square)
                 let corners: [(CornerSlot, Val, Val, Val, Val); 4] = [
-                    (CornerSlot::TopLeft,     Val::Px(0.0), Val::Px(0.0), Val::Auto, Val::Auto),
-                    (CornerSlot::TopRight,    Val::Px(0.0), Val::Auto,    Val::Px(0.0), Val::Auto),
+                    (CornerSlot::TopLeft,     Val::Px(0.0), Val::Px(0.0), Val::Auto,    Val::Auto   ),
+                    (CornerSlot::TopRight,    Val::Px(0.0), Val::Auto,    Val::Px(0.0), Val::Auto   ),
                     (CornerSlot::BottomLeft,  Val::Auto,    Val::Px(0.0), Val::Auto,    Val::Px(0.0)),
                     (CornerSlot::BottomRight, Val::Auto,    Val::Auto,    Val::Px(0.0), Val::Px(0.0)),
                 ];
@@ -173,20 +183,21 @@ impl GuiBorderWidget {
                             left,
                             right,
                             bottom,
-                            width: Val::Px(cs),
-                            height: Val::Px(cs),
+                            width: Val::Px(cw),
+                            height: Val::Px(ch),
                             ..default()
                         },
                         ImageNode::new(assets.corner(slot, alert).clone()),
                     ));
                 }
 
-                // 4 edges (tiled)
+                // 4 edges (tiled).  Horizontal edges are inset by corner_width
+                // on each side; vertical edges are inset by corner_height.
                 let edges: [(EdgeSlot, Val, Val, Val, Val, bool, bool); 4] = [
-                    (EdgeSlot::Top,    Val::Px(0.0), Val::Px(cs),  Val::Px(cs),  Val::Auto,    true,  false),
-                    (EdgeSlot::Bottom, Val::Auto,    Val::Px(cs),  Val::Px(cs),  Val::Px(0.0), true,  false),
-                    (EdgeSlot::Left,   Val::Px(cs),  Val::Px(0.0), Val::Auto,    Val::Px(cs),  false, true ),
-                    (EdgeSlot::Right,  Val::Px(cs),  Val::Auto,    Val::Px(0.0), Val::Px(cs),  false, true ),
+                    (EdgeSlot::Top,    Val::Px(0.0), Val::Px(cw), Val::Px(cw), Val::Auto,    true,  false),
+                    (EdgeSlot::Bottom, Val::Auto,    Val::Px(cw), Val::Px(cw), Val::Px(0.0), true,  false),
+                    (EdgeSlot::Left,   Val::Px(ch),  Val::Px(0.0), Val::Auto,  Val::Px(ch),  false, true ),
+                    (EdgeSlot::Right,  Val::Px(ch),  Val::Auto,   Val::Px(0.0), Val::Px(ch), false, true ),
                 ];
                 for (slot, top, left, right, bottom, tile_x, tile_y) in edges {
                     let node = if tile_x {

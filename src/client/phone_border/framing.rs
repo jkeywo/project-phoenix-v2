@@ -306,8 +306,8 @@ fn spawn_bezel_on_startup(
     // Spawn the "RED ALERT" banner (phone-specific, not part of generic border).
     //
     // Positioned BELOW the tab bar so it doesn't overlap the console
-    // selection tabs.  Bezel top inset is 40px (corner_size); tab bar
-    // adds another ~36px height.  Banner sits just below at ~84px.
+    // selection tabs.  Edge top inset is 22px; tab bar adds another ~36px.
+    // Banner sits just below at ~84px (comfortable margin above ~58px end).
     commands.spawn((
         AlertBannerText,
         Text::new("RED ALERT"),

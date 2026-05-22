@@ -960,6 +960,185 @@ fn region_shape_node(
     (node, bg_mut, border_color_mut)
 }
 
+// ── Radar arcs ────────────────────────────────────────────────────────────────
+
+/// Distinguishes phaser arcs from torpedo arcs so consumers can colour them
+/// independently. Carried on `RadarArc` and used as a tie-breaker key when
+/// reconciling arc child nodes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RadarArcKind {
+    Phaser,
+    Torpedo,
+}
+
+/// One arc specification rendered on a radar widget.
+///
+/// `facing_deg` is the bearing of the arc's centreline in ship-relative
+/// coordinates (0° = forward, +90° = starboard, matching `TorpedoTubeConfig`
+/// and `PhaserBankConfig` semantics). `fire_arc_deg` is the full arc width.
+/// Both are in degrees.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadarArc {
+    pub id: String,
+    pub kind: RadarArcKind,
+    pub facing_deg: f32,
+    pub fire_arc_deg: f32,
+    pub color: Color,
+}
+
+/// Component on a `GenericRadarWidget` listing the arcs to draw.
+/// Replace the whole vector to update the on-radar arc set.
+#[derive(Component, Clone, Default, Debug)]
+pub struct RadarArcs(pub Vec<RadarArc>);
+
+/// Component on a `GenericRadarWidget` selecting at most one blip to highlight
+/// in red. The widget matches against blip-source entities carrying
+/// [`RadarEntityUuid`].
+#[derive(Component, Clone, Default, Debug)]
+pub struct RadarTargetHighlight(pub Option<String>);
+
+/// Component on a blip-source ECS entity (e.g. an NPC ship snapshot) exposing
+/// the entity's wire UUID to the radar widget. Required for
+/// `RadarTargetHighlight` lookups; optional otherwise.
+#[derive(Component, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RadarEntityUuid(pub String);
+
+/// Per-arc `UiMaterial`. Binding layout matches `assets/shaders/radar_arc.wgsl`:
+///   0 = uniform struct.
+#[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
+pub struct RadarArcMaterial {
+    #[uniform(0)]
+    pub color_r: f32,
+    #[uniform(0)]
+    pub color_g: f32,
+    #[uniform(0)]
+    pub color_b: f32,
+    #[uniform(0)]
+    pub color_a: f32,
+    #[uniform(0)]
+    pub facing_rad: f32,
+    #[uniform(0)]
+    pub half_arc_rad: f32,
+    #[uniform(0)]
+    pub _pad0: f32,
+    #[uniform(0)]
+    pub _pad1: f32,
+}
+
+impl UiMaterial for RadarArcMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/radar_arc.wgsl".into()
+    }
+}
+
+/// Tags a UI node spawned by `sync_radar_arc_nodes` so the diff can reconcile
+/// in place. The key is `(kind, id)`.
+#[derive(Component, Clone, Debug)]
+struct RadarArcNode {
+    kind: RadarArcKind,
+    id: String,
+}
+
+/// Pure helper: is `bearing_deg` within the arc centred on `facing_deg` of
+/// width `fire_arc_deg`? All inputs in degrees; result is a closed interval
+/// `[-half, +half]` after wrap-around to `(-180, 180]`.
+pub fn arc_contains(facing_deg: f32, fire_arc_deg: f32, bearing_deg: f32) -> bool {
+    let half = fire_arc_deg.abs() * 0.5;
+    let mut delta = bearing_deg - facing_deg;
+    // Wrap to (-180, 180].
+    while delta > 180.0 {
+        delta -= 360.0;
+    }
+    while delta <= -180.0 {
+        delta += 360.0;
+    }
+    delta.abs() <= half + 1e-4
+}
+
+/// Reconcile arc child nodes for every visible `GenericRadarWidget` that
+/// carries [`RadarArcs`]. Arcs render as full-size overlays beneath blips
+/// (z-index 5, blips use 10).
+#[allow(clippy::type_complexity)]
+fn sync_radar_arc_nodes(
+    mut commands: Commands,
+    radars: Query<(
+        Entity,
+        &RadarArcs,
+        &bevy::camera::visibility::InheritedVisibility,
+        Option<&Children>,
+    )>,
+    mut existing: Query<(&mut Node, &MaterialNode<RadarArcMaterial>, &mut RadarArcNode)>,
+    mut materials: ResMut<Assets<RadarArcMaterial>>,
+) {
+    for (radar_entity, arcs, vis, children) in radars.iter() {
+        if !vis.get() {
+            continue;
+        }
+        // Build intended set keyed by (kind, id).
+        let mut intended: std::collections::HashMap<(RadarArcKind, String), &RadarArc> =
+            std::collections::HashMap::new();
+        for arc in arcs.0.iter() {
+            intended.insert((arc.kind, arc.id.clone()), arc);
+        }
+
+        // Reconcile existing children.
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok((mut node, mat_node, tag)) = existing.get_mut(child) {
+                    let key = (tag.kind, tag.id.clone());
+                    if let Some(arc) = intended.remove(&key) {
+                        node.width = Val::Percent(100.0);
+                        node.height = Val::Percent(100.0);
+                        if let Some(mat) = materials.get_mut(&mat_node.0) {
+                            let LinearRgba { red, green, blue, alpha } = arc.color.to_linear();
+                            mat.color_r = red;
+                            mat.color_g = green;
+                            mat.color_b = blue;
+                            mat.color_a = alpha;
+                            mat.facing_rad = arc.facing_deg.to_radians();
+                            mat.half_arc_rad = arc.fire_arc_deg.to_radians() * 0.5;
+                        }
+                    } else {
+                        commands.entity(child).despawn();
+                    }
+                }
+            }
+        }
+
+        // Spawn new arcs.
+        if !intended.is_empty() {
+            commands.entity(radar_entity).with_children(|parent| {
+                for ((kind, id), arc) in intended.drain() {
+                    let LinearRgba { red, green, blue, alpha } = arc.color.to_linear();
+                    let mat = materials.add(RadarArcMaterial {
+                        color_r: red,
+                        color_g: green,
+                        color_b: blue,
+                        color_a: alpha,
+                        facing_rad: arc.facing_deg.to_radians(),
+                        half_arc_rad: arc.fire_arc_deg.to_radians() * 0.5,
+                        _pad0: 0.0,
+                        _pad1: 0.0,
+                    });
+                    parent.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(0.0),
+                            left: Val::Px(0.0),
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        MaterialNode(mat),
+                        ZIndex(5),
+                        RadarArcNode { kind, id },
+                    ));
+                }
+            });
+        }
+    }
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 /// Detects press transitions on `RadarBlipNode` UI nodes and triggers
@@ -983,9 +1162,13 @@ pub struct GuiRadarPlugin;
 impl Plugin for GuiRadarPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiMaterialPlugin::<RadarBlipMaterial>::default())
+            .add_plugins(UiMaterialPlugin::<RadarArcMaterial>::default())
             .init_resource::<RadarIconLookup>()
             .add_systems(Startup, setup_radar_blip_fallback)
-            .add_systems(Update, (sync_radar_blip_nodes, detect_radar_blip_press));
+            .add_systems(
+                Update,
+                (sync_radar_blip_nodes, sync_radar_arc_nodes, detect_radar_blip_press),
+            );
     }
 }
 
@@ -1385,5 +1568,49 @@ mod tests {
         let (left, top) = blip_local_offset(0.0, 0.0, 150.0, 100.0, 100.0, half);
         assert!((left - (150.0 - half)).abs() < 1e-5, "left={left}");
         assert!((top - (100.0 - half)).abs() < 1e-5, "top={top}");
+    }
+
+    // ── arc_contains ────────────────────────────────────────────────────────
+
+    #[test]
+    fn arc_contains_centre_bearing() {
+        assert!(arc_contains(0.0, 90.0, 0.0));
+    }
+
+    #[test]
+    fn arc_contains_at_arc_edge_inclusive() {
+        assert!(arc_contains(0.0, 90.0, 45.0));
+        assert!(arc_contains(0.0, 90.0, -45.0));
+    }
+
+    #[test]
+    fn arc_contains_rejects_outside_arc() {
+        assert!(!arc_contains(0.0, 90.0, 46.0));
+        assert!(!arc_contains(0.0, 90.0, -46.0));
+    }
+
+    #[test]
+    fn arc_contains_wraps_around_180() {
+        // Facing aft (180°) with 90° arc covers (135° .. -135°).
+        assert!(arc_contains(180.0, 90.0, 170.0));
+        assert!(arc_contains(180.0, 90.0, -170.0));
+        assert!(!arc_contains(180.0, 90.0, 90.0));
+    }
+
+    #[test]
+    fn arc_contains_negative_arc_is_treated_as_absolute() {
+        // A negative arc width is a TOML mistake; absolute keeps behaviour sane.
+        assert!(arc_contains(0.0, -90.0, 30.0));
+    }
+
+    #[test]
+    fn arc_contains_starboard_phaser_at_90_deg() {
+        // PRD example: starboard phaser bank facing 90° with 90° arc covers
+        // (45° .. 135°) — beam can lock anywhere on the right hemisphere.
+        assert!(arc_contains(90.0, 90.0, 90.0));
+        assert!(arc_contains(90.0, 90.0, 45.0));
+        assert!(arc_contains(90.0, 90.0, 135.0));
+        assert!(!arc_contains(90.0, 90.0, 0.0));
+        assert!(!arc_contains(90.0, 90.0, 180.0));
     }
 }

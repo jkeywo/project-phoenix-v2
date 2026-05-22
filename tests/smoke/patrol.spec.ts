@@ -68,10 +68,10 @@ test('patrol scenario: raider entity appears in WorldSetup after game start', as
     `Expected a raider entity (tags: npc + enemy) in WorldSetup.world.entities. Got: ${JSON.stringify(entities.map((e: any) => ({ id: e.id, tags: e.tags })))}`,
   ).toBeDefined();
 
-  // The raider should be positioned near patrol_alpha anchor [300, 0, -300].
+  // The raider should be positioned near patrol_alpha anchor [600, 0, -600].
   expect(Array.isArray(raider.position)).toBe(true);
-  expect(Math.abs(raider.position[0] - 300)).toBeLessThan(1.0);
-  expect(Math.abs(raider.position[2] - (-300))).toBeLessThan(1.0);
+  expect(Math.abs(raider.position[0] - 600)).toBeLessThan(1.0);
+  expect(Math.abs(raider.position[2] - (-600))).toBeLessThan(1.0);
 
   await helm.close();
   await tactical.close();

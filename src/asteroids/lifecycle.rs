@@ -14,8 +14,9 @@ use crate::asteroid_spawner::eval_cell;
 use crate::asteroid_window::{compute_player_grid_cell, compute_slot_for_world_cell, eval_on_player_move};
 use crate::entity_spawner::{AsteroidFieldSection, MeshSection};
 use crate::lobby::Target;
+use crate::lobby::WorldResource;
+use crate::messages::{EntitySnapshot, ServerMessage};
 use crate::simulation::SimOutbox;
-use crate::messages::ServerMessage;
 use crate::ship_state::ShipState;
 
 pub use crate::simulation::{Asteroid, AsteroidUuid};
@@ -87,6 +88,7 @@ pub fn check_destroyed_asteroids(
     mut commands: Commands,
     mut window: ResMut<AsteroidWindow>,
     mut entity_map: ResMut<AsteroidEntityMap>,
+    mut world: ResMut<WorldResource>,
     asteroid_query: Query<(Entity, &Transform, &AsteroidUuid, &EntityConsoleHull)>,
     mut outbox: ResMut<SimOutbox>,
 ) {
@@ -113,6 +115,7 @@ pub fn check_destroyed_asteroids(
             }
         }
         entity_map.0.remove(&uuid.0);
+        world.0.entities.retain(|e| e.uuid != uuid.0);
 
         outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: uuid.0.clone() }));
         commands.entity(entity).despawn();
@@ -129,6 +132,7 @@ pub fn update_asteroid_window(
     ship: Res<ShipState>,
     fields: Query<&AsteroidFieldSection>,
     mut window: ResMut<AsteroidWindow>,
+    mut world: ResMut<WorldResource>,
     mut player_grid: ResMut<PlayerGridPosition>,
     mut entity_map: ResMut<AsteroidEntityMap>,
     mut outbox: ResMut<SimOutbox>,
@@ -155,7 +159,7 @@ pub fn update_asteroid_window(
 
     if needs_init || delta.full_rebuild {
         full_rebuild(
-            &mut commands, &mut window, &mut entity_map, &mut outbox,
+            &mut commands, &mut window, &mut entity_map, &mut world, &mut outbox,
             gx, gz, field_idx, &grid, field.inner_radius, field.outer_radius,
             &field.asteroid_type_paths,
         );
@@ -164,7 +168,7 @@ pub fn update_asteroid_window(
             if let Some((sx, sz)) = compute_slot_for_world_cell(
                 window.arena_gx, window.arena_gz, *cell_gx, *cell_gz, window.despawn_cells,
             ) {
-                clear_slot(&mut window, &mut commands, &mut entity_map, sx, sz);
+                clear_slot(&mut window, &mut commands, &mut entity_map, &mut world, sx, sz);
             }
         }
 
@@ -176,7 +180,7 @@ pub fn update_asteroid_window(
                 window.arena_gx, window.arena_gz, *cell_gx, *cell_gz, window.despawn_cells,
             ) {
                 try_spawn_cell(
-                    &mut commands, &mut window, &mut entity_map, &mut outbox,
+                    &mut commands, &mut window, &mut entity_map, &mut world, &mut outbox,
                     *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
                     field.inner_radius, field.outer_radius, &field.asteroid_type_paths,
                 );
@@ -195,6 +199,7 @@ fn full_rebuild(
     commands: &mut Commands,
     window: &mut AsteroidWindow,
     entity_map: &mut AsteroidEntityMap,
+    world: &mut ResMut<WorldResource>,
     outbox: &mut ResMut<SimOutbox>,
     gx: i32, gz: i32,
     field_idx: usize,
@@ -206,6 +211,11 @@ fn full_rebuild(
         commands.entity(entity).despawn();
     }
     entity_map.0.clear();
+    world.0.entities.clear();
+
+    // Sync window extents from grid config so TOML-specified values take effect.
+    window.spawn_cells = grid.spawn_cells;
+    window.despawn_cells = grid.despawn_cells;
 
     let size = (2 * window.despawn_cells + 1) as usize;
     window.slots = vec![vec![None; size]; size];
@@ -223,7 +233,7 @@ fn full_rebuild(
                 gx, gz, cx, cz, window.despawn_cells,
             ) {
                 try_spawn_cell(
-                    commands, window, entity_map, outbox,
+                    commands, window, entity_map, world, outbox,
                     cx, cz, sx, sz, field_idx, grid,
                     inner_radius, outer_radius, gameplay_type_paths,
                 );
@@ -239,6 +249,7 @@ fn try_spawn_cell(
     commands: &mut Commands,
     window: &mut AsteroidWindow,
     entity_map: &mut AsteroidEntityMap,
+    world: &mut ResMut<WorldResource>,
     outbox: &mut ResMut<SimOutbox>,
     cell_gx: i32, cell_gz: i32,
     slot_x: usize, slot_z: usize,
@@ -310,6 +321,12 @@ fn try_spawn_cell(
         y: spawn.y,
     });
     entity_map.0.insert(uuid.clone(), entity);
+    world.0.entities.push(EntitySnapshot {
+        uuid: uuid.clone(),
+        position: Some([spawn.x, spawn.y, spawn.z]),
+        tags: vec!["asteroid".into()],
+        ..EntitySnapshot::default()
+    });
 
     outbox.0.push((Target::All, ServerMessage::AsteroidSpawned {
         uuid,
@@ -327,6 +344,7 @@ fn clear_slot(
     window: &mut AsteroidWindow,
     commands: &mut Commands,
     entity_map: &mut AsteroidEntityMap,
+    world: &mut ResMut<WorldResource>,
     slot_x: usize, slot_z: usize,
 ) {
     if let Some(slot) = window.slots.get_mut(slot_z).and_then(|row| row.get_mut(slot_x)) {
@@ -335,6 +353,7 @@ fn clear_slot(
                 commands.entity(entity).despawn();
             }
             entity_map.0.remove(&data.uuid);
+            world.0.entities.retain(|e| e.uuid != data.uuid);
         }
     }
 }
@@ -373,6 +392,7 @@ mod tests {
         app.init_resource::<AsteroidWindow>();
         app.init_resource::<PlayerGridPosition>();
         app.init_resource::<AsteroidEntityMap>();
+        app.init_resource::<WorldResource>();
         app.insert_resource(ShipState::new());
         app.add_systems(Update, update_asteroid_window);
         app
@@ -412,7 +432,7 @@ mod tests {
     #[test]
     fn window_initialises_from_spawned_asteroid_field_section() {
         let mut app = test_app();
-        // No world resource. The system should still find the field.
+        // WorldResource is init'd by test_app. The system should find the field.
         app.world_mut().spawn((
             AsteroidFieldSection(field(15.0)),
             Transform::default(),

@@ -951,6 +951,7 @@ mod tests {
             beam_color: vec![],
             power_multipliers: None,
             complexity_toml: None,
+            phaser_banks: Vec::new(),
         }
     }
 

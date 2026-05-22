@@ -239,6 +239,114 @@ fn default_impulse_acceleration_multiplier() -> f32 {
     crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
 }
 
+/// Stable identifier for a phaser bank, parsed verbatim from the TOML
+/// `id` field on `[[weapons_console.phaser_banks]]`. Used on the wire
+/// to address a specific bank (e.g. `FirePhaser { bank: "port" }`).
+pub type PhaserBankId = String;
+
+/// One `[[weapons_console.phaser_banks]]` entry. Defines a single phaser
+/// bank's orientation on the ship, its full fire arc (used for manual
+/// fire validity and for the radar arc overlay), its narrower auto-fire
+/// arc (used by `console_ai` for autonomous firing decisions), and its
+/// effective beam range.
+///
+/// `facing_deg` is the bank's centre bearing in ship-local degrees:
+/// `0` = forward (−Z), `90` = starboard (+X), `180` = aft (+Z),
+/// `-90` / `270` = port. Wraps freely; only the wrapped direction
+/// matters.
+///
+/// `fire_arc_deg` is the full arc width centred on `facing_deg`. A bank
+/// with `facing_deg = -90`, `fire_arc_deg = 180` covers the port
+/// hemisphere from forward to aft. Values must be in `(0, 360]`.
+///
+/// `auto_arc_deg` is the (narrower) auto-fire window, also centred on
+/// `facing_deg`. Must satisfy `0 < auto_arc_deg <= fire_arc_deg`.
+///
+/// `beam_range` is in world units. When `0.0`, the renderer/server
+/// falls back to the parent `[weapons_console].beam_range`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhaserBankConfig {
+    pub id: PhaserBankId,
+    pub facing_deg: f32,
+    pub fire_arc_deg: f32,
+    pub auto_arc_deg: f32,
+    #[serde(default)]
+    pub beam_range: f32,
+}
+
+/// Stable identifier for a torpedo tube, parsed verbatim from the TOML
+/// `id` field on `[[torpedoes.tubes]]`. Used on the wire to address a
+/// specific tube (e.g. `FireTorpedo { tube: "fore_port" }`).
+pub type TorpedoTubeId = String;
+
+/// One `[[torpedoes.tubes]]` entry. Defines a single torpedo tube's
+/// orientation and launch arc. Ammo is **not** per-tube; the entire
+/// ship draws from the shared `[torpedoes].count` pool.
+///
+/// `facing_deg` and `fire_arc_deg` use the same convention as
+/// [`PhaserBankConfig`] (ship-local degrees, 0 = forward).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TorpedoTubeConfig {
+    pub id: TorpedoTubeId,
+    pub facing_deg: f32,
+    pub fire_arc_deg: f32,
+}
+
+/// Validate a `[[weapons_console.phaser_banks]]` list parsed from TOML.
+///
+/// Rejects:
+///   - empty list (caller may decide to fall back to a single hardcoded
+///     bank — this validator returns `Err` so callers see the empty list)
+///   - duplicate `id` values
+///   - `fire_arc_deg` outside `(0, 360]`
+///   - `auto_arc_deg` outside `(0, fire_arc_deg]`
+pub fn validate_phaser_banks(banks: &[PhaserBankConfig]) -> Result<(), String> {
+    if banks.is_empty() {
+        return Err("phaser_banks list is empty".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for b in banks {
+        if !seen.insert(b.id.as_str()) {
+            return Err(format!("duplicate phaser bank id '{}'", b.id));
+        }
+        if !(b.fire_arc_deg > 0.0 && b.fire_arc_deg <= 360.0) {
+            return Err(format!(
+                "phaser bank '{}' has fire_arc_deg={} outside (0, 360]",
+                b.id, b.fire_arc_deg
+            ));
+        }
+        if !(b.auto_arc_deg > 0.0 && b.auto_arc_deg <= b.fire_arc_deg) {
+            return Err(format!(
+                "phaser bank '{}' has auto_arc_deg={} outside (0, fire_arc_deg={}]",
+                b.id, b.auto_arc_deg, b.fire_arc_deg
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate a `[[torpedoes.tubes]]` list parsed from TOML.
+///
+/// Rejects: empty list, duplicate `id`, `fire_arc_deg` outside `(0, 360]`.
+pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String> {
+    if tubes.is_empty() {
+        return Err("torpedo tubes list is empty".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for t in tubes {
+        if !seen.insert(t.id.as_str()) {
+            return Err(format!("duplicate torpedo tube id '{}'", t.id));
+        }
+        if !(t.fire_arc_deg > 0.0 && t.fire_arc_deg <= 360.0) {
+            return Err(format!(
+                "torpedo tube '{}' has fire_arc_deg={} outside (0, 360]",
+                t.id, t.fire_arc_deg
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WeaponsConsoleConfig {
     #[serde(default)]
@@ -264,6 +372,12 @@ pub struct WeaponsConsoleConfig {
     /// Path to a complexity TOML file for this console.
     #[serde(default)]
     pub complexity_toml: Option<String>,
+    /// Per-bank phaser definitions parsed from
+    /// `[[weapons_console.phaser_banks]]`. Each bank has its own facing,
+    /// fire arc, auto-fire arc, and range. Empty when the ship has no
+    /// explicit per-bank loadout.
+    #[serde(default)]
+    pub phaser_banks: Vec<PhaserBankConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -426,19 +540,16 @@ impl ShieldsBaseConfig {
 /// on `[weapons_console]` (`beam_range`, `beam_damage_per_sec`,
 /// `beam_duration_secs`, `cooldown_secs`).
 ///
-/// Until this slice these fields were only honoured by the NPC phaser
-/// path; the player path used hardcoded constants
-/// (`BEAM_DURATION_SECS = 6.0`, `BEAM_COOLDOWN_SECS = 6.0`,
-/// `BEAM_DAMAGE_PER_SEC = 5.0`, `radar::PHASER_RANGE = 40.0`).
 /// `PhaserCombatConfig` is the player-path source of truth, installed
 /// as a Bevy resource by `WeaponsPlugin` (defaults match the constants)
 /// and overridden in `spawn_game_start_entities` from the player ship's
 /// `[weapons_console]` block.
 ///
-/// The arc fields on `phaser::PhaserConfig` (`fire_arc_deg`,
-/// `auto_arc_deg`) are deliberately NOT moved to TOML: the live game has
-/// a single hardcoded 180° forward hemisphere with no auto/manual arc
-/// distinction. See AGENTS.md slice notes.
+/// NOTE: Per-bank arc/facing fields are defined on
+/// [`PhaserBankConfig`] (parsed from `[[weapons_console.phaser_banks]]`).
+/// This flat config is being phased out in favour of the per-bank list;
+/// it currently remains the seed for shared timings until the weapons
+/// server is migrated to consume the per-bank list directly.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhaserCombatConfig {
     /// Effective player phaser range in world units.
@@ -584,6 +695,12 @@ pub struct TorpedoesConfig {
     pub lifespan: f32,
     #[serde(default = "default_torpedo_load_time")]
     pub load_time: f32,
+    /// Per-tube torpedo definitions parsed from `[[torpedoes.tubes]]`.
+    /// Each tube has its own facing and fire arc. Ammo is shared via
+    /// the top-level `count` field. Empty when the ship has no explicit
+    /// per-tube loadout.
+    #[serde(default)]
+    pub tubes: Vec<TorpedoTubeConfig>,
 }
 
 fn default_torpedo_count() -> u32 {
@@ -618,6 +735,7 @@ impl Default for TorpedoesConfig {
             turn_rate_deg_per_sec: default_torpedo_turn_rate_deg_per_sec(),
             lifespan: default_torpedo_lifespan(),
             load_time: default_torpedo_load_time(),
+            tubes: Vec::new(),
         }
     }
 }
@@ -2235,6 +2353,240 @@ beam_range = 50.0
         assert_eq!(combat.beam_damage_per_sec, 5.0, "default for omitted field");
         assert_eq!(combat.beam_duration_secs, 6.0, "default for omitted field");
         assert_eq!(combat.beam_cooldown_secs, 6.0, "default for omitted field");
+    }
+
+    // ── PhaserBankConfig / TorpedoTubeConfig schema tests (Phase A) ───────
+
+    #[test]
+    fn phaser_banks_array_parses_full_entries() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 40.0
+
+[[weapons_console.phaser_banks]]
+id = "port"
+facing_deg = -90.0
+fire_arc_deg = 180.0
+auto_arc_deg = 120.0
+beam_range = 35.0
+
+[[weapons_console.phaser_banks]]
+id = "starboard"
+facing_deg = 90.0
+fire_arc_deg = 180.0
+auto_arc_deg = 120.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let wc = config.weapons_console.expect("weapons_console");
+        assert_eq!(wc.phaser_banks.len(), 2);
+        assert_eq!(wc.phaser_banks[0].id, "port");
+        assert_eq!(wc.phaser_banks[0].facing_deg, -90.0);
+        assert_eq!(wc.phaser_banks[0].fire_arc_deg, 180.0);
+        assert_eq!(wc.phaser_banks[0].auto_arc_deg, 120.0);
+        assert_eq!(wc.phaser_banks[0].beam_range, 35.0);
+        assert_eq!(wc.phaser_banks[1].id, "starboard");
+        assert_eq!(
+            wc.phaser_banks[1].beam_range, 0.0,
+            "missing beam_range defaults to 0 (caller falls back to parent)"
+        );
+    }
+
+    #[test]
+    fn phaser_banks_defaults_to_empty_vec_when_absent() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 40.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let wc = config.weapons_console.expect("weapons_console");
+        assert!(
+            wc.phaser_banks.is_empty(),
+            "phaser_banks defaults to empty when [[phaser_banks]] absent"
+        );
+    }
+
+    #[test]
+    fn validate_phaser_banks_accepts_valid_list() {
+        let banks = vec![
+            PhaserBankConfig {
+                id: "port".into(),
+                facing_deg: -90.0,
+                fire_arc_deg: 180.0,
+                auto_arc_deg: 120.0,
+                beam_range: 0.0,
+            },
+            PhaserBankConfig {
+                id: "starboard".into(),
+                facing_deg: 90.0,
+                fire_arc_deg: 180.0,
+                auto_arc_deg: 120.0,
+                beam_range: 0.0,
+            },
+        ];
+        assert!(validate_phaser_banks(&banks).is_ok());
+    }
+
+    #[test]
+    fn validate_phaser_banks_rejects_empty_list() {
+        let err = validate_phaser_banks(&[]).unwrap_err();
+        assert!(err.contains("empty"), "error mentions empty: {err}");
+    }
+
+    #[test]
+    fn validate_phaser_banks_rejects_duplicate_ids() {
+        let banks = vec![
+            PhaserBankConfig {
+                id: "port".into(),
+                facing_deg: -90.0,
+                fire_arc_deg: 180.0,
+                auto_arc_deg: 90.0,
+                beam_range: 0.0,
+            },
+            PhaserBankConfig {
+                id: "port".into(),
+                facing_deg: 90.0,
+                fire_arc_deg: 180.0,
+                auto_arc_deg: 90.0,
+                beam_range: 0.0,
+            },
+        ];
+        let err = validate_phaser_banks(&banks).unwrap_err();
+        assert!(err.contains("duplicate"), "error mentions duplicate: {err}");
+        assert!(err.contains("port"));
+    }
+
+    #[test]
+    fn validate_phaser_banks_rejects_auto_arc_greater_than_fire_arc() {
+        let banks = vec![PhaserBankConfig {
+            id: "port".into(),
+            facing_deg: -90.0,
+            fire_arc_deg: 90.0,
+            auto_arc_deg: 180.0,
+            beam_range: 0.0,
+        }];
+        let err = validate_phaser_banks(&banks).unwrap_err();
+        assert!(err.contains("auto_arc_deg"), "error mentions auto arc: {err}");
+    }
+
+    #[test]
+    fn validate_phaser_banks_rejects_fire_arc_out_of_range() {
+        let banks = vec![PhaserBankConfig {
+            id: "port".into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 400.0,
+            auto_arc_deg: 90.0,
+            beam_range: 0.0,
+        }];
+        let err = validate_phaser_banks(&banks).unwrap_err();
+        assert!(err.contains("fire_arc_deg"), "error mentions fire arc: {err}");
+
+        let banks = vec![PhaserBankConfig {
+            id: "port".into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 0.0,
+            auto_arc_deg: 0.0,
+            beam_range: 0.0,
+        }];
+        let err = validate_phaser_banks(&banks).unwrap_err();
+        assert!(err.contains("fire_arc_deg"), "zero arc rejected: {err}");
+    }
+
+    #[test]
+    fn torpedo_tubes_array_parses_full_entries() {
+        let toml_str = r##"
+[torpedoes]
+count = 10
+
+[[torpedoes.tubes]]
+id = "fore_port"
+facing_deg = -30.0
+fire_arc_deg = 90.0
+
+[[torpedoes.tubes]]
+id = "fore_starboard"
+facing_deg = 30.0
+fire_arc_deg = 90.0
+
+[[torpedoes.tubes]]
+id = "aft"
+facing_deg = 180.0
+fire_arc_deg = 90.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let t = config.torpedoes.expect("torpedoes");
+        assert_eq!(t.tubes.len(), 3);
+        assert_eq!(t.tubes[0].id, "fore_port");
+        assert_eq!(t.tubes[0].facing_deg, -30.0);
+        assert_eq!(t.tubes[0].fire_arc_deg, 90.0);
+        assert_eq!(t.tubes[2].id, "aft");
+        assert_eq!(t.tubes[2].facing_deg, 180.0);
+    }
+
+    #[test]
+    fn torpedo_tubes_defaults_to_empty_vec_when_absent() {
+        let toml_str = r##"
+[torpedoes]
+count = 10
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let t = config.torpedoes.expect("torpedoes");
+        assert!(
+            t.tubes.is_empty(),
+            "tubes defaults to empty when [[torpedoes.tubes]] absent"
+        );
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_accepts_valid_list() {
+        let tubes = vec![
+            TorpedoTubeConfig {
+                id: "fore_port".into(),
+                facing_deg: -30.0,
+                fire_arc_deg: 90.0,
+            },
+            TorpedoTubeConfig {
+                id: "aft".into(),
+                facing_deg: 180.0,
+                fire_arc_deg: 90.0,
+            },
+        ];
+        assert!(validate_torpedo_tubes(&tubes).is_ok());
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_rejects_empty_list() {
+        let err = validate_torpedo_tubes(&[]).unwrap_err();
+        assert!(err.contains("empty"));
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_rejects_duplicate_ids() {
+        let tubes = vec![
+            TorpedoTubeConfig {
+                id: "aft".into(),
+                facing_deg: 180.0,
+                fire_arc_deg: 90.0,
+            },
+            TorpedoTubeConfig {
+                id: "aft".into(),
+                facing_deg: 0.0,
+                fire_arc_deg: 90.0,
+            },
+        ];
+        let err = validate_torpedo_tubes(&tubes).unwrap_err();
+        assert!(err.contains("duplicate"));
+        assert!(err.contains("aft"));
+    }
+
+    #[test]
+    fn validate_torpedo_tubes_rejects_fire_arc_out_of_range() {
+        let tubes = vec![TorpedoTubeConfig {
+            id: "aft".into(),
+            facing_deg: 180.0,
+            fire_arc_deg: 0.0,
+        }];
+        let err = validate_torpedo_tubes(&tubes).unwrap_err();
+        assert!(err.contains("fire_arc_deg"));
     }
 
     #[test]

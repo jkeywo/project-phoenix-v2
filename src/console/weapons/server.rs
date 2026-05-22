@@ -1760,6 +1760,7 @@ mod tests {
                 beam_color: vec![],
                 power_multipliers: None,
                 complexity_toml: None,
+                phaser_banks: Vec::new(),
             }),
             EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)])),
             Transform::from_xyz(0.0, 0.0, 0.0),

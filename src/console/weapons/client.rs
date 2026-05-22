@@ -22,16 +22,18 @@ use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken
 use crate::client_sim::{
     fire_phaser_message, nearest_entity_to_point, set_target_message,
     toggle_phaser_mode_message, fire_torpedo_message,
-    is_fire_button_enabled, phaser_mode_label, ClientSimState,
+    is_fire_button_enabled, is_tube_loaded, tube_reload_secs,
+    phaser_mode_label, ClientSimState,
 };
 use crate::gui::{
     default_layer_colour, is_on_radar, layer_to_icon, project_radar_entity,
     region_shape_from_snapshot, spawn_gui_button, tags_to_radar_layer, ButtonPressed, ButtonSize,
-    GenericRadar, GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter,
-    RadarClipMode, RadarFilter, RadarIcon, RadarLayer, StateVisuals, RadioButtonConfig, RadioGroup,
+    GenericRadar, GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarArc,
+    RadarArcKind, RadarArcs, RadarCenter, RadarClipMode, RadarEntityUuid, RadarFilter, RadarIcon,
+    RadarLayer, RadarTargetHighlight, StateVisuals, RadioButtonConfig, RadioGroup,
     RadioSelected, Disabled,
 };
-use crate::messages::{Console, GamePhase, TorpedoTube};
+use crate::messages::{Console, GamePhase, PhaserBankClientConfig, TorpedoTube, TorpedoTubeClientConfig};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
@@ -67,9 +69,10 @@ pub fn weapons_panel_visible(
 
 // ── Marker components ─────────────────────────────────────────────────
 
-/// Marks the text label inside the Fire Phasers button (shows cooldown status).
+/// Marks the text label inside a Fire Phasers button (shows cooldown status).
+/// Carries the bank id so multiple banks can share the refresh system.
 #[derive(Component)]
-struct FirePhaserLabel;
+struct FirePhaserLabel(String);
 
 /// Marks the text label inside the Phaser Mode toggle button.
 #[derive(Component)]
@@ -83,21 +86,29 @@ struct FireTorpedoLabel;
 #[derive(Component)]
 struct TorpedoCountLabel;
 
-/// Marks the label that shows tube reload status. Stores which tube it displays.
+/// Marks the label that shows tube reload status. Stores the tube id it displays.
 #[derive(Component)]
 struct TubeStatusLabel(TorpedoTube);
 
-/// Marks the Fire Phasers `GuiButton` entity.
+/// Marks a Fire Phasers `GuiButton` entity. Carries the bank id (matches
+/// `PhaserBankClientConfig.id`) so the press handler knows which bank to fire.
 #[derive(Component)]
-struct FirePhaserButton;
+struct FirePhaserButton(String);
 
 /// Marks the Fire Torpedo `GuiButton` entity.
 #[derive(Component)]
 struct FireTorpedoButton;
 
-/// Marks the `RadioGroup` entity used for torpedo tube selection.
+/// Marks the `RadioGroup` entity used for torpedo tube selection. Carries the
+/// ordered list of tube ids so the `RadioSelected` observer can map a member
+/// child entity back to a tube id.
 #[derive(Component)]
-struct TubeRadioGroup;
+struct TubeRadioGroup(Vec<String>);
+
+/// Marker on the weapons radar widget entity, so systems can locate it
+/// without scanning all `GenericRadarWidget`s.
+#[derive(Component)]
+struct WeaponsRadarWidget;
 
 // ── Resources ─────────────────────────────────────────────────────────
 
@@ -447,7 +458,11 @@ fn fill_tactical_controls(commands: &mut Commands, container: Entity) {
         None,
     );
     commands.entity(radio_group)
-        .insert(TubeRadioGroup)
+        .insert(TubeRadioGroup(vec![
+            "fore_port".to_string(),
+            "fore_starboard".to_string(),
+            "aft".to_string(),
+        ]))
         .observe(on_tube_selected);
     commands.entity(torpedo_container).add_child(radio_group);
 
@@ -533,14 +548,14 @@ fn fill_tactical_controls(commands: &mut Commands, container: Entity) {
     );
     let fire_phaser_label = commands
         .spawn((
-            FirePhaserLabel,
+            FirePhaserLabel("port".to_string()),
             Text::new("FIRE PHASERS"),
             TextFont { font_size: 22.0, ..default() },
             TextColor(Color::srgb(1.0, 0.5, 0.2)),
         ))
         .id();
     commands.entity(fire_phaser_btn)
-        .insert(FirePhaserButton)
+        .insert(FirePhaserButton("port".to_string()))
         .add_child(fire_phaser_label)
         .observe(on_fire_phaser_pressed);
     commands.entity(col).add_child(fire_phaser_btn);
@@ -766,14 +781,17 @@ fn on_tube_selected(
 // ── Button observers ──────────────────────────────────────────────────
 
 fn on_fire_phaser_pressed(
-    _trigger: On<ButtonPressed>,
+    trigger: On<ButtonPressed>,
     sim: Res<ClientSimState>,
+    buttons: Query<&FirePhaserButton>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
-    if !is_fire_button_enabled(&sim) {
+    let Ok(button) = buttons.get(trigger.event().0) else { return };
+    let bank_id = button.0.as_str();
+    if !is_fire_button_enabled(&sim, bank_id) {
         return;
     }
-    outbound.write(OutboundClientMessage(fire_phaser_message()));
+    outbound.write(OutboundClientMessage(fire_phaser_message(bank_id)));
 }
 
 fn on_phaser_mode_pressed(
@@ -791,13 +809,7 @@ fn on_fire_torpedo_pressed(
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     let Some(tube) = selected.0.clone() else { return };
-    let loaded = match tube.as_str() {
-        "fore_port"      => sim.fore_port_loaded,
-        "fore_starboard" => sim.fore_starboard_loaded,
-        "aft"            => sim.aft_loaded,
-        _                => false,
-    };
-    if !loaded || sim.torpedo_count == 0 {
+    if !is_tube_loaded(&sim, &tube) || sim.torpedo_count == 0 {
         return;
     }
     outbound.write(OutboundClientMessage(fire_torpedo_message(tube, None)));
@@ -805,24 +817,30 @@ fn on_fire_torpedo_pressed(
 
 // ── Phaser refresh system ─────────────────────────────────────────────
 
-/// Updates Fire Phasers button label and Phaser Mode label from `ClientSimState`.
+/// Updates each Fire Phasers button label (one per bank) and the Phaser Mode
+/// label from `ClientSimState`.
 fn refresh_weapons_panel(
     sim: Res<ClientSimState>,
-    mut fire_label: Query<(&mut Text, &mut TextColor), With<FirePhaserLabel>>,
+    mut fire_label: Query<(&mut Text, &mut TextColor, &FirePhaserLabel)>,
     mut mode_label: Query<&mut Text, (With<PhaserModeLabel>, Without<FirePhaserLabel>)>,
 ) {
     if !sim.is_changed() {
         return;
     }
-    let fire_enabled = is_fire_button_enabled(&sim);
 
-    // Fire Phasers button label.
-    for (mut text, mut color) in fire_label.iter_mut() {
-        if sim.on_cooldown {
-            **text = "COOLING DOWN".to_string();
+    // Per-bank Fire Phasers button labels.
+    for (mut text, mut color, label) in fire_label.iter_mut() {
+        let bank_id = label.0.as_str();
+        let bank = sim.bank_states.iter().find(|b| b.id == bank_id);
+        let on_cooldown = bank.map(|b| b.on_cooldown).unwrap_or(false);
+        let fire_enabled = is_fire_button_enabled(&sim, bank_id);
+        let label_text = bank_label(bank_id);
+
+        if on_cooldown {
+            **text = format!("{} COOLING", label_text);
             *color = TextColor(Color::srgb(0.5, 0.2, 0.2));
         } else {
-            **text = "FIRE PHASERS".to_string();
+            **text = format!("FIRE {}", label_text);
             *color = if fire_enabled {
                 TextColor(Color::srgb(1.0, 0.5, 0.2))
             } else {
@@ -837,23 +855,29 @@ fn refresh_weapons_panel(
     }
 }
 
-/// Inserts/removes `Disabled` on the Fire Phasers button as `sim` changes.
+/// Inserts/removes `Disabled` on each Fire Phasers button as `sim` changes.
 fn sync_fire_phaser_disabled(
     mut commands: Commands,
     sim: Res<ClientSimState>,
-    fire_btn: Query<(Entity, Has<Disabled>), With<FirePhaserButton>>,
+    fire_btn: Query<(Entity, &FirePhaserButton, Has<Disabled>)>,
 ) {
     if !sim.is_changed() {
         return;
     }
-    let fire_enabled = is_fire_button_enabled(&sim);
-    for (entity, currently_disabled) in fire_btn.iter() {
+    for (entity, button, currently_disabled) in fire_btn.iter() {
+        let fire_enabled = is_fire_button_enabled(&sim, &button.0);
         if !fire_enabled && !currently_disabled {
             commands.entity(entity).insert(Disabled);
         } else if fire_enabled && currently_disabled {
             commands.entity(entity).remove::<Disabled>();
         }
     }
+}
+
+/// Human-readable short label for a phaser bank id (`"port"` → `"PORT"`).
+/// Falls back to upper-casing the raw id for unknown banks.
+fn bank_label(bank_id: &str) -> String {
+    bank_id.to_uppercase()
 }
 
 // ── Torpedo refresh system ────────────────────────────────────────────
@@ -885,12 +909,9 @@ fn refresh_torpedo_ui(
 
     // Per-tube status labels.
     for (mut text, mut color, label) in tube_status.iter_mut() {
-        let (loaded, reload_secs) = match label.0.as_str() {
-            "fore_port"      => (sim.fore_port_loaded,      sim.fore_port_reload_secs),
-            "fore_starboard" => (sim.fore_starboard_loaded, sim.fore_starboard_reload_secs),
-            "aft"            => (sim.aft_loaded,            sim.aft_reload_secs),
-            _                => (true, 0.0),
-        };
+        let tube_id = label.0.as_str();
+        let loaded = is_tube_loaded(&sim, tube_id);
+        let reload_secs = tube_reload_secs(&sim, tube_id);
         if loaded {
             **text = "LOADED".to_string();
             *color = TextColor(Color::srgb(0.3, 1.0, 0.3));
@@ -901,12 +922,7 @@ fn refresh_torpedo_ui(
     }
 
     // Fire Torpedo button: enable/disable.
-    let tube_ready = selected.0.as_ref().map(|t| match t.as_str() {
-        "fore_port"      => sim.fore_port_loaded,
-        "fore_starboard" => sim.fore_starboard_loaded,
-        "aft"            => sim.aft_loaded,
-        _                => false,
-    }).unwrap_or(false);
+    let tube_ready = selected.0.as_ref().map(|t| is_tube_loaded(&sim, t)).unwrap_or(false);
     let can_fire = tube_ready && sim.torpedo_count > 0 && selected.0.is_some();
 
     for (entity, currently_disabled) in fire_btn.iter() {
@@ -1244,7 +1260,7 @@ mod tests {
     #[test]
     fn fire_phaser_message_produces_fire_phaser() {
         use crate::messages::ClientMessage;
-        let msg = fire_phaser_message();
+        let msg = fire_phaser_message("port");
         assert_eq!(msg, ClientMessage::FirePhaser { bank: "port".to_string() });
     }
 
@@ -1286,34 +1302,8 @@ mod tests {
         assert_eq!(msg, ClientMessage::SetPhaserMode { mode: PhaserMode::Auto });
     }
 
-    // ── is_fire_button_enabled ────────────────────────────────────────
-
-    #[test]
-    fn fire_button_enabled_when_ready_and_no_cooldown() {
-        use crate::client_sim::is_fire_button_enabled;
-        let mut state = ClientSimState::default();
-        state.fire_ready = true;
-        state.on_cooldown = false;
-        assert!(is_fire_button_enabled(&state));
-    }
-
-    #[test]
-    fn fire_button_disabled_when_on_cooldown() {
-        use crate::client_sim::is_fire_button_enabled;
-        let mut state = ClientSimState::default();
-        state.fire_ready = true;
-        state.on_cooldown = true;
-        assert!(!is_fire_button_enabled(&state));
-    }
-
-    #[test]
-    fn fire_button_disabled_when_not_ready() {
-        use crate::client_sim::is_fire_button_enabled;
-        let mut state = ClientSimState::default();
-        state.fire_ready = false;
-        state.on_cooldown = false;
-        assert!(!is_fire_button_enabled(&state));
-    }
+    // Per-bank `is_fire_button_enabled` semantics are covered in
+    // `client_sim::tests::fire_button_*`; nothing to retest here.
 
     // ── phaser_mode_label ─────────────────────────────────────────────
 

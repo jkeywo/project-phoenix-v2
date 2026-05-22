@@ -182,26 +182,8 @@ pub struct ClientSimState {
     /// Latest shield facing snapshots received from the server.
     /// Empty until the first `ShieldStatus` message is received.
     pub shield_facings: Vec<ShieldFacingStatus>,
-    /// True when the phaser can fire (target in range/arc, no cooldown).
-    /// Updated by `WeaponsUpdate` messages from the server.
-    pub fire_ready: bool,
-    /// True while the phaser bank is on post-fire cooldown.
-    /// Updated by `WeaponsUpdate` messages from the server.
-    pub on_cooldown: bool,
-    /// Remaining torpedoes in the magazine.
+    /// Remaining torpedoes in the magazine (shared pool).
     pub torpedo_count: u32,
-    /// Whether the fore-port tube is loaded and ready.
-    pub fore_port_loaded: bool,
-    /// Seconds until the fore-port tube is ready (0.0 when loaded).
-    pub fore_port_reload_secs: f32,
-    /// Whether the fore-starboard tube is loaded and ready.
-    pub fore_starboard_loaded: bool,
-    /// Seconds until the fore-starboard tube is ready (0.0 when loaded).
-    pub fore_starboard_reload_secs: f32,
-    /// Whether the aft tube is loaded and ready.
-    pub aft_loaded: bool,
-    /// Seconds until the aft tube is ready (0.0 when loaded).
-    pub aft_reload_secs: f32,
     /// In-flight torpedoes: (uuid, x, z, heading, tube).
     /// Updated by `TorpedoLaunched` and `TorpedoDestroyed` messages.
     pub torpedoes_in_flight: Vec<(String, f32, f32, f32, TorpedoTube)>,
@@ -241,15 +223,7 @@ impl Default for ClientSimState {
             science_target_suggestion: None,
             sensors_target_suggestion: None,
             shield_facings: Vec::new(),
-            fire_ready: false,
-            on_cooldown: false,
             torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
             torpedoes_in_flight: Vec::new(),
             modifiers: HashMap::new(),
             power_state_payload: None,
@@ -317,27 +291,6 @@ impl ClientSimState {
                 self.tube_states = tubes.clone();
                 self.torpedo_count = *torpedo_count;
                 self.phaser_mode = *phaser_mode;
-
-                // Derive legacy aggregate fields for back-compat UI code.
-                self.fire_ready = banks.iter().any(|b| b.fire_ready);
-                self.on_cooldown = !banks.is_empty() && banks.iter().all(|b| b.on_cooldown);
-
-                let lookup = |id: &str| -> (bool, f32) {
-                    tubes
-                        .iter()
-                        .find(|t| t.id == id)
-                        .map(|t| (t.loaded, t.reload_secs))
-                        .unwrap_or((true, 0.0))
-                };
-                let (fp_l, fp_r) = lookup("fore_port");
-                let (fs_l, fs_r) = lookup("fore_starboard");
-                let (af_l, af_r) = lookup("aft");
-                self.fore_port_loaded = fp_l;
-                self.fore_port_reload_secs = fp_r;
-                self.fore_starboard_loaded = fs_l;
-                self.fore_starboard_reload_secs = fs_r;
-                self.aft_loaded = af_l;
-                self.aft_reload_secs = af_r;
             }
             ServerMessage::ScienceTargetSuggestion { uuid } => {
                 self.science_target_suggestion = Some(uuid.clone());
@@ -459,10 +412,10 @@ pub fn fire_torpedo_message(tube: TorpedoTube, target_uuid: Option<String>) -> C
     ClientMessage::FireTorpedo { tube, target_uuid }
 }
 
-/// `ClientMessage` to fire the phaser. Currently hardcodes the `"port"` bank;
-/// per-bank UI wiring lands in Phase G.
-pub fn fire_phaser_message() -> ClientMessage {
-    ClientMessage::FirePhaser { bank: "port".to_string() }
+/// `ClientMessage` to fire the phaser bank with the given id (matches
+/// `PhaserBankClientConfig.id`, e.g. `"port"` / `"starboard"`).
+pub fn fire_phaser_message(bank_id: &str) -> ClientMessage {
+    ClientMessage::FirePhaser { bank: bank_id.to_string() }
 }
 
 /// `ClientMessage` to set the phaser mode (Auto or Manual).
@@ -479,13 +432,42 @@ pub fn toggle_phaser_mode_message(current: PhaserMode) -> ClientMessage {
     ClientMessage::SetPhaserMode { mode: next }
 }
 
-/// Returns `true` when the Fire Phaser button should be enabled.
+/// Returns `true` when the Fire Phaser button for the bank with `bank_id`
+/// should be enabled.
 ///
-/// The button is active only when the server has reported that the target is
-/// in range/arc (`fire_ready`) AND the phaser bank is not on post-fire
-/// cooldown (`on_cooldown`).
-pub fn is_fire_button_enabled(state: &ClientSimState) -> bool {
-    state.fire_ready && !state.on_cooldown
+/// The button is active only when the server has reported, for this bank, that
+/// the target is in range/arc (`fire_ready`) AND the bank is not on post-fire
+/// cooldown (`on_cooldown`). If no `PhaserBankState` matches `bank_id`, returns
+/// `false`.
+pub fn is_fire_button_enabled(state: &ClientSimState, bank_id: &str) -> bool {
+    state
+        .bank_states
+        .iter()
+        .find(|b| b.id == bank_id)
+        .map(|b| b.fire_ready && !b.on_cooldown)
+        .unwrap_or(false)
+}
+
+/// Returns `true` when the torpedo tube with `tube_id` is loaded and ready.
+/// Returns `false` if no `TorpedoTubeState` matches `tube_id`.
+pub fn is_tube_loaded(state: &ClientSimState, tube_id: &str) -> bool {
+    state
+        .tube_states
+        .iter()
+        .find(|t| t.id == tube_id)
+        .map(|t| t.loaded)
+        .unwrap_or(false)
+}
+
+/// Returns the remaining reload seconds for the tube with `tube_id`, or `0.0`
+/// if no `TorpedoTubeState` matches `tube_id`.
+pub fn tube_reload_secs(state: &ClientSimState, tube_id: &str) -> f32 {
+    state
+        .tube_states
+        .iter()
+        .find(|t| t.id == tube_id)
+        .map(|t| t.reload_secs)
+        .unwrap_or(0.0)
 }
 
 /// Human-readable label for the current phaser mode toggle button.
@@ -1788,24 +1770,30 @@ mod tests {
     }
 
     #[test]
-    fn weapons_update_sets_fire_ready_and_cooldown() {
+    fn weapons_update_sets_per_bank_fire_ready_and_cooldown() {
         let mut s = ClientSimState::default();
-        assert!(!s.fire_ready, "default: fire not ready");
-        assert!(!s.on_cooldown, "default: not on cooldown");
+        assert!(s.bank_states.is_empty(), "default: no banks");
 
         s.apply(&weapons_update_msg(true, false, 10, (true, 0.0), (true, 0.0), (true, 0.0), PhaserMode::Auto));
-        assert!(s.fire_ready);
-        assert!(!s.on_cooldown);
+        assert_eq!(s.bank_states.len(), 1);
+        assert!(s.bank_states[0].fire_ready);
+        assert!(!s.bank_states[0].on_cooldown);
 
         s.apply(&weapons_update_msg(false, true, 10, (true, 0.0), (true, 0.0), (true, 0.0), PhaserMode::Auto));
-        assert!(!s.fire_ready);
-        assert!(s.on_cooldown);
+        assert!(!s.bank_states[0].fire_ready);
+        assert!(s.bank_states[0].on_cooldown);
     }
 
     #[test]
     fn fire_phaser_message_builder_produces_correct_message() {
-        let msg = fire_phaser_message();
+        let msg = fire_phaser_message("port");
         assert_eq!(msg, ClientMessage::FirePhaser { bank: "port".to_string() });
+    }
+
+    #[test]
+    fn fire_phaser_message_builder_accepts_arbitrary_bank_id() {
+        let msg = fire_phaser_message("starboard");
+        assert_eq!(msg, ClientMessage::FirePhaser { bank: "starboard".to_string() });
     }
 
     #[test]
@@ -1847,34 +1835,58 @@ mod tests {
     }
 
     #[test]
-    fn fire_button_disabled_when_not_fire_ready() {
+    fn fire_button_disabled_when_no_bank_state() {
         let s = ClientSimState::default();
         assert!(
-            !is_fire_button_enabled(&s),
-            "fire button should be disabled when fire_ready is false"
+            !is_fire_button_enabled(&s, "port"),
+            "no bank states → button disabled"
         );
     }
 
     #[test]
-    fn fire_button_enabled_when_fire_ready_and_not_on_cooldown() {
+    fn fire_button_enabled_when_bank_ready_and_not_on_cooldown() {
         let mut s = ClientSimState::default();
-        s.fire_ready = true;
-        s.on_cooldown = false;
-        assert!(
-            is_fire_button_enabled(&s),
-            "fire button should be enabled when fire_ready and not on cooldown"
-        );
+        s.bank_states = vec![PhaserBankState {
+            id: "port".to_string(),
+            fire_ready: true,
+            on_cooldown: false,
+            cooldown_remaining: 0.0,
+        }];
+        assert!(is_fire_button_enabled(&s, "port"));
     }
 
     #[test]
-    fn fire_button_disabled_when_on_cooldown_even_if_fire_ready() {
+    fn fire_button_disabled_when_bank_on_cooldown_even_if_ready() {
         let mut s = ClientSimState::default();
-        s.fire_ready = true;
-        s.on_cooldown = true;
-        assert!(
-            !is_fire_button_enabled(&s),
-            "fire button should be disabled when on cooldown"
-        );
+        s.bank_states = vec![PhaserBankState {
+            id: "port".to_string(),
+            fire_ready: true,
+            on_cooldown: true,
+            cooldown_remaining: 1.0,
+        }];
+        assert!(!is_fire_button_enabled(&s, "port"));
+    }
+
+    #[test]
+    fn fire_button_lookup_ignores_other_banks() {
+        let mut s = ClientSimState::default();
+        s.bank_states = vec![
+            PhaserBankState {
+                id: "port".to_string(),
+                fire_ready: false,
+                on_cooldown: false,
+                cooldown_remaining: 0.0,
+            },
+            PhaserBankState {
+                id: "starboard".to_string(),
+                fire_ready: true,
+                on_cooldown: false,
+                cooldown_remaining: 0.0,
+            },
+        ];
+        assert!(!is_fire_button_enabled(&s, "port"));
+        assert!(is_fire_button_enabled(&s, "starboard"));
+        assert!(!is_fire_button_enabled(&s, "missing"));
     }
 
     #[test]
@@ -1888,19 +1900,10 @@ mod tests {
     }
 
     #[test]
-    fn weapons_update_torpedo_fields_update_tube_status() {
+    fn weapons_update_populates_per_tube_states() {
         let mut s = ClientSimState::default();
-        // Default: all tubes loaded, full count.
         assert_eq!(s.torpedo_count, 10);
-        assert!(s.fore_port_loaded, "fore port should start loaded");
-        assert!(
-            s.fore_starboard_loaded,
-            "fore starboard should start loaded"
-        );
-        assert!(s.aft_loaded, "aft should start loaded");
-        assert_eq!(s.fore_port_reload_secs, 0.0);
-        assert_eq!(s.fore_starboard_reload_secs, 0.0);
-        assert_eq!(s.aft_reload_secs, 0.0);
+        assert!(s.tube_states.is_empty(), "no tube states by default");
 
         s.apply(&weapons_update_msg(
             false, false, 8,
@@ -1909,12 +1912,20 @@ mod tests {
         ));
 
         assert_eq!(s.torpedo_count, 8);
-        assert!(!s.fore_port_loaded);
-        assert_eq!(s.fore_port_reload_secs, 7.5);
-        assert!(s.fore_starboard_loaded);
-        assert_eq!(s.fore_starboard_reload_secs, 0.0);
-        assert!(!s.aft_loaded);
-        assert_eq!(s.aft_reload_secs, 3.2);
+        assert_eq!(s.tube_states.len(), 3);
+        assert!(!is_tube_loaded(&s, "fore_port"));
+        assert_eq!(tube_reload_secs(&s, "fore_port"), 7.5);
+        assert!(is_tube_loaded(&s, "fore_starboard"));
+        assert_eq!(tube_reload_secs(&s, "fore_starboard"), 0.0);
+        assert!(!is_tube_loaded(&s, "aft"));
+        assert_eq!(tube_reload_secs(&s, "aft"), 3.2);
+    }
+
+    #[test]
+    fn tube_helpers_return_defaults_for_missing_id() {
+        let s = ClientSimState::default();
+        assert!(!is_tube_loaded(&s, "fore_port"));
+        assert_eq!(tube_reload_secs(&s, "fore_port"), 0.0);
     }
 
     #[test]

@@ -1111,16 +1111,15 @@ fn apply_pending_scenario_loads(
 /// unchanged.  On native the global cache is always empty (no WASM pre-load
 /// step), so we fall back to reading each template file from disk so that
 /// `spawn_immediate_entities_internal` can resolve them.
-#[allow(unused_mut)]
 fn build_layer_config_cache(
-    _world_config: &crate::world::config::WorldConfig,
+    world_config: &crate::world::config::WorldConfig,
 ) -> crate::config_cache::ConfigCache {
     let mut cache = crate::config_cache::get_config_cache();
 
     #[cfg(not(target_arch = "wasm32"))]
     {
         use crate::entity_config::EntityConfig;
-        for entity in &_world_config.entities {
+        for entity in &world_config.entities {
             if cache.contains_key(&entity.template_path) {
                 continue;
             }

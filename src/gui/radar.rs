@@ -179,9 +179,7 @@ struct RadarBlipNode {
 /// diff can reconcile and render the correct geometry.
 #[derive(Component)]
 pub struct RadarRegionNode {
-    pub source: Entity,
-    #[allow(dead_code)]
-    pub shape: RegionRadarShape,
+    source: Entity,
 }
 
 /// Triggered on a radar blip UI node when the player clicks it.
@@ -709,10 +707,7 @@ fn sync_radar_blip_nodes(
                         bg,
                         border_color,
                         ZIndex(10),
-                        RadarRegionNode {
-                            source,
-                            shape: shape.clone(),
-                        },
+                        RadarRegionNode { source },
                     ));
                 }
             });
@@ -820,7 +815,7 @@ fn region_shape_node(
         position_type: PositionType::Absolute,
         ..default()
     };
-    // Delegate to update to fill in the node layout fields
+
     let mut bg_mut = BackgroundColor(Color::NONE);
     let mut border_color_mut = BorderColor::all(colour);
     update_region_node(

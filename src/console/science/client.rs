@@ -19,7 +19,7 @@ use crate::client_sim::set_science_target_message;
 use crate::gui::{
     default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
     tags_to_radar_layer, ButtonPressed, ButtonSize, GenericRadar, OnRadar, OrientationMode,
-    RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer, StateVisuals,
+    RadarAppearance, RadarCenter, RadarClipMode, RadarFilter, RadarIcon, RadarLayer, StateVisuals,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -200,6 +200,8 @@ fn fill_sensors_radar(commands: &mut Commands, container: Entity) {
         OrientationMode::WorldFixed,
         radar_filter,
         None,
+        None,
+        RadarClipMode::Circle,
         None,
     );
     commands.entity(radar).insert(Node {

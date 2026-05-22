@@ -15,8 +15,8 @@ use crate::gui::{
     default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
     tags_to_radar_layer, ButtonPressed, ButtonSize, GenericJoystick, GenericRadar,
     GenericRadarWidget, HelmRadarWidget, JoystickMoved, OnRadar, OrientationMode, RadarAppearance,
-    RadarCenter, RadarFilter, RadarIcon, RadarLayer, ReadoutValue, StateVisuals, TextReadout,
-    Visual,
+    RadarCenter, RadarClipMode, RadarFilter, RadarIcon, RadarLayer, ReadoutValue, StateVisuals,
+    TextReadout, Visual,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -490,6 +490,8 @@ fn fill_helm_radar(
         radar_filter,
         Some(assets.radar_surround.clone()),
         Some(assets.radar_bg.clone()),
+        RadarClipMode::Circle,
+        Some(assets.radar_surround.clone()),
     );
     // HelmRadarWidget marks this widget so sync_helm_radar_range only
     // updates it, not other consoles' radar widgets.

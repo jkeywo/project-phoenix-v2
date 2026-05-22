@@ -114,6 +114,24 @@ pub enum OrientationMode {
     WorldFixed,
 }
 
+// ── Clip mode ─────────────────────────────────────────────────────────────────
+
+/// Controls how the radar widget clips rendered blips at its boundary.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum RadarClipMode {
+    /// No clipping — blips may overflow the node's bounds.
+    #[default]
+    None,
+    /// Blips are visually clipped to the inscribed circle of the radar widget.
+    /// Pass a `clip_image` to `GenericRadar::spawn` whose opaque pixels cover
+    /// the area outside the circular dial; transparent pixels show blips through.
+    Circle,
+    /// Blips are clipped to the rectangular bounds of the radar widget.
+    /// Requires `overflow: Overflow::Clip` on the spawned node (set it after
+    /// `GenericRadar::spawn` via `commands.entity(radar).insert(Node { … })`).
+    Square,
+}
+
 // ── Widget component ──────────────────────────────────────────────────────────
 
 /// Component on the radar UI node.
@@ -122,6 +140,7 @@ pub struct GenericRadarWidget {
     pub range: f32,
     pub orientation: OrientationMode,
     pub filter: RadarFilter,
+    pub clip_mode: RadarClipMode,
 }
 
 // ── Per-widget behaviour overrides ────────────────────────────────────────────
@@ -315,13 +334,26 @@ pub fn world_size_to_px(world_size: f32, range: f32, radar_radius_px: f32) -> f3
 }
 
 /// Given a projection in normalised radar coords (`nx, ny` in [-1, 1]
-/// with +y up per gizmo convention), the radar's pixel radius, and a
-/// blip's half-size in pixels, returns the top-left corner of a UI
-/// `Node` that centres the blip on the projection point inside the
-/// radar widget. Y is flipped to UI's y-down convention.
-pub fn blip_local_offset(nx: f32, ny: f32, radar_radius_px: f32, half_size_px: f32) -> (f32, f32) {
-    let left = radar_radius_px + nx * radar_radius_px - half_size_px;
-    let top = radar_radius_px - ny * radar_radius_px - half_size_px;
+/// with +y up per gizmo convention), the radar widget's pixel center
+/// (`center_x_px`, `center_y_px`), the pixel radius used for scaling
+/// (`radar_radius_px`), and a blip's half-size in pixels, returns the
+/// top-left corner of a UI `Node` that centres the blip on the projection
+/// point inside the radar widget. Y is flipped to UI's y-down convention.
+///
+/// `center_x_px` and `center_y_px` are computed as `size.x * 0.5` and
+/// `size.y * 0.5` from `ComputedNode::size()`. Keeping them separate from
+/// `radar_radius_px` (which is `size.x.min(size.y) * 0.5`) corrects blip
+/// positions when the widget is not perfectly square.
+pub fn blip_local_offset(
+    nx: f32,
+    ny: f32,
+    center_x_px: f32,
+    center_y_px: f32,
+    radar_radius_px: f32,
+    half_size_px: f32,
+) -> (f32, f32) {
+    let left = center_x_px + nx * radar_radius_px - half_size_px;
+    let top = center_y_px - ny * radar_radius_px - half_size_px;
     (left, top)
 }
 
@@ -383,6 +415,10 @@ impl GenericRadar {
     /// - `orientation` — `ShipRelative` or `WorldFixed`.
     /// - `filter` — which `RadarLayer` values to draw.
     /// - `bg_image` (back layer) / `overlay_image` (front layer) — optional images.
+    /// - `clip_mode` — `Circle`, `Square`, or `None`. Stored on the widget component.
+    /// - `clip_image` — when `Some`, spawned as a child at `ZIndex(50)` (above all
+    ///   blips). For circular clipping, pass an image whose opaque pixels cover the
+    ///   area outside the inscribed circle while the centre is transparent.
     ///
     /// Returns the UI node entity.
     pub fn spawn(
@@ -392,12 +428,15 @@ impl GenericRadar {
         filter: RadarFilter,
         bg_image: Option<Handle<Image>>,
         overlay_image: Option<Handle<Image>>,
+        clip_mode: RadarClipMode,
+        clip_image: Option<Handle<Image>>,
     ) -> Entity {
         let mut node = commands.spawn((
             GenericRadarWidget {
                 range,
                 orientation,
                 filter,
+                clip_mode,
             },
             Node {
                 width: Val::Percent(100.0),
@@ -424,6 +463,23 @@ impl GenericRadar {
                     },
                     ImageNode::new(overlay),
                     ZIndex(1),
+                ));
+            });
+        }
+
+        if let Some(clip) = clip_image {
+            commands.entity(entity).with_children(|parent| {
+                parent.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        top: Val::Px(0.0),
+                        left: Val::Px(0.0),
+                        ..default()
+                    },
+                    ImageNode::new(clip),
+                    ZIndex(50),
                 ));
             });
         }
@@ -482,6 +538,8 @@ fn sync_radar_blip_nodes(
             continue;
         }
         let size = computed.size();
+        let center_x_px = size.x * 0.5;
+        let center_y_px = size.y * 0.5;
         let radar_radius_px = size.x.min(size.y) * 0.5;
         if radar_radius_px <= 0.0 {
             continue;
@@ -599,7 +657,7 @@ fn sync_radar_blip_nodes(
                 let size_px =
                     world_size_to_px(appearance.world_size, range, radar_radius_px);
                 let half = size_px * 0.5;
-                let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
+                let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
                 let icon_handle = icons.0.get(&appearance.icon).cloned();
                 intended.insert(
                     src,
@@ -644,6 +702,8 @@ fn sync_radar_blip_nodes(
                             colour,
                             &shape,
                             range,
+                            center_x_px,
+                            center_y_px,
                             radar_radius_px,
                         );
                     } else {
@@ -700,6 +760,8 @@ fn sync_radar_blip_nodes(
                         colour,
                         &shape,
                         range,
+                        center_x_px,
+                        center_y_px,
                         radar_radius_px,
                     );
                     parent.spawn((
@@ -740,6 +802,8 @@ fn update_region_node(
     colour: Color,
     shape: &RegionRadarShape,
     range: f32,
+    center_x_px: f32,
+    center_y_px: f32,
     radar_radius_px: f32,
 ) {
     match *shape {
@@ -747,7 +811,7 @@ fn update_region_node(
             let diameter_px =
                 world_size_to_px(radius * 2.0, range, radar_radius_px).max(2.0);
             let half = diameter_px * 0.5;
-            let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
+            let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
             node.left = Val::Px(left);
             node.top = Val::Px(top);
             node.width = Val::Px(diameter_px);
@@ -766,7 +830,7 @@ fn update_region_node(
             let inner_px = (inner_radius / range * radar_radius_px * 2.0).max(0.0);
             let border_px = ((outer_px - inner_px) * 0.5).max(1.0);
             let half = outer_px * 0.5;
-            let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
+            let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
             node.left = Val::Px(left);
             node.top = Val::Px(top);
             node.width = Val::Px(outer_px);
@@ -787,7 +851,7 @@ fn update_region_node(
                 world_size_to_px(half_extents_z * 2.0, range, radar_radius_px).max(2.0);
             let half_w = width_px * 0.5;
             let half_h = height_px * 0.5;
-            let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half_w);
+            let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half_w);
             let top = top - (half_h - half_w);
             node.left = Val::Px(left);
             node.top = Val::Px(top);
@@ -809,6 +873,8 @@ fn region_shape_node(
     colour: Color,
     shape: &RegionRadarShape,
     range: f32,
+    center_x_px: f32,
+    center_y_px: f32,
     radar_radius_px: f32,
 ) -> (Node, BackgroundColor, BorderColor) {
     let mut node = Node {
@@ -827,6 +893,8 @@ fn region_shape_node(
         colour,
         shape,
         range,
+        center_x_px,
+        center_y_px,
         radar_radius_px,
     );
 
@@ -1220,14 +1288,15 @@ mod tests {
 
     #[test]
     fn blip_local_offset_centre_projection() {
-        let (left, top) = blip_local_offset(0.0, 0.0, 140.0, 8.0);
+        // Square radar: center == radar_radius == 140.
+        let (left, top) = blip_local_offset(0.0, 0.0, 140.0, 140.0, 140.0, 8.0);
         assert!((left - 132.0).abs() < 1e-5);
         assert!((top - 132.0).abs() < 1e-5);
     }
 
     #[test]
     fn blip_local_offset_right_edge() {
-        let (left, top) = blip_local_offset(1.0, 0.0, 140.0, 8.0);
+        let (left, top) = blip_local_offset(1.0, 0.0, 140.0, 140.0, 140.0, 8.0);
         assert!((left - 272.0).abs() < 1e-5);
         assert!((top - 132.0).abs() < 1e-5);
     }
@@ -1235,15 +1304,25 @@ mod tests {
     #[test]
     fn blip_local_offset_top_edge() {
         // ny = 1 → top = 140 - 1*140 - 8 = -8 (Y flipped to UI's y-down).
-        let (left, top) = blip_local_offset(0.0, 1.0, 140.0, 8.0);
+        let (left, top) = blip_local_offset(0.0, 1.0, 140.0, 140.0, 140.0, 8.0);
         assert!((left - 132.0).abs() < 1e-5);
         assert!((top - (-8.0)).abs() < 1e-5);
     }
 
     #[test]
     fn blip_local_offset_bottom_edge() {
-        let (left, top) = blip_local_offset(0.0, -1.0, 140.0, 8.0);
+        let (left, top) = blip_local_offset(0.0, -1.0, 140.0, 140.0, 140.0, 8.0);
         assert!((left - 132.0).abs() < 1e-5);
         assert!((top - 272.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn blip_local_offset_non_square_widget_centers_correctly() {
+        // Widget is 300 wide × 200 tall → center_x=150, center_y=100, radius=100.
+        // Player ship at (0,0) should land at (center_x - half, center_y - half).
+        let half = 8.0;
+        let (left, top) = blip_local_offset(0.0, 0.0, 150.0, 100.0, 100.0, half);
+        assert!((left - (150.0 - half)).abs() < 1e-5, "left={left}");
+        assert!((top - (100.0 - half)).abs() < 1e-5, "top={top}");
     }
 }

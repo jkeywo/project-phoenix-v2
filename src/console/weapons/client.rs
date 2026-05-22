@@ -27,8 +27,9 @@ use crate::client_sim::{
 use crate::gui::{
     default_layer_colour, is_on_radar, layer_to_icon, project_radar_entity,
     region_shape_from_snapshot, spawn_gui_button, tags_to_radar_layer, ButtonPressed, ButtonSize,
-    GenericRadar, GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
-    RadarIcon, RadarLayer, StateVisuals, RadioButtonConfig, RadioGroup, RadioSelected, Disabled,
+    GenericRadar, GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter,
+    RadarClipMode, RadarFilter, RadarIcon, RadarLayer, StateVisuals, RadioButtonConfig, RadioGroup,
+    RadioSelected, Disabled,
 };
 use crate::messages::{Console, GamePhase, TorpedoTube};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -266,6 +267,8 @@ fn fill_tactical_radar(commands: &mut Commands, container: Entity) {
         OrientationMode::WorldFixed,
         radar_filter,
         None,
+        None,
+        RadarClipMode::Circle,
         None,
     );
     commands.entity(radar).insert((Node {

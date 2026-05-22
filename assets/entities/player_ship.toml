@@ -68,6 +68,7 @@ emergency_threshold = 25.0
 
 [helm_console]
 max_speed = 50.0
+max_reverse_speed = 25.0
 acceleration = 16.7
 deceleration = 50.0
 max_yaw_rate = 1.5708

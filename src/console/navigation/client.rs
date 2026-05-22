@@ -17,7 +17,8 @@ use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::gui::{
     spawn_gui_button, AutoScaleRadar, ButtonPressed, ButtonSize, GenericRadar, OrientationMode,
-    RadarFilter, RadarLayer, ReadoutValue, StateVisuals, TextReadout, WorldCentredRadar,
+    RadarClipMode, RadarFilter, RadarLayer, ReadoutValue, StateVisuals, TextReadout,
+    WorldCentredRadar,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -244,6 +245,8 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
         radar_filter,
         None,
         None,
+        RadarClipMode::Square,
+        None,
     );
     commands.entity(radar).insert((
         WorldCentredRadar,
@@ -254,6 +257,7 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
             border: UiRect::all(Val::Px(1.0)),
             aspect_ratio: Some(1.0),
             position_type: PositionType::Relative,
+            overflow: Overflow::clip(),
             ..default()
         },
     ));

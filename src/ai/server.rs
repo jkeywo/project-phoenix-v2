@@ -951,6 +951,7 @@ mod tests {
             beam_duration_secs: 3.0,
             cooldown_secs: 3.0,
             beam_color: vec![],
+            torpedo_arc_color: vec![],
             power_multipliers: None,
             complexity_toml: None,
             phaser_banks: Vec::new(),

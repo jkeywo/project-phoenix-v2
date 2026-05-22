@@ -367,6 +367,10 @@ pub struct WeaponsConsoleConfig {
     /// When absent (empty vec), the renderer falls back to `beam_render::DEFAULT_BEAM_COLOR`.
     #[serde(default)]
     pub beam_color: Vec<f32>,
+    /// RGBA colour used by the client Tactical UI for torpedo fire-arc
+    /// overlays. When absent, the `ShipClientConfig` default is used.
+    #[serde(default)]
+    pub torpedo_arc_color: Vec<f32>,
     #[serde(default)]
     pub power_multipliers: Option<[f32; 4]>,
     /// Path to a complexity TOML file for this console.

@@ -119,6 +119,48 @@ fn update_session_with_config(
             next.repair_travel_secs = rc.travel_duration_secs;
             next.repair_rate_hp_per_sec = rc.repair_rate_hp_per_sec;
         }
+        // [weapons_console] — push phaser banks (id/facing/fire_arc only;
+        // auto_arc_deg stays server-side) and the beam/arc colours so the
+        // Tactical UI can render fire arcs and colour fire buttons.
+        if let Some(wc) = &ship_config.weapons_console {
+            next.phaser_banks = wc
+                .phaser_banks
+                .iter()
+                .map(|b| crate::core::messages::PhaserBankClientConfig {
+                    id: b.id.clone(),
+                    facing_deg: b.facing_deg,
+                    fire_arc_deg: b.fire_arc_deg,
+                })
+                .collect();
+            if wc.beam_color.len() == 4 {
+                next.phaser_beam_color = [
+                    wc.beam_color[0],
+                    wc.beam_color[1],
+                    wc.beam_color[2],
+                    wc.beam_color[3],
+                ];
+            }
+            if wc.torpedo_arc_color.len() == 4 {
+                next.torpedo_arc_color = [
+                    wc.torpedo_arc_color[0],
+                    wc.torpedo_arc_color[1],
+                    wc.torpedo_arc_color[2],
+                    wc.torpedo_arc_color[3],
+                ];
+            }
+        }
+        // [torpedoes] — per-tube layout (id/facing/fire_arc).
+        if let Some(tc) = &ship_config.torpedoes {
+            next.torpedo_tubes = tc
+                .tubes
+                .iter()
+                .map(|t| crate::core::messages::TorpedoTubeClientConfig {
+                    id: t.id.clone(),
+                    facing_deg: t.facing_deg,
+                    fire_arc_deg: t.fire_arc_deg,
+                })
+                .collect();
+        }
         ship_client_config.0 = next;
     }
 }

@@ -1,8 +1,9 @@
 //! Client-side Navigation Panel plugin — migrated to `src/gui/` library widgets.
 //!
-//! Owns the Navigation console UI: system chart display (gizmo-drawn),
-//! impulse status text readout (`TextReadout`), cancel-impulse button
-//! (`GuiButton`), and on-screen viewscreen control (`GuiButton`).
+//! Owns the Navigation console UI: system chart display (`GenericRadar`,
+//! world-centred, north-up, auto-scaled), impulse status text readout
+//! (`TextReadout`), cancel-impulse button (`GuiButton`), and on-screen
+//! viewscreen control (`GuiButton`).
 //!
 //! All callbacks are wired via observers at spawn time.
 //! No per-button marker-component query systems remain.
@@ -14,9 +15,9 @@ use bevy::prelude::*;
 use crate::client::console_shell::ConsoleShell;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
-use crate::client_sim::ClientSimState;
 use crate::gui::{
-    spawn_gui_button, ButtonPressed, ButtonSize, ReadoutValue, StateVisuals, TextReadout,
+    spawn_gui_button, AutoScaleRadar, ButtonPressed, ButtonSize, GenericRadar, OrientationMode,
+    RadarFilter, RadarLayer, ReadoutValue, StateVisuals, TextReadout, WorldCentredRadar,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -110,10 +111,6 @@ fn impulse_readout_visuals() -> StateVisuals {
 #[derive(Component)]
 pub struct NavigationPanel;
 
-/// Marks the navigation chart display container (gizmo-drawn).
-#[derive(Component)]
-pub struct NavChartPanel;
-
 /// Marks the `TextReadout` root entity for the impulse status display.
 #[derive(Component)]
 pub struct NavImpulseReadout;
@@ -139,7 +136,6 @@ impl Plugin for NavigationPanelPlugin {
                 spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
                 toggle_navigation_panel_visibility,
                 refresh_navigation_panel,
-                draw_nav_chart,
                 respawn_navigation_on_orientation_change,
             ),
         );
@@ -204,7 +200,13 @@ fn spawn_navigation_ui(
     commands.entity(shell.root).insert((NavigationPanel, Visibility::Hidden));
 }
 
-/// Primary slot: title + nav chart panel.
+/// Primary slot: title + system chart (`GenericRadar`, world-centred, auto-scaled).
+///
+/// The chart is centred at world origin (0, 0), north-up (no ship-yaw
+/// rotation), and automatically zooms each frame to fit all visible blips
+/// plus a 10 % margin.  It shows the player ship, stations, planets, stars,
+/// and asteroid-field region boundaries — but not individual asteroids or
+/// NPC ships.
 fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
     let col = commands
         .spawn(Node {
@@ -219,24 +221,43 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity) {
         .id();
     commands.entity(container).add_child(col);
 
-    commands.entity(col).with_children(|p| {
-        p.spawn((
+    let title = commands
+        .spawn((
             Text::new("Navigation"),
             TextFont { font_size: 32.0, ..default() },
             TextColor(Color::srgb(0.5, 1.0, 0.8)),
-        ));
-        p.spawn((
-            NavChartPanel,
-            Node {
-                width: Val::Px(240.0),
-                height: Val::Px(240.0),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(Color::srgb(0.3, 1.0, 0.5)),
-            BackgroundColor(Color::srgb(0.04, 0.06, 0.10)),
-        ));
-    });
+        ))
+        .id();
+    commands.entity(col).add_child(title);
+
+    let radar_filter = RadarFilter(std::collections::HashSet::from([
+        RadarLayer::PlayerShip,
+        RadarLayer::Station,
+        RadarLayer::Planet,
+        RadarLayer::Star,
+        RadarLayer::AsteroidField,
+    ]));
+    let radar = GenericRadar::spawn(
+        commands,
+        500.0, // initial range; overridden each frame by AutoScaleRadar
+        OrientationMode::WorldFixed,
+        radar_filter,
+        None,
+        None,
+    );
+    commands.entity(radar).insert((
+        WorldCentredRadar,
+        AutoScaleRadar { margin: 1.1, min_range: 50.0 },
+        Node {
+            width: Val::Px(240.0),
+            height: Val::Px(240.0),
+            border: UiRect::all(Val::Px(1.0)),
+            aspect_ratio: Some(1.0),
+            position_type: PositionType::Relative,
+            ..default()
+        },
+    ));
+    commands.entity(col).add_child(radar);
 }
 
 /// Secondary slot: impulse status readout + cancel button + on-screen button.
@@ -361,100 +382,6 @@ fn refresh_navigation_panel(
             Visibility::Hidden
         };
     }
-}
-
-/// Draw the Navigation system chart on the `NavChartPanel` using gizmos.
-///
-/// Uses a star-centred, north-up projection so the star sits at the centre of
-/// the display and north (+Y screen direction) always points toward world -Z.
-/// The ship is shown as a heading triangle at its actual position relative to
-/// the star (not locked to the chart centre).
-fn draw_nav_chart(
-    mut gizmos: Gizmos,
-    panel: Query<(&ComputedNode, &GlobalTransform, &ViewVisibility), With<NavChartPanel>>,
-    nav_panel: Query<&Visibility, With<NavigationPanel>>,
-    sim: Res<ClientSimState>,
-    ship_view: Res<ShipView>,
-    windows: Query<&Window>,
-) {
-    if !nav_panel
-        .iter()
-        .any(|v| matches!(v, Visibility::Visible | Visibility::Inherited))
-    {
-        return;
-    }
-    let Ok((node, gt, view_vis)) = panel.single() else {
-        return;
-    };
-    if !view_vis.get() {
-        return;
-    }
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let viewport_w = window.width();
-    let viewport_h = window.height();
-
-    let node_size = node.size();
-    let node_centre_screen = gt.translation().truncate();
-    let centre_world_x = node_centre_screen.x - viewport_w / 2.0;
-    let centre_world_y = viewport_h / 2.0 - node_centre_screen.y;
-    let centre = Vec2::new(centre_world_x, centre_world_y);
-
-    let radius = node_size.x.min(node_size.y) * 0.5;
-    if radius <= 0.0 {
-        return;
-    }
-
-    let config = crate::radar::navigation_chart_config();
-    let chart_view = crate::radar::compute_star_centred_nav_chart(
-        &sim.world.entities,
-        ship_view.ship_x,
-        ship_view.ship_z,
-        &config,
-    );
-    const ZOOM: f32 = 1.0;
-
-    for ring in &chart_view.rings {
-        let pos = centre
-            + Vec2::new(
-                ring.centre_x * radius / ZOOM,
-                ring.centre_y * radius / ZOOM,
-            );
-        let outer_r = ring.outer_r * radius / ZOOM;
-        gizmos.circle_2d(pos, outer_r, Color::srgb(0.3, 0.7, 0.4));
-        let inner_r = ring.inner_r * radius / ZOOM;
-        if inner_r > 0.0 {
-            gizmos.circle_2d(pos, inner_r, Color::srgb(0.2, 0.5, 0.3));
-        }
-    }
-
-    let mut ship_radar_pos: Option<Vec2> = None;
-    for dot in &chart_view.dots {
-        let pos =
-            centre + Vec2::new(dot.radar_x * radius / ZOOM, dot.radar_y * radius / ZOOM);
-        if dot.uuid == crate::radar::SHIP_DOT_UUID {
-            ship_radar_pos = Some(pos);
-        } else {
-            let pix_radius = (dot.scaled_radius * radius / ZOOM).max(3.0);
-            gizmos.circle_2d(pos, pix_radius, Color::srgb(0.8, 0.8, 0.4));
-        }
-    }
-
-    // Draw ship as a small heading triangle at its star-relative position.
-    let ship_pos = ship_radar_pos.unwrap_or(centre);
-    let yaw = ship_view.ship_yaw;
-    let nose_len = radius * 0.10;
-    let half_base = radius * 0.06;
-    let (sin_y, cos_y) = yaw.sin_cos();
-    let rotate =
-        |v: Vec2| Vec2::new(v.x * cos_y + v.y * sin_y, -v.x * sin_y + v.y * cos_y);
-    let nose = ship_pos + rotate(Vec2::new(0.0, nose_len));
-    let left = ship_pos + rotate(Vec2::new(-half_base, -nose_len * 0.6));
-    let right = ship_pos + rotate(Vec2::new(half_base, -nose_len * 0.6));
-    gizmos.line_2d(nose, left, Color::srgb(0.5, 1.0, 0.8));
-    gizmos.line_2d(left, right, Color::srgb(0.5, 1.0, 0.8));
-    gizmos.line_2d(right, nose, Color::srgb(0.5, 1.0, 0.8));
 }
 
 // ── Tests ────────────────────────────────────────────────────────────

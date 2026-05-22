@@ -15,8 +15,12 @@ use std::collections::{HashMap, HashSet};
 /// Entity classification for radar layer filtering.
 #[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum RadarLayer {
+    /// The local player's ship (never produced by tag; bridges add it explicitly).
+    PlayerShip,
     Ship,
     Asteroid,
+    /// An asteroid-field region (ring boundary), distinct from individual asteroids.
+    AsteroidField,
     Station,
     Missile,
     Planet,
@@ -86,6 +90,35 @@ pub struct GenericRadarWidget {
     pub filter: RadarFilter,
 }
 
+// ── Per-widget behaviour overrides ────────────────────────────────────────────
+
+/// Marker for the **helm** `GenericRadarWidget` entity.
+///
+/// `sync_helm_radar_range` targets only this widget so that updating the helm
+/// radar range from the server config does not accidentally overwrite other
+/// consoles' ranges.
+#[derive(Component)]
+pub struct HelmRadarWidget;
+
+/// If present on a `GenericRadarWidget` entity, the radar is centred on the
+/// world origin `(0, 0)` rather than the `RadarCenter` reference entity, and
+/// orientation is always north-up (effective yaw = 0).
+#[derive(Component)]
+pub struct WorldCentredRadar;
+
+/// If present on a `GenericRadarWidget` entity, the widget recomputes its
+/// `range` every frame so that all visible blips fit within the display
+/// plus a `margin` factor (e.g. `1.1` = 10 % extra space).
+/// A `min_range` floor prevents the view from collapsing when no blips exist.
+#[derive(Component)]
+pub struct AutoScaleRadar {
+    /// Multiplicative margin applied to the farthest blip distance.
+    /// `1.1` means 10 % padding beyond the outermost entity.
+    pub margin: f32,
+    /// Minimum display range in world units even when blips are absent.
+    pub min_range: f32,
+}
+
 // ── Reference entity ──────────────────────────────────────────────────────────
 
 /// Attach to the player ship (or any reference entity) so the radar widget
@@ -117,14 +150,18 @@ struct RadarBlipNode {
 /// runtime side. Console clients (helm, weapons, science) and the editor's
 /// `tag-shape-map.js` must agree with this table.
 ///
+/// Note: `RadarLayer::PlayerShip` is never produced here — bridge functions
+/// add it explicitly for the local player's ship.
+///
 /// Precedence (first match wins):
-///   - `ship` | `pirate`            → `RadarLayer::Ship`
-///   - `asteroid` | `asteroid_field` → `RadarLayer::Asteroid`
-///   - `station`                    → `RadarLayer::Station`
-///   - `missile` | `torpedo`        → `RadarLayer::Missile`
-///   - `planet`                     → `RadarLayer::Planet`
-///   - `star`                       → `RadarLayer::Star`
-///   - `region` or unknown          → `None`
+///   - `ship` | `pirate`  → `RadarLayer::Ship`
+///   - `asteroid`         → `RadarLayer::Asteroid`
+///   - `asteroid_field`   → `RadarLayer::AsteroidField`
+///   - `station`          → `RadarLayer::Station`
+///   - `missile` | `torpedo` → `RadarLayer::Missile`
+///   - `planet`           → `RadarLayer::Planet`
+///   - `star`             → `RadarLayer::Star`
+///   - `region` or unknown → `None`
 pub fn tags_to_radar_layer<S: AsRef<str>>(tags: &[S]) -> Option<RadarLayer> {
     let has = |t: &str| tags.iter().any(|s| s.as_ref() == t);
     if has("region") {
@@ -132,8 +169,10 @@ pub fn tags_to_radar_layer<S: AsRef<str>>(tags: &[S]) -> Option<RadarLayer> {
     }
     if has("ship") || has("pirate") {
         Some(RadarLayer::Ship)
-    } else if has("asteroid") || has("asteroid_field") {
+    } else if has("asteroid") {
         Some(RadarLayer::Asteroid)
+    } else if has("asteroid_field") {
+        Some(RadarLayer::AsteroidField)
     } else if has("station") {
         Some(RadarLayer::Station)
     } else if has("missile") || has("torpedo") {
@@ -147,12 +186,17 @@ pub fn tags_to_radar_layer<S: AsRef<str>>(tags: &[S]) -> Option<RadarLayer> {
     }
 }
 
-/// Map a `RadarLayer` to the icon used for its blip. `Missile` uses the
-/// torpedo icon since the wire layer for torpedoes is `Missile`.
+/// Map a `RadarLayer` to the icon used for its blip.
+///
+/// - `PlayerShip` reuses the `Ship` icon (same PNG, different colour tint).
+/// - `AsteroidField` reuses the `Asteroid` icon (same PNG, different tint).
+/// - `Missile` uses the torpedo icon since the wire layer for torpedoes is `Missile`.
 pub fn layer_to_icon(layer: RadarLayer) -> RadarIcon {
     match layer {
+        RadarLayer::PlayerShip => RadarIcon::Ship,
         RadarLayer::Ship => RadarIcon::Ship,
         RadarLayer::Asteroid => RadarIcon::Asteroid,
+        RadarLayer::AsteroidField => RadarIcon::Asteroid,
         RadarLayer::Station => RadarIcon::Station,
         RadarLayer::Missile => RadarIcon::Torpedo,
         RadarLayer::Planet => RadarIcon::Planet,
@@ -165,8 +209,12 @@ pub fn layer_to_icon(layer: RadarLayer) -> RadarIcon {
 /// the editor canvas matches in-game radar.
 pub fn default_layer_colour(layer: RadarLayer) -> Color {
     match layer {
+        RadarLayer::PlayerShip => Color::srgb(0.95, 0.95, 1.0),
         RadarLayer::Ship => Color::srgb(0.95, 0.95, 1.0),
         RadarLayer::Asteroid => Color::srgb(0.85, 0.75, 0.45),
+        // Asteroid-field region rendered in a distinct teal so it contrasts
+        // with individual asteroid dots on the same radar.
+        RadarLayer::AsteroidField => Color::srgb(0.25, 0.75, 0.55),
         RadarLayer::Station => Color::srgb(0.3, 0.8, 0.6),
         RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
         RadarLayer::Planet => Color::srgb(0.0, 0.6, 1.0),
@@ -316,23 +364,34 @@ impl GenericRadar {
 /// `OnRadar` + `RadarAppearance` entities passing the filter into child UI
 /// nodes (icons via `RadarIconLookup`). New blips spawn, existing ones
 /// update in place, missing ones despawn.
+///
+/// Supports two optional per-widget components:
+/// - [`WorldCentredRadar`] — centres the projection on world origin `(0, 0)`
+///   instead of the `RadarCenter` entity, and forces north-up orientation.
+/// - [`AutoScaleRadar`] — recomputes `GenericRadarWidget::range` each frame
+///   so every visible blip fits within the display area.
 fn sync_radar_blip_nodes(
     mut commands: Commands,
-    radars: Query<(
+    mut radars: Query<(
         Entity,
-        &GenericRadarWidget,
+        &mut GenericRadarWidget,
         &ComputedNode,
         &bevy::camera::visibility::InheritedVisibility,
         Option<&Children>,
+        Option<&WorldCentredRadar>,
+        Option<&AutoScaleRadar>,
     )>,
     blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform)>,
     centers: Query<&RadarCenter>,
     mut existing_nodes: Query<(&mut Node, &mut ImageNode, &RadarBlipNode)>,
     icons: Res<RadarIconLookup>,
 ) {
-    let Some(center) = centers.iter().next() else { return };
+    // Cache the global RadarCenter once; only used for ship-centred widgets.
+    let global_center = centers.iter().next();
 
-    for (radar_entity, widget, computed, vis, children) in radars.iter() {
+    for (radar_entity, mut widget, computed, vis, children, world_centred, auto_scale) in
+        radars.iter_mut()
+    {
         if !vis.get() {
             continue;
         }
@@ -342,7 +401,58 @@ fn sync_radar_blip_nodes(
             continue;
         }
 
-        // Build intended blip set: source -> (left, top, size_px, color, icon_handle)
+        // ── Determine projection centre and effective yaw ─────────────────────
+        //
+        // WorldCentredRadar → origin (0, 0), north-up (yaw = 0).
+        // Ship-centred      → RadarCenter position + orientation mode.
+        let (center_x, center_z, effective_yaw) = if world_centred.is_some() {
+            (0.0_f32, 0.0_f32, 0.0_f32)
+        } else {
+            let Some(center) = global_center else {
+                // No RadarCenter in world yet; skip this widget this frame.
+                continue;
+            };
+            let yaw = match widget.orientation {
+                OrientationMode::ShipRelative => center.yaw,
+                OrientationMode::WorldFixed => 0.0,
+            };
+            (center.world_x, center.world_z, yaw)
+        };
+
+        // ── Auto-scale range ──────────────────────────────────────────────────
+        //
+        // If AutoScaleRadar is present, find the farthest blip that passes the
+        // filter (including its own radius) and set `widget.range` so it fits
+        // just within the display area with the requested margin.
+        if let Some(auto_scale) = auto_scale {
+            let max_dist = blips
+                .iter()
+                .filter(|(_, on_radar, _, _)| is_on_radar(&widget.filter, on_radar.0))
+                .filter_map(|(_, _, appearance, blip_gtf)| {
+                    let bpos = blip_gtf.translation();
+                    let dx = bpos.x - center_x;
+                    let dz = bpos.z - center_z;
+                    // Use world_size as an approximation of the entity's outer
+                    // radius so large fields are not clipped at their edge.
+                    let dist = (dx * dx + dz * dz).sqrt() + appearance.world_size;
+                    if dist > 0.0 {
+                        Some(dist)
+                    } else {
+                        None
+                    }
+                })
+                .fold(0.0_f32, f32::max);
+            if max_dist > 0.0 {
+                widget.range = (max_dist * auto_scale.margin).max(auto_scale.min_range);
+            } else {
+                widget.range = auto_scale.min_range;
+            }
+        }
+
+        let range = widget.range;
+
+        // ── Build intended blip set ───────────────────────────────────────────
+        // source entity → (left_px, top_px, size_px, color, icon_handle)
         let mut intended: HashMap<Entity, (f32, f32, f32, Color, Option<Handle<Image>>)> =
             HashMap::new();
         for (src, on_radar, appearance, blip_gtf) in blips.iter() {
@@ -350,15 +460,18 @@ fn sync_radar_blip_nodes(
                 continue;
             }
             let bpos = blip_gtf.translation();
+            // project_radar_entity is called with ShipRelative + effective_yaw
+            // because effective_yaw already encodes the orientation choice
+            // (0.0 for WorldFixed / WorldCentred, center.yaw for ShipRelative).
             let Some((nx, ny)) = project_radar_entity(
                 bpos.x,
                 bpos.z,
-                center.world_x,
-                center.world_z,
-                center.yaw,
-                widget.range,
+                center_x,
+                center_z,
+                effective_yaw,
+                range,
                 appearance.world_size * 0.5,
-                &widget.orientation,
+                &OrientationMode::ShipRelative,
             ) else {
                 continue;
             };
@@ -366,14 +479,14 @@ fn sync_radar_blip_nodes(
             if nx * nx + ny * ny > 1.0 {
                 continue;
             }
-            let size_px = world_size_to_px(appearance.world_size, widget.range, radar_radius_px);
+            let size_px = world_size_to_px(appearance.world_size, range, radar_radius_px);
             let half = size_px * 0.5;
             let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
             let icon_handle = icons.0.get(&appearance.icon).cloned();
             intended.insert(src, (left, top, size_px, appearance.color, icon_handle));
         }
 
-        // Reconcile existing children.
+        // ── Reconcile existing children ───────────────────────────────────────
         if let Some(children) = children {
             for child in children.iter() {
                 if let Ok((mut node, mut image, tag)) = existing_nodes.get_mut(child) {
@@ -396,7 +509,7 @@ fn sync_radar_blip_nodes(
             }
         }
 
-        // Spawn new nodes for any remaining intended blips.
+        // ── Spawn new nodes for remaining intended blips ──────────────────────
         if !intended.is_empty() {
             commands.entity(radar_entity).with_children(|parent| {
                 for (source, (left, top, size_px, color, icon_handle)) in intended.drain() {
@@ -461,9 +574,17 @@ mod tests {
     }
 
     #[test]
-    fn tags_to_radar_layer_asteroid_and_asteroid_field_return_asteroid() {
+    fn tags_to_radar_layer_asteroid_returns_asteroid() {
         assert_eq!(tags_to_radar_layer(&["asteroid"]), Some(RadarLayer::Asteroid));
-        assert_eq!(tags_to_radar_layer(&["asteroid_field"]), Some(RadarLayer::Asteroid));
+    }
+
+    #[test]
+    fn tags_to_radar_layer_asteroid_field_returns_asteroid_field() {
+        // asteroid_field is its own distinct layer, separate from individual asteroids.
+        assert_eq!(
+            tags_to_radar_layer(&["asteroid_field"]),
+            Some(RadarLayer::AsteroidField)
+        );
     }
 
     #[test]
@@ -513,8 +634,11 @@ mod tests {
 
     #[test]
     fn layer_to_icon_round_trips_every_layer() {
+        assert_eq!(layer_to_icon(RadarLayer::PlayerShip), RadarIcon::Ship);
         assert_eq!(layer_to_icon(RadarLayer::Ship), RadarIcon::Ship);
         assert_eq!(layer_to_icon(RadarLayer::Asteroid), RadarIcon::Asteroid);
+        // AsteroidField reuses the Asteroid icon (colour tint provides distinction).
+        assert_eq!(layer_to_icon(RadarLayer::AsteroidField), RadarIcon::Asteroid);
         assert_eq!(layer_to_icon(RadarLayer::Station), RadarIcon::Station);
         assert_eq!(layer_to_icon(RadarLayer::Missile), RadarIcon::Torpedo);
         assert_eq!(layer_to_icon(RadarLayer::Planet), RadarIcon::Planet);
@@ -525,8 +649,10 @@ mod tests {
     fn default_layer_colour_covers_every_layer() {
         // Just assert each call returns; the actual values are visual choices
         // and changing them is a deliberate gameplay change, not a regression.
+        let _ = default_layer_colour(RadarLayer::PlayerShip);
         let _ = default_layer_colour(RadarLayer::Ship);
         let _ = default_layer_colour(RadarLayer::Asteroid);
+        let _ = default_layer_colour(RadarLayer::AsteroidField);
         let _ = default_layer_colour(RadarLayer::Station);
         let _ = default_layer_colour(RadarLayer::Missile);
         let _ = default_layer_colour(RadarLayer::Planet);
@@ -535,8 +661,10 @@ mod tests {
 
     fn all_layers_filter() -> RadarFilter {
         let mut s = HashSet::new();
+        s.insert(RadarLayer::PlayerShip);
         s.insert(RadarLayer::Ship);
         s.insert(RadarLayer::Asteroid);
+        s.insert(RadarLayer::AsteroidField);
         s.insert(RadarLayer::Station);
         s.insert(RadarLayer::Missile);
         s.insert(RadarLayer::Planet);
@@ -579,8 +707,10 @@ mod tests {
     #[test]
     fn all_layers_filter_includes_all() {
         let filter = all_layers_filter();
+        assert!(is_on_radar(&filter, RadarLayer::PlayerShip));
         assert!(is_on_radar(&filter, RadarLayer::Ship));
         assert!(is_on_radar(&filter, RadarLayer::Asteroid));
+        assert!(is_on_radar(&filter, RadarLayer::AsteroidField));
         assert!(is_on_radar(&filter, RadarLayer::Station));
         assert!(is_on_radar(&filter, RadarLayer::Missile));
     }

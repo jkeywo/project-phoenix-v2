@@ -182,9 +182,14 @@ fn fill_sensors_radar(commands: &mut Commands, container: Entity) {
         .id();
     commands.entity(col).add_child(title);
 
+    // Sensors shows: player ship, NPC ships, individual asteroids, and
+    // asteroid-field region boundaries.  WorldFixed keeps the display
+    // north-up regardless of ship heading.
     let radar_filter = RadarFilter(std::collections::HashSet::from([
+        RadarLayer::PlayerShip,
         RadarLayer::Ship,
         RadarLayer::Asteroid,
+        RadarLayer::AsteroidField,
     ]));
     let radar = GenericRadar::spawn(
         commands,
@@ -336,6 +341,9 @@ fn bridge_client_sim_to_science_radar(
     mut radar: ResMut<ScienceRadarEntities>,
 ) {
     // ── Radar center (player ship) ────────────────────────────────────
+    //
+    // Registered as PlayerShip so navigation and other filters that want
+    // "player ship only" can include PlayerShip without also showing NPCs.
     let ship_appearance = RadarAppearance {
         icon: RadarIcon::Ship,
         world_size: 6.0,
@@ -349,7 +357,7 @@ fn bridge_client_sim_to_science_radar(
                     world_z: ship_view.ship_z,
                     yaw: ship_view.ship_yaw,
                 },
-                OnRadar(RadarLayer::Ship),
+                OnRadar(RadarLayer::PlayerShip),
                 ship_appearance,
                 Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
             ));
@@ -362,7 +370,7 @@ fn bridge_client_sim_to_science_radar(
                         world_z: ship_view.ship_z,
                         yaw: ship_view.ship_yaw,
                     },
-                    OnRadar(RadarLayer::Ship),
+                    OnRadar(RadarLayer::PlayerShip),
                     ship_appearance,
                     Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
                     GlobalTransform::default(),
@@ -381,10 +389,10 @@ fn bridge_client_sim_to_science_radar(
             continue;
         }
 
-        // Science radar shows ships and asteroids; everything else
-        // (stations, planets, stars, regions, missiles) is filtered out.
+        // Science radar shows ships, asteroids, and asteroid-field regions;
+        // everything else (stations, planets, stars, missiles) is filtered out.
         let layer = match tags_to_radar_layer(&snapshot.tags) {
-            Some(l @ (RadarLayer::Ship | RadarLayer::Asteroid)) => l,
+            Some(l @ (RadarLayer::Ship | RadarLayer::Asteroid | RadarLayer::AsteroidField)) => l,
             _ => continue,
         };
         let icon = layer_to_icon(layer);

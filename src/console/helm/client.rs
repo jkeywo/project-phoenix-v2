@@ -13,9 +13,9 @@ use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
     default_layer_colour, layer_to_icon, spawn_gui_button, tags_to_radar_layer, ButtonPressed,
-    ButtonSize, GenericJoystick, GenericRadar, JoystickMoved, OnRadar, OrientationMode,
-    RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer, ReadoutValue, StateVisuals,
-    TextReadout, Visual,
+    ButtonSize, GenericJoystick, GenericRadar, GenericRadarWidget, HelmRadarWidget, JoystickMoved,
+    OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
+    ReadoutValue, StateVisuals, TextReadout, Visual,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -192,13 +192,15 @@ fn update_helm_readouts(
     }
 }
 
-/// Keeps `GenericRadarWidget.range` in sync with the server-provided
-/// `LobbyState.ship_config.helm_radar_range`. Runs whenever `LobbyState`
-/// changes (i.e. on `Welcome`) so the helm radar uses the TOML-driven
-/// range from `[helm_console.radar]`.
+/// Keeps the **helm** `GenericRadarWidget.range` in sync with the
+/// server-provided `LobbyState.ship_config.helm_radar_range`.
+///
+/// The query is intentionally restricted to `With<HelmRadarWidget>` so that
+/// other consoles' radar ranges (sensors = 200 units, navigation = auto-scaled)
+/// are not accidentally overwritten.
 fn sync_helm_radar_range(
     lobby: Res<LobbyState>,
-    mut radars: Query<&mut crate::gui::GenericRadarWidget>,
+    mut radars: Query<&mut GenericRadarWidget, With<HelmRadarWidget>>,
 ) {
     if !lobby.is_changed() {
         return;
@@ -224,11 +226,11 @@ fn bridge_client_sim_to_radar_entities(
     // Manage the RadarCenter entity.
     //
     // The centre entity doubles as the player-ship blip: we attach
-    // `OnRadar(Ship) + RadarAppearance` and a Transform at the ship's
-    // world position. In `ShipRelative` orientation it projects to the
-    // radar centre (0, 0). Without this, the radar would never show the
-    // player's own ship — the sim entity stream omits it (the local ship
-    // is implicit).
+    // `OnRadar(PlayerShip) + RadarAppearance` and a Transform at the ship's
+    // world position.  Using `PlayerShip` (not `Ship`) lets filters that want
+    // "player ship but not NPC ships" include `PlayerShip` without also showing
+    // every hostile.  In `ShipRelative` orientation it projects to the radar
+    // centre (0, 0).
     let ship_appearance = RadarAppearance {
         icon: RadarIcon::Ship,
         world_size: 6.0,
@@ -242,7 +244,7 @@ fn bridge_client_sim_to_radar_entities(
                     world_z: ship_view.ship_z,
                     yaw: ship_view.ship_yaw,
                 },
-                OnRadar(RadarLayer::Ship),
+                OnRadar(RadarLayer::PlayerShip),
                 ship_appearance,
                 Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
                 GlobalTransform::from(Transform::from_xyz(
@@ -262,7 +264,7 @@ fn bridge_client_sim_to_radar_entities(
                         world_z: ship_view.ship_z,
                         yaw: ship_view.ship_yaw,
                     },
-                    OnRadar(RadarLayer::Ship),
+                    OnRadar(RadarLayer::PlayerShip),
                     ship_appearance,
                     t,
                     GlobalTransform::from(t),
@@ -415,9 +417,15 @@ fn fill_helm_radar(
     commands.entity(container).add_child(col);
 
     // ── Radar ──
+    //
+    // Filter includes PlayerShip (the local ship, added by the bridge as
+    // RadarLayer::PlayerShip) and AsteroidField (field regions, now a
+    // distinct layer from individual Asteroid blips).
     let radar_filter = RadarFilter(std::collections::HashSet::from([
+        RadarLayer::PlayerShip,
         RadarLayer::Ship,
         RadarLayer::Asteroid,
+        RadarLayer::AsteroidField,
         RadarLayer::Station,
         RadarLayer::Missile,
         RadarLayer::Planet,
@@ -439,6 +447,9 @@ fn fill_helm_radar(
         Some(assets.radar_surround.clone()),
         Some(assets.radar_bg.clone()),
     );
+    // HelmRadarWidget marks this widget so sync_helm_radar_range only
+    // updates it, not other consoles' radar widgets.
+    commands.entity(radar).insert(HelmRadarWidget);
     // Override the default Val::Percent(100.0)-width sizing from
     // GenericRadar::spawn so the radar squares-fit the parent slot:
     //   landscape → constrain by height (parent is wider than tall)

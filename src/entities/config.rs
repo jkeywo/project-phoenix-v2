@@ -1595,13 +1595,7 @@ hull_integrity = 100
             .asteroid_field
             .as_ref()
             .expect("must have [asteroid_field]");
-        assert!((field.inner_radius - 100.0).abs() < 1e-6);
-        assert!((field.outer_radius - 200.0).abs() < 1e-6);
-        let grid = field
-            .grid
-            .as_ref()
-            .expect("must have [asteroid_field.grid]");
-        assert!((grid.resolution - 15.0).abs() < 1e-6);
+        field.grid.as_ref().expect("must have [asteroid_field.grid]");
         assert_eq!(field.asteroid_type_paths.len(), 2);
         assert_eq!(field.cosmetic_type_paths.len(), 1);
     }

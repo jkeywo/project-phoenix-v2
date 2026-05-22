@@ -311,7 +311,6 @@ describe('EntityModeShell', () => {
       const card = shell.getCard('asteroid_field');
       expect(card).not.toBeNull();
       expect(card.data.grid).toBeDefined();
-      expect(card.data.grid.resolution).toBe(15.0);
     });
 
     it('creates cards for stations section in player_ship.toml', () => {

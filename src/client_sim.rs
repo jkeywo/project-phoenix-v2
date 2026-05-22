@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use crate::entity_tags::EntityTag;
 use crate::messages::{
     ClientMessage, Console, ConsoleHullStatus, EntitySnapshot, ModifierSlot, ModifierSource,
-    PhaserMode, ServerMessage, ShieldFacingStatus, TeamSlot, TorpedoTube, ViewDirection, ViewMode,
-    WorldData,
+    PhaserBankState, PhaserMode, ServerMessage, ShieldFacingStatus, TeamSlot, TorpedoTube,
+    TorpedoTubeState, ViewDirection, ViewMode, WorldData,
 };
 use crate::radar::{compute_science_radar_view, ScienceRadarView};
 use crate::radar_config::RadarConfig;
@@ -224,6 +224,12 @@ pub struct ClientSimState {
     /// `console_hull` field on `SimSnapshot` for consoles that need direct
     /// access without going through `ShipView`.
     pub console_hull: Vec<ConsoleHullStatus>,
+    /// Per-bank phaser state, from the latest `WeaponsUpdate`.
+    pub bank_states: Vec<PhaserBankState>,
+    /// Per-tube torpedo state, from the latest `WeaponsUpdate`.
+    pub tube_states: Vec<TorpedoTubeState>,
+    /// Currently locked target UUID, from the latest `WeaponsUpdate`.
+    pub current_target_uuid: Option<String>,
 }
 
 impl Default for ClientSimState {
@@ -251,6 +257,9 @@ impl Default for ClientSimState {
             phaser_frequency: 0.5,
             frequency_hint: None,
             console_hull: Vec::new(),
+            bank_states: Vec::new(),
+            tube_states: Vec::new(),
+            current_target_uuid: None,
         }
     }
 }
@@ -297,28 +306,38 @@ impl ClientSimState {
                 self.last_phaser_target = Some(target_uuid.clone());
             }
             ServerMessage::WeaponsUpdate {
-                fire_ready,
-                on_cooldown,
+                target_uuid,
+                banks,
+                tubes,
                 torpedo_count,
-                fore_port_loaded,
-                fore_port_reload_secs,
-                fore_starboard_loaded,
-                fore_starboard_reload_secs,
-                aft_loaded,
-                aft_reload_secs,
                 phaser_mode,
-                ..
             } => {
-                self.fire_ready = *fire_ready;
-                self.on_cooldown = *on_cooldown;
+                self.current_target_uuid = target_uuid.clone();
+                self.bank_states = banks.clone();
+                self.tube_states = tubes.clone();
                 self.torpedo_count = *torpedo_count;
-                self.fore_port_loaded = *fore_port_loaded;
-                self.fore_port_reload_secs = *fore_port_reload_secs;
-                self.fore_starboard_loaded = *fore_starboard_loaded;
-                self.fore_starboard_reload_secs = *fore_starboard_reload_secs;
-                self.aft_loaded = *aft_loaded;
-                self.aft_reload_secs = *aft_reload_secs;
                 self.phaser_mode = *phaser_mode;
+
+                // Derive legacy aggregate fields for back-compat UI code.
+                self.fire_ready = banks.iter().any(|b| b.fire_ready);
+                self.on_cooldown = !banks.is_empty() && banks.iter().all(|b| b.on_cooldown);
+
+                let lookup = |id: &str| -> (bool, f32) {
+                    tubes
+                        .iter()
+                        .find(|t| t.id == id)
+                        .map(|t| (t.loaded, t.reload_secs))
+                        .unwrap_or((true, 0.0))
+                };
+                let (fp_l, fp_r) = lookup("fore_port");
+                let (fs_l, fs_r) = lookup("fore_starboard");
+                let (af_l, af_r) = lookup("aft");
+                self.fore_port_loaded = fp_l;
+                self.fore_port_reload_secs = fp_r;
+                self.fore_starboard_loaded = fs_l;
+                self.fore_starboard_reload_secs = fs_r;
+                self.aft_loaded = af_l;
+                self.aft_reload_secs = af_r;
             }
             ServerMessage::ScienceTargetSuggestion { uuid } => {
                 self.science_target_suggestion = Some(uuid.clone());
@@ -337,7 +356,7 @@ impl ClientSimState {
                 heading,
             } => {
                 self.torpedoes_in_flight
-                    .push((uuid.clone(), *x, *z, *heading, *tube));
+                    .push((uuid.clone(), *x, *z, *heading, tube.clone()));
             }
             ServerMessage::TorpedoDestroyed { uuid } => {
                 self.torpedoes_in_flight.retain(|(id, ..)| id != uuid);
@@ -440,9 +459,10 @@ pub fn fire_torpedo_message(tube: TorpedoTube, target_uuid: Option<String>) -> C
     ClientMessage::FireTorpedo { tube, target_uuid }
 }
 
-/// `ClientMessage` to fire the phaser.
+/// `ClientMessage` to fire the phaser. Currently hardcodes the `"port"` bank;
+/// per-bank UI wiring lands in Phase G.
 pub fn fire_phaser_message() -> ClientMessage {
-    ClientMessage::FirePhaser
+    ClientMessage::FirePhaser { bank: "port".to_string() }
 }
 
 /// `ClientMessage` to set the phaser mode (Auto or Manual).
@@ -1740,41 +1760,44 @@ mod tests {
 
     // ── weapons_update ───────────────────────────────────────────────────
 
+    fn weapons_update_msg(
+        fire_ready: bool,
+        on_cooldown: bool,
+        torpedo_count: u32,
+        fp: (bool, f32),
+        fs: (bool, f32),
+        af: (bool, f32),
+        phaser_mode: PhaserMode,
+    ) -> ServerMessage {
+        ServerMessage::WeaponsUpdate {
+            target_uuid: None,
+            banks: vec![PhaserBankState {
+                id: "port".to_string(),
+                fire_ready,
+                on_cooldown,
+                cooldown_remaining: 0.0,
+            }],
+            tubes: vec![
+                TorpedoTubeState { id: "fore_port".to_string(), loaded: fp.0, reload_secs: fp.1 },
+                TorpedoTubeState { id: "fore_starboard".to_string(), loaded: fs.0, reload_secs: fs.1 },
+                TorpedoTubeState { id: "aft".to_string(), loaded: af.0, reload_secs: af.1 },
+            ],
+            torpedo_count,
+            phaser_mode,
+        }
+    }
+
     #[test]
     fn weapons_update_sets_fire_ready_and_cooldown() {
         let mut s = ClientSimState::default();
         assert!(!s.fire_ready, "default: fire not ready");
         assert!(!s.on_cooldown, "default: not on cooldown");
 
-        s.apply(&ServerMessage::WeaponsUpdate {
-            target_uuid: None,
-            fire_ready: true,
-            on_cooldown: false,
-            torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
-            phaser_mode: PhaserMode::Auto,
-        });
+        s.apply(&weapons_update_msg(true, false, 10, (true, 0.0), (true, 0.0), (true, 0.0), PhaserMode::Auto));
         assert!(s.fire_ready);
         assert!(!s.on_cooldown);
 
-        s.apply(&ServerMessage::WeaponsUpdate {
-            target_uuid: None,
-            fire_ready: false,
-            on_cooldown: true,
-            torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
-            phaser_mode: PhaserMode::Auto,
-        });
+        s.apply(&weapons_update_msg(false, true, 10, (true, 0.0), (true, 0.0), (true, 0.0), PhaserMode::Auto));
         assert!(!s.fire_ready);
         assert!(s.on_cooldown);
     }
@@ -1782,7 +1805,7 @@ mod tests {
     #[test]
     fn fire_phaser_message_builder_produces_correct_message() {
         let msg = fire_phaser_message();
-        assert_eq!(msg, ClientMessage::FirePhaser);
+        assert_eq!(msg, ClientMessage::FirePhaser { bank: "port".to_string() });
     }
 
     #[test]
@@ -1879,19 +1902,11 @@ mod tests {
         assert_eq!(s.fore_starboard_reload_secs, 0.0);
         assert_eq!(s.aft_reload_secs, 0.0);
 
-        s.apply(&ServerMessage::WeaponsUpdate {
-            target_uuid: None,
-            fire_ready: false,
-            on_cooldown: false,
-            torpedo_count: 8,
-            fore_port_loaded: false,
-            fore_port_reload_secs: 7.5,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: false,
-            aft_reload_secs: 3.2,
-            phaser_mode: PhaserMode::Auto,
-        });
+        s.apply(&weapons_update_msg(
+            false, false, 8,
+            (false, 7.5), (true, 0.0), (false, 3.2),
+            PhaserMode::Auto,
+        ));
 
         assert_eq!(s.torpedo_count, 8);
         assert!(!s.fore_port_loaded);
@@ -1907,52 +1922,36 @@ mod tests {
         let mut s = ClientSimState::default();
         assert_eq!(s.phaser_mode, PhaserMode::Auto, "default should be Auto");
 
-        s.apply(&ServerMessage::WeaponsUpdate {
-            target_uuid: None,
-            fire_ready: false,
-            on_cooldown: false,
-            torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
-            phaser_mode: PhaserMode::Manual,
-        });
+        s.apply(&weapons_update_msg(
+            false, false, 10,
+            (true, 0.0), (true, 0.0), (true, 0.0),
+            PhaserMode::Manual,
+        ));
         assert_eq!(s.phaser_mode, PhaserMode::Manual);
 
-        s.apply(&ServerMessage::WeaponsUpdate {
-            target_uuid: None,
-            fire_ready: false,
-            on_cooldown: false,
-            torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
-            phaser_mode: PhaserMode::Auto,
-        });
+        s.apply(&weapons_update_msg(
+            false, false, 10,
+            (true, 0.0), (true, 0.0), (true, 0.0),
+            PhaserMode::Auto,
+        ));
         assert_eq!(s.phaser_mode, PhaserMode::Auto);
     }
 
     #[test]
     fn fire_torpedo_message_builder_produces_correct_message() {
-        let msg = fire_torpedo_message(TorpedoTube::ForePort, Some("target-uuid".into()));
+        let msg = fire_torpedo_message("fore_port".to_string(), Some("target-uuid".into()));
         assert_eq!(
             msg,
             ClientMessage::FireTorpedo {
-                tube: TorpedoTube::ForePort,
+                tube: "fore_port".to_string(),
                 target_uuid: Some("target-uuid".into()),
             }
         );
-        let msg2 = fire_torpedo_message(TorpedoTube::Aft, None);
+        let msg2 = fire_torpedo_message("aft".to_string(), None);
         assert_eq!(
             msg2,
             ClientMessage::FireTorpedo {
-                tube: TorpedoTube::Aft,
+                tube: "aft".to_string(),
                 target_uuid: None,
             }
         );
@@ -1963,7 +1962,7 @@ mod tests {
         let mut s = ClientSimState::default();
         s.apply(&ServerMessage::TorpedoLaunched {
             uuid: "t1".into(),
-            tube: TorpedoTube::ForePort,
+            tube: "fore_port".to_string(),
             x: 10.0,
             z: -5.0,
             heading: 0.0,
@@ -1974,7 +1973,7 @@ mod tests {
         assert_eq!(*x, 10.0);
         assert_eq!(*z, -5.0);
         assert_eq!(*heading, 0.0);
-        assert_eq!(*tube, TorpedoTube::ForePort);
+        assert_eq!(*tube, "fore_port".to_string());
     }
 
     #[test]
@@ -1982,14 +1981,14 @@ mod tests {
         let mut s = ClientSimState::default();
         s.apply(&ServerMessage::TorpedoLaunched {
             uuid: "t1".into(),
-            tube: TorpedoTube::Aft,
+            tube: "aft".to_string(),
             x: 0.0,
             z: 0.0,
             heading: 0.0,
         });
         s.apply(&ServerMessage::TorpedoLaunched {
             uuid: "t2".into(),
-            tube: TorpedoTube::ForeStarboard,
+            tube: "fore_starboard".to_string(),
             x: 0.0,
             z: 0.0,
             heading: 0.0,

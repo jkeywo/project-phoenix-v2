@@ -105,7 +105,7 @@ struct TubeRadioGroup;
 ///
 /// `None` means no tube is selected. Updated when the `RadioGroup` fires
 /// `RadioSelected`.
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Resource, Default, Clone, PartialEq, Eq, Debug)]
 pub struct SelectedTube(pub Option<TorpedoTube>);
 
 /// Persistent entity IDs for weapons-specific radar components.
@@ -462,9 +462,9 @@ fn fill_tactical_controls(commands: &mut Commands, container: Entity) {
         })
         .id();
     for tube in [
-        TorpedoTube::ForePort,
-        TorpedoTube::ForeStarboard,
-        TorpedoTube::Aft,
+        "fore_port".to_string(),
+        "fore_starboard".to_string(),
+        "aft".to_string(),
     ] {
         let label = commands
             .spawn((
@@ -747,15 +747,15 @@ fn on_tube_selected(
     let member = trigger.event().member;
 
     let tubes = [
-        TorpedoTube::ForePort,
-        TorpedoTube::ForeStarboard,
-        TorpedoTube::Aft,
+        "fore_port".to_string(),
+        "fore_starboard".to_string(),
+        "aft".to_string(),
     ];
     if let Ok(children) = children_q.get(group) {
         for (idx, child) in children.iter().enumerate() {
             if child == member {
-                if let Some(&tube) = tubes.get(idx) {
-                    selected.0 = Some(tube);
+                if let Some(tube) = tubes.get(idx) {
+                    selected.0 = Some(tube.clone());
                     return;
                 }
             }
@@ -790,11 +790,12 @@ fn on_fire_torpedo_pressed(
     sim: Res<ClientSimState>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
-    let Some(tube) = selected.0 else { return };
-    let loaded = match tube {
-        TorpedoTube::ForePort       => sim.fore_port_loaded,
-        TorpedoTube::ForeStarboard  => sim.fore_starboard_loaded,
-        TorpedoTube::Aft            => sim.aft_loaded,
+    let Some(tube) = selected.0.clone() else { return };
+    let loaded = match tube.as_str() {
+        "fore_port"      => sim.fore_port_loaded,
+        "fore_starboard" => sim.fore_starboard_loaded,
+        "aft"            => sim.aft_loaded,
+        _                => false,
     };
     if !loaded || sim.torpedo_count == 0 {
         return;
@@ -884,10 +885,11 @@ fn refresh_torpedo_ui(
 
     // Per-tube status labels.
     for (mut text, mut color, label) in tube_status.iter_mut() {
-        let (loaded, reload_secs) = match label.0 {
-            TorpedoTube::ForePort       => (sim.fore_port_loaded,      sim.fore_port_reload_secs),
-            TorpedoTube::ForeStarboard  => (sim.fore_starboard_loaded, sim.fore_starboard_reload_secs),
-            TorpedoTube::Aft            => (sim.aft_loaded,            sim.aft_reload_secs),
+        let (loaded, reload_secs) = match label.0.as_str() {
+            "fore_port"      => (sim.fore_port_loaded,      sim.fore_port_reload_secs),
+            "fore_starboard" => (sim.fore_starboard_loaded, sim.fore_starboard_reload_secs),
+            "aft"            => (sim.aft_loaded,            sim.aft_reload_secs),
+            _                => (true, 0.0),
         };
         if loaded {
             **text = "LOADED".to_string();
@@ -899,10 +901,11 @@ fn refresh_torpedo_ui(
     }
 
     // Fire Torpedo button: enable/disable.
-    let tube_ready = selected.0.map(|t| match t {
-        TorpedoTube::ForePort       => sim.fore_port_loaded,
-        TorpedoTube::ForeStarboard  => sim.fore_starboard_loaded,
-        TorpedoTube::Aft            => sim.aft_loaded,
+    let tube_ready = selected.0.as_ref().map(|t| match t.as_str() {
+        "fore_port"      => sim.fore_port_loaded,
+        "fore_starboard" => sim.fore_starboard_loaded,
+        "aft"            => sim.aft_loaded,
+        _                => false,
     }).unwrap_or(false);
     let can_fire = tube_ready && sim.torpedo_count > 0 && selected.0.is_some();
 
@@ -1242,7 +1245,7 @@ mod tests {
     fn fire_phaser_message_produces_fire_phaser() {
         use crate::messages::ClientMessage;
         let msg = fire_phaser_message();
-        assert_eq!(msg, ClientMessage::FirePhaser);
+        assert_eq!(msg, ClientMessage::FirePhaser { bank: "port".to_string() });
     }
 
     // ── fire_torpedo_message builder ──────────────────────────────────
@@ -1250,9 +1253,9 @@ mod tests {
     #[test]
     fn fire_torpedo_message_fore_port_no_target() {
         use crate::messages::ClientMessage;
-        let msg = fire_torpedo_message(TorpedoTube::ForePort, None);
+        let msg = fire_torpedo_message("fore_port".to_string(), None);
         assert_eq!(msg, ClientMessage::FireTorpedo {
-            tube: TorpedoTube::ForePort,
+            tube: "fore_port".to_string(),
             target_uuid: None,
         });
     }
@@ -1260,9 +1263,9 @@ mod tests {
     #[test]
     fn fire_torpedo_message_aft_with_target() {
         use crate::messages::ClientMessage;
-        let msg = fire_torpedo_message(TorpedoTube::Aft, Some("uuid-1".into()));
+        let msg = fire_torpedo_message("aft".to_string(), Some("uuid-1".into()));
         assert_eq!(msg, ClientMessage::FireTorpedo {
-            tube: TorpedoTube::Aft,
+            tube: "aft".to_string(),
             target_uuid: Some("uuid-1".into()),
         });
     }

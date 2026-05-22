@@ -2190,9 +2190,9 @@ mod tests {
             .find_map(|m| match &m.msg {
                 ServerMessage::WeaponsUpdate {
                     target_uuid,
-                    fire_ready,
+                    banks,
                     ..
-                } => Some((target_uuid.clone(), *fire_ready)),
+                } => Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
                 _ => None,
             })
             .expect("expected a WeaponsUpdate message");
@@ -2227,9 +2227,9 @@ mod tests {
             .find_map(|m| match &m.msg {
                 ServerMessage::WeaponsUpdate {
                     target_uuid,
-                    fire_ready,
+                    banks,
                     ..
-                } => Some((target_uuid.clone(), *fire_ready)),
+                } => Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
                 _ => None,
             })
             .expect("expected a WeaponsUpdate message");
@@ -2256,7 +2256,7 @@ mod tests {
         );
         let _ = tick(app);
         // Fire
-        push(app, "weapons", ClientMessage::FirePhaser);
+        push(app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(app)
     }
 
@@ -2275,7 +2275,7 @@ mod tests {
             "expected BeamStarted after firing at fire-ready target"
         );
         match &beam_started.unwrap().msg {
-            ServerMessage::BeamStarted { target_uuid } => assert_eq!(target_uuid, "target-uuid"),
+            ServerMessage::BeamStarted { target_uuid, .. } => assert_eq!(target_uuid, "target-uuid"),
             _ => unreachable!(),
         }
         match &beam_started.unwrap().target {
@@ -2302,7 +2302,7 @@ mod tests {
             .resource_mut::<PhaserCooldown>()
             .remaining_secs = 3.0;
 
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
 
         assert!(
@@ -2319,7 +2319,7 @@ mod tests {
         setup_weapons_world(&mut app, 0.0, -20.0);
         start_game(&mut app);
 
-        push(&mut app, "captain", ClientMessage::FirePhaser);
+        push(&mut app, "captain", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
 
         assert!(
@@ -2346,7 +2346,7 @@ mod tests {
         );
         let _ = tick(&mut app);
         // Fire â€" rejected because target is behind.
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
 
         assert!(
@@ -2557,7 +2557,7 @@ mod tests {
             ClientMessage::SetTarget { uuid: "t1".into() },
         );
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let _ = tick(&mut app);
         assert_eq!(
             app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
@@ -2587,7 +2587,7 @@ mod tests {
             ClientMessage::SetTarget { uuid: "t2".into() },
         );
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
 
         assert!(
@@ -2963,7 +2963,7 @@ mod tests {
             &mut app,
             "weapons",
             ClientMessage::FireTorpedo {
-                tube: crate::messages::TorpedoTube::ForePort,
+                tube: "fore_port".to_string(),
                 target_uuid: None,
             },
         );
@@ -2972,10 +2972,7 @@ mod tests {
         assert!(
             out.iter().any(|m| matches!(
                 &m.msg,
-                ServerMessage::TorpedoLaunched {
-                    tube: crate::messages::TorpedoTube::ForePort,
-                    ..
-                }
+                ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port"
             )),
             "expected TorpedoLaunched broadcast after Tactical fires torpedo"
         );
@@ -2990,7 +2987,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::FireTorpedo {
-                tube: crate::messages::TorpedoTube::ForePort,
+                tube: "fore_port".to_string(),
                 target_uuid: None,
             },
         );
@@ -3030,7 +3027,7 @@ mod tests {
             &mut app,
             "weapons",
             ClientMessage::FireTorpedo {
-                tube: crate::messages::TorpedoTube::Aft,
+                tube: "aft".to_string(),
                 target_uuid: None,
             },
         );
@@ -3052,7 +3049,7 @@ mod tests {
             &mut app,
             "weapons",
             ClientMessage::FireTorpedo {
-                tube: crate::messages::TorpedoTube::ForeStarboard,
+                tube: "fore_starboard".to_string(),
                 target_uuid: None,
             },
         );
@@ -3089,7 +3086,7 @@ mod tests {
             },
         );
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app);
 
         // Advance by 1 second of simulated time (many small ticks).
@@ -3145,7 +3142,7 @@ mod tests {
             },
         );
         tick(&mut app_fast);
-        push(&mut app_fast, "weapons", ClientMessage::FirePhaser);
+        push(&mut app_fast, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app_fast); // processes FirePhaser, beam becomes active
 
         // Inject accumulated damage: 3.5s Ã— (5 HP/s Ã— 2Ã—) = 35 HP â†' enough to destroy 30-HP asteroid.
@@ -3179,7 +3176,7 @@ mod tests {
             },
         );
         tick(&mut app_base);
-        push(&mut app_base, "weapons", ClientMessage::FirePhaser);
+        push(&mut app_base, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app_base); // processes FirePhaser, beam becomes active
                              // Inject same real time but at base rate: 3.5s Ã— 5 HP/s = 17.5 HP accumulated
         {

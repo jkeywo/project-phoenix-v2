@@ -2,12 +2,12 @@ use bevy::prelude::*;
 
 use crate::lobby::{InboundMessage, Target, Sessions, WorldResource};
 use crate::messages::{
-    ClientMessage, Console, ModifierSlot, ServerMessage,
+    ClientMessage, Console, ModifierSlot, PhaserBank, PhaserBankState, ServerMessage,
+    TorpedoTubeState,
 };
 use crate::simulation::{AsteroidUuid, SimOutbox};
 use crate::entity_spawner::EntityConsoleHull;
-use crate::torpedo::{TorpedoSystem, TorpedoConfig, TorpedoTubeId};
-use crate::messages::TorpedoTube as MsgTorpedoTube;
+use crate::torpedo::{TorpedoSystem, TorpedoConfig};
 use crate::ai_plugin::{AiTokenRegistry, AiControllerComponent, EntityPhaserState};
 use crate::ship_state::ShipState;
 use crate::radar::WEAPONS_RADAR_RANGE;
@@ -40,7 +40,7 @@ pub struct ActiveBeam {
     pub remaining_secs: f32,
     pub damage_accumulator: f32,
     /// Which bank is firing this beam. `None` when no beam is active.
-    pub bank: Option<crate::messages::PhaserBank>,
+    pub bank: Option<PhaserBank>,
 }
 
 /// Post-beam cooldown. The weapons console is locked out for
@@ -133,11 +133,13 @@ pub struct AsteroidDestroyedVfx {
 
 #[derive(Event, Clone, Debug)]
 pub struct BeamStartedEvent {
+    pub bank: PhaserBank,
     pub target_uuid: String,
 }
 
 #[derive(Event, Clone, Debug)]
 pub struct BeamEndedEvent {
+    pub bank: PhaserBank,
     pub target_uuid: String,
 }
 
@@ -146,7 +148,10 @@ fn on_beam_started(
     mut outbox: ResMut<SimOutbox>,
 ) {
     let ev = trigger.event();
-    outbox.0.push((Target::All, ServerMessage::BeamStarted { target_uuid: ev.target_uuid.clone() }));
+    outbox.0.push((Target::All, ServerMessage::BeamStarted {
+        bank: ev.bank.clone(),
+        target_uuid: ev.target_uuid.clone(),
+    }));
 }
 
 fn on_beam_ended(
@@ -154,7 +159,10 @@ fn on_beam_ended(
     mut outbox: ResMut<SimOutbox>,
 ) {
     let ev = trigger.event();
-    outbox.0.push((Target::All, ServerMessage::BeamEnded { target_uuid: ev.target_uuid.clone() }));
+    outbox.0.push((Target::All, ServerMessage::BeamEnded {
+        bank: ev.bank.clone(),
+        target_uuid: ev.target_uuid.clone(),
+    }));
 }
 
 // ── Plugin ─────────────────────────────────────────────────────────────────
@@ -242,9 +250,9 @@ fn handle_fire_phaser(
     _outbox: ResMut<SimOutbox>,
 ) {
     for ev in reader.read() {
-        if !matches!(ev.msg, ClientMessage::FirePhaser) {
+        let ClientMessage::FirePhaser { bank } = &ev.msg else {
             continue;
-        }
+        };
         if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
             continue;
         }
@@ -261,21 +269,21 @@ fn handle_fire_phaser(
         }
 
         if let Some(old_uuid) = beam.target_uuid.take() {
+            let old_bank = beam.bank.clone().unwrap_or_default();
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            commands.trigger(BeamEndedEvent { target_uuid: old_uuid });
+            commands.trigger(BeamEndedEvent { bank: old_bank, target_uuid: old_uuid });
         }
 
-        let next_bank = match beam.bank {
-            Some(crate::messages::PhaserBank::Port) => crate::messages::PhaserBank::Starboard,
-            _ => crate::messages::PhaserBank::Port,
-        };
         beam.target_uuid = Some(target_uuid.clone());
         beam.remaining_secs = combat_config.0.beam_duration_secs;
         beam.damage_accumulator = 0.0;
-        beam.bank = Some(next_bank);
+        beam.bank = Some(bank.clone());
 
-        commands.trigger(BeamStartedEvent { target_uuid: target_uuid.clone() });
+        commands.trigger(BeamStartedEvent {
+            bank: bank.clone(),
+            target_uuid: target_uuid.clone(),
+        });
     }
 }
 
@@ -320,7 +328,7 @@ fn handle_fire_phaser_npc(
         if !ev.token.starts_with("ai:") {
             continue;
         }
-        if matches!(ev.msg, ClientMessage::FirePhaser) {
+        if matches!(ev.msg, ClientMessage::FirePhaser { .. }) {
             fire_orders.push(ev.token.clone());
         }
     }
@@ -387,7 +395,10 @@ fn handle_fire_phaser_npc(
                     phaser_state.beam_active = true;
                     phaser_state.beam_target = Some(t_uuid);
                     phaser_state.beam_remaining_secs = beam_duration;
-                    commands.trigger(BeamStartedEvent { target_uuid: t_uuid.to_string() });
+                    commands.trigger(BeamStartedEvent {
+                        bank: "port".to_string(),
+                        target_uuid: t_uuid.to_string(),
+                    });
                 }
             }
         }
@@ -420,7 +431,10 @@ fn handle_fire_phaser_npc(
                     phaser_state.beam_target = None;
                     phaser_state.beam_remaining_secs = 0.0;
                     phaser_state.cooldown_remaining = beam_duration;
-                    commands.trigger(BeamEndedEvent { target_uuid: ended_uuid });
+                    commands.trigger(BeamEndedEvent {
+                        bank: "port".to_string(),
+                        target_uuid: ended_uuid,
+                    });
                 }
             } else {
                 phaser_state.beam_active = false;
@@ -473,14 +487,6 @@ fn handle_set_phaser_frequency(
     }
 }
 
-fn to_tube_id(tube: MsgTorpedoTube) -> TorpedoTubeId {
-    match tube {
-        MsgTorpedoTube::ForePort => TorpedoTubeId::ForePort,
-        MsgTorpedoTube::ForeStarboard => TorpedoTubeId::ForeStarboard,
-        MsgTorpedoTube::Aft => TorpedoTubeId::Aft,
-    }
-}
-
 fn handle_fire_torpedo(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
@@ -493,21 +499,22 @@ fn handle_fire_torpedo(
         if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
             continue;
         }
-        let tube_id = to_tube_id(*tube);
         let uuid = uuid::Uuid::new_v4().to_string();
         let launch_heading = ship.yaw;
         use crate::torpedo::LaunchResult;
-        match torpedo_sys.0.launch(tube_id, uuid, ship.x, ship.z, launch_heading, target_uuid.clone()) {
+        match torpedo_sys.0.launch(tube.as_str(), uuid, ship.x, ship.z, launch_heading, target_uuid.clone()) {
             LaunchResult::Launched { uuid: launched_uuid } => {
                 outbox.0.push((Target::All, ServerMessage::TorpedoLaunched {
                     uuid: launched_uuid,
-                    tube: *tube,
+                    tube: tube.clone(),
                     x: ship.x,
                     z: ship.z,
                     heading: launch_heading,
                 }));
             }
-            LaunchResult::TubeNotLoaded | LaunchResult::NoTorpedoes => {}
+            LaunchResult::TubeNotLoaded
+            | LaunchResult::NoTorpedoes
+            | LaunchResult::UnknownTube => {}
         }
     }
 }
@@ -552,6 +559,7 @@ fn tick_active_beam(
     let Some(target_uuid) = beam.target_uuid.clone() else {
         return;
     };
+    let active_bank = beam.bank.clone().unwrap_or_default();
 
     let asteroid_info = world.0.entities.iter().find(|a| a.uuid == target_uuid).cloned();
     let Some(info) = asteroid_info else {
@@ -559,7 +567,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start(&combat_config.0);
-        commands.trigger(BeamEndedEvent { target_uuid });
+        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
         return;
     };
 
@@ -569,7 +577,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start(&combat_config.0);
-        commands.trigger(BeamEndedEvent { target_uuid });
+        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
         return;
     }
 
@@ -613,7 +621,7 @@ fn tick_active_beam(
             cooldown.start(&combat_config.0);
 
             outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
-            commands.trigger(BeamEndedEvent { target_uuid });
+            commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
             return;
         }
 
@@ -628,7 +636,7 @@ fn tick_active_beam(
             beam.damage_accumulator = 0.0;
             cooldown.start(&combat_config.0);
 
-            commands.trigger(BeamEndedEvent { target_uuid });
+            commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
             return;
         }
     }
@@ -639,7 +647,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start(&combat_config.0);
-        commands.trigger(BeamEndedEvent { target_uuid });
+        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
     }
 }
 
@@ -672,17 +680,38 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             };
 
             let ts = &torpedo_sys.0;
+            let on_cooldown = cooldown.is_active() || beam.target_uuid.is_some();
+
+            // Per-bank state. If `combat_config.0.banks` is empty (ship has
+            // no per-bank TOML), fall back to a single anonymous bank using
+            // the active-beam state.
+            let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
+                vec![PhaserBankState {
+                    id: String::new(),
+                    fire_ready,
+                    on_cooldown,
+                    cooldown_remaining: cooldown.remaining_secs,
+                }]
+            } else {
+                combat_config.0.banks.iter().map(|b| PhaserBankState {
+                    id: b.id.clone(),
+                    fire_ready,
+                    on_cooldown,
+                    cooldown_remaining: cooldown.remaining_secs,
+                }).collect()
+            };
+
+            let tubes: Vec<TorpedoTubeState> = ts.tubes.iter().map(|t| TorpedoTubeState {
+                id: t.id.clone(),
+                loaded: t.is_loaded(),
+                reload_secs: t.reload_remaining,
+            }).collect();
+
             vec![ServerMessage::WeaponsUpdate {
                 target_uuid: weapons_target.0.clone(),
-                fire_ready,
-                on_cooldown: cooldown.is_active() || beam.target_uuid.is_some(),
+                banks,
+                tubes,
                 torpedo_count: ts.torpedoes_remaining,
-                fore_port_loaded: ts.fore_port.is_loaded(),
-                fore_port_reload_secs: ts.fore_port.reload_remaining,
-                fore_starboard_loaded: ts.fore_starboard.is_loaded(),
-                fore_starboard_reload_secs: ts.fore_starboard.reload_remaining,
-                aft_loaded: ts.aft.is_loaded(),
-                aft_reload_secs: ts.aft.reload_remaining,
                 phaser_mode,
             }]
         },
@@ -807,7 +836,7 @@ mod tests {
         start_game_with_weapons(app);
         push(app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
         let _ = tick(app);
-        push(app, "weapons", ClientMessage::FirePhaser);
+        push(app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(app)
     }
 
@@ -882,8 +911,8 @@ mod tests {
         let out = tick(&mut app);
 
         let update = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::WeaponsUpdate { target_uuid, fire_ready, .. } =>
-                Some((target_uuid.clone(), *fire_ready)),
+            ServerMessage::WeaponsUpdate { target_uuid, banks, .. } =>
+                Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
             _ => None,
         }).expect("expected a WeaponsUpdate message");
         assert_eq!(update.0.as_deref(), Some("target-uuid"));
@@ -901,8 +930,8 @@ mod tests {
         let out = tick(&mut app);
 
         let update = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::WeaponsUpdate { target_uuid, fire_ready, .. } =>
-                Some((target_uuid.clone(), *fire_ready)),
+            ServerMessage::WeaponsUpdate { target_uuid, banks, .. } =>
+                Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
             _ => None,
         }).expect("expected a WeaponsUpdate message");
         assert_eq!(update.0.as_deref(), Some("target-uuid"));
@@ -919,7 +948,7 @@ mod tests {
         let beam_started = out.iter().find(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. }));
         assert!(beam_started.is_some(), "expected BeamStarted after firing at fire-ready target");
         match &beam_started.unwrap().msg {
-            ServerMessage::BeamStarted { target_uuid } => assert_eq!(target_uuid, "target-uuid"),
+            ServerMessage::BeamStarted { target_uuid, .. } => assert_eq!(target_uuid, "target-uuid"),
             _ => unreachable!(),
         }
         match &beam_started.unwrap().target {
@@ -941,7 +970,7 @@ mod tests {
         app.world_mut().resource_mut::<ActiveBeam>().target_uuid = None;
         app.world_mut().resource_mut::<PhaserCooldown>().remaining_secs = 3.0;
 
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
 
         assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
@@ -954,7 +983,7 @@ mod tests {
         setup_weapons_world(&mut app, 0.0, -20.0);
         start_game(&mut app);
 
-        push(&mut app, "captain", ClientMessage::FirePhaser);
+        push(&mut app, "captain", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
 
         assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
@@ -968,7 +997,7 @@ mod tests {
         start_game_with_weapons(&mut app);
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
 
         assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
@@ -1095,7 +1124,7 @@ mod tests {
 
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t1".into() });
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let _ = tick(&mut app);
         assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t1"));
 
@@ -1109,7 +1138,7 @@ mod tests {
 
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t2".into() });
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
 
         assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
@@ -1153,13 +1182,13 @@ mod tests {
         start_game_with_weapons(&mut app);
 
         push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::ForePort,
+            tube: "fore_port".to_string(),
             target_uuid: None,
         });
         let out = tick(&mut app);
 
         assert!(
-            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube: crate::messages::TorpedoTube::ForePort, .. })),
+            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")),
             "expected TorpedoLaunched broadcast after Tactical fires torpedo"
         );
     }
@@ -1223,7 +1252,7 @@ mod tests {
         start_game_with_weapons(&mut app);
 
         push(&mut app, "captain", ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::ForePort,
+            tube: "fore_port".to_string(),
             target_uuid: None,
         });
         let out = tick(&mut app);
@@ -1245,7 +1274,7 @@ mod tests {
         tick(&mut app);
 
         push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::Aft,
+            tube: "aft".to_string(),
             target_uuid: None,
         });
         let out = tick(&mut app);
@@ -1262,7 +1291,7 @@ mod tests {
         start_game_with_weapons(&mut app);
 
         push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::ForeStarboard,
+            tube: "fore_starboard".to_string(),
             target_uuid: None,
         });
         let out = tick(&mut app);
@@ -1285,7 +1314,7 @@ mod tests {
 
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app);
 
         let hp_before = {
@@ -1313,7 +1342,7 @@ mod tests {
         start_game_with_weapons(&mut app_fast);
         push(&mut app_fast, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
         tick(&mut app_fast);
-        push(&mut app_fast, "weapons", ClientMessage::FirePhaser);
+        push(&mut app_fast, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app_fast);
 
         {
@@ -1331,7 +1360,7 @@ mod tests {
         start_game_with_weapons(&mut app_base);
         push(&mut app_base, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
         tick(&mut app_base);
-        push(&mut app_base, "weapons", ClientMessage::FirePhaser);
+        push(&mut app_base, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app_base);
         {
             let mut beam = app_base.world_mut().resource_mut::<ActiveBeam>();
@@ -1455,7 +1484,7 @@ mod tests {
 
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app);
 
         // Accumulate damage but don't destroy
@@ -1481,7 +1510,7 @@ mod tests {
 
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app);
 
         // Force lethal damage
@@ -1527,7 +1556,7 @@ mod tests {
 
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser);
+        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         tick(&mut app);
 
         app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 30.0;
@@ -1609,7 +1638,7 @@ mod tests {
 
         // Send FirePhaser as the NPC's synthetic token.
         let ai_token = format!("ai:{}", npc_uuid);
-        push(&mut app, &ai_token, ClientMessage::FirePhaser);
+        push(&mut app, &ai_token, ClientMessage::FirePhaser { bank: "port".to_string() });
         app.update();
 
         let phaser_state = app

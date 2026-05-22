@@ -116,8 +116,8 @@ pub struct TorpedoAiInput {
     pub target_locked: bool,
     /// Locked target's combined shield HP. Fire only when this is ≤ 0.
     pub target_shields: i32,
-    /// Tubes in canonical priority order: [ForePort, ForeStarboard, Aft].
-    pub tubes: [TubeSummary; 3],
+    /// Tubes considered by the AI, in priority order.
+    pub tubes: Vec<TubeSummary>,
     /// Torpedoes remaining in the magazine.
     pub magazine: u32,
 }
@@ -144,7 +144,7 @@ pub fn auto_fire_torpedo(input: &TorpedoAiInput) -> Vec<TorpedoTubeId> {
         .tubes
         .iter()
         .filter(|t| t.loaded && t.in_arc)
-        .map(|t| t.id)
+        .map(|t| t.id.clone())
         .collect()
 }
 
@@ -695,18 +695,18 @@ mod tests {
             "frequency must persist at last value — no auto-revert when trigger ends");
     }
 
-    fn tube(id: TorpedoTubeId, loaded: bool, in_arc: bool) -> TubeSummary {
-        TubeSummary { id, loaded, in_arc }
+    fn tube(id: &str, loaded: bool, in_arc: bool) -> TubeSummary {
+        TubeSummary { id: id.to_string(), loaded, in_arc }
     }
 
     fn all_ready_input() -> TorpedoAiInput {
         TorpedoAiInput {
             target_locked: true,
             target_shields: 0,
-            tubes: [
-                tube(TorpedoTubeId::ForePort, true, true),
-                tube(TorpedoTubeId::ForeStarboard, true, true),
-                tube(TorpedoTubeId::Aft, true, true),
+            tubes: vec![
+                tube("fore_port", true, true),
+                tube("fore_starboard", true, true),
+                tube("aft", true, true),
             ],
             magazine: 10,
         }
@@ -767,7 +767,7 @@ mod tests {
         input.tubes[0].loaded = false;
         let result = auto_fire_torpedo(&input);
         assert!(
-            !result.contains(&TorpedoTubeId::ForePort),
+            !result.contains(&"fore_port".to_string()),
             "unloaded ForePort should not appear in result"
         );
     }
@@ -791,7 +791,7 @@ mod tests {
         input.tubes[1].in_arc = false;
         let result = auto_fire_torpedo(&input);
         assert!(
-            !result.contains(&TorpedoTubeId::ForeStarboard),
+            !result.contains(&"fore_starboard".to_string()),
             "out-of-arc ForeStarboard should not appear in result"
         );
     }
@@ -813,7 +813,7 @@ mod tests {
         let result = auto_fire_torpedo(&all_ready_input());
         assert_eq!(
             result,
-            vec![TorpedoTubeId::ForePort, TorpedoTubeId::ForeStarboard, TorpedoTubeId::Aft],
+            vec!["fore_port".to_string(), "fore_starboard".to_string(), "aft".to_string()],
             "tubes must appear in deterministic priority order"
         );
     }
@@ -824,7 +824,7 @@ mod tests {
         input.tubes[0].loaded = false; // ForePort unloaded
         input.tubes[1].in_arc = false; // ForeStarboard out of arc
         let result = auto_fire_torpedo(&input);
-        assert_eq!(result, vec![TorpedoTubeId::Aft]);
+        assert_eq!(result, vec!["aft".to_string()]);
     }
 
     #[test]
@@ -832,7 +832,7 @@ mod tests {
         let mut input = all_ready_input();
         input.tubes[1].loaded = false; // ForeStarboard unloaded
         let result = auto_fire_torpedo(&input);
-        assert_eq!(result, vec![TorpedoTubeId::ForePort, TorpedoTubeId::Aft]);
+        assert_eq!(result, vec!["fore_port".to_string(), "aft".to_string()]);
     }
 
     // ── Power movement rule helpers ───────────────────────────────────────

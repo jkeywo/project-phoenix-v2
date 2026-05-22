@@ -401,7 +401,9 @@ fn tick_ai_controllers(
                     crate::ai::AiInput::FirePhaser => {
                         inbound.write(crate::lobby::InboundMessage {
                             token: token.clone(),
-                            msg: crate::messages::ClientMessage::FirePhaser,
+                            msg: crate::messages::ClientMessage::FirePhaser {
+                                bank: "port".to_string(),
+                            },
                         });
                     }
                     _ => {}

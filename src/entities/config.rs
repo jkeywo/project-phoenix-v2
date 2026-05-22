@@ -552,14 +552,20 @@ impl ShieldsBaseConfig {
 /// server is migrated to consume the per-bank list directly.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhaserCombatConfig {
-    /// Effective player phaser range in world units.
+    /// Effective player phaser range in world units. Used as the fallback
+    /// when an individual bank's `beam_range` is 0.0.
     pub phaser_range: f32,
     /// Active beam duration in seconds (how long a beam stays on a target).
     pub beam_duration_secs: f32,
-    /// Post-beam cooldown in seconds.
+    /// Post-beam cooldown in seconds. Shared by every bank.
     pub beam_cooldown_secs: f32,
     /// Damage applied to the target per second of active beam.
     pub beam_damage_per_sec: f32,
+    /// Per-bank facing/arc/range list, parsed from
+    /// `[[weapons_console.phaser_banks]]` in TOML order. Empty if the ship
+    /// has no banks configured (e.g. NPC defaults). The Tactical UI also
+    /// receives a stripped subset of these via `PhaserBankClientConfig`.
+    pub banks: Vec<PhaserBankConfig>,
 }
 
 impl Default for PhaserCombatConfig {
@@ -572,6 +578,7 @@ impl Default for PhaserCombatConfig {
             beam_duration_secs: 6.0,
             beam_cooldown_secs: 6.0,
             beam_damage_per_sec: 5.0,
+            banks: Vec::new(),
         }
     }
 }
@@ -605,6 +612,7 @@ impl PhaserCombatConfig {
             } else {
                 default.beam_damage_per_sec
             },
+            banks: wc.phaser_banks.clone(),
         }
     }
 }

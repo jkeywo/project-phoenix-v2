@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::lobby::{GameStateCache, WorldResource};
-use crate::messages::{GamePhase, PhaserBank, ViewDirection, ViewMode};
+use crate::messages::{GamePhase, ViewDirection, ViewMode};
 use crate::ship_state::ShipState;
 use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource};
 use crate::beam_render;
@@ -495,9 +495,9 @@ fn draw_beam_vfx(
     let glow_color = Color::srgba(r, g * 1.5, b * 2.0, a * 0.35);
 
     // Draw a beam for each bank, originating from the correct hull side.
-    for bank in [PhaserBank::Port, PhaserBank::Starboard] {
+    for bank_side in [-1.0_f32, 1.0_f32] {
         let (ox, oz) = beam_render::bank_origin(
-            ship.x, ship.z, ship.yaw, bank, beam_render::BANK_HULL_OFFSET,
+            ship.x, ship.z, ship.yaw, bank_side, beam_render::BANK_HULL_OFFSET,
         );
         let origin = Vec3::new(ox, -1.5, oz);
         let target = Vec3::new(end_x, 0.0, end_z);

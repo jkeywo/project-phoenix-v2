@@ -82,19 +82,58 @@ pub struct ShieldFacingStatus {
     pub is_focused: bool,
 }
 
-/// Which phaser bank to address. Used in `SetPhaserMode` and `PhaserFired`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PhaserBank {
-    Port,
-    Starboard,
+/// String identifier for a phaser bank, matching the `id` field of the
+/// `[[weapons_console.phaser_banks]]` array in `player_ship.toml` (e.g.
+/// `"port"`, `"starboard"`). Used in `FirePhaser`, `PhaserFired`,
+/// `PhaserBankState`, and `PhaserBankClientConfig`.
+pub type PhaserBank = String;
+
+/// String identifier for a torpedo tube, matching the `id` field of the
+/// `[[torpedoes.tubes]]` array in `player_ship.toml` (e.g. `"fore_port"`,
+/// `"aft"`). Used in `FireTorpedo`, `TorpedoLaunched`, `TorpedoTubeState`,
+/// and `TorpedoTubeClientConfig`.
+pub type TorpedoTube = String;
+
+/// Per-bank state broadcast to the Tactical operator as part of `WeaponsUpdate`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PhaserBankState {
+    pub id: PhaserBank,
+    /// True if this bank's locked target is within `beam_range` and inside
+    /// the bank's `fire_arc_deg` (manual-fire arc).
+    pub fire_ready: bool,
+    /// True if the bank is in its post-shot cooldown.
+    pub on_cooldown: bool,
+    /// Seconds remaining on the cooldown timer (0.0 when ready).
+    pub cooldown_remaining: f32,
 }
 
-/// Which torpedo tube to fire from.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum TorpedoTube {
-    ForePort,
-    ForeStarboard,
-    Aft,
+/// Per-tube state broadcast to the Tactical operator as part of `WeaponsUpdate`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TorpedoTubeState {
+    pub id: TorpedoTube,
+    /// True when the tube is loaded and ready to fire.
+    pub loaded: bool,
+    /// Seconds remaining on the reload timer (0.0 when loaded).
+    pub reload_secs: f32,
+}
+
+/// Static, per-bank configuration sent to clients in `Welcome` so the
+/// Tactical UI can render the bank's fire arc on the radar. Only
+/// `fire_arc_deg` is exposed — `auto_arc_deg` is a server-side concern.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PhaserBankClientConfig {
+    pub id: PhaserBank,
+    pub facing_deg: f32,
+    pub fire_arc_deg: f32,
+}
+
+/// Static, per-tube configuration sent to clients in `Welcome` so the
+/// Tactical UI can render torpedo fire arcs.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct TorpedoTubeClientConfig {
+    pub id: TorpedoTube,
+    pub facing_deg: f32,
+    pub fire_arc_deg: f32,
 }
 
 /// Firing mode for phaser banks. Matches `phaser::PhaserMode`.
@@ -334,6 +373,20 @@ pub struct ShipClientConfig {
     /// correct rate.
     #[serde(default = "default_impulse_charge_duration")]
     pub impulse_charge_duration: f32,
+    /// Phaser banks defined on the ship, in TOML order. Used by the Tactical
+    /// UI to render fire-arc overlays on radar and label fire buttons.
+    #[serde(default)]
+    pub phaser_banks: Vec<PhaserBankClientConfig>,
+    /// Torpedo tubes defined on the ship, in TOML order.
+    #[serde(default)]
+    pub torpedo_tubes: Vec<TorpedoTubeClientConfig>,
+    /// RGBA colour the renderer uses for phaser beams (from `[weapons_console]
+    /// beam_color`). Defaults to a generic orange when missing from TOML.
+    #[serde(default = "default_phaser_beam_color")]
+    pub phaser_beam_color: [f32; 4],
+    /// RGBA colour the Tactical UI uses for torpedo fire-arc overlays.
+    #[serde(default = "default_torpedo_arc_color")]
+    pub torpedo_arc_color: [f32; 4],
 }
 
 fn default_helm_radar_range() -> f32 {
@@ -352,6 +405,14 @@ fn default_impulse_charge_duration() -> f32 {
     3.0
 }
 
+fn default_phaser_beam_color() -> [f32; 4] {
+    [1.0, 0.6, 0.1, 1.0]
+}
+
+fn default_torpedo_arc_color() -> [f32; 4] {
+    [0.2, 0.7, 1.0, 1.0]
+}
+
 impl Default for ShipClientConfig {
     fn default() -> Self {
         Self {
@@ -359,6 +420,10 @@ impl Default for ShipClientConfig {
             repair_travel_secs: default_repair_travel_secs(),
             repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
             impulse_charge_duration: default_impulse_charge_duration(),
+            phaser_banks: Vec::new(),
+            torpedo_tubes: Vec::new(),
+            phaser_beam_color: default_phaser_beam_color(),
+            torpedo_arc_color: default_torpedo_arc_color(),
         }
     }
 }
@@ -632,7 +697,9 @@ pub enum ClientMessage {
     SetSensorsTarget {
         uuid: String,
     },
-    FirePhaser,
+    FirePhaser {
+        bank: PhaserBank,
+    },
     SetPhaserMode {
         mode: PhaserMode,
     },
@@ -730,39 +797,28 @@ pub enum ServerMessage {
         uuid: String,
         locked: bool,
     },
-    /// Sent at 10 Hz to the Weapons console player only.  `target_uuid` is the
-    /// currently locked target (`None` if no lock), `fire_ready` indicates
-    /// whether that target is within phaser range and in the forward 180° arc,
-    /// and `on_cooldown` indicates whether the phaser is in its post-beam
-    /// cooldown period (Fire is blocked).
+    /// Sent at 10 Hz to the Weapons console player only. `target_uuid` is the
+    /// currently locked target (`None` if no lock). `banks` carries per-bank
+    /// fire-ready / cooldown state in TOML order, and `tubes` carries per-tube
+    /// load state in TOML order. `torpedo_count` is the shared magazine.
     WeaponsUpdate {
         target_uuid: Option<String>,
-        fire_ready: bool,
-        on_cooldown: bool,
-        /// Remaining torpedoes in the magazine.
+        banks: Vec<PhaserBankState>,
+        tubes: Vec<TorpedoTubeState>,
+        /// Remaining torpedoes in the shared magazine.
         torpedo_count: u32,
-        /// Whether the fore-port tube is loaded and ready.
-        fore_port_loaded: bool,
-        /// Reload remaining for the fore-port tube (0.0 when loaded).
-        fore_port_reload_secs: f32,
-        /// Whether the fore-starboard tube is loaded and ready.
-        fore_starboard_loaded: bool,
-        /// Reload remaining for the fore-starboard tube (0.0 when loaded).
-        fore_starboard_reload_secs: f32,
-        /// Whether the aft tube is loaded and ready.
-        aft_loaded: bool,
-        /// Reload remaining for the aft tube (0.0 when loaded).
-        aft_reload_secs: f32,
         /// Current phaser firing mode (Auto or Manual).
         phaser_mode: PhaserMode,
     },
     /// Broadcast when a phaser beam starts. Sent to all players so the renderer
     /// can draw the beam on the viewscreen.
     BeamStarted {
+        bank: PhaserBank,
         target_uuid: String,
     },
     /// Broadcast when a phaser beam ends (natural expiry, sever, or cancel).
     BeamEnded {
+        bank: PhaserBank,
         target_uuid: String,
     },
     /// Broadcast when an asteroid's HP reaches 0 and it is despawned.

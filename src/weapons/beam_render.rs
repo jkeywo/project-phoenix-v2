@@ -9,7 +9,6 @@
 //! * Forward: `( sin(yaw), 0, −cos(yaw) )`
 //! * Right (starboard): `( cos(yaw), 0,  sin(yaw) )`
 //! * Left  (port):      `(−cos(yaw), 0, −sin(yaw) )`
-use crate::messages::PhaserBank;
 
 /// Lateral hull offset (world units) from the ship centre to the point
 /// where each phaser bank's emitter is positioned.
@@ -23,7 +22,8 @@ pub const DEFAULT_BEAM_COLOR: [f32; 4] = [1.0, 0.4, 0.1, 1.0];
 /// # Arguments
 /// * `ship_x`, `ship_z` – ship centre position.
 /// * `ship_yaw` – ship heading in radians.
-/// * `bank` – `Port` offsets to the left; `Starboard` offsets to the right.
+/// * `bank_side` – `-1.0` for port (offsets left), `+1.0` for starboard (offsets right).
+///   Callers compute this from a bank's `facing_deg` (negative → port).
 /// * `hull_offset` – lateral distance from centre to the emitter.
 ///
 /// Returns `(x, z)`.
@@ -31,19 +31,15 @@ pub fn bank_origin(
     ship_x: f32,
     ship_z: f32,
     ship_yaw: f32,
-    bank: PhaserBank,
+    bank_side: f32,
     hull_offset: f32,
 ) -> (f32, f32) {
     // Right vector: (cos(yaw), sin(yaw)) in XZ
     let right_x = ship_yaw.cos();
     let right_z = ship_yaw.sin();
-    let sign = match bank {
-        PhaserBank::Port => -1.0,
-        PhaserBank::Starboard => 1.0,
-    };
     (
-        ship_x + sign * right_x * hull_offset,
-        ship_z + sign * right_z * hull_offset,
+        ship_x + bank_side * right_x * hull_offset,
+        ship_z + bank_side * right_z * hull_offset,
     )
 }
 
@@ -89,23 +85,22 @@ pub fn resolve_beam_color(configured: &[f32]) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::PhaserBank;
 
     // ── bank_origin ─────────────────────────────────────────────────────────
 
     /// At yaw=0, ship faces −Z.
     /// Right (starboard) vector = (cos 0, sin 0) = (+1, 0) in XZ.
-    /// Port offset = (−1, 0).  Starboard offset = (+1, 0).
+    /// Port (-1.0) offset = (−4, 0).  Starboard (+1.0) offset = (+4, 0).
     #[test]
     fn bank_origin_port_at_yaw_zero() {
-        let (x, z) = bank_origin(0.0, 0.0, 0.0, PhaserBank::Port, 4.0);
+        let (x, z) = bank_origin(0.0, 0.0, 0.0, -1.0, 4.0);
         assert!((x - (-4.0)).abs() < 1e-5, "x should be -4, got {x}");
         assert!(z.abs() < 1e-5, "z should be 0, got {z}");
     }
 
     #[test]
     fn bank_origin_starboard_at_yaw_zero() {
-        let (x, z) = bank_origin(0.0, 0.0, 0.0, PhaserBank::Starboard, 4.0);
+        let (x, z) = bank_origin(0.0, 0.0, 0.0, 1.0, 4.0);
         assert!((x - 4.0).abs() < 1e-5, "x should be +4, got {x}");
         assert!(z.abs() < 1e-5, "z should be 0, got {z}");
     }
@@ -113,7 +108,7 @@ mod tests {
     /// Ship offset by (10, 5) – origin should shift accordingly.
     #[test]
     fn bank_origin_respects_ship_position() {
-        let (x, z) = bank_origin(10.0, 5.0, 0.0, PhaserBank::Starboard, 4.0);
+        let (x, z) = bank_origin(10.0, 5.0, 0.0, 1.0, 4.0);
         assert!((x - 14.0).abs() < 1e-5);
         assert!((z - 5.0).abs() < 1e-5);
     }
@@ -123,7 +118,7 @@ mod tests {
     #[test]
     fn bank_origin_starboard_at_yaw_pi_over_2() {
         let yaw = std::f32::consts::FRAC_PI_2;
-        let (x, z) = bank_origin(0.0, 0.0, yaw, PhaserBank::Starboard, 4.0);
+        let (x, z) = bank_origin(0.0, 0.0, yaw, 1.0, 4.0);
         // cos(π/2) ≈ 0, sin(π/2) = 1 → offset = (0, +4)
         assert!(x.abs() < 1e-5, "x should be ~0, got {x}");
         assert!((z - 4.0).abs() < 1e-5, "z should be +4, got {z}");

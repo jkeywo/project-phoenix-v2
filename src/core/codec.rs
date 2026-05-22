@@ -523,17 +523,21 @@ mod tests {
 
     #[test]
     fn server_weapons_update_fire_ready() {
+        use crate::messages::{PhaserBankState, TorpedoTubeState};
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
-            fire_ready: true,
-            on_cooldown: false,
+            banks: vec![PhaserBankState {
+                id: "port".to_string(),
+                fire_ready: true,
+                on_cooldown: false,
+                cooldown_remaining: 0.0,
+            }],
+            tubes: vec![
+                TorpedoTubeState { id: "fore_port".to_string(), loaded: true, reload_secs: 0.0 },
+                TorpedoTubeState { id: "fore_starboard".to_string(), loaded: true, reload_secs: 0.0 },
+                TorpedoTubeState { id: "aft".to_string(), loaded: true, reload_secs: 0.0 },
+            ],
             torpedo_count: 10,
-            fore_port_loaded: true,
-            fore_port_reload_secs: 0.0,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: true,
-            aft_reload_secs: 0.0,
             phaser_mode: crate::messages::PhaserMode::Auto,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -542,17 +546,21 @@ mod tests {
 
     #[test]
     fn server_weapons_update_no_lock() {
+        use crate::messages::{PhaserBankState, TorpedoTubeState};
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: None,
-            fire_ready: false,
-            on_cooldown: false,
+            banks: vec![PhaserBankState {
+                id: "port".to_string(),
+                fire_ready: false,
+                on_cooldown: false,
+                cooldown_remaining: 0.0,
+            }],
+            tubes: vec![
+                TorpedoTubeState { id: "fore_port".to_string(), loaded: false, reload_secs: 7.5 },
+                TorpedoTubeState { id: "fore_starboard".to_string(), loaded: true, reload_secs: 0.0 },
+                TorpedoTubeState { id: "aft".to_string(), loaded: false, reload_secs: 3.2 },
+            ],
             torpedo_count: 8,
-            fore_port_loaded: false,
-            fore_port_reload_secs: 7.5,
-            fore_starboard_loaded: true,
-            fore_starboard_reload_secs: 0.0,
-            aft_loaded: false,
-            aft_reload_secs: 3.2,
             phaser_mode: crate::messages::PhaserMode::Manual,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -561,17 +569,21 @@ mod tests {
 
     #[test]
     fn server_weapons_update_on_cooldown() {
+        use crate::messages::{PhaserBankState, TorpedoTubeState};
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
-            fire_ready: false,
-            on_cooldown: true,
+            banks: vec![PhaserBankState {
+                id: "port".to_string(),
+                fire_ready: false,
+                on_cooldown: true,
+                cooldown_remaining: 1.5,
+            }],
+            tubes: vec![
+                TorpedoTubeState { id: "fore_port".to_string(), loaded: false, reload_secs: 10.0 },
+                TorpedoTubeState { id: "fore_starboard".to_string(), loaded: false, reload_secs: 5.0 },
+                TorpedoTubeState { id: "aft".to_string(), loaded: false, reload_secs: 2.0 },
+            ],
             torpedo_count: 0,
-            fore_port_loaded: false,
-            fore_port_reload_secs: 10.0,
-            fore_starboard_loaded: false,
-            fore_starboard_reload_secs: 5.0,
-            aft_loaded: false,
-            aft_reload_secs: 2.0,
             phaser_mode: crate::messages::PhaserMode::Manual,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -580,7 +592,7 @@ mod tests {
 
     #[test]
     fn client_fire_phaser_round_trips() {
-        let msg = ClientMessage::FirePhaser;
+        let msg = ClientMessage::FirePhaser { bank: "port".to_string() };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -588,6 +600,7 @@ mod tests {
     #[test]
     fn server_beam_started_round_trips() {
         let msg = ServerMessage::BeamStarted {
+            bank: "port".to_string(),
             target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -597,6 +610,7 @@ mod tests {
     #[test]
     fn server_beam_ended_round_trips() {
         let msg = ServerMessage::BeamEnded {
+            bank: "port".to_string(),
             target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -658,7 +672,7 @@ mod tests {
     #[test]
     fn server_phaser_fired_round_trips() {
         let msg = ServerMessage::PhaserFired {
-            bank: crate::messages::PhaserBank::Port,
+            bank: "port".to_string(),
             target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -786,7 +800,7 @@ mod tests {
     #[test]
     fn client_fire_torpedo_round_trips() {
         let msg = ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::ForePort,
+            tube: "fore_port".to_string(),
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -796,7 +810,7 @@ mod tests {
     #[test]
     fn client_fire_torpedo_no_target_round_trips() {
         let msg = ClientMessage::FireTorpedo {
-            tube: crate::messages::TorpedoTube::Aft,
+            tube: "aft".to_string(),
             target_uuid: None,
         };
         assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -807,7 +821,7 @@ mod tests {
     fn server_torpedo_launched_round_trips() {
         let msg = ServerMessage::TorpedoLaunched {
             uuid: "torpedo-uuid-1".into(),
-            tube: crate::messages::TorpedoTube::ForeStarboard,
+            tube: "fore_starboard".to_string(),
             x: 10.5,
             z: -20.0,
             heading: 1.57,
@@ -1065,6 +1079,7 @@ mod tests {
             repair_travel_secs: 9.0,
             repair_rate_hp_per_sec: 1.5,
             impulse_charge_duration: 4.5,
+            ..ShipClientConfig::default()
         };
         let msg = ServerMessage::Welcome {
             state: state(),

@@ -20,11 +20,10 @@ use crate::console_ai::{
 };
 use crate::lobby::{InboundMessage, Sessions};
 use crate::simulation::SimOutbox;
-use crate::messages::{ClientMessage, Console, ServerMessage, TorpedoTube as MsgTorpedoTube};
+use crate::messages::{ClientMessage, Console, ServerMessage};
 use crate::ship_state::ShipState;
 use crate::ship_plugin::LastHelmInput;
 use crate::simulation::{ShipPowerSystem, TorpedoSystemResource, WeaponsTarget};
-use crate::torpedo::TorpedoTubeId;
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -296,23 +295,15 @@ fn run_tactical_ai(
 
     let ts = &torpedo_sys.0;
 
-    let tubes = [
-        TubeSummary {
-            id: TorpedoTubeId::ForePort,
-            loaded: ts.fore_port.is_loaded(),
-            in_arc: ts.fore_port.is_in_arc(bearing),
-        },
-        TubeSummary {
-            id: TorpedoTubeId::ForeStarboard,
-            loaded: ts.fore_starboard.is_loaded(),
-            in_arc: ts.fore_starboard.is_in_arc(bearing),
-        },
-        TubeSummary {
-            id: TorpedoTubeId::Aft,
-            loaded: ts.aft.is_loaded(),
-            in_arc: ts.aft.is_in_arc(bearing),
-        },
-    ];
+    let tubes: Vec<TubeSummary> = ts
+        .tubes
+        .iter()
+        .map(|tube| TubeSummary {
+            id: tube.id.clone(),
+            loaded: tube.is_loaded(),
+            in_arc: tube.is_in_arc(bearing),
+        })
+        .collect();
 
     let input = TorpedoAiInput {
         target_locked: true, // we already checked above
@@ -323,11 +314,10 @@ fn run_tactical_ai(
 
     let tubes_to_fire = auto_fire_torpedo(&input);
     for tube_id in tubes_to_fire {
-        let tube = tube_id_to_msg(tube_id);
         writer.write(InboundMessage {
             token: holder_token.to_string(),
             msg: ClientMessage::FireTorpedo {
-                tube,
+                tube: tube_id,
                 target_uuid: Some(target_uuid.clone()),
             },
         });
@@ -586,14 +576,8 @@ fn run_power_ai(
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/// Convert a `torpedo::TorpedoTubeId` to a `messages::TorpedoTube`.
-fn tube_id_to_msg(id: TorpedoTubeId) -> MsgTorpedoTube {
-    match id {
-        TorpedoTubeId::ForePort => MsgTorpedoTube::ForePort,
-        TorpedoTubeId::ForeStarboard => MsgTorpedoTube::ForeStarboard,
-        TorpedoTubeId::Aft => MsgTorpedoTube::Aft,
-    }
-}
+// (tube_id_to_msg removed: TorpedoTubeId and messages::TorpedoTube are both
+// String aliases now, so no conversion is needed.)
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 

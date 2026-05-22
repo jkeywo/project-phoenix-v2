@@ -9,6 +9,7 @@
 //! via observers at spawn time.
 
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use std::collections::HashMap;
 
 use crate::client::console_shell::ConsoleShell;
@@ -19,16 +20,17 @@ use crate::client_app::{
 };
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::{
-    fire_phaser_message, toggle_phaser_mode_message, fire_torpedo_message,
+    fire_phaser_message, nearest_entity_to_point, set_target_message,
+    toggle_phaser_mode_message, fire_torpedo_message,
     is_fire_button_enabled, phaser_mode_label, ClientSimState,
 };
 use crate::gui::{
-    default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
-    tags_to_radar_layer, ButtonPressed, ButtonSize, GenericRadar, OnRadar, OrientationMode,
-    RadarAppearance, RadarBlipClicked, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
-    StateVisuals, RadioButtonConfig, RadioGroup, RadioSelected, Disabled,
+    default_layer_colour, layer_to_icon, project_radar_entity, region_shape_from_snapshot,
+    spawn_gui_button, tags_to_radar_layer, ButtonPressed, ButtonSize, GenericRadar,
+    GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter,
+    RadarIcon, RadarLayer, StateVisuals, RadioButtonConfig, RadioGroup, RadioSelected, Disabled,
 };
-use crate::messages::{ClientMessage, Console, GamePhase, TorpedoTube};
+use crate::messages::{Console, GamePhase, TorpedoTube};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
@@ -183,8 +185,7 @@ impl Plugin for WeaponsPanelPlugin {
                 refresh_torpedo_ui,
                 bridge_client_sim_to_weapons_radar,
                 respawn_weapons_on_orientation_change,
-            ))
-            .add_observer(handle_radar_blip_clicked);
+            ));
     }
 }
 
@@ -267,15 +268,125 @@ fn fill_tactical_radar(commands: &mut Commands, container: Entity) {
         None,
         None,
     );
-    commands.entity(radar).insert(Node {
+    commands.entity(radar).insert((Node {
         width:  Val::Px(240.0),
         height: Val::Px(240.0),
         border: UiRect::all(Val::Px(1.0)),
         aspect_ratio: Some(1.0),
         position_type: PositionType::Relative,
         ..default()
-    });
+    }, TacticalRadarTapTarget));
+    commands.entity(radar).observe(on_tactical_radar_tap);
     commands.entity(col).add_child(radar);
+}
+
+/// Marker for the tactical-radar `Node` that owns the tap-to-target observer.
+#[derive(Component)]
+pub struct TacticalRadarTapTarget;
+
+/// Convert a tap (in **logical** window pixels, as delivered by Bevy's picking
+/// `Pointer<Click>::pointer_location.position`) into the radar Node's local
+/// **physical** pixel space, given the node's physical top-left, its physical
+/// size and the window's `scale_factor`.
+///
+/// The renderer (`gui/radar.rs`) lays out blips using `ComputedNode::size()`,
+/// which is in physical pixels. To compare a tap against those blip centres
+/// we must therefore promote the logical tap into the same physical basis.
+///
+/// Returns `(local_x, local_y)` with origin at the node's top-left.
+pub fn radar_local_pixel(
+    tap_logical: Vec2,
+    node_physical_top_left: Vec2,
+    _node_physical_size: Vec2,
+    scale_factor: f32,
+) -> Vec2 {
+    let tap_physical = tap_logical * scale_factor;
+    tap_physical - node_physical_top_left
+}
+
+/// Observer: when the tactical radar is tapped, find the nearest ship/missile
+/// blip to the tap point and dispatch `SetTarget { uuid }`.
+///
+/// `pointer_location.position` is in **logical** window pixels, while
+/// `ComputedNode::size()` and `GlobalTransform::translation()` for UI nodes are
+/// in **physical** pixels. We convert the tap to physical pixels via the
+/// primary window's `scale_factor()` so the comparison is consistent on
+/// high-DPI displays (phones).
+fn on_tactical_radar_tap(
+    trigger: On<Pointer<Click>>,
+    radars: Query<(&ComputedNode, &GlobalTransform, &GenericRadarWidget), With<TacticalRadarTapTarget>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    sim: Res<ClientSimState>,
+    ship_view: Res<ShipView>,
+    mut commands: Commands,
+) {
+    let entity = trigger.entity;
+    let Ok((computed, gt, widget)) = radars.get(entity) else {
+        return;
+    };
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let scale = window.scale_factor() as f32;
+
+    // Radar centre + size in physical pixels (UI GlobalTransform is centred).
+    let size = computed.size();
+    let radar_radius_px = size.x.min(size.y) * 0.5;
+    if radar_radius_px <= 0.0 {
+        return;
+    }
+    let centre = gt.translation();
+    let centre_xy = Vec2::new(centre.x, centre.y);
+    let top_left = centre_xy - size * 0.5;
+
+    // Tap point in radar-local physical pixel space (origin top-left).
+    let tap = radar_local_pixel(
+        trigger.event().pointer_location.position,
+        top_left,
+        size,
+        scale,
+    );
+
+    // Convert the tap to the same (left, top) basis the renderer uses for
+    // blip centres: blip centre = (radius + nx*radius, radius - ny*radius).
+    let click_local = (tap.x, tap.y);
+
+    // Project every ship/missile in the sim world to radar-local pixels.
+    let projected: Vec<(String, f32, f32)> = sim
+        .world
+        .entities
+        .iter()
+        .filter_map(|snap| {
+            let layer = tags_to_radar_layer(&snap.tags)?;
+            if !matches!(layer, RadarLayer::Ship | RadarLayer::Missile) {
+                return None;
+            }
+            let (nx, ny) = project_radar_entity(
+                snap.x(),
+                snap.z(),
+                ship_view.ship_x,
+                ship_view.ship_z,
+                ship_view.ship_yaw,
+                widget.range,
+                snap.radius_or_zero(),
+                &widget.orientation,
+            )?;
+            // Cull blips outside the circular radar boundary.
+            if nx * nx + ny * ny > 1.0 {
+                return None;
+            }
+            let px = radar_radius_px + nx * radar_radius_px;
+            let py = radar_radius_px - ny * radar_radius_px;
+            Some((snap.uuid.clone(), px, py))
+        })
+        .collect();
+
+    if let Some(uuid) = nearest_entity_to_point(click_local, &projected) {
+        let msg = set_target_message(uuid);
+        commands.queue(|world: &mut World| {
+            world.write_message(OutboundClientMessage(msg));
+        });
+    }
 }
 
 /// Secondary slot: torpedo section + phaser mode + fire phasers + repair label
@@ -967,22 +1078,6 @@ fn bridge_client_sim_to_weapons_radar(
     });
 }
 
-// ── Radar blip click → target ─────────────────────────────────────────
-
-/// Handles a click on any radar blip: reverse-looks up the triggered entity in
-/// `WeaponsRadarEntities` to find its UUID, then sends `SetTarget`.
-fn handle_radar_blip_clicked(
-    trigger: On<RadarBlipClicked>,
-    radar: Res<WeaponsRadarEntities>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    let source = trigger.0.entity();
-    let Some(uuid) = radar.blips.iter().find_map(|(k, &v)| (v == source).then(|| k.clone())) else {
-        return;
-    };
-    outbound.write(OutboundClientMessage(ClientMessage::SetTarget { uuid }));
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1020,6 +1115,64 @@ mod tests {
 
     fn no_tab() -> ActiveConsole { ActiveConsole(None) }
     fn tab(c: Console) -> ActiveConsole { ActiveConsole(Some(c)) }
+
+    // ── radar_local_pixel coordinate conversion ───────────────────────
+
+    #[test]
+    fn radar_local_pixel_scale_factor_one_is_identity_minus_top_left() {
+        // Desktop: logical == physical. Node at (100,200), size 400x400, tap
+        // at logical (300, 400) → local physical (200, 200) (i.e. the centre).
+        let out = radar_local_pixel(
+            Vec2::new(300.0, 400.0),
+            Vec2::new(100.0, 200.0),
+            Vec2::new(400.0, 400.0),
+            1.0,
+        );
+        assert_eq!(out, Vec2::new(200.0, 200.0));
+    }
+
+    #[test]
+    fn radar_local_pixel_scale_factor_two_centre_of_node() {
+        // High-DPI phone: node is 400x400 physical px sitting at physical
+        // top-left (200, 200). In logical pixels that's top-left (100, 100)
+        // and size 200x200, so the logical centre tap is (200, 200).
+        // Expected local physical: (200, 200) — the centre of the node.
+        let out = radar_local_pixel(
+            Vec2::new(200.0, 200.0),
+            Vec2::new(200.0, 200.0),
+            Vec2::new(400.0, 400.0),
+            2.0,
+        );
+        assert_eq!(out, Vec2::new(200.0, 200.0));
+    }
+
+    #[test]
+    fn radar_local_pixel_scale_factor_non_integer() {
+        // scale 1.5: node physical top-left (150, 75), size 300x300.
+        // Logical top-left = (100, 50), logical size = 200x200.
+        // Logical centre tap = (200, 150) → physical tap (300, 225) →
+        // local = (150, 150), the physical centre of the node.
+        let out = radar_local_pixel(
+            Vec2::new(200.0, 150.0),
+            Vec2::new(150.0, 75.0),
+            Vec2::new(300.0, 300.0),
+            1.5,
+        );
+        assert_eq!(out, Vec2::new(150.0, 150.0));
+    }
+
+    #[test]
+    fn radar_local_pixel_scale_factor_two_top_left_corner() {
+        // Tap at the node's logical top-left corner should map to local (0,0).
+        // Node physical top-left (200, 200), scale 2.0 → logical top-left (100, 100).
+        let out = radar_local_pixel(
+            Vec2::new(100.0, 100.0),
+            Vec2::new(200.0, 200.0),
+            Vec2::new(400.0, 400.0),
+            2.0,
+        );
+        assert_eq!(out, Vec2::ZERO);
+    }
 
     // ── weapons_panel_visible ─────────────────────────────────────────
 

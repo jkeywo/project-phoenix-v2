@@ -486,6 +486,41 @@ pub fn set_sensors_target_message(uuid: String) -> ClientMessage {
     ClientMessage::SetSensorsTarget { uuid }
 }
 
+/// `ClientMessage` to set the Tactical phaser target lock.
+///
+/// Used by the Weapons console's tap-to-select-on-radar interaction.
+pub fn set_target_message(uuid: String) -> ClientMessage {
+    ClientMessage::SetTarget { uuid }
+}
+
+/// Given a click position and a list of entity blip positions in the same
+/// coordinate space, return the UUID of the nearest entity (Euclidean
+/// distance), or `None` if `entities` is empty.
+///
+/// Ties are broken by **first-wins** order in the slice. This makes the
+/// outcome deterministic when two entities sit at exactly the same point.
+///
+/// Pure function — caller is responsible for projecting both the click and
+/// the entities into a shared coordinate system before calling.
+pub fn nearest_entity_to_point(
+    click: (f32, f32),
+    entities: &[(String, f32, f32)],
+) -> Option<String> {
+    let (cx, cy) = click;
+    let mut best: Option<(f32, &String)> = None;
+    for (uuid, ex, ey) in entities {
+        let dx = ex - cx;
+        let dy = ey - cy;
+        let d2 = dx * dx + dy * dy;
+        match best {
+            None => best = Some((d2, uuid)),
+            Some((bd2, _)) if d2 < bd2 => best = Some((d2, uuid)),
+            _ => {}
+        }
+    }
+    best.map(|(_, uuid)| uuid.clone())
+}
+
 /// Returns `true` when the Science Console's "Cancel Impulse" button should
 /// be visible — i.e. when the impulse drive is charging or active.
 pub fn cancel_impulse_button_visible(state: &crate::impulse::ImpulseState) -> bool {
@@ -878,6 +913,61 @@ mod tests {
             ClientMessage::SetSensorsTarget {
                 uuid: "sensors-uuid-42".into()
             }
+        );
+    }
+
+    // ── set_target_message ────────────────────────────────────────────────
+
+    #[test]
+    fn set_target_message_builder_produces_correct_message() {
+        let msg = set_target_message("target-uuid-7".into());
+        assert_eq!(
+            msg,
+            ClientMessage::SetTarget {
+                uuid: "target-uuid-7".into()
+            }
+        );
+    }
+
+    // ── nearest_entity_to_point ───────────────────────────────────────────
+
+    #[test]
+    fn nearest_entity_empty_list_returns_none() {
+        assert!(nearest_entity_to_point((0.0, 0.0), &[]).is_none());
+    }
+
+    #[test]
+    fn nearest_entity_single_entity_always_wins() {
+        let entities = vec![("only".into(), 100.0, 100.0)];
+        assert_eq!(
+            nearest_entity_to_point((0.0, 0.0), &entities),
+            Some("only".into())
+        );
+    }
+
+    #[test]
+    fn nearest_entity_picks_closest_of_three() {
+        let entities = vec![
+            ("far".into(), 50.0, 50.0),
+            ("near".into(), 1.0, 1.0),
+            ("mid".into(), 10.0, 10.0),
+        ];
+        assert_eq!(
+            nearest_entity_to_point((0.0, 0.0), &entities),
+            Some("near".into())
+        );
+    }
+
+    #[test]
+    fn nearest_entity_ties_broken_by_first_in_slice() {
+        // Two entities at identical positions — first one wins.
+        let entities = vec![
+            ("first".into(), 5.0, 5.0),
+            ("second".into(), 5.0, 5.0),
+        ];
+        assert_eq!(
+            nearest_entity_to_point((0.0, 0.0), &entities),
+            Some("first".into())
         );
     }
 

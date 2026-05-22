@@ -330,6 +330,9 @@ fn detect_comms_clicks(
 ) {
     for (interaction, pill) in contacts.iter() {
         if *interaction == Interaction::Pressed {
+            if !state.can_hail(&pill.target_uuid) {
+                continue;
+            }
             outbound.write(OutboundClientMessage(
                 ClientMessage::Hail { target_uuid: pill.target_uuid.clone() },
             ));
@@ -345,6 +348,14 @@ fn detect_comms_clicks(
     }
     for (interaction, btn) in responses.iter() {
         if *interaction == Interaction::Pressed {
+            // Skip if the sender of this message is out of range.
+            let in_range = state.messages.iter()
+                .find(|m| m.id == btn.message_id)
+                .map(|m| m.sender_in_range)
+                .unwrap_or(true);
+            if !in_range {
+                continue;
+            }
             outbound.write(OutboundClientMessage(
                 ClientMessage::RespondToMessage {
                     message_id: btn.message_id.clone(),
@@ -398,14 +409,22 @@ fn refresh_all_comms_ui(
     if !state.is_dirty() { return; }
 
     // ── Contacts strip ──────────────────────────────────────────────────
+    // Out-of-range contacts are hidden entirely (spec): no greyed pill.
+    // The inbox row + chat panel still surface stale-but-known messages
+    // from those contacts so the operator can read them — they're just no
+    // longer hailable. We render an "All contacts out of range" fallback
+    // when every contact has dropped out so the strip doesn't read empty.
     if let Ok(container) = contacts_strip_q.single() {
         if let Ok(existing) = children.get(container) {
             clear_children(existing, &mut commands);
         }
+        let visible_contacts: Vec<_> = state.contacts.iter().filter(|c| c.in_range).collect();
         if state.contacts.is_empty() {
             spawn_empty_label(container, "No contacts", &mut commands);
+        } else if visible_contacts.is_empty() {
+            spawn_empty_label(container, "All contacts out of range", &mut commands);
         } else {
-            for contact in state.contacts.iter() {
+            for contact in visible_contacts {
                 commands.entity(container).with_children(|p| {
                     p.spawn((
                         CommsContactPill { target_uuid: contact.uuid.clone() },
@@ -447,8 +466,16 @@ fn refresh_all_comms_ui(
                 } else {
                     msg.subject.clone()
                 };
-                let row_label = format!("{} \u{2014} {}", sender_text, subject_text);
-                let (bg, fg) = if msg.is_read {
+                let row_label = if msg.sender_in_range {
+                    format!("{} \u{2014} {}", sender_text, subject_text)
+                } else {
+                    format!("{} \u{2014} {} [OUT OF RANGE]", sender_text, subject_text)
+                };
+                let (bg, fg) = if !msg.sender_in_range {
+                    // Alert red (`#ff3344`) to match viewscreen_border.rs
+                    // COLOR_ALERT_RED so out-of-range stands out at a glance.
+                    (Color::srgb_u8(35, 25, 25), Color::srgb(1.0, 0.2, 0.267))
+                } else if msg.is_read {
                     (Color::srgb_u8(30, 30, 40), Color::srgb(0.4, 0.4, 0.5))
                 } else {
                     (Color::srgb_u8(40, 40, 55), Color::srgb(0.9, 0.9, 1.0))
@@ -528,6 +555,14 @@ fn refresh_all_comms_ui(
                         Text::new("Transmission ended \u{2014} source no longer available."),
                         TextFont { font_size: 12.0, ..default() },
                         TextColor(Color::srgb(0.6, 0.4, 0.4)),
+                    ));
+                });
+            } else if !msg.sender_in_range {
+                commands.entity(container).with_children(|p| {
+                    p.spawn((
+                        Text::new("OUT OF RANGE \u{2014} cannot respond."),
+                        TextFont { font_size: 12.0, ..default() },
+                        TextColor(Color::srgb(1.0, 0.2, 0.267)),
                     ));
                 });
             } else if let Some(selected_idx) = msg.selected_response {

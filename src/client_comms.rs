@@ -70,14 +70,17 @@ impl ClientCommsState {
         }
     }
 
-    /// Returns `true` if response buttons should be enabled for the currently
-    /// selected message: the message exists, has not yet been responded to, and
-    /// is not orphaned.
     pub fn response_buttons_enabled(&self) -> bool {
         match self.selected_message() {
-            Some(msg) => msg.selected_response.is_none() && !msg.responses.is_empty() && !msg.is_orphaned,
+            Some(msg) => msg.selected_response.is_none() && !msg.responses.is_empty() && !msg.is_orphaned && msg.sender_in_range,
             None => false,
         }
+    }
+
+    /// Returns `true` if a Hail click on `uuid` should produce an outbound
+    /// message: the contact exists in the current snapshot and is in range.
+    pub fn can_hail(&self, uuid: &str) -> bool {
+        self.contacts.iter().any(|c| c.uuid == uuid && c.in_range)
     }
 
     /// Returns `true` if the state has changed since the last `mark_clean()`.
@@ -142,7 +145,7 @@ mod tests {
     use crate::messages::ObjectiveStatus;
 
     fn contact(uuid: &str, name: &str) -> CommsContact {
-        CommsContact { uuid: uuid.into(), name: name.into() }
+        CommsContact { uuid: uuid.into(), name: name.into(), in_range: true }
     }
 
     fn msg(id: &str) -> CommsMessage {
@@ -156,6 +159,7 @@ mod tests {
             selected_response: None,
             is_read: false,
             is_orphaned: false,
+            sender_in_range: true,
         }
     }
 
@@ -473,5 +477,57 @@ mod tests {
         let sorted = s.sorted_messages();
         assert_eq!(sorted[0].id, "m1");
         assert_eq!(sorted[1].id, "m2");
+    }
+
+    // ── Slice 8: range flag passthrough + response gating ──────────────────
+
+    #[test]
+    fn apply_preserves_out_of_range_contact_flag() {
+        let mut s = ClientCommsState::default();
+        let mut c = contact("c1", "Far Station");
+        c.in_range = false;
+        s.apply(&comms_state(vec![], vec![c]));
+        assert!(!s.contacts[0].in_range);
+    }
+
+    #[test]
+    fn apply_preserves_out_of_range_message_flag() {
+        let mut s = ClientCommsState::default();
+        let mut m = msg("m1");
+        m.sender_in_range = false;
+        s.apply(&comms_state(vec![m], vec![]));
+        assert!(!s.messages[0].sender_in_range);
+    }
+
+    #[test]
+    fn response_buttons_disabled_when_sender_out_of_range() {
+        let mut s = ClientCommsState::default();
+        let mut m = msg("m1");
+        m.sender_in_range = false;
+        s.apply(&comms_state(vec![m], vec![]));
+        s.select_message("m1");
+        assert!(!s.response_buttons_enabled());
+    }
+
+    #[test]
+    fn can_hail_true_for_in_range_contact() {
+        let mut s = ClientCommsState::default();
+        s.apply(&comms_state(vec![], vec![contact("c1", "Alpha")]));
+        assert!(s.can_hail("c1"));
+    }
+
+    #[test]
+    fn can_hail_false_for_out_of_range_contact() {
+        let mut s = ClientCommsState::default();
+        let mut c = contact("c2", "Far");
+        c.in_range = false;
+        s.apply(&comms_state(vec![], vec![c]));
+        assert!(!s.can_hail("c2"));
+    }
+
+    #[test]
+    fn can_hail_false_for_unknown_contact() {
+        let s = ClientCommsState::default();
+        assert!(!s.can_hail("nope"));
     }
 }

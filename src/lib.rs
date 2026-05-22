@@ -63,6 +63,7 @@ pub use modifiers::repair_teams;
 pub use lobby::client_panel as client_lobby;
 pub mod client_sim;
 pub mod client_comms;
+pub mod comms;
 pub mod client_complexity;
 
 // ── Console module ─────────────────────────────────────────────────────────

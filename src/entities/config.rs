@@ -538,6 +538,18 @@ impl RepairConfig {
     }
 }
 
+/// Config block for an entity's comms range.
+///
+/// Loaded from `[comms]` in entity TOMLs. When present, the entity is
+/// reachable by the player's Comms console while inside `range` units of the
+/// player ship. The player ship's own `[comms].range` defines how far it can
+/// listen. Effective range between two entities is `min(a.range, b.range)`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommsConfig {
+    /// Comms range in world units.
+    pub range: f32,
+}
+
 /// Config block for the torpedo system in a ship TOML.
 ///
 /// Loaded from `[torpedoes]` in `player_ship.toml` (and any NPC ship TOML
@@ -654,6 +666,9 @@ pub struct EntityConfig {
     pub torpedoes: Option<TorpedoesConfig>,
     /// Repair team timings (travel duration, repair rate).
     pub repair: Option<RepairConfig>,
+    /// Comms range — when present, the entity can send/receive comms within
+    /// this radius of the player ship.
+    pub comms: Option<CommsConfig>,
     /// Asteroid field section from entity template (donut params, grid, etc.)
     pub asteroid_field: Option<AsteroidFieldConfig>,
     /// Region shape section — present for region entities.
@@ -695,6 +710,7 @@ struct TomlConfig {
     shields_console: Option<ShieldsConsoleConfig>,
     torpedoes: Option<TorpedoesConfig>,
     repair: Option<RepairConfig>,
+    comms: Option<CommsConfig>,
     asteroid_field: Option<AsteroidFieldConfig>,
     shape: Option<RegionShape>,
     effects: Option<RegionEffectsConfig>,
@@ -778,6 +794,7 @@ impl EntityConfig {
             sensors_console: raw.sensors_console,
             torpedoes: raw.torpedoes,
             repair: raw.repair,
+            comms: raw.comms,
             asteroid_field: raw.asteroid_field,
             shape: raw.shape,
             effects: raw.effects,
@@ -2211,11 +2228,28 @@ beam_range = 50.0
         assert_eq!(combat.beam_duration_secs, 6.0, "default for omitted field");
         assert_eq!(combat.beam_cooldown_secs, 6.0, "default for omitted field");
     }
+
+    #[test]
+    fn comms_config_parses_range_from_toml() {
+        let toml_str = r##"
+[comms]
+range = 8000.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let comms = config.comms.expect("comms section present");
+        assert_eq!(comms.range, 8000.0);
+    }
+
+    #[test]
+    fn comms_config_is_none_when_section_absent() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert!(config.comms.is_none(), "no [comms] → field is None");
+    }
 }
 
 // ── Leaf scene-shape types moved from former entities/map_config.rs (PRD #341) ──
 // These describe entity-template physical/visual properties consumed by
-// EntityConfig (one-per-template) and by steroids::spawner. They are not
+// EntityConfig (one-per-template) and by steroids::spawner. They are not
 // world-tree concerns and so live alongside the entity-template schema rather
 // than in world::config.
 

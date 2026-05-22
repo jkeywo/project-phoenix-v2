@@ -43,6 +43,29 @@ pub struct WorldContentRuntime {
     /// Paths of world TOML files already merged into this runtime, used to
     /// de-duplicate additive world loads (no-op if path already active).
     pub loaded_scenario_paths: HashSet<String>,
+    /// Per-entity-UUID snapshot of comms-range flags. Populated by
+    /// `update_comms_range_flags` each tick from ship + entity transforms +
+    /// `CommsRange` components. UUIDs absent from the map default to true at
+    /// stamp time *only when `range_active == false`* (backward compat for
+    /// pure-handler tests and lobby phase). When `range_active == true`,
+    /// missing UUIDs are treated as `sender_in_range = false`.
+    pub range_flags: HashMap<String, bool>,
+    /// `true` once `update_comms_range_flags` has located a player `Ship`
+    /// and is maintaining `range_flags`. While `false`, range gating is
+    /// fully bypassed (preserves lobby + pure-handler tests).
+    pub range_active: bool,
+}
+
+/// Resolve the current `sender_in_range` flag for an injection-time message,
+/// matching the stamp logic in `broadcast_comms_state`. Used by every site
+/// that inserts a new `CommsMessage` so the field is correct from the moment
+/// the message lands in the inbox (belt-and-braces against future refactors
+/// that bypass the broadcast stamp pass).
+fn current_sender_in_range(runtime: &WorldContentRuntime, sender_uuid: &str) -> bool {
+    match runtime.range_flags.get(sender_uuid).copied() {
+        Some(flag) => flag,
+        None => !runtime.range_active,
+    }
 }
 
 /// Bevy resource wrapping the server-side comms inbox.
@@ -131,6 +154,7 @@ impl Plugin for WorldPlugin {
                     handle_hail.in_set(crate::sim_sets::SimSet::Input),
                     handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
                     handle_clear_comms.in_set(crate::sim_sets::SimSet::Input),
+                    update_comms_range_flags.in_set(crate::sim_sets::SimSet::Broadcast),
                     broadcast_comms_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     broadcast_objective_summary.in_set(crate::sim_sets::SimSet::Broadcast),
                 ).chain(),
@@ -387,6 +411,7 @@ fn setup_fallback_world(
         shields_console: None,
         torpedoes: None,
         repair: None,
+        comms: None,
         asteroid_field: None,
         shape: None,
         effects: None,
@@ -458,6 +483,7 @@ fn init_world_runtime(
             contacts.push(CommsContact {
                 uuid,
                 name: tmpl.from.clone(),
+                in_range: true,
             });
         }
     }
@@ -527,16 +553,31 @@ fn handle_hail(
             continue;
         };
 
+        // Server-side range gate: when range tracking is active, the target
+        // must be a known, in-range entity. Out-of-range hails are silently
+        // dropped (clients enforce the same gate UX-side; this defends
+        // against stale or malicious clients).
+        if runtime.range_active {
+            match runtime.range_flags.get(target_uuid).copied() {
+                Some(true) => {}
+                _ => continue,
+            }
+        }
+
         // Evaluate matching on_hailed comms templates.
         let world_events = vec![WorldEvent::Hailed {
             target_uuid: target_uuid.clone(),
         }];
 
-        let name_to_uuid = runtime.name_to_uuid.clone();
+        let WorldContentRuntime {
+            name_to_uuid,
+            comms_template_states,
+            ..
+        } = &mut *runtime;
         let fired = evaluate_comms_templates(
-            &mut runtime.comms_template_states,
+            comms_template_states,
             &world_events,
-            &name_to_uuid,
+            name_to_uuid,
         );
 
         for f in fired {
@@ -564,6 +605,7 @@ fn handle_hail(
                 selected_response: None,
                 is_read: false,
                 is_orphaned: false,
+                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
             };
 
             inbox.0.inject(msg);
@@ -610,6 +652,18 @@ fn handle_respond_to_message(
             Some(d) => d.clone(),
             None => continue,
         };
+
+        // Server-side range gate: if range tracking is active, the sender
+        // of this message must currently be in range. Out-of-range responses
+        // are silently dropped so stale clients can't fire actions on a
+        // hidden response button.
+        if runtime.range_active {
+            let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
+            match runtime.range_flags.get(&sender_uuid).copied() {
+                Some(true) => {}
+                _ => continue,
+            }
+        }
 
         let responses = &dialogue.current_node.responses;
         if *response_index >= responses.len() {
@@ -671,7 +725,7 @@ fn handle_respond_to_message(
 
             let new_msg = CommsMessage {
                 id: new_msg_id.clone(),
-                sender_uuid,
+                sender_uuid: sender_uuid.clone(),
                 sender_name,
                 subject: follow_up.body.chars().take(40).collect(),
                 body: follow_up.body.clone(),
@@ -679,6 +733,7 @@ fn handle_respond_to_message(
                 selected_response: None,
                 is_read: false,
                 is_orphaned: false,
+                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
             };
 
             inbox.0.inject(new_msg);
@@ -712,6 +767,109 @@ fn handle_clear_comms(
     }
 }
 
+/// Recompute per-entity comms-range flags from ship + entity transforms.
+///
+/// Runs before `broadcast_comms_state`. Finds the player ship (entity with
+/// `Ship` marker + `Transform` + optional `CommsRange`) and computes
+/// `crate::comms::in_range(distance, ship_range, entity_range)` for every
+/// entity carrying `EntityUuid` + `Transform` + `CommsRange`. Updates the
+/// `runtime.range_flags` map and stamps `runtime.contacts[i].in_range`. Sets
+/// `runtime.needs_broadcast = true` if any flag flipped vs. the prior snapshot.
+fn update_comms_range_flags(
+    mut runtime: ResMut<WorldContentRuntime>,
+    ship_q: Query<(&Transform, Option<&crate::comms::CommsRange>), With<crate::simulation::Ship>>,
+    entity_q: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &Transform,
+        &crate::comms::CommsRange,
+    )>,
+) {
+    let Ok((ship_tf, ship_range_opt)) = ship_q.single() else {
+        // No ship: either lobby/pure-handler tests (range tracking never
+        // activated — preserve default-true semantics) or the ship was
+        // destroyed mid-game. In the latter case, do NOT reset
+        // `range_active` to false — that would silently re-enable all
+        // comms (a back-door past the Hail/Respond gates). Instead, force
+        // every tracked flag to false so the gates stay closed.
+        if runtime.range_active {
+            let mut any_changed = false;
+            for v in runtime.range_flags.values_mut() {
+                if *v {
+                    *v = false;
+                    any_changed = true;
+                }
+            }
+            let before = runtime.contacts.len();
+            for c in runtime.contacts.iter_mut() {
+                if c.in_range {
+                    c.in_range = false;
+                    any_changed = true;
+                }
+            }
+            let _ = before;
+            if any_changed {
+                runtime.needs_broadcast = true;
+            }
+        }
+        return;
+    };
+    let ship_range = ship_range_opt.map(|r| r.0).unwrap_or(0.0);
+    let ship_pos = ship_tf.translation;
+
+    let mut any_changed = !runtime.range_active;
+    runtime.range_active = true;
+
+    // Build the live set of comms-range-bearing UUIDs and refresh flags.
+    let mut live: HashSet<String> = HashSet::new();
+    for (uuid, tf, range) in entity_q.iter() {
+        let dist = ship_pos.distance(tf.translation);
+        let in_range = crate::comms::in_range(dist, ship_range, range.0);
+        let prior = runtime.range_flags.insert(uuid.0.clone(), in_range);
+        if prior != Some(in_range) {
+            any_changed = true;
+        }
+        live.insert(uuid.0.clone());
+    }
+
+    // Remove stale flags for despawned entities.
+    let stale: Vec<String> = runtime
+        .range_flags
+        .keys()
+        .filter(|k| !live.contains(*k))
+        .cloned()
+        .collect();
+    if !stale.is_empty() {
+        any_changed = true;
+        for k in stale {
+            runtime.range_flags.remove(&k);
+        }
+    }
+
+    // Prune contacts whose entity has no [comms] block (no CommsRange).
+    let before = runtime.contacts.len();
+    let live_ref = &live;
+    runtime.contacts.retain(|c| live_ref.contains(&c.uuid));
+    if runtime.contacts.len() != before {
+        any_changed = true;
+    }
+
+    // Stamp the surviving contacts in place from the flag map.
+    let WorldContentRuntime {
+        range_flags,
+        contacts,
+        ..
+    } = &mut *runtime;
+    for c in contacts.iter_mut() {
+        if let Some(flag) = range_flags.get(&c.uuid).copied() {
+            c.in_range = flag;
+        }
+    }
+
+    if any_changed {
+        runtime.needs_broadcast = true;
+    }
+}
+
 /// Broadcast `CommsState` to the Comms console holder when the inbox is dirty
 /// or `WorldContentRuntime::needs_broadcast` is set.
 fn broadcast_comms_state(
@@ -733,7 +891,17 @@ fn broadcast_comms_state(
         return;
     };
 
-    let messages = inbox.0.messages();
+    let mut messages = inbox.0.messages();
+    for m in messages.iter_mut() {
+        if let Some(flag) = runtime.range_flags.get(&m.sender_uuid).copied() {
+            m.sender_in_range = flag;
+        } else if runtime.range_active {
+            // Range tracking is on but this sender has no flag entry — the
+            // entity has been despawned or never had a `[comms]` block.
+            // Treat as out of range so clients hide the response controls.
+            m.sender_in_range = false;
+        }
+    }
     let objectives_snap = objectives.0.sorted_snapshots();
     let contacts = runtime.contacts.clone();
 
@@ -826,7 +994,7 @@ fn handle_ai_events(
         let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
         let msg = crate::messages::CommsMessage {
             id: msg_id.clone(),
-            sender_uuid,
+            sender_uuid: sender_uuid.clone(),
             sender_name,
             subject: fc.node.body.chars().take(40).collect(),
             body: fc.node.body.clone(),
@@ -834,6 +1002,7 @@ fn handle_ai_events(
             selected_response: None,
             is_read: false,
             is_orphaned: false,
+            sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
         };
         inbox.0.inject(msg);
         runtime.active_dialogues.insert(
@@ -1082,6 +1251,7 @@ fn apply_pending_scenario_loads(
                                 runtime.contacts.push(crate::messages::CommsContact {
                                     uuid,
                                     name: tmpl.from.clone(),
+                                    in_range: true,
                                 });
                             }
                         }
@@ -1228,6 +1398,7 @@ fn apply_world_layer_changes(
                                         runtime.contacts.push(crate::messages::CommsContact {
                                             uuid,
                                             name: tmpl.from.clone(),
+                                            in_range: true,
                                         });
                                     }
                                 }
@@ -1400,6 +1571,7 @@ mod tests {
                     handle_hail,
                     handle_respond_to_message,
                     handle_clear_comms,
+                    update_comms_range_flags,
                     broadcast_comms_state,
                     broadcast_objective_summary,
                 ).chain(),
@@ -1474,6 +1646,7 @@ mod tests {
         runtime.contacts.push(CommsContact {
             uuid: station_uuid.into(),
             name: "Starbase Alpha".into(),
+            in_range: true,
         });
         runtime.comms_template_states.push(CommsTemplateState {
             template: crate::world::content::CommsTemplate {
@@ -1661,6 +1834,7 @@ mod tests {
             selected_response: None,
             is_read: false,
             is_orphaned: true,
+            sender_in_range: true,
         };
         // Orphan it before injection so clear() will remove it.
         app.world_mut()
@@ -2702,6 +2876,393 @@ entity = "layer_npc"
         assert!(
             !app.world().resource::<WorldLayerMap>().0.contains_key(&world_path),
             "WorldLayerMap must not contain the path after UnloadWorld"
+        );
+    }
+
+    // -- Slice 7: range-aware comms broadcast --------------------------------
+
+    #[test]
+    fn comms_state_marks_contact_out_of_range_when_ship_too_far() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-uuid-range-far";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        // Spawn the ship close to the station so the initial hail succeeds,
+        // then move the station far away to verify the flag flips.
+        let ship_entity = app
+            .world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)))
+            .id();
+        let station_entity = app.world_mut().spawn((
+            EntityUuid(station_uuid.into()),
+            Transform::from_xyz(50.0, 0.0, 0.0),
+            CommsRange(100.0),
+        )).id();
+
+        // Flush initial broadcast.
+        let _ = tick(&mut app);
+
+        // Hail in range so a message is injected.
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail { target_uuid: station_uuid.into() },
+        );
+        let _ = tick(&mut app);
+
+        // Now move the station far away (combined range 200, distance 1000).
+        let _ = ship_entity;
+        if let Ok(mut e) = app.world_mut().get_entity_mut(station_entity) {
+            e.insert(Transform::from_xyz(1000.0, 0.0, 0.0));
+        }
+        let out = tick(&mut app);
+
+        let (messages, contacts) = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, contacts, .. } = &m.msg {
+                Some((messages.clone(), contacts.clone()))
+            } else { None }
+        }).expect("CommsState must be broadcast after range flip");
+
+        let contact = contacts.iter().find(|c| c.uuid == station_uuid).expect("contact present");
+        assert!(!contact.in_range, "contact should be out of range");
+        assert_eq!(messages.len(), 1, "one hail message expected");
+        assert!(!messages[0].sender_in_range, "sender_in_range must be false when station is far");
+    }
+
+    #[test]
+    fn comms_state_marks_contact_in_range_when_ship_close() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-uuid-range-near";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut().spawn((
+            EntityUuid(station_uuid.into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+
+        let _ = tick(&mut app);
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail { target_uuid: station_uuid.into() },
+        );
+        let out = tick(&mut app);
+
+        let (messages, contacts) = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, contacts, .. } = &m.msg {
+                Some((messages.clone(), contacts.clone()))
+            } else { None }
+        }).expect("CommsState must be broadcast");
+
+        let contact = contacts.iter().find(|c| c.uuid == station_uuid).expect("contact present");
+        assert!(contact.in_range, "contact should be in range");
+        assert!(messages[0].sender_in_range, "sender_in_range true when station within range");
+    }
+
+    // -- Review fixes: pruning, server enforcement, despawn handling ---------
+
+    /// Contacts whose UUID has no matching `CommsRange`-bearing entity in
+    /// the world (e.g. the world TOML names a `[[comms]]` template but the
+    /// referenced entity doesn't declare a `[comms]` block) MUST be pruned
+    /// before broadcast so they never appear as permanently in-range.
+    #[test]
+    fn contact_without_comms_range_entity_is_pruned_from_broadcast() {
+        use crate::comms::CommsRange;
+        use crate::simulation::Ship;
+
+        let bogus_uuid = "no-such-entity";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, bogus_uuid);
+
+        // Spawn the ship so range tracking activates, but DO NOT spawn an
+        // entity with `bogus_uuid` + CommsRange.
+        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+
+        let out = tick(&mut app);
+        let contacts = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { contacts, .. } = &m.msg {
+                Some(contacts.clone())
+            } else { None }
+        }).expect("CommsState must be broadcast");
+
+        assert!(
+            !contacts.iter().any(|c| c.uuid == bogus_uuid),
+            "contact for entity without [comms] block must be pruned, got {contacts:?}"
+        );
+    }
+
+    /// A Hail targeting an out-of-range entity must NOT inject any message
+    /// into the inbox (server-side enforcement; stale clients can't bypass
+    /// the client gate).
+    #[test]
+    fn server_rejects_hail_when_target_out_of_range() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-out-of-range-hail";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)));
+        app.world_mut().spawn((
+            EntityUuid(station_uuid.into()),
+            Transform::from_xyz(5000.0, 0.0, 0.0),
+            CommsRange(100.0),
+        ));
+
+        // Flush initial broadcast so range_flags is populated.
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail { target_uuid: station_uuid.into() },
+        );
+        let out = tick(&mut app);
+
+        // No CommsState broadcast should contain a non-empty inbox.
+        for m in &out {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                assert!(messages.is_empty(), "out-of-range Hail must not inject messages, got {messages:?}");
+            }
+        }
+    }
+
+    /// A `RespondToMessage` whose dialogue sender is out of range must NOT
+    /// fire response actions (no objective added, no follow-up).
+    #[test]
+    fn server_rejects_respond_when_sender_out_of_range() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-respond-oor";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        // Start in range, hail, then move ship far away and respond.
+        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        let station_entity = app.world_mut().spawn((
+            EntityUuid(station_uuid.into()),
+            Transform::from_xyz(50.0, 0.0, 0.0),
+            CommsRange(500.0),
+        )).id();
+        let _ = tick(&mut app);
+
+        push_msg(&mut app, "comms", ClientMessage::Hail { target_uuid: station_uuid.into() });
+        let out = tick(&mut app);
+        let msg_id = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                messages.first().map(|m| m.id.clone())
+            } else { None }
+        }).expect("hail produced a message");
+
+        // Move the station far away.
+        if let Ok(mut e) = app.world_mut().get_entity_mut(station_entity) {
+            e.insert(Transform::from_xyz(5000.0, 0.0, 0.0));
+        }
+        // Tick to refresh range_flags.
+        let _ = tick(&mut app);
+
+        // Try to respond.
+        push_msg(&mut app, "comms", ClientMessage::RespondToMessage {
+            message_id: msg_id.clone(),
+            response_index: 0,
+        });
+        let _ = tick(&mut app);
+
+        // Objective `obj-survey` must NOT have been added (response_actions
+        // include AddObjective in setup_game_with_comms).
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objectives.sorted_snapshots().is_empty(),
+            "out-of-range Respond must not fire AddObjective action"
+        );
+    }
+
+    /// When a comms-bearing entity is despawned, its `range_flags` entry
+    /// must be removed and any inbox message from that sender must be
+    /// stamped `sender_in_range = false` on the next broadcast.
+    #[test]
+    fn entity_despawn_flips_sender_in_range_to_false() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-despawn";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)));
+        let station_entity = app.world_mut().spawn((
+            EntityUuid(station_uuid.into()),
+            Transform::from_xyz(50.0, 0.0, 0.0),
+            CommsRange(1000.0),
+        )).id();
+        let _ = tick(&mut app);
+
+        // Hail to populate the inbox while in range.
+        push_msg(&mut app, "comms", ClientMessage::Hail { target_uuid: station_uuid.into() });
+        let _ = tick(&mut app);
+
+        // Now despawn the station entity.
+        app.world_mut().despawn(station_entity);
+        let out = tick(&mut app);
+
+        let messages = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                Some(messages.clone())
+            } else { None }
+        }).expect("a broadcast must fire after despawn (range flip)");
+
+        assert!(
+            messages.iter().all(|m| !m.sender_in_range),
+            "after despawn, all messages from that sender must have sender_in_range=false: {messages:?}"
+        );
+    }
+
+    /// Two entities at different distances each get their own flag; flipping
+    /// only the closer one's range must not affect the farther one's flag.
+    #[test]
+    fn multiple_entities_have_independent_range_flags() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let near_uuid = "near-1";
+        let far_uuid = "far-1";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, near_uuid);
+        // Manually add a second contact.
+        {
+            let runtime = &mut app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.contacts.push(CommsContact {
+                uuid: far_uuid.into(),
+                name: "Far".into(),
+                in_range: true,
+            });
+        }
+
+        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut().spawn((
+            EntityUuid(near_uuid.into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+        app.world_mut().spawn((
+            EntityUuid(far_uuid.into()),
+            Transform::from_xyz(5000.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+
+        let out = tick(&mut app);
+        let contacts = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { contacts, .. } = &m.msg {
+                Some(contacts.clone())
+            } else { None }
+        }).expect("CommsState must be broadcast");
+
+        let near = contacts.iter().find(|c| c.uuid == near_uuid).expect("near contact");
+        let far = contacts.iter().find(|c| c.uuid == far_uuid).expect("far contact");
+        assert!(near.in_range, "near contact must be in range");
+        assert!(!far.in_range, "far contact must be out of range");
+    }
+
+    /// When a contact flips in_range, a CommsState broadcast must fire even
+    /// if the inbox itself is clean.
+    #[test]
+    fn range_flip_triggers_fresh_broadcast() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-flip";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        let ship_entity = app.world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)))
+            .id();
+        app.world_mut().spawn((
+            EntityUuid(station_uuid.into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+            CommsRange(500.0),
+        ));
+
+        // Drain initial broadcasts.
+        let _ = tick(&mut app);
+        let _ = tick(&mut app);
+
+        // Move ship far away — this must trigger a fresh broadcast even
+        // though the inbox didn't change.
+        if let Ok(mut e) = app.world_mut().get_entity_mut(ship_entity) {
+            e.insert(Transform::from_xyz(5000.0, 0.0, 0.0));
+        }
+        let out = tick(&mut app);
+
+        let has_broadcast = out.iter().any(|m| matches!(&m.msg, ServerMessage::CommsState { .. }));
+        assert!(has_broadcast, "range flip from in→out must trigger a fresh CommsState broadcast");
+    }
+
+    /// If the player ship is despawned mid-game (hypothetical hull-zero edge
+    /// case), the server must NOT silently re-enable comms by flipping
+    /// `range_active` back to false. All tracked flags must be forced to
+    /// false so the Hail / Respond gates stay closed.
+    #[test]
+    fn ship_despawn_mid_game_keeps_gates_closed() {
+        use crate::comms::CommsRange;
+        use crate::entities::spawner::EntityUuid;
+        use crate::simulation::Ship;
+
+        let station_uuid = "station-ship-despawn";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+
+        let ship_entity = app.world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)))
+            .id();
+        app.world_mut().spawn((
+            EntityUuid(station_uuid.into()),
+            Transform::from_xyz(100.0, 0.0, 0.0),
+            CommsRange(1000.0),
+        ));
+        let _ = tick(&mut app);
+
+        // Sanity: contact is in range.
+        {
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert!(runtime.range_active, "range_active must be true with ship");
+            assert_eq!(runtime.range_flags.get(station_uuid).copied(), Some(true));
+        }
+
+        // Despawn the ship.
+        app.world_mut().despawn(ship_entity);
+        let _ = tick(&mut app);
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.range_active,
+            "range_active must REMAIN true after ship despawn (no back-door)"
+        );
+        assert_eq!(
+            runtime.range_flags.get(station_uuid).copied(),
+            Some(false),
+            "tracked flag must be forced false on ship despawn"
+        );
+        assert!(
+            runtime.contacts.iter().all(|c| !c.in_range),
+            "all contacts must be out of range after ship despawn"
         );
     }
 }

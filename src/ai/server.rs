@@ -1089,6 +1089,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             radar_appearance: None,
             mesh: None,
         };

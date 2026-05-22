@@ -438,6 +438,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             sensors_console: None,
             asteroid_field: None,
             faction: None,

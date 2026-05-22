@@ -122,6 +122,7 @@ mod tests {
             selected_response: None,
             is_read: false,
             is_orphaned: false,
+            sender_in_range: true,
         }
     }
 

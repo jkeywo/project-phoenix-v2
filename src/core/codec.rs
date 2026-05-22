@@ -1805,11 +1805,13 @@ mod tests {
                 selected_response: Some(0),
                 is_read: false,
                 is_orphaned: false,
+                sender_in_range: true,
             }],
             objectives: vec![],
             contacts: vec![crate::messages::CommsContact {
                 uuid: "station-abc".into(),
                 name: "Starbase 12".into(),
+                in_range: true,
             }],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1829,12 +1831,78 @@ mod tests {
                 selected_response: None,
                 is_read: false,
                 is_orphaned: true,
+                sender_in_range: true,
             }],
             objectives: vec![],
             contacts: vec![],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn server_comms_state_with_range_flags_round_trips() {
+        let msg = ServerMessage::CommsState {
+            messages: vec![crate::messages::CommsMessage {
+                id: "m3".into(),
+                sender_uuid: "raider-1".into(),
+                sender_name: "Raider".into(),
+                subject: "Surrender".into(),
+                body: "...".into(),
+                responses: vec!["No".into()],
+                selected_response: None,
+                is_read: false,
+                is_orphaned: false,
+                sender_in_range: false,
+            }],
+            objectives: vec![],
+            contacts: vec![crate::messages::CommsContact {
+                uuid: "raider-1".into(),
+                name: "Raider".into(),
+                in_range: false,
+            }],
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn comms_contact_missing_in_range_defaults_to_true() {
+        let json = r#"{"uuid":"x","name":"X"}"#;
+        let contact: crate::messages::CommsContact = serde_json::from_str(json).unwrap();
+        assert!(contact.in_range, "in_range should default to true for backward compat");
+    }
+
+    #[test]
+    fn comms_message_missing_sender_in_range_defaults_to_true() {
+        let json = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false}"#;
+        let msg: crate::messages::CommsMessage = serde_json::from_str(json).unwrap();
+        assert!(msg.sender_in_range, "sender_in_range should default to true for backward compat");
+    }
+
+    #[test]
+    fn comms_state_payload_with_no_range_flags_defaults_both_to_true() {
+        // A pre-feature server payload contains neither `in_range` on contacts
+        // nor `sender_in_range` on messages. Both must deserialize as true so
+        // older clients/servers interoperate.
+        let json = r#"{
+            "type":"CommsState",
+            "data":{
+                "messages":[{"id":"m1","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false,"is_orphaned":false}],
+                "objectives":[],
+                "contacts":[{"uuid":"c1","name":"C"}]
+            }
+        }"#;
+        let msg = JsonCodec.decode_server(json).expect("decode");
+        match msg {
+            ServerMessage::CommsState { messages, contacts, .. } => {
+                assert_eq!(messages.len(), 1);
+                assert!(messages[0].sender_in_range, "sender_in_range must default to true");
+                assert_eq!(contacts.len(), 1);
+                assert!(contacts[0].in_range, "in_range must default to true");
+            }
+            other => panic!("expected CommsState, got {other:?}"),
+        }
     }
 
     // ── EntityStateSnapshot with shields wire extension ───────────────────

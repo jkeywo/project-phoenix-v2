@@ -228,6 +228,10 @@ impl Console {
 
 // ── Comms wire types ──────────────────────────────────────────────────────
 
+fn default_true() -> bool {
+    true
+}
+
 /// A single message in the Comms inbox.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CommsMessage {
@@ -251,6 +255,11 @@ pub struct CommsMessage {
     /// a "transmission ended" marker should be shown.
     #[serde(default)]
     pub is_orphaned: bool,
+    /// True when the sender is currently within comms range of the player
+    /// ship. When false, responses should be disabled and an out-of-range
+    /// marker shown. Defaults to true for backward compatibility.
+    #[serde(default = "default_true")]
+    pub sender_in_range: bool,
 }
 
 /// A contact the Comms operator can hail.
@@ -260,6 +269,11 @@ pub struct CommsContact {
     pub uuid: String,
     /// Display name shown in the contact list.
     pub name: String,
+    /// True when the contact is currently within comms range of the player
+    /// ship. Out-of-range contacts should be hidden or visually muted.
+    /// Defaults to true for backward compatibility.
+    #[serde(default = "default_true")]
+    pub in_range: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default, States)]

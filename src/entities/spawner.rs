@@ -195,6 +195,11 @@ pub fn spawn_entity(
         entity_commands.insert(WeaponsConsoleSection(wc.clone()));
     }
 
+    // Comms range — attach CommsRange component when [comms] is present.
+    if let Some(comms) = &config.comms {
+        entity_commands.insert(crate::comms::CommsRange(comms.range));
+    }
+
     // Hull Ã¢â‚¬â€ attach an EntityConsoleHull component if the config has hull data.
     // Per-console entries (console_hull) take precedence; if absent, the legacy
     // hull_integrity value is mapped to a single CaptainChair slot.
@@ -261,6 +266,77 @@ mod tests {
     }
 
     #[test]
+    fn spawn_entity_with_comms_inserts_comms_range_component() {
+        let mut app = test_app();
+        let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
+            tags: vec![],
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            sensors_console: None,
+            shields_console: None,
+            torpedoes: None,
+            repair: None,
+            comms: Some(crate::entity_config::CommsConfig { range: 8000.0 }),
+            asteroid_field: None,
+            shape: None,
+            effects: None,
+            faction: None,
+            behaviour: None,
+            radar_appearance: None,
+            mesh: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+        let world = app.world_mut();
+        let range = world
+            .get::<crate::comms::CommsRange>(spawned)
+            .expect("CommsRange component should be inserted when [comms] is present");
+        assert_eq!(range.0, 8000.0);
+    }
+
+    #[test]
+    fn spawn_entity_without_comms_omits_comms_range_component() {
+        let mut app = test_app();
+        let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
+            tags: vec![],
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            sensors_console: None,
+            shields_console: None,
+            torpedoes: None,
+            repair: None,
+            comms: None,
+            asteroid_field: None,
+            shape: None,
+            effects: None,
+            faction: None,
+            behaviour: None,
+            radar_appearance: None,
+            mesh: None,
+        };
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+        let world = app.world_mut();
+        assert!(world.get::<crate::comms::CommsRange>(spawned).is_none());
+    }
+
+    #[test]
     fn spawn_entity_with_name_inserts_entity_name_component() {
         let mut app = test_app();
         let config = EntityConfig {
@@ -279,6 +355,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -315,6 +392,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -354,6 +432,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -398,6 +477,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -448,6 +528,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             shape: None,
             effects: None,
             faction: None,
@@ -487,6 +568,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -554,6 +636,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             faction: None,
             behaviour: None,
@@ -597,6 +680,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             faction: None,
             behaviour: None,
@@ -633,6 +717,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -695,6 +780,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -747,6 +833,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -790,6 +877,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,
@@ -832,6 +920,7 @@ mod tests {
             shields_console: None,
             torpedoes: None,
             repair: None,
+            comms: None,
             asteroid_field: None,
             shape: None,
             effects: None,

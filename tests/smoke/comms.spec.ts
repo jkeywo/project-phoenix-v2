@@ -43,6 +43,8 @@ test('comms — hail Starbase Alpha, respond, get ObjectiveSummary', async ({ co
   const contacts: Array<{ uuid: string; name: string }> = initialComms?.data?.contacts ?? [];
   const starbase = contacts.find((c) => c.name === 'Starbase Alpha');
   expect(starbase, 'Starbase Alpha contact must be present in initial CommsState').toBeTruthy();
+  expect(starbase!.in_range, 'contact must expose in_range flag').toBeDefined();
+  expect(typeof starbase!.in_range).toBe('boolean');
   const starbaseUuid = starbase!.uuid;
 
   // ── Hail Starbase Alpha ────────────────────────────────────────────────────
@@ -56,11 +58,13 @@ test('comms — hail Starbase Alpha, respond, get ObjectiveSummary', async ({ co
   await captain.send('Hail', { target_uuid: starbaseUuid });
 
   const hailComms = await captain.waitForMessage('CommsState', 8_000) as any;
-  const messages: Array<{ id: string; body: string; responses: string[] }> =
+  const messages: Array<{ id: string; body: string; responses: string[]; sender_in_range: boolean }> =
     hailComms?.data?.messages ?? [];
   expect(messages.length).toBeGreaterThan(0);
   const msg = messages[0];
   expect(msg.responses.length).toBeGreaterThan(0);
+  expect(msg.sender_in_range, 'message must expose sender_in_range flag').toBeDefined();
+  expect(typeof msg.sender_in_range).toBe('boolean');
 
   // ── Respond ────────────────────────────────────────────────────────────────
   await captain.page.evaluate(() => {

@@ -115,10 +115,7 @@ pub mod viewscreen_border {
     pub use crate::server::viewscreen_border::*;
 }
 
-#[cfg(feature = "server")]
-pub mod debug_overlay {
-    pub use crate::server::debug_overlay::*;
-}
+pub mod debug_overlay;
 
 // Client-only grouped module (app, bridge, elements, phone_border).
 #[cfg(feature = "client")]

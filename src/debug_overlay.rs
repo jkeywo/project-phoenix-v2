@@ -108,28 +108,28 @@ impl Plugin for DebugOverlayPlugin {
 /// text to the WASM thread-local `DEBUG_STATE_STRING`.
 ///
 /// Only runs when `DebugOverlayEnabled` is true.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "server"))]
 fn write_debug_state(modifiers: Res<ShipModifiers>) {
     let text = modifiers.format_debug();
     crate::bridge::set_debug_state_string(text);
 }
 
 /// Native / test stub — does nothing (no thread-locals available outside WASM).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_arch = "wasm32", feature = "server")))]
 fn write_debug_state(_modifiers: Res<ShipModifiers>) {}
 
 /// Reads the `DamageLog` resource and writes the formatted text to the WASM
 /// thread-local `DAMAGE_LOG_STRING` for the F8 overlay.
 ///
 /// Only runs when `DebugDamageEnabled` is true.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "server"))]
 fn write_damage_log(log: Res<DamageLog>) {
     let text = log.format();
     crate::bridge::set_damage_log_string(text);
 }
 
 /// Native / test stub — does nothing.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_arch = "wasm32", feature = "server")))]
 fn write_damage_log(_log: Res<DamageLog>) {}
 
 /// Draws wireframe outlines for every region entity with a shape component.

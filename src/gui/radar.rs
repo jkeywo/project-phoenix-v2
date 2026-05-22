@@ -10,6 +10,8 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
+use crate::messages::EntitySnapshot;
+
 // ── Layer / filter ────────────────────────────────────────────────────────────
 
 /// Entity classification for radar layer filtering.
@@ -25,6 +27,8 @@ pub enum RadarLayer {
     Missile,
     Planet,
     Star,
+    /// Region entities rendered as shapes (torus, sphere, box).
+    Region,
 }
 
 /// Opts a game-world entity into the radar.  The widget draws only entities
@@ -50,16 +54,46 @@ pub enum RadarIcon {
     Torpedo,
 }
 
+/// How a region entity's shape is rendered on the 2D radar projection.
+/// Each variant maps to a different UI node layout.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RegionRadarShape {
+    /// Filled circle with `radius` world units.
+    Sphere { radius: f32 },
+    /// Filled rectangle extruded from `half_extents` (XZ plane).
+    Box {
+        half_extents_x: f32,
+        half_extents_z: f32,
+        yaw: f32,
+    },
+    /// Annular ring with inner and outer radius (world units).
+    Torus {
+        inner_radius: f32,
+        outer_radius: f32,
+    },
+}
+
 /// How an `OnRadar` entity is rendered on the radar.
 ///
 /// `world_size` is a world-space diameter that the radar widget
 /// projects into pixels via its current `range` and pixel radius.
 /// `color` tints the icon (use `Color::WHITE` for no tint).
+///
+/// When `region_colour` is `Some`, the entity is a region rendered
+/// as its shape (torus, sphere, box) filled with that colour rather
+/// than as a point icon.
 #[derive(Component, Clone, Debug)]
 pub struct RadarAppearance {
     pub icon: RadarIcon,
     pub world_size: f32,
     pub color: Color,
+    /// Region fill colour. `Some` → render as region shape;
+    /// `None` → render as a point icon.
+    pub region_colour: Option<Color>,
+    /// The region shape geometry. Meaningful only when
+    /// `region_colour` is `Some`. When `Some` and `region_colour`
+    /// is `Some`, the shape is rendered on the radar.
+    pub region_shape: Option<RegionRadarShape>,
 }
 
 /// Maps `RadarIcon` to the loaded `Handle<Image>` for the corresponding
@@ -140,6 +174,15 @@ struct RadarBlipNode {
     source: Entity,
 }
 
+/// Tags a UI node spawned by `sync_radar_blip_nodes` to represent a
+/// region shape. Holds the source `Entity` and shape data so the
+/// diff can reconcile and render the correct geometry.
+#[derive(Component)]
+struct RadarRegionNode {
+    source: Entity,
+    shape: RegionRadarShape,
+}
+
 /// Triggered on a radar blip UI node when the player clicks it.
 /// The payload is the source ECS entity stored in `RadarBlipNode::source`.
 #[derive(EntityEvent, Clone, Debug)]
@@ -166,11 +209,12 @@ pub struct RadarBlipClicked(pub Entity);
 ///   - `missile` | `torpedo` → `RadarLayer::Missile`
 ///   - `planet`           → `RadarLayer::Planet`
 ///   - `star`             → `RadarLayer::Star`
-///   - `region` or unknown → `None`
+///   - `region` → `RadarLayer::Region`
+///   - unknown → `None`
 pub fn tags_to_radar_layer<S: AsRef<str>>(tags: &[S]) -> Option<RadarLayer> {
     let has = |t: &str| tags.iter().any(|s| s.as_ref() == t);
     if has("region") {
-        return None;
+        return Some(RadarLayer::Region);
     }
     if has("ship") || has("pirate") {
         Some(RadarLayer::Ship)
@@ -206,6 +250,7 @@ pub fn layer_to_icon(layer: RadarLayer) -> RadarIcon {
         RadarLayer::Missile => RadarIcon::Torpedo,
         RadarLayer::Planet => RadarIcon::Planet,
         RadarLayer::Star => RadarIcon::Star,
+        RadarLayer::Region => RadarIcon::Star,
     }
 }
 
@@ -224,6 +269,31 @@ pub fn default_layer_colour(layer: RadarLayer) -> Color {
         RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
         RadarLayer::Planet => Color::srgb(0.0, 0.6, 1.0),
         RadarLayer::Star => Color::srgb(1.0, 0.85, 0.3),
+        RadarLayer::Region => Color::srgb(0.8, 0.4, 0.8),
+    }
+}
+
+/// Build a `RegionRadarShape` from an `EntitySnapshot` based on its
+/// `shape` string and geometric fields. Returns `None` when the
+/// snapshot has no recognised shape (unknown or missing).
+pub fn region_shape_from_snapshot(snapshot: &EntitySnapshot) -> Option<RegionRadarShape> {
+    match snapshot.shape.as_deref() {
+        Some("torus") => Some(RegionRadarShape::Torus {
+            inner_radius: snapshot.inner_radius_or_zero(),
+            outer_radius: snapshot.radius_or_zero(),
+        }),
+        Some("sphere") => Some(RegionRadarShape::Sphere {
+            radius: snapshot.radius_or_zero(),
+        }),
+        Some("box") => {
+            let he = snapshot.half_extents_or_zero();
+            Some(RegionRadarShape::Box {
+                half_extents_x: he[0],
+                half_extents_z: he[2],
+                yaw: 0.0,
+            })
+        }
+        _ => None,
     }
 }
 
@@ -388,7 +458,20 @@ fn sync_radar_blip_nodes(
     )>,
     blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform)>,
     centers: Query<&RadarCenter>,
-    mut existing_nodes: Query<(&mut Node, &mut ImageNode, &RadarBlipNode)>,
+    mut existing_blip_nodes: Query<
+        (&mut Node, &mut ImageNode, &mut Transform, &RadarBlipNode),
+        Without<RadarRegionNode>,
+    >,
+    mut existing_region_nodes: Query<
+        (
+            &mut Node,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut BorderRadius,
+            &RadarRegionNode,
+        ),
+        Without<RadarBlipNode>,
+    >,
     icons: Res<RadarIconLookup>,
 ) {
     // Cache the global RadarCenter once; only used for ship-centred widgets.
@@ -407,14 +490,10 @@ fn sync_radar_blip_nodes(
         }
 
         // ── Determine projection centre and effective yaw ─────────────────────
-        //
-        // WorldCentredRadar → origin (0, 0), north-up (yaw = 0).
-        // Ship-centred      → RadarCenter position + orientation mode.
         let (center_x, center_z, effective_yaw) = if world_centred.is_some() {
             (0.0_f32, 0.0_f32, 0.0_f32)
         } else {
             let Some(center) = global_center else {
-                // No RadarCenter in world yet; skip this widget this frame.
                 continue;
             };
             let yaw = match widget.orientation {
@@ -425,10 +504,6 @@ fn sync_radar_blip_nodes(
         };
 
         // ── Auto-scale range ──────────────────────────────────────────────────
-        //
-        // If AutoScaleRadar is present, find the farthest blip that passes the
-        // filter (including its own radius) and set `widget.range` so it fits
-        // just within the display area with the requested margin.
         if let Some(auto_scale) = auto_scale {
             let max_dist = blips
                 .iter()
@@ -437,8 +512,6 @@ fn sync_radar_blip_nodes(
                     let bpos = blip_gtf.translation();
                     let dx = bpos.x - center_x;
                     let dz = bpos.z - center_z;
-                    // Use world_size as an approximation of the entity's outer
-                    // radius so large fields are not clipped at their edge.
                     let dist = (dx * dx + dz * dz).sqrt() + appearance.world_size;
                     if dist > 0.0 {
                         Some(dist)
@@ -456,18 +529,26 @@ fn sync_radar_blip_nodes(
 
         let range = widget.range;
 
-        // ── Build intended blip set ───────────────────────────────────────────
-        // source entity → (left_px, top_px, size_px, color, icon_handle)
-        let mut intended: HashMap<Entity, (f32, f32, f32, Color, Option<Handle<Image>>)> =
-            HashMap::new();
+        // ── Build intended blip set (point entities) ─────────────────────────
+        // source entity → (left_px, top_px, size_px, color, icon_handle, icon_angle)
+        let mut intended: HashMap<
+            Entity,
+            (f32, f32, f32, Color, Option<Handle<Image>>, f32),
+        > = HashMap::new();
+
+        // ── Build intended region set (region shape entities) ────────────────
+        // source entity → (nx, ny, colour, shape, outer_size_px)
+        let mut intended_regions: HashMap<
+            Entity,
+            (f32, f32, Color, RegionRadarShape, f32),
+        > = HashMap::new();
+
         for (src, on_radar, appearance, blip_gtf) in blips.iter() {
             if !is_on_radar(&widget.filter, on_radar.0) {
                 continue;
             }
             let bpos = blip_gtf.translation();
-            // project_radar_entity is called with ShipRelative + effective_yaw
-            // because effective_yaw already encodes the orientation choice
-            // (0.0 for WorldFixed / WorldCentred, center.yaw for ShipRelative).
+            let ent_radius = appearance.world_size * 0.5;
             let Some((nx, ny)) = project_radar_entity(
                 bpos.x,
                 bpos.z,
@@ -475,27 +556,67 @@ fn sync_radar_blip_nodes(
                 center_z,
                 effective_yaw,
                 range,
-                appearance.world_size * 0.5,
+                ent_radius,
                 &OrientationMode::ShipRelative,
             ) else {
                 continue;
             };
-            // Circular clip: skip blips whose centre lies outside the radar circle.
             if nx * nx + ny * ny > 1.0 {
                 continue;
             }
-            let size_px = world_size_to_px(appearance.world_size, range, radar_radius_px);
-            let half = size_px * 0.5;
-            let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
-            let icon_handle = icons.0.get(&appearance.icon).cloned();
-            intended.insert(src, (left, top, size_px, appearance.color, icon_handle));
+
+            if let Some(region_colour) = appearance.region_colour {
+                // ── Region entity: render as shape ────────────────────────────
+                let shape = appearance
+                    .region_shape
+                    .clone()
+                    .unwrap_or(RegionRadarShape::Sphere {
+                        radius: appearance.world_size,
+                    });
+                let outer_size_px = match &shape {
+                    RegionRadarShape::Sphere { radius } => {
+                        world_size_to_px(radius * 2.0, range, radar_radius_px)
+                    }
+                    RegionRadarShape::Torus { outer_radius, .. } => {
+                        world_size_to_px(outer_radius * 2.0, range, radar_radius_px)
+                    }
+                    RegionRadarShape::Box {
+                        half_extents_x,
+                        half_extents_z,
+                        ..
+                    } => {
+                        let w = world_size_to_px(half_extents_x * 2.0, range, radar_radius_px);
+                        let h = world_size_to_px(half_extents_z * 2.0, range, radar_radius_px);
+                        w.max(h)
+                    }
+                };
+                intended_regions.insert(src, (nx, ny, region_colour, shape, outer_size_px));
+            } else {
+                // ── Point entity: render as icon ─────────────────────────────
+                let icon_angle = icon_rotation_angle(
+                    blip_gtf,
+                    effective_yaw,
+                    &widget.orientation,
+                );
+                let size_px =
+                    world_size_to_px(appearance.world_size, range, radar_radius_px);
+                let half = size_px * 0.5;
+                let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
+                let icon_handle = icons.0.get(&appearance.icon).cloned();
+                intended.insert(
+                    src,
+                    (left, top, size_px, appearance.color, icon_handle, icon_angle),
+                );
+            }
         }
 
         // ── Reconcile existing children ───────────────────────────────────────
         if let Some(children) = children {
             for child in children.iter() {
-                if let Ok((mut node, mut image, tag)) = existing_nodes.get_mut(child) {
-                    if let Some((left, top, size_px, color, icon_handle)) =
+                if let Ok((mut node, mut image, mut transform, tag)) =
+                    existing_blip_nodes.get_mut(child)
+                {
+                    if let Some((left, top, size_px, color, icon_handle, icon_angle)) =
                         intended.remove(&tag.source)
                     {
                         node.left = Val::Px(left);
@@ -506,19 +627,44 @@ fn sync_radar_blip_nodes(
                             image.image = h;
                         }
                         image.color = color;
+                        transform.rotation = Quat::from_rotation_z(icon_angle);
                     } else {
-                        // Source no longer present — despawn.
+                        commands.entity(child).despawn();
+                    }
+                } else if let Ok((mut node, mut bg, mut border_color, mut border_radius, tag)) =
+                    existing_region_nodes.get_mut(child)
+                {
+                    if let Some((nx, ny, colour, shape, _)) =
+                        intended_regions.remove(&tag.source)
+                    {
+                        update_region_node(
+                            &mut node,
+                            &mut bg,
+                            &mut border_color,
+                            &mut border_radius,
+                            nx,
+                            ny,
+                            colour,
+                            &shape,
+                            range,
+                            radar_radius_px,
+                        );
+                    } else {
                         commands.entity(child).despawn();
                     }
                 }
             }
         }
 
-        // ── Spawn new nodes for remaining intended blips ──────────────────────
-        if !intended.is_empty() {
+        // ── Spawn new blip nodes ─────────────────────────────────────────────
+        if !intended.is_empty() || !intended_regions.is_empty() {
             commands.entity(radar_entity).with_children(|parent| {
-                for (source, (left, top, size_px, color, icon_handle)) in intended.drain() {
-                    let node = Node {
+                for (
+                    source,
+                    (left, top, size_px, color, icon_handle, icon_angle),
+                ) in intended.drain()
+                {
+                    let mut node = Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(left),
                         top: Val::Px(top),
@@ -526,20 +672,22 @@ fn sync_radar_blip_nodes(
                         height: Val::Px(size_px),
                         ..default()
                     };
+                    let transform = Transform::from_rotation(Quat::from_rotation_z(icon_angle));
                     if let Some(h) = icon_handle {
                         parent.spawn((
                             node,
                             ImageNode::new(h).with_color(color),
+                            transform,
                             ZIndex(10),
                             RadarBlipNode { source },
                             Button,
                             Interaction::default(),
                         ));
                     } else {
-                        // Defensive fallback: coloured square when icon missing.
                         parent.spawn((
                             node,
                             ImageNode::solid_color(color),
+                            transform,
                             ZIndex(10),
                             RadarBlipNode { source },
                             Button,
@@ -547,9 +695,156 @@ fn sync_radar_blip_nodes(
                         ));
                     }
                 }
+                for (source, (nx, ny, colour, shape, _)) in intended_regions.drain() {
+                    let (node, bg, border_color, border_radius) = region_shape_node(
+                        source,
+                        nx,
+                        ny,
+                        colour,
+                        &shape,
+                        range,
+                        radar_radius_px,
+                    );
+                    parent.spawn((
+                        node,
+                        bg,
+                        border_color,
+                        border_radius,
+                        ZIndex(10),
+                        RadarRegionNode {
+                            source,
+                            shape: shape.clone(),
+                        },
+                    ));
+                }
             });
         }
     }
+}
+
+/// Compute the Z-rotation angle for a radar blip icon based on the
+/// entity's world yaw and the radar's orientation mode.
+fn icon_rotation_angle(
+    blip_gtf: &GlobalTransform,
+    effective_yaw: f32,
+    _orientation: &OrientationMode,
+) -> f32 {
+    let entity_yaw = blip_gtf
+        .to_scale_rotation_translation()
+        .1
+        .to_euler(bevy::math::EulerRot::YXZ)
+        .0;
+    effective_yaw - entity_yaw
+}
+
+/// Update an existing region node's layout to match the current projection.
+fn update_region_node(
+    node: &mut Node,
+    bg: &mut BackgroundColor,
+    border_color: &mut BorderColor,
+    border_radius: &mut BorderRadius,
+    nx: f32,
+    ny: f32,
+    colour: Color,
+    shape: &RegionRadarShape,
+    range: f32,
+    radar_radius_px: f32,
+) {
+    match *shape {
+        RegionRadarShape::Sphere { radius } => {
+            let diameter_px =
+                world_size_to_px(radius * 2.0, range, radar_radius_px).max(2.0);
+            let half = diameter_px * 0.5;
+            let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
+            node.left = Val::Px(left);
+            node.top = Val::Px(top);
+            node.width = Val::Px(diameter_px);
+            node.height = Val::Px(diameter_px);
+            node.border = UiRect::default();
+            bg.0 = colour.with_alpha(0.3);
+            border_color.0 = colour;
+            *border_radius = BorderRadius::all(Val::Percent(50.0));
+        }
+        RegionRadarShape::Torus {
+            inner_radius,
+            outer_radius,
+        } => {
+            let outer_px =
+                world_size_to_px(outer_radius * 2.0, range, radar_radius_px).max(2.0);
+            let inner_px = (inner_radius / range * radar_radius_px * 2.0).max(0.0);
+            let border_px = ((outer_px - inner_px) * 0.5).max(1.0);
+            let half = outer_px * 0.5;
+            let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half);
+            node.left = Val::Px(left);
+            node.top = Val::Px(top);
+            node.width = Val::Px(outer_px);
+            node.height = Val::Px(outer_px);
+            node.border = UiRect::all(Val::Px(border_px));
+            bg.0 = Color::NONE;
+            border_color.0 = colour;
+            *border_radius = BorderRadius::all(Val::Percent(50.0));
+        }
+        RegionRadarShape::Box {
+            half_extents_x,
+            half_extents_z,
+            ..
+        } => {
+            let width_px =
+                world_size_to_px(half_extents_x * 2.0, range, radar_radius_px).max(2.0);
+            let height_px =
+                world_size_to_px(half_extents_z * 2.0, range, radar_radius_px).max(2.0);
+            let half_w = width_px * 0.5;
+            let half_h = height_px * 0.5;
+            let (left, top) = blip_local_offset(nx, ny, radar_radius_px, half_w);
+            let top = top - (half_h - half_w);
+            node.left = Val::Px(left);
+            node.top = Val::Px(top);
+            node.width = Val::Px(width_px);
+            node.height = Val::Px(height_px);
+            node.border = UiRect::default();
+            bg.0 = colour.with_alpha(0.3);
+            border_color.0 = colour;
+            *border_radius = BorderRadius::ZERO;
+        }
+    }
+}
+
+/// Build a UI node bundle for a region shape entity.
+fn region_shape_node(
+    _source: Entity,
+    nx: f32,
+    ny: f32,
+    colour: Color,
+    shape: &RegionRadarShape,
+    range: f32,
+    radar_radius_px: f32,
+) -> (Node, BackgroundColor, BorderColor, BorderRadius) {
+    let mut node = Node {
+        position_type: PositionType::Absolute,
+        ..default()
+    };
+    let bg = BackgroundColor(Color::NONE);
+    let border_color = BorderColor(colour);
+    let border_radius = BorderRadius::ZERO;
+
+    // Delegate to update to fill in the node layout fields
+    let mut bg_mut = BackgroundColor(Color::NONE);
+    let mut border_color_mut = BorderColor(colour);
+    let mut border_radius_mut = BorderRadius::ZERO;
+    update_region_node(
+        &mut node,
+        &mut bg_mut,
+        &mut border_color_mut,
+        &mut border_radius_mut,
+        nx,
+        ny,
+        colour,
+        shape,
+        range,
+        radar_radius_px,
+    );
+
+    (node, bg_mut, border_color_mut, border_radius_mut)
 }
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
@@ -633,10 +928,16 @@ mod tests {
     }
 
     #[test]
-    fn tags_to_radar_layer_region_is_excluded() {
-        assert_eq!(tags_to_radar_layer(&["region"]), None);
+    fn tags_to_radar_layer_region_returns_region_layer() {
+        assert_eq!(
+            tags_to_radar_layer(&["region"]),
+            Some(RadarLayer::Region)
+        );
         // region wins even when combined with other recognised tags
-        assert_eq!(tags_to_radar_layer(&["region", "ship"]), None);
+        assert_eq!(
+            tags_to_radar_layer(&["region", "ship"]),
+            Some(RadarLayer::Region)
+        );
     }
 
     #[test]
@@ -681,6 +982,7 @@ mod tests {
         let _ = default_layer_colour(RadarLayer::Missile);
         let _ = default_layer_colour(RadarLayer::Planet);
         let _ = default_layer_colour(RadarLayer::Star);
+        let _ = default_layer_colour(RadarLayer::Region);
     }
 
     fn all_layers_filter() -> RadarFilter {
@@ -693,6 +995,7 @@ mod tests {
         s.insert(RadarLayer::Missile);
         s.insert(RadarLayer::Planet);
         s.insert(RadarLayer::Star);
+        s.insert(RadarLayer::Region);
         RadarFilter(s)
     }
 

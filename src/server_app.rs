@@ -720,6 +720,15 @@ fn reconcile_runtime_entities(
                 };
                 if let Some(shape) = region_shape {
                     snapshot.shape = Some(shape_to_wire(shape));
+                    match &shape.0 {
+                        crate::region_shape::RegionShape::Torus { inner_radius, .. } => {
+                            snapshot.inner_radius = Some(*inner_radius);
+                        }
+                        crate::region_shape::RegionShape::Box { half_extents, .. } => {
+                            snapshot.half_extents = Some(*half_extents);
+                        }
+                        crate::region_shape::RegionShape::Sphere { .. } => {}
+                    }
                 }
                 if let Some(ra) = radar_appearance {
                     if ra.0.colour.len() >= 3 {
@@ -756,6 +765,15 @@ fn reconcile_runtime_entities(
                 };
                 if let Some(shape) = region_shape {
                     snapshot.shape = Some(shape_to_wire(shape));
+                    match &shape.0 {
+                        crate::region_shape::RegionShape::Torus { inner_radius, .. } => {
+                            snapshot.inner_radius = Some(*inner_radius);
+                        }
+                        crate::region_shape::RegionShape::Box { half_extents, .. } => {
+                            snapshot.half_extents = Some(*half_extents);
+                        }
+                        crate::region_shape::RegionShape::Sphere { .. } => {}
+                    }
                 }
                 if let Some(ra) = radar_appearance {
                     if ra.0.colour.len() >= 3 {

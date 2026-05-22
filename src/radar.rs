@@ -673,6 +673,7 @@ mod tests {
             inner_radius: None,
             warp_out_remaining_secs: None,
             radar_world_size: None,
+            half_extents: None,
         }
     }
 
@@ -922,6 +923,7 @@ mod tests {
             inner_radius: Some(inner),
             warp_out_remaining_secs: None,
             radar_world_size: None,
+            half_extents: None,
         }
     }
 

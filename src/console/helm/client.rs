@@ -12,10 +12,11 @@ use crate::client_app::{HelmPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    default_layer_colour, layer_to_icon, spawn_gui_button, tags_to_radar_layer, ButtonPressed,
-    ButtonSize, GenericJoystick, GenericRadar, GenericRadarWidget, HelmRadarWidget, JoystickMoved,
-    OnRadar, OrientationMode, RadarAppearance, RadarCenter, RadarFilter, RadarIcon, RadarLayer,
-    ReadoutValue, StateVisuals, TextReadout, Visual,
+    default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
+    tags_to_radar_layer, ButtonPressed, ButtonSize, GenericJoystick, GenericRadar,
+    GenericRadarWidget, HelmRadarWidget, JoystickMoved, OnRadar, OrientationMode, RadarAppearance,
+    RadarCenter, RadarFilter, RadarIcon, RadarLayer, ReadoutValue, StateVisuals, TextReadout,
+    Visual,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -235,39 +236,40 @@ fn bridge_client_sim_to_radar_entities(
         icon: RadarIcon::Ship,
         world_size: 6.0,
         color: Color::srgb(0.95, 0.95, 1.0),
+        region_colour: None,
+        region_shape: None,
     };
+    let ship_yaw = ship_view.ship_yaw;
+    let ship_transform = Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z)
+        .with_rotation(Quat::from_rotation_y(ship_yaw));
+    let ship_global = GlobalTransform::from(ship_transform);
     let _center_entity = match radar.center {
         Some(e) => {
             commands.entity(e).insert((
                 RadarCenter {
                     world_x: ship_view.ship_x,
                     world_z: ship_view.ship_z,
-                    yaw: ship_view.ship_yaw,
+                    yaw: ship_yaw,
                 },
                 OnRadar(RadarLayer::PlayerShip),
                 ship_appearance,
-                Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z),
-                GlobalTransform::from(Transform::from_xyz(
-                    ship_view.ship_x,
-                    0.0,
-                    ship_view.ship_z,
-                )),
+                ship_transform,
+                ship_global,
             ));
             e
         }
         None => {
-            let t = Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z);
             let e = commands
                 .spawn((
                     RadarCenter {
                         world_x: ship_view.ship_x,
                         world_z: ship_view.ship_z,
-                        yaw: ship_view.ship_yaw,
+                        yaw: ship_yaw,
                     },
                     OnRadar(RadarLayer::PlayerShip),
                     ship_appearance,
-                    t,
-                    GlobalTransform::from(t),
+                    ship_transform,
+                    ship_global,
                 ))
                 .id();
             radar.center = Some(e);
@@ -285,44 +287,84 @@ fn bridge_client_sim_to_radar_entities(
         }
 
         let Some(layer) = tags_to_radar_layer(&snapshot.tags) else {
-            continue; // skip regions and unknown types
+            continue;
         };
 
+        let entity_yaw = snapshot.yaw.unwrap_or(0.0);
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
-        let default_color = default_layer_colour(layer);
-        let icon = layer_to_icon(layer);
-        // Prefer the authored radar override, then the physical radius,
-        // then a fallback of 4.0 world units.
-        let world_size = snapshot
-            .radar_world_size
-            .or(Some(snapshot.radius_or_zero()))
-            .filter(|s| *s > 0.0)
-            .unwrap_or(4.0);
-        let appearance = RadarAppearance {
-            icon,
-            world_size,
-            color: colour.unwrap_or(default_color),
-        };
 
-        if let Some(existing) = radar.blips.get(uuid) {
-            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z());
-            commands.entity(*existing).insert((
-                OnRadar(layer),
-                appearance,
-                t,
-                GlobalTransform::from(t),
-            ));
-        } else {
-            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z());
-            let blip = commands
-                .spawn((
+        if layer == RadarLayer::Region {
+            // ── Region entity: render as shape ────────────────────────────────
+            let region_colour = colour.unwrap_or(default_layer_colour(layer));
+            let region_shape = region_shape_from_snapshot(snapshot);
+            let world_size = snapshot
+                .radar_world_size
+                .or(Some(snapshot.radius_or_zero()))
+                .filter(|s| *s > 0.0)
+                .unwrap_or(4.0);
+            let appearance = RadarAppearance {
+                icon: RadarIcon::Star,
+                world_size,
+                color: Color::WHITE,
+                region_colour: Some(region_colour),
+                region_shape,
+            };
+            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
+                .with_rotation(Quat::from_rotation_y(entity_yaw));
+            if let Some(existing) = radar.blips.get(uuid) {
+                commands.entity(*existing).insert((
                     OnRadar(layer),
                     appearance,
                     t,
                     GlobalTransform::from(t),
-                ))
-                .id();
-            radar.blips.insert(uuid.clone(), blip);
+                ));
+            } else {
+                let blip = commands
+                    .spawn((
+                        OnRadar(layer),
+                        appearance,
+                        t,
+                        GlobalTransform::from(t),
+                    ))
+                    .id();
+                radar.blips.insert(uuid.clone(), blip);
+            }
+        } else {
+            // ── Point entity: render as icon ──────────────────────────────────
+            let default_color = default_layer_colour(layer);
+            let icon = layer_to_icon(layer);
+            let world_size = snapshot
+                .radar_world_size
+                .or(Some(snapshot.radius_or_zero()))
+                .filter(|s| *s > 0.0)
+                .unwrap_or(4.0);
+            let appearance = RadarAppearance {
+                icon,
+                world_size,
+                color: colour.unwrap_or(default_color),
+                region_colour: None,
+                region_shape: None,
+            };
+            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
+                .with_rotation(Quat::from_rotation_y(entity_yaw));
+            if let Some(existing) = radar.blips.get(uuid) {
+                commands.entity(*existing).insert((
+                    OnRadar(layer),
+                    appearance,
+                    t,
+                    GlobalTransform::from(t),
+                ));
+            } else {
+                let blip = commands
+                    .spawn((
+                        OnRadar(layer),
+                        appearance,
+                        t,
+                        GlobalTransform::from(t),
+                    ))
+                    .id();
+                radar.blips.insert(uuid.clone(), blip);
+            }
         }
     }
 
@@ -336,6 +378,8 @@ fn bridge_client_sim_to_radar_entities(
         }
     });
 }
+
+
 
 // ── Phone helm UI spawn ──────────────────────────────────────────────
 

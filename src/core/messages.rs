@@ -411,6 +411,9 @@ pub struct EntitySnapshot {
     /// radar visibility independently of the entity's actual physical size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radar_world_size: Option<f32>,
+    /// Half-extents for Box-shaped region entities. `[x, y, z]` in world units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub half_extents: Option<[f32; 3]>,
 }
 
 impl EntitySnapshot {
@@ -434,6 +437,11 @@ impl EntitySnapshot {
         self.inner_radius.unwrap_or(0.0)
     }
 
+    /// Half-extents for Box-shaped region entities, or zero array when missing.
+    pub fn half_extents_or_zero(&self) -> [f32; 3] {
+        self.half_extents.unwrap_or([0.0, 0.0, 0.0])
+    }
+
     /// Convenience constructor for an asteroid entity (the most common case).
     pub fn asteroid(uuid: impl Into<String>, x: f32, z: f32, radius: f32) -> Self {
         Self {
@@ -449,6 +457,7 @@ impl EntitySnapshot {
             inner_radius: None,
             warp_out_remaining_secs: None,
             radar_world_size: None,
+            half_extents: None,
         }
     }
 
@@ -465,7 +474,7 @@ impl EntitySnapshot {
             id: None,
             position: Some([x, 0.0, z]),
             tags: vec!["asteroid_field".into()],
-            shape: None,
+            shape: Some("torus".into()),
             radius: Some(outer_radius),
             colour: None,
             yaw: None,
@@ -473,6 +482,7 @@ impl EntitySnapshot {
             inner_radius: Some(inner_radius),
             warp_out_remaining_secs: None,
             radar_world_size: None,
+            half_extents: None,
         }
     }
 
@@ -491,6 +501,7 @@ impl EntitySnapshot {
             inner_radius: None,
             warp_out_remaining_secs: None,
             radar_world_size: None,
+            half_extents: None,
         }
     }
 }

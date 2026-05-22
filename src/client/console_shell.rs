@@ -317,8 +317,24 @@ fn tab_button_visuals(phone_assets: &PhoneAssets) -> StateVisuals {
     }
 }
 
-/// Rebuilds tab-button children on every [`EmbeddedTabBar`] when the lobby
-/// state or active console changes.
+/// Cached state that determines whether the tab bar needs rebuilding.
+///
+/// Using an explicit snapshot is more precise than `lobby.is_changed()`,
+/// which fires on every server message (position updates, radar pings, …)
+/// because `LobbyState::apply` is called for all server messages, marking the
+/// resource changed even when the player's console list is unchanged.  That
+/// caused constant per-frame rebuilds (and one-frame layout glitches) during
+/// active gameplay.
+#[derive(Default, PartialEq)]
+struct TabBarSnapshot {
+    consoles: Vec<Console>,
+    active: Option<Console>,
+    in_game: bool,
+}
+
+/// Rebuilds tab-button children on every [`EmbeddedTabBar`] when the player's
+/// console list, active console, or game phase changes, or when a new
+/// [`EmbeddedTabBar`] entity is added (e.g. after an orientation respawn).
 ///
 /// Rules:
 /// - Single-console player: tab bar hidden, no buttons spawned.
@@ -332,14 +348,24 @@ fn rebuild_embedded_tab_bars(
     active: Res<ActiveConsole>,
     phone_assets: Res<PhoneAssets>,
     mut tab_bars: Query<(Entity, &EmbeddedTabBar, &mut Visibility)>,
+    new_tab_bars: Query<(), Added<EmbeddedTabBar>>,
+    mut snapshot: Local<TabBarSnapshot>,
 ) {
-    if !lobby.is_changed() && !token.is_changed() && !active.is_changed() {
-        return;
-    }
-
     let view = LobbyView::new(&lobby, &token.0);
     let my_consoles = view.my_consoles();
     let in_game = lobby.phase == GamePhase::InProgress;
+
+    let current = TabBarSnapshot {
+        consoles: my_consoles.iter().cloned().collect(),
+        active: active.0.clone(),
+        in_game,
+    };
+
+    if current == *snapshot && new_tab_bars.is_empty() {
+        return;
+    }
+    *snapshot = current;
+
     let show_tabs = in_game && my_consoles.len() >= 2;
 
     for (tab_bar_entity, embedded, mut vis) in tab_bars.iter_mut() {

@@ -137,10 +137,14 @@ impl Plugin for PhoneBorderPlugin {
         app.init_resource::<DeviceOrientation>()
             .init_resource::<RedAlertIntensity>()
             .add_systems(Startup, (load_phone_assets, spawn_bezel_on_startup).chain())
+            // detect_orientation runs in PreUpdate so DeviceOrientation is always
+            // up-to-date before any Update system (including spawn_*_ui) reads it.
+            // This prevents consoles from spawning with the wrong orientation on
+            // the first frame when the window is landscape but the default is Portrait.
+            .add_systems(PreUpdate, detect_orientation)
             .add_systems(
                 Update,
                 (
-                    detect_orientation,
                     update_red_alert_intensity,
                     swap_phone_border_textures,
                     refresh_alert_banner,

@@ -1,9 +1,7 @@
+name = "Research Outpost"
 tags = ["station", "comms_contact", "science_facility"]
 
-[station]
-name = "Research Outpost"
-shape = "sphere"
-radius = 8.0
+[hull]
 hull_integrity = 60.0
 
 [radar_appearance]

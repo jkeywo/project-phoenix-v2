@@ -17,7 +17,7 @@ tags = ["field", "main", "asteroid_field"]
 
 [asteroid_field.grid]
 resolution = 15.0
-fill_gameplay = 0.2
+fill_gameplay = 0.4
 fill_cosmetic = 0.15
 uniformity = 0.3
 noise_freq = 0.02
@@ -26,5 +26,3 @@ density_noise_freq = 0.01
 density_noise_octaves = 2
 jitter = 10.0
 cosmetic_y_offset = 15.0
-spawn_cells = 20
-despawn_cells = 22

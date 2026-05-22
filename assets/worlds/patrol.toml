@@ -18,23 +18,23 @@ patrol_gamma = [0.0, 0.0, -500.0]
 
 [[entity]]
 template_path = "assets/entities/star_sun.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/asteroid_field_main.toml"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 
 [[entity]]
 template_path = "assets/entities/player_ship.toml"
 id = "player-ship"
-position = [0.0, 0.0, 0.0]
+transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 
 # ── Named entities (trigger / comms-eligible) ────────────────────────────────
 #
 # PRD #337 slice 3: the patrol raider migrated from `[[spawn]]` to a named
-# `[[entity]]` with `anchor = "patrol_alpha"`. The unified pipeline assigns
-# a UUID at spawn time, registers `raider_alpha` → uuid in
+# `[[entity]]` with `transform = { anchor = "patrol_alpha" }`. The unified
+# pipeline assigns a UUID at spawn time, registers `raider_alpha` → uuid in
 # `WorldConfig.name_to_uuid`, and `spawn_world_entities` wires the AI
 # components (BehaviourSection, FactionComponent) via the shared
 # `spawn_entity` helper.
@@ -42,7 +42,7 @@ spawn_on = "game_start"
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
-anchor        = "patrol_alpha"
+transform     = { anchor = "patrol_alpha" }
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 

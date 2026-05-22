@@ -1,9 +1,7 @@
+name = "Outpost Alpha"
 tags = ["station", "destructible"]
 
-[station]
-name = "Outpost Alpha"
-shape = "cylinder"
-radius = 12.0
+[hull]
 hull_integrity = 200.0
 
 [collider]

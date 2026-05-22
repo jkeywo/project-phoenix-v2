@@ -1,9 +1,7 @@
+name = "Axiom Station"
 tags = ["station", "comms_contact", "allied"]
 
-[station]
-name = "Axiom Station"
-shape = "torus"
-radius = 18.0
+[hull]
 hull_integrity = 200.0
 
 [radar_appearance]

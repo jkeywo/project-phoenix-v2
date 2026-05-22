@@ -12,6 +12,7 @@ use crate::shield::ShieldSystem;
 use rand::SeedableRng as _;
 
 use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage};
+use crate::debug_overlay::{DamageLog, DamageLogEntry};
 use crate::shield::attacker_bearing_relative;
 use crate::ship_physics::ShipPhysicsConfig;
 use crate::ship_state::ShipState;
@@ -455,6 +456,7 @@ fn handle_collisions(
     mut outbox: ResMut<SimOutbox>,
     mut next_state: ResMut<NextState<GamePhase>>,
     mut game_over_reason: ResMut<GameOverReason>,
+    mut damage_log: ResMut<DamageLog>,
 ) {
     let dt = time.delta_secs();
     cooldown.remaining_secs = (cooldown.remaining_secs - dt).max(0.0);
@@ -499,6 +501,27 @@ fn handle_collisions(
                 })
             })
             .unwrap_or(0.0);
+
+        let source_label = contact
+            .and_then(|attacker_entity| {
+                asteroid_query.get(attacker_entity).ok().map(|(_, uuid)| {
+                    format!("asteroid:{}", uuid.0)
+                })
+            })
+            .unwrap_or_else(|| "collision".to_string());
+
+        let arc_idx = shields.0.facing_index_for_bearing(bearing);
+        let arc_label = shields
+            .0
+            .facings
+            .get(arc_idx)
+            .map(|f| f.label.clone());
+
+        damage_log.push(DamageLogEntry {
+            source: source_label,
+            shield_arc: arc_label,
+            amount: damage,
+        });
 
         let hull_damage_from_shields =
             apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);

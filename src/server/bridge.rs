@@ -58,10 +58,19 @@ thread_local! {
     /// `drain_debug_toggles` each `PreUpdate` frame.
     static PENDING_PAUSE_TOGGLE: RefCell<bool> = const { RefCell::new(false) };
 
+    /// Pending toggle request from `wasm_toggle_debug_damage()`. Drained by
+    /// `drain_debug_toggles` each `PreUpdate` frame.
+    static PENDING_TOGGLE_DAMAGE: RefCell<bool> = const { RefCell::new(false) };
+
     /// Pre-formatted modifier debug text written by `write_debug_state` each
     /// `PostUpdate` frame when the overlay is enabled. Read by
     /// `wasm_get_debug_state()` from JS.
     static DEBUG_STATE_STRING: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// Pre-formatted damage-log text written by `write_damage_log` each
+    /// `PostUpdate` frame when the damage overlay is enabled. Read by
+    /// `wasm_get_damage_log()` from JS.
+    static DAMAGE_LOG_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -221,6 +230,16 @@ pub fn wasm_toggle_debug_pause() {
     PENDING_PAUSE_TOGGLE.with(|v| *v.borrow_mut() = true);
 }
 
+/// Called by JS (e.g. F8 keydown) to toggle the damage debug overlay at runtime.
+///
+/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
+/// `PreUpdate` frame, which flips the `DebugDamageEnabled` Bevy resource.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_debug_damage() {
+    PENDING_TOGGLE_DAMAGE.with(|v| *v.borrow_mut() = true);
+}
+
 /// Called by JS each animation frame to read the latest formatted modifier
 /// debug state when the overlay is visible.
 #[cfg(target_arch = "wasm32")]
@@ -234,6 +253,21 @@ pub fn wasm_get_debug_state() -> String {
 #[cfg(target_arch = "wasm32")]
 pub fn set_debug_state_string(text: String) {
     DEBUG_STATE_STRING.with(|v| *v.borrow_mut() = text);
+}
+
+/// Called by JS each animation frame to read the latest damage log text when
+/// the damage overlay is visible.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_damage_log() -> String {
+    DAMAGE_LOG_STRING.with(|v| v.borrow().clone())
+}
+
+/// Called by the Bevy `write_damage_log` system to update the damage log
+/// string that JS reads via `wasm_get_damage_log()`.
+#[cfg(target_arch = "wasm32")]
+pub fn set_damage_log_string(text: String) {
+    DAMAGE_LOG_STRING.with(|v| *v.borrow_mut() = text);
 }
 
 // ── Config Preload Exports ──────────────────────────────────────────────────
@@ -316,6 +350,7 @@ fn drain_debug_toggles(
     mut regions_enabled: ResMut<crate::debug_overlay::DebugRegionsEnabled>,
     mut overlay_enabled: ResMut<crate::debug_overlay::DebugOverlayEnabled>,
     mut paused: ResMut<crate::debug_overlay::DebugPaused>,
+    mut damage_enabled: ResMut<crate::debug_overlay::DebugDamageEnabled>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
     // ── Region wireframes toggle (F4) ──────────────────────────────────────
@@ -353,6 +388,16 @@ fn drain_debug_toggles(
         } else {
             virtual_time.unpause();
         }
+    }
+
+    // ── Damage overlay toggle (F8) ─────────────────────────────────────────
+    let pending_damage = PENDING_TOGGLE_DAMAGE.with(|v| {
+        let was = *v.borrow();
+        *v.borrow_mut() = false;
+        was
+    });
+    if pending_damage {
+        damage_enabled.0 = !damage_enabled.0;
     }
 }
 

@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::VecDeque;
 
 use crate::entity_spawner::RegionShapeSection;
 use crate::region_shape::RegionShape;
@@ -16,6 +17,63 @@ pub struct DebugOverlayEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct DebugPaused(pub bool);
 
+/// Resource indicating whether the damage debug overlay (F8) is enabled.
+#[derive(Resource, Default)]
+pub struct DebugDamageEnabled(pub bool);
+
+/// Maximum number of damage log entries retained.
+pub const DAMAGE_LOG_CAPACITY: usize = 10;
+
+/// A single damage event recorded for the F8 overlay.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DamageLogEntry {
+    /// Human-readable description of the damage source (e.g. asteroid uuid,
+    /// region uuid, weapon name).
+    pub source: String,
+    /// Shield arc label hit, or `None` when shields were bypassed / absent.
+    pub shield_arc: Option<String>,
+    /// Total damage amount before shield absorption (hull + shield combined).
+    pub amount: f32,
+}
+
+/// Ring-buffer of the most recent damage events.
+///
+/// Always retains up to `DAMAGE_LOG_CAPACITY` entries, newest at the front.
+/// Populated by damage application sites; read by the F8 overlay system.
+#[derive(Resource, Default)]
+pub struct DamageLog {
+    pub entries: VecDeque<DamageLogEntry>,
+}
+
+impl DamageLog {
+    /// Push a new entry to the front, evicting the oldest when at capacity.
+    pub fn push(&mut self, entry: DamageLogEntry) {
+        self.entries.push_front(entry);
+        while self.entries.len() > DAMAGE_LOG_CAPACITY {
+            self.entries.pop_back();
+        }
+    }
+
+    /// Format the log as a multi-line string for display.
+    pub fn format(&self) -> String {
+        if self.entries.is_empty() {
+            return "(no damage)".to_string();
+        }
+        let mut out = String::from("DAMAGE LOG (newest first)\n");
+        for (i, e) in self.entries.iter().enumerate() {
+            let arc = e.shield_arc.as_deref().unwrap_or("—");
+            out.push_str(&format!(
+                "{:>2}. {:<24} arc={:<10} dmg={:.1}\n",
+                i + 1,
+                e.source,
+                arc,
+                e.amount
+            ));
+        }
+        out
+    }
+}
+
 /// Server-only plugin that draws region shape wireframes when enabled.
 ///
 /// The `enabled` field is typically set from the `?debug_regions=1` URL parameter
@@ -29,6 +87,8 @@ impl Plugin for DebugOverlayPlugin {
         app.insert_resource(DebugRegionsEnabled(self.enabled));
         app.init_resource::<DebugOverlayEnabled>();
         app.init_resource::<DebugPaused>();
+        app.init_resource::<DebugDamageEnabled>();
+        app.init_resource::<DamageLog>();
         app.add_systems(
             Update,
             draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),
@@ -36,6 +96,10 @@ impl Plugin for DebugOverlayPlugin {
         app.add_systems(
             PostUpdate,
             write_debug_state.run_if(|r: Res<DebugOverlayEnabled>| r.0),
+        );
+        app.add_systems(
+            PostUpdate,
+            write_damage_log.run_if(|r: Res<DebugDamageEnabled>| r.0),
         );
     }
 }
@@ -53,6 +117,20 @@ fn write_debug_state(modifiers: Res<ShipModifiers>) {
 /// Native / test stub — does nothing (no thread-locals available outside WASM).
 #[cfg(not(target_arch = "wasm32"))]
 fn write_debug_state(_modifiers: Res<ShipModifiers>) {}
+
+/// Reads the `DamageLog` resource and writes the formatted text to the WASM
+/// thread-local `DAMAGE_LOG_STRING` for the F8 overlay.
+///
+/// Only runs when `DebugDamageEnabled` is true.
+#[cfg(target_arch = "wasm32")]
+fn write_damage_log(log: Res<DamageLog>) {
+    let text = log.format();
+    crate::bridge::set_damage_log_string(text);
+}
+
+/// Native / test stub — does nothing.
+#[cfg(not(target_arch = "wasm32"))]
+fn write_damage_log(_log: Res<DamageLog>) {}
 
 /// Draws wireframe outlines for every region entity with a shape component.
 fn draw_region_wireframes(
@@ -208,5 +286,69 @@ mod tests {
         app.world_mut().resource_mut::<DebugOverlayEnabled>().0 = false;
         let enabled = app.world().resource::<DebugOverlayEnabled>();
         assert!(!enabled.0, "overlay should be disabled after second toggle");
+    }
+
+    // ── DamageLog tests ───────────────────────────────────────────────────
+
+    fn entry(source: &str, arc: Option<&str>, amount: f32) -> DamageLogEntry {
+        DamageLogEntry {
+            source: source.to_string(),
+            shield_arc: arc.map(|s| s.to_string()),
+            amount,
+        }
+    }
+
+    #[test]
+    fn damage_log_starts_empty() {
+        let log = DamageLog::default();
+        assert!(log.entries.is_empty());
+        assert_eq!(log.format(), "(no damage)");
+    }
+
+    #[test]
+    fn damage_log_pushes_newest_to_front() {
+        let mut log = DamageLog::default();
+        log.push(entry("a", Some("Fore"), 1.0));
+        log.push(entry("b", Some("Port"), 2.0));
+        assert_eq!(log.entries.len(), 2);
+        assert_eq!(log.entries[0].source, "b");
+        assert_eq!(log.entries[1].source, "a");
+    }
+
+    #[test]
+    fn damage_log_caps_at_capacity() {
+        let mut log = DamageLog::default();
+        for i in 0..(DAMAGE_LOG_CAPACITY + 5) {
+            log.push(entry(&format!("s{}", i), None, i as f32));
+        }
+        assert_eq!(log.entries.len(), DAMAGE_LOG_CAPACITY);
+        // Newest at front
+        assert_eq!(log.entries[0].source, format!("s{}", DAMAGE_LOG_CAPACITY + 4));
+        // Oldest retained is the one DAMAGE_LOG_CAPACITY back from newest
+        assert_eq!(log.entries[DAMAGE_LOG_CAPACITY - 1].source, "s5");
+    }
+
+    #[test]
+    fn damage_log_format_includes_source_arc_and_amount() {
+        let mut log = DamageLog::default();
+        log.push(entry("asteroid-42", Some("Fore"), 12.5));
+        log.push(entry("region-zone", None, 3.0));
+        let text = log.format();
+        assert!(text.contains("region-zone"));
+        assert!(text.contains("asteroid-42"));
+        assert!(text.contains("Fore"));
+        assert!(text.contains("12.5"));
+        assert!(text.contains("3.0"));
+        // None arc renders as em-dash placeholder
+        assert!(text.contains("—"));
+    }
+
+    #[test]
+    fn debug_damage_disabled_by_default() {
+        let plugin = DebugOverlayPlugin { enabled: false };
+        let mut app = App::new();
+        plugin.build(&mut app);
+        let enabled = app.world().resource::<DebugDamageEnabled>();
+        assert!(!enabled.0, "damage overlay should be disabled by default");
     }
 }

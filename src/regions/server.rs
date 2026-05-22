@@ -3,6 +3,7 @@ use rand::SeedableRng as _;
 use std::collections::{HashMap, HashSet};
 
 use crate::entity_spawner::{RegionShapeSection, RegionEffectsSection, EntityUuid};
+use crate::debug_overlay::{DamageLog, DamageLogEntry};
 use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse};
 use crate::ship_state::ShipState;
 use crate::region_effects::RegionEffectKind;
@@ -114,12 +115,13 @@ pub(crate) fn update_region_membership(
 fn apply_damage_zone_damage(
     time: Res<Time>,
     membership: Res<RegionMembership>,
-    region_query: Query<&RegionEffectsSection>,
+    region_query: Query<(&RegionEffectsSection, Option<&EntityUuid>)>,
     ship_query: Query<Entity, With<Ship>>,
     hull: Option<ResMut<ShipHullIntegrity>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
+    mut damage_log: Option<ResMut<DamageLog>>,
 ) {
     let Some(mut hull) = hull else {
         return;
@@ -139,7 +141,7 @@ fn apply_damage_zone_damage(
     };
 
     for &region_entity in region_set.iter() {
-        let Ok(effects) = region_query.get(region_entity) else {
+        let Ok((effects, uuid_opt)) = region_query.get(region_entity) else {
             continue;
         };
         for effect in &effects.0 {
@@ -151,6 +153,16 @@ fn apply_damage_zone_damage(
                     total_damage,
                     &mut rng,
                 );
+                if let Some(ref mut log) = damage_log {
+                    let source = uuid_opt
+                        .map(|u| format!("region:{}", u.0))
+                        .unwrap_or_else(|| "region:damage_zone".to_string());
+                    log.push(DamageLogEntry {
+                        source,
+                        shield_arc: None,
+                        amount: total_damage,
+                    });
+                }
                 if let Some(ref mut ob) = outbox {
                     ob.0.push((Target::All, ServerMessage::DamageTaken {
                         hull: hull_applied,

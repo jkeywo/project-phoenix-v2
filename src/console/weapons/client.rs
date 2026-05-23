@@ -9,7 +9,6 @@
 //! via observers at spawn time.
 
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
 use std::collections::HashMap;
 
 use crate::client::console_shell::ConsoleShell;
@@ -381,61 +380,41 @@ pub struct TacticalRadarTapTarget;
 /// we must therefore promote the logical tap into the same physical basis.
 ///
 /// Returns `(local_x, local_y)` with origin at the node's top-left.
-pub fn radar_local_pixel(
-    tap_logical: Vec2,
-    node_physical_top_left: Vec2,
-    _node_physical_size: Vec2,
-    scale_factor: f32,
-) -> Vec2 {
-    let tap_physical = tap_logical * scale_factor;
-    tap_physical - node_physical_top_left
+pub fn radar_local_pixel(tap_logical: Vec2, node_top_left: Vec2) -> Vec2 {
+    tap_logical - node_top_left
 }
 
 /// Observer: when the tactical radar is tapped, find the nearest ship/missile
 /// blip to the tap point and dispatch `SetTarget { uuid }`.
 ///
-/// `pointer_location.position` is in **logical** window pixels, while
-/// `ComputedNode::size()` and `GlobalTransform::translation()` for UI nodes are
-/// in **physical** pixels. We convert the tap to physical pixels via the
-/// primary window's `scale_factor()` so the comparison is consistent on
-/// high-DPI displays (phones).
+/// All spatial values (`pointer_location.position`, `ComputedNode::size()`,
+/// `GlobalTransform::translation()`) are in logical pixels. Blips are laid
+/// out by the renderer in the same logical-pixel space, so the comparison
+/// is direct — no scale-factor conversion needed.
 fn on_tactical_radar_tap(
     trigger: On<Pointer<Click>>,
     radars: Query<(&ComputedNode, &GlobalTransform, &GenericRadarWidget), With<TacticalRadarTapTarget>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
     sim: Res<ClientSimState>,
     ship_view: Res<ShipView>,
-    mut commands: Commands,
+    mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     let entity = trigger.entity;
     let Ok((computed, gt, widget)) = radars.get(entity) else {
         return;
     };
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let scale = window.scale_factor() as f32;
 
-    // Radar centre + size in physical pixels (UI GlobalTransform is centred).
+    // Radar centre + size (logical pixels, UI GlobalTransform is centred).
     let size = computed.size();
-    let radar_radius_px = size.x.min(size.y) * 0.5;
-    if radar_radius_px <= 0.0 {
+    let radar_radius = size.x.min(size.y) * 0.5;
+    if radar_radius <= 0.0 {
         return;
     }
     let centre = gt.translation();
     let centre_xy = Vec2::new(centre.x, centre.y);
     let top_left = centre_xy - size * 0.5;
 
-    // Tap point in radar-local physical pixel space (origin top-left).
-    let tap = radar_local_pixel(
-        trigger.event().pointer_location.position,
-        top_left,
-        size,
-        scale,
-    );
-
-    // Convert the tap to the same (left, top) basis the renderer uses for
-    // blip centres: blip centre = (radius + nx*radius, radius - ny*radius).
+    // Tap point in radar-local pixel space (origin top-left).
+    let tap = radar_local_pixel(trigger.event().pointer_location.position, top_left);
     let click_local = (tap.x, tap.y);
 
     // Project every entity matching the radar's filter to radar-local pixels.
@@ -462,17 +441,14 @@ fn on_tactical_radar_tap(
             if nx * nx + ny * ny > 1.0 {
                 return None;
             }
-            let px = radar_radius_px + nx * radar_radius_px;
-            let py = radar_radius_px - ny * radar_radius_px;
+            let px = radar_radius + nx * radar_radius;
+            let py = radar_radius - ny * radar_radius;
             Some((snap.uuid.clone(), px, py))
         })
         .collect();
 
     if let Some(uuid) = nearest_entity_to_point(click_local, &projected) {
-        let msg = set_target_message(uuid);
-        commands.queue(|world: &mut World| {
-            world.write_message(OutboundClientMessage(msg));
-        });
+        outbound.write(OutboundClientMessage(set_target_message(uuid)));
     }
 }
 
@@ -1281,59 +1257,33 @@ mod tests {
     // ── radar_local_pixel coordinate conversion ───────────────────────
 
     #[test]
-    fn radar_local_pixel_scale_factor_one_is_identity_minus_top_left() {
-        // Desktop: logical == physical. Node at (100,200), size 400x400, tap
-        // at logical (300, 400) → local physical (200, 200) (i.e. the centre).
-        let out = radar_local_pixel(
-            Vec2::new(300.0, 400.0),
-            Vec2::new(100.0, 200.0),
-            Vec2::new(400.0, 400.0),
-            1.0,
-        );
+    fn radar_local_pixel_centre_of_node() {
+        // Node top-left at (100, 200), tap at logical (300, 400)
+        // → local (200, 200) — the centre of the 400x400 node.
+        let out = radar_local_pixel(Vec2::new(300.0, 400.0), Vec2::new(100.0, 200.0));
         assert_eq!(out, Vec2::new(200.0, 200.0));
     }
 
     #[test]
-    fn radar_local_pixel_scale_factor_two_centre_of_node() {
-        // High-DPI phone: node is 400x400 physical px sitting at physical
-        // top-left (200, 200). In logical pixels that's top-left (100, 100)
-        // and size 200x200, so the logical centre tap is (200, 200).
-        // Expected local physical: (200, 200) — the centre of the node.
-        let out = radar_local_pixel(
-            Vec2::new(200.0, 200.0),
-            Vec2::new(200.0, 200.0),
-            Vec2::new(400.0, 400.0),
-            2.0,
-        );
-        assert_eq!(out, Vec2::new(200.0, 200.0));
-    }
-
-    #[test]
-    fn radar_local_pixel_scale_factor_non_integer() {
-        // scale 1.5: node physical top-left (150, 75), size 300x300.
-        // Logical top-left = (100, 50), logical size = 200x200.
-        // Logical centre tap = (200, 150) → physical tap (300, 225) →
-        // local = (150, 150), the physical centre of the node.
-        let out = radar_local_pixel(
-            Vec2::new(200.0, 150.0),
-            Vec2::new(150.0, 75.0),
-            Vec2::new(300.0, 300.0),
-            1.5,
-        );
-        assert_eq!(out, Vec2::new(150.0, 150.0));
-    }
-
-    #[test]
-    fn radar_local_pixel_scale_factor_two_top_left_corner() {
-        // Tap at the node's logical top-left corner should map to local (0,0).
-        // Node physical top-left (200, 200), scale 2.0 → logical top-left (100, 100).
-        let out = radar_local_pixel(
-            Vec2::new(100.0, 100.0),
-            Vec2::new(200.0, 200.0),
-            Vec2::new(400.0, 400.0),
-            2.0,
-        );
+    fn radar_local_pixel_top_left_corner_returns_zero() {
+        // Tap at the node's top-left corner maps to local (0, 0).
+        let out = radar_local_pixel(Vec2::new(100.0, 100.0), Vec2::new(100.0, 100.0));
         assert_eq!(out, Vec2::ZERO);
+    }
+
+    #[test]
+    fn radar_local_pixel_negative_offset_outside_node() {
+        // Tap above and left of the node produces negative local coords.
+        let out = radar_local_pixel(Vec2::new(50.0, 30.0), Vec2::new(100.0, 100.0));
+        assert_eq!(out, Vec2::new(-50.0, -70.0));
+    }
+
+    #[test]
+    fn radar_local_pixel_bottom_right_of_node() {
+        // 400x400 node at (100, 200), tap at (500, 600)
+        // → local (400, 400) — the bottom-right corner.
+        let out = radar_local_pixel(Vec2::new(500.0, 600.0), Vec2::new(100.0, 200.0));
+        assert_eq!(out, Vec2::new(400.0, 400.0));
     }
 
     // ── weapons_panel_visible ─────────────────────────────────────────

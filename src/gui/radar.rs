@@ -688,18 +688,18 @@ fn sync_radar_blip_nodes(
                     });
                 let outer_size_px = match &shape {
                     RegionRadarShape::Sphere { radius } => {
-                        world_size_to_px(radius * 2.0, range, radar_radius_px)
+                        world_size_to_px(*radius, range, radar_radius_px)
                     }
                     RegionRadarShape::Torus { outer_radius, .. } => {
-                        world_size_to_px(outer_radius * 2.0, range, radar_radius_px)
+                        world_size_to_px(*outer_radius, range, radar_radius_px)
                     }
                     RegionRadarShape::Box {
                         half_extents_x,
                         half_extents_z,
                         ..
                     } => {
-                        let w = world_size_to_px(half_extents_x * 2.0, range, radar_radius_px);
-                        let h = world_size_to_px(half_extents_z * 2.0, range, radar_radius_px);
+                        let w = world_size_to_px(*half_extents_x, range, radar_radius_px);
+                        let h = world_size_to_px(*half_extents_z, range, radar_radius_px);
                         w.max(h)
                     }
                 };
@@ -842,7 +842,7 @@ fn sync_radar_blip_nodes(
                         node,
                         bg,
                         border_color,
-                        ZIndex(10),
+                        ZIndex(3),
                         RadarRegionNode { source },
                     ));
                 }
@@ -883,7 +883,7 @@ fn update_region_node(
     match *shape {
         RegionRadarShape::Sphere { radius } => {
             let diameter_px =
-                world_size_to_px(radius * 2.0, range, radar_radius_px).max(2.0);
+                world_size_to_px(radius, range, radar_radius_px).max(2.0);
             let half = diameter_px * 0.5;
             let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
             node.left = Val::Px(left);
@@ -900,7 +900,7 @@ fn update_region_node(
             outer_radius,
         } => {
             let outer_px =
-                world_size_to_px(outer_radius * 2.0, range, radar_radius_px).max(2.0);
+                world_size_to_px(outer_radius, range, radar_radius_px).max(2.0);
             let inner_px = (inner_radius / range * radar_radius_px * 2.0).max(0.0);
             let border_px = ((outer_px - inner_px) * 0.5).max(1.0);
             let half = outer_px * 0.5;
@@ -920,9 +920,9 @@ fn update_region_node(
             ..
         } => {
             let width_px =
-                world_size_to_px(half_extents_x * 2.0, range, radar_radius_px).max(2.0);
+                world_size_to_px(half_extents_x, range, radar_radius_px).max(2.0);
             let height_px =
-                world_size_to_px(half_extents_z * 2.0, range, radar_radius_px).max(2.0);
+                world_size_to_px(half_extents_z, range, radar_radius_px).max(2.0);
             let half_w = width_px * 0.5;
             let half_h = height_px * 0.5;
             let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half_w);

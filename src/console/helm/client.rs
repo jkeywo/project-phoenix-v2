@@ -282,7 +282,7 @@ fn refresh_helm_impulse_state(
     let (joystick_visible, cancel_visible) = impulse_ui_visibility(progress);
     let to_vis = |b: bool| {
         if b {
-            Visibility::Visible
+            Visibility::Inherited
         } else {
             Visibility::Hidden
         }

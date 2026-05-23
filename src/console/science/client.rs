@@ -189,7 +189,6 @@ fn fill_sensors_radar(commands: &mut Commands, container: Entity) {
         RadarLayer::PlayerShip,
         RadarLayer::Ship,
         RadarLayer::Asteroid,
-        RadarLayer::AsteroidField,
         RadarLayer::Station,
         RadarLayer::Planet,
         RadarLayer::Star,

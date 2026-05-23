@@ -327,8 +327,8 @@ fn fill_tactical_radar(
         1.0,
         1.0,
     );
-    let beam = Color::srgba(beam_color[0], beam_color[1], beam_color[2], beam_color[3]);
-    let torp = Color::srgba(torp_color[0], torp_color[1], torp_color[2], torp_color[3]);
+    let beam = Color::srgba(beam_color[0], beam_color[1], beam_color[2], 0.15);
+    let torp = Color::srgba(torp_color[0], torp_color[1], torp_color[2], 0.15);
     let mut arcs: Vec<RadarArc> = Vec::new();
     for bank in banks {
         arcs.push(RadarArc {

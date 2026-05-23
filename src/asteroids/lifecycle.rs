@@ -30,6 +30,11 @@ pub use crate::entity_spawner::EntityConsoleHull;
 #[derive(Resource)]
 pub struct AsteroidWindow {
     pub slots: Vec<Vec<Option<AsteroidData>>>,
+    /// Cosmetic asteroids above the gameplay plane. Indexed [slot_z][slot_x].
+    /// Stores raw Entity handles only — cosmetics have no UUID / hull tracking.
+    pub cosmetic_upper_slots: Vec<Vec<Option<Entity>>>,
+    /// Cosmetic asteroids below the gameplay plane. Indexed [slot_z][slot_x].
+    pub cosmetic_lower_slots: Vec<Vec<Option<Entity>>>,
     pub arena_gx: i32,
     pub arena_gz: i32,
     pub despawn_cells: u32,
@@ -50,6 +55,8 @@ impl Default for AsteroidWindow {
         let size = (2 * dc + 1) as usize;
         Self {
             slots: vec![vec![None; size]; size],
+            cosmetic_upper_slots: vec![vec![None; size]; size],
+            cosmetic_lower_slots: vec![vec![None; size]; size],
             arena_gx: 0,
             arena_gz: 0,
             despawn_cells: dc,
@@ -162,6 +169,7 @@ pub fn update_asteroid_window(
             &mut commands, &mut window, &mut entity_map, &mut world, &mut outbox,
             gx, gz, field_idx, &grid, field.inner_radius, field.outer_radius,
             &field.asteroid_type_paths,
+            &field.cosmetic_type_paths,
         );
     } else {
         for (cell_gx, cell_gz) in &delta.cells_to_despawn {
@@ -183,6 +191,11 @@ pub fn update_asteroid_window(
                     &mut commands, &mut window, &mut entity_map, &mut world, &mut outbox,
                     *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
                     field.inner_radius, field.outer_radius, &field.asteroid_type_paths,
+                );
+                try_spawn_cosmetic_cell(
+                    &mut commands, &mut window,
+                    *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
+                    field.inner_radius, field.outer_radius, &field.cosmetic_type_paths,
                 );
             }
         }
@@ -206,11 +219,29 @@ fn full_rebuild(
     grid: &crate::entity_config::GridConfig,
     inner_radius: f32, outer_radius: f32,
     gameplay_type_paths: &[String],
+    cosmetic_type_paths: &[String],
 ) {
     for (_uuid, &entity) in entity_map.0.iter() {
         commands.entity(entity).despawn();
     }
     entity_map.0.clear();
+
+    // Despawn all existing cosmetic entities before resizing the slot arrays.
+    for row in &window.cosmetic_upper_slots {
+        for slot in row {
+            if let Some(&entity) = slot.as_ref() {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+    for row in &window.cosmetic_lower_slots {
+        for slot in row {
+            if let Some(&entity) = slot.as_ref() {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+
     // Only remove asteroid snapshots from WorldResource; preserve named entities
     // (stations, raiders, player ship) spawned by world/server.rs and game-start systems.
     world.0.entities.retain(|e| !e.tags.iter().any(|t| t == "asteroid"));
@@ -221,6 +252,8 @@ fn full_rebuild(
 
     let size = (2 * window.despawn_cells + 1) as usize;
     window.slots = vec![vec![None; size]; size];
+    window.cosmetic_upper_slots = vec![vec![None; size]; size];
+    window.cosmetic_lower_slots = vec![vec![None; size]; size];
     window.arena_gx = gx;
     window.arena_gz = gz;
     window.resolution = grid.resolution;
@@ -238,6 +271,11 @@ fn full_rebuild(
                     commands, window, entity_map, world, outbox,
                     cx, cz, sx, sz, field_idx, grid,
                     inner_radius, outer_radius, gameplay_type_paths,
+                );
+                try_spawn_cosmetic_cell(
+                    commands, window,
+                    cx, cz, sx, sz, field_idx, grid,
+                    inner_radius, outer_radius, cosmetic_type_paths,
                 );
             }
         }
@@ -281,21 +319,28 @@ fn try_spawn_cell(
         gameplay_type_paths, &[],
     ) else { return };
 
-    let uuid = uuid::Uuid::new_v4().to_string();
-    let max_hp = 30.0f32;
-
-    let asteroid_hull = EntityConsoleHull(
-        crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])
-    );
-
-    // Look up the entity config from the cache so the collider radius
-    // (and visual mesh) come from the TOML rather than a hard-coded value.
+    // Look up the entity config from the cache so the collider radius,
+    // visual mesh, HP, and tags come from the TOML rather than hard-coded values.
     let config_cache = crate::config_cache::get_config_cache();
     let entity_config = config_cache.get(&spawn.config_path);
     let collider_radius = entity_config
         .and_then(|c| c.collider.as_ref())
         .map(|c| c.radius)
         .unwrap_or(2.0);
+    let max_hp = entity_config
+        .and_then(|c| c.hull.as_ref())
+        .map(|h| if h.hull_integrity > 0.0 { h.hull_integrity } else { h.captain_chair.unwrap_or(30.0) })
+        .unwrap_or(30.0);
+    let snapshot_tags = entity_config
+        .map(|c| c.tags.clone())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| vec!["asteroid".into()]);
+
+    let uuid = uuid::Uuid::new_v4().to_string();
+
+    let asteroid_hull = EntityConsoleHull(
+        crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])
+    );
 
     let mut entity_cmd = commands.spawn((
         Asteroid,
@@ -326,7 +371,8 @@ fn try_spawn_cell(
     world.0.entities.push(EntitySnapshot {
         uuid: uuid.clone(),
         position: Some([spawn.x, spawn.y, spawn.z]),
-        tags: vec!["asteroid".into()],
+        tags: snapshot_tags,
+        radius: Some(collider_radius),
         ..EntitySnapshot::default()
     });
 
@@ -338,6 +384,7 @@ fn try_spawn_cell(
         config_path: spawn.config_path,
         max_hp: max_hp as i32,
         current_hp: max_hp as i32,
+        radius: collider_radius,
     }));
 }
 
@@ -356,6 +403,95 @@ fn clear_slot(
             }
             entity_map.0.remove(&data.uuid);
             world.0.entities.retain(|e| e.uuid != data.uuid);
+        }
+    }
+    if let Some(entity) = window.cosmetic_upper_slots
+        .get_mut(slot_z).and_then(|row| row.get_mut(slot_x)).and_then(|s| s.take())
+    {
+        commands.entity(entity).despawn();
+    }
+    if let Some(entity) = window.cosmetic_lower_slots
+        .get_mut(slot_z).and_then(|row| row.get_mut(slot_x)).and_then(|s| s.take())
+    {
+        commands.entity(entity).despawn();
+    }
+}
+
+/// Spawn a single cosmetic asteroid entity (no hull, no UUID tracking).
+/// Returns the spawned `Entity` so the caller can store it in a cosmetic slot.
+fn spawn_cosmetic_entity(
+    commands: &mut Commands,
+    spawn: &crate::asteroid_spawner::AsteroidSpawn,
+    y: f32,
+) -> Entity {
+    let config_cache = crate::config_cache::get_config_cache();
+    let entity_config = config_cache.get(&spawn.config_path);
+    let collider_radius = entity_config
+        .and_then(|c| c.collider.as_ref())
+        .map(|c| c.radius)
+        .unwrap_or(1.0);
+
+    let mut entity_cmd = commands.spawn((
+        Transform::from_xyz(spawn.x, y, spawn.z),
+        bevy_rapier3d::prelude::Collider::ball(collider_radius),
+        bevy_rapier3d::prelude::RigidBody::Fixed,
+    ));
+
+    if let Some(cfg) = entity_config {
+        if let Some(mesh) = &cfg.mesh {
+            entity_cmd.insert(MeshSection(mesh.clone()));
+        }
+    }
+
+    entity_cmd.id()
+}
+
+/// Evaluate and spawn cosmetic asteroids (upper and lower) for a single grid cell.
+/// Uses seed offsets that are independent from the gameplay seed to avoid overlap.
+fn try_spawn_cosmetic_cell(
+    commands: &mut Commands,
+    window: &mut AsteroidWindow,
+    cell_gx: i32, cell_gz: i32,
+    slot_x: usize, slot_z: usize,
+    field_idx: usize,
+    grid: &crate::entity_config::GridConfig,
+    inner_radius: f32, outer_radius: f32,
+    cosmetic_type_paths: &[String],
+) {
+    if cosmetic_type_paths.is_empty() {
+        return;
+    }
+
+    let cell_cx = cell_gx as f32 * grid.resolution;
+    let cell_cz = cell_gz as f32 * grid.resolution;
+    let dist = (cell_cx * cell_cx + cell_cz * cell_cz).sqrt();
+    if dist < inner_radius || dist > outer_radius {
+        return;
+    }
+
+    // Upper layer — large seed offset keeps this independent from gameplay seeds.
+    if window.cosmetic_upper_slots[slot_z][slot_x].is_none() {
+        if let Some(spawn) = eval_cell(
+            field_idx as u64 + 0x0001_0000_0000,
+            cell_gx, cell_gz, grid,
+            inner_radius, outer_radius,
+            &[], cosmetic_type_paths,
+        ) {
+            let entity = spawn_cosmetic_entity(commands, &spawn, spawn.y);
+            window.cosmetic_upper_slots[slot_z][slot_x] = Some(entity);
+        }
+    }
+
+    // Lower layer — separate seed offset so upper and lower differ.
+    if window.cosmetic_lower_slots[slot_z][slot_x].is_none() {
+        if let Some(spawn) = eval_cell(
+            field_idx as u64 + 0x0002_0000_0000,
+            cell_gx, cell_gz, grid,
+            inner_radius, outer_radius,
+            &[], cosmetic_type_paths,
+        ) {
+            let entity = spawn_cosmetic_entity(commands, &spawn, -spawn.y);
+            window.cosmetic_lower_slots[slot_z][slot_x] = Some(entity);
         }
     }
 }
@@ -412,6 +548,7 @@ mod tests {
             density_noise_octaves: 2,
             jitter: 0.0,
             cosmetic_y_offset: 0.0,
+            gameplay_y_variance: 0.0,
             spawn_cells: 2,
             despawn_cells: 3,
         }

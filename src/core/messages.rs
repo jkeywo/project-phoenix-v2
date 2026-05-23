@@ -885,6 +885,7 @@ pub enum ServerMessage {
         config_path: String,
         max_hp: i32,
         current_hp: i32,
+        radius: f32,
     },
     /// Sent at 10 Hz to the Power console holder only. Carries the current
     /// power allocation levels, battery charge fraction, and whether the

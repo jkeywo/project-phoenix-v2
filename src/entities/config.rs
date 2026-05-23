@@ -2679,6 +2679,8 @@ pub struct GridConfig {
     pub jitter: f32,
     #[serde(default)]
     pub cosmetic_y_offset: f32,
+    #[serde(default = "default_gameplay_y_variance")]
+    pub gameplay_y_variance: f32,
     #[serde(default = "default_spawn_cells")]
     pub spawn_cells: u32,
     #[serde(default = "default_despawn_cells")]
@@ -2702,6 +2704,9 @@ fn default_density_noise_freq() -> f32 {
 }
 fn default_density_noise_octaves() -> u32 {
     2
+}
+fn default_gameplay_y_variance() -> f32 {
+    0.5
 }
 fn default_spawn_cells() -> u32 {
     10

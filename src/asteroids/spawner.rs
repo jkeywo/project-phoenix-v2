@@ -169,7 +169,8 @@ pub fn eval_cell(
             let x = cell_center_x + jitter.0;
             let z = cell_center_z + jitter.1;
             let config_path = gameplay_type_paths[rng.random_range(0..gameplay_type_paths.len())].clone();
-            return Some(AsteroidSpawn { x, z, y: 0.0, config_path });
+            let y = (rng.random::<f32>() * 2.0 - 1.0) * grid.gameplay_y_variance;
+            return Some(AsteroidSpawn { x, z, y, config_path });
         }
         return None;
     }
@@ -749,6 +750,7 @@ mod tests {
             density_noise_octaves: 2,
             jitter: 10.0,
             cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
             spawn_cells: 10,
             despawn_cells: 12,
         };
@@ -776,6 +778,7 @@ mod tests {
             density_noise_octaves: 1,
             jitter: 10.0,
             cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
             spawn_cells: 10,
             despawn_cells: 12,
         };
@@ -799,6 +802,7 @@ mod tests {
             density_noise_octaves: 1,
             jitter: 0.0,
             cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
             spawn_cells: 10,
             despawn_cells: 12,
         };
@@ -810,7 +814,7 @@ mod tests {
         let spawn = result.unwrap();
         assert_eq!(spawn.x, 75.0, "Cell center X = cx * resolution");
         assert_eq!(spawn.z, 45.0, "Cell center Z = cz * resolution");
-        assert_eq!(spawn.y, 0.0, "Gameplay Y must be 0");
+        assert_eq!(spawn.y, 0.0, "Gameplay Y must be 0 when variance is 0");
         assert!(spawn.config_path.contains("gameplay"));
     }
 
@@ -827,6 +831,7 @@ mod tests {
             density_noise_octaves: 2,
             jitter: 10.0,
             cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
             spawn_cells: 10,
             despawn_cells: 12,
         };
@@ -877,6 +882,7 @@ mod tests {
             density_noise_octaves: 2,
             jitter: 10.0,
             cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
             spawn_cells: 10,
             despawn_cells: 12,
         };
@@ -915,6 +921,7 @@ mod tests {
             density_noise_octaves: 1,
             jitter: 0.0,
             cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
             spawn_cells: 10,
             despawn_cells: 12,
         };
@@ -943,5 +950,36 @@ mod tests {
                 spawn.y
             );
         }
+    }
+
+    #[test]
+    fn eval_cell_gameplay_y_within_variance() {
+        let variance = 0.5;
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.0,
+            fill_cosmetic: 0.0,
+            uniformity: 0.0,
+            noise_freq: 0.02,
+            noise_octaves: 1,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 1,
+            jitter: 0.0,
+            cosmetic_y_offset: 15.0,
+            gameplay_y_variance: variance,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        };
+        let result = eval_cell(
+            0, 5, 3, &grid, 100.0, 200.0,
+            &["gameplay.toml".to_string()], &[],
+        );
+        let spawn = result.expect("Should spawn when fill is 0.0");
+        assert!(
+            spawn.y.abs() <= variance,
+            "Gameplay Y={} must be within variance ±{}",
+            spawn.y,
+            variance
+        );
     }
 }

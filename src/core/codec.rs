@@ -860,6 +860,7 @@ mod tests {
             config_path: "assets/entities/asteroid_small.toml".into(),
             max_hp: 30,
             current_hp: 30,
+            radius: 2.0,
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
         assert_server_roundtrip(&PrettyJsonCodec, msg);

@@ -343,12 +343,13 @@ impl ClientSimState {
             ServerMessage::EntityDespawned { uuid } => {
                 self.world.entities.retain(|e| e.uuid != *uuid);
             }
-            ServerMessage::AsteroidSpawned { uuid, x, y, z, .. } => {
+            ServerMessage::AsteroidSpawned { uuid, x, y, z, radius, .. } => {
                 if !self.world.entities.iter().any(|e| e.uuid == *uuid) {
                     self.world.entities.push(EntitySnapshot {
                         uuid: uuid.clone(),
                         position: Some([*x, *y, *z]),
                         tags: vec!["asteroid".into()],
+                        radius: Some(*radius),
                         ..EntitySnapshot::default()
                     });
                 }
@@ -2741,6 +2742,7 @@ mod tests {
             config_path: "assets/entities/asteroid_small.toml".into(),
             max_hp: 100,
             current_hp: 100,
+            radius: 2.0,
         });
         assert_eq!(s.world.entities.len(), 1);
         let e = &s.world.entities[0];
@@ -2761,6 +2763,7 @@ mod tests {
                 config_path: "".into(),
                 max_hp: 50,
                 current_hp: 50,
+                radius: 2.0,
             });
         }
         assert_eq!(
@@ -2781,6 +2784,7 @@ mod tests {
             config_path: "".into(),
             max_hp: 50,
             current_hp: 50,
+            radius: 2.0,
         });
         assert_eq!(s.world.entities.len(), 1);
         s.apply(&ServerMessage::AsteroidDestroyed {
@@ -2804,6 +2808,7 @@ mod tests {
             config_path: "".into(),
             max_hp: 50,
             current_hp: 50,
+            radius: 2.0,
         });
         // Now send a SimState with updated position
         s.apply(&ServerMessage::SimState {

@@ -44,14 +44,14 @@ torpedo_arc_color = [1.0, 0.55, 0.2, 1.0]
 [[weapons_console.phaser_banks]]
 id = "port"
 facing_deg = -90.0
-fire_arc_deg = 90.0
+fire_arc_deg = 135.0
 auto_arc_deg = 90.0
 
 # Starboard phaser bank: mirror of port.
 [[weapons_console.phaser_banks]]
 id = "starboard"
 facing_deg = 90.0
-fire_arc_deg = 90.0
+fire_arc_deg = 135.0
 auto_arc_deg = 90.0
 
 [torpedoes]

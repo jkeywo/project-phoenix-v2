@@ -48,11 +48,41 @@
       animation: spin 1s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    #scenario-panel {
+      position: fixed; inset: 0; z-index: 200;
+      background: #000 url('assets/logo.png') center 38% / min(45vw, 45vh) auto no-repeat;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 1.5rem; font-family: monospace; color: #cce;
+      padding-top: 30vh;
+    }
+    #scenario-select {
+      background: #111; color: #cce; border: 1px solid #445;
+      padding: 0.5rem 1rem; font-family: monospace; font-size: 1rem;
+      border-radius: 4px; min-width: 20rem;
+    }
+    #launch-btn {
+      background: #223; color: #aae; border: 1px solid #448;
+      padding: 0.5rem 2rem; font-family: monospace; font-size: 1rem;
+      border-radius: 4px; cursor: pointer; letter-spacing: 0.08em;
+    }
+    #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    #launch-btn:not(:disabled):hover { background: #334; }
   </style>
 </head>
 <body>
   <audio id="bg-hum" src="assets/sounds/background_hum.mp3" loop volume = 0.25></audio>
   <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.mp3"></audio>
+
+  <!-- Scenario selector shown before the server boots -->
+  <div id="scenario-panel">
+    <div style="font-size:0.85rem;color:#889;letter-spacing:0.06em;">Select a scenario to launch the server</div>
+    <select id="scenario-select">
+      <option value="" disabled selected>— choose scenario —</option>
+      <option value="assets/worlds/default.toml">Starbase Alpha</option>
+      <option value="assets/worlds/patrol.toml">Patrol</option>
+    </select>
+    <button id="launch-btn" disabled>Launch Server</button>
+  </div>
 
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">
@@ -124,8 +154,6 @@
       document.addEventListener('fullscreenchange', syncIcon);
     })();
 
-    setConnectionStatus('connecting');
-
     // ── PeerJS host peer ───────────────────────────────────────────────────
 
     // peer connection id → session token (resolved once Identify arrives)
@@ -139,58 +167,77 @@
       .map(b => b.toString(16).padStart(2, '0')).join('');
     const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/#' + hostPeerId;
 
-    const peer = new Peer(hostPeerId, { config: { iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
-    ] } });
+    function initPeerJS() {
+      setConnectionStatus('connecting');
+      const peer = new Peer(hostPeerId, { config: { iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
+      ] } });
 
-    peer.on('open', () => {
-      setConnectionStatus('ready');
-      const canvas = document.getElementById('qr');
-      canvas.style.display = 'block';
-      QRCode.toCanvas(canvas, joinUrl, { width: 200 });
-      document.getElementById('qr-link').href = joinUrl;
-    });
-
-    peer.on('disconnected', () => {
-      setConnectionStatus('disconnected');
-      peer.reconnect();
-    });
-
-    peer.on('connection', (conn) => {
-      conn.on('data', (raw) => {
-        const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
-        let token = peerTokens.get(conn.peer);
-
-        // First message from this peer must be Identify — extract the token
-        if (!token) {
-          try {
-            const msg = JSON.parse(json);
-            if (msg.type === 'Identify') {
-              token = msg.data.token;
-              peerTokens.set(conn.peer, token);
-              tokenConns.set(token, conn);
-            }
-          } catch (_) { return; }
-        }
-
-        if (token) dispatchToWasm(token, json);
+      peer.on('open', () => {
+        setConnectionStatus('ready');
+        const canvas = document.getElementById('qr');
+        canvas.style.display = 'block';
+        QRCode.toCanvas(canvas, joinUrl, { width: 200 });
+        document.getElementById('qr-link').href = joinUrl;
       });
 
-      conn.on('close', () => {
-        const token = peerTokens.get(conn.peer);
-        if (!token) return;
-        wasmBindings.wasm_player_disconnected(token);
-        peerTokens.delete(conn.peer);
-        tokenConns.delete(token);
+      peer.on('disconnected', () => {
+        setConnectionStatus('disconnected');
+        peer.reconnect();
       });
 
-      conn.on('error', (err) => console.error('[PeerJS conn]', err));
+      peer.on('connection', (conn) => {
+        conn.on('data', (raw) => {
+          const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
+          let token = peerTokens.get(conn.peer);
+
+          // First message from this peer must be Identify — extract the token
+          if (!token) {
+            try {
+              const msg = JSON.parse(json);
+              if (msg.type === 'Identify') {
+                token = msg.data.token;
+                peerTokens.set(conn.peer, token);
+                tokenConns.set(token, conn);
+              }
+            } catch (_) { return; }
+          }
+
+          if (token) dispatchToWasm(token, json);
+        });
+
+        conn.on('close', () => {
+          const token = peerTokens.get(conn.peer);
+          if (!token) return;
+          wasmBindings.wasm_player_disconnected(token);
+          peerTokens.delete(conn.peer);
+          tokenConns.delete(token);
+        });
+
+        conn.on('error', (err) => console.error('[PeerJS conn]', err));
+      });
+
+      peer.on('error', (err) => { console.error('[PeerJS host]', err); setConnectionStatus('error'); });
+    }
+
+    // ── Scenario selection ────────────────────────────────────────────────
+
+    let selectedScenario = null;
+    let wasmReady = false;
+
+    document.getElementById('scenario-select').addEventListener('change', function() {
+      document.getElementById('launch-btn').disabled = !this.value;
     });
 
-    peer.on('error', (err) => { console.error('[PeerJS host]', err); setConnectionStatus('error'); });
+    document.getElementById('launch-btn').addEventListener('click', function() {
+      selectedScenario = document.getElementById('scenario-select').value;
+      document.getElementById('scenario-panel').style.display = 'none';
+      initPeerJS();
+      if (wasmReady) startPhoenix();
+    });
 
     // ── WASM dispatch ─────────────────────────────────────────────────────
 
@@ -240,18 +287,18 @@
 const fetchedPaths = new Set();
 
 // Preload sequence: fetch map -> load map -> fetch entities -> load entities -> init
-async function preloadAndStart() {
+async function preloadAndStart(scenarioPath) {
   const spinner = document.getElementById('wasm-spinner');
-  
+
   try {
     // Step 1: Set up the config request callback
     window.set_config_request_callback = wasmBindings.set_config_request_callback;
     set_config_request_callback(handleConfigRequest);
-    
+
     // Step 2: Fetch and load the unified world TOML (map + scenario in one file)
-    const worldResponse = await fetch('assets/worlds/default.toml');
+    const worldResponse = await fetch(scenarioPath);
     if (!worldResponse.ok) {
-      console.error('Failed to fetch default world:', worldResponse.status);
+      console.error('Failed to fetch world:', worldResponse.status);
       throw new Error('World fetch failed');
     }
     const worldToml = await worldResponse.text();
@@ -263,7 +310,7 @@ async function preloadAndStart() {
     window.wasm_load_config = wasmBindings.wasm_load_config;
     window.wasm_is_preload_complete = wasmBindings.wasm_is_preload_complete;
 
-    wasm_load_world('assets/worlds/default.toml', worldToml);
+    wasm_load_world(scenarioPath, worldToml);
 
   } catch (e) {
     console.error('Preload failed:', e);
@@ -415,13 +462,15 @@ function startServer() {
 // instantiated and sets window.wasmBindings to the wasm-bindgen exports.
 
 function startPhoenix() {
-  // Start the preload sequence
-  preloadAndStart().catch(err => {
+  preloadAndStart(selectedScenario).catch(err => {
     console.error('Failed to start preload:', err);
   });
 }
 
-window.addEventListener('TrunkApplicationStarted', startPhoenix);
+window.addEventListener('TrunkApplicationStarted', () => {
+  wasmReady = true;
+  if (selectedScenario) startPhoenix();
+});
 
     // ── Audio context resume on first user gesture ───────────────────────
     // Browsers block AudioContext from playing until a user interacts with

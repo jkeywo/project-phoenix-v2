@@ -476,7 +476,9 @@ fn bridge_client_sim_to_nav_radar(
                 l @ (RadarLayer::AsteroidField
                     | RadarLayer::Station
                     | RadarLayer::Planet
-                    | RadarLayer::Star),
+                    | RadarLayer::PlayerShip
+                    | RadarLayer::Star
+                    | RadarLayer::Region),
             ) => l,
             _ => continue,
         };
@@ -484,7 +486,7 @@ fn bridge_client_sim_to_nav_radar(
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
         let entity_yaw = snapshot.yaw.unwrap_or(0.0);
 
-        let appearance = if layer == RadarLayer::AsteroidField {
+        let appearance = if layer == RadarLayer::AsteroidField || layer == RadarLayer::Region {
             let region_colour = colour.unwrap_or(default_layer_colour(layer));
             let region_shape = region_shape_from_snapshot(snapshot);
             let world_size = snapshot

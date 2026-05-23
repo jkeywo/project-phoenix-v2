@@ -210,6 +210,9 @@ pub fn add_simulation_plugins(app: &mut App) {
 
 #[cfg(feature = "server")]
 app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
+
+#[cfg(feature = "server")]
+app.add_plugins(crate::server::EngineSoundPlugin);
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.

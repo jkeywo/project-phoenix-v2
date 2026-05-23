@@ -106,6 +106,9 @@ impl AiTokenRegistry {
 pub struct AiControllerComponent {
     pub controller: AiController,
     pub entity_uuid: String,
+    /// Current forward speed in world-units/sec, carried across ticks so the
+    /// ship can accelerate over multiple frames (like the player helm does).
+    pub forward_speed: f32,
 }
 
 /// Per-NPC phaser state. Mirrors the player-ship `PhaserCooldown` / `ActiveBeam`
@@ -231,10 +234,15 @@ impl Plugin for AiPlugin {
 fn attach_controllers_on_spawn(
     mut commands: Commands,
     mut registry: ResMut<AiTokenRegistry>,
-    query: Query<(Entity, &EntityUuid, &Transform, &BehaviourSection), Without<AiControllerComponent>>,
+    query: Query<
+        (Entity, &EntityUuid, &Transform, &BehaviourSection,
+         Option<&crate::entity_spawner::WeaponsConsoleSection>,
+         Option<&EntityPhaserState>),
+        Without<AiControllerComponent>,
+    >,
     time: Res<Time>,
 ) {
-    for (entity, uuid, transform, behaviour) in &query {
+    for (entity, uuid, transform, behaviour, weapons_section, existing_phaser) in &query {
         let pos = transform.translation;
         let initial_state = crate::ai::build_initial_state(&behaviour.0);
         let initial_state_name = behaviour.0.initial_state.clone();
@@ -245,12 +253,17 @@ fn attach_controllers_on_spawn(
         controller.current_state = initial_state;
         controller.current_state_name = initial_state_name;
         registry.register_with_entity(&uuid.0, entity);
-        commands
-            .entity(entity)
-            .insert(AiControllerComponent {
-                controller,
-                entity_uuid: uuid.0.clone(),
-            });
+        let mut entity_cmd = commands.entity(entity);
+        entity_cmd.insert(AiControllerComponent {
+            controller,
+            entity_uuid: uuid.0.clone(),
+            forward_speed: 0.0,
+        });
+        // Pre-attach phaser state so the first attack tick can fire immediately,
+        // but only when one isn't already present (tests may set an explicit cooldown).
+        if weapons_section.is_some() && existing_phaser.is_none() {
+            entity_cmd.insert(EntityPhaserState::default());
+        }
     }
 }
 
@@ -268,6 +281,7 @@ fn tick_ai_controllers(
         Option<&crate::entities::spawner::EntityConsoleHull>,
         Option<&crate::entities::spawner::WeaponsConsoleSection>,
         Option<&EntityPhaserState>,
+        Option<&crate::entities::spawner::HelmConsoleSection>,
     )>,
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
@@ -300,7 +314,7 @@ fn tick_ai_controllers(
     let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
 
-    for (entity, mut ctrl, mut transform, behaviour, attacker_comp, self_faction_comp, unloaded_marker, hull_comp, weapons_section, phaser_state) in &mut query {
+    for (entity, mut ctrl, mut transform, behaviour, attacker_comp, self_faction_comp, unloaded_marker, hull_comp, weapons_section, phaser_state, helm_section) in &mut query {
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
 
@@ -399,10 +413,17 @@ fn tick_ai_controllers(
                         });
                     }
                     crate::ai::AiInput::FirePhaser => {
+                        // Use the first declared phaser bank id when available,
+                        // otherwise fall back to "fore" (handle_fire_phaser_npc
+                        // ignores the bank name, but the field must be present).
+                        let bank_id = weapons_section
+                            .and_then(|wc| wc.0.phaser_banks.first())
+                            .map(|b| b.id.clone())
+                            .unwrap_or_else(|| "fore".to_string());
                         inbound.write(crate::lobby::InboundMessage {
                             token: token.clone(),
                             msg: crate::messages::ClientMessage::FirePhaser {
-                                bank: "port".to_string(),
+                                bank: bank_id,
                             },
                         });
                     }
@@ -412,13 +433,25 @@ fn tick_ai_controllers(
         }
 
         // Apply the first Helm input to the entity's Transform.
+        // Physics config comes from the entity's [helm_console] section when present,
+        // falling back to defaults for entities without one.
+        let physics_config = helm_section
+            .map(|hc| crate::ship_physics::ShipPhysicsConfig {
+                max_speed:         hc.0.max_speed,
+                max_reverse_speed: hc.0.max_reverse_speed,
+                acceleration:      hc.0.acceleration,
+                deceleration:      hc.0.deceleration,
+                max_yaw_rate:      hc.0.max_yaw_rate,
+            })
+            .unwrap_or_else(crate::ship_physics::ShipPhysicsConfig::new);
+
         for input in &output.inputs {
             if let crate::ai::AiInput::Helm { thrust, steering } = *input {
                 let physics_state = crate::ship_physics::ShipPhysicsState {
                     x: pos.x,
                     z: pos.z,
                     yaw,
-                    forward_speed: 0.0,
+                    forward_speed: ctrl.forward_speed,
                 };
                 let physics_input = crate::ship_physics::ShipPhysicsInput {
                     thrust,
@@ -428,11 +461,12 @@ fn tick_ai_controllers(
                     physics_state,
                     physics_input,
                     dt,
-                    &crate::ship_physics::ShipPhysicsConfig::new(),
+                    &physics_config,
                 );
                 transform.translation.x = result.x;
                 transform.translation.z = result.z;
                 transform.rotation = Quat::from_rotation_y(result.yaw);
+                ctrl.forward_speed = result.forward_speed;
                 break;
             }
         }

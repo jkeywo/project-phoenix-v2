@@ -1603,6 +1603,7 @@ mod tests {
             AiControllerComponent {
                 controller: ctrl,
                 entity_uuid: npc_uuid.to_string(),
+                forward_speed: 0.0,
             },
             EntityPhaserState::default(),
             Transform::from_xyz(0.0, 0.0, 0.0),

@@ -73,6 +73,11 @@ pub struct FactionComponent(pub uuid::Uuid);
 #[derive(Component, Clone, Debug)]
 pub struct WeaponsConsoleSection(pub crate::entity_config::WeaponsConsoleConfig);
 
+/// Present when the EntityConfig has a `[helm_console]` section.
+/// The AI tick reads this to build a `ShipPhysicsConfig` instead of using hardcoded defaults.
+#[derive(Component, Clone, Debug)]
+pub struct HelmConsoleSection(pub crate::entity_config::HelmConsoleConfig);
+
 /// Present when the EntityConfig had a [radar_appearance] section.
 #[derive(Component, Clone, Debug)]
 pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfig);
@@ -193,6 +198,11 @@ pub fn spawn_entity(
     // WeaponsConsole Ã¢â‚¬â€ attach a WeaponsConsoleSection so the AI can read weapons config from ECS.
     if let Some(wc) = &config.weapons_console {
         entity_commands.insert(WeaponsConsoleSection(wc.clone()));
+    }
+
+    // HelmConsole — attach a HelmConsoleSection so the AI tick can read movement params.
+    if let Some(hc) = &config.helm_console {
+        entity_commands.insert(HelmConsoleSection(hc.clone()));
     }
 
     // Comms range — attach CommsRange component when [comms] is present.

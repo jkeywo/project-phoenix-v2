@@ -29,6 +29,13 @@ beam_duration_secs = 4.0
 cooldown_secs = 5.0
 beam_color = [1.0, 0.1, 0.1, 1.0]
 
+[[weapons_console.phaser_banks]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 180.0
+auto_arc_deg = 180.0
+beam_range = 0.0
+
 [radar_appearance]
 colour = [1.0, 0.2, 0.2]
 radius = 4.0

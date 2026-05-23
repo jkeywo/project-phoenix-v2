@@ -219,7 +219,7 @@ impl Plugin for AiPlugin {
             Update,
             (
                 attach_controllers_on_spawn,
-                tick_ai_controllers.in_set(crate::sim_sets::SimSet::Damage),
+                tick_ai_controllers.in_set(crate::sim_sets::SimSet::Physics),
                 detect_npc_hull_zero,
                 unregister_on_despawn,
             ),
@@ -286,7 +286,7 @@ fn tick_ai_controllers(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     faction_registry: Res<FactionRegistryResource>,
-    entity_query: Query<(&EntityUuid, &Transform, Option<&crate::entities::spawner::FactionComponent>), Without<AiControllerComponent>>,
+    entity_query: Query<(&EntityUuid, &Transform, Option<&crate::entities::spawner::FactionComponent>, Option<&crate::entities::spawner::EntityConsoleHull>), Without<AiControllerComponent>>,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
     mut inbound: MessageWriter<crate::lobby::InboundMessage>,
     registry_res: Res<AiTokenRegistry>,
@@ -299,14 +299,17 @@ fn tick_ai_controllers(
         HashMap::new()
     };
 
-    // Collect world entities from all non-AI entities, including faction if present.
-    let world_entities: Vec<AiWorldEntity> = entity_query.iter().map(|(uid, t, faction_comp)| {
+    // Collect world entities from all non-AI entities, including faction and hull if present.
+    let world_entities: Vec<AiWorldEntity> = entity_query.iter().map(|(uid, t, faction_comp, hull_comp)| {
         AiWorldEntity {
             uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
             position: [t.translation.x, t.translation.y, t.translation.z],
             faction: faction_comp.map(|f| f.0),
             shields: None,
-            hull_fraction: None,
+            hull_fraction: hull_comp.and_then(|h| {
+                let max = h.0.total_max();
+                if max > 0.0 { Some(h.0.total_current() / max) } else { None }
+            }),
             yaw: None,
         }
     }).collect();

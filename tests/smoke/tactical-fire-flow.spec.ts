@@ -1,55 +1,46 @@
 // Issue #315 — Smoke test: tactical fire-flow (phaser hits NPC, hull decreases, NPC destroyed).
 //
-// Uses a custom scenario that places a pirate raider directly adjacent to the
-// player ship spawn (within the 50-unit beam range), so the test never needs
-// to move the ship.  The tactical player:
+// Uses a self-contained world (MINIMAL_TEST_WORLD) that places a pirate raider
+// 20 units directly ahead of the player ship spawn (well within the 100-unit
+// phaser range), so the test never needs to move the ship.  The tactical player:
 //   1. Locks the raider via SetTarget.
 //   2. Fires phasers until BeamStarted is received.
 //   3. Asserts the NPC's hull_fraction in entity_states decreases.
 //   4. Keeps firing until EntityDespawned arrives (NPC hull reaches 0).
 
 import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient, createServerPage } from './fixtures';
+import { readHostPeerId, createTestClient } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
-import * as fs from 'fs';
-import * as path from 'path';
 
-// Load the real default world and append a close-range raider entity so that
-// the test's SetTarget call passes the in-range gate. After PRD #337 the
-// unified `[[entity]]` block (with optional `name`) is the only spawn surface;
-// legacy `[[spawn]]` blocks are no longer parsed.
-//
-// We also strip the default `raider_alpha` entity (positioned at the far
-// patrol anchor) so there is exactly one raider for the test to target.
-// The default block lists `template_path` BEFORE `name`, so the regex must
-// match a `[[entity]]` followed by ANY number of `key = value` lines and then
-// the `name = "raider_alpha"` line — anchored on a non-`[` line prefix to
-// avoid leaking across into the next block.
-//
-// We also override the raider's behaviour to idle with zero transitions so
-// that the `hull_below` (30 %) flee transition does not fire mid-kill. Without
-// this, the second beam triggers a flee → the raider exits the player's
-// 40-unit phaser range → beam severs by range → 6 s cooldown → raider is far
-// out of range by the time we can fire again → EntityDespawned never arrives
-// → test times out at 60 s.  The override is round-tripped through
-// `parse_world` and `resolve_entity` in `src/entities/loader.rs` tests, so
-// any change to the merge semantics will be caught there.
-const REAL_WORLD = fs.readFileSync(
-  path.join(__dirname, '../../assets/worlds/default.toml'),
-  'utf-8',
-);
-const WORLD_WITHOUT_FAR_RAIDER = REAL_WORLD.replace(
-  /\[\[entity\]\]\s*\n(?:[^\[\n][^\n]*\n)*?name\s*=\s*"raider_alpha"[\s\S]*?(?=\n\[\[|$)/,
-  '',
-);
-const CLOSE_RAIDER_WORLD = WORLD_WITHOUT_FAR_RAIDER + `
+// Self-contained smoke-test world — intentionally does NOT read or depend on
+// assets/worlds/default.toml so changes to the default world never break this
+// test.  The player ship spawns at the origin; a single raider is placed 20
+// units directly ahead (within the 100-unit phaser range).  The raider
+// template is intercepted inside startGameWithTactical to zero every
+// target_speed and set initial_state = "idle" so it stays put.
+const MINIMAL_TEST_WORLD = `
+[global]
+seed = 42
 
-# Smoke-test override: a raider 20 units in front of the player ship spawn.
-# Ship spawns at (300, 0, 0) per assets/worlds/default.toml; forward is -Z.
+[ambient_light]
+color      = [0.6, 0.55, 0.5]
+brightness = 300.0
+
+[anchors]
+patrol_alpha = [600.0, 0.0, -600.0]
+patrol_beta  = [500.0, 0.0, -300.0]
+patrol_gamma = [200.0, 0.0, -600.0]
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
-transform     = { position = [300.0, 0.0, -20.0] }
+transform     = { position = [0.0, 0.0, -20.0] }
 `;
 
 async function waitForStation(
@@ -66,11 +57,21 @@ async function waitForStation(
 }
 
 async function startGameWithTactical(context: BrowserContext) {
-  // Intercept the unified world TOML with our close-raider variant (real
-  // world content + appended close-range raider spawn).
+  // Serve the self-contained minimal world instead of the real default.toml.
   await context.route('**/assets/worlds/default.toml', (route) =>
-    route.fulfill({ contentType: 'text/plain', body: CLOSE_RAIDER_WORLD }),
+    route.fulfill({ contentType: 'text/plain', body: MINIMAL_TEST_WORLD }),
   );
+
+  // Make the raider stationary: set initial_state = "idle" and zero every
+  // target_speed so it never moves regardless of AI transitions.
+  await context.route('**/assets/entities/pirate_raider.toml', async (route) => {
+    const response = await route.fetch();
+    const text = await response.text();
+    const patched = text
+      .replace(/initial_state\s*=\s*"patrol"/, 'initial_state = "idle"')
+      .replace(/target_speed\s*=\s*[\d.]+/g, 'target_speed = 0.0');
+    await route.fulfill({ contentType: 'text/plain', body: patched });
+  });
 
   // Patch player_ship.toml: boost phaser DPS so one beam kills the 60 HP
   // raider. Headless Chromium throttles requestAnimationFrame on the

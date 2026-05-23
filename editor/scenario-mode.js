@@ -36,10 +36,12 @@ import { CrossReferenceIndex } from './cross-references.js';
 import { renderWorldContentPanel as defaultRenderWorldContent } from './world-content-view.js';
 import { renderTriggerableWorldsPanel as defaultRenderTriggerableWorlds } from './triggerable-worlds-panel.js';
 import { mountNewWorldButton as defaultMountNewWorldButton } from './new-world-dialog.js';
+import { mountOpenWorldButton as defaultMountOpenWorldButton } from './open-world-dialog.js';
 import {
   readFile as defaultReadFile,
   writeFile as defaultWriteFile,
   listDirectory as defaultListDirectory,
+  onRootChanged as defaultOnRootChanged,
 } from './project-root.js';
 
 /**
@@ -97,10 +99,11 @@ export function mountScenarioMode({
       ? host.querySelector(`#${id}`)
       : null) || document.getElementById(id);
   const ioDeps = {
-    readFile:      io?.readFile      || defaultReadFile,
-    writeFile:     io?.writeFile     || defaultWriteFile,
-    listDirectory: io?.listDirectory || defaultListDirectory,
-    tomlParse:     io?.tomlParse     || (typeof window !== 'undefined' ? window.tomlParse : null),
+    readFile:       io?.readFile       || defaultReadFile,
+    writeFile:      io?.writeFile      || defaultWriteFile,
+    listDirectory:  io?.listDirectory  || defaultListDirectory,
+    tomlParse:      io?.tomlParse      || (typeof window !== 'undefined' ? window.tomlParse : null),
+    onRootChanged:  io?.onRootChanged  || defaultOnRootChanged,
   };
 
   const CanvasManager     = deps?.CanvasManager     || DefaultCanvasManager;
@@ -110,6 +113,7 @@ export function mountScenarioMode({
   const renderWorldContentPanel  = deps?.renderWorldContentPanel  || defaultRenderWorldContent;
   const renderTriggerableWorlds  = deps?.renderTriggerableWorldsPanel || defaultRenderTriggerableWorlds;
   const mountNewWorldButton      = deps?.mountNewWorldButton      || defaultMountNewWorldButton;
+  const mountOpenWorldButton     = deps?.mountOpenWorldButton     || defaultMountOpenWorldButton;
 
   const layerManager = new LayerManager();
   const crossRefIndex = new CrossReferenceIndex();
@@ -163,6 +167,27 @@ export function mountScenarioMode({
       tomlParse: ioDeps.tomlParse,
       onCreated: renderAll,
       getExistingPaths: () => layerManager.getLayers().map((l) => l.filename),
+    });
+
+    mountOpenWorldButton({
+      layerManager,
+      listDirectory: ioDeps.listDirectory,
+      readFile: ioDeps.readFile,
+      tomlParse: ioDeps.tomlParse,
+      onOpened: renderAll,
+    });
+
+    // Re-populate the entity palette whenever the project root changes (e.g.
+    // user picks a root after the mode has already mounted, which is the
+    // common first-run case — preloadEntityCache runs before a root exists
+    // and silently returns nothing).
+    ioDeps.onRootChanged(async () => {
+      try {
+        await preloadEntityCache();
+      } catch (err) {
+        console.warn('[scenario-mode] preloadEntityCache on root change failed:', err?.message || err);
+      }
+      entityEditor.loadEntitiesPalette();
     });
 
     // Session-only triggerable layers must skip the FSA-backed save flow.

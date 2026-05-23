@@ -22,8 +22,8 @@ brightness = 300.0
 [anchors]
 starbase_alpha = [1000.0, 0.0, 0.0]
 patrol_alpha   = [600.0, 0.0, -600.0]
-patrol_beta    = [-600.0, 0.0, -400.0]
-patrol_gamma   = [0.0, 0.0, -1000.0]
+patrol_beta    = [500.0, 0.0, -300.0]
+patrol_gamma   = [200.0, 0.0, -600.0]
 
 # ── Static map entities ───────────────────────────────────────────────────────
 

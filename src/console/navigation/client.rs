@@ -225,12 +225,12 @@ fn spawn_navigation_ui(
 ///
 /// Sizing mirrors the helm console: landscape → constrain by height, portrait
 /// → constrain by width.  `aspect_ratio: 1.0` derives the other axis.
-fn fill_navigation_chart(commands: &mut Commands, container: Entity, is_landscape: bool) {
+fn fill_navigation_chart(commands: &mut Commands, container: Entity, _is_landscape: bool) {
     let col = commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Stretch,
+            justify_content: JustifyContent::FlexStart,
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
             ..default()
@@ -261,9 +261,8 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity, is_landscap
         WorldCentredRadar,
         AutoScaleRadar { margin: 1.1, min_range: 50.0 },
         Node {
-            width: if is_landscape { Val::Auto } else { Val::Percent(100.0) },
-            height: if is_landscape { Val::Percent(100.0) } else { Val::Auto },
-            border: UiRect::all(Val::Px(1.0)),
+            width: Val::Percent(100.0),
+            height: Val::Auto,
             aspect_ratio: Some(1.0),
             position_type: PositionType::Relative,
             overflow: Overflow::clip(),

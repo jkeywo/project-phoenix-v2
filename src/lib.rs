@@ -122,8 +122,9 @@ pub mod debug_overlay;
 #[cfg(feature = "client")]
 pub mod client;
 
-// Generic GUI widget library — client only.
-#[cfg(feature = "client")]
+// Generic GUI widget library — needed by both client consoles and the server
+// viewscreen radar (ServerViewscreenRadarPlugin).
+#[cfg(any(feature = "client", feature = "server"))]
 pub mod gui;
 
 // Backwards-compat flat modules for client.

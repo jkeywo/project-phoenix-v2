@@ -768,6 +768,16 @@ impl TorpedoesConfig {
     }
 }
 
+/// Config block for the Navigation console in a ship TOML.
+///
+/// Loaded from `[navigation_console]` in `player_ship.toml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NavigationConsoleConfig {
+    /// System chart radar config for the Navigation console.
+    #[serde(default)]
+    pub system_chart: crate::radar_config::RadarConfig,
+}
+
 /// Config block for the Sensors console in a ship TOML.
 ///
 /// Loaded from `[sensors_console]` in `player_ship.toml`.
@@ -798,6 +808,7 @@ pub struct EntityConfig {
     pub captain_console: Option<CaptainConsoleConfig>,
     pub power: Option<PowerConfigSection>,
     pub sensors_console: Option<SensorsConsoleConfig>,
+    pub navigation_console: Option<NavigationConsoleConfig>,
     /// Shields console focus config.
     pub shields_console: Option<ShieldsConsoleConfig>,
     /// Torpedo system config (player ship and any NPC ship with torpedoes).
@@ -845,6 +856,7 @@ struct TomlConfig {
     captain_console: Option<CaptainConsoleConfig>,
     power: Option<PowerConfigSection>,
     sensors_console: Option<SensorsConsoleConfig>,
+    navigation_console: Option<NavigationConsoleConfig>,
     shields_console: Option<ShieldsConsoleConfig>,
     torpedoes: Option<TorpedoesConfig>,
     repair: Option<RepairConfig>,
@@ -930,6 +942,7 @@ impl EntityConfig {
             power: raw.power,
             shields_console: raw.shields_console,
             sensors_console: raw.sensors_console,
+            navigation_console: raw.navigation_console,
             torpedoes: raw.torpedoes,
             repair: raw.repair,
             comms: raw.comms,

@@ -20,6 +20,7 @@ pub enum EntityTag {
     Star,
     Planet,
     Region,
+    Station,
 }
 
 impl EntityTag {
@@ -36,6 +37,7 @@ impl EntityTag {
             "star" => Some(EntityTag::Star),
             "planet" => Some(EntityTag::Planet),
             "region" => Some(EntityTag::Region),
+            "station" => Some(EntityTag::Station),
             _ => None,
         }
     }
@@ -49,6 +51,7 @@ impl EntityTag {
             EntityTag::Star => "star",
             EntityTag::Planet => "planet",
             EntityTag::Region => "region",
+            EntityTag::Station => "station",
         }
     }
 }
@@ -83,6 +86,7 @@ mod tests {
             ("star", EntityTag::Star),
             ("planet", EntityTag::Planet),
             ("region", EntityTag::Region),
+            ("station", EntityTag::Station),
         ];
         for (s, expected) in cases {
             assert_eq!(EntityTag::from_str(s), Some(expected), "from_str({s:?})");

@@ -1090,6 +1090,7 @@ mod tests {
             tags: vec![],
             power: None,
             sensors_console: None,
+            navigation_console: None,
             shields_console: None,
             torpedoes: None,
             repair: None,

@@ -476,6 +476,7 @@ mod tests {
             repair: None,
             comms: None,
             sensors_console: None,
+            navigation_console: None,
             asteroid_field: None,
             faction: None,
             behaviour: None,

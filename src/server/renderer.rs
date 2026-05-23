@@ -56,10 +56,6 @@ struct LobbyCamera;
 #[derive(Component)]
 pub struct GameCamera;
 
-/// 2D camera used to render the radar overlay during InProgress + ViewMode::Radar.
-#[derive(Component)]
-struct RadarCamera;
-
 
 /// FPS counter text — rendered in the Bevy UI overlay.
 #[derive(Component)]
@@ -96,7 +92,6 @@ impl Plugin for RendererPlugin {
                 update_view_screen_text,
                 update_view_direction_label,
                 hull_camera.run_if(in_state(GamePhase::InProgress)),
-                draw_radar_overlay.run_if(in_state(GamePhase::InProgress)),
             ))
             .add_systems(Update, (
                 draw_beam_vfx.run_if(in_state(GamePhase::InProgress)),
@@ -114,9 +109,9 @@ fn setup(
     mut commands: Commands,
 ) {
     // 2D camera — active during lobby phase. `IsDefaultUiCamera` marks
-    // this as the canonical UI target; Bevy 0.18 requires exactly one such
-    // camera for text glyph extraction to resolve when multiple Camera2d
-    // entities exist (we also have `RadarCamera`).
+    // this as the canonical UI target for all UI nodes. It stays active
+    // throughout InProgress so the FPS counter, radar widgets, and viewscreen
+    // border continue to render without an explicit UiTargetCamera.
     commands.spawn((LobbyCamera, Camera2d, Camera { order: 0, ..default() }, IsDefaultUiCamera));
 
     // 3D camera — active during in-game phase, positioned for ship view.
@@ -132,13 +127,6 @@ fn setup(
             ..default()
         }),
         Transform::from_xyz(0.0, 2.0, -10.0),
-    ));
-
-    // 2D camera — active during InProgress + ViewMode::Radar; renders gizmos overlay.
-    commands.spawn((
-        RadarCamera,
-        Camera2d,
-        Camera { is_active: false, order: 1, ..default() },
     ));
 
     // Ambient light is now spawned by `spawn_world_ambient_light` in
@@ -270,29 +258,25 @@ fn update_camera_aspect(
 fn toggle_cameras(
     state: Res<State<GamePhase>>,
     ship: Res<ShipState>,
-    mut game: Query<&mut Camera, (With<GameCamera>, Without<RadarCamera>)>,
-    mut radar_cam: Query<&mut Camera, (With<RadarCamera>, Without<GameCamera>)>,
+    mut game: Query<&mut Camera, With<GameCamera>>,
 ) {
     if !state.is_changed() && !ship.is_changed() {
         return;
     }
     let in_game = state.get() == &GamePhase::InProgress;
-    let radar_active = in_game
-        && matches!(
-            ship.view_mode,
-            ViewMode::Radar
-                | ViewMode::ScienceRadar
-                | ViewMode::SensorsRadar
-                | ViewMode::SystemChart
-                | ViewMode::NavigationChart
-        );
-    let game_active  = in_game && !radar_active;
+    // The 3D GameCamera is active only when we're in a Camera or Comms view.
+    // Radar views are handled by the GenericRadarWidget UI pipeline
+    // (ServerViewscreenRadarPlugin), which renders through the always-active
+    // LobbyCamera (Camera2d, IsDefaultUiCamera).
+    let game_active = in_game
+        && matches!(ship.view_mode, ViewMode::Camera(_) | ViewMode::Comms);
 
     // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
-    // in all phases so that UI nodes without an explicit UiTargetCamera
-    // (e.g. the FPS counter) continue to render during InProgress.
-    if let Ok(mut cam) = game.single_mut()     { cam.is_active = game_active; }
-    if let Ok(mut cam) = radar_cam.single_mut(){ cam.is_active = radar_active; }
+    // in all phases so that UI nodes (FPS counter, radar widgets) continue to
+    // render during InProgress without an explicit UiTargetCamera.
+    if let Ok(mut cam) = game.single_mut() {
+        cam.is_active = game_active;
+    }
 }
 
 fn update_view_screen_text(
@@ -379,82 +363,6 @@ fn update_view_direction_label(
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {
             **text = label.to_string();
-        }
-    }
-}
-
-/// Pixel radius of the radar disc on screen.
-const RADAR_PIXEL_RADIUS: f32 = 220.0;
-
-/// Draws the radar overlay (outer ring, mid ring, ship triangle, entity pips,
-/// asteroid-field rings) using gizmos in the RadarCamera's 2D space. Active
-/// whenever the ship's view mode is one of the radar views; otherwise nothing
-/// is emitted (gizmo buffer stays empty).
-///
-/// Per view mode the tag filter is taken from the matching client console's
-/// `RadarConfig` so the viewscreen and the phone show the same entities:
-///
-/// - `Radar`          → `helm_radar_config()`        (asteroids + stars + planets, ship range)
-/// - `ScienceRadar` / `SensorsRadar` → `science_radar_config()` (long range, ships + fields + stars + planets)
-/// - `SystemChart`    → `system_chart_config()`      (stars, planets, fields, regions)
-/// - `NavigationChart`→ `navigation_chart_config()`  (stars, planets, fields, regions)
-fn draw_radar_overlay(
-    ship: Res<ShipState>,
-    world: Option<Res<WorldResource>>,
-    mut gizmos: Gizmos,
-) {
-    use crate::client_sim::{helm_radar_config, science_radar_config, system_chart_config};
-    use crate::radar::{compute_science_radar_view, navigation_chart_config};
-
-    let config = match ship.view_mode {
-        ViewMode::Radar => helm_radar_config(),
-        ViewMode::ScienceRadar | ViewMode::SensorsRadar => science_radar_config(),
-        ViewMode::SystemChart => system_chart_config(),
-        ViewMode::NavigationChart => navigation_chart_config(),
-        ViewMode::Camera(_) | ViewMode::Comms => return,
-    };
-
-    let centre = Vec2::ZERO;
-    let outer = Color::srgba(0.4, 0.9, 0.5, 0.9);
-    let mid = Color::srgba(0.4, 0.9, 0.5, 0.45);
-    let ship_c = Color::srgba(0.6, 1.0, 0.7, 1.0);
-    let aster = Color::srgba(0.85, 0.7, 0.55, 0.95);
-    let field_c = Color::srgba(0.6, 0.55, 0.4, 0.5);
-
-    // Outer ring (full range) and a mid reference ring at half range.
-    gizmos.circle_2d(centre, RADAR_PIXEL_RADIUS, outer);
-    gizmos.circle_2d(centre, RADAR_PIXEL_RADIUS * 0.5, mid);
-
-    // Ship triangle at centre, pointing up (forward = +y on the radar).
-    let tip = Vec2::new(0.0, 10.0);
-    let left = Vec2::new(-7.0, -8.0);
-    let right = Vec2::new(7.0, -8.0);
-    gizmos.line_2d(tip, left, ship_c);
-    gizmos.line_2d(left, right, ship_c);
-    gizmos.line_2d(right, tip, ship_c);
-
-    let Some(world) = world else { return };
-    let view = compute_science_radar_view(
-        &world.0.entities,
-        ship.x,
-        ship.z,
-        ship.yaw,
-        &config,
-    );
-
-    for dot in &view.dots {
-        let pos = Vec2::new(dot.radar_x * RADAR_PIXEL_RADIUS, dot.radar_y * RADAR_PIXEL_RADIUS);
-        let pix_radius = (dot.scaled_radius * RADAR_PIXEL_RADIUS).max(2.0);
-        gizmos.circle_2d(pos, pix_radius, aster);
-    }
-
-    for ring in &view.rings {
-        let pos = Vec2::new(ring.centre_x * RADAR_PIXEL_RADIUS, ring.centre_y * RADAR_PIXEL_RADIUS);
-        let outer_pix = (ring.outer_r * RADAR_PIXEL_RADIUS).max(2.0);
-        gizmos.circle_2d(pos, outer_pix, field_c);
-        if ring.inner_r > 0.0 {
-            let inner_pix = (ring.inner_r * RADAR_PIXEL_RADIUS).max(1.0);
-            gizmos.circle_2d(pos, inner_pix, field_c);
         }
     }
 }

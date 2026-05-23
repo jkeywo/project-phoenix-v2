@@ -408,6 +408,7 @@ fn setup_fallback_world(
         captain_console: None,
         power: None,
         sensors_console: None,
+        navigation_console: None,
         shields_console: None,
         torpedoes: None,
         repair: None,

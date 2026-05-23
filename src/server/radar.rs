@@ -29,8 +29,8 @@ use std::collections::{HashMap, HashSet};
 use crate::entity_tags::EntityTag;
 use crate::gui::{
     AutoScaleRadar, GenericRadar, OnRadar, OrientationMode, RadarAppearance, RadarCenter,
-    RadarClipMode, RadarFilter, RadarIcon, RadarLayer, WorldCentredRadar, default_layer_colour,
-    layer_to_icon, region_shape_from_snapshot, tags_to_radar_layer,
+    RadarClipMode, RadarFilter, RadarIcon, RadarIconLookup, RadarLayer, WorldCentredRadar,
+    default_layer_colour, layer_to_icon, region_shape_from_snapshot, tags_to_radar_layer,
 };
 use crate::gui::radar::GuiRadarPlugin;
 use crate::lobby::WorldResource;
@@ -76,7 +76,7 @@ impl Plugin for ServerViewscreenRadarPlugin {
         }
 
         app.init_resource::<ServerRadarEntityMap>()
-            .add_systems(Startup, spawn_viewscreen_radar_widgets)
+            .add_systems(Startup, (load_server_radar_icons, spawn_viewscreen_radar_widgets).chain())
             .add_systems(
                 Update,
                 (
@@ -117,14 +117,17 @@ fn radar_filter_from_shows(shows: &[EntityTag]) -> RadarFilter {
 }
 
 /// Spawn a full-screen absolute container node that holds a radar widget as
-/// its only child.  The container starts hidden; `toggle_viewscreen_radar_widgets`
-/// shows/hides it based on the current view mode.
+/// its only child.  The widget is constrained to 80 % of viewport height,
+/// centred inside the container (which fills the full viewport).
+///
+/// The container starts hidden; `toggle_viewscreen_radar_widgets` shows/hides
+/// it based on the current view mode.
 fn spawn_radar_container(
     commands: &mut Commands,
     mode: RadarContainerMode,
     widget_entity: Entity,
 ) {
-    commands
+    let container = commands
         .spawn((
             mode,
             Node {
@@ -138,10 +141,41 @@ fn spawn_radar_container(
             Visibility::Hidden,
             ZIndex(5),
         ))
-        .add_child(widget_entity);
+        .id();
+    // Override the widget's default 100 % width with 80 % of viewport
+    // height, keeping the 1:1 aspect ratio so the radar is a centred
+    // square that never exceeds 80 % of the screen height.
+    commands.entity(widget_entity).insert(Node {
+        width: Val::Vh(80.0),
+        aspect_ratio: Some(1.0),
+        position_type: PositionType::Relative,
+        ..default()
+    });
+    commands.entity(container).add_child(widget_entity);
 }
 
-// ── Startup system ────────────────────────────────────────────────────────────
+// ── Startup system: radar icon assets ─────────────────────────────────────────
+
+/// Loads the six radar icon PNGs and populates the shared `RadarIconLookup`
+/// so the viewscreen renders icons instead of falling back to plain squares.
+/// Runs before `spawn_viewscreen_radar_widgets` so the lookup is ready when
+/// blips are first spawned (though it stays populated for the lifetime).
+fn load_server_radar_icons(
+    asset_server: Res<AssetServer>,
+    mut lookup: ResMut<RadarIconLookup>,
+) {
+    if !lookup.0.is_empty() {
+        return;
+    }
+    lookup.0.insert(RadarIcon::Ship, asset_server.load("radar_icons/Icon-Ship.png"));
+    lookup.0.insert(RadarIcon::Asteroid, asset_server.load("radar_icons/Icon-Asteroid.png"));
+    lookup.0.insert(RadarIcon::Station, asset_server.load("radar_icons/Icon-Station.png"));
+    lookup.0.insert(RadarIcon::Planet, asset_server.load("radar_icons/Icon-Planet.png"));
+    lookup.0.insert(RadarIcon::Star, asset_server.load("radar_icons/Icon-Star.png"));
+    lookup.0.insert(RadarIcon::Torpedo, asset_server.load("radar_icons/Icon-Torpedo.png"));
+}
+
+// ── Startup system: radar widgets ─────────────────────────────────────────────
 
 fn spawn_viewscreen_radar_widgets(mut commands: Commands) {
     // Read ship config from the thread-local config cache (populated by JS

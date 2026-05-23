@@ -33,7 +33,7 @@ const REQUIRED_ASSETS = [
 test('client WASM loads without asset 404s or JS errors', async ({ context }) => {
   // Boot the server so the client has a valid host ID to connect to.
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
   const hostId = await readHostPeerId(serverPage);
 

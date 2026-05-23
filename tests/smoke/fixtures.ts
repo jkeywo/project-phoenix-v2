@@ -166,7 +166,7 @@ export async function createServerPage(
       await route.fulfill({ contentType: 'text/plain', body: patchMaxPlayers(text, mp) });
     });
   }
-  await page.goto('/');
+  await page.goto('/?scenario=assets/worlds/default.toml');
   await page.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
   return page;
 }

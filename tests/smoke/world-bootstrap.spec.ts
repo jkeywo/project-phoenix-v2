@@ -10,7 +10,7 @@ import { readHostPeerId, createTestClient } from './fixtures';
 
 test('default scenario: Starbase Alpha appears in WorldSetup after game start', async ({ context }) => {
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);

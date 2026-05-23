@@ -9,7 +9,7 @@ test('without URL param: debug regions disabled', async ({ context }) => {
   const serverPage = await context.newPage();
   serverPage.on('pageerror', (err) => errors.push(err.message));
 
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   // wasm_is_debug_regions_enabled should be callable and return false
@@ -31,7 +31,7 @@ test('with ?debug_regions=1: debug regions enabled', async ({ context }) => {
   const serverPage = await context.newPage();
   serverPage.on('pageerror', (err) => errors.push(err.message));
 
-  await serverPage.goto('/?debug_regions=1');
+  await serverPage.goto('/?debug_regions=1&scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const enabled = await serverPage.evaluate(() => {

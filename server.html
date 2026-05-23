@@ -239,6 +239,17 @@
       if (wasmReady) startPhoenix();
     });
 
+    // Allow automated tests (and quick dev launches) to bypass the picker via
+    // ?scenario=<path>, e.g. /?scenario=assets/worlds/default.toml
+    (function() {
+      const sp = new URLSearchParams(location.search).get('scenario');
+      if (sp) {
+        selectedScenario = sp;
+        document.getElementById('scenario-panel').style.display = 'none';
+        initPeerJS();
+      }
+    })();
+
     // ── WASM dispatch ─────────────────────────────────────────────────────
 
     function dispatchToWasm(token, json) {

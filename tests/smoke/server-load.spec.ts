@@ -8,7 +8,7 @@ test('server page: WASM initialises without JS errors', async ({ context }) => {
 
   serverPage.on('pageerror', (err) => errors.push(err.message));
 
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
 
   // window.__wasmReady is set by the shim after TrunkApplicationStarted fires
   // and startPhoenix() has run.  15 s is generous for cold-load from localhost.

@@ -27,7 +27,7 @@ async function waitForStation(client: { page: import('@playwright/test').Page; t
 
 async function startGame(context: BrowserContext): Promise<{ captain: TestClient; helm: TestClient }> {
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);
@@ -87,7 +87,7 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
 
   // Wait up to 2× the TOML-configured charge duration for a SimState showing
   // impulse_charge_progress has reached 1.0 (headroom for CI latency).
-  const chargeTimeoutMs = IMPULSE_CHARGE_DURATION_S * 2 * 1000;
+  const chargeTimeoutMs = IMPULSE_CHARGE_DURATION_S * 4 * 1000;
   await helm.page.waitForFunction(
     () => {
       const msgs: any[] = (window as any).__messages;

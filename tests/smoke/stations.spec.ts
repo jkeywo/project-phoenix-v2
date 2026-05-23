@@ -6,7 +6,7 @@ import { readHostPeerId, createTestClient, createServerPage } from './fixtures';
 
 test('Welcome includes ship_stations', async ({ context }) => {
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);
@@ -30,7 +30,7 @@ test('Welcome includes ship_stations', async ({ context }) => {
 
 test('SelectStation for empty station claims it and broadcasts StationAssigned', async ({ context }) => {
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);
@@ -48,7 +48,7 @@ test('SelectStation for empty station claims it and broadcasts StationAssigned',
 
 test('SelectStation for occupied station is a no-op', async ({ context }) => {
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);
@@ -81,7 +81,7 @@ test('SelectStation for occupied station is a no-op', async ({ context }) => {
 
 test('SelectStation for own station is a no-op', async ({ context }) => {
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);
@@ -106,7 +106,7 @@ test('SelectStation for own station is a no-op', async ({ context }) => {
 
 test('ReleaseStation returns player to spectator', async ({ context }) => {
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);

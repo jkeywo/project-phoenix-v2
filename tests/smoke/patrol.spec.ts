@@ -24,7 +24,7 @@ test('patrol scenario: raider entity appears in WorldSetup after game start', as
   );
 
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
 
   const hostId = await readHostPeerId(serverPage);

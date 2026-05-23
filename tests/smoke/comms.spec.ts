@@ -19,7 +19,7 @@ async function waitForStation(client: { page: import('@playwright/test').Page; t
 test('comms — hail Starbase Alpha, respond, get ObjectiveSummary', async ({ context }) => {
   // ── Boot server ────────────────────────────────────────────────────────────
   const serverPage = await context.newPage();
-  await serverPage.goto('/');
+  await serverPage.goto('/?scenario=assets/worlds/default.toml');
   await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 20_000 });
 
   const hostId = await readHostPeerId(serverPage);

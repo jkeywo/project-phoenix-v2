@@ -692,7 +692,7 @@ fn sync_radar_blip_nodes(
                 effective_yaw,
                 range,
                 ent_radius,
-                &OrientationMode::ShipRelative,
+                &widget.orientation,
             ) else {
                 continue;
             };

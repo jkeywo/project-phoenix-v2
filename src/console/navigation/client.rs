@@ -455,7 +455,7 @@ fn bridge_client_sim_to_nav_radar(
                     OnRadar(RadarLayer::PlayerShip),
                     ship_appearance,
                     ship_t,
-                    GlobalTransform::default(),
+                    GlobalTransform::from(ship_t),
                 ))
                 .id();
             radar.center = Some(e);
@@ -521,7 +521,7 @@ fn bridge_client_sim_to_nav_radar(
             commands.entity(*existing).insert((OnRadar(layer), appearance, t));
         } else {
             let blip = commands
-                .spawn((OnRadar(layer), appearance, t, GlobalTransform::default()))
+                .spawn((OnRadar(layer), appearance, t, GlobalTransform::from(t)))
                 .id();
             radar.blips.insert(uuid.clone(), blip);
         }

@@ -206,8 +206,10 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(weapons_update_broadcaster())
     .add_plugins(sim_state_broadcaster())
     .add_plugins(modifier_events_broadcaster())
-    .add_plugins(sim_outbox_broadcaster())
-    .add_plugins(crate::server::ServerViewscreenRadarPlugin);
+    .add_plugins(sim_outbox_broadcaster());
+
+#[cfg(feature = "server")]
+app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.

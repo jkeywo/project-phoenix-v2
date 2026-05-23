@@ -244,6 +244,7 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity, is_landscap
         RadarLayer::Planet,
         RadarLayer::Star,
         RadarLayer::AsteroidField,
+        RadarLayer::Region,
     ]));
     let radar = GenericRadar::spawn(
         commands,

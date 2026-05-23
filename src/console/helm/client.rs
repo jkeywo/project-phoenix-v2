@@ -640,7 +640,6 @@ fn fill_helm_radar(
         RadarLayer::PlayerShip,
         RadarLayer::Ship,
         RadarLayer::Asteroid,
-        RadarLayer::AsteroidField,
         RadarLayer::Station,
         RadarLayer::Missile,
         RadarLayer::Planet,

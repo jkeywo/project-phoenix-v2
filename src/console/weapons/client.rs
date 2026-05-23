@@ -315,6 +315,7 @@ fn fill_tactical_radar(
         RadarLayer::Ship,
         RadarLayer::Missile,
         RadarLayer::Station,
+        RadarLayer::Asteroid,
     ]));
     let radar = GenericRadar::spawn(
         commands,

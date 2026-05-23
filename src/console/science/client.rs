@@ -326,7 +326,7 @@ fn refresh_cancel_impulse_visibility(
 ) {
     for mut vis in buttons.iter_mut() {
         *vis = if ship_view.impulse_charge_progress > 0.0 {
-            Visibility::Visible
+            Visibility::Inherited
         } else {
             Visibility::Hidden
         };

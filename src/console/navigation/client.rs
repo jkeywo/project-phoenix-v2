@@ -405,7 +405,7 @@ fn refresh_navigation_panel(
     }
     for mut vis in cancel_vis.iter_mut() {
         *vis = if charge > 0.0 {
-            Visibility::Visible
+            Visibility::Inherited
         } else {
             Visibility::Hidden
         };

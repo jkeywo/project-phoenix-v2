@@ -663,7 +663,7 @@ fn fill_helm_radar(
         Some(assets.radar_bg.clone()),
         RadarClipMode::Circle,
         560.0 / 640.0, // overlay_fraction: radar-bg (560px) centred within surround (640px)
-        270.0 / 320.0, // face_fraction: measured circle radius (270px) / surround half (320px)
+        270.0 / 280.0, // face_fraction: measured circle radius (270px) / bg half (280px)
     );
     // HelmRadarWidget marks this widget so sync_helm_radar_range only
     // updates it, not other consoles' radar widgets.

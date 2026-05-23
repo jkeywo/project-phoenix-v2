@@ -143,12 +143,19 @@ pub struct GenericRadarWidget {
     pub orientation: OrientationMode,
     pub filter: RadarFilter,
     pub clip_mode: RadarClipMode,
-    /// Fraction of the widget's inscribed-circle radius that corresponds to the
-    /// visual radar face.  `1.0` means the radar circle fills the full widget;
-    /// values < 1.0 scale blip positions and the per-pixel clip boundary inward
-    /// to match a background image whose circular face is smaller than the node.
+    /// Fraction of the (root or overlay) inscribed-circle radius that corresponds
+    /// to the visual radar face.  `1.0` means the radar circle fills the full
+    /// face area; values < 1.0 scale blip positions and the per-pixel clip
+    /// boundary inward to match a background image whose circular face is
+    /// smaller than the image.
     pub face_fraction: f32,
 }
+
+/// Captures the overlay-image child entity so `sync_radar_blip_nodes` can read
+/// that child's `ComputedNode` size for the radar-radius calculation instead of
+/// using the root widget's size.
+#[derive(Component)]
+pub struct RadarOverlayEntity(pub Entity);
 
 // ── Per-widget behaviour overrides ────────────────────────────────────────────
 
@@ -512,20 +519,20 @@ impl GenericRadar {
 
         if let Some(overlay) = overlay_image {
             let margin_pct = (1.0 - overlay_fraction) * 50.0;
-            commands.entity(entity).with_children(|parent| {
-                parent.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        width: Val::Percent(overlay_fraction * 100.0),
-                        height: Val::Percent(overlay_fraction * 100.0),
-                        top: Val::Percent(margin_pct),
-                        left: Val::Percent(margin_pct),
-                        ..default()
-                    },
-                    ImageNode::new(overlay),
-                    ZIndex(1),
-                ));
-            });
+            let child = commands.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Percent(overlay_fraction * 100.0),
+                    height: Val::Percent(overlay_fraction * 100.0),
+                    top: Val::Percent(margin_pct),
+                    left: Val::Percent(margin_pct),
+                    ..default()
+                },
+                ImageNode::new(overlay),
+                ZIndex(1),
+            )).id();
+            commands.entity(entity).add_child(child);
+            commands.entity(entity).insert(RadarOverlayEntity(child));
         }
 
         entity
@@ -569,7 +576,9 @@ fn sync_radar_blip_nodes(
         Option<&Children>,
         Option<&WorldCentredRadar>,
         Option<&AutoScaleRadar>,
+        Option<&RadarOverlayEntity>,
     )>,
+    overlay_nodes: Query<&ComputedNode>,
     blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform)>,
     centers: Query<&RadarCenter>,
     mut existing_blip_nodes: Query<
@@ -592,16 +601,29 @@ fn sync_radar_blip_nodes(
     // Cache the global RadarCenter once; only used for ship-centred widgets.
     let global_center = centers.iter().next();
 
-    for (radar_entity, mut widget, computed, vis, children, world_centred, auto_scale) in
-        radars.iter_mut()
+    for (
+        radar_entity,
+        mut widget,
+        computed,
+        vis,
+        children,
+        world_centred,
+        auto_scale,
+        overlay,
+    ) in radars.iter_mut()
     {
         if !vis.get() {
             continue;
         }
-        let size = computed.size();
-        let center_x_px = size.x * 0.5;
-        let center_y_px = size.y * 0.5;
-        let radar_radius_px = size.x.min(size.y) * 0.5 * widget.face_fraction;
+        // When an overlay entity exists, use its computed size for the radar
+        // radius so blip positioning and clipping respect the overlay's actual
+        // rendered area rather than the root widget's area.
+        let face_size = overlay
+            .and_then(|o| overlay_nodes.get(o.0).ok())
+            .map_or_else(|| computed.size(), |cn| cn.size());
+        let center_x_px = computed.size().x * 0.5;
+        let center_y_px = computed.size().y * 0.5;
+        let radar_radius_px = face_size.x.min(face_size.y) * 0.5 * widget.face_fraction;
         if radar_radius_px <= 0.0 {
             continue;
         }

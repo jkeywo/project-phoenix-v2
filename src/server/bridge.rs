@@ -130,7 +130,20 @@ pub fn wasm_init() {
     let debug_regions_initial = DEBUG_REGIONS_ENABLED.with(|v| *v.borrow());
     app.add_plugins(crate::debug_overlay::DebugOverlayPlugin { enabled: debug_regions_initial });
 
-    app.insert_resource(bevy::winit::WinitSettings::game())
+    app.insert_resource(bevy::winit::WinitSettings {
+        focused_mode: bevy::winit::UpdateMode::Reactive {
+            wait: std::time::Duration::ZERO,
+            react_to_device_events: false,
+            react_to_user_events: false,
+            react_to_window_events: true,
+        },
+        unfocused_mode: bevy::winit::UpdateMode::Reactive {
+            wait: std::time::Duration::from_secs_f64(1.0 / 20.0),
+            react_to_device_events: false,
+            react_to_user_events: false,
+            react_to_window_events: true,
+        },
+    })
     .add_systems(PreUpdate, (drain_inbound, drain_disconnects, drain_debug_toggles))
     .add_systems(PostUpdate, flush_outbound);
 

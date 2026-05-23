@@ -97,6 +97,7 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
           m.data.snapshot.impulse_charge_progress >= 1.0,
       );
     },
+    undefined,
     { timeout: chargeTimeoutMs },
   );
 

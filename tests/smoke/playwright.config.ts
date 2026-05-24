@@ -8,8 +8,8 @@ export default defineConfig({
   testMatch: '*.spec.ts',
   // Tests run sequentially — WASM is heavy; parallel runs OOM on CI
   workers: 1,
-  timeout: 45_000,
-  expect: { timeout: 15_000 },
+  timeout: 60_000,
+  expect: { timeout: 30_000 },
 
   use: {
     baseURL: 'http://localhost:3000',

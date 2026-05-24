@@ -1,8 +1,7 @@
 // Issue #134 — Smoke tests: station-based lobby protocol.
 // Rewrites issues #56 + #57 for SelectStation / StationAssigned.
 
-import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
 
 async function waitForStation(client: { page: import('@playwright/test').Page; token: string }, timeout = 5_000) {
   await client.page.waitForFunction(
@@ -17,7 +16,7 @@ async function waitForStation(client: { page: import('@playwright/test').Page; t
 test('SelectStation — claims station and both clients receive StationAssigned', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 
@@ -54,7 +53,7 @@ test('SelectStation — claims station and both clients receive StationAssigned'
 test('non-captain StartGame is ignored', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 
@@ -82,7 +81,7 @@ test('non-captain StartGame is ignored', async ({ context }) => {
 test('StartGame with unfilled stations is ignored', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 
@@ -108,7 +107,7 @@ test('StartGame with unfilled stations is ignored', async ({ context }) => {
 test('captain starts game — both clients receive GameStarted', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 

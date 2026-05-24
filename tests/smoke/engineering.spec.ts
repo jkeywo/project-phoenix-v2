@@ -3,8 +3,7 @@
 // SimSnapshot no longer carries a flat hull_integrity; it carries
 // console_hull: Vec<ConsoleHullStatus { console, current, max_hp }>.
 
-import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
 
 async function waitForStation(client: { page: import('@playwright/test').Page; token: string }, timeout = 5_000) {
@@ -20,7 +19,7 @@ async function waitForStation(client: { page: import('@playwright/test').Page; t
 async function startGameWithEngineering(context: BrowserContext) {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 

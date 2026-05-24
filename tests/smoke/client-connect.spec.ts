@@ -1,13 +1,12 @@
 // Issue #55 — Smoke test: client connects to host and receives Welcome.
 
-import { test, expect } from './fixtures';
-import { readHostPeerId } from './fixtures';
+import { test, expect, readHostPeerId, waitForWasmReady } from './fixtures';
 
 test('client receives Welcome containing its player token', async ({ context }) => {
   // ── Server page ────────────────────────────────────────────────────────────
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
   expect(hostId).toBeTruthy();

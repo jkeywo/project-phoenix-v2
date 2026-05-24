@@ -2,6 +2,7 @@ import { test as base, BrowserContext, Page } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
+
 export const SHIM = fs.readFileSync(path.join(__dirname, 'peerjs-shim.js'), 'utf-8');
 
 // Stub CDN scripts so they don't overwrite the shim or block execution.
@@ -42,6 +43,22 @@ export const test = base.extend({
 });
 
 export { expect } from '@playwright/test';
+
+/** Default timeout for waiting on __wasmReady (PhoenixReady + Peer open).
+ *
+ * In CI / long-running test suites Chrome throttles rAF on non-active pages
+ * (~1 fps), which can delay the Bevy init → PhoenixReady dispatch by 20-40 s.
+ * 60 s gives enough headroom without making tests flaky locally.
+ */
+export const WASM_READY_TIMEOUT = 60_000;
+
+/** Bring a server page to front and wait for __wasmReady.
+ *  Replaces the ad-hoc 3-line pattern spread across spec files.
+ */
+export async function waitForWasmReady(page: Page, timeout = WASM_READY_TIMEOUT): Promise<void> {
+  await page.bringToFront();
+  await page.waitForFunction(() => !!(window as any).__wasmReady, { timeout });
+}
 
 // ── Test client helper ────────────────────────────────────────────────────────
 // Creates a blank page at localhost:3000 (same BroadcastChannel origin),
@@ -167,7 +184,8 @@ export async function createServerPage(
     });
   }
   await page.goto('/?scenario=assets/worlds/default.toml');
-  await page.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await page.bringToFront();
+  await page.waitForFunction(() => !!(window as any).__wasmReady, { timeout: WASM_READY_TIMEOUT });
   return page;
 }
 

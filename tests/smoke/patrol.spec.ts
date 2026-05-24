@@ -6,8 +6,7 @@
 // confirming that the pirate_raider.toml → patrol.toml → entity-spawn
 // pipeline is wired end-to-end.
 
-import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
 import fs from 'fs';
 import path from 'path';
 
@@ -25,7 +24,7 @@ test('patrol scenario: raider entity appears in WorldSetup after game start', as
 
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 

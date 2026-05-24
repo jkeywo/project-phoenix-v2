@@ -1,13 +1,12 @@
 // Issue #134 — Smoke tests: station contract (Welcome, spectator overflow,
 // SelectStation / ReleaseStation behaviors).
 
-import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient, createServerPage } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, createServerPage, waitForWasmReady } from './fixtures';
 
 test('Welcome includes ship_stations', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
   const client = await createTestClient(context, hostId, { name: 'Tester' });
@@ -31,7 +30,7 @@ test('Welcome includes ship_stations', async ({ context }) => {
 test('SelectStation for empty station claims it and broadcasts StationAssigned', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
   const client = await createTestClient(context, hostId, { name: 'Solo' });
@@ -49,7 +48,7 @@ test('SelectStation for empty station claims it and broadcasts StationAssigned',
 test('SelectStation for occupied station is a no-op', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 
@@ -82,7 +81,7 @@ test('SelectStation for occupied station is a no-op', async ({ context }) => {
 test('SelectStation for own station is a no-op', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
   const client = await createTestClient(context, hostId, { name: 'Solo' });
@@ -107,7 +106,7 @@ test('SelectStation for own station is a no-op', async ({ context }) => {
 test('ReleaseStation returns player to spectator', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
   const client = await createTestClient(context, hostId, { name: 'Solo' });

@@ -2,8 +2,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { test, expect, type TestClient } from './fixtures';
-import { readHostPeerId, createTestClient } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
+import type { TestClient } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
 
 // Read impulse_charge_duration from the ship TOML so the test timeout is
@@ -28,7 +28,7 @@ async function waitForStation(client: { page: import('@playwright/test').Page; t
 async function startGame(context: BrowserContext): Promise<{ captain: TestClient; helm: TestClient }> {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 

@@ -8,8 +8,7 @@
 //   3. Asserts the NPC's hull_fraction in entity_states decreases.
 //   4. Keeps firing until EntityDespawned arrives (NPC hull reaches 0).
 
-import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
 import type { BrowserContext } from '@playwright/test';
 
 // Self-contained smoke-test world — intentionally does NOT read or depend on
@@ -92,7 +91,7 @@ async function startGameWithTactical(context: BrowserContext) {
 
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 

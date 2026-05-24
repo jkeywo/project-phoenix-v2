@@ -8,8 +8,7 @@
 // not reactively, so the test catches missing copy-dir entries even when
 // the local WASM binary pre-dates the asset additions.
 
-import { test, expect } from './fixtures';
-import { readHostPeerId } from './fixtures';
+import { test, expect, readHostPeerId, waitForWasmReady } from './fixtures';
 
 // Sentinel asset from each directory the client Bevy app loads.
 // One file per directory is enough — if the directory is missing the whole
@@ -34,7 +33,7 @@ test('client WASM loads without asset 404s or JS errors', async ({ context }) =>
   // Boot the server so the client has a valid host ID to connect to.
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
   const hostId = await readHostPeerId(serverPage);
 
   const clientPage = await context.newPage();

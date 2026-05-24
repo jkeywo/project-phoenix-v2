@@ -4,7 +4,7 @@
 // After game starts, the Helm player hails Starbase Alpha, picks a response,
 // and verifies that ObjectiveSummary is delivered to the captain.
 
-import { test, expect, createTestClient, readHostPeerId } from './fixtures';
+import { test, expect, createTestClient, readHostPeerId, waitForWasmReady } from './fixtures';
 
 async function waitForStation(client: { page: import('@playwright/test').Page; token: string }, timeout = 8_000) {
   await client.page.waitForFunction(
@@ -20,7 +20,7 @@ test('comms — hail Starbase Alpha, respond, get ObjectiveSummary', async ({ co
   // ── Boot server ────────────────────────────────────────────────────────────
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 20_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 

@@ -5,13 +5,12 @@
 // assets/worlds/default.toml ("Starbase Alpha", tag: "station") must
 // appear in the WorldSetup entity list.
 
-import { test, expect } from './fixtures';
-import { readHostPeerId, createTestClient } from './fixtures';
+import { test, expect, readHostPeerId, createTestClient, waitForWasmReady } from './fixtures';
 
 test('default scenario: Starbase Alpha appears in WorldSetup after game start', async ({ context }) => {
   const serverPage = await context.newPage();
   await serverPage.goto('/?scenario=assets/worlds/default.toml');
-  await serverPage.waitForFunction(() => !!(window as any).__wasmReady, { timeout: 15_000 });
+  await waitForWasmReady(serverPage);
 
   const hostId = await readHostPeerId(serverPage);
 

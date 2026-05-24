@@ -68,7 +68,7 @@
     #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #launch-btn:not(:disabled):hover { background: #334; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-4db8455baf66c421.js" crossorigin="anonymous" integrity="sha384-NG5q3uR72UnxMVG9vVO92y0br2x8YjBkyAooSrSX+j1/ZAXnBzFtKbRl8oRFNTOv"><link rel="preload" href="./project-phoenix-4db8455baf66c421_bg.wasm" crossorigin="anonymous" integrity="sha384-WdXijGMI6+94DALjozTzNbPAZU/VTdskCmz0Rwzayz/v9U3tJ3bzl3spxiz2BWpo" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-6157522cbeb43358.js" crossorigin="anonymous" integrity="sha384-NG5q3uR72UnxMVG9vVO92y0br2x8YjBkyAooSrSX+j1/ZAXnBzFtKbRl8oRFNTOv"><link rel="preload" href="./project-phoenix-6157522cbeb43358_bg.wasm" crossorigin="anonymous" integrity="sha384-A7ilkFeEvyn/WGgs3ySs4NuNWVj9ghxNujXLZlt/3x8xSIV1tWEZW8/fQEzfIatV" as="fetch" type="application/wasm"></head>
 <body>
   <audio id="bg-hum" src="assets/sounds/background_hum.mp3" loop volume = 0.25></audio>
   <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.mp3"></audio>
@@ -118,8 +118,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-4db8455baf66c421.js';
-const wasm = await init({ module_or_path: './project-phoenix-4db8455baf66c421_bg.wasm' });
+import init, * as bindings from './project-phoenix-6157522cbeb43358.js';
+const wasm = await init({ module_or_path: './project-phoenix-6157522cbeb43358_bg.wasm' });
 
 
 window.wasmBindings = bindings;

@@ -577,13 +577,13 @@ window.addEventListener('TrunkApplicationStarted', () => {
       requestAnimationFrame(rafLoop);
     })();
 
-    // ── F5 — toggle entity behavior overlay ─────────────────────────────
+    // ── F6 — toggle entity behavior overlay ─────────────────────────────
     (function() {
       var entityEl = document.getElementById('entity-debug-overlay');
       var entityVisible = false;
 
       document.addEventListener('keydown', function(e) {
-        if (e.key === 'F5') {
+        if (e.key === 'F6') {
           e.preventDefault();
           entityVisible = !entityVisible;
           entityEl.style.display = entityVisible ? 'block' : 'none';

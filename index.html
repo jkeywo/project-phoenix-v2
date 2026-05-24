@@ -68,7 +68,7 @@
     #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #launch-btn:not(:disabled):hover { background: #334; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-f812791e2e1aa7e3.js" crossorigin="anonymous" integrity="sha384-NG5q3uR72UnxMVG9vVO92y0br2x8YjBkyAooSrSX+j1/ZAXnBzFtKbRl8oRFNTOv"><link rel="preload" href="./project-phoenix-f812791e2e1aa7e3_bg.wasm" crossorigin="anonymous" integrity="sha384-A7ilkFeEvyn/WGgs3ySs4NuNWVj9ghxNujXLZlt/3x8xSIV1tWEZW8/fQEzfIatV" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-3eabdab6caa68e0.js" crossorigin="anonymous" integrity="sha384-c7Yj69YtD4nZLw0kr/uFPLuxgTRMRS2G2UmqXrjeuILrRjBMEcJCAm1VOXXJIZtN"><link rel="preload" href="./project-phoenix-3eabdab6caa68e0_bg.wasm" crossorigin="anonymous" integrity="sha384-DP2wBnTG+2LcaDyNQfsluQ6EWCeVpMfCuC/a/4PoeY08ykeAjHDS4lg4d/D9AF+H" as="fetch" type="application/wasm"></head>
 <body>
   <audio id="bg-hum" src="assets/sounds/background_hum.mp3" loop volume = 0.25></audio>
   <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.mp3"></audio>
@@ -106,6 +106,9 @@
   <!-- Damage debug overlay (F8) -->
   <div id="damage-log-overlay" style="display:none;position:fixed;top:0;right:0;z-index:9999;background:rgba(0,0,0,0.8);color:#f80;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:50vw;max-height:100vh;overflow-y:auto;"></div>
 
+  <!-- Entity behavior debug overlay (F5) -->
+  <div id="entity-debug-overlay" style="display:none;position:fixed;bottom:0;left:0;z-index:9999;background:rgba(0,0,0,0.8);color:#0ff;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:60vw;max-height:50vh;overflow-y:auto;"></div>
+
   <div id="top-bar">
     <div id="top-bar-row">
       <span id="conn-label"></span>
@@ -118,8 +121,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-f812791e2e1aa7e3.js';
-const wasm = await init({ module_or_path: './project-phoenix-f812791e2e1aa7e3_bg.wasm' });
+import init, * as bindings from './project-phoenix-3eabdab6caa68e0.js';
+const wasm = await init({ module_or_path: './project-phoenix-3eabdab6caa68e0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -579,6 +582,31 @@ window.addEventListener('TrunkApplicationStarted', () => {
       function rafLoop() {
         if (damageVisible && typeof wasm_get_damage_log === 'function') {
           damageEl.textContent = wasm_get_damage_log();
+        }
+        requestAnimationFrame(rafLoop);
+      }
+      requestAnimationFrame(rafLoop);
+    })();
+
+    // ── F5 — toggle entity behavior overlay ─────────────────────────────
+    (function() {
+      var entityEl = document.getElementById('entity-debug-overlay');
+      var entityVisible = false;
+
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'F5') {
+          e.preventDefault();
+          entityVisible = !entityVisible;
+          entityEl.style.display = entityVisible ? 'block' : 'none';
+          if (typeof wasm_toggle_debug_entities === 'function') {
+            wasm_toggle_debug_entities();
+          }
+        }
+      });
+
+      function rafLoop() {
+        if (entityVisible && typeof wasm_get_entity_debug_state === 'function') {
+          entityEl.textContent = wasm_get_entity_debug_state();
         }
         requestAnimationFrame(rafLoop);
       }

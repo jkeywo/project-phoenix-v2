@@ -751,6 +751,22 @@ fn reconcile_runtime_entities(
                 };
                 if let Some(shape) = region_shape {
                     snapshot.shape = Some(shape_to_wire(shape));
+                    if snapshot.radius.is_none() {
+                        match &shape.0 {
+                            crate::region_shape::RegionShape::Sphere { radius } => {
+                                snapshot.radius = Some(*radius);
+                            }
+                            crate::region_shape::RegionShape::Box { half_extents, .. } => {
+                                let max_he = half_extents[0].max(half_extents[2]);
+                                snapshot.radius = Some(max_he);
+                                snapshot.half_extents = Some(*half_extents);
+                            }
+                            crate::region_shape::RegionShape::Torus { inner_radius, outer_radius } => {
+                                snapshot.radius = Some(*outer_radius);
+                                snapshot.inner_radius = Some(*inner_radius);
+                            }
+                        }
+                    }
                 }
                 if let Some(ra) = radar_appearance {
                     if ra.0.colour.len() >= 3 {
@@ -794,6 +810,22 @@ fn reconcile_runtime_entities(
                 };
                 if let Some(shape) = region_shape {
                     snapshot.shape = Some(shape_to_wire(shape));
+                    if snapshot.radius.is_none() {
+                        match &shape.0 {
+                            crate::region_shape::RegionShape::Sphere { radius } => {
+                                snapshot.radius = Some(*radius);
+                            }
+                            crate::region_shape::RegionShape::Box { half_extents, .. } => {
+                                let max_he = half_extents[0].max(half_extents[2]);
+                                snapshot.radius = Some(max_he);
+                                snapshot.half_extents = Some(*half_extents);
+                            }
+                            crate::region_shape::RegionShape::Torus { inner_radius, outer_radius } => {
+                                snapshot.radius = Some(*outer_radius);
+                                snapshot.inner_radius = Some(*inner_radius);
+                            }
+                        }
+                    }
                 }
                 if let Some(ra) = radar_appearance {
                     if ra.0.colour.len() >= 3 {

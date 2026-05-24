@@ -37,7 +37,7 @@ beam_damage_per_sec = 5.0
 beam_duration_secs = 6.0
 cooldown_secs = 6.0
 beam_color = [1.0, 0.4, 0.1, 1.0]
-torpedo_arc_color = [1.0, 0.55, 0.2, 1.0]
+torpedo_arc_color = [1.0, 0.55, 0.2, 0.15]
 
 # Port phaser bank: covers the port hemisphere (forward arc to aft arc).
 # Auto-fire window is narrower than the manual fire arc.
@@ -63,16 +63,16 @@ turn_rate_deg_per_sec = 45.0
 lifespan = 20.0
 load_time = 10.0
 
-# Forward port tube: angled 30° to port of the bow.
+# Forward tube A
 [[torpedoes.tubes]]
 id = "fore_port"
-facing_deg = -30.0
+facing_deg = 0.0
 fire_arc_deg = 90.0
 
-# Forward starboard tube: mirror of fore_port.
+# Forward tube B
 [[torpedoes.tubes]]
 id = "fore_starboard"
-facing_deg = 30.0
+facing_deg = 0.0
 fire_arc_deg = 90.0
 
 # Aft tube: rear-facing torpedo launcher.

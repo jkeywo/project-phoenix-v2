@@ -30,7 +30,7 @@ pub use crate::radar::WEAPONS_RADAR_RANGE;
 pub fn helm_radar_config() -> RadarConfig {
     RadarConfig {
         range: HELM_RADAR_RANGE,
-        shows: vec![EntityTag::Asteroid, EntityTag::Star, EntityTag::Planet],
+        shows: vec![EntityTag::Asteroid, EntityTag::Star, EntityTag::Planet, EntityTag::Ship],
     }
 }
 
@@ -42,7 +42,7 @@ pub fn helm_radar_config() -> RadarConfig {
 pub fn weapons_radar_config() -> RadarConfig {
     RadarConfig {
         range: WEAPONS_RADAR_RANGE,
-        shows: vec![EntityTag::Asteroid],
+        shows: vec![EntityTag::Asteroid, EntityTag::Ship],
     }
 }
 

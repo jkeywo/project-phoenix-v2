@@ -21,6 +21,10 @@ pub struct DebugPaused(pub bool);
 #[derive(Resource, Default)]
 pub struct DebugDamageEnabled(pub bool);
 
+/// Resource indicating whether the entity behavior debug overlay (F5) is enabled.
+#[derive(Resource, Default)]
+pub struct DebugEntitiesEnabled(pub bool);
+
 /// Maximum number of damage log entries retained.
 pub const DAMAGE_LOG_CAPACITY: usize = 10;
 
@@ -89,6 +93,7 @@ impl Plugin for DebugOverlayPlugin {
         app.init_resource::<DebugPaused>();
         app.init_resource::<DebugDamageEnabled>();
         app.init_resource::<DamageLog>();
+        app.init_resource::<DebugEntitiesEnabled>();
         app.add_systems(
             Update,
             draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),
@@ -100,6 +105,10 @@ impl Plugin for DebugOverlayPlugin {
         app.add_systems(
             PostUpdate,
             write_damage_log.run_if(|r: Res<DebugDamageEnabled>| r.0),
+        );
+        app.add_systems(
+            PostUpdate,
+            write_entity_debug_state.run_if(|r: Res<DebugEntitiesEnabled>| r.0),
         );
     }
 }
@@ -131,6 +140,47 @@ fn write_damage_log(log: Res<DamageLog>) {
 /// Native / test stub — does nothing.
 #[cfg(not(all(target_arch = "wasm32", feature = "server")))]
 fn write_damage_log(_log: Res<DamageLog>) {}
+
+/// Reads all entities with `AiControllerComponent` and writes a formatted
+/// table (name, position, current state) to the WASM thread-local for F5.
+///
+/// Only runs when `DebugEntitiesEnabled` is true.
+#[cfg(all(target_arch = "wasm32", feature = "server"))]
+fn write_entity_debug_state(
+    entities: Query<(
+        &crate::ai::server::AiControllerComponent,
+        &Transform,
+        Option<&crate::entities::spawner::EntityName>,
+    )>,
+) {
+    let count = entities.iter().count();
+    let mut out = format!("ENTITY BEHAVIOR ({} entities)\n", count);
+    for (i, (ai, transform, name)) in entities.iter().enumerate() {
+        let label = name.map(|n| n.0.as_str()).unwrap_or("<unnamed>");
+        let p = transform.translation;
+        let state = &ai.controller.current_state_name;
+        out.push_str(&format!(
+            "{:>2}. {:<20} pos=({:>7.1},{:>7.1},{:>7.1})  state={}\n",
+            i + 1,
+            label,
+            p.x,
+            p.y,
+            p.z,
+            state
+        ));
+    }
+    crate::bridge::set_entity_debug_string(out);
+}
+
+/// Native / test stub — does nothing.
+#[cfg(not(all(target_arch = "wasm32", feature = "server")))]
+fn write_entity_debug_state(
+    _entities: Query<(
+        &crate::ai::server::AiControllerComponent,
+        &Transform,
+        Option<&crate::entities::spawner::EntityName>,
+    )>,
+) {}
 
 /// Draws wireframe outlines for every region entity with a shape component.
 fn draw_region_wireframes(

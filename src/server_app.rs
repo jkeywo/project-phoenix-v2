@@ -19,8 +19,8 @@ use crate::ship_state::ShipState;
 use bevy_rapier3d::prelude::ReadRapierContext;
 
 use crate::entity_spawner::{
-    AsteroidFieldSection, EntityId, EntityTagsSection, EntityUuid, RadarAppearanceSection,
-    RegionShapeSection,
+    AsteroidFieldSection, BehaviourSection, EntityId, EntityName, EntityTagsSection, EntityUuid,
+    FactionComponent, MeshSection, RadarAppearanceSection, RegionShapeSection,
 };
 use crate::impulse::ImpulseState;
 use crate::messages::ModifierSlot;
@@ -170,7 +170,7 @@ pub fn add_simulation_plugins(app: &mut App) {
         TimerMode::Repeating,
     )))
     .add_systems(Startup, setup_world.after(crate::world::server::insert_world_config_resource))
-    .add_systems(OnEnter(GamePhase::InProgress), spawn_game_start_entities)
+    .add_systems(OnEnter(GamePhase::InProgress), (spawn_game_start_entities, dump_tracked_entities).chain())
     .add_systems(Update, render_spawned_entities)
     .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
     .insert_resource(GameOverReason(None))
@@ -1215,6 +1215,57 @@ fn spawn_game_start_entities(
     }
 
     *has_spawned = true;
+}
+
+/// Diagnostic: dump every tracked entity's components on InProgress start.
+/// Helps debug missing raider or other invisible NPC issues.
+fn dump_tracked_entities(
+    query: Query<(
+        &EntityUuid,
+        Option<&EntityName>,
+        Option<&EntityId>,
+        &Transform,
+        Option<&MeshSection>,
+        Option<&EntityTagsSection>,
+        Option<&RadarAppearanceSection>,
+        Option<&BehaviourSection>,
+        Option<&FactionComponent>,
+    )>,
+) {
+    bevy::log::info!("=== ENTITY DUMP (InProgress start) ===");
+    let mut count = 0u32;
+    for (uuid, name, id, transform, mesh, tags, radar, behaviour, faction) in &query {
+        count += 1;
+        let label = name
+            .map(|n| n.0.clone())
+            .or_else(|| id.map(|i| i.0.clone()))
+            .unwrap_or_else(|| "?".to_string());
+        let pos = format!(
+            "[{:.1}, {:.1}, {:.1}]",
+            transform.translation.x, transform.translation.y, transform.translation.z
+        );
+        let has_mesh = if mesh.is_some() { "MESH" } else { "no-mesh" };
+        let tags_str = tags
+            .map(|t| format!("tags={:?}", t.0))
+            .unwrap_or_else(|| "no-tags".to_string());
+        let has_radar = if radar.is_some() { "RADAR" } else { "no-radar" };
+        let has_ai = if behaviour.is_some() { "AI" } else { "no-ai" };
+        let fac = faction
+            .map(|f| format!("faction={}", f.0))
+            .unwrap_or_else(|| "no-faction".to_string());
+        bevy::log::info!(
+            "  ENTTY uuid={} label={} pos={} {} {} {} {} {}",
+            &uuid.0[..uuid.0.len().min(8)],
+            label,
+            pos,
+            has_mesh,
+            tags_str,
+            has_radar,
+            has_ai,
+            fac
+        );
+    }
+    bevy::log::info!("=== ENTITY DUMP END ({} entities) ===", count);
 }
 
 /// Add visual meshes and materials to spawned entities that have a `[mesh]`

@@ -295,6 +295,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -317,6 +318,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -339,6 +341,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -361,6 +364,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -383,6 +387,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -1189,6 +1194,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -1211,6 +1217,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -1422,6 +1429,7 @@ mod tests {
                 }],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -1452,6 +1460,7 @@ mod tests {
                 }],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -1479,6 +1488,7 @@ mod tests {
                     science_system_map: 600.0,
                 },
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -1525,6 +1535,7 @@ mod tests {
                     science_system_map: 500.0,
                 },
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };
@@ -1982,6 +1993,7 @@ mod tests {
                 }],
                 radar_state: crate::messages::RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         };

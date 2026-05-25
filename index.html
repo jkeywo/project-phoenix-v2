@@ -68,7 +68,7 @@
     #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #launch-btn:not(:disabled):hover { background: #334; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-421dce2a59585f42.js" crossorigin="anonymous" integrity="sha384-IG+jPlGsmAQzRf0VM9FwIToOqzDAWSIJLt+XDU+V2tVz6TT/j7Wx0/TdaKYGEsVA"><link rel="preload" href="./project-phoenix-421dce2a59585f42_bg.wasm" crossorigin="anonymous" integrity="sha384-Es2D4cab0DyMZewj4VcxfjoNmZnUoll/T85pYKTf65j2Hlw0TzyMUHReLfrpjNI8" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-8792e4928e30ee69.js" crossorigin="anonymous" integrity="sha384-LKlEnPvl384No1hlLL507So4P/EyKPP/11xBhvFnO0Jrv1KxVlqwpafSed0c3cOR"><link rel="preload" href="./project-phoenix-8792e4928e30ee69_bg.wasm" crossorigin="anonymous" integrity="sha384-o7a4FAKrP9jxwd1m2NeP7r+eabm0iTKBm/9+CkWdMh6vFM52ZqvLaq8uVA60Vd4y" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
   <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
@@ -123,8 +123,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-421dce2a59585f42.js';
-const wasm = await init({ module_or_path: './project-phoenix-421dce2a59585f42_bg.wasm' });
+import init, * as bindings from './project-phoenix-8792e4928e30ee69.js';
+const wasm = await init({ module_or_path: './project-phoenix-8792e4928e30ee69_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -289,7 +289,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       hum.volume = 0.25;
       hum.play().catch(() => {});
       const engine = document.getElementById('ship-engine');
-      engine.volume = 0.15;
+      engine.volume = 0.0;
       engine.play().catch(() => {});
     }
 
@@ -301,11 +301,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           startGameAudio();
         }
         if (parsed.type === 'SimState') {
-          const redAlert = parsed.data?.snapshot?.red_alert;
+          const snapshot = parsed.data?.snapshot;
+          const redAlert = snapshot?.red_alert;
           if (redAlert && !prevRedAlert) {
             document.getElementById('red-alert-siren').play().catch(() => {});
           }
           prevRedAlert = redAlert;
+          const engine = document.getElementById('ship-engine');
+          engine.volume = (snapshot?.engine_thrust ?? 0) * 0.15;
         }
       } catch (_) {}
 
@@ -511,26 +514,6 @@ window.addEventListener('TrunkApplicationStarted', () => {
   wasmReady = true;
   if (selectedScenario) startPhoenix();
 });
-
-    // ── Audio context resume on first user gesture ───────────────────────
-    // Browsers block AudioContext from playing until a user interacts with
-    // the page. Create + resume inside the first click/tap to satisfy the
-    // autoplay policy. Bevy's audio plugin can then use this context normally.
-    (function initAudio() {
-      let resumed = false;
-      function ensureAudio() {
-        if (resumed) return;
-        resumed = true;
-        // AudioContext must be created/resumed inside a user gesture.
-        window.AudioContext = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioContext();
-        // .resume() is a no-op if already running; suppresses the warning.
-        ctx.resume().catch(() => {});
-      }
-      document.addEventListener('mousedown', ensureAudio);
-      document.addEventListener('touchstart', ensureAudio);
-      document.addEventListener('keydown', ensureAudio);
-    })();
 
     // ── F4 — toggle region wireframes ────────────────────────────────────
     document.addEventListener('keydown', function(e) {

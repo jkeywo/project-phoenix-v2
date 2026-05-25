@@ -217,9 +217,16 @@ app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
     // navigator.webdriver is true when the browser is controlled by WebDriver,
     // which covers all Playwright-driven headless Chromium runs.
     #[cfg(target_arch = "wasm32")]
-    let automation = web_sys::window()
-        .map(|w| w.navigator().webdriver())
-        .unwrap_or(false);
+    let automation = {
+        use wasm_bindgen::JsCast as _;
+        web_sys::window()
+            .map(|w| {
+                w.navigator()
+                    .unchecked_ref::<web_sys::NavigatorAutomationInformation>()
+                    .webdriver()
+            })
+            .unwrap_or(false)
+    };
     #[cfg(not(target_arch = "wasm32"))]
     let automation = false;
 

@@ -587,13 +587,18 @@ window.addEventListener('TrunkApplicationStarted', () => {
           entityEl.style.display = entityVisible ? 'block' : 'none';
           if (typeof wasm_toggle_debug_entities === 'function') {
             wasm_toggle_debug_entities();
+          } else if (entityVisible) {
+            entityEl.textContent = '(entity overlay: WASM not ready — hard-reload the page)';
           }
         }
       });
 
       function rafLoop() {
-        if (entityVisible && typeof wasm_get_entity_debug_state === 'function') {
-          entityEl.textContent = wasm_get_entity_debug_state();
+        if (entityVisible) {
+          if (typeof wasm_get_entity_debug_state === 'function') {
+            var txt = wasm_get_entity_debug_state();
+            entityEl.textContent = txt.length > 0 ? txt : '(entity overlay active — waiting for Bevy)';
+          }
         }
         requestAnimationFrame(rafLoop);
       }

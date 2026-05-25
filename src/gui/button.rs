@@ -199,8 +199,7 @@ pub struct GuiButtonPlugin;
 
 impl Plugin for GuiButtonPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_ui_sounds)
-           .add_systems(Update, (detect_button_press, detect_widget_state_change));
+        app.add_systems(Update, (detect_button_press, detect_widget_state_change));
     }
 }
 

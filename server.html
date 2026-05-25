@@ -70,7 +70,6 @@
   </style>
 </head>
 <body>
-  <audio id="bg-hum" src="assets/sounds/background_hum.mp3" loop volume = 0.25></audio>
   <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.mp3"></audio>
 
   <!-- Scenario selector shown before the server boots -->
@@ -272,7 +271,6 @@
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
           document.getElementById('overlay').style.display = 'none';
-          document.getElementById('bg-hum').play().catch(() => {});
         }
         if (parsed.type === 'SimState') {
           const redAlert = parsed.data?.snapshot?.red_alert;

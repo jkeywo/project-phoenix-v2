@@ -211,7 +211,7 @@ pub fn add_simulation_plugins(app: &mut App) {
 #[cfg(feature = "server")]
 app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
 
-#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+#[cfg(feature = "server")]
 app.add_plugins(crate::server::EngineSoundPlugin);
 }
 

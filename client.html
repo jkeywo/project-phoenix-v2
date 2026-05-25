@@ -85,6 +85,9 @@
   </style>
 </head>
 <body>
+  <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
+  <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
+
   <!-- Trunk replaces this with the compiled WASM bundle (client feature).
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   <link data-trunk rel="rust" data-wasm-opt="z" data-cargo-no-default-features data-cargo-features="client" />
@@ -180,6 +183,18 @@
   </div>
 
   <script>
+    // ── Click sound ────────────────────────────────────────────────────────
+    // Message types that should NOT trigger a click (continuous / connection
+    // setup messages that are not the result of a deliberate button press).
+    const NO_CLICK = new Set(['HelmInput', 'Identify', 'SetName']);
+
+    function playClick() {
+      const el = document.getElementById('ui-click');
+      if (!el) return;
+      el.currentTime = 0;
+      el.play().catch(() => {});
+    }
+
     // ── Connection status ──────────────────────────────────────────────────
 
     function setConnectionStatus(state) {
@@ -288,6 +303,7 @@
 
     function send(type, data) {
       if (!conn || !conn.open) return;
+      if (!NO_CLICK.has(type)) playClick();
       const msg = data !== undefined ? { type, data } : { type };
       conn.send(JSON.stringify(msg));
     }
@@ -952,6 +968,10 @@
     // Outbound callback the WASM uses to send ClientMessage JSON to the host.
     function clientSendCallback(payload) {
       if (conn && conn.open) conn.send(payload);
+      try {
+        const msg = JSON.parse(payload);
+        if (!NO_CLICK.has(msg.type)) playClick();
+      } catch (_) {}
     }
 
     function startClientWasm() {

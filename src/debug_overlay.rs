@@ -188,7 +188,7 @@ fn draw_region_wireframes(
     mut gizmos: Gizmos,
 ) {
     for (transform, shape) in regions.iter() {
-        let origin = transform.translation;
+        let origin = transform.translation - Vec3::Y * 10.0;
         match &shape.0 {
             RegionShape::Sphere { radius } => {
                 draw_sphere_wireframe(&mut gizmos, origin, *radius);

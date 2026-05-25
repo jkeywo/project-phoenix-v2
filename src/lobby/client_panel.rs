@@ -598,6 +598,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: crate::messages::RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![],
             },
         });

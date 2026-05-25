@@ -2274,6 +2274,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: hull.clone(),
             },
         });
@@ -2313,6 +2314,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: first,
             },
         });
@@ -2329,6 +2331,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: second.clone(),
             },
         });
@@ -2351,6 +2354,7 @@ mod tests {
                 entity_states: vec![],
                 radar_state: RadarStateSnapshot::default(),
                 impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
                 console_hull: vec![ConsoleHullStatus {
                     console: Console::Helm,
                     current: 20.0,
@@ -2823,6 +2827,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 flags: vec![],
                 radar_state: RadarStateSnapshot::default(),
+                engine_thrust: 0.0,
                 console_hull: vec![],
                 entity_states: vec![crate::messages::EntityStateSnapshot {
                     uuid: "ast-move".into(),

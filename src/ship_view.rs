@@ -276,6 +276,7 @@ mod tests {
             flags: vec![],
             entity_states: vec![],
             radar_state: RadarStateSnapshot::default(),
+            engine_thrust: 0.0,
             console_hull: vec![],
         }
     }

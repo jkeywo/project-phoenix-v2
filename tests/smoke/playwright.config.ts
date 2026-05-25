@@ -23,7 +23,14 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: {
-          args: ['--autoplay-policy=no-user-gesture-required'],
+          args: [
+            '--autoplay-policy=no-user-gesture-required',
+            // cpal's WASM audio backend stalls the Bevy update loop in headless
+            // Chromium once InProgress audio entities are spawned.  Disabling the
+            // Web Audio API makes cpal fail gracefully (BuildStreamError, no panic)
+            // so the simulation keeps ticking.
+            '--disable-web-audio',
+          ],
         },
       },
     },

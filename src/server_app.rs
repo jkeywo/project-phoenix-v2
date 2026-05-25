@@ -211,35 +211,6 @@ pub fn add_simulation_plugins(app: &mut App) {
 #[cfg(feature = "server")]
 app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
 
-#[cfg(feature = "server")]
-{
-    // Skip audio in headless/automation environments (e.g. Playwright CI).
-    // navigator.webdriver is true when the browser is controlled by WebDriver,
-    // which covers all Playwright-driven headless Chromium runs.
-    #[cfg(target_arch = "wasm32")]
-    let automation = {
-        use wasm_bindgen::JsCast as _;
-        web_sys::window()
-            .map(|w| {
-                w.navigator()
-                    .unchecked_ref::<web_sys::NavigatorAutomationInformation>()
-                    .webdriver()
-            })
-            .unwrap_or(false)
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let automation = false;
-
-    // bevy_audio panics with UnrecognizedFormat on wasm32 in Bevy 0.18:
-    // rodio's Decoder::new().unwrap() at audio_source.rs:102 fails for every
-    // format because the symphonia decoders don't function under
-    // wasm32-unknown-unknown.  Audio is handled via JavaScript in server.html
-    // using the browser's native Web Audio API instead.
-    #[cfg(not(target_arch = "wasm32"))]
-    if !automation {
-        app.add_plugins(crate::server::EngineSoundPlugin);
-    }
-}
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.
@@ -327,6 +298,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             flags,
             helm_range_mult,
             charge_progress,
+            engine_thrust,
             ship_x,
             ship_z,
             ship_yaw,
@@ -339,6 +311,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let power = world.get_resource::<ShipPowerSystem>();
             let impulse = world.resource::<ShipImpulse>();
             let modifiers = world.resource::<crate::modifiers::ShipModifiers>();
+            let last_helm = world.get_resource::<crate::ship_plugin::LastHelmInput>();
 
             let power_levels = power
                 .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
@@ -355,12 +328,18 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                     max_hp: *max,
                 })
                 .collect();
+            let engine_thrust = if impulse.0.charge_progress >= 1.0 {
+                1.0_f32
+            } else {
+                last_helm.map(|h| h.thrust.abs()).unwrap_or(0.0)
+            };
             (
                 console_hull,
                 power_levels,
                 flags,
                 helm_range_mult,
                 impulse.0.charge_progress,
+                engine_thrust,
                 ship.x,
                 ship.z,
                 ship.yaw,
@@ -390,6 +369,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             entity_states,
             radar_state,
             impulse_charge_progress: charge_progress,
+            engine_thrust,
         };
         vec![ServerMessage::SimState { snapshot }]
     })

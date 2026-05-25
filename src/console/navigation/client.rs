@@ -321,7 +321,6 @@ fn fill_navigation_controls(commands: &mut Commands, container: Entity) {
         commands,
         ButtonSize::Rect { width: 150.0, height: 36.0 },
         cancel_impulse_visuals(),
-        None,
     );
     commands.entity(cancel_btn).insert((
         NavCancelImpulseButton,
@@ -341,7 +340,6 @@ fn fill_navigation_controls(commands: &mut Commands, container: Entity) {
         commands,
         ButtonSize::Rect { width: 120.0, height: 36.0 },
         on_screen_visuals(),
-        None,
     );
     commands.entity(on_screen_btn).with_children(|btn| {
         btn.spawn((

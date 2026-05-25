@@ -312,7 +312,6 @@ fn fill_shields_hp_rows(commands: &mut Commands, container: Entity) {
             commands,
             ButtonSize::Rect { width: 52.0, height: 24.0 },
             focus_button_visuals(),
-            None,
         );
         commands
             .entity(focus_btn)

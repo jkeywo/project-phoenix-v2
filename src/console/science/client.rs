@@ -234,7 +234,6 @@ fn fill_sensors_buttons(commands: &mut Commands, container: Entity) {
         commands,
         ButtonSize::Rect { width: 160.0, height: 36.0 },
         on_screen_visuals(),
-        None,
     );
     commands.entity(on_screen_btn).with_children(|btn| {
         btn.spawn((
@@ -250,7 +249,6 @@ fn fill_sensors_buttons(commands: &mut Commands, container: Entity) {
         commands,
         ButtonSize::Rect { width: 160.0, height: 36.0 },
         cancel_impulse_visuals(),
-        None,
     );
     commands.entity(cancel_btn).with_children(|btn| {
         btn.spawn((

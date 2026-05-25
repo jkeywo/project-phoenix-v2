@@ -452,7 +452,6 @@ fn spawn_repair_team_row(commands: &mut Commands, team_idx: usize) -> Entity {
             commands,
             ButtonSize::Rect { width: 72.0, height: 28.0 },
             dispatch_button_visuals(),
-            None,
         );
         let dispatch_info = DispatchButton { console: console.clone(), team_idx };
         commands.entity(btn)

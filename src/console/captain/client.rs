@@ -339,7 +339,6 @@ fn fill_captain_dirpad(commands: &mut Commands, container: Entity, assets: &Phon
             commands,
             ButtonSize::Square(PAD_BTN_SIZE),
             dir_state_visuals,
-            None,
         );
 
         // Pre-select Fore (matches ViewMode default).
@@ -442,7 +441,6 @@ fn fill_captain_alert(commands: &mut Commands, container: Entity, assets: &Phone
         commands,
         ButtonSize::Rect { width: 160.0, height: 52.0 },
         ra_visuals,
-        None,
     );
 
     commands.entity(ra_btn).insert(Node {

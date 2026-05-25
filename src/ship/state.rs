@@ -62,6 +62,7 @@ impl ShipState {
             entity_states,
             radar_state,
             impulse_charge_progress,
+            engine_thrust: 0.0,
             console_hull,
         }
     }

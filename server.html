@@ -278,7 +278,7 @@
       hum.volume = 0.25;
       hum.play().catch(() => {});
       const engine = document.getElementById('ship-engine');
-      engine.volume = 0.15;
+      engine.volume = 0.0;
       engine.play().catch(() => {});
     }
 
@@ -290,11 +290,14 @@
           startGameAudio();
         }
         if (parsed.type === 'SimState') {
-          const redAlert = parsed.data?.snapshot?.red_alert;
+          const snapshot = parsed.data?.snapshot;
+          const redAlert = snapshot?.red_alert;
           if (redAlert && !prevRedAlert) {
             document.getElementById('red-alert-siren').play().catch(() => {});
           }
           prevRedAlert = redAlert;
+          const engine = document.getElementById('ship-engine');
+          engine.volume = (snapshot?.engine_thrust ?? 0) * 0.15;
         }
       } catch (_) {}
 
@@ -500,26 +503,6 @@ window.addEventListener('TrunkApplicationStarted', () => {
   wasmReady = true;
   if (selectedScenario) startPhoenix();
 });
-
-    // ── Audio context resume on first user gesture ───────────────────────
-    // Browsers block AudioContext from playing until a user interacts with
-    // the page. Create + resume inside the first click/tap to satisfy the
-    // autoplay policy. Bevy's audio plugin can then use this context normally.
-    (function initAudio() {
-      let resumed = false;
-      function ensureAudio() {
-        if (resumed) return;
-        resumed = true;
-        // AudioContext must be created/resumed inside a user gesture.
-        window.AudioContext = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioContext();
-        // .resume() is a no-op if already running; suppresses the warning.
-        ctx.resume().catch(() => {});
-      }
-      document.addEventListener('mousedown', ensureAudio);
-      document.addEventListener('touchstart', ensureAudio);
-      document.addEventListener('keydown', ensureAudio);
-    })();
 
     // ── F4 — toggle region wireframes ────────────────────────────────────
     document.addEventListener('keydown', function(e) {

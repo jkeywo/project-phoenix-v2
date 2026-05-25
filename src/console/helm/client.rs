@@ -781,7 +781,6 @@ fn fill_helm_radar(
                 color: Color::srgba(0.08, 0.08, 0.15, 0.5),
             },
         },
-        None,
     );
     commands.entity(on_screen_btn).with_children(|btn| {
         btn.spawn((
@@ -824,7 +823,6 @@ fn fill_helm_radar(
                 color: Color::srgba(0.05, 0.10, 0.20, 0.5),
             },
         },
-        None,
     );
     commands.entity(impulse_btn).with_children(|btn| {
         btn.spawn((
@@ -1013,7 +1011,6 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
                 color: Color::srgba(0.20, 0.05, 0.05, 0.5),
             },
         },
-        None,
     );
     commands
         .entity(cancel_btn)

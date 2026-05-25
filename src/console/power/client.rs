@@ -343,7 +343,6 @@ fn spawn_power_row(commands: &mut Commands, console: Console, label: &str) -> En
         commands,
         ButtonSize::Square(36.0),
         dec_visuals(),
-        None,
     );
     commands.entity(dec_btn)
         .insert((PowerDecButton(dec_console.clone()), Disabled))
@@ -386,7 +385,6 @@ fn spawn_power_row(commands: &mut Commands, console: Console, label: &str) -> En
         commands,
         ButtonSize::Square(36.0),
         inc_visuals(),
-        None,
     );
     commands.entity(inc_btn)
         .insert((PowerIncButton(inc_console.clone()), Disabled))

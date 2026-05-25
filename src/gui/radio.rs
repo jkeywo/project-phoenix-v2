@@ -39,7 +39,6 @@ pub struct RadioMember {
 #[derive(Clone, Debug)]
 pub struct RadioButtonConfig {
     pub size: ButtonSize,
-    pub click_sound: Option<Handle<AudioSource>>,
 }
 
 // ── Pure helper ───────────────────────────────────────────────────────────────
@@ -95,7 +94,6 @@ impl RadioGroup {
                 commands,
                 cfg.size.clone(),
                 state_visuals.clone(),
-                cfg.click_sound.clone(),
             );
             commands.entity(btn).insert(RadioMember { group });
             commands.entity(btn).observe(on_radio_member_pressed);

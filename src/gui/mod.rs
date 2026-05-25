@@ -11,8 +11,8 @@ pub use border::{
     GuiBorderPlugin, GuiBorderWidget,
 };
 pub use button::{
-    resolve_click_sound, setup_ui_sounds, spawn_gui_button, ButtonPressed, ButtonSize, ClickSound,
-    GuiButtonMarker, UiSounds, WidgetActivated, WidgetDeactivated,
+    spawn_gui_button, ButtonPressed, ButtonSize,
+    GuiButtonMarker, WidgetActivated, WidgetDeactivated,
 };
 pub use foundation::{
     resolve_visual, resolve_visuals_system, Disabled, StateVisuals, Visual, WidgetState,

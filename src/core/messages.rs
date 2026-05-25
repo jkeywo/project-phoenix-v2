@@ -446,6 +446,10 @@ pub struct SimSnapshot {
     /// Broadcast so console panels can show the current impulse drive status.
     #[serde(default)]
     pub impulse_charge_progress: f32,
+    /// Engine thrust level for audio volume mapping.
+    /// 1.0 when the impulse drive is fully active; otherwise `|helm_thrust|` (0.0–1.0).
+    #[serde(default)]
+    pub engine_thrust: f32,
     /// Boolean flags that are currently active on the ship.
     /// Populated from `ShipModifiers::flags()` each tick.
     #[serde(default)]

@@ -504,7 +504,6 @@ fn fill_tactical_controls(
         let tube_btn_configs: Vec<RadioButtonConfig> = (0..tubes.len())
             .map(|_| RadioButtonConfig {
                 size: ButtonSize::Rect { width: 80.0, height: 36.0 },
-                click_sound: None,
             })
             .collect();
 
@@ -552,7 +551,6 @@ fn fill_tactical_controls(
             commands,
             ButtonSize::Rect { width: 200.0, height: 52.0 },
             torpedo_fire_visuals(),
-            None,
         );
         let fire_torpedo_label = commands
             .spawn((
@@ -574,7 +572,6 @@ fn fill_tactical_controls(
         commands,
         ButtonSize::Rect { width: 200.0, height: 44.0 },
         mode_visuals(),
-        None,
     );
     let mode_label = commands
         .spawn((
@@ -596,7 +593,6 @@ fn fill_tactical_controls(
             commands,
             ButtonSize::Rect { width: 200.0, height: 52.0 },
             fire_visuals(),
-            None,
         );
         let label_text = format!("FIRE {}", bank.id.to_uppercase());
         let fire_phaser_label = commands

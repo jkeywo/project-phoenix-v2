@@ -1462,8 +1462,7 @@ fn sync_complexity_hiding(
 /// - `NavigationPanelPlugin`   — system chart + impulse status + cancel
 /// - `CommsPanelPlugin`        — comms console (placeholder)
 pub fn add_client_plugins(app: &mut App) {
-    app.add_systems(Startup, crate::gui::setup_ui_sounds)
-        .add_plugins(ClientAppPlugin)
+    app.add_plugins(ClientAppPlugin)
         .add_plugins(crate::gui::GuiPlugin)
         .add_plugins(crate::ship_view::ShipViewPlugin)
         .add_plugins(crate::phone_border::PhoneBorderPlugin)

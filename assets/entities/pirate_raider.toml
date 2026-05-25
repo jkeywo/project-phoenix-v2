@@ -4,6 +4,7 @@
 # fights aggressively, flees when wounded, and warps out if not intercepted.
 # Used as the canonical NPC in assets/scenarios/patrol.toml.
 
+name = "Pirate Raider"
 tags = ["ship", "npc", "enemy"]
 faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
 

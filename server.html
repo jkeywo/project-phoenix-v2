@@ -70,6 +70,10 @@
   </style>
 </head>
 <body>
+  <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
+  <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
+  <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.ogg"      ></audio>
+
   <!-- Scenario selector shown before the server boots -->
   <div id="scenario-panel">
     <div style="font-size:0.85rem;color:#889;letter-spacing:0.06em;">Select a scenario to launch the server</div>
@@ -262,11 +266,31 @@
 
     // ── Outbound routing ───────────────────────────────────────────────────
 
+    // ── JS audio state ─────────────────────────────────────────────────────
+    let prevRedAlert = false;
+    let gameAudioStarted = false;
+
+    function startGameAudio() {
+      if (gameAudioStarted) return;
+      gameAudioStarted = true;
+      const hum = document.getElementById('bg-hum');
+      hum.volume = 0.25;
+      hum.play().catch(() => {});
+    }
+
     function routeOutbound(target, payload) {
       try {
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
           document.getElementById('overlay').style.display = 'none';
+          startGameAudio();
+        }
+        if (parsed.type === 'SimState') {
+          const redAlert = parsed.data?.snapshot?.red_alert;
+          if (redAlert && !prevRedAlert) {
+            document.getElementById('red-alert-siren').play().catch(() => {});
+          }
+          prevRedAlert = redAlert;
         }
       } catch (_) {}
 

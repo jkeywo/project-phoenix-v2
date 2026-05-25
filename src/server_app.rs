@@ -230,6 +230,12 @@ app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
     #[cfg(not(target_arch = "wasm32"))]
     let automation = false;
 
+    // bevy_audio panics with UnrecognizedFormat on wasm32 in Bevy 0.18:
+    // rodio's Decoder::new().unwrap() at audio_source.rs:102 fails for every
+    // format because the symphonia decoders don't function under
+    // wasm32-unknown-unknown.  Audio is handled via JavaScript in server.html
+    // using the browser's native Web Audio API instead.
+    #[cfg(not(target_arch = "wasm32"))]
     if !automation {
         app.add_plugins(crate::server::EngineSoundPlugin);
     }

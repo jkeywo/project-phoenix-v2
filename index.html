@@ -72,6 +72,7 @@
 <body>
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
   <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
+  <audio id="ship-engine"     src="assets/sounds/ship_engine.wav"      loop></audio>
   <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.ogg"      ></audio>
 
   <!-- Scenario selector shown before the server boots -->
@@ -287,6 +288,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const hum = document.getElementById('bg-hum');
       hum.volume = 0.25;
       hum.play().catch(() => {});
+      const engine = document.getElementById('ship-engine');
+      engine.volume = 0.15;
+      engine.play().catch(() => {});
     }
 
     function routeOutbound(target, payload) {

@@ -293,15 +293,15 @@ impl AiTickOutput {
 
 /// Proportional steering toward a direction, with deadband and saturation.
 ///
-/// - `yaw`: current entity yaw in radians (forward = `-sin(yaw), -cos(yaw)` in XZ).
+/// - `yaw`: current entity yaw in radians (forward = `(sin(yaw), -cos(yaw))` in XZ).
 /// - `target_dir`: 2-element [dx, dz] unit vector pointing at target.
 /// - `deadband_rad`: angular error below which steering = 0.
 /// - `full_steer_rad`: angular error at which steering saturates to ±1.
 ///
 /// Returns a steering value in [-1, 1].
 pub fn steer_toward(yaw: f32, target_dir: [f32; 2], deadband_rad: f32, full_steer_rad: f32) -> f32 {
-    // Ship forward in XZ: (-sin(yaw), -cos(yaw))
-    let fwd_x = -yaw.sin();
+    // Ship forward in XZ: (sin(yaw), -cos(yaw))
+    let fwd_x = yaw.sin();
     let fwd_z = -yaw.cos();
 
     // Signed angle from forward to target: use 2D cross product for sign, dot for cosine.

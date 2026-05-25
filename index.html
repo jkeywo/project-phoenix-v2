@@ -68,8 +68,12 @@
     #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #launch-btn:not(:disabled):hover { background: #334; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-3909c731bf52b0f4.js" crossorigin="anonymous" integrity="sha384-uptw9DvzUUhOg3rhIfpH0xZtTfX6UNDzM6L6XFcKe1uNfL6H/0U5lchIg4zcP9Sm"><link rel="preload" href="./project-phoenix-3909c731bf52b0f4_bg.wasm" crossorigin="anonymous" integrity="sha384-kwJ6zE+xlMKXy13nIV3xBCxnIj3rEBEj3IIkUqcfTWHsj/X7Cro8pSnpVb9Qami1" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-421dce2a59585f42.js" crossorigin="anonymous" integrity="sha384-IG+jPlGsmAQzRf0VM9FwIToOqzDAWSIJLt+XDU+V2tVz6TT/j7Wx0/TdaKYGEsVA"><link rel="preload" href="./project-phoenix-421dce2a59585f42_bg.wasm" crossorigin="anonymous" integrity="sha384-Es2D4cab0DyMZewj4VcxfjoNmZnUoll/T85pYKTf65j2Hlw0TzyMUHReLfrpjNI8" as="fetch" type="application/wasm"></head>
 <body>
+  <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
+  <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
+  <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.ogg"      ></audio>
+
   <!-- Scenario selector shown before the server boots -->
   <div id="scenario-panel">
     <div style="font-size:0.85rem;color:#889;letter-spacing:0.06em;">Select a scenario to launch the server</div>
@@ -118,8 +122,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-3909c731bf52b0f4.js';
-const wasm = await init({ module_or_path: './project-phoenix-3909c731bf52b0f4_bg.wasm' });
+import init, * as bindings from './project-phoenix-421dce2a59585f42.js';
+const wasm = await init({ module_or_path: './project-phoenix-421dce2a59585f42_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -273,11 +277,31 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     // ── Outbound routing ───────────────────────────────────────────────────
 
+    // ── JS audio state ─────────────────────────────────────────────────────
+    let prevRedAlert = false;
+    let gameAudioStarted = false;
+
+    function startGameAudio() {
+      if (gameAudioStarted) return;
+      gameAudioStarted = true;
+      const hum = document.getElementById('bg-hum');
+      hum.volume = 0.25;
+      hum.play().catch(() => {});
+    }
+
     function routeOutbound(target, payload) {
       try {
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
           document.getElementById('overlay').style.display = 'none';
+          startGameAudio();
+        }
+        if (parsed.type === 'SimState') {
+          const redAlert = parsed.data?.snapshot?.red_alert;
+          if (redAlert && !prevRedAlert) {
+            document.getElementById('red-alert-siren').play().catch(() => {});
+          }
+          prevRedAlert = redAlert;
         }
       } catch (_) {}
 

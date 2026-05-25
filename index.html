@@ -68,9 +68,8 @@
     #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #launch-btn:not(:disabled):hover { background: #334; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-767703394acf1dc0.js" crossorigin="anonymous" integrity="sha384-qW6MdwKZEvp0o1CVpFfxfStAr3Sxv30u66wrKsyQmgKpn0XEfq0Df4t5T1UiNVp5"><link rel="preload" href="./project-phoenix-767703394acf1dc0_bg.wasm" crossorigin="anonymous" integrity="sha384-XGkphDkWjf/jcRcfAw8XBC4xMag3o/q0BtKbfmN8EXnNwz5voi7Lds6aHrdUt4nh" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-47e1aec2b3271fcd.js" crossorigin="anonymous" integrity="sha384-bZzxvKtots5jK1rDUDGSKa5xp/thhLcdFyey04KoakbHfPFCfIj7+oqJzbgWeA14"><link rel="preload" href="./project-phoenix-47e1aec2b3271fcd_bg.wasm" crossorigin="anonymous" integrity="sha384-RLPDZAxF0J8UOjPl5HGcKzLCBKN2zC5egy7F7JkQHObBKwO4WtkOHjrsd+kfs16+" as="fetch" type="application/wasm"></head>
 <body>
-  <audio id="bg-hum" src="assets/sounds/background_hum.mp3" loop volume = 0.25></audio>
   <audio id="red-alert-siren" src="assets/sounds/red_alert_siren.mp3"></audio>
 
   <!-- Scenario selector shown before the server boots -->
@@ -121,8 +120,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-767703394acf1dc0.js';
-const wasm = await init({ module_or_path: './project-phoenix-767703394acf1dc0_bg.wasm' });
+import init, * as bindings from './project-phoenix-47e1aec2b3271fcd.js';
+const wasm = await init({ module_or_path: './project-phoenix-47e1aec2b3271fcd_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -283,7 +282,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         const parsed = JSON.parse(payload);
         if (parsed.type === 'GameStarted') {
           document.getElementById('overlay').style.display = 'none';
-          document.getElementById('bg-hum').play().catch(() => {});
         }
         if (parsed.type === 'SimState') {
           const redAlert = parsed.data?.snapshot?.red_alert;
@@ -588,25 +586,30 @@ window.addEventListener('TrunkApplicationStarted', () => {
       requestAnimationFrame(rafLoop);
     })();
 
-    // ── F6 — toggle entity behavior overlay ─────────────────────────────
+    // ── F7 — toggle entity behavior overlay ─────────────────────────────
     (function() {
       var entityEl = document.getElementById('entity-debug-overlay');
       var entityVisible = false;
 
       document.addEventListener('keydown', function(e) {
-        if (e.key === 'F6') {
+        if (e.key === 'F7') {
           e.preventDefault();
           entityVisible = !entityVisible;
           entityEl.style.display = entityVisible ? 'block' : 'none';
           if (typeof wasm_toggle_debug_entities === 'function') {
             wasm_toggle_debug_entities();
+          } else if (entityVisible) {
+            entityEl.textContent = '(entity overlay: WASM not ready — hard-reload the page)';
           }
         }
       });
 
       function rafLoop() {
-        if (entityVisible && typeof wasm_get_entity_debug_state === 'function') {
-          entityEl.textContent = wasm_get_entity_debug_state();
+        if (entityVisible) {
+          if (typeof wasm_get_entity_debug_state === 'function') {
+            var txt = wasm_get_entity_debug_state();
+            entityEl.textContent = txt.length > 0 ? txt : '(entity overlay active — waiting for Bevy)';
+          }
         }
         requestAnimationFrame(rafLoop);
       }

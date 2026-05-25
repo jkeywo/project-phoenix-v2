@@ -414,6 +414,8 @@ function finishInit() {
   window.wasm_get_debug_state = wasmBindings.wasm_get_debug_state;
   window.wasm_toggle_debug_damage = wasmBindings.wasm_toggle_debug_damage;
   window.wasm_get_damage_log = wasmBindings.wasm_get_damage_log;
+  window.wasm_toggle_debug_entities = wasmBindings.wasm_toggle_debug_entities;
+  window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;
 
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.

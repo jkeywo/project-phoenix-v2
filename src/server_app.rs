@@ -212,7 +212,21 @@ pub fn add_simulation_plugins(app: &mut App) {
 app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
 
 #[cfg(feature = "server")]
-app.add_plugins(crate::server::EngineSoundPlugin);
+{
+    // Skip audio in headless/automation environments (e.g. Playwright CI).
+    // navigator.webdriver is true when the browser is controlled by WebDriver,
+    // which covers all Playwright-driven headless Chromium runs.
+    #[cfg(target_arch = "wasm32")]
+    let automation = web_sys::window()
+        .map(|w| w.navigator().webdriver())
+        .unwrap_or(false);
+    #[cfg(not(target_arch = "wasm32"))]
+    let automation = false;
+
+    if !automation {
+        app.add_plugins(crate::server::EngineSoundPlugin);
+    }
+}
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.

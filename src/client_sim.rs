@@ -350,6 +350,7 @@ impl ClientSimState {
                         position: Some([*x, *y, *z]),
                         tags: vec!["asteroid".into()],
                         radius: Some(*radius),
+                        radar_icon: Some("asteroid".into()),
                         ..EntitySnapshot::default()
                     });
                 }

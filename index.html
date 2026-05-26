@@ -50,25 +50,34 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     #scenario-panel {
       position: fixed; inset: 0; z-index: 200;
-      background: #000 url('assets/logo.png') center 38% / min(45vw, 45vh) auto no-repeat;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 1.5rem; font-family: monospace; color: #cce;
-      padding-top: 30vh;
+      background: #000 url('assets/logo.png') center center / min(45vw, 45vh) auto no-repeat;
+      display: flex; flex-direction: row; align-items: stretch;
+      font-family: monospace; color: #cce;
     }
-    #scenario-select {
-      background: #111; color: #cce; border: 1px solid #445;
-      padding: 0.5rem 1rem; font-family: monospace; font-size: 1rem;
-      border-radius: 4px; min-width: 20rem;
+    #world-list {
+      display: flex; flex-direction: column; gap: 0.5rem;
+      padding: 1.5rem 1rem;
+      width: 14rem; min-width: 12rem; max-width: 18rem;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.75);
+      border-right: 1px solid #334;
+      box-sizing: border-box;
     }
-    #launch-btn {
-      background: #223; color: #aae; border: 1px solid #448;
-      padding: 0.5rem 2rem; font-family: monospace; font-size: 1rem;
-      border-radius: 4px; cursor: pointer; letter-spacing: 0.08em;
+    #world-list-label {
+      font-size: 0.75rem; color: #889; letter-spacing: 0.06em;
+      margin-bottom: 0.5rem; text-transform: uppercase;
     }
-    #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-    #launch-btn:not(:disabled):hover { background: #334; }
+    .world-btn {
+      background: #111; color: #aae; border: 1px solid #334;
+      padding: 0.55rem 0.9rem; font-family: monospace; font-size: 0.95rem;
+      border-radius: 4px; cursor: pointer; text-align: left;
+      letter-spacing: 0.04em; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis; transition: background 0.15s, border-color 0.15s;
+    }
+    .world-btn:hover { background: #223; border-color: #558; }
+    .world-btn.active { background: #224; border-color: #66c; color: #ccf; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-3137fec83519054e.js" crossorigin="anonymous" integrity="sha384-hGjoC+d9opqOYrm4zYQXsfbUO7H7SORlSPYDbI4RcVHvge2BbKTExIAFYqxBgyjp"><link rel="preload" href="./project-phoenix-3137fec83519054e_bg.wasm" crossorigin="anonymous" integrity="sha384-fSs15Nxt5wx3t/2q3hUe1To1mCE0YEWps4EL6adrFMqR5TS64FnxtK6vPI4w17eP" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-20c422ffebb0caff.js" crossorigin="anonymous" integrity="sha384-3qg50kFhr4tdLgJtRd/WUxiqMMN8TeHCfGrTjAfv6AZh5/j3FDsCHgCC+1l+Lq7k"><link rel="preload" href="./project-phoenix-20c422ffebb0caff_bg.wasm" crossorigin="anonymous" integrity="sha384-ahK3s37I6uk29kg4EETDQD2Xv+5k5FOkjX3oBUcHahC4o2YgMxPhWZIPmfp2irrp" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
   <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
@@ -77,13 +86,11 @@
 
   <!-- Scenario selector shown before the server boots -->
   <div id="scenario-panel">
-    <div style="font-size:0.85rem;color:#889;letter-spacing:0.06em;">Select a scenario to launch the server</div>
-    <select id="scenario-select">
-      <option value="" disabled selected>— choose scenario —</option>
-      <option value="assets/worlds/default.toml">Starbase Alpha</option>
-      <option value="assets/worlds/patrol.toml">Patrol</option>
-    </select>
-    <button id="launch-btn" disabled>Launch Server</button>
+    <div id="world-list">
+      <div id="world-list-label">Select a world</div>
+      <button class="world-btn" data-path="assets/worlds/default.toml">Starbase Alpha</button>
+      <button class="world-btn" data-path="assets/worlds/patrol.toml">Patrol</button>
+    </div>
   </div>
 
   <!-- Loading spinner shown until WASM is ready -->
@@ -126,8 +133,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-3137fec83519054e.js';
-const wasm = await init({ module_or_path: './project-phoenix-3137fec83519054e_bg.wasm' });
+import init, * as bindings from './project-phoenix-20c422ffebb0caff.js';
+const wasm = await init({ module_or_path: './project-phoenix-20c422ffebb0caff_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -268,16 +275,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     let selectedScenario = null;
     let wasmReady = false;
 
-    document.getElementById('scenario-select').addEventListener('change', function() {
-      document.getElementById('launch-btn').disabled = !this.value;
-    });
-
-    document.getElementById('launch-btn').addEventListener('click', function() {
-      selectedScenario = document.getElementById('scenario-select').value;
-      document.getElementById('scenario-panel').style.display = 'none';
-      initPeerJS();
-      acquireWakeLock();
-      if (wasmReady) startPhoenix();
+    document.querySelectorAll('.world-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        selectedScenario = this.dataset.path;
+        document.getElementById('scenario-panel').style.display = 'none';
+        initPeerJS();
+        acquireWakeLock();
+        if (wasmReady) startPhoenix();
+      });
     });
 
     // Allow automated tests (and quick dev launches) to bypass the picker via

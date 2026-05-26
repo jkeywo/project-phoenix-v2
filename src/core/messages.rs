@@ -391,6 +391,11 @@ pub struct ShipClientConfig {
     /// `[helm_console.radar] shows` in the ship TOML.
     #[serde(default)]
     pub helm_radar_shows: Vec<String>,
+    /// Detection range for the Sensors long-range radar widget, in world
+    /// units. Sourced from `[sensors_console.long_range_radar] range` in the
+    /// ship TOML.
+    #[serde(default = "default_sensors_radar_range")]
+    pub sensors_radar_range: f32,
     /// Tag filter for the Sensors/Science long-range radar. Sourced from
     /// `[sensors_console.long_range_radar] shows`.
     #[serde(default)]
@@ -406,6 +411,10 @@ pub struct ShipClientConfig {
 }
 
 fn default_helm_radar_range() -> f32 {
+    500.0
+}
+
+fn default_sensors_radar_range() -> f32 {
     500.0
 }
 
@@ -441,6 +450,7 @@ impl Default for ShipClientConfig {
             phaser_beam_color: default_phaser_beam_color(),
             torpedo_arc_color: default_torpedo_arc_color(),
             helm_radar_shows: Vec::new(),
+            sensors_radar_range: default_sensors_radar_range(),
             sensors_radar_shows: Vec::new(),
             nav_chart_shows: Vec::new(),
             tactical_radar_shows: Vec::new(),

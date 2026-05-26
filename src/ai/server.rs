@@ -219,7 +219,9 @@ impl Plugin for AiPlugin {
             Update,
             (
                 attach_controllers_on_spawn,
-                tick_ai_controllers.in_set(crate::sim_sets::SimSet::Physics),
+                tick_ai_controllers
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .in_set(crate::sim_sets::AiTickLabel),
                 detect_npc_hull_zero,
                 unregister_on_despawn,
             ),
@@ -992,7 +994,6 @@ mod tests {
             power_multipliers: None,
             complexity_toml: None,
             phaser_banks: Vec::new(),
-            radar: None,
         }
     }
 

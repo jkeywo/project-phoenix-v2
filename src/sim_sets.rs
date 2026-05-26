@@ -8,3 +8,8 @@ pub enum SimSet {
     Modifiers,
     Broadcast,
 }
+
+/// Ordering label within `SimSet::Physics`: ensure player ship position
+/// is synced to Transform before the AI tick reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub struct AiTickLabel;

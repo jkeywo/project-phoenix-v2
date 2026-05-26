@@ -62,7 +62,9 @@ impl Plugin for ShipPlugin {
             (
                 process_helm_inputs.in_set(crate::sim_sets::SimSet::Physics),
                 tick_impulse.in_set(crate::sim_sets::SimSet::Physics),
-                sync_ship_position.in_set(crate::sim_sets::SimSet::Physics),
+                sync_ship_position
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .before(crate::sim_sets::AiTickLabel),
                 handle_impulse_messages.in_set(crate::sim_sets::SimSet::Input),
             )
                 .after(crate::lobby::process_lobby),

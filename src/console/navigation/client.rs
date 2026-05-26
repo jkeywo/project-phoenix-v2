@@ -433,6 +433,7 @@ fn bridge_client_sim_to_nav_radar(
         region_colour: None,
         region_shape: None,
     };
+    let ship_global = GlobalTransform::from(ship_t);
     match radar.center {
         Some(e) => {
             commands.entity(e).insert((
@@ -440,6 +441,7 @@ fn bridge_client_sim_to_nav_radar(
                 OnRadar(vec!["player_ship".to_string()]),
                 ship_appearance,
                 ship_t,
+                ship_global,
             ));
         }
         None => {
@@ -517,7 +519,12 @@ fn bridge_client_sim_to_nav_radar(
         let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
             .with_rotation(Quat::from_rotation_y(entity_yaw));
         if let Some(existing) = radar.blips.get(uuid) {
-            commands.entity(*existing).insert((OnRadar(snapshot.tags.clone()), appearance, t));
+            commands.entity(*existing).insert((
+                OnRadar(snapshot.tags.clone()),
+                appearance,
+                t,
+                GlobalTransform::from(t),
+            ));
         } else {
             let blip = commands
                 .spawn((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::from(t)))

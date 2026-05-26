@@ -369,6 +369,7 @@ fn bridge_client_sim_to_science_radar(
                 OnRadar(vec!["player_ship".to_string()]),
                 ship_appearance,
                 ship_t,
+                GlobalTransform::from(ship_t),
             ));
         }
         None => {
@@ -382,7 +383,7 @@ fn bridge_client_sim_to_science_radar(
                     OnRadar(vec!["player_ship".to_string()]),
                     ship_appearance,
                     ship_t,
-                    GlobalTransform::default(),
+                    GlobalTransform::from(ship_t),
                 ))
                 .id();
             radar.center = Some(e);
@@ -433,10 +434,15 @@ fn bridge_client_sim_to_science_radar(
             let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((OnRadar(snapshot.tags.clone()), appearance, t));
+                commands.entity(*existing).insert((
+                    OnRadar(snapshot.tags.clone()),
+                    appearance,
+                    t,
+                    GlobalTransform::from(t),
+                ));
             } else {
                 let blip = commands
-                    .spawn((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::default()))
+                    .spawn((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::from(t)))
                     .id();
                 radar.blips.insert(uuid.clone(), blip);
             }
@@ -458,10 +464,15 @@ fn bridge_client_sim_to_science_radar(
             let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((OnRadar(snapshot.tags.clone()), appearance, t));
+                commands.entity(*existing).insert((
+                    OnRadar(snapshot.tags.clone()),
+                    appearance,
+                    t,
+                    GlobalTransform::from(t),
+                ));
             } else {
                 let blip = commands
-                    .spawn((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::default()))
+                    .spawn((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::from(t)))
                     .id();
                 radar.blips.insert(uuid.clone(), blip);
             }

@@ -12,10 +12,10 @@ use crate::client_app::{HelmPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
-    tags_to_radar_layer, ButtonPressed, ButtonSize, GenericJoystick, GenericRadar,
+    region_shape_from_snapshot, icon_from_radar_icon_str, spawn_gui_button,
+    ButtonPressed, ButtonSize, GenericJoystick, GenericRadar,
     GenericRadarWidget, HelmRadarWidget, JoystickMoved, OnRadar, OrientationMode, RadarAppearance,
-    RadarCenter, RadarClipMode, RadarFilter, RadarIcon, RadarLayer, ReadoutValue, StateVisuals,
+    RadarCenter, RadarClipMode, RadarFilter, RadarIcon, ReadoutValue, StateVisuals,
     TextReadout, Visual,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
@@ -397,12 +397,9 @@ fn bridge_client_sim_to_radar_entities(
 ) {
     // Manage the RadarCenter entity.
     //
-    // The centre entity doubles as the player-ship blip: we attach
-    // `OnRadar(PlayerShip) + RadarAppearance` and a Transform at the ship's
-    // world position.  Using `PlayerShip` (not `Ship`) lets filters that want
-    // "player ship but not NPC ships" include `PlayerShip` without also showing
-    // every hostile.  In `ShipRelative` orientation it projects to the radar
-    // centre (0, 0).
+    // The centre entity doubles as the player-ship blip. It carries the
+    // "player_ship" tag so filters that include it show the ship dot.
+    // In `ShipRelative` orientation it projects to the radar centre (0, 0).
     let ship_appearance = RadarAppearance {
         icon: RadarIcon::Ship,
         world_size: 6.0,
@@ -422,7 +419,7 @@ fn bridge_client_sim_to_radar_entities(
                     world_z: ship_view.ship_z,
                     yaw: ship_yaw,
                 },
-                OnRadar(RadarLayer::PlayerShip),
+                OnRadar(vec!["player_ship".to_string()]),
                 ship_appearance,
                 ship_transform,
                 ship_global,
@@ -437,7 +434,7 @@ fn bridge_client_sim_to_radar_entities(
                         world_z: ship_view.ship_z,
                         yaw: ship_yaw,
                     },
-                    OnRadar(RadarLayer::PlayerShip),
+                    OnRadar(vec!["player_ship".to_string()]),
                     ship_appearance,
                     ship_transform,
                     ship_global,
@@ -457,16 +454,25 @@ fn bridge_client_sim_to_radar_entities(
             continue;
         }
 
-        let Some(layer) = tags_to_radar_layer(&snapshot.tags) else {
+        if snapshot.tags.is_empty() {
             continue;
-        };
+        }
 
         let entity_yaw = snapshot.yaw.unwrap_or(0.0);
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
+        let icon_str = snapshot.radar_icon.as_deref().unwrap_or("ship");
+        let icon = icon_from_radar_icon_str(icon_str);
+        let is_region = snapshot.tags.iter().any(|t| t == "region");
+        let is_field = snapshot.tags.iter().any(|t| t == "asteroid_field");
 
-        if layer == RadarLayer::Region || layer == RadarLayer::AsteroidField {
+        if is_region || is_field {
             // ── Region / field entity: render as shape ────────────────────────
-            let region_colour = colour.unwrap_or(default_layer_colour(layer));
+            let default_col = if is_field {
+                Color::srgb(0.25, 0.75, 0.55)
+            } else {
+                Color::srgb(0.8, 0.4, 0.8)
+            };
+            let region_colour = colour.unwrap_or(default_col);
             let region_shape = region_shape_from_snapshot(snapshot);
             let world_size = snapshot
                 .radar_world_size
@@ -474,7 +480,7 @@ fn bridge_client_sim_to_radar_entities(
                 .filter(|s| *s > 0.0)
                 .unwrap_or(4.0);
             let appearance = RadarAppearance {
-                icon: layer_to_icon(layer),
+                icon,
                 world_size,
                 color: region_colour,
                 region_colour: Some(region_colour),
@@ -484,7 +490,7 @@ fn bridge_client_sim_to_radar_entities(
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
                 commands.entity(*existing).insert((
-                    OnRadar(layer),
+                    OnRadar(snapshot.tags.clone()),
                     appearance,
                     t,
                     GlobalTransform::from(t),
@@ -492,7 +498,7 @@ fn bridge_client_sim_to_radar_entities(
             } else {
                 let blip = commands
                     .spawn((
-                        OnRadar(layer),
+                        OnRadar(snapshot.tags.clone()),
                         appearance,
                         t,
                         GlobalTransform::from(t),
@@ -502,8 +508,6 @@ fn bridge_client_sim_to_radar_entities(
             }
         } else {
             // ── Point entity: render as icon ──────────────────────────────────
-            let default_color = default_layer_colour(layer);
-            let icon = layer_to_icon(layer);
             let world_size = snapshot
                 .radar_world_size
                 .or(Some(snapshot.radius_or_zero()))
@@ -512,7 +516,7 @@ fn bridge_client_sim_to_radar_entities(
             let appearance = RadarAppearance {
                 icon,
                 world_size,
-                color: colour.unwrap_or(default_color),
+                color: colour.unwrap_or(Color::srgb(0.95, 0.95, 1.0)),
                 region_colour: None,
                 region_shape: None,
             };
@@ -520,7 +524,7 @@ fn bridge_client_sim_to_radar_entities(
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
                 commands.entity(*existing).insert((
-                    OnRadar(layer),
+                    OnRadar(snapshot.tags.clone()),
                     appearance,
                     t,
                     GlobalTransform::from(t),
@@ -528,7 +532,7 @@ fn bridge_client_sim_to_radar_entities(
             } else {
                 let blip = commands
                     .spawn((
-                        OnRadar(layer),
+                        OnRadar(snapshot.tags.clone()),
                         appearance,
                         t,
                         GlobalTransform::from(t),
@@ -633,17 +637,19 @@ fn fill_helm_radar(
 
     // ── Radar ──
     //
-    // Filter includes PlayerShip (the local ship, added by the bridge as
-    // RadarLayer::PlayerShip) and AsteroidField (field regions, now a
-    // distinct layer from individual Asteroid blips).
+    // Filter includes player_ship, individual entities, and asteroid fields.
     let radar_filter = RadarFilter(std::collections::HashSet::from([
-        RadarLayer::PlayerShip,
-        RadarLayer::Ship,
-        RadarLayer::Asteroid,
-        RadarLayer::Station,
-        RadarLayer::Missile,
-        RadarLayer::Planet,
-        RadarLayer::Star,
+        "player_ship".to_string(),
+        "ship".to_string(),
+        "pirate".to_string(),
+        "asteroid".to_string(),
+        "asteroid_field".to_string(),
+        "station".to_string(),
+        "missile".to_string(),
+        "torpedo".to_string(),
+        "planet".to_string(),
+        "star".to_string(),
+        "region".to_string(),
     ]));
     // Layering (back → front, per user direction):
     //   1. radar-surround.png  (outer frame / tick marks) — passed as `bg_image`

@@ -31,11 +31,11 @@ pub use progress::{
     SegmentCount,
 };
 pub use radar::{
-    blip_local_offset, default_layer_colour, is_on_radar, layer_to_icon, project_radar_entity,
-    region_shape_from_snapshot, tags_to_radar_layer, world_size_to_px, AutoScaleRadar,
+    blip_local_offset, icon_from_radar_icon_str, is_on_radar, project_radar_entity,
+    region_shape_from_snapshot, world_size_to_px, AutoScaleRadar,
     GenericRadar, GenericRadarWidget, HelmRadarWidget, OnRadar, OrientationMode, RadarAppearance,
     RadarArc, RadarArcKind, RadarArcs, RadarBlipClicked, RadarCenter, RadarClipMode,
-    RadarEntityUuid, RadarFilter, RadarIcon, RadarIconLookup, RadarLayer, RadarRegionNode,
+    RadarEntityUuid, RadarFilter, RadarIcon, RadarIconLookup, RadarRegionNode,
     RadarTargetHighlight, RegionRadarShape, WorldCentredRadar,
 };
 pub use radio::{

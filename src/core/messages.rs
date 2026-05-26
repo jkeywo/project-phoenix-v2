@@ -508,6 +508,11 @@ pub struct EntitySnapshot {
     /// Half-extents for Box-shaped region entities. `[x, y, z]` in world units.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub half_extents: Option<[f32; 3]>,
+    /// Radar icon name derived from entity tags by the server at snapshot-encode
+    /// time. One of `"ship"`, `"asteroid"`, `"station"`, `"planet"`, `"star"`,
+    /// `"torpedo"`. `None` defaults to `"ship"` on the client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radar_icon: Option<String>,
 }
 
 impl EntitySnapshot {
@@ -552,6 +557,7 @@ impl EntitySnapshot {
             warp_out_remaining_secs: None,
             radar_world_size: None,
             half_extents: None,
+            radar_icon: Some("asteroid".into()),
         }
     }
 
@@ -577,6 +583,7 @@ impl EntitySnapshot {
             warp_out_remaining_secs: None,
             radar_world_size: None,
             half_extents: None,
+            radar_icon: Some("asteroid".into()),
         }
     }
 
@@ -596,6 +603,7 @@ impl EntitySnapshot {
             warp_out_remaining_secs: None,
             radar_world_size: None,
             half_extents: None,
+            radar_icon: None,
         }
     }
 }

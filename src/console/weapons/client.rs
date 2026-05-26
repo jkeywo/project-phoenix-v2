@@ -25,11 +25,11 @@ use crate::client_sim::{
     phaser_mode_label, ClientSimState,
 };
 use crate::gui::{
-    default_layer_colour, is_on_radar, layer_to_icon, project_radar_entity,
-    region_shape_from_snapshot, spawn_gui_button, tags_to_radar_layer, ButtonPressed, ButtonSize,
+    icon_from_radar_icon_str, is_on_radar, project_radar_entity,
+    region_shape_from_snapshot, spawn_gui_button, ButtonPressed, ButtonSize,
     GenericRadar, GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarArc,
     RadarArcKind, RadarArcs, RadarCenter, RadarClipMode, RadarEntityUuid, RadarFilter, RadarIcon,
-    RadarLayer, RadarTargetHighlight, StateVisuals, RadioButtonConfig, RadioGroup,
+    RadarTargetHighlight, StateVisuals, RadioButtonConfig, RadioGroup,
     RadioSelected, Disabled,
 };
 use crate::messages::{Console, GamePhase, PhaserBankClientConfig, TorpedoTube, TorpedoTubeClientConfig};
@@ -311,10 +311,13 @@ fn fill_tactical_radar(
     commands.entity(col).add_child(title);
 
     let radar_filter = RadarFilter(std::collections::HashSet::from([
-        RadarLayer::Ship,
-        RadarLayer::Missile,
-        RadarLayer::Station,
-        RadarLayer::Asteroid,
+        "ship".to_string(),
+        "pirate".to_string(),
+        "missile".to_string(),
+        "torpedo".to_string(),
+        "station".to_string(),
+        "asteroid".to_string(),
+        "region".to_string(),
     ]));
     let radar = GenericRadar::spawn(
         commands,
@@ -1073,7 +1076,7 @@ fn bridge_client_sim_to_weapons_radar(
                     world_z: ship_view.ship_z,
                     yaw: ship_yaw,
                 },
-                OnRadar(RadarLayer::Ship),
+                OnRadar(vec!["ship".to_string()]),
                 ship_appearance,
                 ship_t,
             ));
@@ -1086,7 +1089,7 @@ fn bridge_client_sim_to_weapons_radar(
                         world_z: ship_view.ship_z,
                         yaw: ship_yaw,
                     },
-                    OnRadar(RadarLayer::Ship),
+                    OnRadar(vec!["ship".to_string()]),
                     ship_appearance,
                     ship_t,
                     GlobalTransform::default(),
@@ -1105,23 +1108,25 @@ fn bridge_client_sim_to_weapons_radar(
             continue;
         }
 
+        if snapshot.tags.is_empty() {
+            continue;
+        }
+
         // Weapons radar shows ships, torpedoes, stations, and regions.
-        let layer = match tags_to_radar_layer(&snapshot.tags) {
-            Some(
-                l @ (RadarLayer::Ship
-                | RadarLayer::Missile
-                | RadarLayer::Station
-                | RadarLayer::Region),
-            ) => l,
-            _ => continue,
-        };
+        let shows_tags = ["ship", "pirate", "missile", "torpedo", "station", "region"];
+        if !snapshot.tags.iter().any(|t| shows_tags.contains(&t.as_str())) {
+            continue;
+        }
 
         let entity_yaw = snapshot.yaw.unwrap_or(0.0);
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
+        let icon_str = snapshot.radar_icon.as_deref().unwrap_or("ship");
+        let icon = icon_from_radar_icon_str(icon_str);
+        let is_region = snapshot.tags.iter().any(|t| t == "region");
 
-        if layer == RadarLayer::Region {
+        if is_region {
             // ── Region entity: render as shape ────────────────────────────────
-            let region_colour = colour.unwrap_or(default_layer_colour(layer));
+            let region_colour = colour.unwrap_or(Color::srgb(0.8, 0.4, 0.8));
             let region_shape = region_shape_from_snapshot(snapshot);
             let world_size = snapshot
                 .radar_world_size
@@ -1129,7 +1134,7 @@ fn bridge_client_sim_to_weapons_radar(
                 .filter(|s| *s > 0.0)
                 .unwrap_or(4.0);
             let appearance = RadarAppearance {
-                icon: RadarIcon::Star,
+                icon,
                 world_size,
                 color: Color::WHITE,
                 region_colour: Some(region_colour),
@@ -1139,7 +1144,7 @@ fn bridge_client_sim_to_weapons_radar(
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
                 commands.entity(*existing).insert((
-                    OnRadar(layer),
+                    OnRadar(snapshot.tags.clone()),
                     appearance,
                     t,
                     RadarEntityUuid(uuid.clone()),
@@ -1147,7 +1152,7 @@ fn bridge_client_sim_to_weapons_radar(
             } else {
                 let blip = commands
                     .spawn((
-                        OnRadar(layer),
+                        OnRadar(snapshot.tags.clone()),
                         appearance,
                         t,
                         GlobalTransform::default(),
@@ -1158,12 +1163,15 @@ fn bridge_client_sim_to_weapons_radar(
             }
         } else {
             // ── Point entity: render as icon ──────────────────────────────────
-            let icon = layer_to_icon(layer);
-            let default_color = match layer {
-                RadarLayer::Ship => Color::srgb(1.0, 0.4, 0.4),
-                RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
-                RadarLayer::Station => Color::srgb(0.3, 0.8, 0.6),
-                _ => unreachable!("filtered above"),
+            // Weapons uses red for ships, orange for missiles, teal for stations.
+            let is_missile = snapshot.tags.iter().any(|t| t == "missile" || t == "torpedo");
+            let is_station = snapshot.tags.iter().any(|t| t == "station");
+            let default_color = if is_missile {
+                Color::srgb(1.0, 0.4, 0.2)
+            } else if is_station {
+                Color::srgb(0.3, 0.8, 0.6)
+            } else {
+                Color::srgb(1.0, 0.4, 0.4) // ship/pirate
             };
             let world_size = snapshot
                 .radar_world_size
@@ -1181,7 +1189,7 @@ fn bridge_client_sim_to_weapons_radar(
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
                 commands.entity(*existing).insert((
-                    OnRadar(layer),
+                    OnRadar(snapshot.tags.clone()),
                     appearance,
                     t,
                     RadarEntityUuid(uuid.clone()),
@@ -1189,7 +1197,7 @@ fn bridge_client_sim_to_weapons_radar(
             } else {
                 let blip = commands
                     .spawn((
-                        OnRadar(layer),
+                        OnRadar(snapshot.tags.clone()),
                         appearance,
                         t,
                         GlobalTransform::default(),
@@ -1420,30 +1428,30 @@ mod tests {
     fn weapons_radar_filter_includes_ships() {
         use crate::gui::is_on_radar;
         let filter = RadarFilter(std::collections::HashSet::from([
-            RadarLayer::Ship,
-            RadarLayer::Missile,
+            "ship".to_string(),
+            "missile".to_string(),
         ]));
-        assert!(is_on_radar(&filter, RadarLayer::Ship));
+        assert!(is_on_radar(&filter, &["ship".to_string()]));
     }
 
     #[test]
     fn weapons_radar_filter_includes_missiles() {
         use crate::gui::is_on_radar;
         let filter = RadarFilter(std::collections::HashSet::from([
-            RadarLayer::Ship,
-            RadarLayer::Missile,
+            "ship".to_string(),
+            "missile".to_string(),
         ]));
-        assert!(is_on_radar(&filter, RadarLayer::Missile));
+        assert!(is_on_radar(&filter, &["missile".to_string()]));
     }
 
     #[test]
     fn weapons_radar_filter_excludes_asteroids() {
         use crate::gui::is_on_radar;
         let filter = RadarFilter(std::collections::HashSet::from([
-            RadarLayer::Ship,
-            RadarLayer::Missile,
+            "ship".to_string(),
+            "missile".to_string(),
         ]));
-        assert!(!is_on_radar(&filter, RadarLayer::Asteroid));
+        assert!(!is_on_radar(&filter, &["asteroid".to_string()]));
     }
 
     // ── StateVisuals: five widget states render distinctly ────────────

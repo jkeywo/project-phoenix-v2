@@ -413,6 +413,7 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: None,
                     half_extents: None,
+                radar_icon: None,
                 }],
                 ..Default::default()
             },
@@ -440,6 +441,7 @@ mod tests {
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
                     half_extents: None,
+                    radar_icon: None,
                     },
                     EntitySnapshot {
                         uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(),
@@ -455,6 +457,7 @@ mod tests {
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
                     half_extents: None,
+                    radar_icon: None,
                     },
                 ],
                 ..Default::default()
@@ -486,6 +489,7 @@ mod tests {
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
                         half_extents: None,
+                    radar_icon: None,
                     }],
                     ..Default::default()
                 }),
@@ -1247,6 +1251,7 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: None,
                     half_extents: None,
+                radar_icon: None,
                 }],
                 ..Default::default()
             },
@@ -1273,6 +1278,7 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: None,
                     half_extents: None,
+                radar_icon: None,
                 }],
                 ..Default::default()
             },
@@ -1299,6 +1305,7 @@ mod tests {
                     warp_out_remaining_secs: Some(3.5),
                     radar_world_size: None,
                     half_extents: None,
+                radar_icon: None,
                 }],
                 ..Default::default()
             },
@@ -1325,6 +1332,7 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: Some(12.5),
                     half_extents: None,
+                radar_icon: None,
                 }],
                 ..Default::default()
             },
@@ -1351,6 +1359,7 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: None,
                     half_extents: None,
+                radar_icon: None,
                 }],
                 ..Default::default()
             },
@@ -1382,6 +1391,7 @@ mod tests {
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
                     half_extents: None,
+                    radar_icon: None,
                     },
                     EntitySnapshot {
                         uuid: "field-1".into(),
@@ -1397,6 +1407,7 @@ mod tests {
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
                     half_extents: None,
+                    radar_icon: None,
                     },
                 ],
                 ..Default::default()
@@ -1610,6 +1621,7 @@ mod tests {
                 warp_out_remaining_secs: None,
                 radar_world_size: None,
                 half_extents: None,
+            radar_icon: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1633,6 +1645,7 @@ mod tests {
                 warp_out_remaining_secs: None,
                 radar_world_size: None,
                 half_extents: None,
+            radar_icon: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

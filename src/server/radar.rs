@@ -19,18 +19,16 @@
 //! `sync_server_radar_bridge` mirrors the entity bridge pattern from
 //! `console/helm/client.rs`: it reads `WorldResource.0.entities` each frame and
 //! reconciles `OnRadar + RadarAppearance + Transform + GlobalTransform` ECS
-//! entities, using `tags_to_radar_layer`, `layer_to_icon`,
-//! `default_layer_colour`, and `region_shape_from_snapshot` from `gui/radar.rs`
-//! — the same functions the client consoles use.
+//! entities, using `icon_from_radar_icon_str` and `region_shape_from_snapshot`
+//! from `gui/radar.rs` — the same functions the client consoles use.
 
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::entity_tags::EntityTag;
 use crate::gui::{
     AutoScaleRadar, GenericRadar, OnRadar, OrientationMode, RadarAppearance, RadarCenter,
-    RadarClipMode, RadarFilter, RadarIcon, RadarIconLookup, RadarLayer, WorldCentredRadar,
-    default_layer_colour, layer_to_icon, region_shape_from_snapshot, tags_to_radar_layer,
+    RadarClipMode, RadarFilter, RadarIcon, RadarIconLookup, WorldCentredRadar,
+    icon_from_radar_icon_str, region_shape_from_snapshot,
 };
 use crate::gui::radar::GuiRadarPlugin;
 use crate::lobby::WorldResource;
@@ -54,8 +52,7 @@ enum RadarContainerMode {
 
 /// Tracks the Bevy entities that represent radar blips on the server viewscreen.
 ///
-/// - `center`: the single `RadarCenter + OnRadar(PlayerShip)` entity for the
-///   player ship.
+/// - `center`: the single `RadarCenter + OnRadar` entity for the player ship.
 /// - `blips`: UUID → Bevy entity for every world entity currently on the radar.
 #[derive(Resource, Default)]
 pub struct ServerRadarEntityMap {
@@ -89,35 +86,17 @@ impl Plugin for ServerViewscreenRadarPlugin {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Map a single `EntityTag` to its corresponding `RadarLayer`.
-fn entity_tag_to_radar_layer(tag: EntityTag) -> Option<RadarLayer> {
-    match tag {
-        EntityTag::Ship => Some(RadarLayer::Ship),
-        EntityTag::Asteroid => Some(RadarLayer::Asteroid),
-        EntityTag::AsteroidField => Some(RadarLayer::AsteroidField),
-        EntityTag::Station => Some(RadarLayer::Station),
-        EntityTag::Planet => Some(RadarLayer::Planet),
-        EntityTag::Star => Some(RadarLayer::Star),
-        EntityTag::Region => Some(RadarLayer::Region),
-    }
-}
-
-/// Build a `RadarFilter` from a TOML `shows` list.
+/// Build a `RadarFilter` from a `shows` tag list.
 ///
-/// `PlayerShip` is always included so the ship blip is visible on every widget.
-fn radar_filter_from_shows(shows: &[EntityTag]) -> RadarFilter {
-    let mut set = HashSet::new();
-    set.insert(RadarLayer::PlayerShip);
-    for &tag in shows {
-        if let Some(layer) = entity_tag_to_radar_layer(tag) {
-            set.insert(layer);
-        }
-    }
+/// `"player_ship"` is always included so the ship blip is visible on every widget.
+fn radar_filter_from_shows(shows: &[crate::entity_tags::EntityTag]) -> RadarFilter {
+    let mut set: HashSet<String> = shows.iter().map(|t| t.as_str().to_string()).collect();
+    set.insert("player_ship".to_string());
     RadarFilter(set)
 }
 
 /// Spawn a full-screen absolute container node that holds a radar widget as
-/// its only child.  The widget is constrained to 80 % of viewport height,
+/// its only child.  The widget is constrained to 80 % of viewport height,
 /// centred inside the container (which fills the full viewport).
 ///
 /// The container starts hidden; `toggle_viewscreen_radar_widgets` shows/hides
@@ -142,9 +121,9 @@ fn spawn_radar_container(
             ZIndex(5),
         ))
         .id();
-    // Override the widget's default 100 % width with 80 % of viewport
+    // Override the widget's default 100 % width with 80 % of viewport
     // height, keeping the 1:1 aspect ratio so the radar is a centred
-    // square that never exceeds 80 % of the screen height.
+    // square that never exceeds 80 % of the screen height.
     commands.entity(widget_entity).insert(Node {
         width: Val::Vh(80.0),
         aspect_ratio: Some(1.0),
@@ -225,18 +204,19 @@ fn spawn_viewscreen_radar_widgets(mut commands: Commands) {
     // ── System chart ────────────────────────────────────────────────────────
     // Same range as the sensors long-range radar; filter restricted to large
     // fixed bodies (star, planet, asteroid fields, regions) + player ship.
-    let mut system_chart_set = HashSet::new();
-    system_chart_set.insert(RadarLayer::PlayerShip);
-    system_chart_set.insert(RadarLayer::Star);
-    system_chart_set.insert(RadarLayer::Planet);
-    system_chart_set.insert(RadarLayer::AsteroidField);
-    system_chart_set.insert(RadarLayer::Region);
+    let system_chart_filter = RadarFilter(HashSet::from([
+        "player_ship".to_string(),
+        "star".to_string(),
+        "planet".to_string(),
+        "asteroid_field".to_string(),
+        "region".to_string(),
+    ]));
 
     let system_chart_widget = GenericRadar::spawn(
         &mut commands,
         science_radar.range,
         OrientationMode::WorldFixed,
-        RadarFilter(system_chart_set),
+        system_chart_filter,
         None,
         None,
         RadarClipMode::Circle,
@@ -279,8 +259,9 @@ fn spawn_viewscreen_radar_widgets(mut commands: Commands) {
 /// Reconciles `WorldResource.0.entities` into ECS radar blip entities.
 ///
 /// Mirrors `bridge_client_sim_to_radar_entities` in `console/helm/client.rs`:
-/// same `tags_to_radar_layer`, `layer_to_icon`, `default_layer_colour`, and
-/// `region_shape_from_snapshot` calls, same spawn/update/despawn logic.
+/// reads `snapshot.radar_icon` and `snapshot.colour` directly (both encoded by
+/// the server's `reconcile_runtime_entities`), builds `RadarAppearance`, and
+/// inserts `OnRadar(tags)` so the widget's tag-based filter can classify them.
 fn sync_server_radar_bridge(
     mut commands: Commands,
     world: Option<Res<WorldResource>>,
@@ -303,7 +284,7 @@ fn sync_server_radar_bridge(
         Some(e) => {
             commands.entity(e).insert((
                 RadarCenter { world_x: ship.x, world_z: ship.z, yaw: ship.yaw },
-                OnRadar(RadarLayer::PlayerShip),
+                OnRadar(vec!["player_ship".to_string()]),
                 ship_appearance,
                 ship_transform,
                 ship_global,
@@ -313,7 +294,7 @@ fn sync_server_radar_bridge(
             let e = commands
                 .spawn((
                     RadarCenter { world_x: ship.x, world_z: ship.z, yaw: ship.yaw },
-                    OnRadar(RadarLayer::PlayerShip),
+                    OnRadar(vec!["player_ship".to_string()]),
                     ship_appearance,
                     ship_transform,
                     ship_global,
@@ -334,16 +315,26 @@ fn sync_server_radar_bridge(
             continue; // deduplicate
         }
 
-        let Some(layer) = tags_to_radar_layer(&snapshot.tags) else {
-            continue; // entity type not recognised for radar
-        };
+        // Skip entities with no tags — they can't match any filter.
+        if snapshot.tags.is_empty() {
+            continue;
+        }
 
         let entity_yaw = snapshot.yaw.unwrap_or(0.0);
         let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
+        let icon_str = snapshot.radar_icon.as_deref().unwrap_or("ship");
+        let icon = icon_from_radar_icon_str(icon_str);
+        let is_region = snapshot.tags.iter().any(|t| t == "region");
+        let is_field = snapshot.tags.iter().any(|t| t == "asteroid_field");
 
-        let appearance = if layer == RadarLayer::Region || layer == RadarLayer::AsteroidField {
+        let appearance = if is_region || is_field {
             // Region / field: rendered as a shape (torus, sphere, box).
-            let region_colour = colour.unwrap_or_else(|| default_layer_colour(layer));
+            let default_col = if is_field {
+                Color::srgb(0.25, 0.75, 0.55)
+            } else {
+                Color::srgb(0.8, 0.4, 0.8)
+            };
+            let region_colour = colour.unwrap_or(default_col);
             let region_shape = region_shape_from_snapshot(snapshot);
             let world_size = snapshot
                 .radar_world_size
@@ -351,7 +342,7 @@ fn sync_server_radar_bridge(
                 .filter(|&s| s > 0.0)
                 .unwrap_or(4.0);
             RadarAppearance {
-                icon: layer_to_icon(layer),
+                icon,
                 world_size,
                 color: region_colour,
                 region_colour: Some(region_colour),
@@ -359,15 +350,16 @@ fn sync_server_radar_bridge(
             }
         } else {
             // Point entity: rendered as an icon blip.
+            let default_col = Color::srgb(0.95, 0.95, 1.0);
             let world_size = snapshot
                 .radar_world_size
                 .or_else(|| Some(snapshot.radius_or_zero()))
                 .filter(|&s| s > 0.0)
                 .unwrap_or(4.0);
             RadarAppearance {
-                icon: layer_to_icon(layer),
+                icon,
                 world_size,
-                color: colour.unwrap_or_else(|| default_layer_colour(layer)),
+                color: colour.unwrap_or(default_col),
                 region_colour: None,
                 region_shape: None,
             }
@@ -379,10 +371,10 @@ fn sync_server_radar_bridge(
         if let Some(&existing) = entity_map.blips.get(uuid) {
             commands
                 .entity(existing)
-                .insert((OnRadar(layer), appearance, t, GlobalTransform::from(t)));
+                .insert((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::from(t)));
         } else {
             let blip = commands
-                .spawn((OnRadar(layer), appearance, t, GlobalTransform::from(t)))
+                .spawn((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::from(t)))
                 .id();
             entity_map.blips.insert(uuid.clone(), blip);
         }

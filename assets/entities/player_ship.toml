@@ -1,5 +1,5 @@
 name = "Player Ship"
-tags = ["player", "ship"]
+tags = ["player", "ship", "player_ship"]
 faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 
 [collider]

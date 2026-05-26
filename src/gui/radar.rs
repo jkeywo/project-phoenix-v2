@@ -1,7 +1,7 @@
 //! `GenericRadar` widget — UI-node-based radar with configurable range,
-//! orientation, and per-layer entity filtering.
+//! orientation, and tag-based entity filtering.
 //!
-//! Game-world entities opt in by carrying `OnRadar(RadarLayer)` and
+//! Game-world entities opt in by carrying `OnRadar` (with their tag list) and
 //! `RadarAppearance`.  The reference entity (player ship) carries `RadarCenter`.
 //! Blips are reconciled each frame into child UI nodes of the radar widget so
 //! they render *over* the radar background (gizmos draw under UI and would be
@@ -11,37 +11,22 @@ use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::messages::EntitySnapshot;
 
-// ── Layer / filter ────────────────────────────────────────────────────────────
+// ── Filter ────────────────────────────────────────────────────────────────────
 
-/// Entity classification for radar layer filtering.
-#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
-pub enum RadarLayer {
-    /// The local player's ship (never produced by tag; bridges add it explicitly).
-    PlayerShip,
-    Ship,
-    Asteroid,
-    /// An asteroid-field region (ring boundary), distinct from individual asteroids.
-    AsteroidField,
-    Station,
-    Missile,
-    Planet,
-    Star,
-    /// Region entities rendered as shapes (torus, sphere, box).
-    Region,
-}
-
-/// Opts a game-world entity into the radar.  The widget draws only entities
-/// whose layer passes the widget's `RadarFilter`.
+/// Opts a game-world entity into the radar. Carries the entity's tag list so
+/// `sync_radar_blip_nodes` can check it against the widget's `RadarFilter`.
 #[derive(Component, Clone, Debug)]
-pub struct OnRadar(pub RadarLayer);
+pub struct OnRadar(pub Vec<String>);
 
-/// Component on the radar widget node: which `RadarLayer` values to draw.
+/// Component on the radar widget node: which tag strings to draw.
+/// An entity passes the filter if it carries **at least one** of these tags
+/// (OR logic). An empty filter shows nothing.
 #[derive(Component, Clone, Debug)]
-pub struct RadarFilter(pub HashSet<RadarLayer>);
+pub struct RadarFilter(pub std::collections::HashSet<String>);
 
 // ── Appearance ────────────────────────────────────────────────────────────────
 
@@ -266,88 +251,26 @@ fn setup_radar_blip_fallback(mut commands: Commands, mut images: ResMut<Assets<I
     commands.insert_resource(RadarBlipFallbackIcon(images.add(Image::default())));
 }
 
-// ── Pure tag → layer / icon mapping ──────────────────────────────────────────
+// ── Icon mapping ──────────────────────────────────────────────────────────────
 
-/// Map an entity's `tags` list to a `RadarLayer`. Returns `None` for tags
-/// that are not radar-relevant (e.g. `region`) or for entities lacking any
-/// recognised tag.
+/// Map a tag string to the `RadarIcon` used for its blip.
 ///
-/// This is the single source of truth for tag→layer classification on the
-/// runtime side. Console clients (helm, weapons, science) and the editor's
-/// `tag-shape-map.js` must agree with this table.
-///
-/// Note: `RadarLayer::PlayerShip` is never produced here — bridge functions
-/// add it explicitly for the local player's ship.
-///
-/// Precedence (first match wins):
-///   - `ship` | `pirate`  → `RadarLayer::Ship`
-///   - `asteroid`         → `RadarLayer::Asteroid`
-///   - `asteroid_field`   → `RadarLayer::AsteroidField`
-///   - `station`          → `RadarLayer::Station`
-///   - `missile` | `torpedo` → `RadarLayer::Missile`
-///   - `planet`           → `RadarLayer::Planet`
-///   - `star`             → `RadarLayer::Star`
-///   - `region` → `RadarLayer::Region`
-///   - unknown → `None`
-pub fn tags_to_radar_layer<S: AsRef<str>>(tags: &[S]) -> Option<RadarLayer> {
-    let has = |t: &str| tags.iter().any(|s| s.as_ref() == t);
-    if has("region") {
-        return Some(RadarLayer::Region);
-    }
-    if has("ship") || has("pirate") {
-        Some(RadarLayer::Ship)
-    } else if has("asteroid") {
-        Some(RadarLayer::Asteroid)
-    } else if has("asteroid_field") {
-        Some(RadarLayer::AsteroidField)
-    } else if has("station") {
-        Some(RadarLayer::Station)
-    } else if has("missile") || has("torpedo") {
-        Some(RadarLayer::Missile)
-    } else if has("planet") {
-        Some(RadarLayer::Planet)
-    } else if has("star") {
-        Some(RadarLayer::Star)
-    } else {
-        None
-    }
-}
-
-/// Map a `RadarLayer` to the icon used for its blip.
-///
-/// - `PlayerShip` reuses the `Ship` icon (same PNG, different colour tint).
-/// - `AsteroidField` reuses the `Asteroid` icon (same PNG, different tint).
-/// - `Missile` uses the torpedo icon since the wire layer for torpedoes is `Missile`.
-pub fn layer_to_icon(layer: RadarLayer) -> RadarIcon {
-    match layer {
-        RadarLayer::PlayerShip => RadarIcon::Ship,
-        RadarLayer::Ship => RadarIcon::Ship,
-        RadarLayer::Asteroid => RadarIcon::Asteroid,
-        RadarLayer::AsteroidField => RadarIcon::Asteroid,
-        RadarLayer::Station => RadarIcon::Station,
-        RadarLayer::Missile => RadarIcon::Torpedo,
-        RadarLayer::Planet => RadarIcon::Planet,
-        RadarLayer::Star => RadarIcon::Star,
-        RadarLayer::Region => RadarIcon::Star,
-    }
-}
-
-/// Default per-layer colour used when an entity does not carry an authored
-/// `radar_appearance.colour`. Editors and clients should agree on these so
-/// the editor canvas matches in-game radar.
-pub fn default_layer_colour(layer: RadarLayer) -> Color {
-    match layer {
-        RadarLayer::PlayerShip => Color::srgb(0.95, 0.95, 1.0),
-        RadarLayer::Ship => Color::srgb(0.95, 0.95, 1.0),
-        RadarLayer::Asteroid => Color::srgb(0.85, 0.75, 0.45),
-        // Asteroid-field region rendered in a distinct teal so it contrasts
-        // with individual asteroid dots on the same radar.
-        RadarLayer::AsteroidField => Color::srgb(0.25, 0.75, 0.55),
-        RadarLayer::Station => Color::srgb(0.3, 0.8, 0.6),
-        RadarLayer::Missile => Color::srgb(1.0, 0.4, 0.2),
-        RadarLayer::Planet => Color::srgb(0.0, 0.6, 1.0),
-        RadarLayer::Star => Color::srgb(1.0, 0.85, 0.3),
-        RadarLayer::Region => Color::srgb(0.8, 0.4, 0.8),
+/// - `"ship"`, `"pirate"`, `"player_ship"` → `Ship`
+/// - `"asteroid"`, `"asteroid_field"` → `Asteroid`
+/// - `"station"` → `Station`
+/// - `"missile"`, `"torpedo"` → `Torpedo`
+/// - `"planet"` → `Planet`
+/// - `"star"` → `Star`
+/// - anything else → `Ship` (defensive fallback)
+pub fn icon_from_radar_icon_str(s: &str) -> RadarIcon {
+    match s {
+        "ship" | "pirate" | "player_ship" => RadarIcon::Ship,
+        "asteroid" | "asteroid_field" => RadarIcon::Asteroid,
+        "station" => RadarIcon::Station,
+        "missile" | "torpedo" => RadarIcon::Torpedo,
+        "planet" => RadarIcon::Planet,
+        "star" => RadarIcon::Star,
+        _ => RadarIcon::Ship,
     }
 }
 
@@ -376,6 +299,13 @@ pub fn region_shape_from_snapshot(snapshot: &EntitySnapshot) -> Option<RegionRad
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
+
+/// Returns `true` if any tag in `tags` is present in `filter`.
+///
+/// Pure function — fully unit-testable without a running `App`.
+pub fn is_on_radar(filter: &RadarFilter, tags: &[String]) -> bool {
+    tags.iter().any(|t| filter.0.contains(t))
+}
 
 /// Minimum blip diameter in pixels so very small or distant entities
 /// remain visible on the HUD even when truthful projection would
@@ -415,13 +345,6 @@ pub fn blip_local_offset(
     let left = center_x_px + nx * radar_radius_px - half_size_px;
     let top = center_y_px - ny * radar_radius_px - half_size_px;
     (left, top)
-}
-
-/// Returns `true` if `layer` is included in `filter`.
-///
-/// Pure function — fully unit-testable without a running `App`.
-pub fn is_on_radar(filter: &RadarFilter, layer: RadarLayer) -> bool {
-    filter.0.contains(&layer)
 }
 
 /// Project a world-space entity position onto the radar's normalised coordinate
@@ -646,7 +569,7 @@ fn sync_radar_blip_nodes(
         if let Some(auto_scale) = auto_scale {
             let max_dist = blips
                 .iter()
-                .filter(|(_, on_radar, _, _)| is_on_radar(&widget.filter, on_radar.0))
+                .filter(|(_, on_radar, _, _)| is_on_radar(&widget.filter, &on_radar.0))
                 .filter_map(|(_, _, appearance, blip_gtf)| {
                     let bpos = blip_gtf.translation();
                     let dx = bpos.x - center_x;
@@ -679,7 +602,7 @@ fn sync_radar_blip_nodes(
         > = HashMap::new();
 
         for (src, on_radar, appearance, blip_gtf) in blips.iter() {
-            if !is_on_radar(&widget.filter, on_radar.0) {
+            if !is_on_radar(&widget.filter, &on_radar.0) {
                 continue;
             }
             let bpos = blip_gtf.translation();
@@ -1215,166 +1138,88 @@ impl Plugin for GuiRadarPlugin {
 mod tests {
     use super::*;
 
-    // ── tags_to_radar_layer / layer_to_icon / default_layer_colour ────────────
+    // ── icon_from_radar_icon_str ──────────────────────────────────────────────
 
     #[test]
-    fn tags_to_radar_layer_ship_tag_returns_ship() {
-        assert_eq!(tags_to_radar_layer(&["ship"]), Some(RadarLayer::Ship));
-    }
-
-    #[test]
-    fn tags_to_radar_layer_pirate_tag_returns_ship() {
-        assert_eq!(tags_to_radar_layer(&["pirate"]), Some(RadarLayer::Ship));
-    }
-
-    #[test]
-    fn tags_to_radar_layer_asteroid_returns_asteroid() {
-        assert_eq!(tags_to_radar_layer(&["asteroid"]), Some(RadarLayer::Asteroid));
-    }
-
-    #[test]
-    fn tags_to_radar_layer_asteroid_field_returns_asteroid_field() {
-        // asteroid_field is its own distinct layer, separate from individual asteroids.
-        assert_eq!(
-            tags_to_radar_layer(&["asteroid_field"]),
-            Some(RadarLayer::AsteroidField)
-        );
+    fn icon_from_str_known_tags() {
+        assert_eq!(icon_from_radar_icon_str("ship"), RadarIcon::Ship);
+        assert_eq!(icon_from_radar_icon_str("pirate"), RadarIcon::Ship);
+        assert_eq!(icon_from_radar_icon_str("player_ship"), RadarIcon::Ship);
+        assert_eq!(icon_from_radar_icon_str("asteroid"), RadarIcon::Asteroid);
+        assert_eq!(icon_from_radar_icon_str("asteroid_field"), RadarIcon::Asteroid);
+        assert_eq!(icon_from_radar_icon_str("station"), RadarIcon::Station);
+        assert_eq!(icon_from_radar_icon_str("missile"), RadarIcon::Torpedo);
+        assert_eq!(icon_from_radar_icon_str("torpedo"), RadarIcon::Torpedo);
+        assert_eq!(icon_from_radar_icon_str("planet"), RadarIcon::Planet);
+        assert_eq!(icon_from_radar_icon_str("star"), RadarIcon::Star);
     }
 
     #[test]
-    fn tags_to_radar_layer_station_returns_station() {
-        assert_eq!(tags_to_radar_layer(&["station"]), Some(RadarLayer::Station));
+    fn icon_from_str_unknown_falls_back_to_ship() {
+        assert_eq!(icon_from_radar_icon_str("wormhole"), RadarIcon::Ship);
+        assert_eq!(icon_from_radar_icon_str(""), RadarIcon::Ship);
     }
 
-    #[test]
-    fn tags_to_radar_layer_missile_and_torpedo_return_missile() {
-        assert_eq!(tags_to_radar_layer(&["missile"]), Some(RadarLayer::Missile));
-        assert_eq!(tags_to_radar_layer(&["torpedo"]), Some(RadarLayer::Missile));
+    // ── helper constructors ───────────────────────────────────────────────────
+
+    fn filter(tags: &[&str]) -> RadarFilter {
+        RadarFilter(tags.iter().map(|s| s.to_string()).collect())
     }
 
-    #[test]
-    fn tags_to_radar_layer_planet_returns_planet() {
-        assert_eq!(tags_to_radar_layer(&["planet"]), Some(RadarLayer::Planet));
-    }
-
-    #[test]
-    fn tags_to_radar_layer_star_returns_star() {
-        assert_eq!(tags_to_radar_layer(&["star"]), Some(RadarLayer::Star));
-    }
-
-    #[test]
-    fn tags_to_radar_layer_region_returns_region_layer() {
-        assert_eq!(
-            tags_to_radar_layer(&["region"]),
-            Some(RadarLayer::Region)
-        );
-        // region wins even when combined with other recognised tags
-        assert_eq!(
-            tags_to_radar_layer(&["region", "ship"]),
-            Some(RadarLayer::Region)
-        );
-    }
-
-    #[test]
-    fn tags_to_radar_layer_unknown_or_empty_returns_none() {
-        let empty: [&str; 0] = [];
-        assert_eq!(tags_to_radar_layer(&empty), None);
-        assert_eq!(tags_to_radar_layer(&["mystery"]), None);
-    }
-
-    #[test]
-    fn tags_to_radar_layer_precedence_ship_before_station() {
-        // A ship that is also tagged station (unusual but legal in TOML)
-        // resolves as Ship because ship is checked first.
-        assert_eq!(
-            tags_to_radar_layer(&["ship", "station"]),
-            Some(RadarLayer::Ship)
-        );
-    }
-
-    #[test]
-    fn layer_to_icon_round_trips_every_layer() {
-        assert_eq!(layer_to_icon(RadarLayer::PlayerShip), RadarIcon::Ship);
-        assert_eq!(layer_to_icon(RadarLayer::Ship), RadarIcon::Ship);
-        assert_eq!(layer_to_icon(RadarLayer::Asteroid), RadarIcon::Asteroid);
-        // AsteroidField reuses the Asteroid icon (colour tint provides distinction).
-        assert_eq!(layer_to_icon(RadarLayer::AsteroidField), RadarIcon::Asteroid);
-        assert_eq!(layer_to_icon(RadarLayer::Station), RadarIcon::Station);
-        assert_eq!(layer_to_icon(RadarLayer::Missile), RadarIcon::Torpedo);
-        assert_eq!(layer_to_icon(RadarLayer::Planet), RadarIcon::Planet);
-        assert_eq!(layer_to_icon(RadarLayer::Star), RadarIcon::Star);
-    }
-
-    #[test]
-    fn default_layer_colour_covers_every_layer() {
-        // Just assert each call returns; the actual values are visual choices
-        // and changing them is a deliberate gameplay change, not a regression.
-        let _ = default_layer_colour(RadarLayer::PlayerShip);
-        let _ = default_layer_colour(RadarLayer::Ship);
-        let _ = default_layer_colour(RadarLayer::Asteroid);
-        let _ = default_layer_colour(RadarLayer::AsteroidField);
-        let _ = default_layer_colour(RadarLayer::Station);
-        let _ = default_layer_colour(RadarLayer::Missile);
-        let _ = default_layer_colour(RadarLayer::Planet);
-        let _ = default_layer_colour(RadarLayer::Star);
-        let _ = default_layer_colour(RadarLayer::Region);
-    }
-
-    fn all_layers_filter() -> RadarFilter {
-        let mut s = HashSet::new();
-        s.insert(RadarLayer::PlayerShip);
-        s.insert(RadarLayer::Ship);
-        s.insert(RadarLayer::Asteroid);
-        s.insert(RadarLayer::AsteroidField);
-        s.insert(RadarLayer::Station);
-        s.insert(RadarLayer::Missile);
-        s.insert(RadarLayer::Planet);
-        s.insert(RadarLayer::Star);
-        s.insert(RadarLayer::Region);
-        RadarFilter(s)
-    }
-
-    fn ship_only_filter() -> RadarFilter {
-        let mut s = HashSet::new();
-        s.insert(RadarLayer::Ship);
-        RadarFilter(s)
-    }
-
-    fn empty_filter() -> RadarFilter {
-        RadarFilter(HashSet::new())
+    fn tags(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
     }
 
     // ── is_on_radar ──────────────────────────────────────────────────────────
 
     #[test]
-    fn included_layer_passes_filter() {
-        let filter = ship_only_filter();
-        assert!(is_on_radar(&filter, RadarLayer::Ship));
+    fn matching_tag_passes_filter() {
+        assert!(is_on_radar(&filter(&["ship"]), &tags(&["ship"])));
     }
 
     #[test]
-    fn excluded_layer_fails_filter() {
-        let filter = ship_only_filter();
-        assert!(!is_on_radar(&filter, RadarLayer::Asteroid));
+    fn non_matching_tag_fails_filter() {
+        assert!(!is_on_radar(&filter(&["ship"]), &tags(&["asteroid"])));
     }
 
     #[test]
-    fn empty_filter_excludes_all_layers() {
-        let filter = empty_filter();
-        assert!(!is_on_radar(&filter, RadarLayer::Ship));
-        assert!(!is_on_radar(&filter, RadarLayer::Asteroid));
-        assert!(!is_on_radar(&filter, RadarLayer::Missile));
+    fn empty_filter_excludes_all() {
+        assert!(!is_on_radar(&filter(&[]), &tags(&["ship"])));
+        assert!(!is_on_radar(&filter(&[]), &tags(&["asteroid"])));
     }
 
     #[test]
-    fn all_layers_filter_includes_all() {
-        let filter = all_layers_filter();
-        assert!(is_on_radar(&filter, RadarLayer::PlayerShip));
-        assert!(is_on_radar(&filter, RadarLayer::Ship));
-        assert!(is_on_radar(&filter, RadarLayer::Asteroid));
-        assert!(is_on_radar(&filter, RadarLayer::AsteroidField));
-        assert!(is_on_radar(&filter, RadarLayer::Station));
-        assert!(is_on_radar(&filter, RadarLayer::Missile));
+    fn empty_tags_excluded_by_any_filter() {
+        assert!(!is_on_radar(&filter(&["ship"]), &tags(&[])));
+    }
+
+    #[test]
+    fn multi_tag_entity_passes_if_any_match() {
+        // entity has "pirate" and "ship"; filter includes "ship"
+        assert!(is_on_radar(&filter(&["ship"]), &tags(&["pirate", "ship"])));
+    }
+
+    #[test]
+    fn player_ship_tag_passes_player_ship_filter() {
+        assert!(is_on_radar(&filter(&["player_ship"]), &tags(&["player_ship"])));
+    }
+
+    #[test]
+    fn player_ship_does_not_pass_ship_only_filter() {
+        // player_ship and ship are distinct tags
+        assert!(!is_on_radar(&filter(&["ship"]), &tags(&["player_ship"])));
+    }
+
+    #[test]
+    fn all_tags_filter_accepts_all_known_tags() {
+        let f = filter(&[
+            "player_ship", "ship", "asteroid", "asteroid_field",
+            "station", "missile", "planet", "star", "region",
+        ]);
+        for tag in &["player_ship", "ship", "asteroid", "asteroid_field",
+                     "station", "missile", "planet", "star", "region"] {
+            assert!(is_on_radar(&f, &tags(&[tag])), "tag {tag} should pass");
+        }
     }
 
     // ── project_radar_entity ─────────────────────────────────────────────────

@@ -21,6 +21,10 @@ pub enum EntityTag {
     Planet,
     Region,
     Station,
+    /// The local player's ship. Distinct from `Ship` so radar filters can show
+    /// the player dot without also showing all NPC vessels.
+    PlayerShip,
+    Missile,
 }
 
 impl EntityTag {
@@ -38,6 +42,8 @@ impl EntityTag {
             "planet" => Some(EntityTag::Planet),
             "region" => Some(EntityTag::Region),
             "station" => Some(EntityTag::Station),
+            "player_ship" => Some(EntityTag::PlayerShip),
+            "missile" | "torpedo" => Some(EntityTag::Missile),
             _ => None,
         }
     }
@@ -52,6 +58,8 @@ impl EntityTag {
             EntityTag::Planet => "planet",
             EntityTag::Region => "region",
             EntityTag::Station => "station",
+            EntityTag::PlayerShip => "player_ship",
+            EntityTag::Missile => "missile",
         }
     }
 }
@@ -87,6 +95,8 @@ mod tests {
             ("planet", EntityTag::Planet),
             ("region", EntityTag::Region),
             ("station", EntityTag::Station),
+            ("player_ship", EntityTag::PlayerShip),
+            ("missile", EntityTag::Missile),
         ];
         for (s, expected) in cases {
             assert_eq!(EntityTag::from_str(s), Some(expected), "from_str({s:?})");

@@ -711,9 +711,10 @@ fn sync_radar_blip_nodes(
         Option<&WorldCentredRadar>,
         Option<&AutoScaleRadar>,
         Option<&RadarOverlayEntity>,
+        Option<&RadarTargetHighlight>,
     )>,
     overlay_nodes: Query<&ComputedNode>,
-    blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform)>,
+    blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform, Option<&RadarEntityUuid>)>,
     centers: Query<&RadarCenter>,
     mut existing_blip_nodes: Query<
         (&mut Node, &MaterialNode<RadarBlipMaterial>, &mut Transform, &RadarBlipNode),
@@ -744,6 +745,7 @@ fn sync_radar_blip_nodes(
         world_centred,
         auto_scale,
         overlay,
+        target_highlight,
     ) in radars.iter_mut()
     {
         if !vis.get() {
@@ -793,8 +795,8 @@ fn sync_radar_blip_nodes(
         if let Some(auto_scale) = auto_scale {
             let max_dist = blips
                 .iter()
-                .filter(|(_, on_radar, _, _)| is_on_radar(&widget.filter, &on_radar.0))
-                .filter_map(|(_, _, appearance, blip_gtf)| {
+                .filter(|(_, on_radar, _, _, _)| is_on_radar(&widget.filter, &on_radar.0))
+                .filter_map(|(_, _, appearance, blip_gtf, _)| {
                     let bpos = blip_gtf.translation();
                     let dx = bpos.x - center_x;
                     let dz = bpos.z - center_z;
@@ -825,7 +827,7 @@ fn sync_radar_blip_nodes(
             (f32, f32, Color, RegionRadarShape, f32),
         > = HashMap::new();
 
-        for (src, on_radar, appearance, blip_gtf) in blips.iter() {
+        for (src, on_radar, appearance, blip_gtf, blip_uuid) in blips.iter() {
             if !is_on_radar(&widget.filter, &on_radar.0) {
                 continue;
             }
@@ -887,11 +889,25 @@ fn sync_radar_blip_nodes(
                 let icon_handle = icons.0.get(&appearance.icon).cloned();
                 let size_frac = half / radar_radius_px;
                 let clip_circle = if widget.clip_mode == RadarClipMode::Circle { 1.0_f32 } else { 0.0_f32 };
+                // Override blip colour for the currently-locked target, if any.
+                // The widget's optional `RadarTargetHighlight` carries the
+                // server-confirmed lock uuid; the blip's optional
+                // `RadarEntityUuid` carries its wire uuid. When both are
+                // present and match, render in highlight yellow.
+                let highlight_match = matches!(
+                    (target_highlight, blip_uuid),
+                    (Some(hl), Some(uuid)) if hl.0.as_deref() == Some(uuid.0.as_str())
+                );
+                let blip_color = if highlight_match {
+                    Color::srgb(1.0, 0.85, 0.1)
+                } else {
+                    appearance.color
+                };
                 intended.insert(src, BlipIntent {
                     left,
                     top,
                     size_px,
-                    color: appearance.color,
+                    color: blip_color,
                     icon: icon_handle,
                     angle: icon_angle,
                     nx,

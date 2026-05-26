@@ -1052,15 +1052,22 @@ fn bridge_client_sim_to_weapons_radar(
     );
 }
 
-/// Mirror ClientSimState.last_phaser_target into the tactical widget's
-/// RadarTargetHighlight so the arc renderer can highlight the locked blip.
+/// Mirror the server-confirmed weapons target into the tactical widget's
+/// `RadarTargetHighlight` so the arc renderer can highlight the locked blip.
+///
+/// Reads `ClientSimState::current_target_uuid`, which is populated from
+/// `ServerMessage::WeaponsUpdate.target_uuid` at 10 Hz. Previously this
+/// system read `last_phaser_target`, which is only set by `PhaserFired` —
+/// meaning the lock indicator never appeared between tapping a blip and
+/// actually firing, and a `SetTarget` followed by no fire was invisible
+/// to the user.
 fn sync_weapons_radar_target_highlight(
     sim: Res<ClientSimState>,
     mut widget: Query<&mut RadarTargetHighlight>,
 ) {
     for mut hl in widget.iter_mut() {
-        if hl.0 != sim.last_phaser_target {
-            hl.0 = sim.last_phaser_target.clone();
+        if hl.0 != sim.current_target_uuid {
+            hl.0 = sim.current_target_uuid.clone();
         }
     }
 }

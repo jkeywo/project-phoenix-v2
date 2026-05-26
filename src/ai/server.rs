@@ -994,6 +994,7 @@ mod tests {
             power_multipliers: None,
             complexity_toml: None,
             phaser_banks: Vec::new(),
+            radar: None,
         }
     }
 

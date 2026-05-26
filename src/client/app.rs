@@ -306,6 +306,9 @@ fn sync_radar_widgets_from_lobby(
         if matches!(console, ConsoleRadar::Helm) {
             widget.range = cfg.helm_radar_range;
         }
+        if matches!(console, ConsoleRadar::Sensors) {
+            widget.range = cfg.sensors_radar_range;
+        }
     }
 }
 

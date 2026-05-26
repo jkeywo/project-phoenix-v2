@@ -170,6 +170,7 @@ fn update_session_with_config(
             }
         }
         if let Some(sc) = &ship_config.sensors_console {
+            next.sensors_radar_range = sc.long_range_radar.range;
             next.sensors_radar_shows = sc.long_range_radar.shows.iter().map(|t| t.as_str().to_string()).collect();
         }
         if let Some(nc) = &ship_config.navigation_console {

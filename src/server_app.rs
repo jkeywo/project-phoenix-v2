@@ -349,11 +349,17 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             )
         };
 
-        let radar_state = crate::messages::RadarStateSnapshot {
-            helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
-            tactical_range: crate::client_sim::WEAPONS_RADAR_RANGE * helm_range_mult,
-            science_long_range: crate::client_sim::SCIENCE_RADAR_RANGE * helm_range_mult,
-            science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
+        let radar_state = {
+            let science_range = world
+                .get_resource::<crate::lobby::server::ShipClientConfigResource>()
+                .map(|r| r.0.sensors_radar_range)
+                .unwrap_or(crate::client_sim::SCIENCE_RADAR_RANGE);
+            crate::messages::RadarStateSnapshot {
+                helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
+                tactical_range: crate::client_sim::WEAPONS_RADAR_RANGE * helm_range_mult,
+                science_long_range: science_range * helm_range_mult,
+                science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
+            }
         };
 
         let snapshot = crate::messages::SimSnapshot {

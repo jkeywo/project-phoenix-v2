@@ -385,7 +385,11 @@ fn reparent_panels_into_bezel(
         {
             continue;
         }
-        commands.entity(entity).set_parent_in_place(target);
+        // Use add_child on the target so the ChildOf + Children pair
+        // is always maintained (set_parent_in_place guards add_child
+        // behind a GlobalTransform read, which can silently skip the
+        // hierarchy update when the parent lacks GlobalTransform).
+        commands.entity(target).add_child(entity);
     }
 }
 

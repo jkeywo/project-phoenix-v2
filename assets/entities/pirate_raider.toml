@@ -68,7 +68,7 @@ name = "patrol"
 kind = "patrolling"
 waypoints = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
 loop_path = true
-target_speed = 0.5
+target_speed = 0.4
 
 [[behaviour.state]]
 name = "pursue"

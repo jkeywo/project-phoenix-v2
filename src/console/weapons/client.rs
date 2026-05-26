@@ -1076,6 +1076,7 @@ fn bridge_client_sim_to_weapons_radar(
                 OnRadar(RadarLayer::Ship),
                 ship_appearance,
                 ship_t,
+                GlobalTransform::from(ship_t),
             ));
         }
         None => {
@@ -1089,7 +1090,7 @@ fn bridge_client_sim_to_weapons_radar(
                     OnRadar(RadarLayer::Ship),
                     ship_appearance,
                     ship_t,
-                    GlobalTransform::default(),
+                    GlobalTransform::from(ship_t),
                 ))
                 .id();
             radar.center = Some(e);
@@ -1142,6 +1143,7 @@ fn bridge_client_sim_to_weapons_radar(
                     OnRadar(layer),
                     appearance,
                     t,
+                    GlobalTransform::from(t),
                     RadarEntityUuid(uuid.clone()),
                 ));
             } else {
@@ -1150,7 +1152,7 @@ fn bridge_client_sim_to_weapons_radar(
                         OnRadar(layer),
                         appearance,
                         t,
-                        GlobalTransform::default(),
+                        GlobalTransform::from(t),
                         RadarEntityUuid(uuid.clone()),
                     ))
                     .id();
@@ -1184,6 +1186,7 @@ fn bridge_client_sim_to_weapons_radar(
                     OnRadar(layer),
                     appearance,
                     t,
+                    GlobalTransform::from(t),
                     RadarEntityUuid(uuid.clone()),
                 ));
             } else {
@@ -1192,7 +1195,7 @@ fn bridge_client_sim_to_weapons_radar(
                         OnRadar(layer),
                         appearance,
                         t,
-                        GlobalTransform::default(),
+                        GlobalTransform::from(t),
                         RadarEntityUuid(uuid.clone()),
                     ))
                     .id();

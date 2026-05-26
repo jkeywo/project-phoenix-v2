@@ -368,6 +368,7 @@ fn bridge_client_sim_to_science_radar(
                 OnRadar(RadarLayer::PlayerShip),
                 ship_appearance,
                 ship_t,
+                GlobalTransform::from(ship_t),
             ));
         }
         None => {
@@ -381,7 +382,7 @@ fn bridge_client_sim_to_science_radar(
                     OnRadar(RadarLayer::PlayerShip),
                     ship_appearance,
                     ship_t,
-                    GlobalTransform::default(),
+                    GlobalTransform::from(ship_t),
                 ))
                 .id();
             radar.center = Some(e);
@@ -432,10 +433,20 @@ fn bridge_client_sim_to_science_radar(
             let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((OnRadar(layer), appearance, t));
+                commands.entity(*existing).insert((
+                    OnRadar(layer),
+                    appearance,
+                    t,
+                    GlobalTransform::from(t),
+                ));
             } else {
                 let blip = commands
-                    .spawn((OnRadar(layer), appearance, t, GlobalTransform::default()))
+                    .spawn((
+                        OnRadar(layer),
+                        appearance,
+                        t,
+                        GlobalTransform::from(t),
+                    ))
                     .id();
                 radar.blips.insert(uuid.clone(), blip);
             }
@@ -458,10 +469,20 @@ fn bridge_client_sim_to_science_radar(
             let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
                 .with_rotation(Quat::from_rotation_y(entity_yaw));
             if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((OnRadar(layer), appearance, t));
+                commands.entity(*existing).insert((
+                    OnRadar(layer),
+                    appearance,
+                    t,
+                    GlobalTransform::from(t),
+                ));
             } else {
                 let blip = commands
-                    .spawn((OnRadar(layer), appearance, t, GlobalTransform::default()))
+                    .spawn((
+                        OnRadar(layer),
+                        appearance,
+                        t,
+                        GlobalTransform::from(t),
+                    ))
                     .id();
                 radar.blips.insert(uuid.clone(), blip);
             }

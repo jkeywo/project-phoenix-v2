@@ -381,9 +381,29 @@ pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsV
 }
 
 /// Get the loaded FactionRegistry.
+///
+/// Pre-populates from compile-time includes if the thread-local is still
+/// empty (e.g. when `wasm_load_faction` was never called from JS due to
+/// missing wiring).  This ensures the registry always contains the four
+/// built-in factions — Federation, Pirate, Harrow, Requiem — on every
+/// target, WASM included.
 #[cfg(target_arch = "wasm32")]
 pub fn get_faction_registry() -> crate::faction::FactionRegistry {
-    FACTION_REGISTRY.with(|reg| reg.borrow().clone())
+    FACTION_REGISTRY.with(|reg| {
+        if reg.borrow().is_empty() {
+            for toml_str in &[
+                include_str!("../../assets/factions/federation.toml"),
+                include_str!("../../assets/factions/pirate.toml"),
+                include_str!("../../assets/factions/harrow.toml"),
+                include_str!("../../assets/factions/requiem.toml"),
+            ] {
+                if let Ok(config) = crate::faction::parse_faction_config(toml_str) {
+                    reg.borrow_mut().insert(config);
+                }
+            }
+        }
+        reg.borrow().clone()
+    })
 }
 
 /// Get a reference to the config cache.

@@ -408,6 +408,14 @@ pub struct ShipClientConfig {
     /// `[weapons_console.radar] shows`.
     #[serde(default)]
     pub tactical_radar_shows: Vec<String>,
+    /// Detection range for the Tactical radar widget, in world units. Sourced
+    /// from `[weapons_console.radar] range` in the ship TOML.
+    #[serde(default = "default_tactical_radar_range")]
+    pub tactical_radar_range: f32,
+}
+
+fn default_tactical_radar_range() -> f32 {
+    300.0
 }
 
 fn default_helm_radar_range() -> f32 {
@@ -454,6 +462,7 @@ impl Default for ShipClientConfig {
             sensors_radar_shows: Vec::new(),
             nav_chart_shows: Vec::new(),
             tactical_radar_shows: Vec::new(),
+            tactical_radar_range: default_tactical_radar_range(),
         }
     }
 }

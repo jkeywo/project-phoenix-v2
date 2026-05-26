@@ -354,9 +354,13 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 .get_resource::<crate::lobby::server::ShipClientConfigResource>()
                 .map(|r| r.0.sensors_radar_range)
                 .unwrap_or(crate::client_sim::SCIENCE_RADAR_RANGE);
+            let tactical_range = world
+                .get_resource::<crate::lobby::server::ShipClientConfigResource>()
+                .map(|r| r.0.tactical_radar_range)
+                .unwrap_or(crate::client_sim::WEAPONS_RADAR_RANGE);
             crate::messages::RadarStateSnapshot {
                 helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
-                tactical_range: crate::client_sim::WEAPONS_RADAR_RANGE * helm_range_mult,
+                tactical_range: tactical_range * helm_range_mult,
                 science_long_range: science_range * helm_range_mult,
                 science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
             }

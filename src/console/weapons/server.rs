@@ -10,7 +10,6 @@ use crate::entity_spawner::EntityConsoleHull;
 use crate::torpedo::{TorpedoSystem, TorpedoConfig};
 use crate::ai_plugin::{AiTokenRegistry, AiControllerComponent, EntityPhaserState};
 use crate::ship_state::ShipState;
-use crate::radar::WEAPONS_RADAR_RANGE;
 
 // ── Beam constants ───────────────────────────────────────────────────────
 //
@@ -206,6 +205,7 @@ fn handle_set_target(
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
+    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
 ) {
     for ev in reader.read() {
         let ClientMessage::SetTarget { uuid } = &ev.msg else { continue };
@@ -215,7 +215,8 @@ fn handle_set_target(
         }
 
         let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
-        let effective_weapons_range = WEAPONS_RADAR_RANGE * radar_range_mult;
+        let base_range = ship_config.0.tactical_radar_range;
+        let effective_weapons_range = base_range * radar_range_mult;
         let asteroid = world.0.entities.iter().find(|a| &a.uuid == uuid);
         let locked = match asteroid {
             None => false,
@@ -765,6 +766,7 @@ mod tests {
             .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
+            .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
             .add_plugins(WeaponsPlugin)
             .add_systems(Update, (
                 tick_active_beam,

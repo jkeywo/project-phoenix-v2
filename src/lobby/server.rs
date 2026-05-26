@@ -179,6 +179,7 @@ fn update_session_with_config(
         if let Some(wc) = &ship_config.weapons_console {
             if let Some(r) = &wc.radar {
                 next.tactical_radar_shows = r.shows.iter().map(|t| t.as_str().to_string()).collect();
+                next.tactical_radar_range = r.range;
             }
         }
         ship_client_config.0 = next;

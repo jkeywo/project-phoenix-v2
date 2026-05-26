@@ -108,8 +108,11 @@
   <!-- Damage debug overlay (F8) -->
   <div id="damage-log-overlay" style="display:none;position:fixed;top:0;right:0;z-index:9999;background:rgba(0,0,0,0.8);color:#f80;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:50vw;max-height:100vh;overflow-y:auto;"></div>
 
-  <!-- Entity behavior debug overlay (F5) -->
+  <!-- Entity behavior debug overlay (F7) -->
   <div id="entity-debug-overlay" style="display:none;position:fixed;bottom:0;left:0;z-index:9999;background:rgba(0,0,0,0.8);color:#0ff;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:60vw;max-height:50vh;overflow-y:auto;"></div>
+
+  <!-- Entity inspector overlay (F6) -->
+  <div id="entity-inspector-overlay" style="display:none;position:fixed;bottom:0;right:0;z-index:9999;background:rgba(0,0,0,0.8);color:#ff0;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:60vw;max-height:70vh;overflow-y:auto;"></div>
 
   <div id="top-bar">
     <div id="top-bar-row">
@@ -416,6 +419,8 @@ function finishInit() {
   window.wasm_get_damage_log = wasmBindings.wasm_get_damage_log;
   window.wasm_toggle_debug_entities = wasmBindings.wasm_toggle_debug_entities;
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;
+  window.wasm_toggle_entity_inspector = wasmBindings.wasm_toggle_entity_inspector;
+  window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
 
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.
@@ -600,6 +605,36 @@ window.addEventListener('TrunkApplicationStarted', () => {
           if (typeof wasm_get_entity_debug_state === 'function') {
             var txt = wasm_get_entity_debug_state();
             entityEl.textContent = txt.length > 0 ? txt : '(entity overlay active — waiting for Bevy)';
+          }
+        }
+        requestAnimationFrame(rafLoop);
+      }
+      requestAnimationFrame(rafLoop);
+    })();
+
+    // ── F6 — toggle entity inspector overlay ────────────────────────────
+    (function() {
+      var inspectorEl = document.getElementById('entity-inspector-overlay');
+      var inspectorVisible = false;
+
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'F6') {
+          e.preventDefault();
+          inspectorVisible = !inspectorVisible;
+          inspectorEl.style.display = inspectorVisible ? 'block' : 'none';
+          if (typeof wasm_toggle_entity_inspector === 'function') {
+            wasm_toggle_entity_inspector();
+          } else if (inspectorVisible) {
+            inspectorEl.textContent = '(entity inspector: WASM not ready — hard-reload the page)';
+          }
+        }
+      });
+
+      function rafLoop() {
+        if (inspectorVisible) {
+          if (typeof wasm_get_entity_inspector === 'function') {
+            var txt = wasm_get_entity_inspector();
+            inspectorEl.textContent = txt.length > 0 ? txt : '(entity inspector active — waiting for Bevy)';
           }
         }
         requestAnimationFrame(rafLoop);

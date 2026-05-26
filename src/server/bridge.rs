@@ -80,6 +80,15 @@ thread_local! {
     /// each `PostUpdate` frame when the overlay is enabled. Read by
     /// `wasm_get_entity_debug_state()` from JS.
     static ENTITY_DEBUG_STRING: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// Pending toggle request from `wasm_toggle_entity_inspector()`. Drained by
+    /// `drain_debug_toggles` each `PreUpdate` frame.
+    static PENDING_TOGGLE_ENTITY_INSPECTOR: RefCell<bool> = const { RefCell::new(false) };
+
+    /// Pre-formatted entity inspector text written by `update_entity_inspector`
+    /// each `PostUpdate` frame when the overlay is enabled. Read by
+    /// `wasm_get_entity_inspector()` from JS.
+    static ENTITY_INSPECTOR_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -317,6 +326,31 @@ pub fn set_entity_debug_string(text: String) {
     ENTITY_DEBUG_STRING.with(|v| *v.borrow_mut() = text);
 }
 
+/// Called by JS (e.g. F6 keydown) to toggle the entity inspector overlay at runtime.
+///
+/// Sets a pending flag that is consumed by `drain_debug_toggles` in the next
+/// `PreUpdate` frame, which flips the `DebugEntityInspectorEnabled` Bevy resource.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_entity_inspector() {
+    PENDING_TOGGLE_ENTITY_INSPECTOR.with(|v| *v.borrow_mut() = true);
+}
+
+/// Called by JS each animation frame to read the latest entity inspector text
+/// when the overlay is visible.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_entity_inspector() -> String {
+    ENTITY_INSPECTOR_STRING.with(|v| v.borrow().clone())
+}
+
+/// Called by the Bevy `update_entity_inspector` system to update the entity
+/// inspector string that JS reads via `wasm_get_entity_inspector()`.
+#[cfg(target_arch = "wasm32")]
+pub fn set_entity_inspector_string(text: String) {
+    ENTITY_INSPECTOR_STRING.with(|v| *v.borrow_mut() = text);
+}
+
 // ── Config Preload Exports ──────────────────────────────────────────────────
 
 /// Re-export config preload functions from config_cache module.
@@ -399,6 +433,7 @@ fn drain_debug_toggles(
     mut paused: ResMut<crate::debug_overlay::DebugPaused>,
     mut damage_enabled: ResMut<crate::debug_overlay::DebugDamageEnabled>,
     mut entities_enabled: ResMut<crate::debug_overlay::DebugEntitiesEnabled>,
+    mut entity_inspector_enabled: ResMut<crate::debug_overlay::DebugEntityInspectorEnabled>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
     // ── Region wireframes toggle (F4) ──────────────────────────────────────
@@ -456,6 +491,16 @@ fn drain_debug_toggles(
     });
     if pending_entities {
         entities_enabled.0 = !entities_enabled.0;
+    }
+
+    // ── Entity inspector overlay toggle (F6) ───────────────────────────────
+    let pending_inspector = PENDING_TOGGLE_ENTITY_INSPECTOR.with(|v| {
+        let was = *v.borrow();
+        *v.borrow_mut() = false;
+        was
+    });
+    if pending_inspector {
+        entity_inspector_enabled.0 = !entity_inspector_enabled.0;
     }
 }
 

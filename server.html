@@ -612,13 +612,13 @@ window.addEventListener('TrunkApplicationStarted', () => {
       requestAnimationFrame(rafLoop);
     })();
 
-    // ── F6 — toggle entity inspector overlay ────────────────────────────
+    // ── F2 — toggle entity inspector overlay ────────────────────────────
     (function() {
       var inspectorEl = document.getElementById('entity-inspector-overlay');
       var inspectorVisible = false;
 
       document.addEventListener('keydown', function(e) {
-        if (e.key === 'F6') {
+        if (e.key === 'F2') {
           e.preventDefault();
           inspectorVisible = !inspectorVisible;
           inspectorEl.style.display = inspectorVisible ? 'block' : 'none';

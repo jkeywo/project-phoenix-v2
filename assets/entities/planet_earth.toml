@@ -9,6 +9,7 @@ length = 0.0
 [radar_appearance]
 colour = [0.0, 0.6, 1.0]
 radius = 20.0
+icon = "planet"
 
 [mesh]
 shape = "sphere"

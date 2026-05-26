@@ -39,6 +39,10 @@ cooldown_secs = 6.0
 beam_color = [1.0, 0.4, 0.1, 1.0]
 torpedo_arc_color = [1.0, 0.55, 0.2, 0.15]
 
+[weapons_console.radar]
+range = 300.0
+shows = ["player", "ship", "asteroid", "station", "missile", "torpedo", "region"]
+
 # Port phaser bank: covers the port hemisphere (forward arc to aft arc).
 # Auto-fire window is narrower than the manual fire arc.
 [[weapons_console.phaser_banks]]
@@ -86,7 +90,7 @@ power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 
 [sensors_console.long_range_radar]
 range = 400.0
-shows = ["asteroid", "ship", "station", "planet", "star"]
+shows = ["player", "asteroid", "ship", "station", "planet", "star"]
 
 [power]
 capacity = 100.0
@@ -107,7 +111,7 @@ impulse_acceleration_multiplier = 5.0
 
 [helm_console.radar]
 range = 250.0
-shows = ["asteroid", "ship", "station", "planet", "star"]
+shows = ["player", "asteroid", "ship", "station", "planet", "star"]
 
 [navigation_console]
 
@@ -140,6 +144,7 @@ offline_duration = 10.0
 [radar_appearance]
 colour = [0.6, 0.8, 1.0]
 radius = 6.0
+icon = "player_ship"
 
 [stations]
 min_players = 1

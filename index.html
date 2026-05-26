@@ -68,7 +68,7 @@
     #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #launch-btn:not(:disabled):hover { background: #334; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-3f8b2f5a8059fdd5.js" crossorigin="anonymous" integrity="sha384-LKlEnPvl384No1hlLL507So4P/EyKPP/11xBhvFnO0Jrv1KxVlqwpafSed0c3cOR"><link rel="preload" href="./project-phoenix-3f8b2f5a8059fdd5_bg.wasm" crossorigin="anonymous" integrity="sha384-rxKobyr3e/wIVPyPGjm0XngoMYmH5xb1HIoyLz7hq4oVE713M2r0aKutiaqwqd0Z" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-df9aaf51cce605ed.js" crossorigin="anonymous" integrity="sha384-7z7g7kSsygNz+SGAReni+RBRmXJzVMoPeNr5GISKhsfrO7C8Nza9V40Nw+yFTPFA"><link rel="preload" href="./project-phoenix-df9aaf51cce605ed_bg.wasm" crossorigin="anonymous" integrity="sha384-f2iJkAPXLTndsnGD2KLF3RJxiLBQZ7sP8ZEi8HNF4M2WooZnGCS5zXg77/9wWaiO" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
   <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
@@ -108,8 +108,11 @@
   <!-- Damage debug overlay (F8) -->
   <div id="damage-log-overlay" style="display:none;position:fixed;top:0;right:0;z-index:9999;background:rgba(0,0,0,0.8);color:#f80;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:50vw;max-height:100vh;overflow-y:auto;"></div>
 
-  <!-- Entity behavior debug overlay (F5) -->
+  <!-- Entity behavior debug overlay (F7) -->
   <div id="entity-debug-overlay" style="display:none;position:fixed;bottom:0;left:0;z-index:9999;background:rgba(0,0,0,0.8);color:#0ff;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:60vw;max-height:50vh;overflow-y:auto;"></div>
+
+  <!-- Entity inspector overlay (F6) -->
+  <div id="entity-inspector-overlay" style="display:none;position:fixed;bottom:0;right:0;z-index:9999;background:rgba(0,0,0,0.8);color:#ff0;font-family:monospace;font-size:13px;padding:12px 16px;white-space:pre;pointer-events:none;max-width:60vw;max-height:70vh;overflow-y:auto;"></div>
 
   <div id="top-bar">
     <div id="top-bar-row">
@@ -123,8 +126,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-3f8b2f5a8059fdd5.js';
-const wasm = await init({ module_or_path: './project-phoenix-3f8b2f5a8059fdd5_bg.wasm' });
+import init, * as bindings from './project-phoenix-df9aaf51cce605ed.js';
+const wasm = await init({ module_or_path: './project-phoenix-df9aaf51cce605ed_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -169,6 +172,27 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       });
       document.addEventListener('fullscreenchange', syncIcon);
     })();
+
+    // ── Screen Wake Lock (keep screen on when active) ─────────────────
+    let wakeLockSentinel = null;
+
+    async function acquireWakeLock() {
+      try {
+        if (wakeLockSentinel) return;
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+      } catch (_) {}
+    }
+
+    function releaseWakeLock() {
+      if (wakeLockSentinel) { wakeLockSentinel.release(); wakeLockSentinel = null; }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') acquireWakeLock();
+    });
+
+    window.addEventListener('beforeunload', () => releaseWakeLock());
 
     // ── PeerJS host peer ───────────────────────────────────────────────────
 
@@ -252,6 +276,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       selectedScenario = document.getElementById('scenario-select').value;
       document.getElementById('scenario-panel').style.display = 'none';
       initPeerJS();
+      acquireWakeLock();
       if (wasmReady) startPhoenix();
     });
 
@@ -263,6 +288,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         selectedScenario = sp;
         document.getElementById('scenario-panel').style.display = 'none';
         initPeerJS();
+        acquireWakeLock();
       }
     })();
 
@@ -427,6 +453,8 @@ function finishInit() {
   window.wasm_get_damage_log = wasmBindings.wasm_get_damage_log;
   window.wasm_toggle_debug_entities = wasmBindings.wasm_toggle_debug_entities;
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;
+  window.wasm_toggle_entity_inspector = wasmBindings.wasm_toggle_entity_inspector;
+  window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
 
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.
@@ -611,6 +639,36 @@ window.addEventListener('TrunkApplicationStarted', () => {
           if (typeof wasm_get_entity_debug_state === 'function') {
             var txt = wasm_get_entity_debug_state();
             entityEl.textContent = txt.length > 0 ? txt : '(entity overlay active — waiting for Bevy)';
+          }
+        }
+        requestAnimationFrame(rafLoop);
+      }
+      requestAnimationFrame(rafLoop);
+    })();
+
+    // ── F2 — toggle entity inspector overlay ────────────────────────────
+    (function() {
+      var inspectorEl = document.getElementById('entity-inspector-overlay');
+      var inspectorVisible = false;
+
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'F2') {
+          e.preventDefault();
+          inspectorVisible = !inspectorVisible;
+          inspectorEl.style.display = inspectorVisible ? 'block' : 'none';
+          if (typeof wasm_toggle_entity_inspector === 'function') {
+            wasm_toggle_entity_inspector();
+          } else if (inspectorVisible) {
+            inspectorEl.textContent = '(entity inspector: WASM not ready — hard-reload the page)';
+          }
+        }
+      });
+
+      function rafLoop() {
+        if (inspectorVisible) {
+          if (typeof wasm_get_entity_inspector === 'function') {
+            var txt = wasm_get_entity_inspector();
+            inspectorEl.textContent = txt.length > 0 ? txt : '(entity inspector active — waiting for Bevy)';
           }
         }
         requestAnimationFrame(rafLoop);

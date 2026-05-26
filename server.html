@@ -159,6 +159,27 @@
       document.addEventListener('fullscreenchange', syncIcon);
     })();
 
+    // ── Screen Wake Lock (keep screen on when active) ─────────────────
+    let wakeLockSentinel = null;
+
+    async function acquireWakeLock() {
+      try {
+        if (wakeLockSentinel) return;
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+      } catch (_) {}
+    }
+
+    function releaseWakeLock() {
+      if (wakeLockSentinel) { wakeLockSentinel.release(); wakeLockSentinel = null; }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') acquireWakeLock();
+    });
+
+    window.addEventListener('beforeunload', () => releaseWakeLock());
+
     // ── PeerJS host peer ───────────────────────────────────────────────────
 
     // peer connection id → session token (resolved once Identify arrives)
@@ -241,6 +262,7 @@
       selectedScenario = document.getElementById('scenario-select').value;
       document.getElementById('scenario-panel').style.display = 'none';
       initPeerJS();
+      acquireWakeLock();
       if (wasmReady) startPhoenix();
     });
 
@@ -252,6 +274,7 @@
         selectedScenario = sp;
         document.getElementById('scenario-panel').style.display = 'none';
         initPeerJS();
+        acquireWakeLock();
       }
     })();
 

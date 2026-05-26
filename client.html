@@ -212,6 +212,25 @@
       }
     }
 
+    // ── Screen Wake Lock (keep screen on when active) ─────────────────
+    let wakeLockSentinel = null;
+
+    async function acquireWakeLock() {
+      try {
+        if (wakeLockSentinel) return;
+        wakeLockSentinel = await navigator.wakeLock.request('screen');
+        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+      } catch (_) {}
+    }
+
+    function releaseWakeLock() {
+      if (wakeLockSentinel) { wakeLockSentinel.release(); wakeLockSentinel = null; }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') acquireWakeLock();
+    });
+
     // ── Fullscreen controller ──────────────────────────────────────────────
 
     (function initFullscreen() {
@@ -1036,6 +1055,7 @@
           conn.on('open', () => {
             clearTimeout(connectTimeout);
             setConnectionStatus('ready');
+            acquireWakeLock();
             send('Identify', { token: myToken, name: myName });
             setStatus('Waiting for server…');
           });
@@ -1050,7 +1070,7 @@
             } catch (e) { console.error('[client] bad message', e, raw); }
           });
 
-          conn.on('close', () => { clearTimeout(connectTimeout); setConnectionStatus('disconnected'); setStatus('Disconnected'); conn = null; });
+          conn.on('close', () => { clearTimeout(connectTimeout); setConnectionStatus('disconnected'); setStatus('Disconnected'); conn = null; releaseWakeLock(); });
           conn.on('error', e  => { clearTimeout(connectTimeout); setStatus('Connection error: ' + e.type); });
         }
 

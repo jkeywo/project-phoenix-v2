@@ -1,4 +1,4 @@
-//! Client-side Navigation Panel plugin — migrated to `src/gui/` library widgets.
+﻿//! Client-side Navigation Panel plugin â€” migrated to `src/gui/` library widgets.
 //!
 //! Owns the Navigation console UI: system chart display (`GenericRadar`,
 //! world-centred, north-up, auto-scaled), impulse status text readout
@@ -17,16 +17,15 @@ use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
-    tags_to_radar_layer, AutoScaleRadar, ButtonPressed, ButtonSize, GenericRadar, OnRadar,
-    OrientationMode, RadarAppearance, RadarCenter, RadarClipMode, RadarFilter, RadarIcon,
-    RadarLayer, ReadoutValue, StateVisuals, TextReadout, WorldCentredRadar,
+    bridge_sim_to_radar, spawn_gui_button, AutoScaleRadar, ButtonPressed, ButtonSize,
+    ConsoleRadar, GenericRadar, OrientationMode, RadarBlipMap, RadarCenterPose, RadarClipMode,
+    RadarFilter, ReadoutValue, StateVisuals, TextReadout, WorldCentredRadar,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
-// ── Pure visibility helper ────────────────────────────────────────────
+// â”€â”€ Pure visibility helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Decide whether the navigation panel should be visible.
 ///
@@ -56,13 +55,13 @@ pub fn navigation_panel_visible(
     }
 }
 
-// ── Pure impulse-status helper ────────────────────────────────────────
+// â”€â”€ Pure impulse-status helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Derive the impulse status label from a charge progress value.
 ///
-/// - `>= 1.0` → `"ACTIVE"`
-/// - `> 0.0`  → `"Charging"`
-/// - `<= 0.0` → `"Idle"`
+/// - `>= 1.0` â†’ `"ACTIVE"`
+/// - `> 0.0`  â†’ `"Charging"`
+/// - `<= 0.0` â†’ `"Idle"`
 pub fn impulse_status_label(charge: f32) -> &'static str {
     if charge >= 1.0 {
         "ACTIVE"
@@ -73,7 +72,7 @@ pub fn impulse_status_label(charge: f32) -> &'static str {
     }
 }
 
-// ── State-visuals helpers ─────────────────────────────────────────────
+// â”€â”€ State-visuals helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Cancel-Impulse button: danger red.
 fn cancel_impulse_visuals() -> StateVisuals {
@@ -108,17 +107,7 @@ fn impulse_readout_visuals() -> StateVisuals {
     )
 }
 
-// ── Resources ────────────────────────────────────────────────────────
-
-/// Persistent ECS entity IDs for navigation radar blips, mirroring
-/// the pattern used by the science and weapons console bridges.
-#[derive(Resource, Default)]
-struct NavRadarEntities {
-    center: Option<Entity>,
-    blips: std::collections::HashMap<String, Entity>,
-}
-
-// ── Marker components ────────────────────────────────────────────────
+// â”€â”€ Marker components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Marks the root of the Navigation console UI.
 #[derive(Component)]
@@ -133,7 +122,7 @@ pub struct NavImpulseReadout;
 #[derive(Component)]
 pub struct NavCancelImpulseButton;
 
-// ── Plugin ────────────────────────────────────────────────────────────
+// â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Marker resource set once the navigation UI has been spawned.
 #[derive(Resource)]
@@ -143,21 +132,20 @@ pub struct NavigationPanelPlugin;
 
 impl Plugin for NavigationPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NavRadarEntities>()
-            .add_systems(
-                Update,
-                (
-                    spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
-                    toggle_navigation_panel_visibility,
-                    refresh_navigation_panel,
-                    respawn_navigation_on_orientation_change,
-                    bridge_client_sim_to_nav_radar,
-                ),
-            );
+        app.add_systems(
+            Update,
+            (
+                spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
+                toggle_navigation_panel_visibility,
+                refresh_navigation_panel,
+                respawn_navigation_on_orientation_change,
+                bridge_client_sim_to_nav_radar,
+            ),
+        );
     }
 }
 
-// ── Button observers ──────────────────────────────────────────────────
+// â”€â”€ Button observers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn on_on_screen_pressed(
     _trigger: On<ButtonPressed>,
@@ -175,7 +163,7 @@ fn on_cancel_impulse_pressed(
     outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
 }
 
-// ── Spawn (ConsoleShell) ──────────────────────────────────────────────
+// â”€â”€ Spawn (ConsoleShell) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn spawn_navigation_ui(
     mut commands: Commands,
@@ -220,11 +208,11 @@ fn spawn_navigation_ui(
 /// The chart is centred at world origin (0, 0), north-up (no ship-yaw
 /// rotation), and automatically zooms each frame to fit all visible blips
 /// plus a 10 % margin.  It shows the player ship, stations, planets, stars,
-/// and asteroid-field region boundaries — but not individual asteroids or
+/// and asteroid-field region boundaries â€” but not individual asteroids or
 /// NPC ships.
 ///
-/// Sizing mirrors the helm console: landscape → constrain by height, portrait
-/// → constrain by width.  `aspect_ratio: 1.0` derives the other axis.
+/// Sizing mirrors the helm console: landscape â†’ constrain by height, portrait
+/// â†’ constrain by width.  `aspect_ratio: 1.0` derives the other axis.
 fn fill_navigation_chart(commands: &mut Commands, container: Entity, _is_landscape: bool) {
     let col = commands
         .spawn(Node {
@@ -238,14 +226,9 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity, _is_landsca
         .id();
     commands.entity(container).add_child(col);
 
-    let radar_filter = RadarFilter(std::collections::HashSet::from([
-        RadarLayer::PlayerShip,
-        RadarLayer::Station,
-        RadarLayer::Planet,
-        RadarLayer::Star,
-        RadarLayer::AsteroidField,
-        RadarLayer::Region,
-    ]));
+    // Spawn with empty filter â€” sync_nav_radar_filter will populate it from
+    // lobby.ship_config.nav_chart_shows once the Welcome message arrives.
+    let radar_filter = RadarFilter(std::collections::HashSet::new());
     let radar = GenericRadar::spawn(
         commands,
         500.0, // initial range; overridden each frame by AutoScaleRadar
@@ -258,6 +241,8 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity, _is_landsca
         1.0,
     );
     commands.entity(radar).insert((
+        ConsoleRadar::Navigation,
+        RadarBlipMap::default(),
         WorldCentredRadar,
         AutoScaleRadar { margin: 1.1, min_range: 50.0 },
         Node {
@@ -352,7 +337,7 @@ fn fill_navigation_controls(commands: &mut Commands, container: Entity) {
     commands.entity(col).add_child(on_screen_btn);
 }
 
-// ── Orientation respawn ──────────────────────────────────────────────
+// â”€â”€ Orientation respawn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn respawn_navigation_on_orientation_change(
     orientation: Option<Res<DeviceOrientation>>,
@@ -369,7 +354,11 @@ fn respawn_navigation_on_orientation_change(
     commands.remove_resource::<NavigationPanelSpawned>();
 }
 
-// ── Systems ──────────────────────────────────────────────────────────
+// â”€â”€ Systems â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+// Note: nav-chart filter is now sourced via the unified
+// `sync_radar_widgets_from_lobby` system in `src/client/app.rs`, routed
+// by `ConsoleRadar::Navigation`.
 
 fn toggle_navigation_panel_visibility(
     lobby: Res<LobbyState>,
@@ -414,140 +403,35 @@ fn refresh_navigation_panel(
 /// `OnRadar` / `RadarAppearance` for the navigation `GenericRadar` widget.
 ///
 /// Shows the player ship, stations, planets, stars, and asteroid-field
-/// region boundaries.  Individual asteroids and NPC ships are excluded —
+/// region boundaries.  Individual asteroids and NPC ships are excluded â€”
 /// the navigation chart is a strategic overview, not a tactical display.
+/// Reconcile ClientSimState entity snapshots into the nav radar widget.
+/// All loop logic lives in [ridge_sim_to_radar].
 fn bridge_client_sim_to_nav_radar(
     mut commands: Commands,
     sim: Res<ClientSimState>,
     ship_view: Res<ShipView>,
-    mut radar: ResMut<NavRadarEntities>,
+    mut q: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
 ) {
-    // ── Player ship ───────────────────────────────────────────────────
-    let ship_yaw = ship_view.ship_yaw;
-    let ship_t = Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z)
-        .with_rotation(Quat::from_rotation_y(ship_yaw));
-    let ship_appearance = RadarAppearance {
-        icon: RadarIcon::Ship,
-        world_size: 6.0,
-        color: Color::srgb(0.95, 0.95, 1.0),
-        region_colour: None,
-        region_shape: None,
+    let Some((widget, _, mut map)) =
+        q.iter_mut().find(|(_, c, _)| **c == ConsoleRadar::Navigation)
+    else {
+        return;
     };
-    let ship_global = GlobalTransform::from(ship_t);
-    match radar.center {
-        Some(e) => {
-            commands.entity(e).insert((
-                RadarCenter { world_x: ship_view.ship_x, world_z: ship_view.ship_z, yaw: ship_yaw },
-                OnRadar(RadarLayer::PlayerShip),
-                ship_appearance,
-                ship_t,
-                ship_global,
-            ));
-        }
-        None => {
-            let e = commands
-                .spawn((
-                    RadarCenter {
-                        world_x: ship_view.ship_x,
-                        world_z: ship_view.ship_z,
-                        yaw: ship_yaw,
-                    },
-                    OnRadar(RadarLayer::PlayerShip),
-                    ship_appearance,
-                    ship_t,
-                    GlobalTransform::from(ship_t),
-                ))
-                .id();
-            radar.center = Some(e);
-        }
-    }
-
-    // ── World entities ────────────────────────────────────────────────
-    let mut seen = std::collections::HashSet::new();
-    for snapshot in &sim.world.entities {
-        let uuid = &snapshot.uuid;
-        if !seen.insert(uuid.clone()) {
-            continue;
-        }
-
-        let layer = match tags_to_radar_layer(&snapshot.tags) {
-            Some(
-                l @ (RadarLayer::AsteroidField
-                    | RadarLayer::Station
-                    | RadarLayer::Planet
-                    | RadarLayer::PlayerShip
-                    | RadarLayer::Star
-                    | RadarLayer::Region),
-            ) => l,
-            _ => continue,
-        };
-
-        let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
-        let entity_yaw = snapshot.yaw.unwrap_or(0.0);
-
-        let appearance = if layer == RadarLayer::AsteroidField || layer == RadarLayer::Region {
-            let region_colour = colour.unwrap_or(default_layer_colour(layer));
-            let region_shape = region_shape_from_snapshot(snapshot);
-            let world_size = snapshot
-                .radar_world_size
-                .or(Some(snapshot.radius_or_zero()))
-                .filter(|s| *s > 0.0)
-                .unwrap_or(4.0);
-            RadarAppearance {
-                icon: layer_to_icon(layer),
-                world_size,
-                color: region_colour,
-                region_colour: Some(region_colour),
-                region_shape,
-            }
-        } else {
-            let world_size = snapshot
-                .radar_world_size
-                .or(Some(snapshot.radius_or_zero()))
-                .filter(|s| *s > 0.0)
-                .unwrap_or(4.0);
-            RadarAppearance {
-                icon: layer_to_icon(layer),
-                world_size,
-                color: colour.unwrap_or(default_layer_colour(layer)),
-                region_colour: None,
-                region_shape: None,
-            }
-        };
-
-        let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
-            .with_rotation(Quat::from_rotation_y(entity_yaw));
-        if let Some(existing) = radar.blips.get(uuid) {
-            commands.entity(*existing).insert((
-                OnRadar(layer),
-                appearance,
-                t,
-                GlobalTransform::from(t),
-            ));
-        } else {
-            let blip = commands
-                .spawn((
-                    OnRadar(layer),
-                    appearance,
-                    t,
-                    GlobalTransform::from(t),
-                ))
-                .id();
-            radar.blips.insert(uuid.clone(), blip);
-        }
-    }
-
-    // Despawn blips for entities no longer in world data.
-    radar.blips.retain(|uuid, &mut entity| {
-        if seen.contains(uuid) {
-            return true;
-        }
-        commands.entity(entity).despawn();
-        false
-    });
+    bridge_sim_to_radar(
+        &mut commands,
+        widget,
+        &mut map,
+        RadarCenterPose {
+            x: ship_view.ship_x,
+            z: ship_view.ship_z,
+            yaw: ship_view.ship_yaw,
+        },
+        &sim.world.entities,
+    );
 }
 
-// ── Tests ────────────────────────────────────────────────────────────
+// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[cfg(test)]
 mod tests {
@@ -599,7 +483,7 @@ mod tests {
         ActiveConsole(Some(c))
     }
 
-    // ── navigation_panel_visible ──────────────────────────────────────
+    // â”€â”€ navigation_panel_visible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn navigation_panel_hidden_in_lobby_phase() {
@@ -659,7 +543,7 @@ mod tests {
         assert!(!navigation_panel_visible(&lobby, "tok", &active));
     }
 
-    // ── impulse_status_label ──────────────────────────────────────────
+    // â”€â”€ impulse_status_label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn impulse_status_idle_when_zero_charge() {
@@ -684,7 +568,7 @@ mod tests {
         assert_eq!(impulse_status_label(-0.1), "Idle");
     }
 
-    // ── StateVisuals: five widget states ─────────────────────────────
+    // â”€â”€ StateVisuals: five widget states â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn cancel_impulse_visuals_has_distinct_five_states() {
@@ -725,7 +609,7 @@ mod tests {
         assert_ne!(idle, active);
     }
 
-    // ── ClientMessage variants (compile-time correctness checks) ─────
+    // â”€â”€ ClientMessage variants (compile-time correctness checks) â”€â”€â”€â”€â”€
 
     #[test]
     fn cancel_impulse_message_variant_exists() {

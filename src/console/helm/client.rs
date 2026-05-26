@@ -1,21 +1,19 @@
-//! Client-side Helm Panel plugin — migrated to `src/gui/` library widgets.
+﻿//! Client-side Helm Panel plugin â€” migrated to `src/gui/` library widgets.
 //!
 //! Owns all helm console UI: joystick (`GenericJoystick`), radar (`GenericRadar`),
 //! buttons (`GuiButton`), readouts (`TextReadout`), panel visibility, and 10 Hz
 //! input resend. No per-button marker-component query systems remain.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use crate::client::console_shell::ConsoleShell;
 use crate::client_app::{HelmPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    default_layer_colour, layer_to_icon, region_shape_from_snapshot, spawn_gui_button,
-    tags_to_radar_layer, ButtonPressed, ButtonSize, GenericJoystick, GenericRadar,
-    GenericRadarWidget, HelmRadarWidget, JoystickMoved, OnRadar, OrientationMode, RadarAppearance,
-    RadarCenter, RadarClipMode, RadarFilter, RadarIcon, RadarLayer, ReadoutValue, StateVisuals,
+    spawn_gui_button, bridge_sim_to_radar, ButtonPressed, ButtonSize, ConsoleRadar,
+    GenericJoystick, GenericRadar, JoystickMoved, OrientationMode,
+    RadarBlipMap, RadarCenterPose, RadarClipMode, RadarFilter, ReadoutValue, StateVisuals,
     TextReadout, Visual,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
@@ -28,7 +26,7 @@ use crate::gui::{
     reset_joystick_drag, JoystickDragState, JoystickResendTimer,
 };
 
-// ── Pure helpers ─────────────────────────────────────────────────────
+// â”€â”€ Pure helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Decide whether the helm panel should be visible.
 pub fn helm_panel_visible(lobby: &LobbyState, token: &str, active: &ActiveConsole) -> bool {
@@ -47,7 +45,7 @@ pub fn helm_panel_visible(lobby: &LobbyState, token: &str, active: &ActiveConsol
     }
 }
 
-// ── Resources ────────────────────────────────────────────────────────
+// â”€â”€ Resources â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// 10 Hz resend timer for the helm joystick.
 ///
@@ -57,14 +55,7 @@ pub fn helm_panel_visible(lobby: &LobbyState, token: &str, active: &ActiveConsol
 #[derive(Resource)]
 pub struct HelmTickTimer(pub Timer);
 
-/// Persistent entity IDs for helm-specific radar components.
-#[derive(Resource, Default)]
-struct HelmRadarEntities {
-    center: Option<Entity>,
-    blips: HashMap<String, Entity>,
-}
-
-// ── Readout kind discriminator ───────────────────────────────────────
+// â”€â”€ Readout kind discriminator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Distinguishes which helm readout a `TextReadout` root belongs to.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -75,7 +66,7 @@ enum HelmReadoutKind {
     Z,
 }
 
-// ── Constants ────────────────────────────────────────────────────────
+// â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Diameter of the joystick pad in logical pixels.
 pub const HELM_PAD_SIZE: f32 = 200.0;
@@ -87,13 +78,13 @@ pub const HELM_PAD_SIZE: f32 = 200.0;
 pub const HELM_RADAR_RANGE_FALLBACK: f32 = 250.0;
 
 /// Convert ship yaw (radians, CCW from +Z) to a 3-digit heading string
-/// (degrees, 0–360, 0 = ship-forward = "north" on the compass).
+/// (degrees, 0â€“360, 0 = ship-forward = "north" on the compass).
 pub fn yaw_to_heading(yaw_rad: f32) -> String {
     let heading = ((-yaw_rad).to_degrees()).rem_euclid(360.0);
-    format!("{:03}°", heading.round() as u32)
+    format!("{:03}Â°", heading.round() as u32)
 }
 
-// ── Impulse UI markers ───────────────────────────────────────────────
+// â”€â”€ Impulse UI markers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Marks the joystick pad so we can hide it while the impulse drive is
 /// charging or active (autopilot mode).
@@ -130,7 +121,7 @@ struct HelmImpulseProgressFill;
 #[derive(Component)]
 struct HelmImpulseStatusText;
 
-// ── Plugin ───────────────────────────────────────────────────────────
+// â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 pub struct HelmPanelPlugin;
 
@@ -140,7 +131,6 @@ impl Plugin for HelmPanelPlugin {
             0.1,
             TimerMode::Repeating,
         )))
-        .init_resource::<HelmRadarEntities>()
         .add_systems(
             Update,
             (
@@ -148,15 +138,14 @@ impl Plugin for HelmPanelPlugin {
                 respawn_helm_on_orientation_change,
                 toggle_helm_panel_visibility,
                 update_helm_readouts,
-                sync_helm_radar_range,
-                bridge_client_sim_to_radar_entities,
+                bridge_helm_radar,
                 refresh_helm_impulse_state,
             ),
         );
     }
 }
 
-// ── Visibility system ────────────────────────────────────────────────
+// â”€â”€ Visibility system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn toggle_helm_panel_visibility(
     lobby: Res<LobbyState>,
@@ -182,7 +171,7 @@ fn toggle_helm_panel_visibility(
     }
 }
 
-// ── Joystick observer ────────────────────────────────────────────────
+// â”€â”€ Joystick observer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn on_helm_joystick_moved(
     trigger: On<JoystickMoved>,
@@ -190,7 +179,7 @@ fn on_helm_joystick_moved(
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     // Suppress joystick output (including 10 Hz resends) while the impulse
-    // drive is charging or active — the autopilot is steering the ship and
+    // drive is charging or active â€” the autopilot is steering the ship and
     // a stale knob value must not override it, nor snap the ship the
     // instant the drive disengages.
     if !should_send_helm_input(ship_view.impulse_charge_progress) {
@@ -205,7 +194,7 @@ fn on_helm_joystick_moved(
     }));
 }
 
-// ── Button observers ─────────────────────────────────────────────────
+// â”€â”€ Button observers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn on_on_screen_button_pressed(
     _trigger: On<ButtonPressed>,
@@ -230,7 +219,7 @@ fn on_cancel_impulse_pressed(
     outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
 }
 
-// ── Impulse overlay state ────────────────────────────────────────────
+// â”€â”€ Impulse overlay state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Each frame: derive joystick / cancel-overlay visibility, progress-bar
 /// fill, status text, and joystick-resend gating from
@@ -239,7 +228,7 @@ fn on_cancel_impulse_pressed(
 /// Compare-then-write on `Visibility` and `Node.width` to avoid change-
 /// detection churn each frame.
 ///
-/// On the rising edge (Idle → Charging/Active) we also reset the pad's
+/// On the rising edge (Idle â†’ Charging/Active) we also reset the pad's
 /// `JoystickDragState` so stale `last_dx`/`last_dy` can't be resent (the
 /// `paused` gate plugs the periodic resend, and `reset_joystick_drag`
 /// plugs the value that would have been resent).
@@ -342,10 +331,10 @@ fn refresh_helm_impulse_state(
     *prev_progress = progress;
 }
 
-// ── Readout update system ────────────────────────────────────────────
+// â”€â”€ Readout update system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Each frame: write HDG / SPD / X / Z readout values from `ShipView`.
-/// No `is_changed()` gate — readouts must update every frame so that small
+/// No `is_changed()` gate â€” readouts must update every frame so that small
 /// per-frame velocity / position deltas are reflected on the bezel without
 /// waiting for a coarse change-detection tick.
 fn update_helm_readouts(
@@ -364,195 +353,39 @@ fn update_helm_readouts(
     }
 }
 
-/// Keeps the **helm** `GenericRadarWidget.range` in sync with the
-/// server-provided `LobbyState.ship_config.helm_radar_range`.
-///
-/// The query is intentionally restricted to `With<HelmRadarWidget>` so that
-/// other consoles' radar ranges (sensors = 200 units, navigation = auto-scaled)
-/// are not accidentally overwritten.
-fn sync_helm_radar_range(
-    lobby: Res<LobbyState>,
-    mut radars: Query<&mut GenericRadarWidget, With<HelmRadarWidget>>,
-) {
-    if !lobby.is_changed() {
-        return;
-    }
-    let range = lobby.ship_config.helm_radar_range;
-    if range <= 0.0 {
-        return;
-    }
-    for mut widget in radars.iter_mut() {
-        widget.range = range;
-    }
-}
+// â”€â”€ Radar entity bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// ── Radar entity bridge ─────────────────────────────────────────────
-
-/// Build `OnRadar` / `RadarAppearance` for the `GenericRadar` widget.
-fn bridge_client_sim_to_radar_entities(
+/// Reconcile `ClientSimState.world.entities` into ECS radar blips for the
+/// helm `GenericRadar` widget. All loop logic lives in
+/// [`bridge_sim_to_radar`]; this is the per-console wiring.
+fn bridge_helm_radar(
     mut commands: Commands,
     sim: Res<ClientSimState>,
     ship_view: Res<ShipView>,
-    mut radar: ResMut<HelmRadarEntities>,
+    mut q: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
 ) {
-    // Manage the RadarCenter entity.
-    //
-    // The centre entity doubles as the player-ship blip: we attach
-    // `OnRadar(PlayerShip) + RadarAppearance` and a Transform at the ship's
-    // world position.  Using `PlayerShip` (not `Ship`) lets filters that want
-    // "player ship but not NPC ships" include `PlayerShip` without also showing
-    // every hostile.  In `ShipRelative` orientation it projects to the radar
-    // centre (0, 0).
-    let ship_appearance = RadarAppearance {
-        icon: RadarIcon::Ship,
-        world_size: 6.0,
-        color: Color::srgb(0.95, 0.95, 1.0),
-        region_colour: None,
-        region_shape: None,
+    let Some((widget, _, mut map)) =
+        q.iter_mut().find(|(_, c, _)| **c == ConsoleRadar::Helm)
+    else {
+        return;
     };
-    let ship_yaw = ship_view.ship_yaw;
-    let ship_transform = Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z)
-        .with_rotation(Quat::from_rotation_y(ship_yaw));
-    let ship_global = GlobalTransform::from(ship_transform);
-    let _center_entity = match radar.center {
-        Some(e) => {
-            commands.entity(e).insert((
-                RadarCenter {
-                    world_x: ship_view.ship_x,
-                    world_z: ship_view.ship_z,
-                    yaw: ship_yaw,
-                },
-                OnRadar(RadarLayer::PlayerShip),
-                ship_appearance,
-                ship_transform,
-                ship_global,
-            ));
-            e
-        }
-        None => {
-            let e = commands
-                .spawn((
-                    RadarCenter {
-                        world_x: ship_view.ship_x,
-                        world_z: ship_view.ship_z,
-                        yaw: ship_yaw,
-                    },
-                    OnRadar(RadarLayer::PlayerShip),
-                    ship_appearance,
-                    ship_transform,
-                    ship_global,
-                ))
-                .id();
-            radar.center = Some(e);
-            e
-        }
-    };
-
-    // De-duplicate: keep track of which UUIDs we see this frame
-    let mut seen = std::collections::HashSet::new();
-
-    for snapshot in &sim.world.entities {
-        let uuid = &snapshot.uuid;
-        if !seen.insert(uuid.clone()) {
-            continue;
-        }
-
-        let Some(layer) = tags_to_radar_layer(&snapshot.tags) else {
-            continue;
-        };
-
-        let entity_yaw = snapshot.yaw.unwrap_or(0.0);
-        let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
-
-        if layer == RadarLayer::Region || layer == RadarLayer::AsteroidField {
-            // ── Region / field entity: render as shape ────────────────────────
-            let region_colour = colour.unwrap_or(default_layer_colour(layer));
-            let region_shape = region_shape_from_snapshot(snapshot);
-            let world_size = snapshot
-                .radar_world_size
-                .or(Some(snapshot.radius_or_zero()))
-                .filter(|s| *s > 0.0)
-                .unwrap_or(4.0);
-            let appearance = RadarAppearance {
-                icon: layer_to_icon(layer),
-                world_size,
-                color: region_colour,
-                region_colour: Some(region_colour),
-                region_shape,
-            };
-            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
-                .with_rotation(Quat::from_rotation_y(entity_yaw));
-            if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((
-                    OnRadar(layer),
-                    appearance,
-                    t,
-                    GlobalTransform::from(t),
-                ));
-            } else {
-                let blip = commands
-                    .spawn((
-                        OnRadar(layer),
-                        appearance,
-                        t,
-                        GlobalTransform::from(t),
-                    ))
-                    .id();
-                radar.blips.insert(uuid.clone(), blip);
-            }
-        } else {
-            // ── Point entity: render as icon ──────────────────────────────────
-            let default_color = default_layer_colour(layer);
-            let icon = layer_to_icon(layer);
-            let world_size = snapshot
-                .radar_world_size
-                .or(Some(snapshot.radius_or_zero()))
-                .filter(|s| *s > 0.0)
-                .unwrap_or(4.0);
-            let appearance = RadarAppearance {
-                icon,
-                world_size,
-                color: colour.unwrap_or(default_color),
-                region_colour: None,
-                region_shape: None,
-            };
-            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
-                .with_rotation(Quat::from_rotation_y(entity_yaw));
-            if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((
-                    OnRadar(layer),
-                    appearance,
-                    t,
-                    GlobalTransform::from(t),
-                ));
-            } else {
-                let blip = commands
-                    .spawn((
-                        OnRadar(layer),
-                        appearance,
-                        t,
-                        GlobalTransform::from(t),
-                    ))
-                    .id();
-                radar.blips.insert(uuid.clone(), blip);
-            }
-        }
-    }
-
-    // Despawn blips that are no longer in the sim state
-    radar.blips.retain(|uuid, entity| {
-        if seen.contains(uuid) {
-            true
-        } else {
-            commands.entity(*entity).despawn();
-            false
-        }
-    });
+    bridge_sim_to_radar(
+        &mut commands,
+        widget,
+        &mut map,
+        RadarCenterPose {
+            x: ship_view.ship_x,
+            z: ship_view.ship_z,
+            yaw: ship_view.ship_yaw,
+        },
+        &sim.world.entities,
+    );
 }
 
 
 
-// ── Phone helm UI spawn ──────────────────────────────────────────────
+
+// â”€â”€ Phone helm UI spawn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Marker resource set once the phone helm UI has been spawned.
 #[derive(Resource)]
@@ -600,7 +433,7 @@ fn spawn_phone_helm_ui(
     commands.entity(shell.root).insert(HelmPanel);
 }
 
-// ── Fill helpers ─────────────────────────────────────────────────────
+// â”€â”€ Fill helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn fill_helm_radar(
     commands: &mut Commands,
@@ -617,7 +450,7 @@ fn fill_helm_radar(
         ..default()
     };
 
-    // ── Column wrapper to stack radar + buttons vertically ──
+    // â”€â”€ Column wrapper to stack radar + buttons vertically â”€â”€
     let col = commands
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -631,23 +464,14 @@ fn fill_helm_radar(
         .id();
     commands.entity(container).add_child(col);
 
-    // ── Radar ──
+    // â”€â”€ Radar â”€â”€
     //
-    // Filter includes PlayerShip (the local ship, added by the bridge as
-    // RadarLayer::PlayerShip) and AsteroidField (field regions, now a
-    // distinct layer from individual Asteroid blips).
-    let radar_filter = RadarFilter(std::collections::HashSet::from([
-        RadarLayer::PlayerShip,
-        RadarLayer::Ship,
-        RadarLayer::Asteroid,
-        RadarLayer::Station,
-        RadarLayer::Missile,
-        RadarLayer::Planet,
-        RadarLayer::Star,
-    ]));
-    // Layering (back → front, per user direction):
-    //   1. radar-surround.png  (outer frame / tick marks) — passed as `bg_image`
-    //   2. radar-bg.png        (inner dial face)          — passed as `overlay_image`
+    // Spawn with an empty filter â€” sync_helm_radar_range will populate it
+    // from lobby.ship_config.helm_radar_shows once the Welcome arrives.
+    let radar_filter = RadarFilter(std::collections::HashSet::new());
+    // Layering (back â†’ front, per user direction):
+    //   1. radar-surround.png  (outer frame / tick marks) â€” passed as `bg_image`
+    //   2. radar-bg.png        (inner dial face)          â€” passed as `overlay_image`
     //   3. blips rendered as child UI nodes (icons) over both.
     //
     // The arg names on `GenericRadar::spawn` describe Z-order (bg = behind,
@@ -664,13 +488,13 @@ fn fill_helm_radar(
         560.0 / 640.0, // overlay_fraction: radar-bg (560px) centred within surround (640px)
         270.0 / 280.0, // face_fraction: measured circle radius (270px) / bg half (280px)
     );
-    // HelmRadarWidget marks this widget so sync_helm_radar_range only
-    // updates it, not other consoles' radar widgets.
-    commands.entity(radar).insert(HelmRadarWidget);
+    // Tag the widget with its console identity and attach a RadarBlipMap
+    // so `bridge_helm_radar` can find it and reconcile blips into it.
+    commands.entity(radar).insert((ConsoleRadar::Helm, RadarBlipMap::default()));
     // Override the default Val::Percent(100.0)-width sizing from
     // GenericRadar::spawn so the radar squares-fit the parent slot:
-    //   landscape → constrain by height (parent is wider than tall)
-    //   portrait  → constrain by width  (parent is taller than wide)
+    //   landscape â†’ constrain by height (parent is wider than tall)
+    //   portrait  â†’ constrain by width  (parent is taller than wide)
     // aspect_ratio: 1.0 derives the other axis from the constrained one.
     commands.entity(radar).insert(Node {
         width: if is_landscape {
@@ -741,7 +565,7 @@ fn fill_helm_radar(
     ));
     commands.entity(radar).add_child(z_read);
 
-    // ── Buttons row ──
+    // â”€â”€ Buttons row â”€â”€
     let buttons_row = commands
         .spawn(Node {
             flex_direction: FlexDirection::Row,
@@ -848,7 +672,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
         ..default()
     };
 
-    // ── Column wrapper to stack joystick elements vertically ──
+    // â”€â”€ Column wrapper to stack joystick elements vertically â”€â”€
     let col = commands
         .spawn((
             HelmJoystickPad,
@@ -865,7 +689,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
 
     // Directional indicators
     let fwd = commands
-        .spawn((Text::new("▲"), mono(16.0), TextColor(dim), Node::default()))
+        .spawn((Text::new("â–²"), mono(16.0), TextColor(dim), Node::default()))
         .id();
     commands.entity(col).add_child(fwd);
 
@@ -881,7 +705,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
 
     // Left directional chevron
     let left_arrow = commands
-        .spawn((Text::new("◄"), mono(14.0), TextColor(dim), Node::default()))
+        .spawn((Text::new("â—„"), mono(14.0), TextColor(dim), Node::default()))
         .id();
     commands.entity(joystick_center_row).add_child(left_arrow);
 
@@ -921,12 +745,12 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
 
     // Right directional chevron
     let right_arrow = commands
-        .spawn((Text::new("►"), mono(14.0), TextColor(dim), Node::default()))
+        .spawn((Text::new("â–º"), mono(14.0), TextColor(dim), Node::default()))
         .id();
     commands.entity(joystick_center_row).add_child(right_arrow);
 
     let aft = commands
-        .spawn((Text::new("▼"), mono(16.0), TextColor(dim), Node::default()))
+        .spawn((Text::new("â–¼"), mono(16.0), TextColor(dim), Node::default()))
         .id();
     commands.entity(col).add_child(aft);
 
@@ -962,7 +786,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
     });
     commands.entity(col).add_child(port_stbd_row);
 
-    // ── Impulse overlay: visible only while the impulse drive is charging
+    // â”€â”€ Impulse overlay: visible only while the impulse drive is charging
     // or active. Sits as a sibling of `col` (the joystick column) inside
     // `container`; visibility is toggled mutually-exclusively in
     // `refresh_helm_impulse_visibility`.
@@ -1068,7 +892,7 @@ fn fill_helm_joystick(commands: &mut Commands, container: Entity, assets: &Phone
     commands.entity(overlay).add_child(status);
 }
 
-// ── Orientation respawn ──────────────────────────────────────────────
+// â”€â”€ Orientation respawn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// When `DeviceOrientation` changes, despawn the current `HelmPanel` and
 /// remove the `PhoneHelmSpawned` resource so `spawn_phone_helm_ui` respawns
@@ -1077,7 +901,6 @@ fn respawn_helm_on_orientation_change(
     orientation: Res<DeviceOrientation>,
     panel: Query<Entity, With<HelmPanel>>,
     mut commands: Commands,
-    mut radar: ResMut<HelmRadarEntities>,
 ) {
     if !orientation.is_changed() {
         return;
@@ -1091,21 +914,16 @@ fn respawn_helm_on_orientation_change(
         return;
     }
     // Despawn the panel root entirely (along with all children) so the next
-    // `spawn_phone_helm_ui` produces exactly one `HelmPanel`, not two.
+    // `spawn_phone_helm_ui` produces exactly one `HelmPanel`, not two. The
+    // widget's `RadarBlipMap` and its blip child entities are also destroyed
+    // because they descend from the panel root.
     for entity in panel.iter() {
-        commands.entity(entity).despawn();
-    }
-    // Clear stale entity IDs so bridge systems don't command dead entities.
-    if let Some(center) = radar.center.take() {
-        commands.entity(center).despawn();
-    }
-    for (_, entity) in radar.blips.drain() {
         commands.entity(entity).despawn();
     }
     commands.remove_resource::<PhoneHelmSpawned>();
 }
 
-// ── Tests ────────────────────────────────────────────────────────────
+// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[cfg(test)]
 mod tests {
@@ -1116,7 +934,7 @@ mod tests {
     use std::collections::HashMap;
     use std::f32::consts::{FRAC_PI_4, TAU};
 
-    // ── helm_panel_visible ────────────────────────────────────────────
+    // â”€â”€ helm_panel_visible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     fn player(token: &str, consoles: Vec<Console>) -> Player {
         Player {
@@ -1218,38 +1036,38 @@ mod tests {
         assert!(!helm_panel_visible(&lobby, "tok", &active));
     }
 
-    // ── yaw_to_heading ─────────────────────────────────────────────
+    // â”€â”€ yaw_to_heading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn yaw_zero_is_heading_000() {
-        assert_eq!(yaw_to_heading(0.0), "000°");
+        assert_eq!(yaw_to_heading(0.0), "000Â°");
     }
 
     #[test]
     fn yaw_negative_quarter_turn_is_heading_045() {
-        assert_eq!(yaw_to_heading(-FRAC_PI_4), "045°");
+        assert_eq!(yaw_to_heading(-FRAC_PI_4), "045Â°");
     }
 
     #[test]
     fn yaw_pi_is_heading_180() {
-        assert_eq!(yaw_to_heading(std::f32::consts::PI), "180°");
+        assert_eq!(yaw_to_heading(std::f32::consts::PI), "180Â°");
     }
 
     #[test]
     fn yaw_negative_yaw_wraps_correctly() {
         let h = yaw_to_heading(-0.5);
-        assert_eq!(h, "029°");
+        assert_eq!(h, "029Â°");
     }
 
     #[test]
     fn yaw_2pi_wraps_to_000() {
-        assert_eq!(yaw_to_heading(TAU), "000°");
+        assert_eq!(yaw_to_heading(TAU), "000Â°");
     }
 
     #[test]
     fn yaw_negative_angle_always_positive_heading() {
         let h = yaw_to_heading(-TAU);
-        assert_eq!(h, "000°");
+        assert_eq!(h, "000Â°");
         let h2 = yaw_to_heading(-0.1);
         assert!(!h2.starts_with('-'));
     }

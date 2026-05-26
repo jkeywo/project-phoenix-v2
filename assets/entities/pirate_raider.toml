@@ -39,6 +39,7 @@ auto_arc_deg = 180.0
 [radar_appearance]
 colour = [1.0, 0.2, 0.2]
 radius = 4.0
+icon = "ship"
 
 [mesh]
 shape = "cuboid"
@@ -68,7 +69,7 @@ name = "patrol"
 kind = "patrolling"
 waypoints = ["patrol_alpha", "patrol_beta", "patrol_gamma"]
 loop_path = true
-target_speed = 0.5
+target_speed = 0.4
 
 [[behaviour.state]]
 name = "pursue"

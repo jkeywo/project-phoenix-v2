@@ -12,6 +12,7 @@ length = 7.0
 [radar_appearance]
 colour = [0.8, 0.3, 0.1]
 radius = 7.0
+icon = "ship"
 
 [mesh]
 shape = "cuboid"

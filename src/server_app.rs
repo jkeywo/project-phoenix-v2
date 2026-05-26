@@ -691,6 +691,30 @@ fn broadcast_world_setup_on_start(
 
 /// Reconciles the live ECS entities with the `TrackedEntities` registry each tick.
 ///
+/// Derive the `radar_icon` string for a snapshot from the entity's tags.
+///
+/// This is the authoritative server-side mapping used when building snapshots
+/// in `reconcile_runtime_entities`. Clients read the resulting string directly
+/// from `EntitySnapshot.radar_icon` rather than re-deriving it from tags.
+fn radar_icon_from_tags(tags: &[String]) -> String {
+    let has = |t: &str| tags.iter().any(|s| s == t);
+    if has("player") || has("ship") || has("pirate") {
+        "ship".into()
+    } else if has("asteroid_field") || has("asteroid") {
+        "asteroid".into()
+    } else if has("station") {
+        "station".into()
+    } else if has("missile") || has("torpedo") {
+        "torpedo".into()
+    } else if has("planet") {
+        "planet".into()
+    } else if has("star") {
+        "star".into()
+    } else {
+        "ship".into() // defensive fallback
+    }
+}
+
 /// For non-asteroid entities carrying `EntityUuid`:
 /// - New entities (present in ECS, absent from `reported`) emit `EntitySpawned`
 ///   and are added to `WorldResource.entities` so they appear on reconnect `Welcome`.
@@ -791,6 +815,10 @@ fn reconcile_runtime_entities(
                         snapshot.inner_radius = Some(field.0.inner_radius);
                     }
                 }
+                snapshot.radar_icon = Some(
+                    radar_appearance.and_then(|r| r.0.icon.clone())
+                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags))
+                );
                 world.0.entities.push(snapshot);
             }
         }
@@ -850,6 +878,10 @@ fn reconcile_runtime_entities(
                         snapshot.inner_radius = Some(field.0.inner_radius);
                     }
                 }
+                snapshot.radar_icon = Some(
+                    radar_appearance.and_then(|r| r.0.icon.clone())
+                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags))
+                );
                 world.0.entities.push(snapshot.clone());
                 outbox
                     .0

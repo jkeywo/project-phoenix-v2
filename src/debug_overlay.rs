@@ -25,6 +25,10 @@ pub struct DebugDamageEnabled(pub bool);
 #[derive(Resource, Default)]
 pub struct DebugEntitiesEnabled(pub bool);
 
+/// Resource indicating whether the entity inspector overlay (F6) is enabled.
+#[derive(Resource, Default)]
+pub struct DebugEntityInspectorEnabled(pub bool);
+
 /// Maximum number of damage log entries retained.
 pub const DAMAGE_LOG_CAPACITY: usize = 10;
 
@@ -94,6 +98,7 @@ impl Plugin for DebugOverlayPlugin {
         app.init_resource::<DebugDamageEnabled>();
         app.init_resource::<DamageLog>();
         app.init_resource::<DebugEntitiesEnabled>();
+        app.init_resource::<DebugEntityInspectorEnabled>();
         app.add_systems(
             Update,
             draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),
@@ -109,6 +114,10 @@ impl Plugin for DebugOverlayPlugin {
         app.add_systems(
             PostUpdate,
             write_entity_debug_state.run_if(|r: Res<DebugEntitiesEnabled>| r.0),
+        );
+        app.add_systems(
+            PostUpdate,
+            update_entity_inspector.run_if(|r: Res<DebugEntityInspectorEnabled>| r.0),
         );
     }
 }
@@ -180,6 +189,166 @@ fn write_entity_debug_state(
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
     )>,
+) {}
+
+/// Reads all non-asteroid entities plus the player ship resources and writes a
+/// formatted entity inspector block to the WASM thread-local for F6.
+///
+/// Displays: name, tags, position, distance from player, faction name, hull HP,
+/// shield arcs (player ship only), comms hailability, and AI state.
+///
+/// Only runs when `DebugEntityInspectorEnabled` is true.
+#[cfg(all(target_arch = "wasm32", feature = "server"))]
+fn update_entity_inspector(
+    entities: Query<(
+        &Transform,
+        &crate::entities::spawner::EntityName,
+        Option<&crate::entities::spawner::EntityConsoleHull>,
+        Option<&crate::entities::spawner::FactionComponent>,
+        Option<&crate::comms::component::CommsRange>,
+        Option<&crate::ai::server::AiControllerComponent>,
+        &crate::entities::spawner::EntityTagsSection,
+    ), bevy::ecs::query::Without<crate::server_app::Asteroid>>,
+    ship_state: Res<crate::ship::state::ShipState>,
+    ship_hull: Res<crate::server_app::ShipHullIntegrity>,
+    ship_shields: Res<crate::server_app::ShipShields>,
+    faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
+) {
+    let player_x = ship_state.x;
+    let player_z = ship_state.z;
+
+    let mut out = String::from("ENTITY INSPECTOR\n");
+    out.push_str("────────────────────────────────────────────────────────────\n");
+
+    // ── Player ship ────────────────────────────────────────────────────────
+    out.push_str(&format!(
+        "[Player Ship]  pos=({:>8.1}, {:>8.1})\n",
+        player_x, player_z
+    ));
+
+    // Per-console hull
+    let hull_entries = ship_hull.0.entries();
+    if hull_entries.is_empty() {
+        out.push_str("  hull: n/a\n");
+    } else {
+        out.push_str("  hull:");
+        for (console, cur, max) in hull_entries {
+            out.push_str(&format!("  {:?} {}/{}", console, *cur as i32, *max as i32));
+        }
+        out.push('\n');
+    }
+
+    // Per-arc shields
+    let facings = &ship_shields.0.facings;
+    if facings.is_empty() {
+        out.push_str("  shields: n/a\n");
+    } else {
+        out.push_str("  shields:");
+        for f in facings {
+            let pct = if f.max_hp > 0 {
+                (f.hp as f32 / f.max_hp as f32 * 100.0) as i32
+            } else {
+                0
+            };
+            let status = if f.offline_remaining > 0.0 { " [OFFLINE]" } else { "" };
+            let focus = if f.is_focused { "*" } else { "" };
+            out.push_str(&format!(
+                "  {}{} {}/{} ({}%){}", focus, f.label, f.hp, f.max_hp, pct, status
+            ));
+        }
+        out.push('\n');
+    }
+
+    out.push_str("────────────────────────────────────────────────────────────\n");
+
+    // ── World entities ─────────────────────────────────────────────────────
+    let mut sorted: Vec<_> = entities.iter().collect();
+    // Sort by distance from player for readability
+    sorted.sort_by(|a, b| {
+        let da = {
+            let p = a.0.translation;
+            let dx = p.x - player_x;
+            let dz = p.z - player_z;
+            dx * dx + dz * dz
+        };
+        let db = {
+            let p = b.0.translation;
+            let dx = p.x - player_x;
+            let dz = p.z - player_z;
+            dx * dx + dz * dz
+        };
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    for (i, (transform, name, hull, faction_comp, comms_range, ai, tags)) in sorted.iter().enumerate() {
+        let p = transform.translation;
+        let dx = p.x - player_x;
+        let dz = p.z - player_z;
+        let dist = (dx * dx + dz * dz).sqrt();
+
+        let tag_list = tags.0.join(", ");
+        out.push_str(&format!(
+            "{:>2}. {}  [{}]\n",
+            i + 1, name.0, tag_list
+        ));
+        out.push_str(&format!(
+            "    pos=({:>8.1}, {:>8.1})  dist={:>7.1}u\n",
+            p.x, p.z, dist
+        ));
+
+        // Faction
+        if let Some(fc) = faction_comp {
+            let faction_name = faction_registry.0
+                .get(&fc.0)
+                .map(|f| f.name.as_str())
+                .unwrap_or("<unknown>");
+            out.push_str(&format!("    faction: {}\n", faction_name));
+        }
+
+        // Hull
+        if let Some(h) = hull {
+            let cur = h.0.total_current();
+            let max = h.0.total_max();
+            let pct = if max > 0.0 { (cur / max * 100.0) as i32 } else { 0 };
+            out.push_str(&format!("    hull: {}/{} ({}%)\n", cur as i32, max as i32, pct));
+        }
+
+        // Comms
+        if let Some(range) = comms_range {
+            let in_range = dist <= range.0;
+            if in_range {
+                out.push_str("    comms: hailable (in range)\n");
+            } else {
+                out.push_str(&format!("    comms: hailable (range {:.0}u)\n", range.0));
+            }
+        }
+
+        // AI state
+        if let Some(ai_ctrl) = ai {
+            out.push_str(&format!("    ai: {}\n", ai_ctrl.controller.current_state_name));
+        }
+    }
+
+    out.push_str("────────────────────────────────────────────────────────────\n");
+    crate::bridge::set_entity_inspector_string(out);
+}
+
+/// Native / test stub — does nothing.
+#[cfg(not(all(target_arch = "wasm32", feature = "server")))]
+fn update_entity_inspector(
+    _entities: Query<(
+        &Transform,
+        &crate::entities::spawner::EntityName,
+        Option<&crate::entities::spawner::EntityConsoleHull>,
+        Option<&crate::entities::spawner::FactionComponent>,
+        Option<&crate::comms::component::CommsRange>,
+        Option<&crate::ai::server::AiControllerComponent>,
+        &crate::entities::spawner::EntityTagsSection,
+    ), bevy::ecs::query::Without<crate::server_app::Asteroid>>,
+    _ship_state: Res<crate::ship::state::ShipState>,
+    _ship_hull: Res<crate::server_app::ShipHullIntegrity>,
+    _ship_shields: Res<crate::server_app::ShipShields>,
+    _faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
 ) {}
 
 /// Draws wireframe outlines for every region entity with a shape component.

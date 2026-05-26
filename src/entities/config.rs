@@ -171,6 +171,12 @@ pub struct RadarAppearanceConfig {
     /// radar visibility for tiny or oversized objects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_size: Option<f32>,
+    /// Radar icon to use for this entity's blip. One of `"ship"`,
+    /// `"asteroid"`, `"station"`, `"planet"`, `"star"`, `"torpedo"`.
+    /// When absent the server falls back to deriving the icon from the
+    /// entity's tags.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -382,6 +388,10 @@ pub struct WeaponsConsoleConfig {
     /// explicit per-bank loadout.
     #[serde(default)]
     pub phaser_banks: Vec<PhaserBankConfig>,
+    /// Structured radar configuration for the Tactical console radar widget.
+    /// When present, overrides the legacy flat `radar_range` field.
+    #[serde(default)]
+    pub radar: Option<crate::radar_config::RadarConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

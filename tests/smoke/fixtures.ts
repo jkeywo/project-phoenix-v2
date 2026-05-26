@@ -164,7 +164,7 @@ export async function createTestClient(
 // otherwise fail the out-of-range validation check in Rust).
 function patchMaxPlayers(toml: string, maxPlayers: number): string {
   let patched = toml.replace(/^max_players\s*=\s*\d+/m, `max_players = ${maxPlayers}`);
-  const pattern = new RegExp(`\n\\[\\[stations\\.${maxPlayers + 1}\\]\\][\\s\\S]*$`);
+  const pattern = new RegExp(`\r?\n\\[\\[stations\\.${maxPlayers + 1}\\]\\][\\s\\S]*$`);
   return patched.replace(pattern, '');
 }
 

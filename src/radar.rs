@@ -674,6 +674,7 @@ mod tests {
             warp_out_remaining_secs: None,
             radar_world_size: None,
             half_extents: None,
+            radar_icon: None,
         }
     }
 
@@ -924,6 +925,7 @@ mod tests {
             warp_out_remaining_secs: None,
             radar_world_size: None,
             half_extents: None,
+            radar_icon: None,
         }
     }
 

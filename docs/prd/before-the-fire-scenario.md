@@ -10,7 +10,7 @@ There is also no reference implementation of how the existing systems compose un
 
 Implement the "Before the Fire" scenario drafted in `docs/scenarios/before_the_fire.md` as a playable, default-quality world. The scenario is a 30–60 minute political-thriller-to-crisis-response narrative aboard the A.E.V. Ardent set in the Axiom System 35 years before the era the world bible otherwise depicts. The crew investigates collapsing peace talks, can follow three non-exclusive narrative branches (Diplomat, Scholar, Soldier), and faces a Kobayashi Maru finale with four simultaneously-available responses, none of which prevent the war but each with distinct consequences.
 
-The content is shipped as a primary world TOML plus four sub-world TOMLs (one per narrative branch, one for the finale), the supporting entity TOMLs (already largely present in the repo), and any necessary faction tuning. The scenario depends on the engine additions specified in the companion engine PRD; nothing in this PRD requires Rust code beyond those additions, with two narrow exceptions called out under Implementation Decisions.
+The content is shipped as a primary world TOML plus four sub-world TOMLs (one per narrative branch, one for the finale), the supporting entity TOMLs (already largely present in the repo), and any necessary faction tuning. The scenario depends on the engine additions specified in the companion engine PRD (#397); nothing in this PRD requires Rust code beyond those additions, with two narrow exceptions called out under Implementation Decisions.
 
 When this PRD ships, "Before the Fire" appears in the host's scenario selector alongside the existing two worlds, and a 2–6 player crew can complete it without operator intervention.
 
@@ -142,7 +142,7 @@ If a scenario-TOML test fixture exists (or is introduced lightly here), assert t
 
 ## Out of Scope
 
-- Engine work beyond what the companion engine PRD covers, with the two narrow exceptions documented above (synthetic internal sender; possible GameOver text rendering).
+- Engine work beyond what the companion engine PRD (#397) covers, with the two narrow exceptions documented above (synthetic internal sender; possible GameOver text rendering).
 - Save/load support for this scenario (covered by PRD #116; this scenario does not author save points).
 - Console-complexity tuning. The scenario uses default complexity presets. The doc's references to Low Tactical auto-firing torpedoes or Low Engineering lacking battery for containment are aspirational documentation; this PRD ships without re-tuning complexity presets.
 - Localisation of comms text. English-only.
@@ -155,7 +155,7 @@ If a scenario-TOML test fixture exists (or is introduced lightly here), assert t
 
 ## Further Notes
 
-- This PRD depends on the engine additions PRD landing first. Splitting the work this way means scenario authoring is gated behind a small, well-tested engine surface that other future scenarios can also use.
+- This PRD depends on the engine additions PRD (#397) landing first. Splitting the work this way means scenario authoring is gated behind a small, well-tested engine surface that other future scenarios can also use.
 - The scenario doc (`docs/scenarios/before_the_fire.md`) is the canonical source of narrative content. This PRD captures the mechanical and structural decisions; the doc captures the prose, lore, and tone. Authoring proceeds by translating the doc into TOML, not by re-inventing content here.
 - "Before the Fire" is set 35 years before the era the rest of the world bible depicts. It is intended to be the first of multiple historical scenarios. Authoring it well — with full feature coverage and a reusable structure — is partly an investment in subsequent scenarios in this and the contemporary era.
 - The scenario also functions as a torture-test for the engine: every console gets meaningful work, region effects layer, AI behaviours vary, sub-worlds load and unload, the flag system carries cross-scenario state, and the finale exercises the new shield-pierce property in a high-pressure scenario. Bugs in any of these systems will surface here first.

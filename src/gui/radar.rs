@@ -752,12 +752,25 @@ fn sync_radar_blip_nodes(
         // When an overlay entity exists, use its computed size for the radar
         // radius so blip positioning and clipping respect the overlay's actual
         // rendered area rather than the root widget's area.
-        let face_size = overlay
+        //
+        // `ComputedNode::size()` returns **physical** pixels, but child blip
+        // nodes are positioned with `Val::Px(..)` which Bevy treats as
+        // **logical** pixels (multiplied internally by the scale factor at
+        // layout time). On HiDPI / phone displays (scale_factor != 1) these
+        // two spaces differ, so we promote the centre / radius into logical
+        // pixels here by multiplying by `inverse_scale_factor`. All
+        // downstream `BlipIntent.left/top/size_px` values are therefore in
+        // logical pixels and can be fed directly to `Val::Px`.
+        let inv_sf = computed.inverse_scale_factor();
+        let face_size_logical = overlay
             .and_then(|o| overlay_nodes.get(o.0).ok())
-            .map_or_else(|| computed.size(), |cn| cn.size());
-        let center_x_px = computed.size().x * 0.5;
-        let center_y_px = computed.size().y * 0.5;
-        let radar_radius_px = face_size.x.min(face_size.y) * 0.5 * widget.face_fraction;
+            .map_or_else(|| computed.size(), |cn| cn.size())
+            * inv_sf;
+        let computed_size_logical = computed.size() * inv_sf;
+        let center_x_px = computed_size_logical.x * 0.5;
+        let center_y_px = computed_size_logical.y * 0.5;
+        let radar_radius_px =
+            face_size_logical.x.min(face_size_logical.y) * 0.5 * widget.face_fraction;
         if radar_radius_px <= 0.0 {
             continue;
         }
@@ -1661,6 +1674,114 @@ mod tests {
         let (left, top) = blip_local_offset(0.0, 0.0, 150.0, 100.0, 100.0, half);
         assert!((left - (150.0 - half)).abs() < 1e-5, "left={left}");
         assert!((top - (100.0 - half)).abs() < 1e-5, "top={top}");
+    }
+
+    // ── HiDPI / scale-factor regression ──────────────────────────────────────
+    //
+    // `ComputedNode::size()` and `GlobalTransform::translation()` are in
+    // **physical** pixels, but blip nodes are positioned with `Val::Px(..)`
+    // which Bevy treats as **logical** pixels. On HiDPI displays
+    // (`scale_factor != 1`) `sync_radar_blip_nodes` must convert physical
+    // values to logical (multiply by `inverse_scale_factor`) before feeding
+    // them into `blip_local_offset`, otherwise blips render at the wrong
+    // distance from radar centre and `on_tactical_radar_tap` projects
+    // entities into a different space than the pointer.
+
+    #[test]
+    fn blip_local_offset_at_phone_scale_factor_lays_out_in_logical_px() {
+        // Phone: scale_factor = 2, so a 240-logical-px radar widget has
+        // ComputedNode::size() == 480 physical px.
+        let scale_factor: f32 = 2.0;
+        let inv_sf = 1.0 / scale_factor;
+        let physical_size = 480.0_f32;
+
+        // The renderer must convert to logical before computing layout, so
+        // the values flowing into blip_local_offset are 240, 240, 120.
+        let logical_size = physical_size * inv_sf;
+        let centre_logical = logical_size * 0.5;
+        let radius_logical = logical_size * 0.5;
+
+        // Entity projected at right edge of the radar (nx=1, ny=0).
+        let (left, top) = blip_local_offset(
+            1.0,
+            0.0,
+            centre_logical,
+            centre_logical,
+            radius_logical,
+            8.0,
+        );
+
+        // Expected (in logical px, ready for Val::Px):
+        //   left = 120 + 1.0 * 120 - 8 = 232
+        //   top  = 120 - 0.0 * 120 - 8 = 112
+        assert!((left - 232.0).abs() < 1e-5, "left={left}");
+        assert!((top - 112.0).abs() < 1e-5, "top={top}");
+
+        // Cross-check the bug we just fixed: had the renderer fed the raw
+        // physical values straight in (centre=240, radius=240), the right-edge
+        // blip would have ended up at left = 240 + 240 - 8 = 472, which is
+        // far outside the 240-logical-px-wide radar widget → blips drift /
+        // clip / tap math diverges from visual layout on phones.
+        let (bad_left, _) = blip_local_offset(
+            1.0,
+            0.0,
+            physical_size * 0.5,
+            physical_size * 0.5,
+            physical_size * 0.5,
+            8.0,
+        );
+        assert!(bad_left > logical_size, "regression sentinel: bad_left={bad_left} should overflow {logical_size}");
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn radar_tap_math_matches_blip_layout_at_phone_scale_factor() {
+        // Simulates `on_tactical_radar_tap` arithmetic. The tap location
+        // (Pointer<Click>::pointer_location.position) and Val::Px blip
+        // positions are both in logical pixels; ComputedNode::size and
+        // GlobalTransform::translation are in physical and must be converted.
+
+        let scale_factor: f32 = 2.0;
+        let inv_sf = 1.0 / scale_factor;
+
+        // Radar is 240 logical px square, top-left at logical (50, 100), so
+        // physical size = (480, 480), physical centre = (50+120, 100+120) * sf
+        //               = (170, 220) * 2 = (340, 440).
+        let physical_size = bevy::math::Vec2::splat(480.0);
+        let physical_centre = bevy::math::Vec2::new(340.0, 440.0);
+
+        // Observer conversion:
+        let logical_size = physical_size * inv_sf;
+        let logical_centre = physical_centre * inv_sf;
+        let logical_top_left = logical_centre - logical_size * 0.5;
+        assert_eq!(logical_top_left, bevy::math::Vec2::new(50.0, 100.0));
+
+        // A blip projected at (nx=0.5, ny=-0.5) — bottom-right quadrant.
+        // Layout (logical, what Val::Px writes):
+        //   centre = 240/2 = 120
+        //   radius = 120
+        //   left   = 120 + 0.5 * 120 - 8 = 172  (logical, inside the widget)
+        //   top    = 120 - (-0.5) * 120 - 8 = 172
+        // So the blip's centre on screen sits at logical
+        // (top_left + 172 + 8, top_left + 172 + 8) = (230, 280).
+        let (left, top) = blip_local_offset(0.5, -0.5, 120.0, 120.0, 120.0, 8.0);
+        let blip_centre_screen = logical_top_left + bevy::math::Vec2::new(left + 8.0, top + 8.0);
+        assert_eq!(blip_centre_screen, bevy::math::Vec2::new(230.0, 280.0));
+
+        // A tap delivered by Bevy picking at logical (230, 280) — i.e. right
+        // on top of the blip — should map to the same nx, ny when projected
+        // back through the observer's math.
+        let tap_logical = bevy::math::Vec2::new(230.0, 280.0);
+        let local = crate::console::weapons::client::radar_local_pixel(
+            tap_logical,
+            logical_top_left,
+        );
+        // local should land at (180, 180) = (centre + nx*radius, centre - ny*radius)
+        // → nx = (180 - 120) / 120 = 0.5, ny = -(180 - 120) / 120 = -0.5 ✓
+        let nx = (local.x - 120.0) / 120.0;
+        let ny = -(local.y - 120.0) / 120.0;
+        assert!((nx - 0.5).abs() < 1e-5, "nx={nx}");
+        assert!((ny - -0.5).abs() < 1e-5, "ny={ny}");
     }
 
     // ── arc_contains ────────────────────────────────────────────────────────

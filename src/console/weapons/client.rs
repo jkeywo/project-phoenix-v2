@@ -1,4 +1,4 @@
-﻿//! Client-side Weapons Panel plugin â€” migrated to `src/gui/` library widgets.
+//! Client-side Weapons Panel plugin â€” migrated to `src/gui/` library widgets.
 //!
 //! Owns all Tactical console UI: fire phasers button (`GuiButton`), phaser mode
 //! toggle (`GuiButton`), torpedo tube selector (`RadioGroup`), fire torpedo
@@ -353,16 +353,12 @@ fn fill_tactical_radar(
 #[derive(Component)]
 pub struct TacticalRadarTapTarget;
 
-/// Convert a tap (in **logical** window pixels, as delivered by Bevy's picking
-/// `Pointer<Click>::pointer_location.position`) into the radar Node's local
-/// **physical** pixel space, given the node's physical top-left, its physical
-/// size and the window's `scale_factor`.
+/// Convert a tap into the radar Node's local pixel space.
 ///
-/// The renderer (`gui/radar.rs`) lays out blips using `ComputedNode::size()`,
-/// which is in physical pixels. To compare a tap against those blip centres
-/// we must therefore promote the logical tap into the same physical basis.
-///
-/// Returns `(local_x, local_y)` with origin at the node's top-left.
+/// `tap_logical` is `Pointer<Click>::pointer_location.position`, which Bevy's
+/// picking layer delivers in **logical** window pixels. `node_top_left` must
+/// be supplied in the same logical-pixel space. Returns `(local_x, local_y)`
+/// with origin at the node's top-left.
 pub fn radar_local_pixel(tap_logical: Vec2, node_top_left: Vec2) -> Vec2 {
     tap_logical - node_top_left
 }
@@ -370,10 +366,15 @@ pub fn radar_local_pixel(tap_logical: Vec2, node_top_left: Vec2) -> Vec2 {
 /// Observer: when the tactical radar is tapped, find the nearest ship/missile
 /// blip to the tap point and dispatch `SetTarget { uuid }`.
 ///
-/// All spatial values (`pointer_location.position`, `ComputedNode::size()`,
-/// `GlobalTransform::translation()`) are in logical pixels. Blips are laid
-/// out by the renderer in the same logical-pixel space, so the comparison
-/// is direct â€” no scale-factor conversion needed.
+/// Coordinate spaces (this matters on HiDPI / phones where `scale_factor` != 1):
+/// - `pointer_location.position` and `Val::Px(..)` are in **logical** pixels.
+/// - `ComputedNode::size()` and `GlobalTransform::translation()` (for UI) are
+///   in **physical** pixels.
+///
+/// The renderer in `gui/radar.rs` lays out blips via `Val::Px`, so blips live
+/// in logical-pixel space. We therefore convert the radar's physical centre
+/// and size into logical pixels (via `ComputedNode::inverse_scale_factor`)
+/// before projecting entities and matching against the tap.
 fn on_tactical_radar_tap(
     trigger: On<Pointer<Click>>,
     radars: Query<(&ComputedNode, &GlobalTransform, &GenericRadarWidget), With<TacticalRadarTapTarget>>,
@@ -386,14 +387,17 @@ fn on_tactical_radar_tap(
         return;
     };
 
-    // Radar centre + size (logical pixels, UI GlobalTransform is centred).
-    let size = computed.size();
+    // Radar centre + size in **logical** pixels (matches the tap and Val::Px
+    // blip layout). `ComputedNode::size()` and `GlobalTransform::translation()`
+    // are both physical, so multiply by inverse_scale_factor to convert.
+    let inv_sf = computed.inverse_scale_factor();
+    let size = computed.size() * inv_sf;
     let radar_radius = size.x.min(size.y) * 0.5;
     if radar_radius <= 0.0 {
         return;
     }
     let centre = gt.translation();
-    let centre_xy = Vec2::new(centre.x, centre.y);
+    let centre_xy = Vec2::new(centre.x, centre.y) * inv_sf;
     let top_left = centre_xy - size * 0.5;
 
     // Tap point in radar-local pixel space (origin top-left).
@@ -1022,7 +1026,7 @@ fn refresh_torpedo_ui(
 // â”€â”€ Radar entity bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // -- Radar entity bridge ----------------------------------------------
 
-/// Thin per-console wrapper around ridge_sim_to_radar for the Tactical
+/// Thin per-console wrapper around bridge_sim_to_radar for the Tactical
 /// (Weapons) radar widget.
 fn bridge_client_sim_to_weapons_radar(
     mut commands: Commands,

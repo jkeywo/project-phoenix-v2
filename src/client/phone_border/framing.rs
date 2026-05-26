@@ -30,6 +30,7 @@ use crate::ship_view::ShipView;
 #[derive(Clone, Debug)]
 pub struct RadarIconHandles {
     pub ship: Handle<Image>,
+    pub player_ship: Handle<Image>,
     pub asteroid: Handle<Image>,
     pub station: Handle<Image>,
     pub planet: Handle<Image>,
@@ -204,6 +205,7 @@ fn load_phone_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
         inset_card: asset_server.load("captain_console/inset-card.png"),
         radar_icons: RadarIconHandles {
             ship: asset_server.load("radar_icons/Icon-Ship.png"),
+            player_ship: asset_server.load("radar_icons/Icon-PlayerShip.png"),
             asteroid: asset_server.load("radar_icons/Icon-Asteroid.png"),
             station: asset_server.load("radar_icons/Icon-Station.png"),
             planet: asset_server.load("radar_icons/Icon-Planet.png"),
@@ -251,6 +253,9 @@ fn populate_radar_icon_lookup(
     lookup
         .0
         .insert(RadarIcon::Ship, assets.radar_icons.ship.clone());
+    lookup
+        .0
+        .insert(RadarIcon::PlayerShip, assets.radar_icons.player_ship.clone());
     lookup
         .0
         .insert(RadarIcon::Asteroid, assets.radar_icons.asteroid.clone());

@@ -1,4 +1,4 @@
-//! Client-side Sensors Panel plugin — migrated to `src/gui/` library widgets.
+﻿//! Client-side Sensors Panel plugin â€” migrated to `src/gui/` library widgets.
 //!
 //! Owns the Sensors console UI: long-range radar display (`GenericRadar`,
 //! WorldFixed, Ships + Asteroids filter), science target designation,
@@ -10,22 +10,21 @@
 //! Compiled only when the `client` Cargo feature is enabled.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use crate::client::console_shell::ConsoleShell;
 use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::set_science_target_message;
 use crate::gui::{
-    icon_from_radar_icon_str, region_shape_from_snapshot, spawn_gui_button,
-    ButtonPressed, ButtonSize, GenericRadar, OnRadar, OrientationMode,
-    RadarAppearance, RadarCenter, RadarClipMode, RadarFilter, RadarIcon, StateVisuals,
+    bridge_sim_to_radar, spawn_gui_button, ButtonPressed, ButtonSize, ConsoleRadar,
+    GenericRadar, OrientationMode, RadarBlipMap, RadarCenterPose, RadarClipMode, RadarFilter,
+    StateVisuals,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
-// ── Pure visibility helper ────────────────────────────────────────────
+// â”€â”€ Pure visibility helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Decide whether the science panel should be visible.
 pub fn sensors_panel_visible(
@@ -48,20 +47,20 @@ pub fn sensors_panel_visible(
     }
 }
 
-// ── Marker components ────────────────────────────────────────────────
+// â”€â”€ Marker components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Marks the root of the Sensors console UI.
 #[derive(Component)]
 pub struct SensorsPanel;
 
-/// Marks the "Cancel Impulse" `GuiButton` entity — used only for visibility
+/// Marks the "Cancel Impulse" `GuiButton` entity â€” used only for visibility
 /// toggling (shown/hidden based on impulse charge state).
 #[derive(Component)]
 pub struct ScienceCancelImpulseButton;
 
-// ── State visuals helpers ─────────────────────────────────────────────
+// â”€â”€ State visuals helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Muted blue-green button visuals — used for ON SCREEN.
+/// Muted blue-green button visuals â€” used for ON SCREEN.
 fn on_screen_visuals() -> StateVisuals {
     StateVisuals::from_colors(
         Color::srgb(0.10, 0.30, 0.25), // idle
@@ -72,7 +71,7 @@ fn on_screen_visuals() -> StateVisuals {
     )
 }
 
-/// Danger (red) button visuals — used for Cancel Impulse.
+/// Danger (red) button visuals â€” used for Cancel Impulse.
 fn cancel_impulse_visuals() -> StateVisuals {
     StateVisuals::from_colors(
         Color::srgb(0.40, 0.05, 0.05), // idle
@@ -83,42 +82,32 @@ fn cancel_impulse_visuals() -> StateVisuals {
     )
 }
 
-// ── Resources ────────────────────────────────────────────────────────
-
-/// Persistent entity IDs for science-specific radar components.
-#[derive(Resource, Default)]
-struct ScienceRadarEntities {
-    center: Option<Entity>,
-    blips: HashMap<String, Entity>,
-}
-
-// ── Plugin ────────────────────────────────────────────────────────────
+// â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Marker resource set once the sensors UI has been spawned.
 #[derive(Resource)]
 pub struct SensorsPanelSpawned;
 
-// ── Plugin ────────────────────────────────────────────────────────────
+// â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 pub struct SensorsPanelPlugin;
 
 impl Plugin for SensorsPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ScienceRadarEntities>()
-            .add_systems(
-                Update,
-                (
-                    spawn_sensors_ui.run_if(not(resource_exists::<SensorsPanelSpawned>)),
-                    toggle_sensors_panel_visibility,
-                    refresh_cancel_impulse_visibility,
-                    bridge_client_sim_to_science_radar,
-                    respawn_sensors_on_orientation_change,
-                ),
-            );
+        app.add_systems(
+            Update,
+            (
+                spawn_sensors_ui.run_if(not(resource_exists::<SensorsPanelSpawned>)),
+                toggle_sensors_panel_visibility,
+                refresh_cancel_impulse_visibility,
+                bridge_client_sim_to_science_radar,
+                respawn_sensors_on_orientation_change,
+            ),
+        );
     }
 }
 
-// ── Spawn (ConsoleShell) ──────────────────────────────────────────────
+// â”€â”€ Spawn (ConsoleShell) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn spawn_sensors_ui(
     mut commands: Commands,
@@ -182,20 +171,9 @@ fn fill_sensors_radar(commands: &mut Commands, container: Entity) {
         .id();
     commands.entity(col).add_child(title);
 
-    // Sensors shows: player ship, NPC ships, individual asteroids, and
-    // asteroid-field region boundaries.  WorldFixed keeps the display
-    // north-up regardless of ship heading.
-    let radar_filter = RadarFilter(std::collections::HashSet::from([
-        "player_ship".to_string(),
-        "ship".to_string(),
-        "pirate".to_string(),
-        "asteroid".to_string(),
-        "asteroid_field".to_string(),
-        "station".to_string(),
-        "planet".to_string(),
-        "star".to_string(),
-        "region".to_string(),
-    ]));
+    // Spawn with empty filter â€” sync_sensors_radar_filter will populate it
+    // from lobby.ship_config.sensors_radar_shows once the Welcome arrives.
+    let radar_filter = RadarFilter(std::collections::HashSet::new());
     let radar = GenericRadar::spawn(
         commands,
         crate::client_sim::SCIENCE_RADAR_RANGE,
@@ -207,14 +185,18 @@ fn fill_sensors_radar(commands: &mut Commands, container: Entity) {
         1.0,
         1.0,
     );
-    commands.entity(radar).insert(Node {
-        width: Val::Px(240.0),
-        height: Val::Px(240.0),
-        border: UiRect::all(Val::Px(1.0)),
-        aspect_ratio: Some(1.0),
-        position_type: PositionType::Relative,
-        ..default()
-    });
+    commands.entity(radar).insert((
+        ConsoleRadar::Sensors,
+        RadarBlipMap::default(),
+        Node {
+            width: Val::Px(240.0),
+            height: Val::Px(240.0),
+            border: UiRect::all(Val::Px(1.0)),
+            aspect_ratio: Some(1.0),
+            position_type: PositionType::Relative,
+            ..default()
+        },
+    ));
     commands.entity(col).add_child(radar);
 }
 
@@ -267,7 +249,7 @@ fn fill_sensors_buttons(commands: &mut Commands, container: Entity) {
     commands.entity(col).add_child(cancel_btn);
 }
 
-// ── Orientation respawn ──────────────────────────────────────────────
+// â”€â”€ Orientation respawn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn respawn_sensors_on_orientation_change(
     orientation: Option<Res<DeviceOrientation>>,
@@ -284,7 +266,7 @@ fn respawn_sensors_on_orientation_change(
     commands.remove_resource::<SensorsPanelSpawned>();
 }
 
-// ── Button observers ──────────────────────────────────────────────────
+// â”€â”€ Button observers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn on_on_screen_button_pressed(
     _trigger: On<ButtonPressed>,
@@ -302,7 +284,7 @@ fn on_cancel_impulse_button_pressed(
     outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
 }
 
-// ── Systems ──────────────────────────────────────────────────────────
+// â”€â”€ Systems â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn toggle_sensors_panel_visibility(
     lobby: Res<LobbyState>,
@@ -320,6 +302,12 @@ fn toggle_sensors_panel_visibility(
     }
 }
 
+/// Update the sensors radar `RadarFilter` from `ShipClientConfig` whenever
+/// lobby state changes.
+//
+// Removed: replaced by the unified `sync_radar_widgets_from_lobby` system
+// in `src/client/app.rs`, which routes by `ConsoleRadar::Sensors`.
+
 /// Toggle Cancel Impulse button visibility based on impulse charge progress.
 fn refresh_cancel_impulse_visibility(
     ship_view: Res<ShipView>,
@@ -334,7 +322,7 @@ fn refresh_cancel_impulse_visibility(
     }
 }
 
-// ── Radar entity bridge ───────────────────────────────────────────────
+// â”€â”€ Radar entity bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Bridges `ClientSimState` entity snapshots into ECS entities with
 /// `OnRadar` / `RadarAppearance` for the science `GenericRadar` widget.
@@ -345,149 +333,24 @@ fn bridge_client_sim_to_science_radar(
     mut commands: Commands,
     sim: Res<crate::client_sim::ClientSimState>,
     ship_view: Res<ShipView>,
-    mut radar: ResMut<ScienceRadarEntities>,
+    mut q: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
 ) {
-    // ── Radar center (player ship) ────────────────────────────────────
-    let ship_appearance = RadarAppearance {
-        icon: RadarIcon::Ship,
-        world_size: 6.0,
-        color: Color::srgb(0.95, 0.95, 1.0),
-        region_colour: None,
-        region_shape: None,
+    let Some((widget, _, mut map)) =
+        q.iter_mut().find(|(_, c, _)| **c == ConsoleRadar::Sensors)
+    else {
+        return;
     };
-    let ship_yaw = ship_view.ship_yaw;
-    let ship_t = Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z)
-        .with_rotation(Quat::from_rotation_y(ship_yaw));
-    match radar.center {
-        Some(e) => {
-            commands.entity(e).insert((
-                RadarCenter {
-                    world_x: ship_view.ship_x,
-                    world_z: ship_view.ship_z,
-                    yaw: ship_yaw,
-                },
-                OnRadar(vec!["player_ship".to_string()]),
-                ship_appearance,
-                ship_t,
-                GlobalTransform::from(ship_t),
-            ));
-        }
-        None => {
-            let e = commands
-                .spawn((
-                    RadarCenter {
-                        world_x: ship_view.ship_x,
-                        world_z: ship_view.ship_z,
-                        yaw: ship_yaw,
-                    },
-                    OnRadar(vec!["player_ship".to_string()]),
-                    ship_appearance,
-                    ship_t,
-                    GlobalTransform::from(ship_t),
-                ))
-                .id();
-            radar.center = Some(e);
-        }
-    }
-
-    // ── Entity blips ──────────────────────────────────────────────────
-    let mut seen = std::collections::HashSet::new();
-
-    for snapshot in &sim.world.entities {
-        let uuid = &snapshot.uuid;
-        if !seen.insert(uuid.clone()) {
-            continue;
-        }
-
-        if snapshot.tags.is_empty() {
-            continue;
-        }
-
-        let entity_yaw = snapshot.yaw.unwrap_or(0.0);
-        let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
-        let icon_str = snapshot.radar_icon.as_deref().unwrap_or("ship");
-        let icon = icon_from_radar_icon_str(icon_str);
-        let is_region = snapshot.tags.iter().any(|t| t == "region");
-        let is_field = snapshot.tags.iter().any(|t| t == "asteroid_field");
-
-        if is_region || is_field {
-            // ── Region / field entity: render as shape ────────────────────────
-            let default_col = if is_field {
-                Color::srgb(0.25, 0.75, 0.55)
-            } else {
-                Color::srgb(0.8, 0.4, 0.8)
-            };
-            let region_colour = colour.unwrap_or(default_col);
-            let region_shape = region_shape_from_snapshot(snapshot);
-            let world_size = snapshot
-                .radar_world_size
-                .or(Some(snapshot.radius_or_zero()))
-                .filter(|s| *s > 0.0)
-                .unwrap_or(4.0);
-            let appearance = RadarAppearance {
-                icon,
-                world_size,
-                color: region_colour,
-                region_colour: Some(region_colour),
-                region_shape,
-            };
-            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
-                .with_rotation(Quat::from_rotation_y(entity_yaw));
-            if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((
-                    OnRadar(snapshot.tags.clone()),
-                    appearance,
-                    t,
-                    GlobalTransform::from(t),
-                ));
-            } else {
-                let blip = commands
-                    .spawn((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::from(t)))
-                    .id();
-                radar.blips.insert(uuid.clone(), blip);
-            }
-        } else {
-            // ── Point entity: render as icon ──────────────────────────────────
-            let default_color = Color::srgb(0.95, 0.95, 1.0);
-            let world_size = snapshot
-                .radar_world_size
-                .or(Some(snapshot.radius_or_zero()))
-                .filter(|s| *s > 0.0)
-                .unwrap_or(4.0);
-            let appearance = RadarAppearance {
-                icon,
-                world_size,
-                color: colour.unwrap_or(default_color),
-                region_colour: None,
-                region_shape: None,
-            };
-            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
-                .with_rotation(Quat::from_rotation_y(entity_yaw));
-            if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((
-                    OnRadar(snapshot.tags.clone()),
-                    appearance,
-                    t,
-                    GlobalTransform::from(t),
-                ));
-            } else {
-                let blip = commands
-                    .spawn((OnRadar(snapshot.tags.clone()), appearance, t, GlobalTransform::from(t)))
-                    .id();
-                radar.blips.insert(uuid.clone(), blip);
-            }
-        }
-    }
-
-    // Despawn blips no longer in sim state.
-    radar.blips.retain(|uuid, entity| {
-        if seen.contains(uuid) {
-            true
-        } else {
-            commands.entity(*entity).despawn();
-            false
-        }
-    });
+    bridge_sim_to_radar(
+        &mut commands,
+        widget,
+        &mut map,
+        RadarCenterPose {
+            x: ship_view.ship_x,
+            z: ship_view.ship_z,
+            yaw: ship_view.ship_yaw,
+        },
+        &sim.world.entities,
+    );
 }
 
 /// Build the `ClientMessage` for designating a science target.
@@ -495,7 +358,7 @@ pub fn science_target_message(uuid: String) -> ClientMessage {
     set_science_target_message(uuid)
 }
 
-// ── Tests ────────────────────────────────────────────────────────────
+// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[cfg(test)]
 mod tests {
@@ -547,7 +410,7 @@ mod tests {
         ActiveConsole(Some(c))
     }
 
-    // ── sensors_panel_visible ─────────────────────────────────────────
+    // â”€â”€ sensors_panel_visible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn sensors_panel_not_visible_in_lobby_phase() {
@@ -610,7 +473,7 @@ mod tests {
         assert!(!sensors_panel_visible(&s, "tok", &active));
     }
 
-    // ── science_target_message ────────────────────────────────────────
+    // â”€â”€ science_target_message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn science_target_message_produces_set_science_target() {
@@ -623,7 +486,7 @@ mod tests {
         );
     }
 
-    // ── on_screen button sends ScienceRadar ViewMode ──────────────────
+    // â”€â”€ on_screen button sends ScienceRadar ViewMode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn on_screen_message_variant_is_set_view_science_radar() {
@@ -638,7 +501,7 @@ mod tests {
         ));
     }
 
-    // ── cancel impulse message variant ───────────────────────────────
+    // â”€â”€ cancel impulse message variant â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn cancel_impulse_message_variant_is_correct() {
@@ -646,7 +509,7 @@ mod tests {
         assert!(matches!(msg, ClientMessage::CancelImpulse));
     }
 
-    // ── Science radar filter includes ships and asteroids ─────────────
+    // â”€â”€ Science radar filter includes ships and asteroids â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn science_radar_filter_includes_ships() {
@@ -678,7 +541,7 @@ mod tests {
         assert!(!is_on_radar(&filter, &["missile".to_string()]));
     }
 
-    // ── StateVisuals: five widget states render distinctly ────────────
+    // â”€â”€ StateVisuals: five widget states render distinctly â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn on_screen_visuals_has_distinct_five_states() {

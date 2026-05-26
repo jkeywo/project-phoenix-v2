@@ -161,6 +161,25 @@ fn update_session_with_config(
                 })
                 .collect();
         }
+        // Radar shows lists — push the TOML-configured tag filters to the
+        // client so each console widget can build its RadarFilter without
+        // hardcoding tag names.
+        if let Some(hc) = &ship_config.helm_console {
+            if let Some(r) = &hc.radar {
+                next.helm_radar_shows = r.shows.iter().map(|t| t.as_str().to_string()).collect();
+            }
+        }
+        if let Some(sc) = &ship_config.sensors_console {
+            next.sensors_radar_shows = sc.long_range_radar.shows.iter().map(|t| t.as_str().to_string()).collect();
+        }
+        if let Some(nc) = &ship_config.navigation_console {
+            next.nav_chart_shows = nc.system_chart.shows.iter().map(|t| t.as_str().to_string()).collect();
+        }
+        if let Some(wc) = &ship_config.weapons_console {
+            if let Some(r) = &wc.radar {
+                next.tactical_radar_shows = r.shows.iter().map(|t| t.as_str().to_string()).collect();
+            }
+        }
         ship_client_config.0 = next;
     }
 }

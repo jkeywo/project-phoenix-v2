@@ -1,4 +1,4 @@
-//! Client-side Weapons Panel plugin — migrated to `src/gui/` library widgets.
+﻿//! Client-side Weapons Panel plugin â€” migrated to `src/gui/` library widgets.
 //!
 //! Owns all Tactical console UI: fire phasers button (`GuiButton`), phaser mode
 //! toggle (`GuiButton`), torpedo tube selector (`RadioGroup`), fire torpedo
@@ -9,7 +9,6 @@
 //! via observers at spawn time.
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 
 use crate::client::console_shell::ConsoleShell;
 use crate::client_app::{
@@ -25,18 +24,16 @@ use crate::client_sim::{
     phaser_mode_label, ClientSimState,
 };
 use crate::gui::{
-    icon_from_radar_icon_str, is_on_radar, project_radar_entity,
-    region_shape_from_snapshot, spawn_gui_button, ButtonPressed, ButtonSize,
-    GenericRadar, GenericRadarWidget, OnRadar, OrientationMode, RadarAppearance, RadarArc,
-    RadarArcKind, RadarArcs, RadarCenter, RadarClipMode, RadarEntityUuid, RadarFilter, RadarIcon,
-    RadarTargetHighlight, StateVisuals, RadioButtonConfig, RadioGroup,
-    RadioSelected, Disabled,
+    bridge_sim_to_radar, is_on_radar, project_radar_entity, spawn_gui_button, ButtonPressed,
+    ButtonSize, ConsoleRadar, GenericRadar, GenericRadarWidget, OrientationMode, RadarArc,
+    RadarArcKind, RadarArcs, RadarBlipMap, RadarCenterPose, RadarClipMode, RadarFilter,
+    RadarTargetHighlight, RadioButtonConfig, RadioGroup, RadioSelected, StateVisuals, Disabled,
 };
 use crate::messages::{Console, GamePhase, PhaserBankClientConfig, TorpedoTube, TorpedoTubeClientConfig};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
 use crate::ship_view::ShipView;
 
-// ── Pure visibility helper ────────────────────────────────────────────
+// â”€â”€ Pure visibility helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Decide whether the weapons panel should be visible.
 ///
@@ -66,7 +63,7 @@ pub fn weapons_panel_visible(
     }
 }
 
-// ── Marker components ─────────────────────────────────────────────────
+// â”€â”€ Marker components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Marks the text label inside a Fire Phasers button (shows cooldown status).
 /// Carries the bank id so multiple banks can share the refresh system.
@@ -104,12 +101,7 @@ struct FireTorpedoButton;
 #[derive(Component)]
 struct TubeRadioGroup(Vec<String>);
 
-/// Marker on the weapons radar widget entity, so systems can locate it
-/// without scanning all `GenericRadarWidget`s.
-#[derive(Component)]
-struct WeaponsRadarWidget;
-
-// ── Resources ─────────────────────────────────────────────────────────
+// â”€â”€ Resources â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Tracks which torpedo tube is currently selected on the Weapons console.
 ///
@@ -118,16 +110,9 @@ struct WeaponsRadarWidget;
 #[derive(Resource, Default, Clone, PartialEq, Eq, Debug)]
 pub struct SelectedTube(pub Option<TorpedoTube>);
 
-/// Persistent entity IDs for weapons-specific radar components.
-#[derive(Resource, Default)]
-struct WeaponsRadarEntities {
-    center: Option<Entity>,
-    blips: HashMap<String, Entity>,
-}
+// â”€â”€ State visuals helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// ── State visuals helpers ─────────────────────────────────────────────
-
-/// Danger (red) button visuals — used for Fire Phasers.
+/// Danger (red) button visuals â€” used for Fire Phasers.
 fn fire_visuals() -> StateVisuals {
     StateVisuals::from_colors(
         Color::srgb(0.40, 0.10, 0.10), // idle
@@ -138,7 +123,7 @@ fn fire_visuals() -> StateVisuals {
     )
 }
 
-/// Neutral (blue-grey) button visuals — used for Phaser Mode toggle.
+/// Neutral (blue-grey) button visuals â€” used for Phaser Mode toggle.
 fn mode_visuals() -> StateVisuals {
     StateVisuals::from_colors(
         Color::srgb(0.15, 0.15, 0.35), // idle
@@ -149,7 +134,7 @@ fn mode_visuals() -> StateVisuals {
     )
 }
 
-/// Safe (green) button visuals — used for Fire Torpedo.
+/// Safe (green) button visuals â€” used for Fire Torpedo.
 fn torpedo_fire_visuals() -> StateVisuals {
     StateVisuals::from_colors(
         Color::srgb(0.10, 0.30, 0.10), // idle
@@ -171,7 +156,7 @@ fn tube_visuals() -> StateVisuals {
     )
 }
 
-// ── Plugin ────────────────────────────────────────────────────────────
+// â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Marker resource set once the weapons UI has been spawned.
 #[derive(Resource)]
@@ -196,7 +181,7 @@ impl WeaponsPanelLayoutKey {
     }
 }
 
-// ── Plugin ────────────────────────────────────────────────────────────
+// â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Plugin that owns all Tactical console UI and systems.
 pub struct WeaponsPanelPlugin;
@@ -205,7 +190,6 @@ impl Plugin for WeaponsPanelPlugin {
     fn build(&self, app: &mut App) {
         app
             .init_resource::<SelectedTube>()
-            .init_resource::<WeaponsRadarEntities>()
             .add_systems(Update, (
                 spawn_weapons_ui.run_if(not(resource_exists::<WeaponsPanelSpawned>)),
                 toggle_weapons_panel_visibility,
@@ -214,13 +198,14 @@ impl Plugin for WeaponsPanelPlugin {
                 sync_fire_phaser_disabled,
                 refresh_torpedo_ui,
                 bridge_client_sim_to_weapons_radar,
+                sync_weapons_radar_target_highlight,
                 respawn_weapons_on_orientation_change,
                 respawn_weapons_on_layout_change,
             ));
     }
 }
 
-// ── Spawn (ConsoleShell) ──────────────────────────────────────────────
+// â”€â”€ Spawn (ConsoleShell) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn spawn_weapons_ui(
     mut commands: Commands,
@@ -277,7 +262,7 @@ fn spawn_weapons_ui(
     commands.entity(shell.root).insert((WeaponsPanel, Visibility::Hidden));
 }
 
-// ── Fill helpers ──────────────────────────────────────────────────────
+// â”€â”€ Fill helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Primary slot: tactical radar (GenericRadar, WorldFixed, Ships + Torpedoes).
 fn fill_tactical_radar(
@@ -310,15 +295,9 @@ fn fill_tactical_radar(
         .id();
     commands.entity(col).add_child(title);
 
-    let radar_filter = RadarFilter(std::collections::HashSet::from([
-        "ship".to_string(),
-        "pirate".to_string(),
-        "missile".to_string(),
-        "torpedo".to_string(),
-        "station".to_string(),
-        "asteroid".to_string(),
-        "region".to_string(),
-    ]));
+    // Spawn with empty filter â€” sync_tactical_radar_filter will populate it
+    // from lobby.ship_config.tactical_radar_shows once the Welcome arrives.
+    let radar_filter = RadarFilter(std::collections::HashSet::new());
     let radar = GenericRadar::spawn(
         commands,
         crate::client_sim::WEAPONS_RADAR_RANGE,
@@ -361,7 +340,8 @@ fn fill_tactical_radar(
             ..default()
         },
         TacticalRadarTapTarget,
-        WeaponsRadarWidget,
+        ConsoleRadar::Tactical,
+        RadarBlipMap::default(),
         RadarArcs(arcs),
         RadarTargetHighlight(None),
     ));
@@ -393,7 +373,7 @@ pub fn radar_local_pixel(tap_logical: Vec2, node_top_left: Vec2) -> Vec2 {
 /// All spatial values (`pointer_location.position`, `ComputedNode::size()`,
 /// `GlobalTransform::translation()`) are in logical pixels. Blips are laid
 /// out by the renderer in the same logical-pixel space, so the comparison
-/// is direct — no scale-factor conversion needed.
+/// is direct â€” no scale-factor conversion needed.
 fn on_tactical_radar_tap(
     trigger: On<Pointer<Click>>,
     radars: Query<(&ComputedNode, &GlobalTransform, &GenericRadarWidget), With<TacticalRadarTapTarget>>,
@@ -426,8 +406,7 @@ fn on_tactical_radar_tap(
         .entities
         .iter()
         .filter_map(|snap| {
-            let layer = tags_to_radar_layer(&snap.tags)?;
-            if !is_on_radar(&widget.filter, layer) {
+            if !is_on_radar(&widget.filter, &snap.tags) {
                 return None;
             }
             let (nx, ny) = project_radar_entity(
@@ -477,7 +456,7 @@ fn fill_tactical_controls(
         .id();
     commands.entity(container).add_child(col);
 
-    // ── Torpedo section (only if there are tubes) ─────────────────────
+    // â”€â”€ Torpedo section (only if there are tubes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if !tubes.is_empty() {
         let torpedo_container = commands
             .spawn((
@@ -570,7 +549,7 @@ fn fill_tactical_controls(
         commands.entity(torpedo_container).add_child(fire_torpedo_btn);
     }
 
-    // ── Phaser Mode toggle button (hideable as "phaser_mode_selector") ──
+    // â”€â”€ Phaser Mode toggle button (hideable as "phaser_mode_selector") â”€â”€
     let mode_btn = spawn_gui_button(
         commands,
         ButtonSize::Rect { width: 200.0, height: 44.0 },
@@ -590,7 +569,7 @@ fn fill_tactical_controls(
         .observe(on_phaser_mode_pressed);
     commands.entity(col).add_child(mode_btn);
 
-    // ── Per-bank Fire Phasers buttons ─────────────────────────────────
+    // â”€â”€ Per-bank Fire Phasers buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     for bank in banks {
         let fire_phaser_btn = spawn_gui_button(
             commands,
@@ -613,7 +592,7 @@ fn fill_tactical_controls(
         commands.entity(col).add_child(fire_phaser_btn);
     }
 
-    // ── Repair icon label ─────────────────────────────────────────────
+    // â”€â”€ Repair icon label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let repair_label = commands
         .spawn((
             RepairIconLabel,
@@ -624,7 +603,7 @@ fn fill_tactical_controls(
         .id();
     commands.entity(col).add_child(repair_label);
 
-    // ── Complexity dropdown row ───────────────────────────────────────
+    // â”€â”€ Complexity dropdown row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let dropdown = commands
         .spawn((
             ComplexityDropdownRoot,
@@ -665,7 +644,7 @@ fn fill_tactical_controls(
     });
     commands.entity(col).add_child(dropdown);
 
-    // ── Complexity pop-up overlay ─────────────────────────────────────
+    // â”€â”€ Complexity pop-up overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let popup = commands
         .spawn((
             ComplexityPopupRoot,
@@ -733,7 +712,7 @@ fn fill_tactical_controls(
     commands.entity(col).add_child(popup);
 }
 
-// ── Orientation respawn ──────────────────────────────────────────────
+// â”€â”€ Orientation respawn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn respawn_weapons_on_orientation_change(
     orientation: Option<Res<DeviceOrientation>>,
@@ -772,7 +751,7 @@ fn respawn_weapons_on_layout_change(
     commands.remove_resource::<WeaponsPanelLayoutKey>();
 }
 
-// ── Tube button labels post-setup ─────────────────────────────────────
+// â”€â”€ Tube button labels post-setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Resource flag: tube button labels haven't been added yet.
 #[derive(Resource)]
@@ -792,7 +771,7 @@ fn add_tube_button_labels(
     for (children, group) in groups.iter() {
         let want = group.0.len();
         if want == 0 || children.len() < want {
-            // Children not yet resolved — try again next frame.
+            // Children not yet resolved â€” try again next frame.
             return;
         }
         for (idx, child) in children.iter().take(want).enumerate() {
@@ -824,7 +803,7 @@ fn tube_label_short(tube_id: &str) -> String {
     }
 }
 
-// ── Visibility system ─────────────────────────────────────────────────
+// â”€â”€ Visibility system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn toggle_weapons_panel_visibility(
     lobby: Res<LobbyState>,
@@ -838,7 +817,7 @@ fn toggle_weapons_panel_visibility(
     }
 }
 
-// ── RadioGroup → SelectedTube observer ───────────────────────────────
+// â”€â”€ RadioGroup â†’ SelectedTube observer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Observer on the `TubeRadioGroup` entity: maps the selected member entity
 /// to a `TorpedoTube` id (looking up the index in `children` and indexing into
@@ -863,7 +842,7 @@ fn on_tube_selected(
     }
 }
 
-// ── Button observers ──────────────────────────────────────────────────
+// â”€â”€ Button observers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fn on_fire_phaser_pressed(
     trigger: On<ButtonPressed>,
@@ -900,7 +879,7 @@ fn on_fire_torpedo_pressed(
     outbound.write(OutboundClientMessage(fire_torpedo_message(tube, None)));
 }
 
-// ── Phaser refresh system ─────────────────────────────────────────────
+// â”€â”€ Phaser refresh system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Updates each Fire Phasers button label (one per bank) and the Phaser Mode
 /// label from `ClientSimState`.
@@ -940,6 +919,10 @@ fn refresh_weapons_panel(
     }
 }
 
+// Note: tactical radar filter is now sourced via the unified
+// `sync_radar_widgets_from_lobby` system in `src/client/app.rs`, routed
+// by `ConsoleRadar::Tactical`.
+
 /// Inserts/removes `Disabled` on each Fire Phasers button as `sim` changes.
 fn sync_fire_phaser_disabled(
     mut commands: Commands,
@@ -959,13 +942,13 @@ fn sync_fire_phaser_disabled(
     }
 }
 
-/// Human-readable short label for a phaser bank id (`"port"` → `"PORT"`).
+/// Human-readable short label for a phaser bank id (`"port"` â†’ `"PORT"`).
 /// Falls back to upper-casing the raw id for unknown banks.
 fn bank_label(bank_id: &str) -> String {
     bank_id.to_uppercase()
 }
 
-// ── Torpedo refresh system ────────────────────────────────────────────
+// â”€â”€ Torpedo refresh system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Refresh torpedo count label, tube-status labels, and Fire Torpedo button.
 fn refresh_torpedo_ui(
@@ -1036,194 +1019,49 @@ fn refresh_torpedo_ui(
     }
 }
 
-// ── Radar entity bridge ───────────────────────────────────────────────
+// â”€â”€ Radar entity bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Radar entity bridge ----------------------------------------------
 
-/// Bridges `ClientSimState` entity snapshots into ECS entities with
-/// `OnRadar` / `RadarAppearance` for the `GenericRadar` widget. Also pushes
-/// the current phaser target into `RadarTargetHighlight` on the widget so the
-/// arc renderer can highlight the locked blip.
-///
-/// Weapons radar shows ships (other vessels) and torpedoes (missiles).
+/// Thin per-console wrapper around ridge_sim_to_radar for the Tactical
+/// (Weapons) radar widget.
 fn bridge_client_sim_to_weapons_radar(
     mut commands: Commands,
     sim: Res<ClientSimState>,
     ship_view: Res<ShipView>,
-    mut radar: ResMut<WeaponsRadarEntities>,
-    mut widget: Query<&mut RadarTargetHighlight, With<WeaponsRadarWidget>>,
+    mut q: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
 ) {
-    // ── Target highlight ──────────────────────────────────────────────
+    let Some((widget, _, mut map)) =
+        q.iter_mut().find(|(_, c, _)| **c == ConsoleRadar::Tactical)
+    else {
+        return;
+    };
+    bridge_sim_to_radar(
+        &mut commands,
+        widget,
+        &mut map,
+        RadarCenterPose {
+            x: ship_view.ship_x,
+            z: ship_view.ship_z,
+            yaw: ship_view.ship_yaw,
+        },
+        &sim.world.entities,
+    );
+}
+
+/// Mirror ClientSimState.last_phaser_target into the tactical widget's
+/// RadarTargetHighlight so the arc renderer can highlight the locked blip.
+fn sync_weapons_radar_target_highlight(
+    sim: Res<ClientSimState>,
+    mut widget: Query<&mut RadarTargetHighlight>,
+) {
     for mut hl in widget.iter_mut() {
         if hl.0 != sim.last_phaser_target {
             hl.0 = sim.last_phaser_target.clone();
         }
     }
-    // ── Radar center (player ship) ────────────────────────────────────
-    let ship_appearance = RadarAppearance {
-        icon: RadarIcon::Ship,
-        world_size: 6.0,
-        color: Color::srgb(0.95, 0.95, 1.0),
-        region_colour: None,
-        region_shape: None,
-    };
-    let ship_yaw = ship_view.ship_yaw;
-    let ship_t = Transform::from_xyz(ship_view.ship_x, 0.0, ship_view.ship_z)
-        .with_rotation(Quat::from_rotation_y(ship_yaw));
-    match radar.center {
-        Some(e) => {
-            commands.entity(e).insert((
-                RadarCenter {
-                    world_x: ship_view.ship_x,
-                    world_z: ship_view.ship_z,
-                    yaw: ship_yaw,
-                },
-                OnRadar(vec!["ship".to_string()]),
-                ship_appearance,
-                ship_t,
-                GlobalTransform::from(ship_t),
-            ));
-        }
-        None => {
-            let e = commands
-                .spawn((
-                    RadarCenter {
-                        world_x: ship_view.ship_x,
-                        world_z: ship_view.ship_z,
-                        yaw: ship_yaw,
-                    },
-                    OnRadar(vec!["ship".to_string()]),
-                    ship_appearance,
-                    ship_t,
-                    GlobalTransform::from(ship_t),
-                ))
-                .id();
-            radar.center = Some(e);
-        }
-    }
-
-    // ── Entity blips ──────────────────────────────────────────────────
-    let mut seen = std::collections::HashSet::new();
-
-    for snapshot in &sim.world.entities {
-        let uuid = &snapshot.uuid;
-        if !seen.insert(uuid.clone()) {
-            continue;
-        }
-
-        if snapshot.tags.is_empty() {
-            continue;
-        }
-
-        // Weapons radar shows ships, torpedoes, stations, and regions.
-        let shows_tags = ["ship", "pirate", "missile", "torpedo", "station", "region"];
-        if !snapshot.tags.iter().any(|t| shows_tags.contains(&t.as_str())) {
-            continue;
-        }
-
-        let entity_yaw = snapshot.yaw.unwrap_or(0.0);
-        let colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
-        let icon_str = snapshot.radar_icon.as_deref().unwrap_or("ship");
-        let icon = icon_from_radar_icon_str(icon_str);
-        let is_region = snapshot.tags.iter().any(|t| t == "region");
-
-        if is_region {
-            // ── Region entity: render as shape ────────────────────────────────
-            let region_colour = colour.unwrap_or(Color::srgb(0.8, 0.4, 0.8));
-            let region_shape = region_shape_from_snapshot(snapshot);
-            let world_size = snapshot
-                .radar_world_size
-                .or(Some(snapshot.radius_or_zero()))
-                .filter(|s| *s > 0.0)
-                .unwrap_or(4.0);
-            let appearance = RadarAppearance {
-                icon,
-                world_size,
-                color: Color::WHITE,
-                region_colour: Some(region_colour),
-                region_shape,
-            };
-            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
-                .with_rotation(Quat::from_rotation_y(entity_yaw));
-            if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((
-                    OnRadar(snapshot.tags.clone()),
-                    appearance,
-                    t,
-                    GlobalTransform::from(t),
-                    RadarEntityUuid(uuid.clone()),
-                ));
-            } else {
-                let blip = commands
-                    .spawn((
-                        OnRadar(snapshot.tags.clone()),
-                        appearance,
-                        t,
-                        GlobalTransform::from(t),
-                        RadarEntityUuid(uuid.clone()),
-                    ))
-                    .id();
-                radar.blips.insert(uuid.clone(), blip);
-            }
-        } else {
-            // ── Point entity: render as icon ──────────────────────────────────
-            // Weapons uses red for ships, orange for missiles, teal for stations.
-            let is_missile = snapshot.tags.iter().any(|t| t == "missile" || t == "torpedo");
-            let is_station = snapshot.tags.iter().any(|t| t == "station");
-            let default_color = if is_missile {
-                Color::srgb(1.0, 0.4, 0.2)
-            } else if is_station {
-                Color::srgb(0.3, 0.8, 0.6)
-            } else {
-                Color::srgb(1.0, 0.4, 0.4) // ship/pirate
-            };
-            let world_size = snapshot
-                .radar_world_size
-                .or(Some(snapshot.radius_or_zero()))
-                .filter(|s| *s > 0.0)
-                .unwrap_or(4.0);
-            let appearance = RadarAppearance {
-                icon,
-                world_size,
-                color: colour.unwrap_or(default_color),
-                region_colour: None,
-                region_shape: None,
-            };
-            let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
-                .with_rotation(Quat::from_rotation_y(entity_yaw));
-            if let Some(existing) = radar.blips.get(uuid) {
-                commands.entity(*existing).insert((
-                    OnRadar(snapshot.tags.clone()),
-                    appearance,
-                    t,
-                    GlobalTransform::from(t),
-                    RadarEntityUuid(uuid.clone()),
-                ));
-            } else {
-                let blip = commands
-                    .spawn((
-                        OnRadar(snapshot.tags.clone()),
-                        appearance,
-                        t,
-                        GlobalTransform::from(t),
-                        RadarEntityUuid(uuid.clone()),
-                    ))
-                    .id();
-                radar.blips.insert(uuid.clone(), blip);
-            }
-        }
-    }
-
-    // Despawn blips no longer in sim state.
-    radar.blips.retain(|uuid, entity| {
-        if seen.contains(uuid) {
-            true
-        } else {
-            commands.entity(*entity).despawn();
-            false
-        }
-    });
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
+// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[cfg(test)]
 mod tests {
@@ -1261,12 +1099,12 @@ mod tests {
     fn no_tab() -> ActiveConsole { ActiveConsole(None) }
     fn tab(c: Console) -> ActiveConsole { ActiveConsole(Some(c)) }
 
-    // ── radar_local_pixel coordinate conversion ───────────────────────
+    // â”€â”€ radar_local_pixel coordinate conversion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn radar_local_pixel_centre_of_node() {
         // Node top-left at (100, 200), tap at logical (300, 400)
-        // → local (200, 200) — the centre of the 400x400 node.
+        // â†’ local (200, 200) â€” the centre of the 400x400 node.
         let out = radar_local_pixel(Vec2::new(300.0, 400.0), Vec2::new(100.0, 200.0));
         assert_eq!(out, Vec2::new(200.0, 200.0));
     }
@@ -1288,12 +1126,12 @@ mod tests {
     #[test]
     fn radar_local_pixel_bottom_right_of_node() {
         // 400x400 node at (100, 200), tap at (500, 600)
-        // → local (400, 400) — the bottom-right corner.
+        // â†’ local (400, 400) â€” the bottom-right corner.
         let out = radar_local_pixel(Vec2::new(500.0, 600.0), Vec2::new(100.0, 200.0));
         assert_eq!(out, Vec2::new(400.0, 400.0));
     }
 
-    // ── weapons_panel_visible ─────────────────────────────────────────
+    // â”€â”€ weapons_panel_visible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn weapons_panel_hidden_in_lobby_phase() {
@@ -1353,7 +1191,7 @@ mod tests {
         assert!(!weapons_panel_visible(&lobby, "tok", &active));
     }
 
-    // ── fire_phaser_message builder ───────────────────────────────────
+    // â”€â”€ fire_phaser_message builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn fire_phaser_message_produces_fire_phaser() {
@@ -1362,7 +1200,7 @@ mod tests {
         assert_eq!(msg, ClientMessage::FirePhaser { bank: "port".to_string() });
     }
 
-    // ── fire_torpedo_message builder ──────────────────────────────────
+    // â”€â”€ fire_torpedo_message builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn fire_torpedo_message_fore_port_no_target() {
@@ -1384,7 +1222,7 @@ mod tests {
         });
     }
 
-    // ── toggle_phaser_mode_message builder ────────────────────────────
+    // â”€â”€ toggle_phaser_mode_message builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn toggle_phaser_mode_auto_produces_manual() {
@@ -1403,7 +1241,7 @@ mod tests {
     // Per-bank `is_fire_button_enabled` semantics are covered in
     // `client_sim::tests::fire_button_*`; nothing to retest here.
 
-    // ── phaser_mode_label ─────────────────────────────────────────────
+    // â”€â”€ phaser_mode_label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn phaser_mode_label_auto() {
@@ -1417,7 +1255,7 @@ mod tests {
         assert_eq!(phaser_mode_label(PhaserMode::Manual), "MANUAL");
     }
 
-    // ── SelectedTube default ──────────────────────────────────────────
+    // â”€â”€ SelectedTube default â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn selected_tube_defaults_to_none() {
@@ -1425,7 +1263,7 @@ mod tests {
         assert_eq!(s.0, None);
     }
 
-    // ── Radar filter: ships + torpedoes only ──────────────────────────
+    // â”€â”€ Radar filter: ships + torpedoes only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn weapons_radar_filter_includes_ships() {
@@ -1457,7 +1295,7 @@ mod tests {
         assert!(!is_on_radar(&filter, &["asteroid".to_string()]));
     }
 
-    // ── StateVisuals: five widget states render distinctly ────────────
+    // â”€â”€ StateVisuals: five widget states render distinctly â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     #[test]
     fn fire_visuals_has_distinct_five_states() {

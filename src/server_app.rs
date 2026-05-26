@@ -698,7 +698,7 @@ fn broadcast_world_setup_on_start(
 /// from `EntitySnapshot.radar_icon` rather than re-deriving it from tags.
 fn radar_icon_from_tags(tags: &[String]) -> String {
     let has = |t: &str| tags.iter().any(|s| s == t);
-    if has("player_ship") || has("ship") || has("pirate") {
+    if has("player") || has("ship") || has("pirate") {
         "ship".into()
     } else if has("asteroid_field") || has("asteroid") {
         "asteroid".into()
@@ -815,7 +815,10 @@ fn reconcile_runtime_entities(
                         snapshot.inner_radius = Some(field.0.inner_radius);
                     }
                 }
-                snapshot.radar_icon = Some(radar_icon_from_tags(&snapshot.tags));
+                snapshot.radar_icon = Some(
+                    radar_appearance.and_then(|r| r.0.icon.clone())
+                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags))
+                );
                 world.0.entities.push(snapshot);
             }
         }
@@ -875,7 +878,10 @@ fn reconcile_runtime_entities(
                         snapshot.inner_radius = Some(field.0.inner_radius);
                     }
                 }
-                snapshot.radar_icon = Some(radar_icon_from_tags(&snapshot.tags));
+                snapshot.radar_icon = Some(
+                    radar_appearance.and_then(|r| r.0.icon.clone())
+                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags))
+                );
                 world.0.entities.push(snapshot.clone());
                 outbox
                     .0

@@ -23,6 +23,7 @@ use crate::client_elements::{
     handle_help_button_press, handle_help_overlay_dismiss, HideableElementRegistry,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ServerMessage};
+use crate::gui::{ConsoleRadar, GenericRadarWidget, RadarFilter};
 
 // ── Events ─────────────────────────────────────────────────────────
 
@@ -261,8 +262,50 @@ impl Plugin for ClientAppPlugin {
                             handle_help_button_press,
                             handle_help_overlay_dismiss,
                         ),
+                        sync_radar_widgets_from_lobby,
                     ),
                 );
+    }
+}
+
+// ── Unified radar widget sync ────────────────────────────────────────
+
+/// Per-frame sync of every console's `GenericRadarWidget` from
+/// `LobbyState.ship_config`. Picks the right `*_shows` tag list (and helm
+/// range) based on the widget's `ConsoleRadar` variant.
+///
+/// Replaces the previous per-console sync systems
+/// (`sync_helm_radar_range`, `sync_sensors_radar_filter`, etc.) so all
+/// TOML-driven radar configuration flows through one place. Server
+/// viewscreen variants are skipped here; the server keeps its own
+/// viewscreen-radar bridge in `src/server/radar.rs`.
+fn sync_radar_widgets_from_lobby(
+    lobby: Res<LobbyState>,
+    mut widgets: Query<(&ConsoleRadar, &mut GenericRadarWidget)>,
+) {
+    if !lobby.is_changed() {
+        return;
+    }
+    let cfg = &lobby.ship_config;
+    for (console, mut widget) in widgets.iter_mut() {
+        let shows: &[String] = match console {
+            ConsoleRadar::Helm => &cfg.helm_radar_shows,
+            ConsoleRadar::Sensors => &cfg.sensors_radar_shows,
+            ConsoleRadar::Navigation => &cfg.nav_chart_shows,
+            ConsoleRadar::Tactical => &cfg.tactical_radar_shows,
+            // Viewscreen radars on the server are configured directly by
+            // `src/server/radar.rs::spawn_viewscreen_radar_widgets`.
+            ConsoleRadar::ViewscreenHelm
+            | ConsoleRadar::ViewscreenScience
+            | ConsoleRadar::ViewscreenSystemChart
+            | ConsoleRadar::ViewscreenNav => continue,
+        };
+        if !shows.is_empty() {
+            widget.filter = RadarFilter::from_shows(shows);
+        }
+        if matches!(console, ConsoleRadar::Helm) {
+            widget.range = cfg.helm_radar_range;
+        }
     }
 }
 

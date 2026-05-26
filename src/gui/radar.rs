@@ -28,6 +28,14 @@ pub struct OnRadar(pub Vec<String>);
 #[derive(Component, Clone, Debug)]
 pub struct RadarFilter(pub std::collections::HashSet<String>);
 
+impl RadarFilter {
+    /// Build a `RadarFilter` from a slice of tag strings (e.g. one of the
+    /// `ShipClientConfig.*_shows` fields, or a TOML `shows = [...]` list).
+    pub fn from_shows<S: AsRef<str>>(shows: &[S]) -> Self {
+        RadarFilter(shows.iter().map(|s| s.as_ref().to_string()).collect())
+    }
+}
+
 // ── Appearance ────────────────────────────────────────────────────────────────
 
 /// Which icon to render for a radar blip. Each variant maps 1:1 to a
@@ -35,6 +43,7 @@ pub struct RadarFilter(pub std::collections::HashSet<String>);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RadarIcon {
     Ship,
+    PlayerShip,
     Asteroid,
     Station,
     Planet,
@@ -82,6 +91,47 @@ pub struct RadarAppearance {
     /// `region_colour` is `Some`. When `Some` and `region_colour`
     /// is `Some`, the shape is rendered on the radar.
     pub region_shape: Option<RegionRadarShape>,
+}
+
+impl RadarAppearance {
+    /// The player-ship reference blip used at the centre of every radar.
+    /// Soft cyan-white, ship icon, 6.0-unit world size.
+    pub fn player_ship() -> Self {
+        Self {
+            icon: RadarIcon::PlayerShip,
+            world_size: 6.0,
+            color: Color::srgb(0.95, 0.95, 1.0),
+            region_colour: None,
+            region_shape: None,
+        }
+    }
+
+    /// A point-entity blip (ship, station, planet, star, missile, asteroid).
+    pub fn point(icon: RadarIcon, world_size: f32, color: Color) -> Self {
+        Self {
+            icon,
+            world_size,
+            color,
+            region_colour: None,
+            region_shape: None,
+        }
+    }
+
+    /// A region-entity blip rendered as a filled/outlined shape.
+    pub fn region(
+        icon: RadarIcon,
+        world_size: f32,
+        region_colour: Color,
+        shape: Option<RegionRadarShape>,
+    ) -> Self {
+        Self {
+            icon,
+            world_size,
+            color: region_colour,
+            region_colour: Some(region_colour),
+            region_shape: shape,
+        }
+    }
 }
 
 /// Maps `RadarIcon` to the loaded `Handle<Image>` for the corresponding
@@ -144,13 +194,35 @@ pub struct RadarOverlayEntity(pub Entity);
 
 // ── Per-widget behaviour overrides ────────────────────────────────────────────
 
-/// Marker for the **helm** `GenericRadarWidget` entity.
+/// Identifies which logical radar a `GenericRadarWidget` represents.
 ///
-/// `sync_helm_radar_range` targets only this widget so that updating the helm
-/// radar range from the server config does not accidentally overwrite other
-/// consoles' ranges.
-#[derive(Component)]
-pub struct HelmRadarWidget;
+/// One component per widget; unifies what used to be four separate empty
+/// marker components (`HelmRadarWidget`, `ScienceRadarWidget`,
+/// `NavRadarWidget`, `TacticalRadarWidget`) plus four viewscreen modes.
+///
+/// The unified `sync_radar_widgets_from_lobby` system reads the variant to
+/// pick which `ShipClientConfig.*_shows` (and optionally range) field to copy
+/// into the widget's `RadarFilter`. Per-console bridge systems use it as a
+/// query filter to find their widget's `RadarBlipMap`.
+#[derive(Component, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum ConsoleRadar {
+    /// Phone helm console — ship-relative, ranged from `helm_radar_range`.
+    Helm,
+    /// Phone sensors console — world-fixed, long-range.
+    Sensors,
+    /// Phone navigation console — world-centred, auto-scaled.
+    Navigation,
+    /// Phone tactical (weapons) console — world-fixed, mid-range.
+    Tactical,
+    /// Server viewscreen helm radar mode.
+    ViewscreenHelm,
+    /// Server viewscreen science / sensors radar mode.
+    ViewscreenScience,
+    /// Server viewscreen system-chart mode.
+    ViewscreenSystemChart,
+    /// Server viewscreen navigation-chart mode.
+    ViewscreenNav,
+}
 
 /// If present on a `GenericRadarWidget` entity, the radar is centred on the
 /// world origin `(0, 0)` rather than the `RadarCenter` reference entity, and
@@ -255,7 +327,7 @@ fn setup_radar_blip_fallback(mut commands: Commands, mut images: ResMut<Assets<I
 
 /// Map a tag string to the `RadarIcon` used for its blip.
 ///
-/// - `"ship"`, `"pirate"`, `"player_ship"` → `Ship`
+/// - `"ship"`, `"pirate"`, `"player"` → `Ship`
 /// - `"asteroid"`, `"asteroid_field"` → `Asteroid`
 /// - `"station"` → `Station`
 /// - `"missile"`, `"torpedo"` → `Torpedo`
@@ -264,7 +336,8 @@ fn setup_radar_blip_fallback(mut commands: Commands, mut images: ResMut<Assets<I
 /// - anything else → `Ship` (defensive fallback)
 pub fn icon_from_radar_icon_str(s: &str) -> RadarIcon {
     match s {
-        "ship" | "pirate" | "player_ship" => RadarIcon::Ship,
+        "ship" | "pirate" => RadarIcon::Ship,
+        "player" | "player_ship" => RadarIcon::PlayerShip,
         "asteroid" | "asteroid_field" => RadarIcon::Asteroid,
         "station" => RadarIcon::Station,
         "missile" | "torpedo" => RadarIcon::Torpedo,
@@ -460,6 +533,144 @@ impl GenericRadar {
 
         entity
     }
+}
+
+// ── Bridge: entity snapshots → radar ECS entities ────────────────────────────
+
+/// Persistent map of `EntitySnapshot.uuid` → blip ECS entities for a single
+/// radar widget. Add one as a sibling component on the `GenericRadarWidget`
+/// entity so each radar keeps its own blip set.
+///
+/// `center` is the player-ship reference entity. `blips` is everything else.
+#[derive(Component, Default)]
+pub struct RadarBlipMap {
+    pub center: Option<Entity>,
+    pub blips: HashMap<String, Entity>,
+}
+
+/// The world-space position + heading of the player ship, supplied to
+/// [`bridge_sim_to_radar`] for the centre blip and `RadarCenter` reference.
+///
+/// Decouples the bridge from `ShipView` (client) vs `ShipState` (server) —
+/// callers compute their own `RadarCenterPose`.
+#[derive(Clone, Copy, Debug)]
+pub struct RadarCenterPose {
+    pub x: f32,
+    pub z: f32,
+    pub yaw: f32,
+}
+
+/// Reconcile a list of `EntitySnapshot`s into ECS radar blip entities under
+/// `map`, plus a single `RadarCenter` reference entity for the player ship.
+///
+/// All four phone-console bridges and the server viewscreen bridge share this
+/// implementation. Per-console behaviour is captured by the inputs:
+/// - `pose` — where the player ship is (computed by the caller from
+///   `ShipView` or `ShipState`).
+/// - `entities` — `&[EntitySnapshot]` from `ClientSimState.world.entities`
+///   or `WorldResource.0.entities`.
+///
+/// All blip ECS entities (including the centre) are spawned as children of
+/// `widget` so they are despawned automatically when the widget is removed
+/// (e.g. on phone-orientation respawn).
+///
+/// Every blip is tagged with [`RadarEntityUuid`] so tap-to-target and
+/// `RadarTargetHighlight` work on any radar.
+pub fn bridge_sim_to_radar(
+    commands: &mut Commands,
+    widget: Entity,
+    map: &mut RadarBlipMap,
+    pose: RadarCenterPose,
+    entities: &[EntitySnapshot],
+) {
+    // ── Player-ship RadarCenter blip ──────────────────────────────────────
+    let ship_t = Transform::from_xyz(pose.x, 0.0, pose.z)
+        .with_rotation(Quat::from_rotation_y(pose.yaw));
+    let ship_global = GlobalTransform::from(ship_t);
+    let centre_bundle = (
+        RadarCenter { world_x: pose.x, world_z: pose.z, yaw: pose.yaw },
+        OnRadar(vec!["player".to_string()]),
+        RadarAppearance::player_ship(),
+        ship_t,
+        ship_global,
+    );
+    match map.center {
+        Some(e) => {
+            commands.entity(e).insert(centre_bundle);
+        }
+        None => {
+            let e = commands.spawn(centre_bundle).id();
+            commands.entity(widget).add_child(e);
+            map.center = Some(e);
+        }
+    }
+
+    // ── World entity blips ────────────────────────────────────────────────
+    let mut seen = std::collections::HashSet::<String>::new();
+    for snapshot in entities {
+        let uuid = &snapshot.uuid;
+        if !seen.insert(uuid.clone()) {
+            continue;
+        }
+        if snapshot.tags.is_empty() {
+            continue;
+        }
+
+        let entity_yaw = snapshot.yaw.unwrap_or(0.0);
+        let tag_colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));
+        let icon_str = snapshot.radar_icon.as_deref().unwrap_or("ship");
+        let icon = icon_from_radar_icon_str(icon_str);
+        let is_region = snapshot.tags.iter().any(|t| t == "region");
+        let is_field = snapshot.tags.iter().any(|t| t == "asteroid_field");
+
+        let world_size = snapshot
+            .radar_world_size
+            .or_else(|| Some(snapshot.radius_or_zero()))
+            .filter(|s| *s > 0.0)
+            .unwrap_or(4.0);
+
+        let appearance = if is_region || is_field {
+            let default_col = if is_field {
+                Color::srgb(0.25, 0.75, 0.55)
+            } else {
+                Color::srgb(0.8, 0.4, 0.8)
+            };
+            let region_colour = tag_colour.unwrap_or(default_col);
+            let region_shape = region_shape_from_snapshot(snapshot);
+            RadarAppearance::region(icon, world_size, region_colour, region_shape)
+        } else {
+            let color = tag_colour.unwrap_or(Color::srgb(0.95, 0.95, 1.0));
+            RadarAppearance::point(icon, world_size, color)
+        };
+
+        let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
+            .with_rotation(Quat::from_rotation_y(entity_yaw));
+        let bundle = (
+            OnRadar(snapshot.tags.clone()),
+            appearance,
+            t,
+            GlobalTransform::from(t),
+            RadarEntityUuid(uuid.clone()),
+        );
+
+        if let Some(&existing) = map.blips.get(uuid) {
+            commands.entity(existing).insert(bundle);
+        } else {
+            let blip = commands.spawn(bundle).id();
+            commands.entity(widget).add_child(blip);
+            map.blips.insert(uuid.clone(), blip);
+        }
+    }
+
+    // Despawn blips for entities that have left the world.
+    map.blips.retain(|uuid, &mut entity| {
+        if seen.contains(uuid) {
+            true
+        } else {
+            commands.entity(entity).despawn();
+            false
+        }
+    });
 }
 
 // ── Sync system ───────────────────────────────────────────────────────────────
@@ -1144,7 +1355,7 @@ mod tests {
     fn icon_from_str_known_tags() {
         assert_eq!(icon_from_radar_icon_str("ship"), RadarIcon::Ship);
         assert_eq!(icon_from_radar_icon_str("pirate"), RadarIcon::Ship);
-        assert_eq!(icon_from_radar_icon_str("player_ship"), RadarIcon::Ship);
+        assert_eq!(icon_from_radar_icon_str("player"), RadarIcon::PlayerShip);
         assert_eq!(icon_from_radar_icon_str("asteroid"), RadarIcon::Asteroid);
         assert_eq!(icon_from_radar_icon_str("asteroid_field"), RadarIcon::Asteroid);
         assert_eq!(icon_from_radar_icon_str("station"), RadarIcon::Station);
@@ -1200,23 +1411,23 @@ mod tests {
     }
 
     #[test]
-    fn player_ship_tag_passes_player_ship_filter() {
-        assert!(is_on_radar(&filter(&["player_ship"]), &tags(&["player_ship"])));
+    fn player_tag_passes_player_filter() {
+        assert!(is_on_radar(&filter(&["player"]), &tags(&["player"])));
     }
 
     #[test]
-    fn player_ship_does_not_pass_ship_only_filter() {
-        // player_ship and ship are distinct tags
-        assert!(!is_on_radar(&filter(&["ship"]), &tags(&["player_ship"])));
+    fn player_does_not_pass_ship_only_filter() {
+        // player and ship are distinct tags
+        assert!(!is_on_radar(&filter(&["ship"]), &tags(&["player"])));
     }
 
     #[test]
     fn all_tags_filter_accepts_all_known_tags() {
         let f = filter(&[
-            "player_ship", "ship", "asteroid", "asteroid_field",
+            "player", "ship", "asteroid", "asteroid_field",
             "station", "missile", "planet", "star", "region",
         ]);
-        for tag in &["player_ship", "ship", "asteroid", "asteroid_field",
+        for tag in &["player", "ship", "asteroid", "asteroid_field",
                      "station", "missile", "planet", "star", "region"] {
             assert!(is_on_radar(&f, &tags(&[tag])), "tag {tag} should pass");
         }

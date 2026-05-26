@@ -387,6 +387,22 @@ pub struct ShipClientConfig {
     /// RGBA colour the Tactical UI uses for torpedo fire-arc overlays.
     #[serde(default = "default_torpedo_arc_color")]
     pub torpedo_arc_color: [f32; 4],
+    /// Tag filter for the Helm radar widget. Sourced from
+    /// `[helm_console.radar] shows` in the ship TOML.
+    #[serde(default)]
+    pub helm_radar_shows: Vec<String>,
+    /// Tag filter for the Sensors/Science long-range radar. Sourced from
+    /// `[sensors_console.long_range_radar] shows`.
+    #[serde(default)]
+    pub sensors_radar_shows: Vec<String>,
+    /// Tag filter for the Navigation system chart. Sourced from
+    /// `[navigation_console.system_chart] shows`.
+    #[serde(default)]
+    pub nav_chart_shows: Vec<String>,
+    /// Tag filter for the Tactical radar widget. Sourced from
+    /// `[weapons_console.radar] shows`.
+    #[serde(default)]
+    pub tactical_radar_shows: Vec<String>,
 }
 
 fn default_helm_radar_range() -> f32 {
@@ -424,6 +440,10 @@ impl Default for ShipClientConfig {
             torpedo_tubes: Vec::new(),
             phaser_beam_color: default_phaser_beam_color(),
             torpedo_arc_color: default_torpedo_arc_color(),
+            helm_radar_shows: Vec::new(),
+            sensors_radar_shows: Vec::new(),
+            nav_chart_shows: Vec::new(),
+            tactical_radar_shows: Vec::new(),
         }
     }
 }

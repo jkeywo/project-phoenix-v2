@@ -68,7 +68,7 @@
     #launch-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     #launch-btn:not(:disabled):hover { background: #334; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-df9aaf51cce605ed.js" crossorigin="anonymous" integrity="sha384-7z7g7kSsygNz+SGAReni+RBRmXJzVMoPeNr5GISKhsfrO7C8Nza9V40Nw+yFTPFA"><link rel="preload" href="./project-phoenix-df9aaf51cce605ed_bg.wasm" crossorigin="anonymous" integrity="sha384-f2iJkAPXLTndsnGD2KLF3RJxiLBQZ7sP8ZEi8HNF4M2WooZnGCS5zXg77/9wWaiO" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-3137fec83519054e.js" crossorigin="anonymous" integrity="sha384-hGjoC+d9opqOYrm4zYQXsfbUO7H7SORlSPYDbI4RcVHvge2BbKTExIAFYqxBgyjp"><link rel="preload" href="./project-phoenix-3137fec83519054e_bg.wasm" crossorigin="anonymous" integrity="sha384-fSs15Nxt5wx3t/2q3hUe1To1mCE0YEWps4EL6adrFMqR5TS64FnxtK6vPI4w17eP" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
   <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
@@ -126,8 +126,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-df9aaf51cce605ed.js';
-const wasm = await init({ module_or_path: './project-phoenix-df9aaf51cce605ed_bg.wasm' });
+import init, * as bindings from './project-phoenix-3137fec83519054e.js';
+const wasm = await init({ module_or_path: './project-phoenix-3137fec83519054e_bg.wasm' });
 
 
 window.wasmBindings = bindings;

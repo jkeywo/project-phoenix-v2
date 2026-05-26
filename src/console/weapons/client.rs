@@ -18,16 +18,17 @@ use crate::client_app::{
 };
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::{
-    fire_phaser_message, nearest_entity_to_point, set_target_message,
+    fire_phaser_message, set_target_message,
     toggle_phaser_mode_message, fire_torpedo_message,
     is_fire_button_enabled, is_tube_loaded, tube_reload_secs,
     phaser_mode_label, ClientSimState,
 };
 use crate::gui::{
-    bridge_sim_to_radar, is_on_radar, project_radar_entity, spawn_gui_button, ButtonPressed,
-    ButtonSize, ConsoleRadar, GenericRadar, GenericRadarWidget, OrientationMode, RadarArc,
-    RadarArcKind, RadarArcs, RadarBlipMap, RadarCenterPose, RadarClipMode, RadarFilter,
-    RadarTargetHighlight, RadioButtonConfig, RadioGroup, RadioSelected, StateVisuals, Disabled,
+    bridge_sim_to_radar, spawn_gui_button, ButtonPressed,
+    ButtonSize, ConsoleRadar, GenericRadar, OrientationMode, RadarArc,
+    RadarArcKind, RadarArcs, RadarBlipClicked, RadarBlipMap, RadarCenterPose, RadarClipMode,
+    RadarEntityUuid, RadarFilter, RadarTargetHighlight, RadioButtonConfig, RadioGroup,
+    RadioSelected, StateVisuals, Disabled,
 };
 use crate::messages::{Console, GamePhase, PhaserBankClientConfig, TorpedoTube, TorpedoTubeClientConfig};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -339,102 +340,35 @@ fn fill_tactical_radar(
             position_type: PositionType::Relative,
             ..default()
         },
-        TacticalRadarTapTarget,
         ConsoleRadar::Tactical,
         RadarBlipMap::default(),
         RadarArcs(arcs),
         RadarTargetHighlight(None),
     ));
-    commands.entity(radar).observe(on_tactical_radar_tap);
+    commands.entity(radar).observe(on_tactical_radar_blip_clicked);
     commands.entity(col).add_child(radar);
 }
 
-/// Marker for the tactical-radar `Node` that owns the tap-to-target observer.
-#[derive(Component)]
-pub struct TacticalRadarTapTarget;
-
-/// Convert a tap into the radar Node's local pixel space.
+/// Observer: when a blip on the tactical radar is clicked, look up the
+/// source entity's `RadarEntityUuid` and dispatch `SetTarget { uuid }`.
 ///
-/// `tap_logical` is `Pointer<Click>::pointer_location.position`, which Bevy's
-/// picking layer delivers in **logical** window pixels. `node_top_left` must
-/// be supplied in the same logical-pixel space. Returns `(local_x, local_y)`
-/// with origin at the node's top-left.
-pub fn radar_local_pixel(tap_logical: Vec2, node_top_left: Vec2) -> Vec2 {
-    tap_logical - node_top_left
-}
-
-/// Observer: when the tactical radar is tapped, find the nearest ship/missile
-/// blip to the tap point and dispatch `SetTarget { uuid }`.
+/// Registered per-radar via `commands.entity(radar).observe(...)`. The
+/// `RadarBlipClicked` event is triggered against the radar entity by
+/// `detect_radar_blip_press` (gui/radar.rs), so this observer only fires
+/// for taps on **this** radar — sensors/long-range radars get their own
+/// observer for their own designation flows.
 ///
-/// Coordinate spaces (this matters on HiDPI / phones where `scale_factor` != 1):
-/// - `pointer_location.position` and `Val::Px(..)` are in **logical** pixels.
-/// - `ComputedNode::size()` and `GlobalTransform::translation()` (for UI) are
-///   in **physical** pixels.
-///
-/// The renderer in `gui/radar.rs` lays out blips via `Val::Px`, so blips live
-/// in logical-pixel space. We therefore convert the radar's physical centre
-/// and size into logical pixels (via `ComputedNode::inverse_scale_factor`)
-/// before projecting entities and matching against the tap.
-fn on_tactical_radar_tap(
-    trigger: On<Pointer<Click>>,
-    radars: Query<(&ComputedNode, &GlobalTransform, &GenericRadarWidget), With<TacticalRadarTapTarget>>,
-    sim: Res<ClientSimState>,
-    ship_view: Res<ShipView>,
+/// The picking math, hit-test, and HiDPI conversions all live inside the
+/// shared `gui::radar` widget; this observer just consumes the resulting
+/// event.
+fn on_tactical_radar_blip_clicked(
+    trigger: On<RadarBlipClicked>,
+    sources: Query<&RadarEntityUuid>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
-    let entity = trigger.entity;
-    let Ok((computed, gt, widget)) = radars.get(entity) else {
-        return;
-    };
-
-    // Radar centre + size in **logical** pixels (matches the tap and Val::Px
-    // blip layout). `ComputedNode::size()` and `GlobalTransform::translation()`
-    // are both physical, so multiply by inverse_scale_factor to convert.
-    let inv_sf = computed.inverse_scale_factor();
-    let size = computed.size() * inv_sf;
-    let radar_radius = size.x.min(size.y) * 0.5;
-    if radar_radius <= 0.0 {
-        return;
-    }
-    let centre = gt.translation();
-    let centre_xy = Vec2::new(centre.x, centre.y) * inv_sf;
-    let top_left = centre_xy - size * 0.5;
-
-    // Tap point in radar-local pixel space (origin top-left).
-    let tap = radar_local_pixel(trigger.event().pointer_location.position, top_left);
-    let click_local = (tap.x, tap.y);
-
-    // Project every entity matching the radar's filter to radar-local pixels.
-    let projected: Vec<(String, f32, f32)> = sim
-        .world
-        .entities
-        .iter()
-        .filter_map(|snap| {
-            if !is_on_radar(&widget.filter, &snap.tags) {
-                return None;
-            }
-            let (nx, ny) = project_radar_entity(
-                snap.x(),
-                snap.z(),
-                ship_view.ship_x,
-                ship_view.ship_z,
-                ship_view.ship_yaw,
-                widget.range,
-                snap.radius_or_zero(),
-                &widget.orientation,
-            )?;
-            // Cull blips outside the circular radar boundary.
-            if nx * nx + ny * ny > 1.0 {
-                return None;
-            }
-            let px = radar_radius + nx * radar_radius;
-            let py = radar_radius - ny * radar_radius;
-            Some((snap.uuid.clone(), px, py))
-        })
-        .collect();
-
-    if let Some(uuid) = nearest_entity_to_point(click_local, &projected) {
-        outbound.write(OutboundClientMessage(set_target_message(uuid)));
+    let source = trigger.event().source;
+    if let Ok(uuid) = sources.get(source) {
+        outbound.write(OutboundClientMessage(set_target_message(uuid.0.clone())));
     }
 }
 
@@ -1110,39 +1044,7 @@ mod tests {
     fn no_tab() -> ActiveConsole { ActiveConsole(None) }
     fn tab(c: Console) -> ActiveConsole { ActiveConsole(Some(c)) }
 
-    // â”€â”€ radar_local_pixel coordinate conversion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-    #[test]
-    fn radar_local_pixel_centre_of_node() {
-        // Node top-left at (100, 200), tap at logical (300, 400)
-        // â†’ local (200, 200) â€” the centre of the 400x400 node.
-        let out = radar_local_pixel(Vec2::new(300.0, 400.0), Vec2::new(100.0, 200.0));
-        assert_eq!(out, Vec2::new(200.0, 200.0));
-    }
-
-    #[test]
-    fn radar_local_pixel_top_left_corner_returns_zero() {
-        // Tap at the node's top-left corner maps to local (0, 0).
-        let out = radar_local_pixel(Vec2::new(100.0, 100.0), Vec2::new(100.0, 100.0));
-        assert_eq!(out, Vec2::ZERO);
-    }
-
-    #[test]
-    fn radar_local_pixel_negative_offset_outside_node() {
-        // Tap above and left of the node produces negative local coords.
-        let out = radar_local_pixel(Vec2::new(50.0, 30.0), Vec2::new(100.0, 100.0));
-        assert_eq!(out, Vec2::new(-50.0, -70.0));
-    }
-
-    #[test]
-    fn radar_local_pixel_bottom_right_of_node() {
-        // 400x400 node at (100, 200), tap at (500, 600)
-        // â†’ local (400, 400) â€” the bottom-right corner.
-        let out = radar_local_pixel(Vec2::new(500.0, 600.0), Vec2::new(100.0, 200.0));
-        assert_eq!(out, Vec2::new(400.0, 400.0));
-    }
-
-    // â”€â”€ weapons_panel_visible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── weapons_panel_visible ─────────────────────────────────────────────
 
     #[test]
     fn weapons_panel_hidden_in_lobby_phase() {
@@ -1360,5 +1262,88 @@ mod tests {
         assert_ne!(idle, active);
         assert_ne!(idle, press);
         assert_ne!(idle, disabled);
+    }
+
+    // ── on_tactical_radar_blip_clicked ────────────────────────────────────
+
+    #[test]
+    fn tactical_radar_blip_clicked_emits_set_target_with_source_uuid() {
+        // End-to-end wiring test for the tap-to-target chain:
+        //
+        // 1. Spawn a "source" ECS entity carrying RadarEntityUuid (mimicking
+        //    what the sim-to-radar bridge spawns for each visible entity).
+        // 2. Spawn a "radar" entity and register the per-radar observer.
+        // 3. Fire RadarBlipClicked at the radar with `source` in the payload
+        //    (this is what `detect_radar_blip_press` does in production).
+        // 4. Assert one OutboundClientMessage::SetTarget { uuid } was written,
+        //    carrying the source entity's RadarEntityUuid.
+        //
+        // This is the regression test for the bug where the prior
+        // `Pointer<Click>` observer silently returned because trigger.entity
+        // was the blip UI node, not the radar Node.
+
+        use bevy::ecs::message::Messages;
+        use crate::client_app::OutboundClientMessage;
+        use crate::messages::ClientMessage;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OutboundClientMessage>();
+
+        // The source entity is what RadarBlipClicked.source points to —
+        // the ECS entity that carries the wire-level uuid.
+        let source = app.world_mut()
+            .spawn(RadarEntityUuid("uuid-deadbeef".to_string()))
+            .id();
+
+        // The radar entity is what the observer is registered on.
+        let radar = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .entity_mut(radar)
+            .observe(on_tactical_radar_blip_clicked);
+
+        // Fire the event exactly as detect_radar_blip_press would.
+        app.world_mut().trigger(RadarBlipClicked { radar, source });
+
+        // Drain outbound queue and assert we got the expected SetTarget.
+        let messages = app.world_mut()
+            .resource_mut::<Messages<OutboundClientMessage>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(messages.len(), 1, "exactly one outbound message: {messages:?}");
+        match &messages[0].0 {
+            ClientMessage::SetTarget { uuid } => {
+                assert_eq!(uuid, "uuid-deadbeef");
+            }
+            other => panic!("expected SetTarget, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tactical_radar_blip_clicked_ignores_source_without_uuid() {
+        // If the source entity somehow lacks RadarEntityUuid (e.g. a stale
+        // blip mid-despawn), the observer must silently no-op rather than
+        // panicking or sending a malformed SetTarget.
+
+        use bevy::ecs::message::Messages;
+        use crate::client_app::OutboundClientMessage;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OutboundClientMessage>();
+
+        let source = app.world_mut().spawn_empty().id(); // no RadarEntityUuid
+        let radar = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .entity_mut(radar)
+            .observe(on_tactical_radar_blip_clicked);
+
+        app.world_mut().trigger(RadarBlipClicked { radar, source });
+
+        let messages = app.world_mut()
+            .resource_mut::<Messages<OutboundClientMessage>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert!(messages.is_empty(), "no message expected: {messages:?}");
     }
 }

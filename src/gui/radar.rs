@@ -272,10 +272,27 @@ pub struct RadarRegionNode {
     source: Entity,
 }
 
-/// Triggered on a radar blip UI node when the player clicks it.
-/// The payload is the source ECS entity stored in `RadarBlipNode::source`.
+/// Triggered on a **radar widget entity** when the player clicks one of its
+/// blips. The event target is the radar; the payload carries the source ECS
+/// entity (`RadarBlipNode::source`) so observers can resolve identity (e.g.
+/// `RadarEntityUuid`) without doing their own picking.
+///
+/// Targeting the radar (rather than the source entity) lets each console
+/// attach its own per-radar `.observe(...)` handler — e.g. the tactical radar
+/// triggers a phaser lock; a future sensors radar might trigger a science
+/// designation — without consoles needing to gate on "is this MY radar?".
 #[derive(EntityEvent, Clone, Debug)]
-pub struct RadarBlipClicked(pub Entity);
+pub struct RadarBlipClicked {
+    /// The radar widget entity that owns the tapped blip. Also the
+    /// `EntityEvent::event_target`, so `commands.entity(radar).observe(...)`
+    /// fires when this event triggers.
+    #[event_target]
+    pub radar: Entity,
+    /// The source ECS blip entity (e.g. a sim-snapshot entity carrying
+    /// `RadarEntityUuid`). Observers query components on this entity to
+    /// recover the wire-level identity of what was tapped.
+    pub source: Entity,
+}
 
 // ── Blip shader material ──────────────────────────────────────────────────────
 
@@ -1342,16 +1359,21 @@ fn sync_radar_arc_nodes(
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 /// Detects press transitions on `RadarBlipNode` UI nodes and triggers
-/// `RadarBlipClicked` on the source ECS blip entity.
+/// `RadarBlipClicked` on the **radar widget entity** (the parent of the
+/// blip UI node), carrying the source ECS blip entity in the payload.
+///
+/// Triggering on the radar (not the source) means each console can attach
+/// a per-radar `.observe(...)` handler scoped to its own radar without
+/// having to filter by "which radar did this come from?" in the body.
 fn detect_radar_blip_press(
-    query: Query<(&Interaction, &RadarBlipNode), Changed<Interaction>>,
+    query: Query<(&Interaction, &RadarBlipNode, &ChildOf), Changed<Interaction>>,
     mut commands: Commands,
 ) {
-    for (interaction, blip) in query.iter() {
+    for (interaction, blip, child_of) in query.iter() {
         if *interaction == Interaction::Pressed {
-            // Trigger on blip.source so the entity event payload carries the
-            // correct ECS blip entity (not the transient UI node entity).
-            commands.entity(blip.source).trigger(RadarBlipClicked);
+            let radar = child_of.parent();
+            let source = blip.source;
+            commands.trigger(RadarBlipClicked { radar, source });
         }
     }
 }
@@ -1751,53 +1773,51 @@ mod tests {
 
     #[cfg(feature = "client")]
     #[test]
-    fn radar_tap_math_matches_blip_layout_at_phone_scale_factor() {
-        // Simulates `on_tactical_radar_tap` arithmetic. The tap location
-        // (Pointer<Click>::pointer_location.position) and Val::Px blip
-        // positions are both in logical pixels; ComputedNode::size and
-        // GlobalTransform::translation are in physical and must be converted.
+    fn radar_blip_press_triggers_event_on_radar_with_source_payload() {
+        // detect_radar_blip_press must fire RadarBlipClicked targeting the
+        // **radar widget** entity (the parent of the blip UI node), carrying
+        // the **source** ECS blip entity in the payload. This is the contract
+        // every per-console observer (tactical, sensors, …) relies on.
 
-        let scale_factor: f32 = 2.0;
-        let inv_sf = 1.0 / scale_factor;
+        use bevy::ecs::observer::On;
+        use std::sync::{Arc, Mutex};
 
-        // Radar is 240 logical px square, top-left at logical (50, 100), so
-        // physical size = (480, 480), physical centre = (50+120, 100+120) * sf
-        //               = (170, 220) * 2 = (340, 440).
-        let physical_size = bevy::math::Vec2::splat(480.0);
-        let physical_centre = bevy::math::Vec2::new(340.0, 440.0);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_systems(Update, detect_radar_blip_press);
 
-        // Observer conversion:
-        let logical_size = physical_size * inv_sf;
-        let logical_centre = physical_centre * inv_sf;
-        let logical_top_left = logical_centre - logical_size * 0.5;
-        assert_eq!(logical_top_left, bevy::math::Vec2::new(50.0, 100.0));
+        // Spawn the source ECS entity (what the wire-level uuid lives on).
+        let source = app.world_mut().spawn_empty().id();
 
-        // A blip projected at (nx=0.5, ny=-0.5) — bottom-right quadrant.
-        // Layout (logical, what Val::Px writes):
-        //   centre = 240/2 = 120
-        //   radius = 120
-        //   left   = 120 + 0.5 * 120 - 8 = 172  (logical, inside the widget)
-        //   top    = 120 - (-0.5) * 120 - 8 = 172
-        // So the blip's centre on screen sits at logical
-        // (top_left + 172 + 8, top_left + 172 + 8) = (230, 280).
-        let (left, top) = blip_local_offset(0.5, -0.5, 120.0, 120.0, 120.0, 8.0);
-        let blip_centre_screen = logical_top_left + bevy::math::Vec2::new(left + 8.0, top + 8.0);
-        assert_eq!(blip_centre_screen, bevy::math::Vec2::new(230.0, 280.0));
+        // Spawn the radar widget entity.
+        let radar = app.world_mut().spawn_empty().id();
 
-        // A tap delivered by Bevy picking at logical (230, 280) — i.e. right
-        // on top of the blip — should map to the same nx, ny when projected
-        // back through the observer's math.
-        let tap_logical = bevy::math::Vec2::new(230.0, 280.0);
-        let local = crate::console::weapons::client::radar_local_pixel(
-            tap_logical,
-            logical_top_left,
+        // Spawn the UI blip node as a child of the radar, with Pressed
+        // interaction so the system picks it up next frame.
+        let mut blip_cmd = app.world_mut().spawn((
+            RadarBlipNode { source },
+            Interaction::Pressed,
+        ));
+        blip_cmd.insert(ChildOf(radar));
+
+        // Capture observer fires. Register on the **radar** entity — this is
+        // the per-radar registration pattern consoles use.
+        let captured: Arc<Mutex<Vec<(Entity, Entity)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured_for_obs = captured.clone();
+        app.world_mut().entity_mut(radar).observe(
+            move |trigger: On<RadarBlipClicked>| {
+                let ev = trigger.event();
+                captured_for_obs.lock().unwrap().push((ev.radar, ev.source));
+            },
         );
-        // local should land at (180, 180) = (centre + nx*radius, centre - ny*radius)
-        // → nx = (180 - 120) / 120 = 0.5, ny = -(180 - 120) / 120 = -0.5 ✓
-        let nx = (local.x - 120.0) / 120.0;
-        let ny = -(local.y - 120.0) / 120.0;
-        assert!((nx - 0.5).abs() < 1e-5, "nx={nx}");
-        assert!((ny - -0.5).abs() < 1e-5, "ny={ny}");
+
+        // One frame: detect_radar_blip_press queues the trigger; observer runs.
+        app.update();
+
+        let hits = captured.lock().unwrap().clone();
+        assert_eq!(hits.len(), 1, "observer fired exactly once: {hits:?}");
+        assert_eq!(hits[0].0, radar, "event.radar is the radar entity");
+        assert_eq!(hits[0].1, source, "event.source is the source ECS blip entity");
     }
 
     // ── arc_contains ────────────────────────────────────────────────────────

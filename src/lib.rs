@@ -3,6 +3,23 @@
 // common in game-development patterns.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+// ── WIP: radar click instrumentation ───────────────────────────────────────
+// Browser-console logging for diagnosing the targeting-on-click bug.
+// Revert this block (and the wasm_log! call sites) once the bug is fixed.
+#[cfg(target_arch = "wasm32")]
+#[macro_export]
+macro_rules! wasm_log {
+    ($($arg:tt)*) => {
+        ::web_sys::console::log_1(&::wasm_bindgen::JsValue::from_str(&format!($($arg)*)))
+    };
+}
+#[cfg(not(target_arch = "wasm32"))]
+#[macro_export]
+macro_rules! wasm_log {
+    ($($arg:tt)*) => { let _ = format_args!($($arg)*); };
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 pub mod core;
 pub mod ai;
 pub use ai::core as ai_core;

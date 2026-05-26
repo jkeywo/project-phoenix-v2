@@ -367,7 +367,14 @@ fn on_tactical_radar_blip_clicked(
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     let source = trigger.event().source;
-    if let Ok(uuid) = sources.get(source) {
+    let lookup = sources.get(source);
+    crate::wasm_log!(
+        "[radar-instr 4] on_tactical_radar_blip_clicked: radar={:?} source={:?} uuid_lookup={}",
+        trigger.event().radar, source,
+        match &lookup { Ok(u) => format!("Some({})", u.0), Err(_) => "None".into() }
+    );
+    if let Ok(uuid) = lookup {
+        crate::wasm_log!("[radar-instr 5] writing SetTarget uuid={}", uuid.0);
         outbound.write(OutboundClientMessage(set_target_message(uuid.0.clone())));
     }
 }

@@ -286,6 +286,10 @@ impl ClientSimState {
                 torpedo_count,
                 phaser_mode,
             } => {
+                crate::wasm_log!(
+                    "[radar-instr 8] WeaponsUpdate received: target_uuid={:?} prev={:?}",
+                    target_uuid, self.current_target_uuid
+                );
                 self.current_target_uuid = target_uuid.clone();
                 self.bank_states = banks.clone();
                 self.tube_states = tubes.clone();

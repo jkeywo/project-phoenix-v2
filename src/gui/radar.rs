@@ -255,6 +255,26 @@ pub struct RadarCenter {
     pub yaw: f32,
 }
 
+// ── Blip world pose ──────────────────────────────────────────────────────────
+
+/// World-space position and heading carried by every radar-blip ECS entity
+/// (`RadarCenter` and per-uuid blips both live alongside this).
+///
+/// Replaces `Transform` / `GlobalTransform` on blip entities. Blips are
+/// parented to a `Node`-based radar widget so that `despawn` on the widget
+/// cleans up its blip set, but `Node` no longer satisfies the
+/// `GlobalTransform` propagation invariant in Bevy 0.18 (UI uses
+/// `UiTransform` instead) — putting `GlobalTransform` on a child of a Node
+/// triggers B0004. `BlipWorldPose` is a plain data carrier, never
+/// propagated, so the parent-child invariant is not violated.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct BlipWorldPose {
+    pub x: f32,
+    pub z: f32,
+    /// Heading in radians.
+    pub yaw: f32,
+}
+
 // ── Blip node tag ────────────────────────────────────────────────────────────
 
 /// Tags a UI node spawned by `sync_radar_blip_nodes` to represent a
@@ -601,15 +621,12 @@ pub fn bridge_sim_to_radar(
     entities: &[EntitySnapshot],
 ) {
     // ── Player-ship RadarCenter blip ──────────────────────────────────────
-    let ship_t = Transform::from_xyz(pose.x, 0.0, pose.z)
-        .with_rotation(Quat::from_rotation_y(pose.yaw));
-    let ship_global = GlobalTransform::from(ship_t);
+    let pose_comp = BlipWorldPose { x: pose.x, z: pose.z, yaw: pose.yaw };
     let centre_bundle = (
         RadarCenter { world_x: pose.x, world_z: pose.z, yaw: pose.yaw },
         OnRadar(vec!["player".to_string()]),
         RadarAppearance::player_ship(),
-        ship_t,
-        ship_global,
+        pose_comp,
     );
     match map.center {
         Some(e) => {
@@ -660,13 +677,10 @@ pub fn bridge_sim_to_radar(
             RadarAppearance::point(icon, world_size, color)
         };
 
-        let t = Transform::from_xyz(snapshot.x(), 0.0, snapshot.z())
-            .with_rotation(Quat::from_rotation_y(entity_yaw));
         let bundle = (
             OnRadar(snapshot.tags.clone()),
             appearance,
-            t,
-            GlobalTransform::from(t),
+            BlipWorldPose { x: snapshot.x(), z: snapshot.z(), yaw: entity_yaw },
             RadarEntityUuid(uuid.clone()),
         );
 
@@ -731,7 +745,7 @@ fn sync_radar_blip_nodes(
         Option<&RadarTargetHighlight>,
     )>,
     overlay_nodes: Query<&ComputedNode>,
-    blips: Query<(Entity, &OnRadar, &RadarAppearance, &GlobalTransform, Option<&RadarEntityUuid>)>,
+    blips: Query<(Entity, &OnRadar, &RadarAppearance, &BlipWorldPose, Option<&RadarEntityUuid>)>,
     centers: Query<&RadarCenter>,
     mut existing_blip_nodes: Query<
         (&mut Node, &MaterialNode<RadarBlipMaterial>, &mut Transform, &RadarBlipNode),
@@ -813,10 +827,9 @@ fn sync_radar_blip_nodes(
             let max_dist = blips
                 .iter()
                 .filter(|(_, on_radar, _, _, _)| is_on_radar(&widget.filter, &on_radar.0))
-                .filter_map(|(_, _, appearance, blip_gtf, _)| {
-                    let bpos = blip_gtf.translation();
-                    let dx = bpos.x - center_x;
-                    let dz = bpos.z - center_z;
+                .filter_map(|(_, _, appearance, blip_pose, _)| {
+                    let dx = blip_pose.x - center_x;
+                    let dz = blip_pose.z - center_z;
                     let dist = (dx * dx + dz * dz).sqrt() + appearance.world_size;
                     if dist > 0.0 {
                         Some(dist)
@@ -844,15 +857,14 @@ fn sync_radar_blip_nodes(
             (f32, f32, Color, RegionRadarShape, f32),
         > = HashMap::new();
 
-        for (src, on_radar, appearance, blip_gtf, blip_uuid) in blips.iter() {
+        for (src, on_radar, appearance, blip_pose, blip_uuid) in blips.iter() {
             if !is_on_radar(&widget.filter, &on_radar.0) {
                 continue;
             }
-            let bpos = blip_gtf.translation();
             let ent_radius = appearance.world_size * 0.5;
             let Some((nx, ny)) = project_radar_entity(
-                bpos.x,
-                bpos.z,
+                blip_pose.x,
+                blip_pose.z,
                 center_x,
                 center_z,
                 effective_yaw,
@@ -895,7 +907,7 @@ fn sync_radar_blip_nodes(
             } else {
                 // ── Point entity: render as icon ─────────────────────────────
                 let icon_angle = icon_rotation_angle(
-                    blip_gtf,
+                    blip_pose.yaw,
                     effective_yaw,
                     &widget.orientation,
                 );
@@ -1018,7 +1030,7 @@ fn sync_radar_blip_nodes(
                         ..default()
                     };
                     let transform = Transform::from_rotation(Quat::from_rotation_z(intent.angle));
-                    parent.spawn((
+                    let spawned = parent.spawn((
                         node,
                         MaterialNode(mat_handle),
                         transform,
@@ -1026,7 +1038,11 @@ fn sync_radar_blip_nodes(
                         RadarBlipNode { source },
                         Button,
                         Interaction::default(),
-                    ));
+                    )).id();
+                    crate::wasm_log!(
+                        "[radar-instr 1] blip spawned: blip={:?} radar={:?} source={:?} left={} top={} size={}",
+                        spawned, radar_entity, source, intent.left, intent.top, intent.size_px
+                    );
                 }
                 for (source, (nx, ny, colour, shape, _)) in intended_regions.drain() {
                     let (node, bg, border_color) = region_shape_node(
@@ -1056,15 +1072,10 @@ fn sync_radar_blip_nodes(
 /// Compute the Z-rotation angle for a radar blip icon based on the
 /// entity's world yaw and the radar's orientation mode.
 fn icon_rotation_angle(
-    blip_gtf: &GlobalTransform,
+    entity_yaw: f32,
     effective_yaw: f32,
     _orientation: &OrientationMode,
 ) -> f32 {
-    let entity_yaw = blip_gtf
-        .to_scale_rotation_translation()
-        .1
-        .to_euler(bevy::math::EulerRot::YXZ)
-        .0;
     effective_yaw - entity_yaw
 }
 
@@ -1366,13 +1377,21 @@ fn sync_radar_arc_nodes(
 /// a per-radar `.observe(...)` handler scoped to its own radar without
 /// having to filter by "which radar did this come from?" in the body.
 fn detect_radar_blip_press(
-    query: Query<(&Interaction, &RadarBlipNode, &ChildOf), Changed<Interaction>>,
+    query: Query<(Entity, &Interaction, &RadarBlipNode, &ChildOf), Changed<Interaction>>,
     mut commands: Commands,
 ) {
-    for (interaction, blip, child_of) in query.iter() {
+    for (blip_entity, interaction, blip, child_of) in query.iter() {
+        crate::wasm_log!(
+            "[radar-instr 2] blip interaction changed: blip={:?} source={:?} parent={:?} state={:?}",
+            blip_entity, blip.source, child_of.parent(), interaction
+        );
         if *interaction == Interaction::Pressed {
             let radar = child_of.parent();
             let source = blip.source;
+            crate::wasm_log!(
+                "[radar-instr 3] RadarBlipClicked triggered: radar={:?} source={:?}",
+                radar, source
+            );
             commands.trigger(RadarBlipClicked { radar, source });
         }
     }

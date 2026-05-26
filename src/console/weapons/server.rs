@@ -210,7 +210,13 @@ fn handle_set_target(
     for ev in reader.read() {
         let ClientMessage::SetTarget { uuid } = &ev.msg else { continue };
 
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
+        let holder = sessions.0.console_holder(Console::Tactical);
+        let holder_match = holder == Some(ev.token.as_str());
+        crate::wasm_log!(
+            "[radar-instr 7] handle_set_target: token={} uuid={} tactical_holder={:?} holder_match={}",
+            ev.token, uuid, holder, holder_match
+        );
+        if !holder_match {
             continue;
         }
 
@@ -226,6 +232,10 @@ fn handle_set_target(
                 dx * dx + dz * dz <= effective_weapons_range * effective_weapons_range
             }
         };
+        crate::wasm_log!(
+            "[radar-instr 7] handle_set_target result: uuid={} entity_found={} base_range={} mult={} effective={} locked={}",
+            uuid, asteroid.is_some(), base_range, radar_range_mult, effective_weapons_range, locked
+        );
 
         if locked {
             weapons_target.0 = Some(uuid.clone());

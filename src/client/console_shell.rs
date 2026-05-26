@@ -524,6 +524,7 @@ mod tests {
             inset_card: d.clone(),
             radar_icons: crate::phone_border::framing::RadarIconHandles {
                 ship: d.clone(),
+                player_ship: d.clone(),
                 asteroid: d.clone(),
                 station: d.clone(),
                 planet: d.clone(),

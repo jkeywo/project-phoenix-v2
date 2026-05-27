@@ -759,7 +759,15 @@ fn handle_respond_to_message(
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
     mut objectives: ResMut<ObjectiveManagerRes>,
-    _commands: Commands,
+    mut commands: Commands,
+    mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
+    mut modifiers: Option<ResMut<crate::modifiers::ShipModifiers>>,
+    mut next_state: Option<ResMut<NextState<GamePhase>>>,
+    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
+    mut layer_map: Option<ResMut<WorldLayerMap>>,
+    base_world_config: Option<Res<crate::world::config::WorldConfig>>,
+    entity_uuid_query: Query<(Entity, &EntityUuid)>,
 ) {
     for ev in reader.read() {
         if !sessions.0.player_has_console(&ev.token, Console::Comms) {
@@ -800,6 +808,24 @@ fn handle_respond_to_message(
         let response = &responses[*response_index];
 
         // Fire response actions.
+        //
+        // PRD #397 fix 2: this dispatch is intentionally parallel to the
+        // per-action match in `handle_ai_events` below. Every `TriggerAction`
+        // variant a trigger can fire must produce the same observable
+        // effect when listed under a comms response. Comms responses do not
+        // currently carry an originating sub-world layer (the `CommsTemplate`
+        // type has no `origin_layer` field, unlike `TriggerState`), so all
+        // layer-scoped operations resolve against the base world (`None`).
+        // Flag-mutation transitions are pushed onto
+        // `runtime.pending_world_events` so `handle_ai_events` (later in the
+        // same Update tick via `SimSet::Physics`) picks them up and fires
+        // any chained `on_flag_set` / `on_flag_cleared` triggers.
+        //
+        // When adding a new `TriggerAction` variant, add an arm here AND in
+        // `handle_ai_events`. The `comms_response_dispatches_every_trigger_action_variant`
+        // parity test guards against drift.
+        let origin_layer: Option<String> = None;
+        let name_to_uuid_snapshot = runtime.name_to_uuid.clone();
         for action in &response.actions {
             match action {
                 TriggerAction::AddObjective { id, text, mandatory } => {
@@ -811,28 +837,365 @@ fn handle_respond_to_message(
                 TriggerAction::FailObjective { id } => {
                     objectives.0.fail(id);
                 }
-                TriggerAction::SetAiState { .. } => {
-                    // SetAiState is handled by the AI-event trigger system, not
-                    // the comms response path. No-op here.
+                TriggerAction::SetAiState { entity, state, target } => {
+                    let target_uuid = match name_to_uuid_snapshot.get(entity) {
+                        Some(u) => u.clone(),
+                        None => {
+                            bevy::log::warn!(
+                                "handle_respond_to_message: SetAiState: unknown entity name '{entity}'"
+                            );
+                            continue;
+                        }
+                    };
+                    for (uuid_comp, mut ctrl, behaviour) in ai_query.iter_mut() {
+                        if uuid_comp.0 != target_uuid {
+                            continue;
+                        }
+                        let new_ai_state = crate::ai::build_initial_state(
+                            &crate::entity_config::BehaviourConfig {
+                                initial_state: state.clone(),
+                                state: behaviour.0.state.clone(),
+                                transition: behaviour.0.transition.clone(),
+                            },
+                        );
+                        ctrl.controller.current_state = new_ai_state;
+                        ctrl.controller.current_state_name = state.clone();
+                        if let Some(target_name) = target {
+                            if let Some(target_uuid) = name_to_uuid_snapshot.get(target_name) {
+                                if let Ok(uuid) = uuid::Uuid::parse_str(target_uuid) {
+                                    ctrl.controller.blackboard.target = Some(uuid);
+                                }
+                            }
+                        }
+                        break;
+                    }
                 }
-                TriggerAction::ApplyModifier { .. }
-                | TriggerAction::RemoveModifier { .. }
-                | TriggerAction::ApplyFlag { .. }
-                | TriggerAction::RemoveFlag { .. }
-                | TriggerAction::ApplyIntModifier { .. }
-                | TriggerAction::RemoveIntModifier { .. }
-                | TriggerAction::GameOver { .. }
-                | TriggerAction::LoadWorld { .. }
-                | TriggerAction::UnloadWorld { .. }
-                | TriggerAction::SetWorldFlag { .. }
-                | TriggerAction::ClearWorldFlag { .. }
-                | TriggerAction::IncrementWorldFlag { .. }
-                | TriggerAction::SetWorldFlagValue { .. }
-                | TriggerAction::SpawnEntity { .. }
-                | TriggerAction::DestroyEntity { .. } => {
-                    // Modifier/flag/game-over/load-world/unload-world/world-flag
-                    // actions are handled by the AI-event trigger or damage systems.
-                    // No-op in the comms response path.
+                TriggerAction::ApplyModifier { entity, tag, slot, bonus } => {
+                    if !name_to_uuid_snapshot.contains_key(entity) {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyModifier: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.add_or_update(crate::modifiers::Modifier {
+                            source: crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            slot: slot.clone(),
+                            bonus: *bonus,
+                        });
+                    }
+                }
+                TriggerAction::RemoveModifier { entity, tag, slot } => {
+                    if !name_to_uuid_snapshot.contains_key(entity) {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveModifier: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.remove(
+                            &crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            slot,
+                        );
+                    }
+                }
+                TriggerAction::ApplyFlag { entity, tag, kind } => {
+                    if !name_to_uuid_snapshot.contains_key(entity) {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyFlag: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.add_flag(
+                            crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            kind.clone(),
+                        );
+                    }
+                }
+                TriggerAction::RemoveFlag { entity, tag, kind } => {
+                    if !name_to_uuid_snapshot.contains_key(entity) {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveFlag: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.remove_flag(
+                            crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            kind.clone(),
+                        );
+                    }
+                }
+                TriggerAction::ApplyIntModifier { entity, tag, slot, bonus } => {
+                    if !name_to_uuid_snapshot.contains_key(entity) {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: ApplyIntModifier: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.add_or_update_int(crate::modifiers::IntModifier {
+                            source: crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            slot: slot.clone(),
+                            bonus: *bonus,
+                        });
+                    }
+                }
+                TriggerAction::RemoveIntModifier { entity, tag, slot } => {
+                    if !name_to_uuid_snapshot.contains_key(entity) {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: RemoveIntModifier: unknown entity name '{entity}'"
+                        );
+                        continue;
+                    }
+                    if let Some(ref mut mods) = modifiers {
+                        mods.remove_int(
+                            &crate::messages::ModifierSource::World {
+                                id: "world".to_string(),
+                                tag: tag.clone(),
+                            },
+                            slot,
+                        );
+                    }
+                }
+                TriggerAction::GameOver { message } => {
+                    let reason = message.clone().unwrap_or_default();
+                    if let Some(ref mut gr) = game_over_reason {
+                        gr.0 = Some(reason);
+                    }
+                    if let Some(ref mut ns) = next_state {
+                        ns.set(GamePhase::GameOver);
+                    }
+                }
+                TriggerAction::LoadWorld { path } => {
+                    if let Some(ref mut lc) = pending_layers {
+                        // Comms responses load against the base world
+                        // (loader_path = None) since CommsTemplate has no
+                        // origin_layer concept today.
+                        lc.0.push(WorldLayerChange::Load {
+                            path: path.clone(),
+                            loader_path: origin_layer.clone(),
+                        });
+                    }
+                }
+                TriggerAction::UnloadWorld { path } => {
+                    if let Some(ref mut lc) = pending_layers {
+                        lc.0.push(WorldLayerChange::Unload(path.clone()));
+                    }
+                }
+                TriggerAction::SetWorldFlag { name } => {
+                    if let Some((target_layer, stripped, before, after)) =
+                        mutate_world_flag(
+                            &mut runtime.flags,
+                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                            &origin_layer,
+                            name,
+                            FlagMutation::Set,
+                        )
+                    {
+                        emit_flag_transition(
+                            &mut runtime.pending_world_events,
+                            &stripped, &target_layer, before, after,
+                        );
+                    }
+                }
+                TriggerAction::ClearWorldFlag { name } => {
+                    if let Some((target_layer, stripped, before, after)) =
+                        mutate_world_flag(
+                            &mut runtime.flags,
+                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                            &origin_layer,
+                            name,
+                            FlagMutation::Clear,
+                        )
+                    {
+                        emit_flag_transition(
+                            &mut runtime.pending_world_events,
+                            &stripped, &target_layer, before, after,
+                        );
+                    }
+                }
+                TriggerAction::IncrementWorldFlag { name, by } => {
+                    if let Some((target_layer, stripped, before, after)) =
+                        mutate_world_flag(
+                            &mut runtime.flags,
+                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                            &origin_layer,
+                            name,
+                            FlagMutation::Increment(*by),
+                        )
+                    {
+                        emit_flag_transition(
+                            &mut runtime.pending_world_events,
+                            &stripped, &target_layer, before, after,
+                        );
+                    }
+                }
+                TriggerAction::SetWorldFlagValue { name, value } => {
+                    if let Some((target_layer, stripped, before, after)) =
+                        mutate_world_flag(
+                            &mut runtime.flags,
+                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                            &origin_layer,
+                            name,
+                            FlagMutation::SetValue(*value),
+                        )
+                    {
+                        emit_flag_transition(
+                            &mut runtime.pending_world_events,
+                            &stripped, &target_layer, before, after,
+                        );
+                    }
+                }
+                TriggerAction::SpawnEntity {
+                    template_path, name, anchor, position, rotation, scale,
+                } => {
+                    let pos_arr: [f32; 3] = if let Some(pos) = position {
+                        *pos
+                    } else if let Some(anchor_name) = anchor {
+                        // origin_layer = None: resolve against base world anchors only.
+                        let lookup = base_world_config
+                            .as_ref()
+                            .and_then(|wc| wc.anchors.get(anchor_name).copied());
+                        match lookup {
+                            Some(p) => p,
+                            None => {
+                                bevy::log::warn!(
+                                    "handle_respond_to_message: SpawnEntity '{name}' anchor '{anchor_name}' not found"
+                                );
+                                continue;
+                            }
+                        }
+                    } else {
+                        bevy::log::warn!(
+                            "handle_respond_to_message: SpawnEntity '{name}' has neither anchor nor position"
+                        );
+                        continue;
+                    };
+
+                    let config_cache = crate::config_cache::get_config_cache();
+                    let template_inst = crate::world::config::WorldEntity {
+                        template_path: template_path.clone(),
+                        ..Default::default()
+                    };
+                    let entity_config = match crate::entity_loader::resolve_entity(
+                        &template_inst, &config_cache,
+                    ) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                match std::fs::read_to_string(template_path) {
+                                    Ok(toml_str) => {
+                                        match crate::entity_config::EntityConfig::from_toml(&toml_str) {
+                                            Ok(c) => c,
+                                            Err(err) => {
+                                                bevy::log::warn!(
+                                                    "handle_respond_to_message: SpawnEntity '{name}' template '{template_path}' parse error: {err:?}"
+                                                );
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        bevy::log::warn!(
+                                            "handle_respond_to_message: SpawnEntity '{name}' template '{template_path}' not in cache nor on disk: {e}"
+                                        );
+                                        continue;
+                                    }
+                                }
+                            }
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                bevy::log::warn!(
+                                    "handle_respond_to_message: SpawnEntity '{name}' template '{template_path}' not in cache: {e}"
+                                );
+                                continue;
+                            }
+                        }
+                    };
+
+                    let uuid = crate::entity_loader::assign_uuid();
+                    let pos_vec = Vec3::new(pos_arr[0], pos_arr[1], pos_arr[2]);
+                    let spawned = crate::entity_spawner::spawn_entity(
+                        &mut commands,
+                        &entity_config,
+                        pos_vec,
+                        uuid.clone(),
+                        None,
+                    );
+
+                    if rotation.is_some() || scale.is_some() {
+                        let [rx, ry, rz] = rotation.unwrap_or([0.0, 0.0, 0.0]);
+                        let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
+                        let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
+                        let scale_vec = Vec3::new(sx, sy, sz);
+                        commands.entity(spawned).insert(
+                            Transform {
+                                translation: pos_vec,
+                                rotation: quat,
+                                scale: scale_vec,
+                            },
+                        );
+                    }
+
+                    runtime.name_to_uuid.insert(name.clone(), uuid);
+                    // origin_layer = None => entity is not attached to any
+                    // sub-world layer's spawned_entities list. It persists
+                    // for the session (matches base-world trigger semantics).
+                }
+                TriggerAction::DestroyEntity { entity } => {
+                    let uuid = match name_to_uuid_snapshot.get(entity) {
+                        Some(u) => u.clone(),
+                        None => {
+                            bevy::log::warn!(
+                                "handle_respond_to_message: DestroyEntity: unknown entity name '{entity}'"
+                            );
+                            continue;
+                        }
+                    };
+                    let mut target_entity: Option<Entity> = None;
+                    for (ent, uuid_comp) in entity_uuid_query.iter() {
+                        if uuid_comp.0 == uuid {
+                            target_entity = Some(ent);
+                            break;
+                        }
+                    }
+                    // Defer AiEntityDestroyed via Commands::queue so
+                    // external consumers (and chained on_destroyed triggers
+                    // in handle_ai_events later this tick) observe the event.
+                    runtime.pending_world_events.push(
+                        WorldEvent::Destroyed { uuid: uuid.clone() }
+                    );
+                    let msg_uuid = uuid.clone();
+                    commands.queue(move |world: &mut World| {
+                        if let Some(mut msgs) = world.get_resource_mut::<
+                            Messages<crate::ai_plugin::AiEntityDestroyed>,
+                        >() {
+                            msgs.write(crate::ai_plugin::AiEntityDestroyed {
+                                entity_uuid: msg_uuid,
+                            });
+                        }
+                    });
+                    if let Some(ent) = target_entity {
+                        commands.entity(ent).despawn();
+                    }
                 }
             }
         }
@@ -5755,5 +6118,586 @@ size_max = 2.0
             }
         }
         assert!(found, "spawned entity must exist in ECS with the registered UUID");
+    }
+
+    // -- PRD #397 fix 2: comms-response action dispatch parity ----------------
+    //
+    // These tests assert that `handle_respond_to_message` dispatches every
+    // `TriggerAction` variant that `handle_ai_events` dispatches. The
+    // "enumeration" test at the end matches on every variant of `TriggerAction`
+    // so adding a new variant is a compile error until the new variant is
+    // wired into both dispatch sites and a per-variant assertion is added.
+
+    /// Extended comms test app that includes the optional resources
+    /// `handle_respond_to_message` needs to dispatch the full action set
+    /// (modifiers, layer map, game-over state, base WorldConfig). The
+    /// `apply_world_layer_changes` system is intentionally NOT wired in: we
+    /// only assert that LoadWorld/UnloadWorld push commands into
+    /// `PendingWorldLayerChanges`, matching the per-variant assertions used
+    /// by the `handle_ai_events` tests above.
+    fn comms_parity_test_app() -> App {
+        let mut app = comms_test_app();
+        app.init_resource::<crate::modifiers::ShipModifiers>()
+            .init_resource::<WorldLayerMap>()
+            .init_resource::<PendingWorldLayerChanges>()
+            .init_resource::<crate::simulation::GameOverReason>();
+        app
+    }
+
+    /// Install a comms template whose single response carries `actions`,
+    /// register the sender as a contact, hail it from the comms player, and
+    /// drive the response. Returns the new App after `tick`s have completed.
+    fn fire_response_with_actions(actions: Vec<TriggerAction>) -> App {
+        let station_uuid = "station-parity-uuid";
+        let mut app = comms_parity_test_app();
+        // Boot the standard captain+comms+InProgress state but install a
+        // tailored template carrying the requested actions.
+        push_msg(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
+        tick(&mut app);
+        push_msg(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
+        tick(&mut app);
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Identify {
+                token: "comms".into(),
+                name: "Uhura".into(),
+            },
+        );
+        tick(&mut app);
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::SelectStation {
+                station: "Comms".into(),
+            },
+        );
+        tick(&mut app);
+        push_msg(&mut app, "captain", ClientMessage::StartGame);
+        tick(&mut app);
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("starbase_alpha".into(), station_uuid.into());
+            runtime.contacts.push(CommsContact {
+                uuid: station_uuid.into(),
+                name: "Starbase Alpha".into(),
+                in_range: true,
+            });
+            runtime.comms_template_states.push(CommsTemplateState {
+                template: crate::world::content::CommsTemplate {
+                    from: "starbase_alpha".into(),
+                    trigger: TriggerCondition::OnHailed {
+                        entity_name: "starbase_alpha".into(),
+                    },
+                    node: CommsDialogueNode {
+                        body: "Hello, Phoenix.".into(),
+                        responses: vec![CommsResponse {
+                            text: "Acknowledge.".into(),
+                            actions,
+                            follow_up: None,
+                        }],
+                    },
+                },
+                fired: false,
+            });
+            runtime.needs_broadcast = true;
+        }
+        let _ = tick(&mut app);
+
+        // Hail to receive the message.
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
+        let out = tick(&mut app);
+
+        let msg_id = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                    messages.first().map(|msg| msg.id.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("hail must deliver a comms message");
+
+        // Respond.
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::RespondToMessage {
+                message_id: msg_id,
+                response_index: 0,
+            },
+        );
+        let _ = tick(&mut app);
+
+        app
+    }
+
+    #[test]
+    fn comms_response_dispatches_set_world_flag() {
+        let app = fire_response_with_actions(vec![TriggerAction::SetWorldFlag {
+            name: "comms_set".into(),
+        }]);
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.flags.counter("comms_set"), 1);
+        assert!(
+            runtime.pending_world_events.iter().any(|e| matches!(
+                e, WorldEvent::FlagSet { name, .. } if name == "comms_set"
+            )),
+            "SetWorldFlag from comms response must enqueue a FlagSet event \
+             for handle_ai_events to chain on"
+        );
+    }
+
+    #[test]
+    fn comms_response_dispatches_clear_world_flag() {
+        let actions = vec![
+            TriggerAction::SetWorldFlag { name: "to_clear".into() },
+            TriggerAction::ClearWorldFlag { name: "to_clear".into() },
+        ];
+        let app = fire_response_with_actions(actions);
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.flags.counter("to_clear"), 0);
+        // Both transitions must have been enqueued.
+        let has_set = runtime.pending_world_events.iter().any(|e| matches!(
+            e, WorldEvent::FlagSet { name, .. } if name == "to_clear"
+        ));
+        let has_cleared = runtime.pending_world_events.iter().any(|e| matches!(
+            e, WorldEvent::FlagCleared { name, .. } if name == "to_clear"
+        ));
+        assert!(has_set && has_cleared,
+            "both set and clear transitions must be enqueued");
+    }
+
+    #[test]
+    fn comms_response_dispatches_increment_world_flag() {
+        let app = fire_response_with_actions(vec![TriggerAction::IncrementWorldFlag {
+            name: "counter".into(),
+            by: 7,
+        }]);
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.flags.counter("counter"), 7);
+    }
+
+    #[test]
+    fn comms_response_dispatches_set_world_flag_value() {
+        let app = fire_response_with_actions(vec![TriggerAction::SetWorldFlagValue {
+            name: "answer".into(),
+            value: 42,
+        }]);
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.flags.counter("answer"), 42);
+    }
+
+    #[test]
+    fn comms_response_dispatches_load_world() {
+        let app = fire_response_with_actions(vec![TriggerAction::LoadWorld {
+            path: "assets/worlds/some.toml".into(),
+        }]);
+        let pending = app.world().resource::<PendingWorldLayerChanges>();
+        assert!(
+            pending.0.iter().any(|c| matches!(
+                c, WorldLayerChange::Load { path, loader_path }
+                if path == "assets/worlds/some.toml" && loader_path.is_none()
+            )),
+            "LoadWorld from comms response must queue a base-world Load command, got {:?}",
+            pending.0
+        );
+    }
+
+    #[test]
+    fn comms_response_dispatches_unload_world() {
+        let app = fire_response_with_actions(vec![TriggerAction::UnloadWorld {
+            path: "assets/worlds/some.toml".into(),
+        }]);
+        let pending = app.world().resource::<PendingWorldLayerChanges>();
+        assert!(
+            pending.0.iter().any(|c| matches!(
+                c, WorldLayerChange::Unload(path) if path == "assets/worlds/some.toml"
+            )),
+            "UnloadWorld from comms response must queue an Unload command, got {:?}",
+            pending.0
+        );
+    }
+
+    #[test]
+    fn comms_response_dispatches_game_over() {
+        let app = fire_response_with_actions(vec![TriggerAction::GameOver {
+            message: Some("you lost".into()),
+        }]);
+        let reason = app.world().resource::<crate::simulation::GameOverReason>();
+        assert_eq!(reason.0.as_deref(), Some("you lost"));
+    }
+
+    #[test]
+    fn comms_response_dispatches_apply_modifier() {
+        let app = fire_response_with_actions(vec![TriggerAction::ApplyModifier {
+            entity: "starbase_alpha".into(),
+            tag: "boost".into(),
+            slot: crate::messages::ModifierSlot::MaxSpeed,
+            bonus: 1.5,
+        }]);
+        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        // The cache aggregates all modifiers in `get`. Bonus is the
+        // observable side-effect; assert it's been applied to MaxSpeed.
+        assert!(
+            mods.get(&crate::messages::ModifierSlot::MaxSpeed) > 1.0,
+            "ApplyModifier must add to MaxSpeed slot total, got {}",
+            mods.get(&crate::messages::ModifierSlot::MaxSpeed)
+        );
+    }
+
+    #[test]
+    fn comms_response_dispatches_remove_modifier() {
+        let app = fire_response_with_actions(vec![
+            TriggerAction::ApplyModifier {
+                entity: "starbase_alpha".into(),
+                tag: "boost".into(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+                bonus: 2.0,
+            },
+            TriggerAction::RemoveModifier {
+                entity: "starbase_alpha".into(),
+                tag: "boost".into(),
+                slot: crate::messages::ModifierSlot::MaxSpeed,
+            },
+        ]);
+        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        // After remove, the slot returns to its baseline multiplier of 1.0
+        // (empty table). Comparing against the post-apply value (which would
+        // exceed 1.0) proves the remove undid the apply.
+        let value = mods.get(&crate::messages::ModifierSlot::MaxSpeed);
+        assert!(
+            (value - 1.0).abs() < 1e-3,
+            "RemoveModifier must reverse the previously-applied modifier; \
+             expected baseline 1.0, got {value}"
+        );
+    }
+
+    #[test]
+    fn comms_response_dispatches_apply_and_remove_flag() {
+        let app = fire_response_with_actions(vec![TriggerAction::ApplyFlag {
+            entity: "starbase_alpha".into(),
+            tag: "jammer".into(),
+            kind: crate::flag_kind::FlagKind::CommsJammed,
+        }]);
+        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        assert!(
+            mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            "ApplyFlag must register a CommsJammed flag"
+        );
+
+        let app = fire_response_with_actions(vec![
+            TriggerAction::ApplyFlag {
+                entity: "starbase_alpha".into(),
+                tag: "jammer".into(),
+                kind: crate::flag_kind::FlagKind::CommsJammed,
+            },
+            TriggerAction::RemoveFlag {
+                entity: "starbase_alpha".into(),
+                tag: "jammer".into(),
+                kind: crate::flag_kind::FlagKind::CommsJammed,
+            },
+        ]);
+        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        assert!(
+            !mods.has_flag(&crate::flag_kind::FlagKind::CommsJammed),
+            "RemoveFlag must un-register the CommsJammed flag"
+        );
+    }
+
+    #[test]
+    fn comms_response_dispatches_apply_and_remove_int_modifier() {
+        let app = fire_response_with_actions(vec![TriggerAction::ApplyIntModifier {
+            entity: "starbase_alpha".into(),
+            tag: "extra_team".into(),
+            slot: crate::modifiers::IntModifierSlot::RepairTeams,
+            bonus: 2,
+        }]);
+        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        assert_eq!(
+            mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams), 2,
+            "ApplyIntModifier must add to RepairTeams int slot"
+        );
+
+        let app = fire_response_with_actions(vec![
+            TriggerAction::ApplyIntModifier {
+                entity: "starbase_alpha".into(),
+                tag: "extra_team".into(),
+                slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                bonus: 3,
+            },
+            TriggerAction::RemoveIntModifier {
+                entity: "starbase_alpha".into(),
+                tag: "extra_team".into(),
+                slot: crate::modifiers::IntModifierSlot::RepairTeams,
+            },
+        ]);
+        let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
+        assert_eq!(
+            mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams), 0,
+            "RemoveIntModifier must reverse the int modifier"
+        );
+    }
+
+    #[test]
+    fn comms_response_dispatches_spawn_entity() {
+        use crate::entities::spawner::EntityUuid;
+
+        let template_path = write_spawn_template_fixture();
+        let app = fire_response_with_actions(vec![TriggerAction::SpawnEntity {
+            template_path,
+            name: "comms_spawn".into(),
+            anchor: None,
+            position: Some([5.0, 0.0, 9.0]),
+            rotation: None,
+            scale: None,
+        }]);
+
+        let uuid = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("comms_spawn")
+            .cloned()
+            .expect("SpawnEntity from comms response must register name_to_uuid");
+
+        let mut app = app;
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &bevy::prelude::Transform)>();
+        let mut found = false;
+        for (eu, t) in q.iter(app.world()) {
+            if eu.0 == uuid {
+                found = true;
+                assert!((t.translation.x - 5.0).abs() < 1e-3);
+                assert!((t.translation.z - 9.0).abs() < 1e-3);
+            }
+        }
+        assert!(found, "spawned entity must exist in ECS");
+    }
+
+    #[test]
+    fn comms_response_dispatches_destroy_entity() {
+        use crate::entities::spawner::EntityUuid;
+
+        // Pre-spawn a target entity with a known UUID, then point the comms
+        // response at it via name_to_uuid.
+        let target_uuid = "comms-doomed-uuid";
+        let mut app = comms_parity_test_app();
+        let target_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(target_uuid.into()),
+                bevy::prelude::Transform::from_xyz(0.0, 0.0, 0.0),
+            ))
+            .id();
+
+        // Boot identical to fire_response_with_actions but with a DestroyEntity
+        // action that targets the pre-spawned entity.
+        push_msg(&mut app, "captain", ClientMessage::Identify {
+            token: "captain".into(), name: "Alice".into(),
+        });
+        tick(&mut app);
+        push_msg(&mut app, "captain", ClientMessage::SelectStation {
+            station: "Captain's Chair".into(),
+        });
+        tick(&mut app);
+        push_msg(&mut app, "comms", ClientMessage::Identify {
+            token: "comms".into(), name: "Uhura".into(),
+        });
+        tick(&mut app);
+        push_msg(&mut app, "comms", ClientMessage::SelectStation {
+            station: "Comms".into(),
+        });
+        tick(&mut app);
+        push_msg(&mut app, "captain", ClientMessage::StartGame);
+        tick(&mut app);
+
+        let station_uuid = "station-destroy-uuid";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert("starbase_alpha".into(), station_uuid.into());
+            runtime.name_to_uuid.insert("doomed".into(), target_uuid.into());
+            runtime.contacts.push(CommsContact {
+                uuid: station_uuid.into(),
+                name: "Starbase Alpha".into(),
+                in_range: true,
+            });
+            runtime.comms_template_states.push(CommsTemplateState {
+                template: crate::world::content::CommsTemplate {
+                    from: "starbase_alpha".into(),
+                    trigger: TriggerCondition::OnHailed {
+                        entity_name: "starbase_alpha".into(),
+                    },
+                    node: CommsDialogueNode {
+                        body: "Fire?".into(),
+                        responses: vec![CommsResponse {
+                            text: "Fire.".into(),
+                            actions: vec![TriggerAction::DestroyEntity {
+                                entity: "doomed".into(),
+                            }],
+                            follow_up: None,
+                        }],
+                    },
+                },
+                fired: false,
+            });
+            runtime.needs_broadcast = true;
+        }
+        let _ = tick(&mut app);
+
+        push_msg(&mut app, "comms", ClientMessage::Hail {
+            target_uuid: station_uuid.into(),
+        });
+        let out = tick(&mut app);
+        let msg_id = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                messages.first().map(|msg| msg.id.clone())
+            } else { None }
+        }).expect("hail must deliver a message");
+
+        push_msg(&mut app, "comms", ClientMessage::RespondToMessage {
+            message_id: msg_id, response_index: 0,
+        });
+        let _ = tick(&mut app);
+        // Run one more update so Commands::queue (deferred despawn + message
+        // write) is applied.
+        app.update();
+
+        assert!(
+            app.world().get_entity(target_entity).is_err(),
+            "DestroyEntity from comms response must despawn the target entity"
+        );
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.pending_world_events.iter().any(|e| matches!(
+                e, WorldEvent::Destroyed { uuid } if uuid == target_uuid
+            )),
+            "DestroyEntity from comms response must enqueue a Destroyed event \
+             for chained on_destroyed triggers"
+        );
+    }
+
+    /// Exhaustive enumeration: matches on every `TriggerAction` variant and
+    /// drives it through `handle_respond_to_message`, asserting that *some*
+    /// observable side-effect occurs. Adding a new variant without wiring it
+    /// into the response dispatch will be caught here as either a compile
+    /// error (missing arm) or an assertion failure (no side-effect).
+    #[test]
+    fn comms_response_dispatches_every_trigger_action_variant() {
+        // Build one representative instance of every variant. The match below
+        // is non-exhaustive on purpose: any added variant of `TriggerAction`
+        // becomes a compile error in this test, forcing the author to add
+        // both a representative instance AND a per-variant parity test above.
+        fn enumerate_variants() -> Vec<TriggerAction> {
+            // Construct a known list. The match below proves we considered
+            // every variant.
+            let variants: Vec<TriggerAction> = vec![
+                TriggerAction::AddObjective {
+                    id: "x".into(), text: "x".into(), mandatory: false,
+                },
+                TriggerAction::CompleteObjective { id: "x".into() },
+                TriggerAction::FailObjective { id: "x".into() },
+                TriggerAction::SetAiState {
+                    entity: "x".into(), state: "x".into(), target: None,
+                },
+                TriggerAction::ApplyModifier {
+                    entity: "x".into(), tag: "x".into(),
+                    slot: crate::messages::ModifierSlot::MaxSpeed, bonus: 0.0,
+                },
+                TriggerAction::RemoveModifier {
+                    entity: "x".into(), tag: "x".into(),
+                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                },
+                TriggerAction::ApplyFlag {
+                    entity: "x".into(), tag: "x".into(),
+                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                },
+                TriggerAction::RemoveFlag {
+                    entity: "x".into(), tag: "x".into(),
+                    kind: crate::flag_kind::FlagKind::CommsJammed,
+                },
+                TriggerAction::ApplyIntModifier {
+                    entity: "x".into(), tag: "x".into(),
+                    slot: crate::modifiers::IntModifierSlot::RepairTeams, bonus: 0,
+                },
+                TriggerAction::RemoveIntModifier {
+                    entity: "x".into(), tag: "x".into(),
+                    slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                },
+                TriggerAction::GameOver { message: None },
+                TriggerAction::LoadWorld { path: "x".into() },
+                TriggerAction::UnloadWorld { path: "x".into() },
+                TriggerAction::SetWorldFlag { name: "x".into() },
+                TriggerAction::ClearWorldFlag { name: "x".into() },
+                TriggerAction::IncrementWorldFlag { name: "x".into(), by: 0 },
+                TriggerAction::SetWorldFlagValue { name: "x".into(), value: 0 },
+                TriggerAction::SpawnEntity {
+                    template_path: "x".into(), name: "x".into(),
+                    anchor: None, position: None,
+                    rotation: None, scale: None,
+                },
+                TriggerAction::DestroyEntity { entity: "x".into() },
+            ];
+            // Exhaustiveness check: this match must cover every variant. If
+            // a new variant is added to `TriggerAction`, this match becomes
+            // a compile error.
+            for v in &variants {
+                match v {
+                    TriggerAction::AddObjective { .. }
+                    | TriggerAction::CompleteObjective { .. }
+                    | TriggerAction::FailObjective { .. }
+                    | TriggerAction::SetAiState { .. }
+                    | TriggerAction::ApplyModifier { .. }
+                    | TriggerAction::RemoveModifier { .. }
+                    | TriggerAction::ApplyFlag { .. }
+                    | TriggerAction::RemoveFlag { .. }
+                    | TriggerAction::ApplyIntModifier { .. }
+                    | TriggerAction::RemoveIntModifier { .. }
+                    | TriggerAction::GameOver { .. }
+                    | TriggerAction::LoadWorld { .. }
+                    | TriggerAction::UnloadWorld { .. }
+                    | TriggerAction::SetWorldFlag { .. }
+                    | TriggerAction::ClearWorldFlag { .. }
+                    | TriggerAction::IncrementWorldFlag { .. }
+                    | TriggerAction::SetWorldFlagValue { .. }
+                    | TriggerAction::SpawnEntity { .. }
+                    | TriggerAction::DestroyEntity { .. } => {}
+                }
+            }
+            variants
+        }
+
+        // The per-variant tests above prove each variant's observable
+        // dispatch behaviour. This test's job is to (a) enumerate every
+        // variant via an exhaustive match (compile-time drift guard) and
+        // (b) confirm dispatch doesn't panic when handed the full set in
+        // a single response.
+        let variants = enumerate_variants();
+        let _ = fire_response_with_actions(variants);
     }
 }

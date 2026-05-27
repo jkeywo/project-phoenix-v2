@@ -69,6 +69,11 @@ pub struct Torpedo {
     pub heading: f32,
     pub lifespan_remaining: f32,
     pub target_uuid: Option<String>,
+    /// UUID of the entity that fired this torpedo. Used by
+    /// [`TorpedoSystem::find_detonation_hits`] to prevent a torpedo from
+    /// detonating on its launcher (the torpedo spawns at the launcher's
+    /// centre, well within any reasonable detonation radius).
+    pub source_uuid: Option<String>,
 }
 
 impl Torpedo {
@@ -212,6 +217,7 @@ impl TorpedoSystem {
         launch_z: f32,
         launch_heading: f32,
         target_uuid: Option<String>,
+        source_uuid: Option<String>,
     ) -> LaunchResult {
         if self.torpedoes_remaining == 0 {
             return LaunchResult::NoTorpedoes;
@@ -233,6 +239,7 @@ impl TorpedoSystem {
             heading: launch_heading,
             lifespan_remaining: lifespan,
             target_uuid,
+            source_uuid,
         });
         LaunchResult::Launched { uuid }
     }
@@ -275,12 +282,14 @@ impl TorpedoSystem {
     /// supplied target volumes. Returns `(torpedo_uuid, target_uuid)` pairs.
     ///
     /// A torpedo `T` hits target `E` when
-    /// `distance(T, E) <= detonation_radius + target_radius`.
+    /// `distance(T, E) <= detonation_radius + target_radius`, with one
+    /// exception: a torpedo never detonates on its own [`Torpedo::source_uuid`]
+    /// (the entity that fired it). Without this, every torpedo would detonate
+    /// on launch because it spawns at the firing ship's centre.
     ///
-    /// A torpedo will never detonate on its own homing target's source — i.e.
-    /// every entity is fair game including asteroids. Each torpedo can only
-    /// hit one target per call (the nearest qualifying one); the caller is
-    /// responsible for removing detonated torpedoes via [`Self::handle_collision`].
+    /// Each torpedo can only hit one target per call (the nearest qualifying
+    /// one); the caller is responsible for removing detonated torpedoes via
+    /// [`Self::handle_collision`].
     ///
     /// `targets` is a slice of `(uuid, x, z, radius)` tuples.
     pub fn find_detonation_hits(
@@ -292,6 +301,9 @@ impl TorpedoSystem {
         for torpedo in &self.in_flight {
             let mut best: Option<(f32, &String)> = None;
             for (uuid, tx, tz, radius) in targets {
+                if torpedo.source_uuid.as_ref() == Some(uuid) {
+                    continue;
+                }
                 let dx = tx - torpedo.x;
                 let dz = tz - torpedo.z;
                 let dist_sq = dx * dx + dz * dz;
@@ -351,14 +363,14 @@ mod tests {
     #[test]
     fn launch_returns_launched_with_uuid() {
         let mut sys = default_system();
-        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(r, LaunchResult::Launched { uuid: "t1".into() });
     }
 
     #[test]
     fn launch_adds_torpedo_to_in_flight() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(sys.in_flight.len(), 1);
         assert_eq!(sys.in_flight[0].uuid, "t1");
     }
@@ -366,29 +378,29 @@ mod tests {
     #[test]
     fn launch_decrements_torpedo_count() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(sys.torpedoes_remaining, 9);
     }
 
     #[test]
     fn launch_starts_tube_reload() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
     }
 
     #[test]
     fn launch_from_unloaded_tube_returns_not_loaded() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
-        let r = sys.launch("fore_port", "t2".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        let r = sys.launch("fore_port", "t2".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(r, LaunchResult::TubeNotLoaded);
     }
 
     #[test]
     fn launch_from_unknown_tube_returns_unknown() {
         let mut sys = default_system();
-        let r = sys.launch("dorsal", "t1".into(), 0.0, 0.0, 0.0, None);
+        let r = sys.launch("dorsal", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(r, LaunchResult::UnknownTube);
     }
 
@@ -398,16 +410,16 @@ mod tests {
         config.count = 0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        let r = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert_eq!(r, LaunchResult::NoTorpedoes);
     }
 
     #[test]
     fn can_launch_from_all_three_tubes_independently() {
         let mut sys = default_system();
-        let r1 = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
-        let r2 = sys.launch("fore_starboard", "t2".into(), 0.0, 0.0, 0.0, None);
-        let r3 = sys.launch("aft", "t3".into(), 0.0, 0.0, 0.0, None);
+        let r1 = sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        let r2 = sys.launch("fore_starboard", "t2".into(), 0.0, 0.0, 0.0, None, None);
+        let r3 = sys.launch("aft", "t3".into(), 0.0, 0.0, 0.0, None, None);
         assert!(matches!(r1, LaunchResult::Launched { .. }));
         assert!(matches!(r2, LaunchResult::Launched { .. }));
         assert!(matches!(r3, LaunchResult::Launched { .. }));
@@ -417,7 +429,7 @@ mod tests {
     #[test]
     fn torpedo_with_no_target_flies_straight() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let initial = sys.in_flight[0].heading;
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(0.1, &targets);
@@ -427,7 +439,7 @@ mod tests {
     #[test]
     fn torpedo_moves_forward_in_straight_flight() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(1.0, &targets);
         let t = &sys.in_flight[0];
@@ -438,7 +450,7 @@ mod tests {
     #[test]
     fn torpedo_homes_toward_target() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()));
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()), None);
         let mut targets = HashMap::new();
         targets.insert("enemy".into(), (20.0_f32, 0.0_f32));
         let h0 = sys.in_flight[0].heading;
@@ -452,7 +464,7 @@ mod tests {
         config.turn_rate = PI / 4.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()));
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()), None);
         let mut targets = HashMap::new();
         targets.insert("enemy".into(), (20.0_f32, 0.0_f32));
         sys.tick(1.0, &targets);
@@ -462,7 +474,7 @@ mod tests {
     #[test]
     fn torpedo_flies_straight_when_target_destroyed() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()));
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()), None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         let h0 = sys.in_flight[0].heading;
         sys.tick(0.5, &targets);
@@ -475,7 +487,7 @@ mod tests {
         config.lifespan = 5.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         let r = sys.tick(5.1, &targets);
         assert!(r.expired.contains(&"t1".to_string()));
@@ -488,7 +500,7 @@ mod tests {
         config.lifespan = 5.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         let r = sys.tick(4.9, &targets);
         assert!(!r.expired.contains(&"t1".to_string()));
@@ -498,7 +510,7 @@ mod tests {
     #[test]
     fn collision_removes_torpedo_and_returns_damage() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let d = sys.handle_collision("t1");
         assert_eq!(d, Some(50));
         assert_eq!(sys.in_flight.len(), 0);
@@ -517,7 +529,7 @@ mod tests {
         config.load_time = 10.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(10.0, &targets);
@@ -530,7 +542,7 @@ mod tests {
         config.load_time = 10.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(9.9, &targets);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
@@ -548,7 +560,7 @@ mod tests {
     #[test]
     fn find_detonation_hits_returns_empty_when_no_targets_in_range() {
         let mut sys = detonation_system(5.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         // Target far away with small radius.
         let targets = vec![("enemy".to_string(), 100.0, 100.0, 1.0)];
         let hits = sys.find_detonation_hits(&targets);
@@ -558,7 +570,7 @@ mod tests {
     #[test]
     fn find_detonation_hits_reports_target_within_detonation_radius() {
         let mut sys = detonation_system(5.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         // Target at (0, -4): distance 4, threshold 5+0 = 5.
         let targets = vec![("enemy".to_string(), 0.0, -4.0, 0.0)];
         let hits = sys.find_detonation_hits(&targets);
@@ -569,7 +581,7 @@ mod tests {
     fn find_detonation_hits_includes_target_radius_in_threshold() {
         // Detonation radius 1, target radius 10, distance 9 → should hit.
         let mut sys = detonation_system(1.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets = vec![("rock".to_string(), 0.0, -9.0, 10.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert_eq!(hits, vec![("t1".to_string(), "rock".to_string())]);
@@ -578,7 +590,7 @@ mod tests {
     #[test]
     fn find_detonation_hits_picks_nearest_when_multiple_in_range() {
         let mut sys = detonation_system(50.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         let targets = vec![
             ("far".to_string(), 0.0, -40.0, 0.0),
             ("near".to_string(), 0.0, -5.0, 0.0),
@@ -600,7 +612,7 @@ mod tests {
     #[test]
     fn find_detonation_hits_handles_multiple_torpedoes_independently() {
         let mut sys = detonation_system(2.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None, None);
         // Move tube ready by skipping reload — instead launch via a fresh tube.
         // Manually push a second torpedo to avoid tube cooldown.
         sys.in_flight.push(Torpedo {

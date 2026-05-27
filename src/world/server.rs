@@ -3071,6 +3071,97 @@ transition = []
         );
     }
 
+    /// Two `LoadWorld` commands for the same path queued within a single tick
+    /// produce exactly one load — no duplicate entities, no duplicate trigger
+    /// states, no duplicate `WorldLayerMap` entry (issue #413).
+    #[test]
+    fn two_load_world_same_path_same_tick_is_single_load() {
+        let (world_path, _template_path) = write_layer_entity_fixtures();
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .init_resource::<WorldLayerMap>()
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<PendingWorldLayerChanges>()
+            .add_systems(Update, apply_world_layer_changes);
+
+        // Two triggers in the same world both request the same load in one tick.
+        {
+            let mut pending = app
+                .world_mut()
+                .resource_mut::<PendingWorldLayerChanges>();
+            pending.0.push(WorldLayerChange::Load(world_path.clone()));
+            pending.0.push(WorldLayerChange::Load(world_path.clone()));
+        }
+        // First update: apply_world_layer_changes drains both commands; the
+        // second must be a no-op because the first already inserted into
+        // WorldLayerMap.
+        app.update();
+        // Second update: Bevy flushes deferred spawns.
+        app.update();
+
+        let layer_map = app.world().resource::<WorldLayerMap>();
+        let layer = layer_map
+            .0
+            .get(&world_path)
+            .expect("WorldLayerMap must contain the loaded path");
+
+        // Exactly one layer entry (a Vec-backed entity list would otherwise
+        // hold double the entities).
+        let entity_count = layer.spawned_entities.len();
+        assert!(
+            entity_count > 0,
+            "precondition: world fixture must spawn at least one entity"
+        );
+
+        // Drop borrow before mutating pending again.
+        drop(layer_map);
+
+        // Capture trigger/contact/name counts after the first-tick double-load.
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        let triggers_after_double = runtime.trigger_states.len();
+        let names_after_double = runtime.name_to_uuid.len();
+        let contacts_after_double = runtime.contacts.len();
+        drop(runtime);
+
+        // Now load the same path AGAIN on a separate tick: must also be a
+        // no-op (existing behaviour) and keep the same counts.
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load(world_path.clone()));
+        app.update();
+        app.update();
+
+        let layer_map = app.world().resource::<WorldLayerMap>();
+        let layer = layer_map
+            .0
+            .get(&world_path)
+            .expect("layer must still be present");
+        assert_eq!(
+            layer.spawned_entities.len(),
+            entity_count,
+            "second-tick duplicate LoadWorld must not double-spawn entities"
+        );
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(
+            runtime.trigger_states.len(),
+            triggers_after_double,
+            "duplicate LoadWorld must not add duplicate trigger states"
+        );
+        assert_eq!(
+            runtime.name_to_uuid.len(),
+            names_after_double,
+            "duplicate LoadWorld must not re-register named entities"
+        );
+        assert_eq!(
+            runtime.contacts.len(),
+            contacts_after_double,
+            "duplicate LoadWorld must not duplicate comms contacts"
+        );
+    }
+
     /// `UnloadWorld` for a path that was never loaded is a silent no-op.
     #[test]
     fn unload_world_unknown_path_is_noop() {

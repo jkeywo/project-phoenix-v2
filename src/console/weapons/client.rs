@@ -980,6 +980,16 @@ fn bridge_client_sim_to_weapons_radar(
     else {
         return;
     };
+    // [radar-instr 13] dump all world entities to find why NPC blip is missing
+    static LOGGED_13: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !LOGGED_13.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        for e in &sim.world.entities {
+            crate::wasm_log!(
+                "[radar-instr 13] world entity: uuid={} tags={:?} pos={:?}",
+                e.uuid, e.tags, e.position
+            );
+        }
+    }
     bridge_sim_to_radar(
         &mut commands,
         widget,

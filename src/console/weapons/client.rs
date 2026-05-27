@@ -1008,6 +1008,10 @@ fn sync_weapons_radar_target_highlight(
 ) {
     for mut hl in widget.iter_mut() {
         if hl.0 != sim.current_target_uuid {
+            crate::wasm_log!(
+                "[radar-instr 10] sync_weapons_radar_target_highlight: {:?} -> {:?}",
+                hl.0, sim.current_target_uuid
+            );
             hl.0 = sim.current_target_uuid.clone();
         }
     }

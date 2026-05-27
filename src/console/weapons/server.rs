@@ -916,6 +916,10 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 reload_secs: t.reload_remaining,
             }).collect();
 
+            crate::wasm_log!(
+                "[radar-instr 9] weapons_update_broadcaster: target_uuid={:?} fire_ready={}",
+                weapons_target.0, fire_ready
+            );
             vec![ServerMessage::WeaponsUpdate {
                 target_uuid: weapons_target.0.clone(),
                 banks,

@@ -389,8 +389,15 @@ fn handle_fire_phaser_npc(
         let npc_z = transform.translation.z;
         let npc_yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
 
-        // Activate beam on FirePhaser order when ready and range/arc check passes.
-        if fire_orders.contains(&token) && phaser_state.is_ready() {
+        // Activate beam on FirePhaser order when ready, or auto-fire when the AI
+        // is in the Attacking state with a valid target (eliminates the 1-frame
+        // event delay between tick_ai_controllers → InboundMessage → here).
+        let should_fire = fire_orders.contains(&token)
+            || ctrl_opt.as_ref().map_or(false, |c| {
+                matches!(c.controller.current_state, crate::ai::AiState::Attacking { .. })
+                    && c.controller.blackboard.target.is_some()
+            });
+        if should_fire && phaser_state.is_ready() {
             if let Some(t_uuid) = target_uuid {
                 let fire_ok = target_positions
                     .iter()

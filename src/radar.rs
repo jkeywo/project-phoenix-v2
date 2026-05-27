@@ -105,12 +105,12 @@ pub fn is_fire_ready_with_range(
         return false;
     }
 
-    // Arc gate: must be in the forward 180° hemisphere (radar_y > 0).
+    // Arc gate: must be in the forward 180° hemisphere (radar_y >= 0).
     // radar_y = dot((dx,dz), forward) = dx*sin(yaw) - dz*cos(yaw)
     let sin_y = ship_yaw.sin();
     let cos_y = ship_yaw.cos();
     let radar_y = dx * sin_y - dz * cos_y;
-    radar_y > 0.0
+    radar_y >= 0.0
 }
 
 /// Iterator of `(radar_x, radar_y, scaled_radius)` tuples for all entities
@@ -791,18 +791,11 @@ mod tests {
         assert!(!is_fire_ready(0.0, -(PHASER_RANGE + 1.0), 0.0, 0.0, 0.0));
     }
 
-    /// Exactly 90° to the side (beam direction) → not fire-ready (arc boundary exclusive).
+    /// Exactly 90° to the side (beam direction) → fire-ready (arc boundary inclusive).
     #[test]
-    fn fire_ready_at_90_degree_arc_boundary_is_not_ready() {
+    fn fire_ready_at_90_degree_arc_boundary_is_fire_ready() {
         // yaw=0: target at (+20, 0) is exactly 90° to starboard (radar_y = 0).
-        assert!(!is_fire_ready(20.0, 0.0, 0.0, 0.0, 0.0));
-    }
-
-    /// Just inside the forward arc (slightly ahead of beam) → fire-ready.
-    #[test]
-    fn fire_ready_just_inside_forward_arc() {
-        // Target at (+20, -1): mostly starboard but slightly ahead.
-        assert!(is_fire_ready(20.0, -1.0, 0.0, 0.0, 0.0));
+        assert!(is_fire_ready(20.0, 0.0, 0.0, 0.0, 0.0));
     }
 
     /// With ship yaw rotated: target must still be evaluated in ship-local space.

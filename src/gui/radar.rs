@@ -343,6 +343,17 @@ pub struct RadarBlipMaterial {
     /// Non-zero enables per-pixel circular clip in the fragment shader.
     #[uniform(2)]
     pub clip_circle: f32,
+    /// Non-zero draws a red targeting ring around the blip (replaces tint-only
+    /// approach that was invisible on coloured icons).
+    #[uniform(2)]
+    pub highlighted: f32,
+    /// std140 padding to 48 bytes (3 × 16 = 3 vec4s).
+    #[uniform(2)]
+    pub _pad0: f32,
+    #[uniform(2)]
+    pub _pad1: f32,
+    #[uniform(2)]
+    pub _pad2: f32,
 }
 
 impl UiMaterial for RadarBlipMaterial {
@@ -719,6 +730,8 @@ struct BlipIntent {
     ny: f32,
     size_frac: f32,
     clip_circle: f32,
+    /// True when this blip's uuid matches the widget's `RadarTargetHighlight`.
+    highlighted: bool,
 }
 
 /// Each frame: for every visible `GenericRadarWidget`, project all
@@ -858,18 +871,6 @@ fn sync_radar_blip_nodes(
         > = HashMap::new();
 
         for (src, on_radar, appearance, blip_pose, blip_uuid) in blips.iter() {
-            // [radar-instr 14] trace every blip when highlight is active
-            if let Some(hl) = target_highlight {
-                if hl.0.is_some() {
-                    if let Some(uuid) = blip_uuid {
-                        let on_r = is_on_radar(&widget.filter, &on_radar.0);
-                        crate::wasm_log!(
-                            "[radar-instr 14] blip uuid={} on_radar={} tags={:?} pos=({:.1},{:.1})",
-                            uuid.0, on_r, on_radar.0, blip_pose.x, blip_pose.z
-                        );
-                    }
-                }
-            }
             if !is_on_radar(&widget.filter, &on_radar.0) {
                 continue;
             }
@@ -887,17 +888,6 @@ fn sync_radar_blip_nodes(
                 continue;
             };
             if nx * nx + ny * ny > 1.0 {
-                // [radar-instr 15] blip out of range
-                if let Some(hl) = target_highlight {
-                    if let Some(uuid) = blip_uuid {
-                        if hl.0.as_deref() == Some(uuid.0.as_str()) {
-                            crate::wasm_log!(
-                                "[radar-instr 15] TARGET BLIP OUT OF RANGE: uuid={} nx={:.2} ny={:.2} range={:.1}",
-                                uuid.0, nx, ny, range
-                            );
-                        }
-                    }
-                }
                 continue;
             }
 
@@ -950,14 +940,6 @@ fn sync_radar_blip_nodes(
                     (target_highlight, blip_uuid),
                     (Some(hl), Some(uuid)) if hl.0.as_deref() == Some(uuid.0.as_str())
                 );
-                if let (Some(hl), Some(uuid)) = (target_highlight, blip_uuid) {
-                    if hl.0.is_some() {
-                        crate::wasm_log!(
-                            "[radar-instr 11] highlight check: hl={:?} blip_uuid={:?} match={}",
-                            hl.0, uuid.0, highlight_match
-                        );
-                    }
-                }
                 let blip_color = if highlight_match {
                     Color::srgb(1.0, 0.85, 0.1)
                 } else {
@@ -974,6 +956,7 @@ fn sync_radar_blip_nodes(
                     ny,
                     size_frac,
                     clip_circle,
+                    highlighted: highlight_match,
                 });
             }
         }
@@ -1000,6 +983,7 @@ fn sync_radar_blip_nodes(
                             mat.radar_ny = intent.ny;
                             mat.size_frac = intent.size_frac;
                             mat.clip_circle = intent.clip_circle;
+                            mat.highlighted = if intent.highlighted { 1.0 } else { 0.0 };
                             if let Some(h) = intent.icon {
                                 mat.icon = h;
                             }
@@ -1051,6 +1035,10 @@ fn sync_radar_blip_nodes(
                         radar_ny: intent.ny,
                         size_frac: intent.size_frac,
                         clip_circle: intent.clip_circle,
+                        highlighted: if intent.highlighted { 1.0 } else { 0.0 },
+                        _pad0: 0.0,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
                     });
                     let node = Node {
                         position_type: PositionType::Absolute,

@@ -19,6 +19,10 @@ struct RadarBlipMaterial {
     radar_ny: f32,
     size_frac: f32,
     clip_circle: f32,
+    highlighted: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 
 @group(1) @binding(0) var icon_texture: texture_2d<f32>;
@@ -38,5 +42,21 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
         }
     }
     let tint = vec4<f32>(material.color_r, material.color_g, material.color_b, material.color_a);
-    return textureSample(icon_texture, icon_sampler, in.uv) * tint;
+    let icon_sample = textureSample(icon_texture, icon_sampler, in.uv) * tint;
+
+    // When highlighted, draw a red ring around the blip.
+    // The ring is a circular outline at a fixed fraction of the node UV space,
+    // drawn on top of the icon so it's always visible regardless of icon colour.
+    if material.highlighted > 0.5 {
+        let uv_center = in.uv - vec2(0.5, 0.5);
+        let dist = length(uv_center);
+        let ring_radius: f32 = 0.42;
+        let ring_half_width: f32 = 0.035;
+        if abs(dist - ring_radius) < ring_half_width {
+            let frac = 1.0 - abs(dist - ring_radius) / ring_half_width;
+            return vec4<f32>(1.0, 0.2, 0.2, frac * 0.85);
+        }
+    }
+
+    return icon_sample;
 }

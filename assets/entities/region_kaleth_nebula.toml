@@ -8,6 +8,8 @@ radius = 220.0
 
 [effects.damage_zone]
 damage_per_second = 3.0
+# Nebula corrosion ignores shields entirely (preserves pre-#414 behaviour).
+shield_pierce = 1.0
 
 [effects.radar_dampening]
 range_modifier = 0.4

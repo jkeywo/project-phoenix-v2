@@ -40,6 +40,9 @@ pub enum WorldEvent {
     FlagSet { name: String },
     /// A world flag transitioned true→false.
     FlagCleared { name: String },
+    /// The containing world finished loading (base-world `Startup` or
+    /// sub-world `LoadWorld`). Emitted once per load cycle.
+    WorldLoaded,
 }
 
 // ── Runtime state ─────────────────────────────────────────────────────────
@@ -192,6 +195,7 @@ fn condition_matches(
         }
         (TriggerCondition::OnFlagSet { name }, WorldEvent::FlagSet { name: n }) => name == n,
         (TriggerCondition::OnFlagCleared { name }, WorldEvent::FlagCleared { name: n }) => name == n,
+        (TriggerCondition::OnWorldLoaded, WorldEvent::WorldLoaded) => true,
         _ => false,
     }
 }
@@ -595,5 +599,63 @@ mod tests {
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
         assert!(fired[0].actions.iter().any(|a| matches!(a, TriggerAction::AddObjective { .. })));
+    }
+
+    // ── on_world_loaded (issue #415) ──────────────────────────────────────
+
+    #[test]
+    fn on_world_loaded_matches_world_loaded_event() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnWorldLoaded,
+                actions: vec![add_obj("obj-loaded")],
+                when: None,
+            },
+            fired: false,
+        }];
+        let name_to_uuid = HashMap::new();
+        let events = vec![WorldEvent::WorldLoaded];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+        assert!(states[0].fired);
+    }
+
+    #[test]
+    fn on_world_loaded_does_not_match_unrelated_events() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnWorldLoaded,
+                actions: vec![add_obj("obj-loaded")],
+                when: None,
+            },
+            fired: false,
+        }];
+        let name_to_uuid = HashMap::new();
+        let events = vec![
+            WorldEvent::Destroyed { uuid: "x".into() },
+            WorldEvent::TimerElapsed { elapsed_secs: 5.0 },
+            WorldEvent::FlagSet { name: "f".into() },
+        ];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert!(fired.is_empty());
+        assert!(!states[0].fired);
+    }
+
+    #[test]
+    fn on_world_loaded_is_single_shot() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnWorldLoaded,
+                actions: vec![add_obj("obj-loaded")],
+                when: None,
+            },
+            fired: false,
+        }];
+        let name_to_uuid = HashMap::new();
+        let events = vec![WorldEvent::WorldLoaded];
+        let fired1 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired1.len(), 1);
+        assert!(fired2.is_empty());
     }
 }

@@ -271,6 +271,11 @@ pub enum TriggerCondition {
     OnFlagSet { name: String },
     /// Fires on the TRANSITION true→false of a named flag.
     OnFlagCleared { name: String },
+    /// Fires once when the world containing this trigger finishes loading
+    /// (base-world `Startup` or sub-world `LoadWorld`). Single-shot per
+    /// trigger lifecycle; on unload + re-load the trigger is re-created
+    /// with `fired = false` so it fires again.
+    OnWorldLoaded,
 }
 
 /// An action to execute when a trigger fires.
@@ -510,6 +515,7 @@ fn parse_trigger_condition_from_string(
         "on_flag_cleared" => Ok(TriggerCondition::OnFlagCleared {
             name: flag_name.ok_or_else(|| format!("{ctx} 'on_flag_cleared' requires a 'name' field"))?,
         }),
+        "on_world_loaded" => Ok(TriggerCondition::OnWorldLoaded),
         other => Err(format!("Unknown {ctx} condition '{}'", other)),
     }
 }
@@ -1441,6 +1447,41 @@ name      = "shields_up"
             cfg.triggers[0].condition,
             TriggerCondition::OnFlagCleared { name: "shields_up".into() }
         );
+    }
+
+    // -- on_world_loaded (issue #415) ------------------------------------
+
+    #[test]
+    fn parse_world_reads_on_world_loaded_condition() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-intro"
+  text = "Welcome aboard."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.triggers[0].condition, TriggerCondition::OnWorldLoaded);
+        assert_eq!(cfg.triggers[0].actions.len(), 1);
+    }
+
+    #[test]
+    fn parse_world_reads_on_world_loaded_with_when_predicate() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+when      = "flag(intro_done)"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-replay"
+  text = "Replay objective."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.triggers[0].condition, TriggerCondition::OnWorldLoaded);
+        assert!(cfg.triggers[0].when.is_some(), "when predicate must round-trip");
     }
 
     #[test]

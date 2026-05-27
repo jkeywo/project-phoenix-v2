@@ -63,6 +63,13 @@ pub struct WorldContentRuntime {
     /// trigger table in the same tick so chained `on_flag_set` /
     /// `on_flag_cleared` triggers fire as part of the same Bevy frame.
     pub flags: crate::world::flags::FlagStore,
+    /// Queue of synthesised `WorldEvent`s to be drained by `handle_ai_events`
+    /// on the next Update tick. Used by `init_world_runtime` (base-world
+    /// Startup) and `apply_world_layer_changes` (sub-world Load) to inject
+    /// `WorldEvent::WorldLoaded` into the trigger evaluation pipeline
+    /// without duplicating the dispatch logic that lives inside
+    /// `handle_ai_events`.
+    pub pending_world_events: Vec<WorldEvent>,
 }
 
 /// Resolve the current `sender_in_range` flag for an injection-time message,
@@ -512,6 +519,13 @@ fn init_world_runtime(
     }
     runtime.contacts = contacts;
     runtime.needs_broadcast = true;
+
+    // Issue #415: emit a WorldLoaded event so `on_world_loaded` triggers
+    // declared in the base world fire on the first Update tick. Pushed onto
+    // the pending queue (rather than evaluated here) so the dispatch logic
+    // inside `handle_ai_events` is the single owner of trigger action
+    // execution.
+    runtime.pending_world_events.push(WorldEvent::WorldLoaded);
 
     // Mark inbox dirty so the first InProgress broadcast fires even though
     // no messages have arrived yet.
@@ -1061,6 +1075,14 @@ fn handle_ai_events(
     for ev in destroyed_reader.read() {
         world_events.push(WorldEvent::Destroyed { uuid: ev.entity_uuid.clone() });
     }
+    // Drain any externally-queued world events (e.g. WorldLoaded pushed by
+    // init_world_runtime or apply_world_layer_changes). This lets those
+    // emission sites participate in the existing evaluate+dispatch+chain
+    // loop below without duplicating the action dispatch table.
+    if !runtime.pending_world_events.is_empty() {
+        let drained: Vec<WorldEvent> = runtime.pending_world_events.drain(..).collect();
+        world_events.extend(drained);
+    }
     if world_events.is_empty() {
         return;
     }
@@ -1557,6 +1579,13 @@ fn apply_world_layer_changes(
                                 }
 
                                 runtime.needs_broadcast = true;
+
+                                // Issue #415: emit a WorldLoaded event so
+                                // `on_world_loaded` triggers declared inside
+                                // this sub-world (and merged into the live
+                                // runtime above) fire on the next Update
+                                // tick via `handle_ai_events`.
+                                runtime.pending_world_events.push(WorldEvent::WorldLoaded);
 
                                 layer_map.0.insert(
                                     path,
@@ -3719,5 +3748,207 @@ entity = "layer_npc"
             runtime.contacts.iter().all(|c| !c.in_range),
             "all contacts must be out of range after ship despawn"
         );
+    }
+
+    // -- on_world_loaded (issue #415) ----------------------------------------
+
+    /// `handle_ai_events` drains `pending_world_events` and dispatches their
+    /// matching triggers' actions. Seeds a `WorldLoaded` event directly into
+    /// the queue and asserts the `add_objective` action fires.
+    #[test]
+    fn pending_world_loaded_event_fires_on_world_loaded_trigger() {
+        let mut app = ai_trigger_test_app();
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnWorldLoaded,
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "obj-loaded".into(),
+                        text: "World loaded.".into(),
+                        mandatory: false,
+                    }],
+                    when: None,
+                },
+                fired: false,
+            }];
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+        }
+
+        app.update();
+
+        let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objectives.sorted_snapshots().iter().any(|o| o.id == "obj-loaded"),
+            "on_world_loaded trigger must have fired its add_objective action"
+        );
+        // Queue must be drained.
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.pending_world_events.is_empty(),
+            "pending_world_events must be drained by handle_ai_events"
+        );
+        assert!(runtime.trigger_states[0].fired, "trigger must be marked fired");
+    }
+
+    /// Base-world Startup: `init_world_runtime` must push a `WorldLoaded`
+    /// event onto `pending_world_events` so any `on_world_loaded` triggers
+    /// declared in the base world fire on the first Update tick.
+    #[test]
+    fn init_world_runtime_queues_world_loaded_event() {
+        let mut app = App::new();
+        app.add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_resource::<WorldResource>()
+            .add_plugins(WorldPlugin);
+
+        // Insert a WorldConfig so init_world_runtime takes its non-no-op path.
+        let mut cfg = crate::world::config::WorldConfig::default();
+        cfg.triggers.push(crate::world::content::Trigger {
+            condition: TriggerCondition::OnWorldLoaded,
+            actions: vec![TriggerAction::AddObjective {
+                id: "obj-startup".into(),
+                text: "Startup objective.".into(),
+                mandatory: false,
+            }],
+            when: None,
+        });
+        app.insert_resource(cfg);
+
+        app.world_mut().run_schedule(Startup);
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.pending_world_events.iter().any(|e| matches!(e, WorldEvent::WorldLoaded)),
+            "init_world_runtime must queue a WorldLoaded event during Startup"
+        );
+        assert_eq!(runtime.trigger_states.len(), 1, "trigger states must be populated");
+    }
+
+    /// Sub-world `LoadWorld` must push a `WorldLoaded` event so any
+    /// `on_world_loaded` triggers declared in the loaded sub-world fire
+    /// after the load merges.
+    #[test]
+    fn apply_world_layer_changes_queues_world_loaded_event_on_load() {
+        let world_path = write_on_world_loaded_layer_fixture();
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .init_resource::<WorldLayerMap>()
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<PendingWorldLayerChanges>()
+            .add_systems(Update, apply_world_layer_changes);
+
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load(world_path.clone()));
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            runtime.pending_world_events.iter().any(|e| matches!(e, WorldEvent::WorldLoaded)),
+            "apply_world_layer_changes Load branch must queue a WorldLoaded event"
+        );
+    }
+
+    /// End-to-end: load a sub-world with an `on_world_loaded` trigger,
+    /// unload it, then re-load it. The trigger must fire on both load
+    /// cycles (proves `fired` is reset because the trigger state is
+    /// recreated fresh on re-load).
+    #[test]
+    fn on_world_loaded_fires_again_after_unload_and_reload() {
+        let world_path = write_on_world_loaded_layer_fixture();
+
+        let mut app = ai_trigger_test_app();
+        app.init_resource::<WorldLayerMap>()
+           .init_resource::<PendingWorldLayerChanges>()
+           .add_systems(Update, apply_world_layer_changes);
+
+        // -- First load cycle --
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load(world_path.clone()));
+        app.update(); // applies load + queues WorldLoaded
+        app.update(); // handle_ai_events drains pending event + fires trigger
+
+        {
+            let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
+            assert!(
+                objectives.sorted_snapshots().iter().any(|o| o.id == "obj-on-load"),
+                "on_world_loaded trigger must fire on first load"
+            );
+        }
+
+        // Complete the objective so we can detect the second add as a
+        // distinct event (ObjectiveManager dedupes by id; re-adding the
+        // same id leaves the existing objective in place which is fine —
+        // we instead assert the trigger's `fired` flag flips back to true
+        // after re-load).
+        // -- Unload --
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload(world_path.clone()));
+        app.update();
+        app.update();
+
+        {
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert!(
+                !runtime.trigger_states.iter().any(|s|
+                    matches!(s.trigger.condition, TriggerCondition::OnWorldLoaded)
+                ),
+                "Unload must remove the on_world_loaded trigger state"
+            );
+        }
+
+        // -- Second load cycle --
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Load(world_path.clone()));
+        app.update(); // applies load + queues WorldLoaded
+        app.update(); // drain + dispatch
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        let reloaded_trigger = runtime
+            .trigger_states
+            .iter()
+            .find(|s| matches!(s.trigger.condition, TriggerCondition::OnWorldLoaded))
+            .expect("on_world_loaded trigger must be re-registered on re-load");
+        assert!(
+            reloaded_trigger.fired,
+            "on_world_loaded trigger must fire again on re-load \
+             (proves fired flag is reset via fresh TriggerState on Load)"
+        );
+    }
+
+    /// Writes a tiny world TOML containing exactly one `on_world_loaded`
+    /// trigger to a temp file. Returns the path. Each call uses a unique
+    /// path so parallel test runs do not collide.
+    fn write_on_world_loaded_layer_fixture() -> String {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let tmp = std::env::temp_dir();
+        let tag = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let world_path = tmp.join(format!("on_world_loaded_{tag}.toml"));
+        let toml = r#"
+[global]
+seed = 1
+
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-on-load"
+  text = "Loaded."
+  mandatory = false
+"#;
+        std::fs::write(&world_path, toml).expect("failed to write fixture world TOML");
+        world_path.to_string_lossy().into_owned()
     }
 }

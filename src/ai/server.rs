@@ -466,12 +466,23 @@ fn tick_ai_controllers(
                     None
                 }
             });
+            // Look up what tick_attacking would have seen for the target.
+            let target_in_view = ctrl.controller.blackboard.target.and_then(|t| {
+                world_entities.iter().find(|e| e.uuid == t).map(|e| {
+                    let dx = e.position[0] - pos.x;
+                    let dz = e.position[2] - pos.z;
+                    (e.position[0], e.position[2], (dx * dx + dz * dz).sqrt())
+                })
+            });
             bevy::log::info!(
-                "[npc-tick] uuid={} state={} yaw={:.2} target={:?} helm={:?} max_yaw_rate={:.2}",
+                "[npc-tick] uuid={} state={} self_pos=({:.1},{:.1}) yaw={:.2} target={:?} target_pos_dist={:?} input_count={} helm={:?} max_yaw_rate={:.2}",
                 ctrl.entity_uuid,
                 ctrl.controller.current_state_name,
+                pos.x, pos.z,
                 yaw,
                 ctrl.controller.blackboard.target,
+                target_in_view,
+                output.inputs.len(),
                 first_helm,
                 physics_config.max_yaw_rate,
             );

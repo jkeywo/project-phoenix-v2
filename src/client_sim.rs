@@ -340,6 +340,10 @@ impl ClientSimState {
                     Some((*helm, *weapons, *sensors, *battery_charge, *locked));
             }
             ServerMessage::EntitySpawned { snapshot } => {
+                crate::wasm_log!(
+                    "[radar-instr 12] EntitySpawned: uuid={} tags={:?}",
+                    snapshot.uuid, snapshot.tags
+                );
                 if !self.world.entities.iter().any(|e| e.uuid == snapshot.uuid) {
                     self.world.entities.push(snapshot.clone());
                 }

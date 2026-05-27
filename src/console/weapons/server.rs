@@ -413,6 +413,18 @@ fn handle_fire_phaser_npc(
     // `EntityConsoleHull` component on the player-ship entity.
     let player_ship_uuid: Option<String> =
         player_ship_q.single().ok().map(|u| u.0.clone());
+    if player_ship_uuid.is_none() {
+        // One-shot warning per tick when NPCs are firing but we can't find the
+        // player ship — likely a missing `Ship` marker or `EntityUuid` on the
+        // player ship entity. Without this, all NPC-->player damage is dropped.
+        if !fire_orders.is_empty() || npc_query.iter().any(|(_, _, _, _, _, c)| {
+            c.is_some_and(|c| matches!(c.controller.current_state, crate::ai::AiState::Attacking { .. }))
+        }) {
+            bevy::log::warn!(
+                "[npc-damage] player_ship_q resolved to None — Ship marker + EntityUuid missing on player-ship entity?"
+            );
+        }
+    }
 
     for (npc_entity, npc_uuid, transform, phaser_state_opt, weapons_section, ctrl_opt) in
         npc_query.iter_mut()
@@ -503,11 +515,27 @@ fn handle_fire_phaser_npc(
                     .map(|u| u == target_uuid_str)
                     .unwrap_or(false);
 
+                bevy::log::info!(
+                    "[npc-damage] uuid={} ticking_beam target={} is_player={} player_ship_uuid={:?}",
+                    npc_uuid.0,
+                    target_uuid_str,
+                    is_player_target,
+                    player_ship_uuid,
+                );
+
                 if is_player_target {
+                    bevy::log::info!(
+                        "[npc-damage] uuid={} hit player_ship target_uuid={} state_present={} shields_present={} hull_present={}",
+                        npc_uuid.0,
+                        target_uuid_str,
+                        ship_state.is_some(),
+                        ship_shields.is_some(),
+                        ship_hull.is_some(),
+                    );
                     if let (Some(ship), Some(shields), Some(hull)) = (
                         ship_state.as_deref(),
-                        ship_shields.as_mut().map(|r| r.as_mut()),
-                        ship_hull.as_mut().map(|r| r.as_mut()),
+                        ship_shields.as_deref_mut(),
+                        ship_hull.as_deref_mut(),
                     ) {
                         let bearing = crate::shield::attacker_bearing_relative(
                             npc_x, npc_z, ship.x, ship.z, ship.yaw,

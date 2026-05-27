@@ -274,6 +274,7 @@ mod tests {
             fire_arc_deg,
             auto_arc_deg,
             beam_range: 0.0,
+            shield_pierce: None,
         }
     }
 

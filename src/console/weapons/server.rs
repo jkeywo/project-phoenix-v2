@@ -145,10 +145,13 @@ pub struct BeamEndedEvent {
 fn on_beam_started(
     trigger: On<BeamStartedEvent>,
     mut outbox: ResMut<SimOutbox>,
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
 ) {
     let ev = trigger.event();
+    let source_uuid = player_ship_q.single().map(|u| u.0.clone()).unwrap_or_default();
     outbox.0.push((Target::All, ServerMessage::BeamStarted {
         bank: ev.bank.clone(),
+        source_uuid,
         target_uuid: ev.target_uuid.clone(),
     }));
 }
@@ -156,10 +159,13 @@ fn on_beam_started(
 fn on_beam_ended(
     trigger: On<BeamEndedEvent>,
     mut outbox: ResMut<SimOutbox>,
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
 ) {
     let ev = trigger.event();
+    let source_uuid = player_ship_q.single().map(|u| u.0.clone()).unwrap_or_default();
     outbox.0.push((Target::All, ServerMessage::BeamEnded {
         bank: ev.bank.clone(),
+        source_uuid,
         target_uuid: ev.target_uuid.clone(),
     }));
 }
@@ -567,6 +573,7 @@ fn handle_fire_torpedo(
     ship: Res<ShipState>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
 ) {
     for ev in reader.read() {
         let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else { continue };
@@ -575,8 +582,9 @@ fn handle_fire_torpedo(
         }
         let uuid = uuid::Uuid::new_v4().to_string();
         let launch_heading = ship.yaw;
+        let source_uuid = player_ship_q.single().map(|u| u.0.clone()).ok();
         use crate::torpedo::LaunchResult;
-        match torpedo_sys.0.launch(tube.as_str(), uuid, ship.x, ship.z, launch_heading, target_uuid.clone()) {
+        match torpedo_sys.0.launch(tube.as_str(), uuid, ship.x, ship.z, launch_heading, target_uuid.clone(), source_uuid) {
             LaunchResult::Launched { uuid: launched_uuid } => {
                 outbox.0.push((Target::All, ServerMessage::TorpedoLaunched {
                     uuid: launched_uuid,
@@ -963,6 +971,7 @@ mod tests {
                         fire_arc_deg: 270.0,
                         auto_arc_deg: 240.0,
                         beam_range: 0.0,
+                        shield_pierce: None,
                     },
                     crate::entity_config::PhaserBankConfig {
                         id: "starboard".into(),
@@ -970,6 +979,7 @@ mod tests {
                         fire_arc_deg: 270.0,
                         auto_arc_deg: 240.0,
                         beam_range: 0.0,
+                        shield_pierce: None,
                     },
                 ],
             }))
@@ -2012,6 +2022,7 @@ mod tests {
                 complexity_toml: None,
                 phaser_banks: Vec::new(),
                 radar: None,
+                shield_pierce: 0.0,
             }),
             EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)])),
             Transform::from_xyz(0.0, 0.0, 0.0),

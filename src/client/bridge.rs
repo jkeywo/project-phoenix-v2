@@ -320,18 +320,8 @@ fn flush_outbound_messages(mut reader: MessageReader<OutboundClientMessage>) {
     OUTBOUND_CB.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
             for payload in &payloads {
-                let includes_set_target = payload.contains("SetTarget");
-                crate::wasm_log!(
-                    "[radar-instr 6] flush_outbound: payload_len={} includes_SetTarget={} body={}",
-                    payload.len(), includes_set_target, payload
-                );
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(payload));
             }
-        } else {
-            crate::wasm_log!(
-                "[radar-instr 6] flush_outbound: {} payloads but NO callback registered",
-                payloads.len()
-            );
         }
     });
 }

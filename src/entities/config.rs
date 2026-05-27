@@ -1505,6 +1505,53 @@ cosmetic_type_paths = ["assets/entities/asteroid_cosmetic.toml"]
         assert!(config.asteroid_field.is_none());
     }
 
+    #[test]
+    fn asteroid_field_shape_defaults_to_none_when_omitted() {
+        // Back-compat: TOMLs that pre-date the `shape` field must continue
+        // to deserialise unchanged, with `shape = None`.
+        let toml_str = r##"
+[asteroid_field]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+asteroid_type_paths = ["x.toml"]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let field = config.asteroid_field.expect("asteroid_field must be Some");
+        assert!(field.shape.is_none());
+    }
+
+    #[test]
+    fn asteroid_field_shape_torus_parses() {
+        // Schema: `shape = "torus"` as a sibling of `inner_radius`/`outer_radius`.
+        let toml_str = r##"
+[asteroid_field]
+shape = "torus"
+inner_radius = 300.0
+outer_radius = 350.0
+density = 0.005
+asteroid_type_paths = ["x.toml"]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let field = config.asteroid_field.expect("asteroid_field must be Some");
+        assert_eq!(field.shape, Some(crate::entity_config::AsteroidFieldShape::Torus));
+        assert!((field.inner_radius - 300.0).abs() < 1e-6);
+        assert!((field.outer_radius - 350.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn asteroid_field_shape_unknown_value_errors() {
+        let toml_str = r##"
+[asteroid_field]
+shape = "donut"
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+"##;
+        let result = EntityConfig::from_toml(toml_str);
+        assert!(result.is_err(), "unknown shape variant must be a parse error");
+    }
+
     // ── name / mesh.emissive / [[light]] tests (PRD: schema refactor slice 3) ──
 
     #[test]
@@ -2876,6 +2923,26 @@ fn default_despawn_cells() -> u32 {
     12
 }
 
+/// Shape variant for an asteroid field.
+///
+/// When the TOML schema omits `shape`, the field defaults to the historical
+/// behaviour (cell-centre distance check against `inner_radius`/`outer_radius`,
+/// which produces a disc/annulus depending on whether `inner_radius` is zero).
+///
+/// `Torus` selects the explicit annulus eligibility test: a cell is admitted
+/// if its XZ bounding box overlaps the annulus `[inner_radius, outer_radius]`
+/// around the world origin. Cells whose bounding box lies fully inside
+/// `inner_radius` or whose nearest corner is beyond `outer_radius` are
+/// rejected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AsteroidFieldShape {
+    /// Annulus / ring-belt eligibility based on `inner_radius` and
+    /// `outer_radius`. Cells whose bounding box overlaps the annulus
+    /// are admitted.
+    Torus,
+}
+
 /// Configuration for an asteroid field.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct AsteroidFieldConfig {
@@ -2900,6 +2967,12 @@ pub struct AsteroidFieldConfig {
     /// behaviour). Clamped to `[0.0, 1.0]` at apply time.
     #[serde(default)]
     pub shield_pierce: f32,
+    /// Optional shape variant. When `None`, the historical cell-centre
+    /// distance eligibility test is used. When `Some(Torus)`, cells are
+    /// admitted iff their XZ bounding box overlaps the annulus
+    /// `[inner_radius, outer_radius]`. See [`AsteroidFieldShape`].
+    #[serde(default)]
+    pub shape: Option<AsteroidFieldShape>,
 }
 
 fn default_spawn_distance() -> f32 {

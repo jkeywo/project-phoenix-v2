@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::asteroid_spawner::eval_cell;
+use crate::asteroid_spawner::{cell_in_field, eval_cell};
 use crate::asteroid_window::{compute_player_grid_cell, compute_slot_for_world_cell, eval_on_player_move};
 use crate::entity_spawner::{AsteroidFieldSection, MeshSection};
 use crate::lobby::Target;
@@ -47,6 +47,9 @@ pub struct AsteroidWindow {
     pub inner_radius: f32,
     /// Outer radius of the torus (cells farther than this have no asteroids).
     pub outer_radius: f32,
+    /// Optional shape variant. When `None`, cell-centre eligibility is used
+    /// (legacy default). When `Some(Torus)`, bbox-overlap eligibility is used.
+    pub shape: Option<crate::entity_config::AsteroidFieldShape>,
 }
 
 impl Default for AsteroidWindow {
@@ -65,6 +68,7 @@ impl Default for AsteroidWindow {
             field_idx: 0,
             inner_radius: 0.0,
             outer_radius: 0.0,
+            shape: None,
         }
     }
 }
@@ -171,6 +175,7 @@ pub fn update_asteroid_window(
             &field.asteroid_type_paths,
             &field.cosmetic_type_paths,
             field.shield_pierce,
+            field.shape,
         );
     } else {
         for (cell_gx, cell_gz) in &delta.cells_to_despawn {
@@ -193,11 +198,13 @@ pub fn update_asteroid_window(
                     *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
                     field.inner_radius, field.outer_radius, &field.asteroid_type_paths,
                     field.shield_pierce,
+                    field.shape,
                 );
                 try_spawn_cosmetic_cell(
                     &mut commands, &mut window,
                     *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
                     field.inner_radius, field.outer_radius, &field.cosmetic_type_paths,
+                    field.shape,
                 );
             }
         }
@@ -223,6 +230,7 @@ fn full_rebuild(
     gameplay_type_paths: &[String],
     cosmetic_type_paths: &[String],
     shield_pierce: f32,
+    shape: Option<crate::entity_config::AsteroidFieldShape>,
 ) {
     for (_uuid, &entity) in entity_map.0.iter() {
         commands.entity(entity).despawn();
@@ -263,6 +271,7 @@ fn full_rebuild(
     window.field_idx = field_idx;
     window.inner_radius = inner_radius;
     window.outer_radius = outer_radius;
+    window.shape = shape;
 
     let s_cells = window.spawn_cells as i32;
     for cx in (gx - s_cells)..=(gx + s_cells) {
@@ -275,11 +284,13 @@ fn full_rebuild(
                     cx, cz, sx, sz, field_idx, grid,
                     inner_radius, outer_radius, gameplay_type_paths,
                     shield_pierce,
+                    shape,
                 );
                 try_spawn_cosmetic_cell(
                     commands, window,
                     cx, cz, sx, sz, field_idx, grid,
                     inner_radius, outer_radius, cosmetic_type_paths,
+                    shape,
                 );
             }
         }
@@ -302,15 +313,13 @@ fn try_spawn_cell(
     inner_radius: f32, outer_radius: f32,
     gameplay_type_paths: &[String],
     shield_pierce: f32,
+    shape: Option<crate::entity_config::AsteroidFieldShape>,
 ) {
     if window.slots[slot_z][slot_x].is_some() {
         return;
     }
 
-    let cell_cx = cell_gx as f32 * grid.resolution;
-    let cell_cz = cell_gz as f32 * grid.resolution;
-    let dist = (cell_cx * cell_cx + cell_cz * cell_cz).sqrt();
-    if dist < inner_radius || dist > outer_radius {
+    if !cell_in_field(cell_gx, cell_gz, grid.resolution, inner_radius, outer_radius, shape) {
         return;
     }
 
@@ -463,15 +472,13 @@ fn try_spawn_cosmetic_cell(
     grid: &crate::entity_config::GridConfig,
     inner_radius: f32, outer_radius: f32,
     cosmetic_type_paths: &[String],
+    shape: Option<crate::entity_config::AsteroidFieldShape>,
 ) {
     if cosmetic_type_paths.is_empty() {
         return;
     }
 
-    let cell_cx = cell_gx as f32 * grid.resolution;
-    let cell_cz = cell_gz as f32 * grid.resolution;
-    let dist = (cell_cx * cell_cx + cell_cz * cell_cz).sqrt();
-    if dist < inner_radius || dist > outer_radius {
+    if !cell_in_field(cell_gx, cell_gz, grid.resolution, inner_radius, outer_radius, shape) {
         return;
     }
 
@@ -572,6 +579,7 @@ mod tests {
             tags: vec![],
             grid: Some(grid(grid_resolution)),
             shield_pierce: 0.0,
+            shape: None,
         }
     }
 
@@ -627,5 +635,119 @@ shield_pierce = 0.4
 "#;
         let cfg: AsteroidFieldConfig = toml::from_str(toml).unwrap();
         assert!((cfg.shield_pierce - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn window_propagates_torus_shape_from_field_section() {
+        // The streaming lifecycle must thread the field's `shape` into the
+        // AsteroidWindow resource so eligibility checks downstream see it.
+        let mut app = test_app();
+        let mut f = field(15.0);
+        f.shape = Some(crate::entity_config::AsteroidFieldShape::Torus);
+        app.world_mut().spawn((
+            AsteroidFieldSection(f),
+            Transform::default(),
+        ));
+        app.update();
+
+        let window = app.world().resource::<AsteroidWindow>();
+        assert_eq!(
+            window.shape,
+            Some(crate::entity_config::AsteroidFieldShape::Torus),
+            "window.shape must be sourced from the spawned AsteroidFieldSection",
+        );
+        assert_eq!(window.inner_radius, 100.0);
+        assert_eq!(window.outer_radius, 200.0);
+    }
+
+    #[test]
+    fn window_shape_defaults_to_none_when_field_omits_it() {
+        // Back-compat: an AsteroidFieldSection with `shape = None` must
+        // leave the window in legacy (centre-distance) mode.
+        let mut app = test_app();
+        app.world_mut().spawn((
+            AsteroidFieldSection(field(15.0)),
+            Transform::default(),
+        ));
+        app.update();
+
+        let window = app.world().resource::<AsteroidWindow>();
+        assert!(window.shape.is_none(), "default field has no shape");
+    }
+
+    #[test]
+    fn streaming_full_rebuild_with_torus_keeps_positions_near_annulus() {
+        // Drive a full rebuild and assert that every spawned gameplay
+        // asteroid sits near the annulus [inner_radius, outer_radius].
+        // Torus eligibility admits cells whose bbox overlaps the annulus,
+        // so positions may extend up to one cell diagonal beyond either
+        // boundary. After the player departs, all asteroids must despawn.
+        let mut app = test_app();
+        // Field with a dense fill so cells actually spawn.
+        let res = 15.0f32;
+        let grid_cfg = GridConfig {
+            resolution: res,
+            fill_gameplay: 0.0,        // admit every cell that passes density
+            fill_cosmetic: 1.0,
+            uniformity: 0.0,
+            noise_freq: 0.02,
+            noise_octaves: 1,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 1,
+            jitter: 0.0,
+            cosmetic_y_offset: 0.0,
+            gameplay_y_variance: 0.0,
+            spawn_cells: 20,
+            despawn_cells: 22,
+        };
+        let f = AsteroidFieldConfig {
+            inner_radius: 100.0,
+            outer_radius: 200.0,
+            density: 0.0,
+            spawn_distance: 150.0,
+            despawn_distance: 250.0,
+            asteroid_type_paths: vec!["asteroid_small.toml".to_string()],
+            cosmetic_type_paths: vec![],
+            tags: vec![],
+            grid: Some(grid_cfg),
+            shield_pierce: 0.0,
+            shape: Some(crate::entity_config::AsteroidFieldShape::Torus),
+        };
+        // Anchor the player on the belt so the spawn window covers it.
+        {
+            let mut ship = app.world_mut().resource_mut::<ShipState>();
+            ship.x = 150.0;
+            ship.z = 0.0;
+        }
+        app.world_mut().spawn((
+            AsteroidFieldSection(f),
+            Transform::default(),
+        ));
+        app.update();
+
+        let tol = res * std::f32::consts::SQRT_2;
+        let mut q = app.world_mut().query::<(&Transform, &Asteroid)>();
+        let mut count = 0;
+        for (t, _) in q.iter(app.world()) {
+            let d = (t.translation.x.powi(2) + t.translation.z.powi(2)).sqrt();
+            assert!(
+                d >= 100.0 - tol && d <= 200.0 + tol,
+                "asteroid at ({}, {}) dist={} outside [{}, {}]",
+                t.translation.x, t.translation.z, d, 100.0 - tol, 200.0 + tol,
+            );
+            count += 1;
+        }
+        assert!(count > 0, "no asteroids spawned — test set-up is wrong");
+
+        // Move the player far away → full rebuild should clear them.
+        {
+            let mut ship = app.world_mut().resource_mut::<ShipState>();
+            ship.x = 10_000.0;
+            ship.z = 10_000.0;
+        }
+        app.update();
+        let mut q = app.world_mut().query::<&Asteroid>();
+        let remaining = q.iter(app.world()).count();
+        assert_eq!(remaining, 0, "all asteroids must despawn after departing the belt");
     }
 }

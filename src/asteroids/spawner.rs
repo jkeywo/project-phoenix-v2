@@ -1,7 +1,7 @@
 ﻿// Pure Rust module for generating asteroid positions in a donut-shaped field.
 // No Bevy, no physics engine — input → output design for isolated unit testing.
 
-use crate::entity_config::GridConfig;
+use crate::entity_config::{AsteroidFieldShape, GridConfig};
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
@@ -191,6 +191,98 @@ pub fn eval_cell(
     None
 }
 
+/// Cell-eligibility test for an asteroid field.
+///
+/// Returns `true` when the world cell at integer grid coordinates
+/// `(cell_gx, cell_gz)` is eligible to contain asteroids for the given
+/// field shape.
+///
+/// - `None`: the legacy disc/annulus test based on the cell **placement
+///   point** distance to the world origin. Equivalent to
+///   `inner_radius <= dist(placement) <= outer_radius`, where the
+///   placement point is `(cell_gx * resolution, cell_gz * resolution)`.
+///   Preserves the historical default for asteroid fields whose TOML
+///   omits `shape`.
+/// - `Some(Torus)`: bounding-box overlap with the annulus. A cell is
+///   admitted iff its XZ bounding box overlaps the annulus
+///   `[inner_radius, outer_radius]` around the world origin. Cells whose
+///   bounding box lies entirely inside `inner_radius`, or whose nearest
+///   bbox corner is beyond `outer_radius`, are rejected. All other
+///   cells are admitted.
+///
+/// For torus eligibility the bbox is centred on the cell placement point
+/// (the position where `eval_cell` writes the asteroid before jitter):
+/// `[gx*res − res/2, gx*res + res/2] × [gz*res − res/2, gz*res + res/2]`.
+/// This makes the eligibility test geometrically consistent with the
+/// per-asteroid jitter clamp in `compute_jitter`, which assumes the
+/// placement point sits inside the annulus and pulls jittered positions
+/// back across the boundary if needed.
+pub fn cell_in_field(
+    cell_gx: i32,
+    cell_gz: i32,
+    resolution: f32,
+    inner_radius: f32,
+    outer_radius: f32,
+    shape: Option<AsteroidFieldShape>,
+) -> bool {
+    match shape {
+        None => {
+            let cx = cell_gx as f32 * resolution;
+            let cz = cell_gz as f32 * resolution;
+            let dist = (cx * cx + cz * cz).sqrt();
+            dist >= inner_radius && dist <= outer_radius
+        }
+        Some(AsteroidFieldShape::Torus) => {
+            let half = resolution * 0.5;
+            let centre_x = cell_gx as f32 * resolution;
+            let centre_z = cell_gz as f32 * resolution;
+            let min_x = centre_x - half;
+            let max_x = centre_x + half;
+            let min_z = centre_z - half;
+            let max_z = centre_z + half;
+
+            // Squared nearest-corner distance from origin to the cell bbox.
+            // If the origin is inside the bbox on an axis, the contribution is 0.
+            let nearest_x = if 0.0 < min_x {
+                min_x
+            } else if 0.0 > max_x {
+                max_x
+            } else {
+                0.0
+            };
+            let nearest_z = if 0.0 < min_z {
+                min_z
+            } else if 0.0 > max_z {
+                max_z
+            } else {
+                0.0
+            };
+            let nearest_sq = nearest_x * nearest_x + nearest_z * nearest_z;
+
+            // Squared farthest-corner distance from origin: the bbox corner
+            // whose component magnitudes are maximal on each axis.
+            let far_x = if min_x.abs() > max_x.abs() { min_x } else { max_x };
+            let far_z = if min_z.abs() > max_z.abs() { min_z } else { max_z };
+            let farthest_sq = far_x * far_x + far_z * far_z;
+
+            let inner_sq = inner_radius * inner_radius;
+            let outer_sq = outer_radius * outer_radius;
+
+            // Reject: cell entirely outside outer radius
+            // (nearest corner is beyond outer_radius).
+            if nearest_sq > outer_sq {
+                return false;
+            }
+            // Reject: cell entirely inside inner hole
+            // (farthest corner is still inside inner_radius).
+            if farthest_sq < inner_sq {
+                return false;
+            }
+            true
+        }
+    }
+}
+
 /// Generate asteroid positions using a grid + Perlin noise system.
 ///
 /// Grid cells within the bounding box (inner_radius..outer_radius on the XZ plane)
@@ -206,6 +298,32 @@ pub fn generate_grid_field(
     _seed_offset: u64,
     gameplay_type_paths: &[String],
     cosmetic_type_paths: &[String],
+) -> AsteroidGridResult {
+    generate_grid_field_with_shape(
+        inner_radius,
+        outer_radius,
+        grid,
+        _seed_offset,
+        gameplay_type_paths,
+        cosmetic_type_paths,
+        None,
+    )
+}
+
+/// Variant of [`generate_grid_field`] that accepts an explicit shape.
+///
+/// `shape = None` preserves the historical cell-centre eligibility test
+/// (back-compat with TOMLs that do not declare a `shape`).
+/// `shape = Some(Torus)` uses bbox-overlap eligibility — admit any cell
+/// whose XZ bounding box overlaps the annulus.
+pub fn generate_grid_field_with_shape(
+    inner_radius: f32,
+    outer_radius: f32,
+    grid: GridConfig,
+    _seed_offset: u64,
+    gameplay_type_paths: &[String],
+    cosmetic_type_paths: &[String],
+    shape: Option<AsteroidFieldShape>,
 ) -> AsteroidGridResult {
     let r_min = inner_radius;
     let r_max = outer_radius;
@@ -224,11 +342,7 @@ pub fn generate_grid_field(
     let mut cell_id: u64 = 0;
     for cx in min_cell_x..=max_cell_x {
         for cz in min_cell_z..=max_cell_z {
-            let cell_center_x = (cx as f32) * res;
-            let cell_center_z = (cz as f32) * res;
-            let dist = (cell_center_x * cell_center_x + cell_center_z * cell_center_z).sqrt();
-
-            if dist < r_min || dist > r_max {
+            if !cell_in_field(cx, cz, res, r_min, r_max, shape) {
                 continue;
             }
 
@@ -980,6 +1094,211 @@ mod tests {
             "Gameplay Y={} must be within variance ±{}",
             spawn.y,
             variance
+        );
+    }
+
+    // ── Torus shape eligibility tests ──────────────────────────────────────
+
+    #[test]
+    fn cell_in_field_none_shape_uses_center_distance() {
+        // Cell placement-point at (75, 45): distance ≈ 87.46. With inner=100,
+        // the legacy centre-distance test rejects it (87 < 100).
+        assert!(!cell_in_field(5, 3, 15.0, 100.0, 200.0, None));
+
+        // Cell placement-point at (150, 150): distance ≈ 212. With outer=200,
+        // the legacy centre-distance test rejects it (212 > 200).
+        assert!(!cell_in_field(10, 10, 15.0, 100.0, 200.0, None));
+
+        // Cell placement at (75, 75) → dist ≈ 106, inside the [100, 200] annulus.
+        assert!(cell_in_field(5, 5, 15.0, 100.0, 200.0, None));
+    }
+
+    #[test]
+    fn cell_in_field_torus_admits_cell_straddling_inner_radius() {
+        // Cell at gx=7, gz=0 with resolution=15:
+        //   placement centre = (105, 0)
+        //   bbox = [97.5..112.5] × [-7.5..7.5]
+        //   nearest corner from origin = (97.5, 0) → dist = 97.5
+        //   farthest corner = (112.5, 7.5) → dist ≈ 112.75
+        // With inner_radius=100, the bbox straddles the inner boundary.
+        // Torus admits it.
+        assert!(cell_in_field(7, 0, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+    }
+
+    #[test]
+    fn cell_in_field_torus_rejects_cell_fully_inside_inner_radius() {
+        // Cell at gx=0, gz=0 with resolution=10:
+        //   bbox centred at origin = [-5..5] × [-5..5]
+        //   farthest corner = (5, 5) → dist ≈ 7.07
+        // With inner_radius=50, the entire bbox is inside the inner hole.
+        assert!(!cell_in_field(0, 0, 10.0, 50.0, 200.0, Some(AsteroidFieldShape::Torus)));
+    }
+
+    #[test]
+    fn cell_in_field_torus_rejects_cell_fully_outside_outer_radius() {
+        // Cell at gx=20, gz=20 with resolution=15:
+        //   placement centre = (300, 300)
+        //   bbox = [292.5..307.5] × [292.5..307.5]
+        //   nearest corner = (292.5, 292.5) → dist ≈ 413.66
+        // With outer_radius=200, the nearest corner is well beyond.
+        assert!(!cell_in_field(20, 20, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+    }
+
+    #[test]
+    fn cell_in_field_torus_admits_cell_straddling_outer_radius() {
+        // Cell at gx=13, gz=0 with resolution=15:
+        //   placement centre = (195, 0)
+        //   bbox = [187.5..202.5] × [-7.5..7.5]
+        //   nearest corner = (187.5, 0) → dist = 187.5 (inside outer=200)
+        //   farthest = (202.5, 7.5) → dist ≈ 202.6 (outside outer=200)
+        // Straddles outer boundary. Admitted because nearest is inside.
+        assert!(cell_in_field(13, 0, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+    }
+
+    #[test]
+    fn cell_in_field_torus_admits_cell_containing_origin() {
+        // Cell at gx=0, gz=0 with resolution=15:
+        //   bbox = [-7.5..7.5] × [-7.5..7.5] (contains origin)
+        //   nearest corner distance = 0 (origin is inside the bbox)
+        //   With inner_radius=10, the cell straddles the inner boundary
+        //   (farthest corner at sqrt(112.5) ≈ 10.6 > 10).
+        assert!(cell_in_field(0, 0, 15.0, 10.0, 200.0, Some(AsteroidFieldShape::Torus)));
+    }
+
+    #[test]
+    fn cell_in_field_torus_zero_inner_radius_admits_central_cells() {
+        // With inner_radius = 0, no cells are "fully inside" the inner
+        // hole (the hole has no area). Admit any cell whose nearest
+        // corner is inside outer_radius.
+        assert!(cell_in_field(0, 0, 15.0, 0.0, 200.0, Some(AsteroidFieldShape::Torus)));
+    }
+
+    #[test]
+    fn cell_in_field_torus_negative_coords_symmetric() {
+        // Symmetry across quadrants: rejection of cells far in -X, -Z.
+        assert!(!cell_in_field(-20, -20, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        // Cell whose bbox crosses the outer boundary on the -X side.
+        assert!(cell_in_field(-13, 0, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+    }
+
+    #[test]
+    fn generate_grid_field_with_shape_none_matches_legacy() {
+        // Determinism / back-compat: when shape = None, the new variant
+        // must produce identical output to the legacy `generate_grid_field`.
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.4,
+            fill_cosmetic: 0.15,
+            uniformity: 0.3,
+            noise_freq: 0.02,
+            noise_octaves: 3,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 2,
+            jitter: 10.0,
+            cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        };
+        let legacy = generate_grid_field(
+            100.0, 200.0, grid.clone(), 42,
+            &["gameplay.toml".to_string()],
+            &["cosmetic.toml".to_string()],
+        );
+        let shaped = generate_grid_field_with_shape(
+            100.0, 200.0, grid, 42,
+            &["gameplay.toml".to_string()],
+            &["cosmetic.toml".to_string()],
+            None,
+        );
+        assert_eq!(legacy.gameplay, shaped.gameplay);
+        assert_eq!(legacy.cosmetic_upper, shaped.cosmetic_upper);
+        assert_eq!(legacy.cosmetic_lower, shaped.cosmetic_lower);
+        assert_eq!(legacy.count, shaped.count);
+    }
+
+    #[test]
+    fn generate_grid_field_torus_positions_near_annulus() {
+        // Torus eligibility admits cells whose bbox overlaps the annulus —
+        // including cells whose centre lies just outside [r_min, r_max].
+        // The per-cell jitter does not pull such positions back inside the
+        // annulus (seed derivation unchanged from legacy). We assert a
+        // looser bound: every position lies within one cell width of the
+        // annulus.
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.4,
+            fill_cosmetic: 0.15,
+            uniformity: 0.3,
+            noise_freq: 0.02,
+            noise_octaves: 3,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 2,
+            jitter: 10.0,
+            cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        };
+        let res = grid.resolution;
+        let result = generate_grid_field_with_shape(
+            100.0, 200.0, grid, 42,
+            &["gameplay.toml".to_string()],
+            &["cosmetic.toml".to_string()],
+            Some(AsteroidFieldShape::Torus),
+        );
+        // Bounded tolerance: one cell diagonal beyond the annulus on either side.
+        let tol = res * std::f32::consts::SQRT_2;
+        for spawn in result.gameplay.iter()
+            .chain(result.cosmetic_upper.iter())
+            .chain(result.cosmetic_lower.iter())
+        {
+            let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
+            assert!(
+                dist >= 100.0 - tol && dist <= 200.0 + tol,
+                "torus pos ({}, {}) dist={} outside [{}, {}]",
+                spawn.x, spawn.z, dist, 100.0 - tol, 200.0 + tol,
+            );
+        }
+    }
+
+    #[test]
+    fn generate_grid_field_torus_count_ge_legacy_count() {
+        // The torus (bbox-overlap) admits a superset of cells compared to
+        // the legacy centre-distance test, so the gameplay+cosmetic counts
+        // must be ≥ the legacy counts (the same per-cell seed produces the
+        // same per-cell outcome for the cells common to both).
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.4,
+            fill_cosmetic: 0.15,
+            uniformity: 0.3,
+            noise_freq: 0.02,
+            noise_octaves: 3,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 2,
+            jitter: 10.0,
+            cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        };
+        let legacy = generate_grid_field_with_shape(
+            100.0, 200.0, grid.clone(), 42,
+            &["gameplay.toml".to_string()],
+            &[],
+            None,
+        );
+        let torus = generate_grid_field_with_shape(
+            100.0, 200.0, grid, 42,
+            &["gameplay.toml".to_string()],
+            &[],
+            Some(AsteroidFieldShape::Torus),
+        );
+        assert!(
+            torus.gameplay.len() >= legacy.gameplay.len(),
+            "torus admits a superset of cells: legacy={} torus={}",
+            legacy.gameplay.len(), torus.gameplay.len(),
         );
     }
 }

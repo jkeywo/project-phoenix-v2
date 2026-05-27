@@ -532,6 +532,7 @@ mod tests {
                 tags: vec![],
                 grid: None,
                 shield_pierce: 0.0,
+                shape: None,
             }),
             hull: None,
             collider: None,

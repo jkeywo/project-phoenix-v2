@@ -455,6 +455,28 @@ fn tick_ai_controllers(
             })
             .unwrap_or_else(crate::ship_physics::ShipPhysicsConfig::new);
 
+        // DEBUG: trace the AI's state + first Helm input so we can see whether
+        // the AI is actively steering toward its target. Remove once the
+        // raider-not-turning bug is diagnosed.
+        if matches!(ctrl.controller.current_state, crate::ai::AiState::Attacking { .. }) {
+            let first_helm = output.inputs.iter().find_map(|i| {
+                if let crate::ai::AiInput::Helm { thrust, steering } = i {
+                    Some((*thrust, *steering))
+                } else {
+                    None
+                }
+            });
+            bevy::log::info!(
+                "[npc-tick] uuid={} state={} yaw={:.2} target={:?} helm={:?} max_yaw_rate={:.2}",
+                ctrl.entity_uuid,
+                ctrl.controller.current_state_name,
+                yaw,
+                ctrl.controller.blackboard.target,
+                first_helm,
+                physics_config.max_yaw_rate,
+            );
+        }
+
         for input in &output.inputs {
             if let crate::ai::AiInput::Helm { thrust, steering } = *input {
                 let physics_state = crate::ship_physics::ShipPhysicsState {

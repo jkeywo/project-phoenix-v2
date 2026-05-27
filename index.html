@@ -77,7 +77,7 @@
     .world-btn:hover { background: #223; border-color: #558; }
     .world-btn.active { background: #224; border-color: #66c; color: #ccf; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-39ebbcf8dceb919.js" crossorigin="anonymous" integrity="sha384-PmGeeWetYkxSldODZHpjDJ8BrEcMFpdDyCGchzYuXBRsj0Kh3KHsYDAxD7YCfaMa"><link rel="preload" href="./project-phoenix-39ebbcf8dceb919_bg.wasm" crossorigin="anonymous" integrity="sha384-9oIFTZwdY5mRrzknHTLrxAYBlEZneQH315Aq2VrdSE892ePvCfar3+W+Qr0sUGlo" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-519f4b4e6fc327fb.js" crossorigin="anonymous" integrity="sha384-bEvnZ9RQuBgJ3PBFL6QBpbuRB05otDCiSR8xeroC6NvYfRoFTTOGTchVmt8mIHGe"><link rel="preload" href="./project-phoenix-519f4b4e6fc327fb_bg.wasm" crossorigin="anonymous" integrity="sha384-nEjlYC0TU0k3FDvi2fMcoCuBmCvVfda0BS/YXGxQaiXGJSYhQ/geCW6tSF/HqLhn" as="fetch" type="application/wasm"></head>
 <body>
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
   <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
@@ -133,8 +133,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-39ebbcf8dceb919.js';
-const wasm = await init({ module_or_path: './project-phoenix-39ebbcf8dceb919_bg.wasm' });
+import init, * as bindings from './project-phoenix-519f4b4e6fc327fb.js';
+const wasm = await init({ module_or_path: './project-phoenix-519f4b4e6fc327fb_bg.wasm' });
 
 
 window.wasmBindings = bindings;

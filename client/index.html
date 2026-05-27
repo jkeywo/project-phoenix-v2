@@ -83,7 +83,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-b72a31353f3ad159.js" crossorigin="anonymous" integrity="sha384-Fa2gOm8QF9Xztkio4EDHHLBZShcrPxWg64Yz6XF7aa+rB8XDpORezuqEEtK/gRvG"><link rel="preload" href="./project-phoenix-b72a31353f3ad159_bg.wasm" crossorigin="anonymous" integrity="sha384-7jtORaApAyXIaKQDMOssFeV59OU1koo/3Isd+aJIuZnXcFGnNQWvsLhGVw/UF0so" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-c6b5d2dcff150d4f.js" crossorigin="anonymous" integrity="sha384-uOuXwxJN0pVzqiUNZ+DeuOXctweBMiXtLHpv2X7Fi+udtxy6t+oa6hX4kZIk65EJ"><link rel="preload" href="./project-phoenix-c6b5d2dcff150d4f_bg.wasm" crossorigin="anonymous" integrity="sha384-f563YK8qEGNYT5+CA1nI0Rf1CEamNXQ/YQ2NE/zzJAylNixgWlzxyUsuyer1mFEe" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -92,8 +92,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-b72a31353f3ad159.js';
-const wasm = await init({ module_or_path: './project-phoenix-b72a31353f3ad159_bg.wasm' });
+import init, * as bindings from './project-phoenix-c6b5d2dcff150d4f.js';
+const wasm = await init({ module_or_path: './project-phoenix-c6b5d2dcff150d4f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -511,7 +511,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
     }
 
-    function renderWeaponsRadar() {      const canvas = $('weapons-radar');
+    // EntitySnapshot position helpers (position: [x, y, z]); shared between
+    // renderWeaponsRadar and the initWeaponsRadar tap-to-lock handler.
+    function entityX(e) { return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0); }
+    function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
+    function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
+
+    function renderWeaponsRadar() {
+      const canvas = $('weapons-radar');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const W = canvas.width, H = canvas.height;
@@ -649,11 +656,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const canvas = $('weapons-radar');
       if (!canvas) return;
       const RANGE = 60.0;
-
-      // EntitySnapshot position helper (position: [x, y, z])
-      function entityX(e) { return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0); }
-      function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
-      function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
 
       function getEntityAtPoint(canvasX, canvasY) {
         const cx = canvas.width / 2, cy = canvas.height / 2;

@@ -66,6 +66,7 @@ speed = 30.0
 turn_rate_deg_per_sec = 45.0
 lifespan = 20.0
 load_time = 10.0
+detonation_radius = 5.0
 
 # Forward tube A
 [[torpedoes.tubes]]

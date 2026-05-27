@@ -1519,13 +1519,27 @@ fn handle_ai_events(
                             }
                         }
                         // Push into our local pipeline so chained
-                        // on_destroyed triggers in the same frame fire,
-                        // and so any future MessageWriter subscriber sees
-                        // a uniform event. We deliberately do NOT use
-                        // MessageWriter<AiEntityDestroyed> here because
-                        // this system already holds the matching reader,
-                        // which would trigger Bevy's B0002 access check.
-                        next_events.push(WorldEvent::Destroyed { uuid });
+                        // on_destroyed triggers in the same frame fire.
+                        // We deliberately do NOT use
+                        // MessageWriter<AiEntityDestroyed> directly here
+                        // because this system already holds the matching
+                        // reader, which would trigger Bevy's B0002 access
+                        // check. Instead, defer the message write via a
+                        // command so it runs after this system exits and
+                        // external consumers (telemetry, save/load,
+                        // achievements) observe script-killed entities the
+                        // same as combat-killed ones.
+                        next_events.push(WorldEvent::Destroyed { uuid: uuid.clone() });
+                        let msg_uuid = uuid.clone();
+                        commands.queue(move |world: &mut World| {
+                            if let Some(mut msgs) = world.get_resource_mut::<
+                                Messages<crate::ai_plugin::AiEntityDestroyed>,
+                            >() {
+                                msgs.write(crate::ai_plugin::AiEntityDestroyed {
+                                    entity_uuid: msg_uuid,
+                                });
+                            }
+                        });
                         // Despawn the underlying entity if we found it.
                         if let Some(ent) = target_entity {
                             commands.entity(ent).despawn();
@@ -4847,6 +4861,22 @@ size_max = 2.0
         assert!(
             objs.sorted_snapshots().iter().any(|o| o.id == "obj-chained"),
             "chained on_destroyed trigger must fire from DestroyEntity action"
+        );
+
+        // External consumers must also see the message: DestroyEntity action
+        // must emit AiEntityDestroyed via the deferred Commands::queue path,
+        // matching combat-induced destruction.
+        let msgs = app
+            .world()
+            .resource::<Messages<crate::ai_plugin::AiEntityDestroyed>>();
+        let mut cursor = msgs.get_cursor();
+        let emitted: Vec<String> = cursor
+            .read(msgs)
+            .map(|m| m.entity_uuid.clone())
+            .collect();
+        assert!(
+            emitted.iter().any(|u| u == target_uuid),
+            "DestroyEntity action must emit AiEntityDestroyed for '{target_uuid}', got {emitted:?}"
         );
     }
 

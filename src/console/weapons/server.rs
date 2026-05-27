@@ -397,6 +397,44 @@ fn handle_fire_phaser_npc(
                 matches!(c.controller.current_state, crate::ai::AiState::Attacking { .. })
                     && c.controller.blackboard.target.is_some()
             });
+
+        // DEBUG: instrument the NPC fire decision so we can see why phasers
+        // are (or aren't) connecting in play sessions. Logged once per tick per
+        // NPC that wants to fire. Remove once the geometry bug is diagnosed.
+        if should_fire {
+            if let Some(t_uuid) = target_uuid {
+                if let Some((_, tx, tz)) = target_positions.iter().find(|(u, _, _)| *u == t_uuid) {
+                    let dx = tx - npc_x;
+                    let dz = tz - npc_z;
+                    let dist = (dx * dx + dz * dz).sqrt();
+                    let radar_y = dx * (-npc_yaw).sin() + dz * (-npc_yaw).cos();
+                    info!(
+                        "[npc-fire] uuid={} target={} dist={:.1} beam_range={:.1} radar_y={:.2} ready={} beam_active={} cooldown={:.2}",
+                        npc_uuid.0,
+                        t_uuid,
+                        dist,
+                        beam_range,
+                        radar_y,
+                        phaser_state.is_ready(),
+                        phaser_state.beam_active,
+                        phaser_state.cooldown_remaining,
+                    );
+                } else {
+                    info!(
+                        "[npc-fire] uuid={} target={} TARGET_NOT_FOUND_IN_HULL_QUERY ready={}",
+                        npc_uuid.0,
+                        t_uuid,
+                        phaser_state.is_ready(),
+                    );
+                }
+            } else {
+                info!(
+                    "[npc-fire] uuid={} should_fire=true but blackboard.target=None",
+                    npc_uuid.0,
+                );
+            }
+        }
+
         if should_fire && phaser_state.is_ready() {
             if let Some(t_uuid) = target_uuid {
                 let fire_ok = target_positions
@@ -408,6 +446,13 @@ fn handle_fire_phaser_npc(
                         )
                     })
                     .unwrap_or(false);
+
+                if !fire_ok {
+                    info!(
+                        "[npc-fire] uuid={} GATE_REJECTED (out of range or wrong arc)",
+                        npc_uuid.0
+                    );
+                }
 
                 if fire_ok {
                     phaser_state.beam_active = true;
@@ -631,6 +676,10 @@ fn tick_active_beam(
     mut outbox: ResMut<SimOutbox>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    // Player-ship UUID, used to tag NPCs we hit so their AI's `on_attacked`
+    // transition fires. Empty in tests that don't spawn a player-ship entity;
+    // the insertion is skipped in that case.
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
 ) {
 
     let dt = time.delta_secs();
@@ -680,6 +729,19 @@ fn tick_active_beam(
             let is_asteroid = asteroid_uuid.is_some();
             let mut rng = rand::rng();
             hull_comp.0.apply_damage(damage_to_apply as f32, &mut rng);
+
+            // Tag the NPC with AttackerThisTick so its AI's `on_attacked`
+            // transition fires. Skipped if there's no player-ship entity
+            // (e.g. test apps that don't spawn one) or if its UUID is malformed.
+            if !is_asteroid {
+                if let Ok(player_uuid) = player_ship_q.single() {
+                    if let Ok(parsed) = uuid::Uuid::parse_str(&player_uuid.0) {
+                        commands
+                            .entity(entity)
+                            .insert(crate::ai_plugin::AttackerThisTick(parsed));
+                    }
+                }
+            }
 
             if hull_comp.0.is_destroyed() {
                 commands.entity(entity).despawn();

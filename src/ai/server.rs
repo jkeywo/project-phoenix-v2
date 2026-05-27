@@ -325,6 +325,11 @@ fn tick_ai_controllers(
 
         // Read attacker from component (set externally by simulation / tests).
         let attacker_this_tick = attacker_comp.map(|a| a.0);
+        // Consume the marker so the `on_attacked` condition only fires once per
+        // incoming hit (the simulation re-inserts it whenever a new hit lands).
+        if attacker_this_tick.is_some() {
+            commands.entity(entity).remove::<AttackerThisTick>();
+        }
 
         // `scenario_unloaded` is true when this entity carries the marker set
         // by `handle_ai_events` when its owning scenario was unloaded.

@@ -663,17 +663,24 @@ fn evaluate_transitions(
                 }
             }
             "target_destroyed" => {
-                if let Some(target_uuid) = controller.blackboard.target {
-                    let present = world_view.entities.iter().any(|e| e.uuid == target_uuid);
-                    if !present {
+                match controller.blackboard.target {
+                    Some(target_uuid) => {
+                        let present = world_view.entities.iter().any(|e| e.uuid == target_uuid);
+                        if !present {
+                            new_bb.target = None;
+                            new_bb.on_attacked_armed = true;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    None => {
+                        // No target — treat as already destroyed so the AI
+                        // transitions out of attack/pursue states.
                         new_bb.target = None;
                         new_bb.on_attacked_armed = true;
                         true
-                    } else {
-                        false
                     }
-                } else {
-                    false
                 }
             }
             "in_weapons_range" => {
@@ -1563,15 +1570,15 @@ mod tests {
     }
 
     #[test]
-    fn target_destroyed_does_not_fire_when_target_is_none() {
-        // No target set → condition does not fire
+    fn target_destroyed_fires_when_target_is_none() {
+        // No target set → condition fires (target is effectively destroyed/missing)
         let mut ctrl = pursuing_controller(None, 0.8);
         ctrl.current_state_name = "chase".to_string();
         let world = WorldView::default();
         let behaviour = chase_behaviour_with_target_destroyed_to_patrol();
         let output = do_tick_with(&ctrl, &world, &behaviour, &empty_registry());
-        assert_ne!(output.new_state, AiState::Patrolling { waypoints: vec![], loop_path: false, target_speed: 0.5 },
-            "target_destroyed must not fire when target is None");
+        assert_eq!(output.new_state, AiState::Patrolling { waypoints: vec![], loop_path: false, target_speed: 0.5 },
+            "target_destroyed must fire when target is None");
     }
 
     // ── Transition ordering ────────────────────────────────────────────────

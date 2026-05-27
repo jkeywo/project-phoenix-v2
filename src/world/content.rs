@@ -59,6 +59,12 @@ pub struct TriggerState {
     pub trigger: Trigger,
     /// Whether this trigger has already fired (single-shot semantics).
     pub fired: bool,
+    /// Path of the sub-world layer that authored this trigger, or `None`
+    /// for triggers declared in the base world. Used by `spawn_entity`
+    /// trigger actions (issue #417) to attach freshly-spawned entities
+    /// to the parent `WorldLayerMap` entry so `UnloadWorld` cascades.
+    #[doc(hidden)]
+    pub origin_layer: Option<String>,
 }
 
 /// Runtime state for one comms template — tracks whether it has already fired.
@@ -72,6 +78,10 @@ pub struct CommsTemplateState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FiredTrigger {
     pub actions: Vec<TriggerAction>,
+    /// Origin sub-world layer path (or `None` for base-world triggers).
+    /// Used by `spawn_entity` action dispatch (issue #417) to attach the
+    /// new entity to the right `WorldLayerMap` entry.
+    pub origin_layer: Option<String>,
 }
 
 /// A comms template that fired in response to world events.
@@ -146,6 +156,7 @@ pub fn evaluate_triggers_with_flags(
         state.fired = true;
         results.push(FiredTrigger {
             actions: state.trigger.actions.clone(),
+            origin_layer: state.origin_layer.clone(),
         });
     }
     results
@@ -226,6 +237,7 @@ pub fn trigger_states_from_world(
         .map(|t| TriggerState {
             trigger: t.clone(),
             fired: false,
+            origin_layer: None,
         })
         .collect()
 }
@@ -302,6 +314,7 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -317,6 +330,7 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -332,6 +346,7 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: dest_trigger("raider", add_obj("obj-1")),
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -351,6 +366,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
         let before = vec![WorldEvent::TimerElapsed { elapsed_secs: 10.0 }];
@@ -370,6 +386,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
@@ -390,6 +407,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("starbase".into(), "uuid-sb".into());
@@ -404,10 +422,12 @@ mod tests {
             TriggerState {
                 trigger: dest_trigger("raider", add_obj("obj-r")),
                 fired: false,
+                origin_layer: None,
             },
             TriggerState {
                 trigger: dest_trigger("station", add_obj("obj-s")),
                 fired: false,
+                origin_layer: None,
             },
         ];
         let mut name_to_uuid = HashMap::new();
@@ -425,6 +445,7 @@ mod tests {
         let mut states = vec![TriggerState {
             trigger: dest_trigger("ghost", add_obj("obj-ghost")),
             fired: false,
+            origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::Destroyed { uuid: "uuid-x".into() }];
@@ -624,6 +645,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::WorldLoaded];
@@ -641,6 +663,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![
@@ -662,6 +685,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
         let events = vec![WorldEvent::WorldLoaded];
@@ -682,6 +706,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -700,6 +725,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -718,6 +744,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -735,6 +762,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
@@ -752,6 +780,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
         let name_to_uuid = HashMap::new(); // empty — name does not resolve
         let events = vec![WorldEvent::EnteredRegion { uuid: "any-uuid".into() }];

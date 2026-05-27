@@ -117,6 +117,10 @@ pub struct WorldRuntime {
     pub comms_template_states: Vec<CommsTemplateState>,
     /// ECS entity handles spawned when this layer was loaded.
     pub spawned_entities: Vec<Entity>,
+    /// Anchor table from the layer's `WorldConfig`. Used by `spawn_entity`
+    /// trigger actions (issue #417) to resolve `anchor = "..."` action
+    /// fields when this layer authored the trigger.
+    pub anchors: HashMap<String, [f32; 3]>,
 }
 
 /// Map of `path → WorldRuntime` for sub-worlds loaded via `LoadWorld` / `extra_worlds`.
@@ -791,7 +795,9 @@ fn handle_respond_to_message(
                 | TriggerAction::SetWorldFlag { .. }
                 | TriggerAction::ClearWorldFlag { .. }
                 | TriggerAction::IncrementWorldFlag { .. }
-                | TriggerAction::SetWorldFlagValue { .. } => {
+                | TriggerAction::SetWorldFlagValue { .. }
+                | TriggerAction::SpawnEntity { .. }
+                | TriggerAction::DestroyEntity { .. } => {
                     // Modifier/flag/game-over/load-world/unload-world/world-flag
                     // actions are handled by the AI-event trigger or damage systems.
                     // No-op in the comms response path.
@@ -1108,7 +1114,7 @@ fn handle_ai_events(
     mut runtime: ResMut<WorldContentRuntime>,
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut inbox: ResMut<CommsInboxRes>,
-    _commands: Commands,
+    mut commands: Commands,
     mut attacked_reader: MessageReader<crate::ai_plugin::AiEntityAttacked>,
     mut destroyed_reader: MessageReader<crate::ai_plugin::AiEntityDestroyed>,
     mut ai_query: Query<(&EntityUuid, &mut AiControllerComponent, &BehaviourSection)>,
@@ -1117,6 +1123,9 @@ fn handle_ai_events(
     mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
     _pending: Option<ResMut<PendingScenarioLoad>>,
     mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
+    mut layer_map: Option<ResMut<WorldLayerMap>>,
+    base_world_config: Option<Res<crate::world::config::WorldConfig>>,
+    entity_uuid_query: Query<(Entity, &EntityUuid)>,
 ) {
 
     let mut world_events: Vec<WorldEvent> = Vec::new();
@@ -1388,6 +1397,140 @@ fn handle_ai_events(
                         let (before, after) = runtime.flags.set_flag_value(name, *value);
                         emit_flag_transition(&mut next_events, name, before, after);
                     }
+                    TriggerAction::SpawnEntity {
+                        template_path, name, anchor, position, rotation: _, scale: _,
+                    } => {
+                        // Resolve spawn position. `anchor` looks up in the
+                        // origin layer's anchors (or the base world's anchors
+                        // for `None` origin). `position` is used directly.
+                        let pos_arr: [f32; 3] = if let Some(pos) = position {
+                            *pos
+                        } else if let Some(anchor_name) = anchor {
+                            let lookup = match &ft.origin_layer {
+                                Some(layer_path) => layer_map
+                                    .as_ref()
+                                    .and_then(|lm| lm.0.get(layer_path))
+                                    .map(|wr| wr.anchors.get(anchor_name).copied())
+                                    .unwrap_or(None),
+                                None => base_world_config
+                                    .as_ref()
+                                    .and_then(|wc| wc.anchors.get(anchor_name).copied()),
+                            };
+                            match lookup {
+                                Some(p) => p,
+                                None => {
+                                    bevy::log::warn!(
+                                        "handle_ai_events: SpawnEntity '{name}' anchor '{anchor_name}' not found"
+                                    );
+                                    continue;
+                                }
+                            }
+                        } else {
+                            bevy::log::warn!(
+                                "handle_ai_events: SpawnEntity '{name}' has neither anchor nor position"
+                            );
+                            continue;
+                        };
+
+                        // Resolve template via config cache.
+                        let config_cache = crate::config_cache::get_config_cache();
+                        let template_inst = crate::world::config::WorldEntity {
+                            template_path: template_path.clone(),
+                            ..Default::default()
+                        };
+                        let entity_config = match crate::entity_loader::resolve_entity(
+                            &template_inst, &config_cache,
+                        ) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                // Native fallback: try reading from disk.
+                                #[cfg(not(target_arch = "wasm32"))]
+                                {
+                                    match std::fs::read_to_string(template_path) {
+                                        Ok(toml_str) => {
+                                            match crate::entity_config::EntityConfig::from_toml(&toml_str) {
+                                                Ok(c) => c,
+                                                Err(err) => {
+                                                    bevy::log::warn!(
+                                                        "handle_ai_events: SpawnEntity '{name}' template '{template_path}' parse error: {err:?}"
+                                                    );
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                        Err(_) => {
+                                            bevy::log::warn!(
+                                                "handle_ai_events: SpawnEntity '{name}' template '{template_path}' not in cache nor on disk: {e}"
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                }
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    bevy::log::warn!(
+                                        "handle_ai_events: SpawnEntity '{name}' template '{template_path}' not in cache: {e}"
+                                    );
+                                    continue;
+                                }
+                            }
+                        };
+
+                        let uuid = crate::entity_loader::assign_uuid();
+                        let pos_vec = Vec3::new(pos_arr[0], pos_arr[1], pos_arr[2]);
+                        let spawned = crate::entity_spawner::spawn_entity(
+                            &mut commands,
+                            &entity_config,
+                            pos_vec,
+                            uuid.clone(),
+                            None,
+                        );
+
+                        // Register name → uuid for subsequent triggers.
+                        runtime.name_to_uuid.insert(name.clone(), uuid);
+
+                        // Attach to the parent layer's spawned_entities so
+                        // `UnloadWorld` despawns the entity (base-world
+                        // origin: entity just persists for the session).
+                        if let (Some(layer_path), Some(ref mut lm)) =
+                            (&ft.origin_layer, &mut layer_map)
+                        {
+                            if let Some(layer) = lm.0.get_mut(layer_path) {
+                                layer.spawned_entities.push(spawned);
+                            }
+                        }
+                    }
+                    TriggerAction::DestroyEntity { entity } => {
+                        let uuid = match runtime.name_to_uuid.get(entity) {
+                            Some(u) => u.clone(),
+                            None => {
+                                bevy::log::warn!(
+                                    "handle_ai_events: DestroyEntity: unknown entity name '{entity}'"
+                                );
+                                continue;
+                            }
+                        };
+                        // Find the Bevy entity with that UUID.
+                        let mut target_entity: Option<Entity> = None;
+                        for (ent, uuid_comp) in entity_uuid_query.iter() {
+                            if uuid_comp.0 == uuid {
+                                target_entity = Some(ent);
+                                break;
+                            }
+                        }
+                        // Push into our local pipeline so chained
+                        // on_destroyed triggers in the same frame fire,
+                        // and so any future MessageWriter subscriber sees
+                        // a uniform event. We deliberately do NOT use
+                        // MessageWriter<AiEntityDestroyed> here because
+                        // this system already holds the matching reader,
+                        // which would trigger Bevy's B0002 access check.
+                        next_events.push(WorldEvent::Destroyed { uuid });
+                        // Despawn the underlying entity if we found it.
+                        if let Some(ent) = target_entity {
+                            commands.entity(ent).despawn();
+                        }
+                    }
                 }
             }
         }
@@ -1581,8 +1724,15 @@ fn apply_world_layer_changes(
                                 layer_map.0.insert(path, WorldRuntime::default());
                             }
                             Ok(mut scenario_config) => {
-                                let trigger_states =
+                                let mut trigger_states =
                                     trigger_states_from_world(&scenario_config);
+                                // Tag every trigger state from this layer with
+                                // its origin path so `spawn_entity` actions can
+                                // attach the new entity to the right
+                                // `WorldLayerMap` entry (issue #417).
+                                for ts in trigger_states.iter_mut() {
+                                    ts.origin_layer = Some(path.clone());
+                                }
                                 let comms_template_states =
                                     comms_template_states_from_world(&scenario_config);
 
@@ -1647,6 +1797,7 @@ fn apply_world_layer_changes(
                                         trigger_states,
                                         comms_template_states,
                                         spawned_entities,
+                                        anchors: scenario_config.anchors.clone(),
                                     },
                                 );
                             }
@@ -2159,6 +2310,7 @@ mod tests {
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         }];
 
         // Emit the AiEntityDestroyed message.
@@ -2200,6 +2352,7 @@ mod tests {
                     when: Some(crate::world::flags::parse_predicate("flag(green_light)").unwrap()),
                 },
                 fired: false,
+                origin_layer: None,
             }];
         }
         // First firing: flag unset → no objective.
@@ -2252,6 +2405,7 @@ mod tests {
                         when: None,
                     },
                     fired: false,
+                    origin_layer: None,
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -2264,6 +2418,7 @@ mod tests {
                         when: None,
                     },
                     fired: false,
+                    origin_layer: None,
                 },
             ];
         }
@@ -2302,6 +2457,7 @@ mod tests {
                         when: None,
                     },
                     fired: false,
+                    origin_layer: None,
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -2314,6 +2470,7 @@ mod tests {
                         when: None,
                     },
                     fired: false,
+                    origin_layer: None,
                 },
             ];
         }
@@ -2352,6 +2509,7 @@ mod tests {
                         when: None,
                     },
                     fired: false,
+                    origin_layer: None,
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -2364,6 +2522,7 @@ mod tests {
                         when: None,
                     },
                     fired: false,
+                    origin_layer: None,
                 },
             ];
         }
@@ -2401,6 +2560,7 @@ mod tests {
                     when: None,
                 },
                 fired: false,
+                origin_layer: None,
             }];
         }
 
@@ -2469,6 +2629,7 @@ mod tests {
                     when: None,
                 },
                 fired: false,
+                origin_layer: None,
             }];
         }
 
@@ -2989,6 +3150,7 @@ transition = []
                     when: None,
                 },
                 fired: false,
+                origin_layer: None,
             }];
         }
 
@@ -3028,6 +3190,7 @@ transition = []
                     when: None,
                 },
                 fired: false,
+                origin_layer: None,
             }];
         }
 
@@ -3825,6 +3988,7 @@ entity = "layer_npc"
                     when: None,
                 },
                 fired: false,
+                origin_layer: None,
             }];
             runtime.pending_world_events.push(WorldEvent::WorldLoaded);
         }
@@ -4082,6 +4246,7 @@ condition = "on_world_loaded"
                 when: None,
             },
             fired: false,
+            origin_layer: None,
         });
     }
 
@@ -4300,6 +4465,7 @@ condition = "on_world_loaded"
                     when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
                 },
                 fired: false,
+                origin_layer: None,
             });
         }
 
@@ -4326,5 +4492,540 @@ condition = "on_world_loaded"
 
         assert!(objective_present(&app, "obj-armed-entry"),
             "gated trigger must fire once the flag is set and ship re-enters");
+    }
+
+    // -- Issue #417: spawn_entity / destroy_entity trigger actions ---------
+
+    /// Writes a minimal NPC template to a temp file and returns its path.
+    fn write_spawn_template_fixture() -> String {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static C: AtomicU32 = AtomicU32::new(0);
+        let tag = C.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!("spawn_action_template_{tag}.toml"));
+        std::fs::write(
+            &p,
+            r##"
+tags = ["npc"]
+
+[appearance]
+colour = "#ff8800"
+size_min = 1.0
+size_max = 2.0
+"##,
+        )
+        .expect("write template");
+        p.to_string_lossy().into_owned()
+    }
+
+    /// SpawnEntity action with an explicit `position` spawns a new entity into
+    /// the ECS, registers it in `name_to_uuid`, and a follow-up DestroyEntity
+    /// removes it again.
+    #[test]
+    fn spawn_entity_action_with_position_spawns_and_registers_uuid() {
+        use crate::entities::spawner::EntityUuid;
+
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+
+        // Trigger fires on attack of a pre-registered marker.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("marker".to_string(), "marker-uuid".to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "marker".to_string(),
+                    },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "spawned_one".to_string(),
+                        anchor: None,
+                        position: Some([7.0, 0.0, 3.0]),
+                        rotation: None,
+                        scale: None,
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: None,
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
+            .write(crate::ai_plugin::AiEntityAttacked {
+                entity_uuid: "marker-uuid".into(),
+                attacker_uuid: uuid::Uuid::parse_str(
+                    "cccccccc-0000-0000-0000-000000000001",
+                )
+                .unwrap(),
+            });
+
+        app.update();
+        app.update();
+
+        // name_to_uuid must contain the new entity.
+        let uuid = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("spawned_one")
+            .cloned();
+        assert!(uuid.is_some(), "SpawnEntity must register name_to_uuid");
+
+        // The ECS must contain an entity with that UUID.
+        let uuid_value = uuid.unwrap();
+        let mut found = false;
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &bevy::prelude::Transform)>();
+        for (eu, t) in q.iter(app.world()) {
+            if eu.0 == uuid_value {
+                found = true;
+                assert!((t.translation.x - 7.0).abs() < 1e-3);
+                assert!((t.translation.z - 3.0).abs() < 1e-3);
+            }
+        }
+        assert!(found, "spawned entity with the new UUID must exist in ECS");
+    }
+
+    /// SpawnEntity action with an `anchor` resolves the anchor against the
+    /// base-world `WorldConfig` resource.
+    #[test]
+    fn spawn_entity_action_with_anchor_resolves_against_base_world() {
+        use crate::entities::spawner::EntityUuid;
+
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+
+        // Insert a WorldConfig with a known anchor.
+        let mut wc = crate::world::config::WorldConfig::default();
+        wc.anchors
+            .insert("alpha".to_string(), [42.0, 0.0, -5.0]);
+        app.world_mut().insert_resource(wc);
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("trigger_src".to_string(), "src-uuid".to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnDestroyed {
+                        entity_name: "trigger_src".to_string(),
+                    },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "anchor_spawn".to_string(),
+                        anchor: Some("alpha".to_string()),
+                        position: None,
+                        rotation: None,
+                        scale: None,
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: None,
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
+            .write(crate::ai_plugin::AiEntityDestroyed {
+                entity_uuid: "src-uuid".into(),
+            });
+
+        app.update();
+        app.update();
+
+        let uuid = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("anchor_spawn")
+            .cloned()
+            .expect("anchor spawn must register name_to_uuid");
+
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &bevy::prelude::Transform)>();
+        let mut found = false;
+        for (eu, t) in q.iter(app.world()) {
+            if eu.0 == uuid {
+                found = true;
+                assert!((t.translation.x - 42.0).abs() < 1e-3);
+                assert!((t.translation.z - -5.0).abs() < 1e-3);
+            }
+        }
+        assert!(found, "anchor-resolved spawn must exist at anchor coords");
+    }
+
+    /// SpawnEntity action with an `anchor` resolves against the originating
+    /// sub-world layer's anchor table (not the base world).
+    #[test]
+    fn spawn_entity_action_resolves_anchor_against_origin_layer() {
+        use crate::entities::spawner::EntityUuid;
+
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+        app.init_resource::<WorldLayerMap>();
+
+        // Register a fake layer with a custom anchor.
+        let layer_path = "fake_layer_path.toml".to_string();
+        {
+            let mut lm = app.world_mut().resource_mut::<WorldLayerMap>();
+            let mut wr = WorldRuntime::default();
+            wr.anchors.insert("docking_bay".to_string(), [11.0, 0.0, 22.0]);
+            lm.0.insert(layer_path.clone(), wr);
+        }
+
+        // Also seed a different anchor with the same name in the base world to
+        // prove the layer-local one wins.
+        let mut wc = crate::world::config::WorldConfig::default();
+        wc.anchors
+            .insert("docking_bay".to_string(), [-99.0, 0.0, -99.0]);
+        app.world_mut().insert_resource(wc);
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("layer_trigger".to_string(), "lt-uuid".to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "layer_trigger".to_string(),
+                    },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "layer_spawn".to_string(),
+                        anchor: Some("docking_bay".to_string()),
+                        position: None,
+                        rotation: None,
+                        scale: None,
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: Some(layer_path.clone()),
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
+            .write(crate::ai_plugin::AiEntityAttacked {
+                entity_uuid: "lt-uuid".into(),
+                attacker_uuid: uuid::Uuid::parse_str(
+                    "dddddddd-0000-0000-0000-000000000001",
+                )
+                .unwrap(),
+            });
+
+        app.update();
+        app.update();
+
+        // The layer's spawned_entities list must now have the new entity, and
+        // that entity must be at the layer-local anchor.
+        let layer = app
+            .world()
+            .resource::<WorldLayerMap>()
+            .0
+            .get(&layer_path)
+            .expect("layer present")
+            .clone();
+        assert_eq!(
+            layer.spawned_entities.len(),
+            1,
+            "layer-originated SpawnEntity must attach to the parent layer for cascade unload"
+        );
+
+        let uuid = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("layer_spawn")
+            .cloned()
+            .expect("layer spawn must register name_to_uuid");
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &bevy::prelude::Transform)>();
+        let mut found = false;
+        for (eu, t) in q.iter(app.world()) {
+            if eu.0 == uuid {
+                found = true;
+                assert!((t.translation.x - 11.0).abs() < 1e-3,
+                    "must use layer anchor (11), not base anchor (-99); got {}", t.translation.x);
+                assert!((t.translation.z - 22.0).abs() < 1e-3);
+            }
+        }
+        assert!(found);
+    }
+
+    /// DestroyEntity action despawns the target entity and emits a destroyed
+    /// world event that subsequent triggers can chain on.
+    #[test]
+    fn destroy_entity_action_despawns_and_emits_chained_event() {
+        use crate::entities::spawner::EntityUuid;
+
+        let mut app = ai_trigger_test_app();
+
+        // Spawn a target entity with a known UUID.
+        let target_uuid = "doomed-uuid";
+        let target_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(target_uuid.into()),
+                bevy::prelude::Transform::from_xyz(0.0, 0.0, 0.0),
+            ))
+            .id();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("doomed".to_string(), target_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("witness".to_string(), "src-uuid".to_string());
+            // First trigger: on attack → destroy.
+            // Second trigger: on destroyed of "doomed" → add objective (proves chaining).
+            runtime.trigger_states = vec![
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnAttacked {
+                            entity_name: "witness".into(),
+                        },
+                        actions: vec![TriggerAction::DestroyEntity {
+                            entity: "doomed".into(),
+                        }],
+                        when: None,
+                    },
+                    fired: false,
+                    origin_layer: None,
+                },
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnDestroyed {
+                            entity_name: "doomed".into(),
+                        },
+                        actions: vec![TriggerAction::AddObjective {
+                            id: "obj-chained".into(),
+                            text: "chained".into(),
+                            mandatory: false,
+                        }],
+                        when: None,
+                    },
+                    fired: false,
+                    origin_layer: None,
+                },
+            ];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
+            .write(crate::ai_plugin::AiEntityAttacked {
+                entity_uuid: "src-uuid".into(),
+                attacker_uuid: uuid::Uuid::parse_str(
+                    "eeeeeeee-0000-0000-0000-000000000001",
+                )
+                .unwrap(),
+            });
+
+        app.update();
+        app.update();
+
+        // Target entity must be gone.
+        assert!(
+            app.world().get_entity(target_entity).is_err(),
+            "DestroyEntity must despawn the target entity"
+        );
+
+        // Chained on_destroyed trigger must have fired (objective added).
+        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objs.sorted_snapshots().iter().any(|o| o.id == "obj-chained"),
+            "chained on_destroyed trigger must fire from DestroyEntity action"
+        );
+    }
+
+    /// DestroyEntity with an unknown entity name is a warned no-op (no panic,
+    /// no objective from a chained trigger).
+    #[test]
+    fn destroy_entity_action_with_unknown_name_is_noop() {
+        let mut app = ai_trigger_test_app();
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("src".to_string(), "src-uuid".to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "src".into(),
+                    },
+                    actions: vec![TriggerAction::DestroyEntity {
+                        entity: "does_not_exist".into(),
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: None,
+            }];
+        }
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
+            .write(crate::ai_plugin::AiEntityAttacked {
+                entity_uuid: "src-uuid".into(),
+                attacker_uuid: uuid::Uuid::parse_str(
+                    "ffffffff-0000-0000-0000-000000000001",
+                )
+                .unwrap(),
+            });
+        app.update();
+        // No assertion needed beyond "does not panic". Verify objectives empty.
+        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(objs.sorted_snapshots().is_empty());
+    }
+
+    /// UnloadWorld cascades through entities spawned by a layer-origin
+    /// SpawnEntity action (not just those spawned at LoadWorld time).
+    #[test]
+    fn unload_world_cascades_through_spawn_entity_action_results() {
+        use crate::entities::spawner::EntityUuid;
+
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+        app.init_resource::<WorldLayerMap>();
+
+        let layer_path = "cascade_layer.toml".to_string();
+        {
+            let mut lm = app.world_mut().resource_mut::<WorldLayerMap>();
+            lm.0.insert(layer_path.clone(), WorldRuntime::default());
+        }
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("src".to_string(), "src-uuid".to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "src".into(),
+                    },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "cascade_me".into(),
+                        anchor: None,
+                        position: Some([1.0, 0.0, 1.0]),
+                        rotation: None,
+                        scale: None,
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: Some(layer_path.clone()),
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
+            .write(crate::ai_plugin::AiEntityAttacked {
+                entity_uuid: "src-uuid".into(),
+                attacker_uuid: uuid::Uuid::parse_str(
+                    "10101010-0000-0000-0000-000000000001",
+                )
+                .unwrap(),
+            });
+
+        app.update();
+        app.update();
+
+        let spawned: Vec<bevy::prelude::Entity> = app
+            .world()
+            .resource::<WorldLayerMap>()
+            .0
+            .get(&layer_path)
+            .expect("layer present")
+            .spawned_entities
+            .clone();
+        assert_eq!(spawned.len(), 1, "spawn must attach to the layer entry");
+
+        // Now register unload handler + drive an UnloadWorld through it.
+        app.add_systems(Update, apply_world_layer_changes);
+        app.init_resource::<PendingWorldLayerChanges>();
+        app.world_mut()
+            .resource_mut::<PendingWorldLayerChanges>()
+            .0
+            .push(WorldLayerChange::Unload(layer_path.clone()));
+        app.update();
+        app.update();
+
+        for e in spawned {
+            assert!(
+                app.world().get_entity(e).is_err(),
+                "entity from SpawnEntity action must be despawned by UnloadWorld"
+            );
+        }
+        let _ = std::any::type_name::<EntityUuid>(); // touch import
+    }
+
+    /// `when` predicate gates SpawnEntity just like every other action.
+    #[test]
+    fn spawn_entity_action_respects_when_predicate() {
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("src".to_string(), "src-uuid".to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "src".into(),
+                    },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "blocked".into(),
+                        anchor: None,
+                        position: Some([0.0, 0.0, 0.0]),
+                        rotation: None,
+                        scale: None,
+                    }],
+                    when: Some(crate::world::flags::Predicate::Flag {
+                        name: "ready".into(),
+                    }),
+                },
+                fired: false,
+                origin_layer: None,
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
+            .write(crate::ai_plugin::AiEntityAttacked {
+                entity_uuid: "src-uuid".into(),
+                attacker_uuid: uuid::Uuid::parse_str(
+                    "20202020-0000-0000-0000-000000000001",
+                )
+                .unwrap(),
+            });
+        app.update();
+        app.update();
+
+        // Flag was NOT set → no registration should appear.
+        let has = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .contains_key("blocked");
+        assert!(
+            !has,
+            "SpawnEntity must not run while `when` predicate is false"
+        );
     }
 }

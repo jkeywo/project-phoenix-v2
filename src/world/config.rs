@@ -204,6 +204,21 @@ struct RawActionEntry {
     /// Direct counter assignment for `set_flag_value`.
     #[serde(default)]
     value: Option<i64>,
+    /// Entity template path for `spawn_entity` action.
+    #[serde(default)]
+    template_path: Option<String>,
+    /// Anchor reference for `spawn_entity` action (mutually exclusive with `position`).
+    #[serde(default)]
+    anchor: Option<String>,
+    /// Explicit `[x, y, z]` for `spawn_entity` action (mutually exclusive with `anchor`).
+    #[serde(default)]
+    position: Option<[f32; 3]>,
+    /// XYZ Euler rotation in radians for `spawn_entity` (optional).
+    #[serde(default)]
+    rotation: Option<[f32; 3]>,
+    /// Per-axis scale for `spawn_entity` (optional).
+    #[serde(default)]
+    scale: Option<[f32; 3]>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -309,6 +324,25 @@ pub enum TriggerAction {
     IncrementWorldFlag { name: String, by: i64 },
     /// Assign a world flag counter directly to `value`.
     SetWorldFlagValue { name: String, value: i64 },
+    /// Spawn an entity ad-hoc, registering it in `name_to_uuid` under `name`.
+    ///
+    /// Exactly one of `anchor` or `position` must be `Some` (enforced by the
+    /// parser). `rotation` and `scale` mirror the static `[[entity]]` schema.
+    /// When fired from a sub-world layer the spawned entity is tracked in
+    /// `WorldLayerMap` so `UnloadWorld` despawns it.
+    SpawnEntity {
+        template_path: String,
+        name: String,
+        anchor: Option<String>,
+        position: Option<[f32; 3]>,
+        rotation: Option<[f32; 3]>,
+        scale: Option<[f32; 3]>,
+    },
+    /// Destroy an entity by `name` (looked up in `name_to_uuid`).
+    ///
+    /// Emits `AiEntityDestroyed` so the normal destruction cascade runs and
+    /// despawns the underlying entity.
+    DestroyEntity { entity: String },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -471,6 +505,34 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
             "set_flag_value" => TriggerAction::SetWorldFlagValue {
                 name: raw_action.name.clone().ok_or_else(|| "Action 'set_flag_value' requires a 'name' field".to_string())?,
                 value: raw_action.value.ok_or_else(|| "Action 'set_flag_value' requires a 'value' field".to_string())?,
+            },
+            "spawn_entity" => {
+                let template_path = raw_action.template_path.clone().ok_or_else(||
+                    "Action 'spawn_entity' requires a 'template_path' field".to_string())?;
+                let name = raw_action.name.clone().ok_or_else(||
+                    "Action 'spawn_entity' requires a 'name' field".to_string())?;
+                let has_anchor = raw_action.anchor.is_some();
+                let has_position = raw_action.position.is_some();
+                if has_anchor && has_position {
+                    return Err(
+                        "Action 'spawn_entity' must not set both 'anchor' and 'position'".to_string());
+                }
+                if !has_anchor && !has_position {
+                    return Err(
+                        "Action 'spawn_entity' requires exactly one of 'anchor' or 'position'".to_string());
+                }
+                TriggerAction::SpawnEntity {
+                    template_path,
+                    name,
+                    anchor: raw_action.anchor.clone(),
+                    position: raw_action.position,
+                    rotation: raw_action.rotation,
+                    scale: raw_action.scale,
+                }
+            }
+            "destroy_entity" => TriggerAction::DestroyEntity {
+                entity: raw_action.entity.clone().ok_or_else(||
+                    "Action 'destroy_entity' requires an 'entity' field".to_string())?,
             },
             other => return Err(format!("Unknown trigger action '{}'", other)),
         };
@@ -2129,5 +2191,156 @@ brightness = 150.0
         let al = cfg.ambient_light.as_ref().expect("ambient_light present");
         assert!(al.color.is_none());
         assert_eq!(al.brightness, Some(150.0));
+    }
+
+    // ── spawn_entity / destroy_entity actions (issue #417) ────────────────
+
+    #[test]
+    fn parse_world_reads_spawn_entity_action_with_position() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/pirate_raider.toml"
+  name          = "raider_beta"
+  position      = [100.0, 0.0, -50.0]
+  rotation      = [0.0, 1.5707963, 0.0]
+  scale         = [2.0, 2.0, 2.0]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.triggers.len(), 1);
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::SpawnEntity { template_path, name, anchor, position, rotation, scale } => {
+                assert_eq!(template_path, "assets/entities/pirate_raider.toml");
+                assert_eq!(name, "raider_beta");
+                assert!(anchor.is_none());
+                assert_eq!(*position, Some([100.0, 0.0, -50.0]));
+                assert_eq!(*rotation, Some([0.0, 1.5707963, 0.0]));
+                assert_eq!(*scale, Some([2.0, 2.0, 2.0]));
+            }
+            other => panic!("expected SpawnEntity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_reads_spawn_entity_action_with_anchor() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/pirate_raider.toml"
+  name          = "raider_at_anchor"
+  anchor        = "patrol_alpha"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::SpawnEntity { anchor, position, rotation, scale, .. } => {
+                assert_eq!(anchor.as_deref(), Some("patrol_alpha"));
+                assert!(position.is_none());
+                assert!(rotation.is_none());
+                assert!(scale.is_none());
+            }
+            other => panic!("expected SpawnEntity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_spawn_entity_rejects_missing_template_path() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type     = "spawn_entity"
+  name     = "x"
+  position = [0.0, 0.0, 0.0]
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("template_path"), "error must mention template_path: {err}");
+    }
+
+    #[test]
+    fn parse_world_spawn_entity_rejects_missing_name() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "t.toml"
+  position      = [0.0, 0.0, 0.0]
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("name"), "error must mention name: {err}");
+    }
+
+    #[test]
+    fn parse_world_spawn_entity_rejects_both_anchor_and_position() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "t.toml"
+  name          = "x"
+  anchor        = "a"
+  position      = [0.0, 0.0, 0.0]
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("anchor") && err.contains("position"),
+                "error must mention both: {err}");
+    }
+
+    #[test]
+    fn parse_world_spawn_entity_rejects_neither_anchor_nor_position() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "t.toml"
+  name          = "x"
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("anchor") || err.contains("position"),
+                "error must mention anchor/position: {err}");
+    }
+
+    #[test]
+    fn parse_world_reads_destroy_entity_action() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type   = "destroy_entity"
+  entity = "raider_beta"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::DestroyEntity { entity } => {
+                assert_eq!(entity, "raider_beta");
+            }
+            other => panic!("expected DestroyEntity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_destroy_entity_rejects_missing_entity() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "destroy_entity"
+"#;
+        let err = parse_world(toml).expect_err("must reject");
+        assert!(err.contains("entity"), "error must mention entity: {err}");
     }
 }

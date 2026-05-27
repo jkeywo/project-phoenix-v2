@@ -133,12 +133,14 @@ pub struct AsteroidDestroyedVfx {
 #[derive(Event, Clone, Debug)]
 pub struct BeamStartedEvent {
     pub bank: PhaserBank,
+    pub source_uuid: String,
     pub target_uuid: String,
 }
 
 #[derive(Event, Clone, Debug)]
 pub struct BeamEndedEvent {
     pub bank: PhaserBank,
+    pub source_uuid: String,
     pub target_uuid: String,
 }
 
@@ -149,6 +151,7 @@ fn on_beam_started(
     let ev = trigger.event();
     outbox.0.push((Target::All, ServerMessage::BeamStarted {
         bank: ev.bank.clone(),
+        source_uuid: ev.source_uuid.clone(),
         target_uuid: ev.target_uuid.clone(),
     }));
 }
@@ -160,6 +163,7 @@ fn on_beam_ended(
     let ev = trigger.event();
     outbox.0.push((Target::All, ServerMessage::BeamEnded {
         bank: ev.bank.clone(),
+        source_uuid: ev.source_uuid.clone(),
         target_uuid: ev.target_uuid.clone(),
     }));
 }
@@ -286,7 +290,15 @@ fn handle_fire_phaser(
     modifiers: Res<crate::modifiers::ShipModifiers>,
     combat_config: Res<PhaserCombatConfigResource>,
     _outbox: ResMut<SimOutbox>,
+    // Player-ship UUID is the beam source for player phaser fire. Empty in
+    // tests that don't spawn a player-ship entity; the beam events fall back
+    // to "player-ship" as a sentinel in that case.
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
 ) {
+    let player_source_uuid = player_ship_q
+        .single()
+        .map(|u| u.0.clone())
+        .unwrap_or_else(|_| "player-ship".to_string());
     for ev in reader.read() {
         let ClientMessage::FirePhaser { bank } = &ev.msg else {
             continue;
@@ -310,7 +322,11 @@ fn handle_fire_phaser(
             let old_bank = beam.bank.clone().unwrap_or_default();
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            commands.trigger(BeamEndedEvent { bank: old_bank, target_uuid: old_uuid });
+            commands.trigger(BeamEndedEvent {
+                bank: old_bank,
+                source_uuid: player_source_uuid.clone(),
+                target_uuid: old_uuid,
+            });
         }
 
         beam.target_uuid = Some(target_uuid.clone());
@@ -320,6 +336,7 @@ fn handle_fire_phaser(
 
         commands.trigger(BeamStartedEvent {
             bank: bank.clone(),
+            source_uuid: player_source_uuid.clone(),
             target_uuid: target_uuid.clone(),
         });
     }
@@ -354,6 +371,17 @@ fn handle_fire_phaser_npc(
         Without<AiControllerComponent>,
     >,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    // Player-ship state for routing NPC-->player damage through the canonical
+    // shield+hull path (same as collision damage in `server_app.rs`).
+    // All optional so unit tests that don't set up a player ship still pass.
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::simulation::Ship>>,
+    ship_state: Option<Res<crate::ship_state::ShipState>>,
+    mut ship_shields: Option<ResMut<crate::simulation::ShipShields>>,
+    mut ship_hull: Option<ResMut<crate::simulation::ShipHullIntegrity>>,
+    mut outbox: Option<ResMut<SimOutbox>>,
+    mut damage_log: Option<ResMut<crate::debug_overlay::DamageLog>>,
+    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut next_state: Option<ResMut<NextState<crate::messages::GamePhase>>>,
 ) {
     let dt = time.delta_secs();
 
@@ -379,6 +407,12 @@ fn handle_fire_phaser_npc(
                 .map(|u| (u, t.translation.x, t.translation.z))
         })
         .collect();
+
+    // Resolve the player ship's UUID once; used to route NPC-->player damage
+    // through the canonical shield+hull resources instead of the unused
+    // `EntityConsoleHull` component on the player-ship entity.
+    let player_ship_uuid: Option<String> =
+        player_ship_q.single().ok().map(|u| u.0.clone());
 
     for (npc_entity, npc_uuid, transform, phaser_state_opt, weapons_section, ctrl_opt) in
         npc_query.iter_mut()
@@ -489,6 +523,7 @@ fn handle_fire_phaser_npc(
                     phaser_state.beam_remaining_secs = beam_duration;
                     commands.trigger(BeamStartedEvent {
                         bank: "port".to_string(),
+                        source_uuid: npc_uuid.0.clone(),
                         target_uuid: t_uuid.to_string(),
                     });
                 }
@@ -503,20 +538,102 @@ fn handle_fire_phaser_npc(
                 let damage = damage_per_sec * dt;
                 let mut target_destroyed = false;
                 let target_uuid_str = t_uuid.to_string();
-                for (tgt_entity, tgt_uid, _tgt_transform, mut tgt_hull) in hull_query.iter_mut() {
-                    if tgt_uid.0 != target_uuid_str {
-                        continue;
+
+                // ── Branch A: target is the player ship ──────────────────
+                // Route damage through ShipShields + ShipHullIntegrity so the
+                // UI flashes, shields absorb, and game-over fires correctly.
+                // This is the same path collision damage uses in
+                // `server_app.rs:550-578`.
+                let is_player_target = player_ship_uuid
+                    .as_deref()
+                    .map(|u| u == target_uuid_str)
+                    .unwrap_or(false);
+
+                if is_player_target {
+                    if let (Some(ship), Some(shields), Some(hull)) = (
+                        ship_state.as_deref(),
+                        ship_shields.as_mut().map(|r| r.as_mut()),
+                        ship_hull.as_mut().map(|r| r.as_mut()),
+                    ) {
+                        let bearing = crate::shield::attacker_bearing_relative(
+                            npc_x, npc_z, ship.x, ship.z, ship.yaw,
+                        );
+                        let arc_idx = shields.0.facing_index_for_bearing(bearing);
+                        let arc_label = shields
+                            .0
+                            .facings
+                            .get(arc_idx)
+                            .map(|f| f.label.clone());
+                        damage_log.as_mut().map(|d| d.push(crate::debug_overlay::DamageLogEntry {
+                            source: format!("npc:{}", npc_uuid.0),
+                            shield_arc: arc_label,
+                            amount: damage,
+                        }));
+                        let hull_leak = crate::damage::apply_damage_with_shields(
+                            damage.round() as i32,
+                            bearing,
+                            &mut shields.0,
+                        );
+                        if hull_leak > 0 {
+                            use rand::SeedableRng as _;
+                            let mut rng = rand::rngs::SmallRng::from_os_rng();
+                            let (hull_applied, ship_destroyed) =
+                                crate::damage::apply_hull_damage(
+                                    &mut hull.0,
+                                    hull_leak as f32,
+                                    &mut rng,
+                                );
+                            if let Some(ref mut ob) = outbox {
+                                ob.0.push((
+                                    Target::All,
+                                    ServerMessage::DamageTaken {
+                                        hull: hull_applied,
+                                        shield: damage - hull_leak as f32,
+                                    },
+                                ));
+                            }
+                            if ship_destroyed {
+                                if let Some(ref mut ob) = outbox {
+                                    ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                                }
+                                if let Some(ref mut gor) = game_over_reason {
+                                    if gor.0.is_none() {
+                                        gor.0 = Some("All consoles destroyed".into());
+                                    }
+                                }
+                                if let Some(ref mut ns) = next_state {
+                                    ns.set(crate::messages::GamePhase::GameOver);
+                                }
+                            }
+                        } else if let Some(ref mut ob) = outbox {
+                            ob.0.push((
+                                Target::All,
+                                ServerMessage::DamageTaken {
+                                    hull: 0.0,
+                                    shield: damage,
+                                },
+                            ));
+                        }
                     }
-                    let mut rng = rand::rng();
-                    tgt_hull.0.apply_damage(damage, &mut rng);
-                    if tgt_hull.0.is_destroyed() {
-                        target_destroyed = true;
-                        commands.entity(tgt_entity).despawn();
-                        destroyed_events
-                            .write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: tgt_uid.0.clone() });
+                } else {
+                    // ── Branch B: target is another NPC entity ───────────
+                    // Existing path: apply directly to EntityConsoleHull.
+                    for (tgt_entity, tgt_uid, _tgt_transform, mut tgt_hull) in hull_query.iter_mut() {
+                        if tgt_uid.0 != target_uuid_str {
+                            continue;
+                        }
+                        let mut rng = rand::rng();
+                        tgt_hull.0.apply_damage(damage, &mut rng);
+                        if tgt_hull.0.is_destroyed() {
+                            target_destroyed = true;
+                            commands.entity(tgt_entity).despawn();
+                            destroyed_events
+                                .write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: tgt_uid.0.clone() });
+                        }
+                        break;
                     }
-                    break;
                 }
+
                 if target_destroyed || phaser_state.beam_remaining_secs <= 0.0 {
                     let ended_uuid = t_uuid.to_string();
                     phaser_state.beam_active = false;
@@ -525,6 +642,7 @@ fn handle_fire_phaser_npc(
                     phaser_state.cooldown_remaining = beam_duration;
                     commands.trigger(BeamEndedEvent {
                         bank: "port".to_string(),
+                        source_uuid: npc_uuid.0.clone(),
                         target_uuid: ended_uuid,
                     });
                 }
@@ -732,6 +850,10 @@ fn tick_active_beam(
         return;
     };
     let active_bank = beam.bank.clone().unwrap_or_default();
+    let player_source_uuid = player_ship_q
+        .single()
+        .map(|u| u.0.clone())
+        .unwrap_or_else(|_| "player-ship".to_string());
 
     // Live position lookup from the ECS — the hull_query already has Transforms
     // for the entity, so use that. WorldResource.0.entities is a stale snapshot.
@@ -745,7 +867,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start(&combat_config.0);
-        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), source_uuid: player_source_uuid.clone(), target_uuid });
         return;
     };
 
@@ -755,7 +877,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start(&combat_config.0);
-        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), source_uuid: player_source_uuid.clone(), target_uuid });
         return;
     }
 
@@ -812,7 +934,7 @@ fn tick_active_beam(
             cooldown.start(&combat_config.0);
 
             outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
-            commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+            commands.trigger(BeamEndedEvent { bank: active_bank.clone(), source_uuid: player_source_uuid.clone(), target_uuid });
             return;
         }
 
@@ -827,7 +949,7 @@ fn tick_active_beam(
             beam.damage_accumulator = 0.0;
             cooldown.start(&combat_config.0);
 
-            commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+            commands.trigger(BeamEndedEvent { bank: active_bank.clone(), source_uuid: player_source_uuid.clone(), target_uuid });
             return;
         }
     }
@@ -838,7 +960,7 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start(&combat_config.0);
-        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), source_uuid: player_source_uuid, target_uuid });
     }
 }
 

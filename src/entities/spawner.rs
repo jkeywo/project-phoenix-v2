@@ -533,6 +533,8 @@ mod tests {
                 grid: None,
                 shield_pierce: 0.0,
                 shape: None,
+                anchor: None,
+                anchor_offset: [0.0, 0.0, 0.0],
             }),
             hull: None,
             collider: None,

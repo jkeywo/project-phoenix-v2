@@ -1182,6 +1182,124 @@ mod tests {
     }
 
     #[test]
+    fn cell_in_field_operates_in_anchor_relative_space() {
+        // PRD #397 fix 5: anchor support is implemented as a pure post-seed
+        // translation. `cell_in_field` is anchor-agnostic — it tests cells
+        // against the annulus centred on the field-local origin. Callers
+        // (the streaming spawner) must convert the player's world position
+        // into anchor-relative grid coordinates BEFORE calling it.
+        //
+        // This test pins the contract: a cell at anchor-relative (0,0)
+        // straddles the inner radius (admitted when inner=10), and a cell
+        // at anchor-relative (20,20) is far outside (rejected) — regardless
+        // of where the anchor lives in world space. If a refactor ever
+        // pushes anchor knowledge into `cell_in_field`, this test fails.
+        let res = 15.0;
+
+        // A cell at anchor-relative origin: bbox contains (0,0), so it is
+        // admitted for a torus that includes the centre (inner=0 or small).
+        assert!(
+            cell_in_field(0, 0, res, 0.0, 200.0, Some(AsteroidFieldShape::Torus)),
+            "anchor-relative origin cell must be admitted when inner_radius=0"
+        );
+
+        // A cell at anchor-relative (20,20) (≈ 424 from anchor) is well
+        // outside outer=200 — rejected.
+        assert!(
+            !cell_in_field(20, 20, res, 100.0, 200.0, Some(AsteroidFieldShape::Torus)),
+            "anchor-relative (20,20) is ~424 units out; must be rejected by outer_radius=200"
+        );
+
+        // A cell at anchor-relative (7,0) straddles inner_radius=100 — admitted.
+        assert!(
+            cell_in_field(7, 0, res, 100.0, 200.0, Some(AsteroidFieldShape::Torus)),
+            "anchor-relative (7,0) straddles inner_radius=100; must be admitted"
+        );
+
+        // Symmetric: anchor-relative (-7,0) likewise straddles inner — admitted.
+        assert!(
+            cell_in_field(-7, 0, res, 100.0, 200.0, Some(AsteroidFieldShape::Torus)),
+            "cell_in_field must be symmetric in anchor-relative space"
+        );
+    }
+
+    #[test]
+    fn eval_cell_is_anchor_independent_anchor_is_pure_translation() {
+        // PRD #397 fix 5 / AGENTS.md rule 6: the per-cell density seed is
+        // `(field_idx, gx, gz)` and MUST NOT include the anchor. The anchor
+        // is applied as a pure post-seed translation at the call site (see
+        // `try_spawn_cell` / `check_destroyed_asteroids` in
+        // `asteroids/lifecycle.rs`).
+        //
+        // This test pins three invariants:
+        //   1. `eval_cell` takes no anchor parameter (compiles as-is).
+        //   2. Two calls with identical (field_idx, gx, gz) return identical
+        //      anchor-relative positions, regardless of what anchor a caller
+        //      might add later.
+        //   3. Translating the returned position by an anchor offset
+        //      produces the expected world-space position — modelling the
+        //      contract `try_spawn_cell` honours.
+        let grid = GridConfig {
+            resolution: 15.0,
+            fill_gameplay: 0.0,
+            fill_cosmetic: 0.0,
+            uniformity: 0.0,
+            noise_freq: 0.02,
+            noise_octaves: 1,
+            density_noise_freq: 0.01,
+            density_noise_octaves: 1,
+            jitter: 0.0,
+            cosmetic_y_offset: 15.0,
+            gameplay_y_variance: 0.0,
+            spawn_cells: 10,
+            despawn_cells: 12,
+        };
+
+        // `fill_gameplay = 0.0` reliably yields Some (see
+        // `eval_cell_returns_some_for_gameplay`). `jitter = 0.0` makes the
+        // returned position the exact cell centre — easy to assert against.
+        let (field_idx, gx, gz) = (7_u64, 8_i32, 4_i32);
+        let anchor_relative = eval_cell(
+            field_idx, gx, gz, &grid, 100.0, 200.0,
+            &["gameplay.toml".to_string()], &[],
+        ).expect("fill_gameplay=0.0 must produce Some");
+
+        // Invariant 1: cell centre is `(gx*res, _, gz*res)` — anchor-relative,
+        // anchor is not even an input to eval_cell.
+        assert_eq!(anchor_relative.x, gx as f32 * grid.resolution);
+        assert_eq!(anchor_relative.z, gz as f32 * grid.resolution);
+
+        // Invariant 2: identical inputs → identical output (anchor-independent).
+        let again = eval_cell(
+            field_idx, gx, gz, &grid, 100.0, 200.0,
+            &["gameplay.toml".to_string()], &[],
+        ).expect("second call with identical (field_idx, gx, gz) must also spawn");
+        assert_eq!(
+            (anchor_relative.x, anchor_relative.y, anchor_relative.z),
+            (again.x, again.y, again.z),
+            "eval_cell must be anchor-independent: identical (field_idx, gx, gz) → identical anchor-relative position"
+        );
+
+        // Invariant 3: post-seed translation by anchor_offset gives the
+        // expected world-space position — model of the contract that
+        // `try_spawn_cell` applies via `spawn.x + anchor_offset[0]` etc.
+        let anchor_offset = [100.0_f32, 0.0, 100.0];
+        let world_x = anchor_relative.x + anchor_offset[0];
+        let world_z = anchor_relative.z + anchor_offset[2];
+        assert_eq!(
+            world_x,
+            gx as f32 * grid.resolution + 100.0,
+            "world X = anchor-relative X + anchor_offset.x"
+        );
+        assert_eq!(
+            world_z,
+            gz as f32 * grid.resolution + 100.0,
+            "world Z = anchor-relative Z + anchor_offset.z"
+        );
+        // Y is anchor-irrelevant (anchor is XZ-only by design).
+    }
+
+    #[test]
     fn generate_grid_field_with_shape_none_matches_legacy() {
         // Determinism / back-compat: when shape = None, the new variant
         // must produce identical output to the legacy `generate_grid_field`.

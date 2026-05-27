@@ -50,6 +50,14 @@ pub struct AsteroidWindow {
     /// Optional shape variant. When `None`, cell-centre eligibility is used
     /// (legacy default). When `Some(Torus)`, bbox-overlap eligibility is used.
     pub shape: Option<crate::entity_config::AsteroidFieldShape>,
+    /// World-space offset applied as a pure post-seed translation to every
+    /// cell coordinate. Defaults to `[0, 0, 0]` (world origin). When the
+    /// owning `AsteroidFieldConfig` references a named world anchor, this
+    /// is the resolved anchor position. Per AGENTS.md the per-cell density
+    /// seed `(field_idx, gx, gz)` must NOT include the anchor — the offset
+    /// is applied only when converting between world-space and the
+    /// anchor-relative grid space used by `cell_in_field` and `eval_cell`.
+    pub anchor_offset: [f32; 3],
 }
 
 impl Default for AsteroidWindow {
@@ -69,6 +77,7 @@ impl Default for AsteroidWindow {
             inner_radius: 0.0,
             outer_radius: 0.0,
             shape: None,
+            anchor_offset: [0.0, 0.0, 0.0],
         }
     }
 }
@@ -108,8 +117,8 @@ pub fn check_destroyed_asteroids(
             continue;
         }
         let (cell_gx, cell_gz) = compute_player_grid_cell(
-            transform.translation.x,
-            transform.translation.z,
+            transform.translation.x - window.anchor_offset[0],
+            transform.translation.z - window.anchor_offset[2],
             window.resolution,
         );
         if let Some((sx, sz)) = compute_slot_for_world_cell(
@@ -157,7 +166,11 @@ pub fn update_asteroid_window(
         None => return,
     };
 
-    let (gx, gz) = compute_player_grid_cell(ship.x, ship.z, grid.resolution);
+    let (gx, gz) = compute_player_grid_cell(
+        ship.x - field.anchor_offset[0],
+        ship.z - field.anchor_offset[2],
+        grid.resolution,
+    );
 
     let needs_init = player_grid.0.is_none();
     let (old_gx, old_gz) = player_grid.0.unwrap_or((gx, gz));
@@ -176,6 +189,7 @@ pub fn update_asteroid_window(
             &field.cosmetic_type_paths,
             field.shield_pierce,
             field.shape,
+            field.anchor_offset,
         );
     } else {
         for (cell_gx, cell_gz) in &delta.cells_to_despawn {
@@ -199,12 +213,14 @@ pub fn update_asteroid_window(
                     field.inner_radius, field.outer_radius, &field.asteroid_type_paths,
                     field.shield_pierce,
                     field.shape,
+                    field.anchor_offset,
                 );
                 try_spawn_cosmetic_cell(
                     &mut commands, &mut window,
                     *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
                     field.inner_radius, field.outer_radius, &field.cosmetic_type_paths,
                     field.shape,
+                    field.anchor_offset,
                 );
             }
         }
@@ -231,6 +247,7 @@ fn full_rebuild(
     cosmetic_type_paths: &[String],
     shield_pierce: f32,
     shape: Option<crate::entity_config::AsteroidFieldShape>,
+    anchor_offset: [f32; 3],
 ) {
     for (_uuid, &entity) in entity_map.0.iter() {
         commands.entity(entity).despawn();
@@ -272,6 +289,7 @@ fn full_rebuild(
     window.inner_radius = inner_radius;
     window.outer_radius = outer_radius;
     window.shape = shape;
+    window.anchor_offset = anchor_offset;
 
     let s_cells = window.spawn_cells as i32;
     for cx in (gx - s_cells)..=(gx + s_cells) {
@@ -285,12 +303,14 @@ fn full_rebuild(
                     inner_radius, outer_radius, gameplay_type_paths,
                     shield_pierce,
                     shape,
+                    anchor_offset,
                 );
                 try_spawn_cosmetic_cell(
                     commands, window,
                     cx, cz, sx, sz, field_idx, grid,
                     inner_radius, outer_radius, cosmetic_type_paths,
                     shape,
+                    anchor_offset,
                 );
             }
         }
@@ -314,6 +334,7 @@ fn try_spawn_cell(
     gameplay_type_paths: &[String],
     shield_pierce: f32,
     shape: Option<crate::entity_config::AsteroidFieldShape>,
+    anchor_offset: [f32; 3],
 ) {
     if window.slots[slot_z][slot_x].is_some() {
         return;
@@ -352,6 +373,12 @@ fn try_spawn_cell(
 
     let uuid = uuid::Uuid::new_v4().to_string();
 
+    // Apply anchor offset as a pure post-seed translation. Seeds and
+    // (cell_gx, cell_gz) remain anchor-relative; only the final world
+    // position is translated. y is left unchanged (anchor is XZ-only).
+    let world_x = spawn.x + anchor_offset[0];
+    let world_z = spawn.z + anchor_offset[2];
+
     let asteroid_hull = EntityConsoleHull(
         crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])
     );
@@ -361,7 +388,7 @@ fn try_spawn_cell(
         AsteroidUuid(uuid.clone()),
         AsteroidShieldPierce(shield_pierce),
         asteroid_hull,
-        Transform::from_xyz(spawn.x, spawn.y, spawn.z),
+        Transform::from_xyz(world_x, spawn.y, world_z),
         bevy_rapier3d::prelude::Collider::ball(collider_radius),
         bevy_rapier3d::prelude::RigidBody::Fixed,
     ));
@@ -385,7 +412,7 @@ fn try_spawn_cell(
     entity_map.0.insert(uuid.clone(), entity);
     world.0.entities.push(EntitySnapshot {
         uuid: uuid.clone(),
-        position: Some([spawn.x, spawn.y, spawn.z]),
+        position: Some([world_x, spawn.y, world_z]),
         tags: snapshot_tags,
         radius: Some(collider_radius),
         ..EntitySnapshot::default()
@@ -393,9 +420,9 @@ fn try_spawn_cell(
 
     outbox.0.push((Target::All, ServerMessage::AsteroidSpawned {
         uuid,
-        x: spawn.x,
+        x: world_x,
         y: spawn.y,
-        z: spawn.z,
+        z: world_z,
         config_path: spawn.config_path,
         max_hp: max_hp as i32,
         current_hp: max_hp as i32,
@@ -438,6 +465,7 @@ fn spawn_cosmetic_entity(
     commands: &mut Commands,
     spawn: &crate::asteroid_spawner::AsteroidSpawn,
     y: f32,
+    anchor_offset: [f32; 3],
 ) -> Entity {
     let config_cache = crate::config_cache::get_config_cache();
     let entity_config = config_cache.get(&spawn.config_path);
@@ -447,7 +475,7 @@ fn spawn_cosmetic_entity(
         .unwrap_or(1.0);
 
     let mut entity_cmd = commands.spawn((
-        Transform::from_xyz(spawn.x, y, spawn.z),
+        Transform::from_xyz(spawn.x + anchor_offset[0], y, spawn.z + anchor_offset[2]),
         bevy_rapier3d::prelude::Collider::ball(collider_radius),
         bevy_rapier3d::prelude::RigidBody::Fixed,
     ));
@@ -473,6 +501,7 @@ fn try_spawn_cosmetic_cell(
     inner_radius: f32, outer_radius: f32,
     cosmetic_type_paths: &[String],
     shape: Option<crate::entity_config::AsteroidFieldShape>,
+    anchor_offset: [f32; 3],
 ) {
     if cosmetic_type_paths.is_empty() {
         return;
@@ -490,7 +519,7 @@ fn try_spawn_cosmetic_cell(
             inner_radius, outer_radius,
             &[], cosmetic_type_paths,
         ) {
-            let entity = spawn_cosmetic_entity(commands, &spawn, spawn.y);
+            let entity = spawn_cosmetic_entity(commands, &spawn, spawn.y, anchor_offset);
             window.cosmetic_upper_slots[slot_z][slot_x] = Some(entity);
         }
     }
@@ -503,7 +532,7 @@ fn try_spawn_cosmetic_cell(
             inner_radius, outer_radius,
             &[], cosmetic_type_paths,
         ) {
-            let entity = spawn_cosmetic_entity(commands, &spawn, -spawn.y);
+            let entity = spawn_cosmetic_entity(commands, &spawn, -spawn.y, anchor_offset);
             window.cosmetic_lower_slots[slot_z][slot_x] = Some(entity);
         }
     }
@@ -580,6 +609,8 @@ mod tests {
             grid: Some(grid(grid_resolution)),
             shield_pierce: 0.0,
             shape: None,
+            anchor: None,
+            anchor_offset: [0.0, 0.0, 0.0],
         }
     }
 
@@ -712,6 +743,8 @@ shield_pierce = 0.4
             grid: Some(grid_cfg),
             shield_pierce: 0.0,
             shape: Some(crate::entity_config::AsteroidFieldShape::Torus),
+            anchor: None,
+            anchor_offset: [0.0, 0.0, 0.0],
         };
         // Anchor the player on the belt so the spawn window covers it.
         {

@@ -344,7 +344,7 @@ pub fn spawn_immediate_entities_internal(
 
     // Asteroid-field entries get a fresh UUID (they have no name to anchor to).
     for entity_inst in fields {
-        let config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
+        let mut config = match crate::entity_loader::resolve_entity(entity_inst, config_cache) {
             Ok(c) => c,
             Err(e) => {
                 bevy::log::error!(
@@ -354,6 +354,23 @@ pub fn spawn_immediate_entities_internal(
                 continue;
             }
         };
+        // Resolve optional `anchor` reference into a concrete world-space offset
+        // applied to the streaming spawner. Missing anchor → warn + fall back
+        // to world origin so a typo never silently relocates the field.
+        if let Some(field) = config.asteroid_field.as_mut() {
+            if let Some(anchor_name) = field.anchor.as_ref() {
+                match world_config.anchors.get(anchor_name) {
+                    Some(pos) => field.anchor_offset = *pos,
+                    None => {
+                        bevy::log::warn!(
+                            "spawn_world_entities: asteroid field '{}' references unknown anchor '{}' — falling back to world origin",
+                            entity_inst.template_path, anchor_name
+                        );
+                        field.anchor_offset = [0.0, 0.0, 0.0];
+                    }
+                }
+            }
+        }
         let uuid = crate::entity_loader::assign_uuid();
         let pos = match resolve_position(entity_inst, &world_config.anchors, &named_positions) {
             Ok(p) => p,
@@ -3110,6 +3127,176 @@ transition = []
         assert!(
             app.world().get::<BehaviourSection>(spawned[0]).is_some(),
             "NPC spawned through unified pipeline must carry BehaviourSection so AiPlugin can attach a controller"
+        );
+    }
+
+    #[test]
+    fn spawn_immediate_entities_resolves_anchor_offset_on_asteroid_field() {
+        // PRD #397 fix 5: an asteroid_field template whose
+        // `[asteroid_field] anchor = "name"` references a known world anchor
+        // must have its `anchor_offset` populated with that anchor's world
+        // position. The streaming spawner reads this offset to translate
+        // the eligibility annulus and per-asteroid spawn positions.
+        use crate::entity_config::{
+            AsteroidFieldConfig, AsteroidFieldShape, EntityConfig, GridConfig,
+        };
+        use crate::entity_spawner::AsteroidFieldSection;
+        use crate::world::config::WorldEntity;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use std::collections::HashMap;
+
+        let mut world_cfg = UnifiedWorldConfig::default();
+        world_cfg
+            .anchors
+            .insert("belt_origin".into(), [500.0, 0.0, -250.0]);
+        world_cfg.entities.push(WorldEntity {
+            template_path: "fixture/anchored_belt.toml".into(),
+            ..Default::default()
+        });
+
+        // Build an EntityConfig in the cache with an asteroid_field that
+        // references the anchor. Anchor offset starts at origin and must
+        // be filled in by `spawn_immediate_entities_internal`.
+        let mut field_template = EntityConfig::from_toml("").unwrap();
+        field_template.asteroid_field = Some(AsteroidFieldConfig {
+            inner_radius: 100.0,
+            outer_radius: 200.0,
+            density: 0.005,
+            spawn_distance: 150.0,
+            despawn_distance: 250.0,
+            asteroid_type_paths: vec!["a.toml".into()],
+            cosmetic_type_paths: vec![],
+            tags: vec![],
+            grid: Some(GridConfig {
+                resolution: 15.0,
+                fill_gameplay: 0.4,
+                fill_cosmetic: 0.0,
+                uniformity: 0.3,
+                noise_freq: 0.02,
+                noise_octaves: 1,
+                density_noise_freq: 0.01,
+                density_noise_octaves: 1,
+                jitter: 0.0,
+                cosmetic_y_offset: 0.0,
+                gameplay_y_variance: 0.0,
+                spawn_cells: 4,
+                despawn_cells: 6,
+            }),
+            shield_pierce: 0.0,
+            shape: Some(AsteroidFieldShape::Torus),
+            anchor: Some("belt_origin".into()),
+            anchor_offset: [0.0, 0.0, 0.0],
+        });
+        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
+        cache.insert("fixture/anchored_belt.toml".into(), field_template);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(world_cfg.clone());
+
+        let spawned: Vec<Entity> = {
+            let mut commands = app.world_mut().commands();
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache)
+        };
+        app.update();
+
+        assert_eq!(spawned.len(), 1, "exactly one asteroid_field entry must spawn");
+        let section = app
+            .world()
+            .get::<AsteroidFieldSection>(spawned[0])
+            .expect("asteroid_field entry must carry an AsteroidFieldSection");
+        assert_eq!(
+            section.0.anchor_offset,
+            [500.0, 0.0, -250.0],
+            "spawn-time resolution must copy the anchor's world position into anchor_offset"
+        );
+        assert_eq!(
+            section.0.anchor.as_deref(),
+            Some("belt_origin"),
+            "anchor name must be preserved alongside the resolved offset"
+        );
+    }
+
+    #[test]
+    fn spawn_immediate_entities_falls_back_to_origin_when_anchor_unknown() {
+        // PRD #397 fix 5: an asteroid_field referencing an anchor name that
+        // is NOT present in `WorldConfig.anchors` must fall back to the
+        // world origin (`anchor_offset = [0,0,0]`) rather than silently
+        // relocating somewhere unexpected or refusing to spawn. Implementation
+        // also logs a `warn!` so the typo is visible in console output.
+        use crate::entity_config::{
+            AsteroidFieldConfig, AsteroidFieldShape, EntityConfig, GridConfig,
+        };
+        use crate::entity_spawner::AsteroidFieldSection;
+        use crate::world::config::WorldEntity;
+        use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use std::collections::HashMap;
+
+        let mut world_cfg = UnifiedWorldConfig::default();
+        // Note: NO anchor named "typo_anchor" — only "real_anchor".
+        world_cfg
+            .anchors
+            .insert("real_anchor".into(), [999.0, 0.0, 999.0]);
+        world_cfg.entities.push(WorldEntity {
+            template_path: "fixture/typo_belt.toml".into(),
+            ..Default::default()
+        });
+
+        let mut field_template = EntityConfig::from_toml("").unwrap();
+        field_template.asteroid_field = Some(AsteroidFieldConfig {
+            inner_radius: 100.0,
+            outer_radius: 200.0,
+            density: 0.005,
+            spawn_distance: 150.0,
+            despawn_distance: 250.0,
+            asteroid_type_paths: vec!["a.toml".into()],
+            cosmetic_type_paths: vec![],
+            tags: vec![],
+            grid: Some(GridConfig {
+                resolution: 15.0,
+                fill_gameplay: 0.4,
+                fill_cosmetic: 0.0,
+                uniformity: 0.3,
+                noise_freq: 0.02,
+                noise_octaves: 1,
+                density_noise_freq: 0.01,
+                density_noise_octaves: 1,
+                jitter: 0.0,
+                cosmetic_y_offset: 0.0,
+                gameplay_y_variance: 0.0,
+                spawn_cells: 4,
+                despawn_cells: 6,
+            }),
+            shield_pierce: 0.0,
+            shape: Some(AsteroidFieldShape::Torus),
+            anchor: Some("typo_anchor".into()),
+            anchor_offset: [0.0, 0.0, 0.0],
+        });
+        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
+        cache.insert("fixture/typo_belt.toml".into(), field_template);
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.insert_resource(world_cfg.clone());
+
+        let spawned: Vec<Entity> = {
+            let mut commands = app.world_mut().commands();
+            spawn_immediate_entities_internal(&mut commands, &world_cfg, &cache)
+        };
+        app.update();
+
+        assert_eq!(
+            spawned.len(), 1,
+            "unknown anchor must NOT block spawn — fallback to origin keeps the field alive"
+        );
+        let section = app
+            .world()
+            .get::<AsteroidFieldSection>(spawned[0])
+            .expect("asteroid_field entry must still carry an AsteroidFieldSection");
+        assert_eq!(
+            section.0.anchor_offset,
+            [0.0, 0.0, 0.0],
+            "missing anchor must fall back to world origin, not the only other known anchor"
         );
     }
 

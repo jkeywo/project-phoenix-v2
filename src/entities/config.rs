@@ -1522,6 +1522,47 @@ asteroid_type_paths = ["x.toml"]
     }
 
     #[test]
+    fn asteroid_field_anchor_parses_as_optional_string() {
+        // PRD #397 fix 5: `[asteroid_field] anchor = "name"` carries the
+        // reference verbatim. The serde-skipped `anchor_offset` defaults
+        // to `[0,0,0]` and is filled in at spawn time against the world's
+        // anchor table.
+        let toml_str = r##"
+[asteroid_field]
+shape = "torus"
+anchor = "belt_origin"
+inner_radius = 300.0
+outer_radius = 350.0
+density = 0.005
+asteroid_type_paths = ["x.toml"]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let field = config.asteroid_field.expect("asteroid_field must be Some");
+        assert_eq!(field.anchor.as_deref(), Some("belt_origin"));
+        assert_eq!(
+            field.anchor_offset, [0.0, 0.0, 0.0],
+            "anchor_offset is serde-skipped and defaults to origin until spawn-time resolution"
+        );
+    }
+
+    #[test]
+    fn asteroid_field_anchor_omitted_defaults_to_none() {
+        // Regression guard: existing TOML without an `anchor` key must keep
+        // `anchor = None` and `anchor_offset = [0,0,0]` (legacy behaviour).
+        let toml_str = r##"
+[asteroid_field]
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.005
+asteroid_type_paths = ["x.toml"]
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let field = config.asteroid_field.expect("asteroid_field must be Some");
+        assert!(field.anchor.is_none(), "missing anchor key → None");
+        assert_eq!(field.anchor_offset, [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
     fn asteroid_field_shape_torus_parses() {
         // Schema: `shape = "torus"` as a sibling of `inner_radius`/`outer_radius`.
         let toml_str = r##"
@@ -2973,6 +3014,23 @@ pub struct AsteroidFieldConfig {
     /// `[inner_radius, outer_radius]`. See [`AsteroidFieldShape`].
     #[serde(default)]
     pub shape: Option<AsteroidFieldShape>,
+    /// Optional world anchor name. When present, the field's eligibility
+    /// region and per-asteroid spawn positions are translated so the
+    /// `[inner_radius, outer_radius]` annulus is centred on the named
+    /// anchor's world position instead of the world origin. The anchor
+    /// is resolved against `WorldConfig.anchors` at spawn time; the
+    /// resolved offset is written into `anchor_offset`. If the anchor
+    /// name is not present in the world's anchor table, the field falls
+    /// back to the world origin (`anchor_offset = [0, 0, 0]`) and a
+    /// warning is logged.
+    #[serde(default)]
+    pub anchor: Option<String>,
+    /// Resolved world-space offset for the anchor referenced by `anchor`.
+    /// Defaults to `[0, 0, 0]` (world origin) when no anchor is set or
+    /// the named anchor could not be resolved. Not serialised — derived
+    /// at spawn time.
+    #[serde(skip)]
+    pub anchor_offset: [f32; 3],
 }
 
 fn default_spawn_distance() -> f32 {

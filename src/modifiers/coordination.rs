@@ -370,7 +370,7 @@ mod tests {
         let mut mods = ShipModifiers::new();
         let uuid = uuid::Uuid::from_u128(1);
         apply_region_effects(&mut mods, uuid, &[
-            RegionEffectKind::DamageZone { dps: 50.0 },
+            RegionEffectKind::DamageZone { dps: 50.0, shield_pierce: 0.0 },
             RegionEffectKind::BlocksImpulse,
         ]);
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-6);

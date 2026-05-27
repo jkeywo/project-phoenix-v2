@@ -42,6 +42,12 @@ pub struct TorpedoConfig {
     /// entity. Independent of homing — an un-locked torpedo still detonates
     /// on contact.
     pub detonation_radius: f32,
+    /// Fraction of the `damage_shields` payload that bypasses the shield
+    /// system entirely and adds to hull damage. Default `0.0` — all
+    /// `damage_shields` is mitigated by the facing shield quadrant.
+    /// `damage_hull` is unaffected (it always hits hull by design).
+    /// Clamped to `[0.0, 1.0]` at apply time.
+    pub shield_pierce: f32,
 }
 
 impl Default for TorpedoConfig {
@@ -55,6 +61,7 @@ impl Default for TorpedoConfig {
             lifespan: 20.0,
             load_time: 10.0,
             detonation_radius: 5.0,
+            shield_pierce: 0.0,
         }
     }
 }
@@ -74,6 +81,11 @@ pub struct Torpedo {
     /// detonating on its launcher (the torpedo spawns at the launcher's
     /// centre, well within any reasonable detonation radius).
     pub source_uuid: Option<String>,
+    /// Snapshot of the firing tube's `shield_pierce` at launch time, so
+    /// detonation logic can split `damage_shields` between absorbed and
+    /// pierced portions without re-resolving the source config. Clamped
+    /// to `[0.0, 1.0]` at apply time.
+    pub shield_pierce: f32,
 }
 
 impl Torpedo {
@@ -232,6 +244,7 @@ impl TorpedoSystem {
         }
         tube.start_reload(load_time);
         self.torpedoes_remaining -= 1;
+        let shield_pierce = self.config.shield_pierce;
         self.in_flight.push(Torpedo {
             uuid: uuid.clone(),
             x: launch_x,
@@ -240,6 +253,7 @@ impl TorpedoSystem {
             lifespan_remaining: lifespan,
             target_uuid,
             source_uuid,
+            shield_pierce,
         });
         LaunchResult::Launched { uuid }
     }
@@ -270,14 +284,40 @@ impl TorpedoSystem {
     }
 
     pub fn handle_collision(&mut self, torpedo_uuid: &str) -> Option<i32> {
-        if let Some(pos) = self.in_flight.iter().position(|t| t.uuid == torpedo_uuid) {
-            self.in_flight.remove(pos);
-            Some(self.config.damage_hull)
-        } else {
-            None
-        }
+        self.handle_collision_full(torpedo_uuid).map(|d| d.damage_hull)
     }
 
+    /// Full detonation payload: hull damage, shield damage, and the firing
+    /// tube's `shield_pierce` fraction (snapshot taken at launch). Removes
+    /// the torpedo from `in_flight`. Returns `None` if `torpedo_uuid` is
+    /// unknown.
+    pub fn handle_collision_full(&mut self, torpedo_uuid: &str) -> Option<TorpedoDetonation> {
+        let pos = self.in_flight.iter().position(|t| t.uuid == torpedo_uuid)?;
+        let removed = self.in_flight.remove(pos);
+        Some(TorpedoDetonation {
+            damage_hull: self.config.damage_hull,
+            damage_shields: self.config.damage_shields,
+            shield_pierce: removed.shield_pierce,
+        })
+    }
+}
+
+/// Result of a successful torpedo detonation, returned by
+/// [`TorpedoSystem::handle_collision_full`]. The caller applies the damage
+/// split according to its own target model:
+///
+/// - `damage_hull` always lands on the hull (it is pierce-by-design).
+/// - `damage_shields` is the shield-eligible portion. Use
+///   [`split_damage_for_pierce`](crate::damage::split_damage_for_pierce)
+///   with `shield_pierce` to compute the pierced vs absorbed split for it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TorpedoDetonation {
+    pub damage_hull: i32,
+    pub damage_shields: i32,
+    pub shield_pierce: f32,
+}
+
+impl TorpedoSystem {
     /// Find proximity-detonation hits between in-flight torpedoes and the
     /// supplied target volumes. Returns `(torpedo_uuid, target_uuid)` pairs.
     ///
@@ -623,6 +663,7 @@ mod tests {
             lifespan_remaining: 10.0,
             target_uuid: None,
             source_uuid: None,
+            shield_pierce: 0.0,
         });
         let targets = vec![
             ("a".to_string(), 1.0, 0.0, 0.0), // close to t1

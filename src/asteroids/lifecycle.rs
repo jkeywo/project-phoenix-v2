@@ -19,7 +19,7 @@ use crate::messages::{EntitySnapshot, ServerMessage};
 use crate::simulation::SimOutbox;
 use crate::ship_state::ShipState;
 
-pub use crate::simulation::{Asteroid, AsteroidUuid};
+pub use crate::simulation::{Asteroid, AsteroidShieldPierce, AsteroidUuid};
 pub use crate::entity_spawner::EntityConsoleHull;
 
 // ── Resources ────────────────────────────────────────────────────────────
@@ -170,6 +170,7 @@ pub fn update_asteroid_window(
             gx, gz, field_idx, &grid, field.inner_radius, field.outer_radius,
             &field.asteroid_type_paths,
             &field.cosmetic_type_paths,
+            field.shield_pierce,
         );
     } else {
         for (cell_gx, cell_gz) in &delta.cells_to_despawn {
@@ -191,6 +192,7 @@ pub fn update_asteroid_window(
                     &mut commands, &mut window, &mut entity_map, &mut world, &mut outbox,
                     *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
                     field.inner_radius, field.outer_radius, &field.asteroid_type_paths,
+                    field.shield_pierce,
                 );
                 try_spawn_cosmetic_cell(
                     &mut commands, &mut window,
@@ -220,6 +222,7 @@ fn full_rebuild(
     inner_radius: f32, outer_radius: f32,
     gameplay_type_paths: &[String],
     cosmetic_type_paths: &[String],
+    shield_pierce: f32,
 ) {
     for (_uuid, &entity) in entity_map.0.iter() {
         commands.entity(entity).despawn();
@@ -271,6 +274,7 @@ fn full_rebuild(
                     commands, window, entity_map, world, outbox,
                     cx, cz, sx, sz, field_idx, grid,
                     inner_radius, outer_radius, gameplay_type_paths,
+                    shield_pierce,
                 );
                 try_spawn_cosmetic_cell(
                     commands, window,
@@ -297,6 +301,7 @@ fn try_spawn_cell(
     grid: &crate::entity_config::GridConfig,
     inner_radius: f32, outer_radius: f32,
     gameplay_type_paths: &[String],
+    shield_pierce: f32,
 ) {
     if window.slots[slot_z][slot_x].is_some() {
         return;
@@ -345,6 +350,7 @@ fn try_spawn_cell(
     let mut entity_cmd = commands.spawn((
         Asteroid,
         AsteroidUuid(uuid.clone()),
+        AsteroidShieldPierce(shield_pierce),
         asteroid_hull,
         Transform::from_xyz(spawn.x, spawn.y, spawn.z),
         bevy_rapier3d::prelude::Collider::ball(collider_radius),
@@ -565,6 +571,7 @@ mod tests {
             cosmetic_type_paths: vec![],
             tags: vec![],
             grid: Some(grid(grid_resolution)),
+            shield_pierce: 0.0,
         }
     }
 
@@ -592,5 +599,33 @@ mod tests {
         let window = app.world().resource::<AsteroidWindow>();
         // Default resolution from AsteroidWindow::default() is 10.0.
         assert_eq!(window.resolution, 10.0);
+    }
+
+    #[test]
+    fn asteroid_field_shield_pierce_defaults_to_zero_in_toml() {
+        // Pre-#414 behaviour: asteroid impacts are fully absorbed by shields.
+        // A TOML file that does not mention shield_pierce must continue to
+        // behave that way after the field is added.
+        let toml = r#"
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.5
+asteroid_type_paths = ["x.toml"]
+"#;
+        let cfg: AsteroidFieldConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.shield_pierce, 0.0);
+    }
+
+    #[test]
+    fn asteroid_field_shield_pierce_parses_when_present_in_toml() {
+        let toml = r#"
+inner_radius = 100.0
+outer_radius = 200.0
+density = 0.5
+asteroid_type_paths = ["x.toml"]
+shield_pierce = 0.4
+"#;
+        let cfg: AsteroidFieldConfig = toml::from_str(toml).unwrap();
+        assert!((cfg.shield_pierce - 0.4).abs() < 1e-6);
     }
 }

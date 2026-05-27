@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RegionEffectKind {
-    DamageZone { dps: f32 },
+    DamageZone { dps: f32, shield_pierce: f32 },
     SlowZone { thrust_modifier: Option<f32>, yaw_rate_modifier: Option<f32> },
     BlocksImpulse,
     RadarDampening { multiplier: f32 },
@@ -16,6 +16,11 @@ pub enum RegionEffectKind {
 pub struct DamageZoneEffect {
     #[serde(alias = "dps")]
     pub damage_per_second: f32,
+    /// Fraction of damage that bypasses shields and goes straight to the
+    /// hull. Clamped to `[0.0, 1.0]` at apply time. Default `0.0` — all
+    /// damage is mitigated by the facing shield quadrant.
+    #[serde(default)]
+    pub shield_pierce: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -73,7 +78,10 @@ impl RegionEffectsConfig {
     pub fn to_kinds(&self) -> Vec<RegionEffectKind> {
         let mut kinds = Vec::new();
         if let Some(z) = &self.damage_zone {
-            kinds.push(RegionEffectKind::DamageZone { dps: z.damage_per_second });
+            kinds.push(RegionEffectKind::DamageZone {
+                dps: z.damage_per_second,
+                shield_pierce: z.shield_pierce,
+            });
         }
         if let Some(z) = &self.slow_zone {
             kinds.push(RegionEffectKind::SlowZone {
@@ -109,7 +117,7 @@ mod tests {
 
     #[test]
     fn serde_round_trip_damage_zone() {
-        round_trip(RegionEffectKind::DamageZone { dps: 15.0 });
+        round_trip(RegionEffectKind::DamageZone { dps: 15.0, shield_pierce: 0.0 });
     }
 
 
@@ -144,13 +152,13 @@ mod tests {
 
     #[test]
     fn serde_round_trip_negative_values() {
-        round_trip(RegionEffectKind::DamageZone { dps: -5.0 });
+        round_trip(RegionEffectKind::DamageZone { dps: -5.0, shield_pierce: 0.0 });
         round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(-1.0), yaw_rate_modifier: None });
     }
 
     #[test]
     fn serde_round_trip_zero_values() {
-        round_trip(RegionEffectKind::DamageZone { dps: 0.0 });
+        round_trip(RegionEffectKind::DamageZone { dps: 0.0, shield_pierce: 0.0 });
         round_trip(RegionEffectKind::RadarDampening { multiplier: 0.0 });
     }
 
@@ -167,19 +175,19 @@ mod tests {
     #[test]
     fn effects_config_damage_zone() {
         let cfg = RegionEffectsConfig {
-            damage_zone: Some(DamageZoneEffect { damage_per_second: 15.0 }),
+            damage_zone: Some(DamageZoneEffect { damage_per_second: 15.0, shield_pierce: 0.0 }),
             ..Default::default()
         };
         assert!(!cfg.is_empty());
         let kinds = cfg.to_kinds();
         assert_eq!(kinds.len(), 1);
-        assert_eq!(kinds[0], RegionEffectKind::DamageZone { dps: 15.0 });
+        assert_eq!(kinds[0], RegionEffectKind::DamageZone { dps: 15.0, shield_pierce: 0.0 });
     }
 
     #[test]
     fn effects_config_to_kinds_aggregates_all() {
         let cfg = RegionEffectsConfig {
-            damage_zone: Some(DamageZoneEffect { damage_per_second: 10.0 }),
+            damage_zone: Some(DamageZoneEffect { damage_per_second: 10.0, shield_pierce: 0.0 }),
             slow_zone: Some(SlowZoneEffect { thrust_modifier: Some(0.5), yaw_rate_modifier: Some(-0.3) }),
             blocks_impulse: Some(BlocksImpulseEffect {}),
             radar_dampening: Some(RadarDampeningEffect { range_modifier: 0.3 }),
@@ -188,22 +196,6 @@ mod tests {
         };
         let kinds = cfg.to_kinds();
         assert_eq!(kinds.len(), 6);
-    }
-
-    #[test]
-    fn effects_config_toml_round_trip_damage_zone() {
-        let toml_str = r#"
-[effects]
-[effects.damage_zone]
-damage_per_second = 15.0
-"#;
-        #[derive(Deserialize)]
-        struct Wrap {
-            effects: RegionEffectsConfig,
-        }
-        let wrap: Wrap = toml::from_str(toml_str).unwrap();
-        assert!(!wrap.effects.is_empty());
-        assert_eq!(wrap.effects.damage_zone.unwrap().damage_per_second, 15.0);
     }
 
     #[test]

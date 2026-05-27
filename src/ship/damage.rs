@@ -33,6 +33,26 @@ pub fn apply_hull_damage(
     (hull_damage, ship_destroyed)
 }
 
+/// Split an incoming damage amount into a pierced portion (bypasses shields,
+/// goes straight to hull) and an absorbed portion (routes through the shield
+/// quadrant pipeline).
+///
+/// `shield_pierce` is clamped defensively to `[0.0, 1.0]`. NaN is treated as
+/// `0.0` (no pierce — fully shielded). Values outside the range do not panic.
+///
+/// Returns `(pierced, absorbed)` such that `pierced + absorbed == damage`
+/// (modulo float precision) and both are non-negative when `damage >= 0`.
+pub fn split_damage_for_pierce(damage: f32, shield_pierce: f32) -> (f32, f32) {
+    let pierce = if shield_pierce.is_nan() {
+        0.0
+    } else {
+        shield_pierce.clamp(0.0, 1.0)
+    };
+    let pierced = damage * pierce;
+    let absorbed = damage * (1.0 - pierce);
+    (pierced, absorbed)
+}
+
 /// Compute collision damage to the ship hull.
 ///
 /// Formula: `floor(clamp(5 + (forward_speed / max_speed) * 10, 5, 15))`
@@ -175,6 +195,64 @@ impl ConsoleHull {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── split_damage_for_pierce helper ────────────────────────────────────
+
+    #[test]
+    fn pierce_zero_routes_all_damage_to_shields() {
+        let (pierced, absorbed) = split_damage_for_pierce(10.0, 0.0);
+        assert!((pierced - 0.0).abs() < 1e-6);
+        assert!((absorbed - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pierce_one_routes_all_damage_to_hull() {
+        let (pierced, absorbed) = split_damage_for_pierce(10.0, 1.0);
+        assert!((pierced - 10.0).abs() < 1e-6);
+        assert!((absorbed - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pierce_fractional_splits_proportionally() {
+        let (pierced, absorbed) = split_damage_for_pierce(10.0, 0.3);
+        assert!((pierced - 3.0).abs() < 1e-6, "pierced={}", pierced);
+        assert!((absorbed - 7.0).abs() < 1e-6, "absorbed={}", absorbed);
+    }
+
+    #[test]
+    fn pierce_above_one_clamps_to_one() {
+        let (pierced, absorbed) = split_damage_for_pierce(10.0, 2.5);
+        assert!((pierced - 10.0).abs() < 1e-6);
+        assert!((absorbed - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pierce_below_zero_clamps_to_zero() {
+        let (pierced, absorbed) = split_damage_for_pierce(10.0, -0.5);
+        assert!((pierced - 0.0).abs() < 1e-6);
+        assert!((absorbed - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pierce_nan_treated_as_zero_no_panic() {
+        let (pierced, absorbed) = split_damage_for_pierce(10.0, f32::NAN);
+        assert!((pierced - 0.0).abs() < 1e-6);
+        assert!((absorbed - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pierce_infinity_clamps_to_one() {
+        let (pierced, absorbed) = split_damage_for_pierce(10.0, f32::INFINITY);
+        assert!((pierced - 10.0).abs() < 1e-6);
+        assert!((absorbed - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pierce_negative_infinity_clamps_to_zero() {
+        let (pierced, absorbed) = split_damage_for_pierce(10.0, f32::NEG_INFINITY);
+        assert!((pierced - 0.0).abs() < 1e-6);
+        assert!((absorbed - 10.0).abs() < 1e-6);
+    }
 
     // ── collision_damage formula ──────────────────────────────────────────
 

@@ -8,3 +8,5 @@ radius = 120.0
 
 [effects.damage_zone]
 damage_per_second = 8.0
+# Radiation ignores shields entirely (preserves pre-#414 behaviour).
+shield_pierce = 1.0

@@ -50,6 +50,14 @@ pub struct Asteroid;
 #[derive(Component, Clone)]
 pub struct AsteroidUuid(pub String);
 
+/// Per-asteroid `shield_pierce` snapshot, copied from the parent
+/// `AsteroidFieldConfig.shield_pierce` at spawn time. Read by
+/// `handle_collisions` to split impact damage between shields and hull.
+/// When the component is missing, the collision handler treats it as
+/// `0.0` (full shield mitigation — pre-#414 behaviour).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct AsteroidShieldPierce(pub f32);
+
 // â"€â"€ Resources â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 #[derive(Resource)]
 struct SimBroadcastTimer(Timer);
@@ -471,7 +479,7 @@ fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
     ship_query: Query<Entity, With<Ship>>,
-    asteroid_query: Query<(&Transform, &AsteroidUuid), With<Asteroid>>,
+    asteroid_query: Query<(&Transform, &AsteroidUuid, Option<&AsteroidShieldPierce>), With<Asteroid>>,
     mut ship: ResMut<ShipState>,
     mut hull: ResMut<ShipHullIntegrity>,
     mut shields: ResMut<ShipShields>,
@@ -514,7 +522,7 @@ fn handle_collisions(
 
         let bearing = contact
             .and_then(|attacker_entity| {
-                asteroid_query.get(attacker_entity).ok().map(|(t, _)| {
+                asteroid_query.get(attacker_entity).ok().map(|(t, _, _)| {
                     attacker_bearing_relative(
                         t.translation.x,
                         t.translation.z,
@@ -528,11 +536,23 @@ fn handle_collisions(
 
         let source_label = contact
             .and_then(|attacker_entity| {
-                asteroid_query.get(attacker_entity).ok().map(|(_, uuid)| {
+                asteroid_query.get(attacker_entity).ok().map(|(_, uuid, _)| {
                     format!("asteroid:{}", uuid.0)
                 })
             })
             .unwrap_or_else(|| "collision".to_string());
+
+        // Resolve the colliding asteroid's `shield_pierce` (missing → 0.0,
+        // matching pre-#414 behaviour where all collision damage was first
+        // absorbed by shields).
+        let shield_pierce = contact
+            .and_then(|attacker_entity| {
+                asteroid_query
+                    .get(attacker_entity)
+                    .ok()
+                    .and_then(|(_, _, sp)| sp.map(|c| c.0))
+            })
+            .unwrap_or(0.0);
 
         let arc_idx = shields.0.facing_index_for_bearing(bearing);
         let arc_label = shields
@@ -547,17 +567,28 @@ fn handle_collisions(
             amount: damage,
         });
 
-        let hull_damage_from_shields =
-            apply_damage_with_shields(damage.round() as i32, bearing, &mut shields.0);
-        if hull_damage_from_shields > 0 {
+        // Split impact damage by the asteroid's `shield_pierce`: the
+        // pierced fraction goes straight to hull; the absorbed fraction
+        // is mitigated by the facing shield quadrant (any leak adds to
+        // hull damage).
+        let (pierced, absorbed) = crate::damage::split_damage_for_pierce(damage, shield_pierce);
+        let mut total_hull = pierced;
+        let mut shield_amount = 0.0;
+        if absorbed > 0.0 {
+            let leak = apply_damage_with_shields(absorbed.round() as i32, bearing, &mut shields.0);
+            shield_amount = (absorbed - leak as f32).max(0.0);
+            total_hull += leak as f32;
+        }
+
+        if total_hull > 0.0 {
             let rng = &mut rand::rngs::SmallRng::from_os_rng();
             let (hull_applied, ship_destroyed) =
-                apply_hull_damage(&mut hull.0, hull_damage_from_shields as f32, rng);
+                apply_hull_damage(&mut hull.0, total_hull, rng);
             outbox.0.push((
                 Target::All,
                 ServerMessage::DamageTaken {
                     hull: hull_applied,
-                    shield: damage - hull_damage_from_shields as f32,
+                    shield: shield_amount,
                 },
             ));
             if ship_destroyed {
@@ -572,7 +603,7 @@ fn handle_collisions(
                 Target::All,
                 ServerMessage::DamageTaken {
                     hull: 0.0,
-                    shield: damage,
+                    shield: shield_amount,
                 },
             ));
         }
@@ -3458,6 +3489,95 @@ mod tests {
             )
         });
         assert!(found, "expected ModifierRemoved in outbound messages");
+    }
+
+    #[test]
+    fn asteroid_collision_pierce_zero_routes_all_to_shields() {
+        // Replicates the split + apply that `handle_collisions` performs
+        // (without standing up Rapier), proving the pierce=0 path leaves
+        // hull untouched and the shield quadrant absorbs full damage.
+        use crate::damage::{apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce};
+        use crate::shield::{ShieldConfig, ShieldSystem};
+        let mut shields = ShieldSystem::new(&ShieldConfig::default());
+        let initial_fore_hp = shields.facings[0].hp;
+        let mut hull = crate::damage::ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+
+        let damage: f32 = 10.0;
+        let (pierced, absorbed) = split_damage_for_pierce(damage, 0.0);
+        assert_eq!(pierced, 0.0);
+        assert_eq!(absorbed, 10.0);
+        let leak = apply_damage_with_shields(absorbed.round() as i32, 0.0, &mut shields);
+        let total_hull = pierced + leak as f32;
+        if total_hull > 0.0 {
+            let rng = &mut rand::rngs::SmallRng::from_os_rng();
+            apply_hull_damage(&mut hull, total_hull, rng);
+        }
+        assert!(
+            (hull.total_current() - 100.0).abs() < 1e-6,
+            "hull untouched with pierce=0 (leak={})", leak
+        );
+        assert_eq!(
+            shields.facings[0].hp,
+            initial_fore_hp - 10,
+            "fore quadrant should have absorbed all 10 damage"
+        );
+    }
+
+    #[test]
+    fn asteroid_collision_pierce_full_routes_all_to_hull() {
+        use crate::damage::{apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce};
+        use crate::shield::{ShieldConfig, ShieldSystem};
+        let mut shields = ShieldSystem::new(&ShieldConfig::default());
+        let initial_fore_hp = shields.facings[0].hp;
+        let mut hull = crate::damage::ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+
+        let damage: f32 = 10.0;
+        let (pierced, absorbed) = split_damage_for_pierce(damage, 1.0);
+        assert_eq!(pierced, 10.0);
+        assert_eq!(absorbed, 0.0);
+        let leak = if absorbed > 0.0 {
+            apply_damage_with_shields(absorbed.round() as i32, 0.0, &mut shields)
+        } else {
+            0
+        };
+        let total_hull = pierced + leak as f32;
+        let rng = &mut rand::rngs::SmallRng::from_os_rng();
+        apply_hull_damage(&mut hull, total_hull, rng);
+        assert!(
+            (hull.total_current() - 90.0).abs() < 1e-6,
+            "hull should be 90 with pierce=1 (10 damage straight through)"
+        );
+        assert_eq!(
+            shields.facings[0].hp, initial_fore_hp,
+            "fore quadrant should be untouched with pierce=1"
+        );
+    }
+
+    #[test]
+    fn asteroid_collision_pierce_partial_splits_proportionally() {
+        use crate::damage::{apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce};
+        use crate::shield::{ShieldConfig, ShieldSystem};
+        let mut shields = ShieldSystem::new(&ShieldConfig::default());
+        let initial_fore_hp = shields.facings[0].hp;
+        let mut hull = crate::damage::ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]);
+
+        // pierce = 0.3 on 10 damage → 3 to hull, 7 to fore shield.
+        let damage: f32 = 10.0;
+        let (pierced, absorbed) = split_damage_for_pierce(damage, 0.3);
+        let leak = apply_damage_with_shields(absorbed.round() as i32, 0.0, &mut shields);
+        let total_hull = pierced + leak as f32;
+        let rng = &mut rand::rngs::SmallRng::from_os_rng();
+        apply_hull_damage(&mut hull, total_hull, rng);
+        assert!(
+            (hull.total_current() - 97.0).abs() < 1e-6,
+            "hull should lose 3 (the pierced portion), got {}",
+            hull.total_current()
+        );
+        assert_eq!(
+            shields.facings[0].hp,
+            initial_fore_hp - 7,
+            "fore quadrant should have absorbed 7"
+        );
     }
 
     #[test]

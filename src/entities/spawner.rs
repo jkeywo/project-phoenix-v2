@@ -531,6 +531,7 @@ mod tests {
                 cosmetic_type_paths: vec![],
                 tags: vec![],
                 grid: None,
+                shield_pierce: 0.0,
             }),
             hull: None,
             collider: None,

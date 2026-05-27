@@ -457,6 +457,9 @@ fn handle_fire_phaser_npc(
         let beam_duration = weapons_section
             .map(|wc| if wc.0.beam_duration_secs > 0.0 { wc.0.beam_duration_secs } else { NPC_BEAM_DURATION_SECS })
             .unwrap_or(NPC_BEAM_DURATION_SECS);
+        let shield_pierce = weapons_section
+            .map(|wc| wc.0.shield_pierce)
+            .unwrap_or(0.0);
 
         let npc_x = transform.translation.x;
         let npc_z = transform.translation.z;
@@ -551,18 +554,33 @@ fn handle_fire_phaser_npc(
                             shield_arc: arc_label,
                             amount: damage,
                         }));
-                        let hull_leak = crate::damage::apply_damage_with_shields(
-                            damage.round() as i32,
-                            bearing,
-                            &mut shields.0,
-                        );
-                        if hull_leak > 0 {
+
+                        // Split this tick's beam damage by the firing
+                        // NPC's resolved `shield_pierce`. Pierced damage
+                        // bypasses shields and lands on hull; absorbed
+                        // damage is mitigated by the facing quadrant
+                        // (leak adds to hull).
+                        let (pierced, absorbed) =
+                            crate::damage::split_damage_for_pierce(damage, shield_pierce);
+                        let mut total_hull = pierced;
+                        let mut shield_amount = 0.0;
+                        if absorbed > 0.0 {
+                            let leak = crate::damage::apply_damage_with_shields(
+                                absorbed.round() as i32,
+                                bearing,
+                                &mut shields.0,
+                            );
+                            shield_amount = (absorbed - leak as f32).max(0.0);
+                            total_hull += leak as f32;
+                        }
+
+                        if total_hull > 0.0 {
                             use rand::SeedableRng as _;
                             let mut rng = rand::rngs::SmallRng::from_os_rng();
                             let (hull_applied, ship_destroyed) =
                                 crate::damage::apply_hull_damage(
                                     &mut hull.0,
-                                    hull_leak as f32,
+                                    total_hull,
                                     &mut rng,
                                 );
                             if let Some(ref mut ob) = outbox {
@@ -570,7 +588,7 @@ fn handle_fire_phaser_npc(
                                     Target::All,
                                     ServerMessage::DamageTaken {
                                         hull: hull_applied,
-                                        shield: damage - hull_leak as f32,
+                                        shield: shield_amount,
                                     },
                                 ));
                             }
@@ -592,7 +610,7 @@ fn handle_fire_phaser_npc(
                                 Target::All,
                                 ServerMessage::DamageTaken {
                                     hull: 0.0,
-                                    shield: damage,
+                                    shield: shield_amount,
                                 },
                             ));
                         }
@@ -762,8 +780,10 @@ fn tick_torpedo_system(
     // collision radius from the (immutable) world snapshot — radius is
     // spawn metadata, position is gameplay state. NPC shields are not yet
     // modelled server-side; when they are, the torpedo's `damage_shields`
-    // should be applied here first (mirroring apply_damage_with_shields on
-    // the ship).
+    // should be applied via `handle_collision_full` and split using the
+    // in-flight torpedo's `shield_pierce` (see `split_damage_for_pierce`).
+    // For now, `handle_collision` still returns only `damage_hull` and the
+    // `damage_shields` payload is dropped (matching pre-#414 behaviour).
     let radius_by_uuid: std::collections::HashMap<&str, f32> = world.0.entities
         .iter()
         .map(|e| (e.uuid.as_str(), e.radius_or_zero()))
@@ -2188,6 +2208,97 @@ mod tests {
         );
     }
 
+    #[test]
+    fn npc_beam_targeting_player_with_full_pierce_bypasses_shields() {
+        // shield_pierce = 1.0 on the NPC's WeaponsConsoleSection routes the
+        // entire beam tick to hull, leaving shields untouched.
+        use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
+        use crate::entity_spawner::{EntityUuid, EntityConsoleHull, WeaponsConsoleSection};
+        use crate::simulation::{Ship, ShipShields};
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+        app.insert_resource(ShipShields(crate::shield::ShieldSystem::default()));
+
+        let npc_uuid = "00000000-0000-0000-0000-000000000077";
+        let player_uuid = "11111111-1111-1111-1111-111111111177";
+
+        let (npc_entity, _placeholder) =
+            setup_npc_shooter(&mut app, npc_uuid, player_uuid, 0.0, -10.0);
+
+        app.world_mut().entity_mut(npc_entity).insert(
+            WeaponsConsoleSection(crate::entity_config::WeaponsConsoleConfig {
+                radar_range: 0.0,
+                target_range: 0.0,
+                fire_arc: 0.0,
+                beam_range: 100.0,
+                beam_damage_per_sec: 20.0,
+                beam_duration_secs: 5.0,
+                cooldown_secs: 1.0,
+                beam_color: vec![],
+                torpedo_arc_color: vec![],
+                power_multipliers: None,
+                complexity_toml: None,
+                phaser_banks: Vec::new(),
+                radar: None,
+                shield_pierce: 1.0,
+            }),
+        );
+
+        let unused_console_hull = EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[
+            (crate::messages::Console::CaptainChair, 100.0),
+        ]));
+        app.world_mut().spawn((
+            Ship,
+            EntityUuid(player_uuid.to_string()),
+            unused_console_hull,
+            Transform::from_xyz(0.0, 0.0, -10.0),
+        ));
+
+        let player_uuid_parsed = uuid::Uuid::parse_str(player_uuid).unwrap();
+        {
+            let mut ps = app.world_mut().get_mut::<EntityPhaserState>(npc_entity).unwrap();
+            ps.beam_active = true;
+            ps.beam_target = Some(player_uuid_parsed);
+            ps.beam_remaining_secs = 5.0;
+        }
+
+        let initial_ship_hull = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let initial_shield_total: i32 = app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .facings
+            .iter()
+            .map(|f| f.hp)
+            .sum();
+
+        for _ in 0..5 {
+            app.update();
+        }
+
+        let final_ship_hull = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let final_shield_total: i32 = app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .facings
+            .iter()
+            .map(|f| f.hp)
+            .sum();
+
+        assert_eq!(
+            initial_shield_total, final_shield_total,
+            "with shield_pierce=1.0, shields must be untouched (initial={}, final={})",
+            initial_shield_total, final_shield_total
+        );
+        assert!(
+            final_ship_hull < initial_ship_hull,
+            "with shield_pierce=1.0, ship hull must take all the damage (initial={}, final={})",
+            initial_ship_hull, final_ship_hull
+        );
+    }
+
     // ── End-to-end: tick_ai_controllers → InboundMessage → handle_fire_phaser_npc ──
 
     /// Build an app that includes BOTH `WeaponsPlugin` AND `AiPlugin` together
@@ -2262,6 +2373,7 @@ mod tests {
                 complexity_toml: None,
                 phaser_banks: Vec::new(),
                 radar: None,
+                shield_pierce: 0.0,
             }),
             EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)])),
             Transform::from_xyz(0.0, 0.0, 0.0),

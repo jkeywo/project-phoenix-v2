@@ -1000,6 +1000,7 @@ mod tests {
             complexity_toml: None,
             phaser_banks: Vec::new(),
             radar: None,
+            shield_pierce: 0.0,
         }
     }
 

@@ -110,7 +110,11 @@ pub(crate) fn update_region_membership(
 }
 
 /// Applies continuous damage from `DamageZone` regions to the ship each tick.
-/// Damage bypasses shields Ã¢â‚¬â€ it goes directly to the hull via `apply_hull_damage`.
+/// Damage is split via the zone's `shield_pierce` field: the pierced fraction
+/// goes straight to the hull (preserving the historical "regions bypass
+/// shields" behaviour when `shield_pierce = 1.0`), and the absorbed fraction
+/// is routed through the shield-quadrant pipeline (treated as a fore-quadrant
+/// impact since regions have no bearing).
 /// Damaged regions are tracked via `RegionMembership`.
 fn apply_damage_zone_damage(
     time: Res<Time>,
@@ -118,6 +122,7 @@ fn apply_damage_zone_damage(
     region_query: Query<(&RegionEffectsSection, Option<&EntityUuid>)>,
     ship_query: Query<Entity, With<Ship>>,
     hull: Option<ResMut<ShipHullIntegrity>>,
+    mut shields: Option<ResMut<crate::simulation::ShipShields>>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
@@ -145,14 +150,36 @@ fn apply_damage_zone_damage(
             continue;
         };
         for effect in &effects.0 {
-            if let crate::region_effects::RegionEffectKind::DamageZone { dps } = effect {
+            if let crate::region_effects::RegionEffectKind::DamageZone { dps, shield_pierce } = effect {
                 let total_damage = dps * dt;
+                let (pierced, absorbed) =
+                    crate::damage::split_damage_for_pierce(total_damage, *shield_pierce);
+
+                // Absorbed portion: route through fore-quadrant shield. Any
+                // shield leak adds to the pierced hull damage.
+                let mut hull_amount = pierced;
+                let mut shield_amount = 0.0;
+                if absorbed > 0.0 {
+                    if let Some(shields) = shields.as_deref_mut() {
+                        let leak = crate::damage::apply_damage_with_shields(
+                            absorbed.round() as i32,
+                            0.0,
+                            &mut shields.0,
+                        );
+                        shield_amount = (absorbed - leak as f32).max(0.0);
+                        hull_amount += leak as f32;
+                    } else {
+                        // No shields resource (e.g. test app); treat absorbed as hull.
+                        hull_amount += absorbed;
+                    }
+                }
+
                 let mut rng = rand::rngs::SmallRng::from_os_rng();
-                let (hull_applied, ship_destroyed) = crate::damage::apply_hull_damage(
-                    &mut hull.0,
-                    total_damage,
-                    &mut rng,
-                );
+                let (hull_applied, ship_destroyed) = if hull_amount > 0.0 {
+                    crate::damage::apply_hull_damage(&mut hull.0, hull_amount, &mut rng)
+                } else {
+                    (0.0, false)
+                };
                 if let Some(ref mut log) = damage_log {
                     let source = uuid_opt
                         .map(|u| format!("region:{}", u.0))
@@ -166,7 +193,7 @@ fn apply_damage_zone_damage(
                 if let Some(ref mut ob) = outbox {
                     ob.0.push((Target::All, ServerMessage::DamageTaken {
                         hull: hull_applied,
-                        shield: 0.0,
+                        shield: shield_amount,
                     }));
                 }
                 if ship_destroyed {
@@ -510,13 +537,17 @@ mod tests {
     }
 
     fn spawn_damage_zone(app: &mut App, x: f32, z: f32, radius: f32, dps: f32) -> Entity {
+        spawn_damage_zone_with_pierce(app, x, z, radius, dps, 1.0)
+    }
+
+    fn spawn_damage_zone_with_pierce(app: &mut App, x: f32, z: f32, radius: f32, dps: f32, shield_pierce: f32) -> Entity {
         let config = EntityConfig {
             name: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
-                damage_zone: Some(DamageZoneEffect { damage_per_second: dps }),
+                damage_zone: Some(DamageZoneEffect { damage_per_second: dps, shield_pierce }),
                 ..Default::default()
             }),
             hull: None,
@@ -602,6 +633,58 @@ mod tests {
         for facing in &shields.0.facings {
             assert_eq!(facing.hp, 100, "shield facing should be undamaged");
         }
+    }
+
+    #[test]
+    fn damage_zone_partial_pierce_splits_70_30() {
+        let mut app = damage_test_app();
+        use crate::simulation::ShipShields;
+        use crate::shield::{ShieldSystem, ShieldConfig};
+        app.insert_resource(ShipShields(ShieldSystem::new(&ShieldConfig {
+            max_hp: 1000,
+            ..Default::default()
+        })));
+
+        // 100 dps for 1s = 100 damage. shield_pierce = 0.3 →
+        // pierced = 30 (to hull), absorbed = 70 (to fore shield).
+        spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 100.0, 0.3);
+        tick_with_dt(&mut app, 1.0);
+
+        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        assert!(
+            (hull_hp - 70.0).abs() < 0.5,
+            "hull should be ~70 after 30 pierced damage on 100hp, got {}",
+            hull_hp
+        );
+        let shields = app.world().resource::<ShipShields>();
+        assert_eq!(
+            shields.0.facings[0].hp, 930,
+            "fore shield should have absorbed 70 damage (1000 - 70 = 930)"
+        );
+    }
+
+    #[test]
+    fn damage_zone_zero_pierce_routes_all_to_shields() {
+        let mut app = damage_test_app();
+        use crate::simulation::ShipShields;
+        use crate::shield::{ShieldSystem, ShieldConfig};
+        app.insert_resource(ShipShields(ShieldSystem::new(&ShieldConfig {
+            max_hp: 1000,
+            ..Default::default()
+        })));
+
+        // shield_pierce = 0.0: all damage absorbed by fore shield, hull untouched.
+        spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 50.0, 0.0);
+        tick_with_dt(&mut app, 1.0);
+
+        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        assert!(
+            (hull_hp - 100.0).abs() < 1e-6,
+            "hull should be untouched at zero pierce, got {}",
+            hull_hp
+        );
+        let shields = app.world().resource::<ShipShields>();
+        assert_eq!(shields.0.facings[0].hp, 950, "fore shield should have absorbed 50");
     }
 
     #[test]

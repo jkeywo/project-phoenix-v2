@@ -278,6 +278,12 @@ pub struct PhaserBankConfig {
     pub auto_arc_deg: f32,
     #[serde(default)]
     pub beam_range: f32,
+    /// Per-bank override for the fraction of beam damage that bypasses
+    /// shields. When `None`, the parent `[weapons_console].shield_pierce`
+    /// (or its default of `0.0`) is used. Clamped to `[0.0, 1.0]` at
+    /// apply time.
+    #[serde(default)]
+    pub shield_pierce: Option<f32>,
 }
 
 /// Stable identifier for a torpedo tube, parsed verbatim from the TOML
@@ -388,6 +394,14 @@ pub struct WeaponsConsoleConfig {
     /// explicit per-bank loadout.
     #[serde(default)]
     pub phaser_banks: Vec<PhaserBankConfig>,
+    /// Fraction of phaser-beam damage that bypasses shields and applies
+    /// directly to the hull. Default `0.0` — all damage is mitigated by
+    /// the facing shield quadrant. Used as the global value for NPC
+    /// phasers (which do not have per-bank config) and as the fallback
+    /// for player banks whose `[[weapons_console.phaser_banks]].shield_pierce`
+    /// is unset.
+    #[serde(default)]
+    pub shield_pierce: f32,
     /// Structured radar configuration for the Tactical console radar widget.
     /// When present, overrides the legacy flat `radar_range` field.
     #[serde(default)]
@@ -720,6 +734,13 @@ pub struct TorpedoesConfig {
     /// Proximity-detonation radius in world units.
     #[serde(default = "default_torpedo_detonation_radius")]
     pub detonation_radius: f32,
+    /// Fraction of `damage_shields` that bypasses shields and adds to
+    /// hull damage at detonation. Default `0.0` — `damage_shields` is
+    /// fully absorbed by the facing shield quadrant. `damage_hull` is
+    /// unaffected (always hits hull). Clamped to `[0.0, 1.0]` at apply
+    /// time.
+    #[serde(default)]
+    pub shield_pierce: f32,
     /// Per-tube torpedo definitions parsed from `[[torpedoes.tubes]]`.
     /// Each tube has its own facing and fire arc. Ammo is shared via
     /// the top-level `count` field. Empty when the ship has no explicit
@@ -764,6 +785,7 @@ impl Default for TorpedoesConfig {
             lifespan: default_torpedo_lifespan(),
             load_time: default_torpedo_load_time(),
             detonation_radius: default_torpedo_detonation_radius(),
+            shield_pierce: 0.0,
             tubes: Vec::new(),
         }
     }
@@ -782,6 +804,7 @@ impl TorpedoesConfig {
             lifespan: self.lifespan,
             load_time: self.load_time,
             detonation_radius: self.detonation_radius,
+            shield_pierce: self.shield_pierce,
         }
     }
 }
@@ -2435,6 +2458,119 @@ auto_arc_deg = 120.0
     }
 
     #[test]
+    fn weapons_console_shield_pierce_defaults_to_zero() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 40.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let wc = config.weapons_console.expect("weapons_console");
+        assert_eq!(wc.shield_pierce, 0.0);
+    }
+
+    #[test]
+    fn weapons_console_shield_pierce_parses_when_present() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 40.0
+shield_pierce = 0.25
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let wc = config.weapons_console.expect("weapons_console");
+        assert!((wc.shield_pierce - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn phaser_bank_shield_pierce_defaults_to_none_when_absent() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 40.0
+
+[[weapons_console.phaser_banks]]
+id = "port"
+facing_deg = -90.0
+fire_arc_deg = 180.0
+auto_arc_deg = 120.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let wc = config.weapons_console.expect("weapons_console");
+        assert_eq!(wc.phaser_banks[0].shield_pierce, None);
+    }
+
+    #[test]
+    fn phaser_bank_shield_pierce_parses_when_present() {
+        let toml_str = r##"
+[weapons_console]
+beam_range = 40.0
+
+[[weapons_console.phaser_banks]]
+id = "port"
+facing_deg = -90.0
+fire_arc_deg = 180.0
+auto_arc_deg = 120.0
+shield_pierce = 0.6
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let wc = config.weapons_console.expect("weapons_console");
+        assert_eq!(wc.phaser_banks[0].shield_pierce, Some(0.6));
+    }
+
+    #[test]
+    fn torpedoes_shield_pierce_defaults_to_zero() {
+        let toml_str = r##"
+[torpedoes]
+count = 5
+
+[[torpedoes.tubes]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let t = config.torpedoes.expect("torpedoes");
+        assert_eq!(t.shield_pierce, 0.0);
+        // Propagates into the runtime config that the in-flight torpedo
+        // snapshots at launch.
+        assert_eq!(t.to_runtime().shield_pierce, 0.0);
+    }
+
+    #[test]
+    fn torpedoes_shield_pierce_parses_when_present() {
+        let toml_str = r##"
+[torpedoes]
+count = 5
+shield_pierce = 0.5
+
+[[torpedoes.tubes]]
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 90.0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let t = config.torpedoes.expect("torpedoes");
+        assert!((t.shield_pierce - 0.5).abs() < 1e-6);
+        assert!((t.to_runtime().shield_pierce - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn torpedo_in_flight_snapshots_shield_pierce_at_launch() {
+        // Wiring proof: changing the in-flight torpedo's snapshot mid-flight
+        // doesn't affect future launches (it's a per-torpedo copy).
+        use crate::torpedo::{TorpedoConfig, TorpedoSystem};
+        let mut cfg = TorpedoConfig::default();
+        cfg.shield_pierce = 0.75;
+        let tubes = vec![TorpedoTubeConfig {
+            id: "fore".into(), facing_deg: 0.0, fire_arc_deg: 90.0,
+        }];
+        let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
+        sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, None, None);
+        assert!((sys.in_flight[0].shield_pierce - 0.75).abs() < 1e-6);
+
+        let det = sys.handle_collision_full("t1").unwrap();
+        assert!((det.shield_pierce - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
     fn phaser_banks_defaults_to_empty_vec_when_absent() {
         let toml_str = r##"
 [weapons_console]
@@ -2457,6 +2593,7 @@ beam_range = 40.0
                 fire_arc_deg: 180.0,
                 auto_arc_deg: 120.0,
                 beam_range: 0.0,
+                shield_pierce: None,
             },
             PhaserBankConfig {
                 id: "starboard".into(),
@@ -2464,6 +2601,7 @@ beam_range = 40.0
                 fire_arc_deg: 180.0,
                 auto_arc_deg: 120.0,
                 beam_range: 0.0,
+                shield_pierce: None,
             },
         ];
         assert!(validate_phaser_banks(&banks).is_ok());
@@ -2484,6 +2622,7 @@ beam_range = 40.0
                 fire_arc_deg: 180.0,
                 auto_arc_deg: 90.0,
                 beam_range: 0.0,
+                shield_pierce: None,
             },
             PhaserBankConfig {
                 id: "port".into(),
@@ -2491,6 +2630,7 @@ beam_range = 40.0
                 fire_arc_deg: 180.0,
                 auto_arc_deg: 90.0,
                 beam_range: 0.0,
+                shield_pierce: None,
             },
         ];
         let err = validate_phaser_banks(&banks).unwrap_err();
@@ -2506,6 +2646,7 @@ beam_range = 40.0
             fire_arc_deg: 90.0,
             auto_arc_deg: 180.0,
             beam_range: 0.0,
+            shield_pierce: None,
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(err.contains("auto_arc_deg"), "error mentions auto arc: {err}");
@@ -2519,6 +2660,7 @@ beam_range = 40.0
             fire_arc_deg: 400.0,
             auto_arc_deg: 90.0,
             beam_range: 0.0,
+            shield_pierce: None,
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(err.contains("fire_arc_deg"), "error mentions fire arc: {err}");
@@ -2529,6 +2671,7 @@ beam_range = 40.0
             fire_arc_deg: 0.0,
             auto_arc_deg: 0.0,
             beam_range: 0.0,
+            shield_pierce: None,
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
         assert!(err.contains("fire_arc_deg"), "zero arc rejected: {err}");
@@ -2751,6 +2894,12 @@ pub struct AsteroidFieldConfig {
     pub tags: Vec<String>,
     #[serde(default)]
     pub grid: Option<GridConfig>,
+    /// Fraction of asteroid-collision damage that bypasses shields and
+    /// applies directly to the hull. Default `0.0` — asteroid impacts are
+    /// fully absorbed by the facing shield quadrant (matching pre-#414
+    /// behaviour). Clamped to `[0.0, 1.0]` at apply time.
+    #[serde(default)]
+    pub shield_pierce: f32,
 }
 
 fn default_spawn_distance() -> f32 {

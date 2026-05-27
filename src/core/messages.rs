@@ -807,6 +807,12 @@ pub enum ClientMessage {
     },
     /// Clear all read or orphaned messages from the inbox.
     ClearComms,
+    /// Display the selected comms message on the viewscreen for the whole crew.
+    /// Pushes `ViewMode::Comms` and stores the message in `OnScreenMessage`.
+    /// Sender must hold `Console::Comms`.
+    ShowOnScreen {
+        message_id: String,
+    },
     /// Focus one shield arc (Fore/Port/Aft/Starboard), or `None` to clear focus.
     /// Sender must hold `Console::Shields`.
     SetShieldFocus {

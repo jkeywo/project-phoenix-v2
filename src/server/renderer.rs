@@ -7,6 +7,7 @@ use crate::ship_state::ShipState;
 use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource};
 use crate::beam_render;
 use crate::ai_plugin::WarpOutMarker;
+use crate::world::server::OnScreenMessage;
 
 // ── VFX Components ────────────────────────────────────────────────
 
@@ -69,6 +70,11 @@ struct ViewScreenText;
 #[derive(Component)]
 struct ViewDirectionLabel;
 
+/// Root node of the comms overlay panel on the viewscreen.
+/// Spawned/despawned by `sync_comms_overlay` based on `OnScreenMessage`.
+#[derive(Component)]
+struct CommsOverlay;
+
 // ── Plugin ────────────────────────────────────────────────────────
 
 pub struct RendererPlugin;
@@ -92,6 +98,7 @@ impl Plugin for RendererPlugin {
                 update_view_screen_text,
                 update_view_direction_label,
                 hull_camera.run_if(in_state(GamePhase::InProgress)),
+                sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
             ))
             .add_systems(Update, (
                 draw_beam_vfx.run_if(in_state(GamePhase::InProgress)),
@@ -368,6 +375,98 @@ fn update_view_direction_label(
 }
 
 // ── VFX Systems ───────────────────────────────────────────────────
+
+/// Synchronises the comms overlay panel with `OnScreenMessage`.
+///
+/// When a message is present the overlay is spawned (or rebuilt if stale).
+/// When the message is cleared the overlay is despawned.
+/// Responses are listed as A), B), C) … read-only labels.
+fn sync_comms_overlay(
+    on_screen: Res<OnScreenMessage>,
+    overlay_q: Query<Entity, With<CommsOverlay>>,
+    mut commands: Commands,
+) {
+    if !on_screen.is_changed() {
+        return;
+    }
+
+    // Always despawn any existing overlay first.
+    for entity in overlay_q.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    let Some(ref msg) = on_screen.0 else { return };
+
+    // Semi-transparent dark panel, centred on screen, ~60% width.
+    let overlay = commands.spawn((
+        CommsOverlay,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(10.0),
+            right: Val::Percent(10.0),
+            top: Val::Percent(15.0),
+            bottom: Val::Percent(15.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(16.0)),
+            row_gap: Val::Px(8.0),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.88)),
+    )).id();
+
+    // Sender name header
+    commands.entity(overlay).with_children(|p| {
+        p.spawn((
+            Text::new(msg.sender_name.clone()),
+            TextFont { font_size: 22.0, ..default() },
+            TextColor(Color::srgb(0.7, 0.6, 1.0)),
+        ));
+    });
+
+    // Divider label
+    commands.entity(overlay).with_children(|p| {
+        p.spawn((
+            Text::new("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"),
+            TextFont { font_size: 14.0, ..default() },
+            TextColor(Color::srgb(0.3, 0.3, 0.5)),
+        ));
+    });
+
+    // Message body
+    commands.entity(overlay).with_children(|p| {
+        p.spawn((
+            Text::new(msg.body.clone()),
+            TextFont { font_size: 16.0, ..default() },
+            TextColor(Color::srgb(0.9, 0.9, 1.0)),
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
+        ));
+    });
+
+    // Responses (read-only, labelled A, B, C…)
+    if !msg.responses.is_empty() {
+        commands.entity(overlay).with_children(|p| {
+            p.spawn((
+                Text::new("POSSIBLE RESPONSES:"),
+                TextFont { font_size: 12.0, ..default() },
+                TextColor(Color::srgb(0.5, 0.5, 0.6)),
+            ));
+        });
+        for (idx, response) in msg.responses.iter().enumerate() {
+            let letter = (b'A' + idx as u8) as char;
+            let label = format!("{})  {}", letter, response);
+            commands.entity(overlay).with_children(|p| {
+                p.spawn((
+                    Text::new(label),
+                    TextFont { font_size: 15.0, ..default() },
+                    TextColor(Color::srgb(0.7, 0.95, 0.85)),
+                ));
+            });
+        }
+    }
+}
 
 /// Draws phaser beams from port and starboard banks to the target asteroid
 /// while `ActiveBeam` has a live target. Uses 3D gizmo lines in world space.

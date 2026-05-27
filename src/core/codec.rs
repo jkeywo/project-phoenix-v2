@@ -1826,6 +1826,15 @@ mod tests {
     }
 
     #[test]
+    fn client_show_on_screen_round_trips() {
+        let msg = ClientMessage::ShowOnScreen {
+            message_id: "msg-abc-123".to_string(),
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
     fn server_comms_state_empty_round_trips() {
         let msg = ServerMessage::CommsState {
             messages: vec![],

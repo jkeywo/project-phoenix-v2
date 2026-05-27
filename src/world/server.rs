@@ -7,8 +7,9 @@ use crate::comms_inbox::CommsInbox;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::simulation::SimOutbox;
 use crate::messages::{
-    ClientMessage, CommsContact, CommsMessage, Console, GamePhase, ServerMessage,
+    ClientMessage, CommsContact, CommsMessage, Console, GamePhase, ServerMessage, ViewMode,
 };
+use crate::ship_state::ShipState;
 use crate::objectives::ObjectiveManager;
 use crate::world::content::{
     ActiveDialogue, CommsTemplateState, TriggerAction,
@@ -124,6 +125,16 @@ pub enum WorldLayerChange {
     Unload(String),
 }
 
+/// The comms message currently being displayed on the viewscreen.
+///
+/// Set when a Comms officer sends `ShowOnScreen { message_id }`.
+/// Cleared automatically when:
+/// - The message is responded to.
+/// - The message becomes orphaned or the sender goes out of range.
+/// - The captain overrides the view mode away from `ViewMode::Comms`.
+#[derive(Resource, Default)]
+pub struct OnScreenMessage(pub Option<CommsMessage>);
+
 pub struct WorldPlugin;
 
 impl Plugin for WorldPlugin {
@@ -134,6 +145,7 @@ impl Plugin for WorldPlugin {
             .init_resource::<PendingScenarioLoad>()
             .init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>()
+            .init_resource::<OnScreenMessage>()
             .add_systems(
                 Startup,
                 (
@@ -154,6 +166,8 @@ impl Plugin for WorldPlugin {
                     handle_hail.in_set(crate::sim_sets::SimSet::Input),
                     handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
                     handle_clear_comms.in_set(crate::sim_sets::SimSet::Input),
+                    handle_show_on_screen.in_set(crate::sim_sets::SimSet::Input),
+                    auto_clear_on_screen_message.in_set(crate::sim_sets::SimSet::Broadcast),
                     update_comms_range_flags.in_set(crate::sim_sets::SimSet::Broadcast),
                     broadcast_comms_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     broadcast_objective_summary.in_set(crate::sim_sets::SimSet::Broadcast),
@@ -765,6 +779,69 @@ fn handle_clear_comms(
         if matches!(ev.msg, ClientMessage::ClearComms) {
             inbox.0.clear();
         }
+    }
+}
+
+/// Handle `ShowOnScreen { message_id }` from Comms console holders.
+///
+/// Looks up the message in the inbox, stores it in `OnScreenMessage`, and
+/// pushes `ViewMode::Comms` so the viewscreen switches to the comms overlay.
+fn handle_show_on_screen(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    inbox: Res<CommsInboxRes>,
+    mut on_screen: ResMut<OnScreenMessage>,
+    mut ship: ResMut<ShipState>,
+) {
+    for ev in reader.read() {
+        if !sessions.0.player_has_console(&ev.token, Console::Comms) {
+            continue;
+        }
+
+        if let ClientMessage::ShowOnScreen { ref message_id } = ev.msg {
+            if let Some(msg) = inbox.0.messages().into_iter().find(|m| &m.id == message_id) {
+                on_screen.0 = Some(msg.clone());
+                ship.view_mode = ViewMode::Comms;
+            }
+        }
+    }
+}
+
+/// Auto-clear `OnScreenMessage` when the displayed message is no longer valid.
+///
+/// Clears when:
+/// - The message has been responded to (`selected_response` is `Some`).
+/// - The message is orphaned (sender entity destroyed/despawned).
+/// - The sender is out of comms range.
+/// - The ship view mode is no longer `ViewMode::Comms` (captain overrode it).
+fn auto_clear_on_screen_message(
+    mut on_screen: ResMut<OnScreenMessage>,
+    inbox: Res<CommsInboxRes>,
+    ship: Res<ShipState>,
+) {
+    if on_screen.0.is_none() {
+        return;
+    }
+    // If the captain (or anyone) has switched away from Comms view, clear.
+    if !matches!(ship.view_mode, ViewMode::Comms) {
+        on_screen.0 = None;
+        return;
+    }
+    // Check the live inbox record for the displayed message.
+    let should_clear = if let Some(ref displayed) = on_screen.0 {
+        match inbox.0.messages().into_iter().find(|m| m.id == displayed.id) {
+            None => true, // message purged from inbox
+            Some(live) => {
+                live.selected_response.is_some()   // responded to
+                || live.is_orphaned                // sender gone
+                || !live.sender_in_range           // out of range
+            }
+        }
+    } else {
+        false
+    };
+    if should_clear {
+        on_screen.0 = None;
     }
 }
 

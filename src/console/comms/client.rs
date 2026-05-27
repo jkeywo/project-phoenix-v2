@@ -81,6 +81,13 @@ pub struct CommsClearButton;
 #[derive(Component)]
 pub struct CommsBackButton;
 
+/// Marks the "On Screen" button in the chat panel.
+/// Carries the message ID to display on the viewscreen.
+#[derive(Component)]
+pub struct CommsOnScreenButton {
+    pub message_id: String,
+}
+
 /// Marker + data for a contact pill: carries the target entity UUID.
 #[derive(Component)]
 pub struct CommsContactPill {
@@ -325,6 +332,7 @@ fn detect_comms_clicks(
     responses: Query<(&Interaction, &CommsResponseButton), Changed<Interaction>>,
     clears: Query<&Interaction, (Changed<Interaction>, With<CommsClearButton>)>,
     backs: Query<&Interaction, (Changed<Interaction>, With<CommsBackButton>)>,
+    on_screens: Query<(&Interaction, &CommsOnScreenButton), Changed<Interaction>>,
     mut outbound: MessageWriter<OutboundClientMessage>,
     mut state: ResMut<ClientCommsState>,
 ) {
@@ -372,6 +380,13 @@ fn detect_comms_clicks(
     for interaction in backs.iter() {
         if *interaction == Interaction::Pressed {
             state.clear_selection();
+        }
+    }
+    for (interaction, btn) in on_screens.iter() {
+        if *interaction == Interaction::Pressed {
+            outbound.write(OutboundClientMessage(
+                ClientMessage::ShowOnScreen { message_id: btn.message_id.clone() },
+            ));
         }
     }
 }
@@ -523,6 +538,24 @@ fn refresh_all_comms_ui(
                     Text::new("\u{2190} Back"),
                     TextFont { font_size: 12.0, ..default() },
                     TextColor(Color::srgb(0.7, 0.7, 0.9)),
+                ));
+            });
+
+            // On Screen button (puts this message on the viewscreen)
+            commands.entity(container).with_children(|p| {
+                p.spawn((
+                    CommsOnScreenButton { message_id: msg.id.clone() },
+                    Button,
+                    Node {
+                        padding: UiRect::all(Val::Px(4.0)),
+                        margin: UiRect::bottom(Val::Px(6.0)),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb_u8(40, 70, 60)),
+                    Text::new("\u{25a6} On Screen"),
+                    TextFont { font_size: 12.0, ..default() },
+                    TextColor(Color::srgb(0.6, 1.0, 0.8)),
                 ));
             });
 

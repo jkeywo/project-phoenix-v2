@@ -83,7 +83,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-f8d1d19ff68216de.js" crossorigin="anonymous" integrity="sha384-Fa2gOm8QF9Xztkio4EDHHLBZShcrPxWg64Yz6XF7aa+rB8XDpORezuqEEtK/gRvG"><link rel="preload" href="./project-phoenix-f8d1d19ff68216de_bg.wasm" crossorigin="anonymous" integrity="sha384-7jtORaApAyXIaKQDMOssFeV59OU1koo/3Isd+aJIuZnXcFGnNQWvsLhGVw/UF0so" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b72a31353f3ad159.js" crossorigin="anonymous" integrity="sha384-Fa2gOm8QF9Xztkio4EDHHLBZShcrPxWg64Yz6XF7aa+rB8XDpORezuqEEtK/gRvG"><link rel="preload" href="./project-phoenix-b72a31353f3ad159_bg.wasm" crossorigin="anonymous" integrity="sha384-7jtORaApAyXIaKQDMOssFeV59OU1koo/3Isd+aJIuZnXcFGnNQWvsLhGVw/UF0so" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -92,8 +92,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-f8d1d19ff68216de.js';
-const wasm = await init({ module_or_path: './project-phoenix-f8d1d19ff68216de_bg.wasm' });
+import init, * as bindings from './project-phoenix-b72a31353f3ad159.js';
+const wasm = await init({ module_or_path: './project-phoenix-b72a31353f3ad159_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -555,11 +555,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Project asteroids (ship-aligned, ship at origin)
+      // Project entities (ship-aligned, ship at origin)
       const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
       for (const a of state.asteroids) {
-        const dx = a.x - state.shipX;
-        const dz = a.z - state.shipZ;
+        const ax = entityX(a), az = entityZ(a);
+        const dx = ax - state.shipX;
+        const dz = az - state.shipZ;
         const dist2 = dx * dx + dz * dz;
         if (dist2 > RANGE * RANGE) continue;
 
@@ -571,7 +572,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         const py = cy - ry * r; // y-up → y-down in canvas
 
         const isLocked = state.weaponsLocked && state.weaponsTarget === a.uuid;
-        const dotR = Math.max(4, (a.radius / RANGE) * r);
+        const dotR = Math.max(4, (entityRadius(a) / RANGE) * r);
 
         if (isLocked) {
           // Pulse red when fire-ready, orange otherwise.
@@ -649,20 +650,26 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (!canvas) return;
       const RANGE = 60.0;
 
-      function getAsteroidAtPoint(canvasX, canvasY) {
+      // EntitySnapshot position helper (position: [x, y, z])
+      function entityX(e) { return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0); }
+      function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
+      function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
+
+      function getEntityAtPoint(canvasX, canvasY) {
         const cx = canvas.width / 2, cy = canvas.height / 2;
         const r = Math.min(cx, cy) - 4;
         const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
         let best = null, bestDist = Infinity;
         for (const a of state.asteroids) {
-          const dx = a.x - state.shipX;
-          const dz = a.z - state.shipZ;
+          const ax = entityX(a), az = entityZ(a);
+          const dx = ax - state.shipX;
+          const dz = az - state.shipZ;
           if (dx * dx + dz * dz > RANGE * RANGE) continue;
           const rx = (dx * cosY + dz * sinY) / RANGE;
           const ry = (dx * sinY - dz * cosY) / RANGE;
           const px = cx + rx * r, py = cy - ry * r;
           const dist = Math.hypot(canvasX - px, canvasY - py);
-          const hitR = Math.max(12, (a.radius / RANGE) * r + 6);
+          const hitR = Math.max(12, (entityRadius(a) / RANGE) * r + 6);
           if (dist <= hitR && dist < bestDist) { best = a; bestDist = dist; }
         }
         return best;
@@ -678,7 +685,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
         const cx = x * scaleX, cy = y * scaleY;
-        const a = getAsteroidAtPoint(cx, cy);
+        const a = getEntityAtPoint(cx, cy);
         if (a) {
           // Optimistic pending lock indicator
           const el = $('weapons-lock-status');
@@ -845,6 +852,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           state.shipZ = snap.ship_z || 0;
           state.shipYaw = snap.ship_yaw || 0;
           if (vd) state.currentView = vd;
+          // Update entity positions from per-tick entity state snapshots
+          if (snap.entity_states) {
+            for (const es of snap.entity_states) {
+              const match = state.asteroids.find(a => a.uuid === es.uuid);
+              if (match && es.position) {
+                match.position = es.position;
+              }
+            }
+          }
           if (typeof hp === 'number' && (state.hullIntegrity !== hp || state.repairTarget !== repairTarget)) {
             state.hullIntegrity = hp;
             state.repairTarget = repairTarget;
@@ -855,7 +871,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           return;
         }
         case 'WorldSetup': {
-          state.asteroids = (msg.data.world && msg.data.world.asteroids) || [];
+          state.asteroids = (msg.data.world && msg.data.world.entities) || [];
           renderWeaponsRadar();
           return;
         }

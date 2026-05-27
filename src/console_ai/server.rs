@@ -708,6 +708,17 @@ mod tests {
         // Add the target entity to the world at a position in ForePort arc
         let mut world_res = app.world_mut().resource_mut::<WorldResource>();
         world_res.0.entities.push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
+        drop(world_res);
+        // Also spawn the live ECS entity — run_tactical_ai uses live Transforms
+        // (not the WorldResource snapshot) since the fix in e147fe2.
+        app.world_mut().spawn((
+            crate::simulation::Asteroid,
+            crate::simulation::AsteroidUuid("target-uuid".into()),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                crate::messages::Console::CaptainChair, 30.0,
+            )])),
+            bevy::prelude::Transform::from_xyz(0.0, 0.0, -30.0),
+        ));
     }
 
     // ── Tests ────────────────────────────────────────────────────────────

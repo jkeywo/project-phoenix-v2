@@ -975,7 +975,7 @@ mod tests {
     }
 
     fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<OutboundMessage> {
-        setup_weapons_world(app, asteroid_x, asteroid_z);
+        setup_weapons_world_with_entity(app, asteroid_x, asteroid_z);
         start_game_with_weapons(app);
         push(app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
         let _ = tick(app);

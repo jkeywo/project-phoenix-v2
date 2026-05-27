@@ -858,6 +858,18 @@ fn sync_radar_blip_nodes(
         > = HashMap::new();
 
         for (src, on_radar, appearance, blip_pose, blip_uuid) in blips.iter() {
+            // [radar-instr 14] trace every blip when highlight is active
+            if let Some(hl) = target_highlight {
+                if hl.0.is_some() {
+                    if let Some(uuid) = blip_uuid {
+                        let on_r = is_on_radar(&widget.filter, &on_radar.0);
+                        crate::wasm_log!(
+                            "[radar-instr 14] blip uuid={} on_radar={} tags={:?} pos=({:.1},{:.1})",
+                            uuid.0, on_r, on_radar.0, blip_pose.x, blip_pose.z
+                        );
+                    }
+                }
+            }
             if !is_on_radar(&widget.filter, &on_radar.0) {
                 continue;
             }
@@ -875,6 +887,17 @@ fn sync_radar_blip_nodes(
                 continue;
             };
             if nx * nx + ny * ny > 1.0 {
+                // [radar-instr 15] blip out of range
+                if let Some(hl) = target_highlight {
+                    if let Some(uuid) = blip_uuid {
+                        if hl.0.as_deref() == Some(uuid.0.as_str()) {
+                            crate::wasm_log!(
+                                "[radar-instr 15] TARGET BLIP OUT OF RANGE: uuid={} nx={:.2} ny={:.2} range={:.1}",
+                                uuid.0, nx, ny, range
+                            );
+                        }
+                    }
+                }
                 continue;
             }
 

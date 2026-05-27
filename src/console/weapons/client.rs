@@ -265,7 +265,7 @@ fn spawn_weapons_ui(
 
 // â”€â”€ Fill helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Primary slot: tactical radar (GenericRadar, WorldFixed, Ships + Torpedoes).
+/// Primary slot: tactical radar (GenericRadar, ShipRelative, Ships + Torpedoes).
 fn fill_tactical_radar(
     commands: &mut Commands,
     container: Entity,
@@ -302,7 +302,7 @@ fn fill_tactical_radar(
     let radar = GenericRadar::spawn(
         commands,
         crate::client_sim::WEAPONS_RADAR_RANGE,
-        OrientationMode::WorldFixed,
+        OrientationMode::ShipRelative,
         radar_filter,
         None,
         None,

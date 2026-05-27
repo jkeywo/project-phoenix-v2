@@ -83,7 +83,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-<link rel="modulepreload" href="./project-phoenix-b09a47889a0e5a1.js" crossorigin="anonymous" integrity="sha384-C5zECmubLoKO/CTcN2bawpgIbmKDxZKkuLJgKqA3j2hnkJdCjwX8cmGZqFA0+OAN"><link rel="preload" href="./project-phoenix-b09a47889a0e5a1_bg.wasm" crossorigin="anonymous" integrity="sha384-y+PTewfMH073bbowK4PmbVDk6Qwovgxur8ASaAGYZdZHrrDnaio+zGYCTQIcaGdy" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-fbfff9d1ddee3de2.js" crossorigin="anonymous" integrity="sha384-f6y66H/IK1LqSRV8iqa+dxyU9BAKGuvC+UoPoTlQx44p7ON31+eEYTvsDIq6zNHT"><link rel="preload" href="./project-phoenix-fbfff9d1ddee3de2_bg.wasm" crossorigin="anonymous" integrity="sha384-DoNEsBL/r30a3PI2p3PjVI2qdBW4JVv1h07ncl0znuNiOUb71RlIjXy4WcbJBIEc" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -92,8 +92,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-b09a47889a0e5a1.js';
-const wasm = await init({ module_or_path: './project-phoenix-b09a47889a0e5a1_bg.wasm' });
+import init, * as bindings from './project-phoenix-fbfff9d1ddee3de2.js';
+const wasm = await init({ module_or_path: './project-phoenix-fbfff9d1ddee3de2_bg.wasm' });
 
 
 window.wasmBindings = bindings;

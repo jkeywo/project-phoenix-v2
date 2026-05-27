@@ -685,6 +685,11 @@ fn handle_fire_torpedo(
     ship: Res<ShipState>,
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
+    // UUID of the firing ship (player ship today; any ship with the `Ship`
+    // marker in the future). Stamped on each launched torpedo so it can't
+    // detonate on its own launcher. Optional so tests without a player-ship
+    // entity still work.
+    ship_uuid_q: Query<&crate::entity_spawner::EntityUuid, With<crate::simulation::Ship>>,
 ) {
     for ev in reader.read() {
         let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else { continue };
@@ -693,8 +698,17 @@ fn handle_fire_torpedo(
         }
         let uuid = uuid::Uuid::new_v4().to_string();
         let launch_heading = ship.yaw;
+        let source_uuid = ship_uuid_q.single().ok().map(|u| u.0.clone());
         use crate::torpedo::LaunchResult;
-        match torpedo_sys.0.launch(tube.as_str(), uuid, ship.x, ship.z, launch_heading, target_uuid.clone()) {
+        match torpedo_sys.0.launch(
+            tube.as_str(),
+            uuid,
+            ship.x,
+            ship.z,
+            launch_heading,
+            target_uuid.clone(),
+            source_uuid,
+        ) {
             LaunchResult::Launched { uuid: launched_uuid } => {
                 outbox.0.push((Target::All, ServerMessage::TorpedoLaunched {
                     uuid: launched_uuid,

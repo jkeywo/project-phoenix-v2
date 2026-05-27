@@ -603,7 +603,7 @@ mod tests {
     fn find_detonation_hits_detonates_unlocked_torpedo_on_contact() {
         // Bug repro: shot without a target lock should still explode.
         let mut sys = detonation_system(5.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, /*target_uuid*/ None);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, /*target_uuid*/ None, /*source_uuid*/ None);
         let targets = vec![("raider".to_string(), 0.0, -3.0, 1.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert_eq!(hits, vec![("t1".to_string(), "raider".to_string())]);
@@ -622,6 +622,7 @@ mod tests {
             heading: 0.0,
             lifespan_remaining: 10.0,
             target_uuid: None,
+            source_uuid: None,
         });
         let targets = vec![
             ("a".to_string(), 1.0, 0.0, 0.0), // close to t1
@@ -631,5 +632,48 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert!(hits.contains(&("t1".to_string(), "a".to_string())));
         assert!(hits.contains(&("t2".to_string(), "b".to_string())));
+    }
+
+    #[test]
+    fn find_detonation_hits_never_detonates_on_source_uuid() {
+        // Regression: torpedoes spawn at the firing ship's centre. Without
+        // source_uuid filtering, every torpedo would instantly detonate on
+        // its launcher and never reach an actual target.
+        let mut sys = detonation_system(5.0);
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            None,
+            Some("player-ship".into()),
+        );
+        // Player ship sitting right on top of the torpedo, plus a raider
+        // also in range further out.
+        let targets = vec![
+            ("player-ship".to_string(), 0.0, 0.0, 5.0),
+            ("raider".to_string(), 0.0, -3.0, 1.0),
+        ];
+        let hits = sys.find_detonation_hits(&targets);
+        // Should hit the raider, not the launcher.
+        assert_eq!(hits, vec![("t1".to_string(), "raider".to_string())]);
+    }
+
+    #[test]
+    fn find_detonation_hits_with_no_targets_in_range_returns_empty_even_if_source_present() {
+        let mut sys = detonation_system(5.0);
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            None,
+            Some("player-ship".into()),
+        );
+        let targets = vec![("player-ship".to_string(), 0.0, 0.0, 5.0)];
+        let hits = sys.find_detonation_hits(&targets);
+        assert!(hits.is_empty());
     }
 }

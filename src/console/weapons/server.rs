@@ -434,7 +434,9 @@ fn handle_fire_phaser_npc(
                     let dx = tx - npc_x;
                     let dz = tz - npc_z;
                     let dist = (dx * dx + dz * dz).sqrt();
-                    let radar_y = dx * (-npc_yaw).sin() + dz * (-npc_yaw).cos();
+                    // Same formula as is_fire_ready_with_range: forward = (sin(yaw), -cos(yaw)),
+                    // so radar_y = dx*sin(yaw) - dz*cos(yaw). >= 0 means in forward hemisphere.
+                    let radar_y = dx * npc_yaw.sin() - dz * npc_yaw.cos();
                     info!(
                         "[npc-fire] uuid={} target={} dist={:.1} beam_range={:.1} radar_y={:.2} ready={} beam_active={} cooldown={:.2}",
                         npc_uuid.0,

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::lobby::{GameStateCache, WorldResource};
+use crate::lobby::GameStateCache;
 use crate::messages::{GamePhase, ViewDirection, ViewMode};
 use crate::ship_state::ShipState;
 use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource};
@@ -380,20 +380,28 @@ fn draw_beam_vfx(
     ship: Res<ShipState>,
     beam: Res<ActiveBeam>,
     render_cfg: Res<PhaserRenderConfig>,
-    world: Option<Res<WorldResource>>,
+    asteroid_q: Query<(&crate::simulation::AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
+    npc_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<crate::simulation::Asteroid>>,
     mut gizmos: Gizmos,
 ) {
     let Some(target_uuid) = &beam.target_uuid else { return };
-    let Some(world) = world else { return };
 
-    let Some(asteroid) = world.0.entities.iter().find(|a| &a.uuid == target_uuid) else {
-        return;
-    };
+    // Resolve the target's live position from ECS Transforms (asteroids
+    // carry AsteroidUuid; NPCs/stations carry EntityUuid). The
+    // WorldResource snapshot stores stale spawn-time positions, so it
+    // would render the beam to where the NPC spawned, not where it is now.
+    let target_xz = asteroid_q
+        .iter()
+        .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z)))
+        .or_else(|| npc_q
+            .iter()
+            .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))));
+    let Some((tx, tz)) = target_xz else { return };
 
     // Endpoint clamped to configured max range.
     let (end_x, end_z) = beam_render::beam_endpoint(
         ship.x, ship.z,
-        asteroid.x(), asteroid.z(),
+        tx, tz,
         render_cfg.beam_range,
     );
 

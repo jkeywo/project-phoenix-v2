@@ -1026,12 +1026,16 @@ mod tests {
     #[test]
     fn full_beam_duration_kills_asteroid() {
         let mut app = test_app();
-        let asteroid_entity = app.world_mut().spawn((
-            crate::simulation::Asteroid,
-            crate::simulation::AsteroidUuid("target-uuid".into()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
-        )).id();
+        // setup_weapons_world (called by lock_and_fire) now spawns the
+        // asteroid ECS entity. Fetch its handle after setup.
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
+        let asteroid_entity = {
+            let mut q = app.world_mut().query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
+            q.iter(app.world())
+                .find(|(_, u)| u.0 == "target-uuid")
+                .map(|(e, _)| e)
+                .expect("setup_weapons_world should have spawned the target asteroid")
+        };
 
         assert_eq!(
             app.world().resource::<ActiveBeam>().target_uuid.as_deref(),

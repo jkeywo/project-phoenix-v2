@@ -257,7 +257,8 @@ fn run_tactical_ai(
     ship: Res<ShipState>,
     torpedo_sys: Res<TorpedoSystemResource>,
     weapons_target: Res<WeaponsTarget>,
-    world: Res<crate::lobby::WorldResource>,
+    asteroid_q: Query<(&crate::simulation::AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
+    npc_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<crate::simulation::Asteroid>>,
     mut writer: MessageWriter<InboundMessage>,
 ) {
 
@@ -276,12 +277,20 @@ fn run_tactical_ai(
         return;
     };
 
-    // Look up the target's world position. If the entity is gone (destroyed
-    // since the lock was set), skip this tick silently.
-    let Some(target_entity) = world.0.entities.iter().find(|e| &e.uuid == target_uuid) else {
+    // Look up the target's live world position from the ECS (asteroids
+    // carry AsteroidUuid; NPCs/stations carry EntityUuid). The
+    // WorldResource snapshot would give the stale spawn-time position,
+    // causing AI auto-fire to miss moving targets. If the entity is gone
+    // (destroyed since the lock was set), skip this tick silently.
+    let target_xz = asteroid_q
+        .iter()
+        .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z)))
+        .or_else(|| npc_q
+            .iter()
+            .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))));
+    let Some((tx, tz)) = target_xz else {
         return;
     };
-    let (tx, tz) = (target_entity.x(), target_entity.z());
 
     // Compute bearing from ship to target (same convention as torpedo.is_in_arc).
     let dx = tx - ship.x;

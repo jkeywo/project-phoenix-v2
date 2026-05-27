@@ -2170,16 +2170,35 @@ mod tests {
             )],
             ..Default::default()
         }));
+        // Also spawn the live ECS entity. As of the targeting fix, gameplay
+        // logic reads positions from ECS Transforms (not the WorldResource
+        // snapshot), so targets must exist as ECS entities to be lockable.
+        app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("target-uuid".into()),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                &[(crate::messages::Console::CaptainChair, 30.0)],
+            )),
+            Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
+        ));
     }
 
-    /// Like `setup_weapons_world` but also spawns the Bevy entity so that beam
-    /// damage can actually be applied and the asteroid can be destroyed.
+    /// Like `setup_weapons_world` but also returns the spawned entity for
+    /// tests that need to manipulate or despawn it later.
     fn setup_weapons_world_with_entity(
         app: &mut App,
         asteroid_x: f32,
         asteroid_z: f32,
     ) -> bevy::ecs::entity::Entity {
-        setup_weapons_world(app, asteroid_x, asteroid_z);
+        app.world_mut().insert_resource(WorldResource(WorldData {
+            entities: vec![EntitySnapshot::asteroid(
+                "target-uuid",
+                asteroid_x,
+                asteroid_z,
+                2.0,
+            )],
+            ..Default::default()
+        }));
         app.world_mut()
             .spawn((
                 Asteroid,
@@ -2518,19 +2537,16 @@ mod tests {
     fn full_beam_duration_kills_asteroid() {
         let mut app = test_app();
 
-        // Spawn an asteroid entity with full HP so tick_active_beam can find it.
-        let asteroid_entity = app
-            .world_mut()
-            .spawn((
-                Asteroid,
-                AsteroidUuid("target-uuid".into()),
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                    &[(crate::messages::Console::CaptainChair, 30.0)],
-                )),
-            ))
-            .id();
-
+        // setup_weapons_world (called by lock_and_fire) now spawns the
+        // asteroid ECS entity. Fetch its handle after setup.
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
+        let asteroid_entity = {
+            let mut q = app.world_mut().query::<(bevy::ecs::entity::Entity, &AsteroidUuid)>();
+            q.iter(app.world())
+                .find(|(_, u)| u.0 == "target-uuid")
+                .map(|(e, _)| e)
+                .expect("setup_weapons_world should have spawned the target asteroid")
+        };
 
         // Verify beam started.
         assert_eq!(
@@ -2632,6 +2648,12 @@ mod tests {
         // Move asteroid position in WorldData to 50 units away (out of 40u range).
         app.world_mut().resource_mut::<WorldResource>().0.entities[0].position =
             Some([0.0, 0.0, -50.0]);
+        // Move the live ECS Transform too — gameplay reads positions from
+        // Transforms, not from the WorldResource snapshot.
+        let mut q = app.world_mut().query_filtered::<&mut Transform, With<AsteroidUuid>>();
+        for mut t in q.iter_mut(app.world_mut()) {
+            t.translation.z = -50.0;
+        }
 
         let out = tick(&mut app);
 
@@ -2650,22 +2672,21 @@ mod tests {
         );
     }
 
-    /// No damage refund on sever â€" whatever HP was dealt is permanent.
+    /// No damage refund on sever — whatever HP was dealt is permanent.
     #[test]
     fn no_damage_refund_on_sever() {
         let mut app = test_app();
-        let asteroid_entity = app
-            .world_mut()
-            .spawn((
-                Asteroid,
-                AsteroidUuid("target-uuid".into()),
-                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                    &[(crate::messages::Console::CaptainChair, 30.0)],
-                )),
-            ))
-            .id();
-
+        // setup_weapons_world (called by lock_and_fire) now spawns the
+        // asteroid ECS entity itself. Fetch its handle by querying for the
+        // matching UUID after the fact.
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
+        let asteroid_entity = {
+            let mut q = app.world_mut().query::<(bevy::ecs::entity::Entity, &AsteroidUuid)>();
+            q.iter(app.world())
+                .find(|(_, u)| u.0 == "target-uuid")
+                .map(|(e, _)| e)
+                .expect("setup_weapons_world should have spawned the target asteroid")
+        };
 
         // Apply partial damage via accumulator.
         app.world_mut()
@@ -2702,6 +2723,24 @@ mod tests {
             ],
             ..Default::default()
         }));
+        // Spawn live ECS entities for both targets — gameplay reads positions
+        // from Transforms, not from the WorldResource snapshot.
+        app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("t1".into()),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                &[(crate::messages::Console::CaptainChair, 30.0)],
+            )),
+            Transform::from_xyz(0.0, 0.0, -20.0),
+        ));
+        app.world_mut().spawn((
+            Asteroid,
+            AsteroidUuid("t2".into()),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                &[(crate::messages::Console::CaptainChair, 30.0)],
+            )),
+            Transform::from_xyz(0.0, 0.0, -15.0),
+        ));
         start_game_with_weapons(&mut app);
 
         // Lock and fire at t1.

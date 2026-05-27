@@ -276,6 +276,11 @@ pub enum TriggerCondition {
     /// trigger lifecycle; on unload + re-load the trigger is re-created
     /// with `fired = false` so it fires again.
     OnWorldLoaded,
+    /// Fires when the player ship enters the named region.
+    OnEnteredRegion { entity_name: String },
+    /// Fires when the player ship exits the named region (or the region
+    /// is despawned while the ship is inside).
+    OnExitedRegion { entity_name: String },
 }
 
 /// An action to execute when a trigger fires.
@@ -516,6 +521,12 @@ fn parse_trigger_condition_from_string(
             name: flag_name.ok_or_else(|| format!("{ctx} 'on_flag_cleared' requires a 'name' field"))?,
         }),
         "on_world_loaded" => Ok(TriggerCondition::OnWorldLoaded),
+        "on_entered_region" => Ok(TriggerCondition::OnEnteredRegion {
+            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_entered_region' requires an 'entity' field"))?,
+        }),
+        "on_exited_region" => Ok(TriggerCondition::OnExitedRegion {
+            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_exited_region' requires an 'entity' field"))?,
+        }),
         other => Err(format!("Unknown {ctx} condition '{}'", other)),
     }
 }
@@ -1482,6 +1493,103 @@ when      = "flag(intro_done)"
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.triggers[0].condition, TriggerCondition::OnWorldLoaded);
         assert!(cfg.triggers[0].when.is_some(), "when predicate must round-trip");
+    }
+
+    // -- on_entered_region / on_exited_region (issue #416) ------------------
+
+    #[test]
+    fn parse_world_reads_on_entered_region_condition() {
+        let toml = r#"
+[[trigger]]
+condition = "on_entered_region"
+entity    = "nebula_alpha"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-nebula"
+  text = "Entered the nebula."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(
+            cfg.triggers[0].condition,
+            TriggerCondition::OnEnteredRegion { entity_name: "nebula_alpha".into() }
+        );
+        assert_eq!(cfg.triggers[0].actions.len(), 1);
+    }
+
+    #[test]
+    fn parse_world_reads_on_exited_region_condition() {
+        let toml = r#"
+[[trigger]]
+condition = "on_exited_region"
+entity    = "nebula_alpha"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-nebula"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(
+            cfg.triggers[0].condition,
+            TriggerCondition::OnExitedRegion { entity_name: "nebula_alpha".into() }
+        );
+    }
+
+    #[test]
+    fn parse_world_reads_on_entered_region_with_when_predicate() {
+        let toml = r#"
+[[trigger]]
+condition = "on_entered_region"
+entity    = "nebula_alpha"
+when      = "flag(stealth_mode)"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-stealth"
+  text = "Stealth ingress."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(
+            cfg.triggers[0].condition,
+            TriggerCondition::OnEnteredRegion { entity_name: "nebula_alpha".into() }
+        );
+        assert!(cfg.triggers[0].when.is_some(), "when predicate must round-trip");
+    }
+
+    #[test]
+    fn parse_world_rejects_on_entered_region_without_entity() {
+        let toml = r#"
+[[trigger]]
+condition = "on_entered_region"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "x"
+  text = "x"
+"#;
+        let err = parse_world(toml).expect_err("missing entity must error");
+        assert!(
+            err.contains("on_entered_region") && err.contains("entity"),
+            "error must mention condition + entity field: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_rejects_on_exited_region_without_entity() {
+        let toml = r#"
+[[trigger]]
+condition = "on_exited_region"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "x"
+  text = "x"
+"#;
+        let err = parse_world(toml).expect_err("missing entity must error");
+        assert!(
+            err.contains("on_exited_region") && err.contains("entity"),
+            "error must mention condition + entity field: {err}"
+        );
     }
 
     #[test]

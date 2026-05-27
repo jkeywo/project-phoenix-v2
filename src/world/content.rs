@@ -43,6 +43,12 @@ pub enum WorldEvent {
     /// The containing world finished loading (base-world `Startup` or
     /// sub-world `LoadWorld`). Emitted once per load cycle.
     WorldLoaded,
+    /// The player ship entered a region (by UUID).
+    EnteredRegion { uuid: String },
+    /// The player ship exited a region (by UUID), either by crossing the
+    /// boundary or because the region entity was despawned while the
+    /// ship was inside.
+    ExitedRegion { uuid: String },
 }
 
 // ── Runtime state ─────────────────────────────────────────────────────────
@@ -196,6 +202,12 @@ fn condition_matches(
         (TriggerCondition::OnFlagSet { name }, WorldEvent::FlagSet { name: n }) => name == n,
         (TriggerCondition::OnFlagCleared { name }, WorldEvent::FlagCleared { name: n }) => name == n,
         (TriggerCondition::OnWorldLoaded, WorldEvent::WorldLoaded) => true,
+        (TriggerCondition::OnEnteredRegion { entity_name }, WorldEvent::EnteredRegion { uuid }) => {
+            name_to_uuid.get(entity_name).map(|u| u == uuid).unwrap_or(false)
+        }
+        (TriggerCondition::OnExitedRegion { entity_name }, WorldEvent::ExitedRegion { uuid }) => {
+            name_to_uuid.get(entity_name).map(|u| u == uuid).unwrap_or(false)
+        }
         _ => false,
     }
 }
@@ -657,5 +669,93 @@ mod tests {
         let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired1.len(), 1);
         assert!(fired2.is_empty());
+    }
+
+    // ── on_entered_region / on_exited_region (issue #416) ─────────────────
+
+    #[test]
+    fn on_entered_region_matches_entered_region_event_with_resolved_uuid() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnEnteredRegion { entity_name: "nebula".into() },
+                actions: vec![add_obj("obj-nebula")],
+                when: None,
+            },
+            fired: false,
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
+        let events = vec![WorldEvent::EnteredRegion { uuid: "uuid-nebula".into() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+        assert!(states[0].fired);
+    }
+
+    #[test]
+    fn on_entered_region_does_not_match_different_uuid() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnEnteredRegion { entity_name: "nebula".into() },
+                actions: vec![add_obj("obj-nebula")],
+                when: None,
+            },
+            fired: false,
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
+        let events = vec![WorldEvent::EnteredRegion { uuid: "uuid-other".into() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert!(fired.is_empty());
+        assert!(!states[0].fired);
+    }
+
+    #[test]
+    fn on_entered_region_does_not_match_exited_region_event() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnEnteredRegion { entity_name: "nebula".into() },
+                actions: vec![add_obj("x")],
+                when: None,
+            },
+            fired: false,
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
+        let events = vec![WorldEvent::ExitedRegion { uuid: "uuid-nebula".into() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert!(fired.is_empty());
+    }
+
+    #[test]
+    fn on_exited_region_matches_exited_region_event_with_resolved_uuid() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnExitedRegion { entity_name: "nebula".into() },
+                actions: vec![add_obj("obj-left-nebula")],
+                when: None,
+            },
+            fired: false,
+        }];
+        let mut name_to_uuid = HashMap::new();
+        name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
+        let events = vec![WorldEvent::ExitedRegion { uuid: "uuid-nebula".into() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert_eq!(fired.len(), 1);
+    }
+
+    #[test]
+    fn on_entered_region_does_not_match_unresolved_name() {
+        let mut states = vec![TriggerState {
+            trigger: Trigger {
+                condition: TriggerCondition::OnEnteredRegion { entity_name: "unknown".into() },
+                actions: vec![add_obj("x")],
+                when: None,
+            },
+            fired: false,
+        }];
+        let name_to_uuid = HashMap::new(); // empty — name does not resolve
+        let events = vec![WorldEvent::EnteredRegion { uuid: "any-uuid".into() }];
+        let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
+        assert!(fired.is_empty());
     }
 }

@@ -190,8 +190,62 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(Update, handle_ai_events.in_set(crate::sim_sets::SimSet::Physics))
             .add_systems(Update, apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics))
-            .add_systems(Update, apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics));
+            .add_systems(Update, apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics))
+            .add_observer(handle_region_entered_event)
+            .add_observer(handle_region_exited_event);
     }
+}
+
+/// Observer: bridge `RegionEntered` (player ship boundary crossing into a
+/// region) into a queued `WorldEvent::EnteredRegion` so `handle_ai_events`
+/// can fan it out to matching triggers on the next tick.
+///
+/// Looks up the region entity's UUID via `RegionMembership.region_uuids`
+/// (populated each tick by `update_region_membership`, and persisted after
+/// the entity despawns). Drops the event silently if no UUID is cached
+/// (e.g. a region entity spawned without an `EntityUuid` component — not
+/// expected in production paths but possible in narrow unit tests).
+///
+/// Single-fire-per-transition is provided by the region containment
+/// system itself: `update_region_membership` uses set differences between
+/// the previous and current "inside" sets, so it only triggers the
+/// observer event once per boundary crossing. Staying inside on the next
+/// tick produces no further `RegionEntered` events.
+///
+/// NPC entities are never considered by `update_region_membership`
+/// (it queries `With<Ship>` and only computes membership for the player
+/// ship), so this observer is only invoked for player ship crossings.
+fn handle_region_entered_event(
+    trigger: On<crate::regions::server::RegionEntered>,
+    membership: Option<Res<crate::regions::server::RegionMembership>>,
+    runtime: Option<ResMut<WorldContentRuntime>>,
+) {
+    let (Some(membership), Some(mut runtime)) = (membership, runtime) else {
+        return;
+    };
+    let ev = trigger.event();
+    let Some(uuid) = membership.region_uuids.get(&ev.region_entity).cloned() else {
+        return;
+    };
+    runtime.pending_world_events.push(WorldEvent::EnteredRegion { uuid });
+}
+
+/// Observer: mirror of `handle_region_entered_event` for region exits.
+/// Fires both on boundary-crossing exits and on implicit exits when the
+/// region entity is despawned while the ship is inside.
+fn handle_region_exited_event(
+    trigger: On<crate::regions::server::RegionExited>,
+    membership: Option<Res<crate::regions::server::RegionMembership>>,
+    runtime: Option<ResMut<WorldContentRuntime>>,
+) {
+    let (Some(membership), Some(mut runtime)) = (membership, runtime) else {
+        return;
+    };
+    let ev = trigger.event();
+    let Some(uuid) = membership.region_uuids.get(&ev.region_entity).cloned() else {
+        return;
+    };
+    runtime.pending_world_events.push(WorldEvent::ExitedRegion { uuid });
 }
 
 /// Startup system: copy the unified `WorldConfig` from the WASM-side
@@ -3950,5 +4004,327 @@ condition = "on_world_loaded"
 "#;
         std::fs::write(&world_path, toml).expect("failed to write fixture world TOML");
         world_path.to_string_lossy().into_owned()
+    }
+
+    // -- Region enter/exit triggers (issue #416) -----------------------------
+
+    use crate::region_shape::RegionShape;
+    use crate::regions::server::RegionPlugin;
+    use crate::entity_spawner::{spawn_entity, EntityUuid};
+    use crate::entity_config::EntityConfig;
+
+    /// Build a minimal app that wires `RegionPlugin` + the issue-#416
+    /// observers + `handle_ai_events` into the same world. Skips the
+    /// heavyweight `WorldPlugin`/`AiPlugin`/`LobbyPlugin` bootstrap so the
+    /// test focuses on the region-event → trigger-fire path.
+    fn region_trigger_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .add_plugins(RegionPlugin)
+            .insert_resource(ShipState::new())
+            .insert_resource(crate::modifiers::ShipModifiers::new())
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<CommsInboxRes>()
+            .init_resource::<ObjectiveManagerRes>()
+            .init_resource::<SimOutbox>()
+            .add_message::<crate::ai::server::AiEntityAttacked>()
+            .add_message::<crate::ai::server::AiEntityDestroyed>()
+            .add_systems(Update, handle_ai_events)
+            .add_observer(handle_region_entered_event)
+            .add_observer(handle_region_exited_event);
+        // Spawn the player ship (with a Transform so RegionPlugin's
+        // membership query succeeds).
+        app.world_mut().spawn((Ship, Transform::default()));
+        app
+    }
+
+    fn spawn_region_with_uuid(app: &mut App, x: f32, z: f32, radius: f32, uuid: &str) -> Entity {
+        let config = EntityConfig {
+            name: None,
+            light: Vec::new(),
+            tags: vec!["region".to_string()],
+            shape: Some(RegionShape::Sphere { radius }),
+            effects: None,
+            hull: None, collider: None, appearance: None,
+            helm_console: None, weapons_console: None, engineering_console: None,
+            captain_console: None, power: None, sensors_console: None,
+            navigation_console: None, shields_console: None, torpedoes: None,
+            repair: None, comms: None, asteroid_field: None, faction: None,
+            behaviour: None, radar_appearance: None, mesh: None,
+        };
+        let mut commands = app.world_mut().commands();
+        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid.to_string(), None)
+    }
+
+    fn set_ship_pos(app: &mut App, x: f32, z: f32) {
+        let mut ship = app.world_mut().resource_mut::<ShipState>();
+        ship.x = x;
+        ship.z = z;
+    }
+
+    fn install_region_trigger(
+        app: &mut App,
+        name: &str,
+        uuid: &str,
+        condition: TriggerCondition,
+        obj_id: &str,
+    ) {
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime.name_to_uuid.insert(name.into(), uuid.into());
+        runtime.trigger_states.push(TriggerState {
+            trigger: crate::world::content::Trigger {
+                condition,
+                actions: vec![TriggerAction::AddObjective {
+                    id: obj_id.into(),
+                    text: "region trigger objective".into(),
+                    mandatory: false,
+                }],
+                when: None,
+            },
+            fired: false,
+        });
+    }
+
+    fn objective_present(app: &App, id: &str) -> bool {
+        app.world()
+            .resource::<ObjectiveManagerRes>()
+            .0
+            .sorted_snapshots()
+            .iter()
+            .any(|o| o.id == id)
+    }
+
+    #[test]
+    fn ship_entering_region_fires_on_entered_region_trigger_exactly_once() {
+        let mut app = region_trigger_test_app();
+        let uuid = "uuid-nebula";
+        spawn_region_with_uuid(&mut app, 100.0, 0.0, 50.0, uuid);
+        install_region_trigger(
+            &mut app,
+            "nebula",
+            uuid,
+            TriggerCondition::OnEnteredRegion { entity_name: "nebula".into() },
+            "obj-entered",
+        );
+
+        // Tick 1: ship outside (at origin), no enter → no fire.
+        app.update();
+        assert!(!objective_present(&app, "obj-entered"),
+            "trigger must not fire while outside");
+
+        // Move ship inside. The membership system runs in Physics and
+        // queues a WorldEvent via the observer; `handle_ai_events` (also
+        // in Physics) drains the queue on the NEXT tick — matching the
+        // documented `WorldLoaded` two-tick pattern.
+        set_ship_pos(&mut app, 110.0, 0.0);
+        app.update(); // queues EnteredRegion
+        app.update(); // handle_ai_events drains + fires
+        assert!(objective_present(&app, "obj-entered"),
+            "trigger must fire on entry");
+
+        // Confirm single-shot: trigger is marked fired, queue is drained.
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(runtime.trigger_states[0].fired,
+            "trigger state must be marked fired after entry");
+        assert!(runtime.pending_world_events.is_empty(),
+            "pending_world_events must be drained");
+
+        // Stay inside on subsequent ticks — membership system must not
+        // re-emit `RegionEntered`, so no new events queue up.
+        app.update();
+        app.update();
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(runtime.pending_world_events.is_empty(),
+            "staying inside must not enqueue further EnteredRegion events");
+    }
+
+    #[test]
+    fn ship_exiting_region_fires_on_exited_region_trigger() {
+        let mut app = region_trigger_test_app();
+        let uuid = "uuid-nebula";
+        spawn_region_with_uuid(&mut app, 0.0, 0.0, 50.0, uuid);
+        install_region_trigger(
+            &mut app,
+            "nebula",
+            uuid,
+            TriggerCondition::OnExitedRegion { entity_name: "nebula".into() },
+            "obj-exited",
+        );
+
+        // Move inside first so we enter cleanly.
+        set_ship_pos(&mut app, 10.0, 0.0);
+        app.update();
+        app.update();
+        assert!(!objective_present(&app, "obj-exited"),
+            "exit trigger must not fire on entry");
+
+        // Now move outside → RegionExited → queued → drained next tick.
+        set_ship_pos(&mut app, 200.0, 0.0);
+        app.update();
+        app.update();
+        assert!(objective_present(&app, "obj-exited"),
+            "exit trigger must fire when ship moves outside the region");
+    }
+
+    #[test]
+    fn region_despawn_while_ship_inside_fires_on_exited_region_trigger() {
+        let mut app = region_trigger_test_app();
+        let uuid = "uuid-fragile";
+        let region_entity = spawn_region_with_uuid(&mut app, 0.0, 0.0, 50.0, uuid);
+        install_region_trigger(
+            &mut app,
+            "fragile",
+            uuid,
+            TriggerCondition::OnExitedRegion { entity_name: "fragile".into() },
+            "obj-imploded",
+        );
+
+        // Enter the region.
+        set_ship_pos(&mut app, 10.0, 0.0);
+        app.update();
+        app.update();
+        assert!(!objective_present(&app, "obj-imploded"));
+
+        // Despawn the region while ship is inside — membership system
+        // emits an implicit RegionExited.
+        app.world_mut().despawn(region_entity);
+        app.update(); // queues ExitedRegion
+        app.update(); // drains + fires
+
+        assert!(objective_present(&app, "obj-imploded"),
+            "exit trigger must fire when the region is despawned while ship is inside");
+    }
+
+    #[test]
+    fn overlapping_regions_fire_independent_enter_triggers() {
+        let mut app = region_trigger_test_app();
+        let uuid_a = "uuid-region-a";
+        let uuid_b = "uuid-region-b";
+        // Both regions cover the origin.
+        spawn_region_with_uuid(&mut app, 0.0, 0.0, 80.0, uuid_a);
+        spawn_region_with_uuid(&mut app, 20.0, 0.0, 80.0, uuid_b);
+        install_region_trigger(
+            &mut app,
+            "region_a",
+            uuid_a,
+            TriggerCondition::OnEnteredRegion { entity_name: "region_a".into() },
+            "obj-a",
+        );
+        install_region_trigger(
+            &mut app,
+            "region_b",
+            uuid_b,
+            TriggerCondition::OnEnteredRegion { entity_name: "region_b".into() },
+            "obj-b",
+        );
+
+        // Ship at origin is inside both regions. First tick queues both
+        // events, second tick drains + fires both triggers.
+        set_ship_pos(&mut app, 0.0, 0.0);
+        app.update();
+        app.update();
+
+        assert!(objective_present(&app, "obj-a"),
+            "region A enter trigger must fire");
+        assert!(objective_present(&app, "obj-b"),
+            "region B enter trigger must fire");
+    }
+
+    #[test]
+    fn npc_entering_region_does_not_fire_trigger() {
+        // The region membership system only tracks the player Ship entity
+        // (queried via `With<Ship>`). Spawning an NPC inside a region must
+        // not cause an `OnEnteredRegion` trigger to fire.
+        let mut app = region_trigger_test_app();
+        let uuid = "uuid-quarantine";
+        // Region at (100, 0); player ship stays at origin (outside).
+        spawn_region_with_uuid(&mut app, 100.0, 0.0, 50.0, uuid);
+        install_region_trigger(
+            &mut app,
+            "quarantine",
+            uuid,
+            TriggerCondition::OnEnteredRegion { entity_name: "quarantine".into() },
+            "obj-ship-quarantined",
+        );
+
+        // Spawn an "NPC" entity inside the region by placing a generic
+        // entity (no Ship marker) at (110, 0). The membership system
+        // ignores it because the only Ship is the player ship at origin.
+        let npc_config = EntityConfig {
+            name: None, light: Vec::new(), tags: vec!["npc".into()],
+            shape: None, effects: None,
+            hull: None, collider: None, appearance: None,
+            helm_console: None, weapons_console: None, engineering_console: None,
+            captain_console: None, power: None, sensors_console: None,
+            navigation_console: None, shields_console: None, torpedoes: None,
+            repair: None, comms: None, asteroid_field: None, faction: None,
+            behaviour: None, radar_appearance: None, mesh: None,
+        };
+        {
+            let mut commands = app.world_mut().commands();
+            let _npc = spawn_entity(
+                &mut commands, &npc_config,
+                Vec3::new(110.0, 0.0, 0.0), "uuid-npc".into(), None,
+            );
+        }
+
+        // Tick a few times; player ship stays at origin (outside).
+        app.update();
+        app.update();
+
+        assert!(!objective_present(&app, "obj-ship-quarantined"),
+            "NPC entering the region must not fire the player-ship trigger");
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(!runtime.trigger_states[0].fired,
+            "trigger must remain unfired when only an NPC is inside");
+    }
+
+    #[test]
+    fn on_entered_region_trigger_with_when_filter_obeys_predicate() {
+        let mut app = region_trigger_test_app();
+        let uuid = "uuid-zone";
+        spawn_region_with_uuid(&mut app, 0.0, 0.0, 50.0, uuid);
+
+        // Install a trigger gated by `flag(armed)`.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert("zone".into(), uuid.into());
+            runtime.trigger_states.push(TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnEnteredRegion { entity_name: "zone".into() },
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "obj-armed-entry".into(),
+                        text: "Armed entry.".into(),
+                        mandatory: false,
+                    }],
+                    when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
+                },
+                fired: false,
+            });
+        }
+
+        // First entry: flag unset → predicate false → no objective.
+        set_ship_pos(&mut app, 10.0, 0.0);
+        app.update();
+        assert!(!objective_present(&app, "obj-armed-entry"),
+            "gated trigger must not fire while flag is unset");
+        {
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert!(!runtime.trigger_states[0].fired,
+                "predicate-false firings must NOT consume the trigger");
+        }
+
+        // Set the flag, leave the region, re-enter — trigger should fire now.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.flags.set_flag("armed");
+        }
+        set_ship_pos(&mut app, 200.0, 0.0); // exit
+        app.update();
+        set_ship_pos(&mut app, 10.0, 0.0);  // re-enter
+        app.update();
+
+        assert!(objective_present(&app, "obj-armed-entry"),
+            "gated trigger must fire once the flag is set and ship re-enters");
     }
 }

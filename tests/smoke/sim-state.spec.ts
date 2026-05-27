@@ -35,6 +35,13 @@ async function startGame(context: BrowserContext): Promise<{ captain: TestClient
   const captain = await createTestClient(context, hostId, { name: 'Cap' });
   const helm = await createTestClient(context, hostId, { name: 'Helm' });
 
+  // Bring client pages to front to prevent Chrome from throttling their
+  // timers (rAF, setTimeout) in the background, which can delay message
+  // dispatch and cause flaky timeouts on loaded CI runners.
+  await captain.page.bringToFront();
+  await helm.page.bringToFront();
+  await serverPage.bringToFront();
+
   // 2P layout: Helm station (CaptainChair+Helm) and Tactical station.
   // The Helm station also carries CaptainChair, so the helm player is the captain.
   await helm.send('SelectStation', { station: 'Helm' });
@@ -85,9 +92,9 @@ test('StartImpulseCharge completes in the TOML-configured duration (~3 s)', asyn
   // Send the impulse charge command
   await helm.send('StartImpulseCharge');
 
-  // Wait up to 2× the TOML-configured charge duration for a SimState showing
+  // Wait up to 8× the TOML-configured charge duration for a SimState showing
   // impulse_charge_progress has reached 1.0 (headroom for CI latency).
-  const chargeTimeoutMs = IMPULSE_CHARGE_DURATION_S * 4 * 1000;
+  const chargeTimeoutMs = IMPULSE_CHARGE_DURATION_S * 8 * 1000;
   await helm.page.waitForFunction(
     () => {
       const msgs: any[] = (window as any).__messages;

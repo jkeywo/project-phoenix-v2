@@ -415,6 +415,7 @@ fn try_spawn_cell(
         position: Some([world_x, spawn.y, world_z]),
         tags: snapshot_tags,
         radius: Some(collider_radius),
+        radar_icon: Some("asteroid".into()),
         ..EntitySnapshot::default()
     });
 

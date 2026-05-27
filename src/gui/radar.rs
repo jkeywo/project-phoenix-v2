@@ -927,6 +927,14 @@ fn sync_radar_blip_nodes(
                     (target_highlight, blip_uuid),
                     (Some(hl), Some(uuid)) if hl.0.as_deref() == Some(uuid.0.as_str())
                 );
+                if let (Some(hl), Some(uuid)) = (target_highlight, blip_uuid) {
+                    if hl.0.is_some() {
+                        crate::wasm_log!(
+                            "[radar-instr 11] highlight check: hl={:?} blip_uuid={:?} match={}",
+                            hl.0, uuid.0, highlight_match
+                        );
+                    }
+                }
                 let blip_color = if highlight_match {
                     Color::srgb(1.0, 0.85, 0.1)
                 } else {

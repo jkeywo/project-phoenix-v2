@@ -1398,7 +1398,7 @@ fn handle_ai_events(
                         emit_flag_transition(&mut next_events, name, before, after);
                     }
                     TriggerAction::SpawnEntity {
-                        template_path, name, anchor, position, rotation: _, scale: _,
+                        template_path, name, anchor, position, rotation, scale,
                     } => {
                         // Resolve spawn position. `anchor` looks up in the
                         // origin layer's anchors (or the base world's anchors
@@ -1485,6 +1485,26 @@ fn handle_ai_events(
                             uuid.clone(),
                             None,
                         );
+
+                        // Apply optional rotation (XYZ Euler radians) and
+                        // scale (per-axis), mirroring `TransformConfig`
+                        // semantics from the static `[[entity]]` schema.
+                        // `spawn_entity` only set translation; we overwrite
+                        // the Transform with translation + rotation + scale
+                        // when either is supplied.
+                        if rotation.is_some() || scale.is_some() {
+                            let [rx, ry, rz] = rotation.unwrap_or([0.0, 0.0, 0.0]);
+                            let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
+                            let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
+                            let scale_vec = Vec3::new(sx, sy, sz);
+                            commands.entity(spawned).insert(
+                                Transform {
+                                    translation: pos_vec,
+                                    rotation: quat,
+                                    scale: scale_vec,
+                                },
+                            );
+                        }
 
                         // Register name → uuid for subsequent triggers.
                         runtime.name_to_uuid.insert(name.clone(), uuid);
@@ -5057,5 +5077,92 @@ size_max = 2.0
             !has,
             "SpawnEntity must not run while `when` predicate is false"
         );
+    }
+
+    /// SpawnEntity action applies optional `rotation` (XYZ Euler radians) and
+    /// `scale` (per-axis) to the spawned entity's Transform, mirroring the
+    /// static `[[entity]]` TransformConfig semantics.
+    #[test]
+    fn spawn_entity_action_applies_rotation_and_scale() {
+        use crate::entities::spawner::EntityUuid;
+
+        let template_path = write_spawn_template_fixture();
+        let mut app = ai_trigger_test_app();
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime
+                .name_to_uuid
+                .insert("marker".to_string(), "marker-uuid".to_string());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "marker".to_string(),
+                    },
+                    actions: vec![TriggerAction::SpawnEntity {
+                        template_path: template_path.clone(),
+                        name: "rotated_scaled".to_string(),
+                        anchor: None,
+                        position: Some([1.0, 2.0, 3.0]),
+                        rotation: Some([0.0, 1.5708, 0.0]),
+                        scale: Some([2.0, 2.0, 2.0]),
+                    }],
+                    when: None,
+                },
+                fired: false,
+                origin_layer: None,
+            }];
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
+            .write(crate::ai_plugin::AiEntityAttacked {
+                entity_uuid: "marker-uuid".into(),
+                attacker_uuid: uuid::Uuid::parse_str(
+                    "cccccccc-0000-0000-0000-000000000002",
+                )
+                .unwrap(),
+            });
+
+        app.update();
+        app.update();
+
+        let uuid = app
+            .world()
+            .resource::<WorldContentRuntime>()
+            .name_to_uuid
+            .get("rotated_scaled")
+            .cloned()
+            .expect("SpawnEntity must register name_to_uuid");
+
+        let expected_quat = Quat::from_euler(EulerRot::XYZ, 0.0, 1.5708, 0.0);
+        let expected_scale = Vec3::new(2.0, 2.0, 2.0);
+        let expected_translation = Vec3::new(1.0, 2.0, 3.0);
+
+        let mut found = false;
+        let mut q = app
+            .world_mut()
+            .query::<(&EntityUuid, &bevy::prelude::Transform)>();
+        for (eu, t) in q.iter(app.world()) {
+            if eu.0 == uuid {
+                found = true;
+                assert!(
+                    t.translation.abs_diff_eq(expected_translation, 1e-4),
+                    "translation mismatch: got {:?}, expected {:?}",
+                    t.translation, expected_translation
+                );
+                assert!(
+                    t.rotation.abs_diff_eq(expected_quat, 1e-4),
+                    "rotation mismatch: got {:?}, expected {:?}",
+                    t.rotation, expected_quat
+                );
+                assert!(
+                    t.scale.abs_diff_eq(expected_scale, 1e-4),
+                    "scale mismatch: got {:?}, expected {:?}",
+                    t.scale, expected_scale
+                );
+            }
+        }
+        assert!(found, "spawned entity must exist in ECS with the registered UUID");
     }
 }

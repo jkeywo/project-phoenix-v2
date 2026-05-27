@@ -500,7 +500,14 @@
       }
     }
 
-    function renderWeaponsRadar() {      const canvas = $('weapons-radar');
+    // EntitySnapshot position helpers (position: [x, y, z]); shared between
+    // renderWeaponsRadar and the initWeaponsRadar tap-to-lock handler.
+    function entityX(e) { return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0); }
+    function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
+    function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
+
+    function renderWeaponsRadar() {
+      const canvas = $('weapons-radar');
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       const W = canvas.width, H = canvas.height;
@@ -638,11 +645,6 @@
       const canvas = $('weapons-radar');
       if (!canvas) return;
       const RANGE = 60.0;
-
-      // EntitySnapshot position helper (position: [x, y, z])
-      function entityX(e) { return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0); }
-      function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
-      function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
 
       function getEntityAtPoint(canvasX, canvasY) {
         const cx = canvas.width / 2, cy = canvas.height / 2;

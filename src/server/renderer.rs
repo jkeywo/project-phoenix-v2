@@ -382,54 +382,101 @@ fn draw_beam_vfx(
     render_cfg: Res<PhaserRenderConfig>,
     asteroid_q: Query<(&crate::simulation::AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
     npc_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<crate::simulation::Asteroid>>,
+    npc_beam_q: Query<
+        (&crate::entity_spawner::EntityUuid, &Transform, &crate::ai_plugin::EntityPhaserState),
+    >,
+    player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::simulation::Ship>>,
     mut gizmos: Gizmos,
 ) {
-    let Some(target_uuid) = &beam.target_uuid else { return };
-
-    // Resolve the target's live position from ECS Transforms (asteroids
-    // carry AsteroidUuid; NPCs/stations carry EntityUuid). The
-    // WorldResource snapshot stores stale spawn-time positions, so it
-    // would render the beam to where the NPC spawned, not where it is now.
-    let target_xz = asteroid_q
-        .iter()
-        .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z)))
-        .or_else(|| npc_q
+    // ── Player phaser beams ────────────────────────────────────────────────
+    if let Some(target_uuid) = &beam.target_uuid {
+        // Resolve the target's live position from ECS Transforms (asteroids
+        // carry AsteroidUuid; NPCs/stations carry EntityUuid). The
+        // WorldResource snapshot stores stale spawn-time positions, so it
+        // would render the beam to where the NPC spawned, not where it is now.
+        let target_xz = asteroid_q
             .iter()
-            .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))));
-    let Some((tx, tz)) = target_xz else { return };
+            .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z)))
+            .or_else(|| npc_q
+                .iter()
+                .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))));
 
-    // Endpoint clamped to configured max range.
-    let (end_x, end_z) = beam_render::beam_endpoint(
-        ship.x, ship.z,
-        tx, tz,
-        render_cfg.beam_range,
-    );
+        if let Some((tx, tz)) = target_xz {
+            // Endpoint clamped to configured max range.
+            let (end_x, end_z) = beam_render::beam_endpoint(
+                ship.x, ship.z,
+                tx, tz,
+                render_cfg.beam_range,
+            );
 
-    // Resolve beam colour from config.
-    let [r, g, b, a] = render_cfg.beam_color;
-    let beam_color = Color::srgba(r, g, b, a);
-    let glow_color = Color::srgba(r, g * 1.5, b * 2.0, a * 0.35);
+            // Resolve beam colour from config.
+            let [r, g, b, a] = render_cfg.beam_color;
+            let beam_color = Color::srgba(r, g, b, a);
+            let glow_color = Color::srgba(r, g * 1.5, b * 2.0, a * 0.35);
 
-    // Draw a beam for each bank, originating from the correct hull side.
-    for bank_side in [-1.0_f32, 1.0_f32] {
-        let (ox, oz) = beam_render::bank_origin(
-            ship.x, ship.z, ship.yaw, bank_side, beam_render::BANK_HULL_OFFSET,
-        );
-        let origin = Vec3::new(ox, -1.5, oz);
-        let target = Vec3::new(end_x, 0.0, end_z);
+            // Draw a beam for each bank, originating from the correct hull side.
+            for bank_side in [-1.0_f32, 1.0_f32] {
+                let (ox, oz) = beam_render::bank_origin(
+                    ship.x, ship.z, ship.yaw, bank_side, beam_render::BANK_HULL_OFFSET,
+                );
+                let origin = Vec3::new(ox, -1.5, oz);
+                let target = Vec3::new(end_x, 0.0, end_z);
 
-        // Core bright beam line
-        gizmos.line(origin, target, beam_color);
+                gizmos.line(origin, target, beam_color);
 
-        // Slightly wider glow by drawing two offset parallel lines
+                let perp = {
+                    let dx = target.x - origin.x;
+                    let dz = target.z - origin.z;
+                    let len = (dx * dx + dz * dz).sqrt().max(0.001);
+                    Vec3::new(-dz / len * 0.5, 0.0, dx / len * 0.5)
+                };
+                gizmos.line(origin + perp, target + perp, glow_color);
+                gizmos.line(origin - perp, target - perp, glow_color);
+            }
+        }
+    }
+
+    // ── NPC phaser beams ───────────────────────────────────────────────────
+    // For each NPC with an active beam, draw a single beam from the NPC's
+    // transform to its target (the player ship, another NPC, or asteroid).
+    // Uses red colouring to distinguish hostile fire from player fire.
+    let npc_beam_color = Color::srgba(1.0, 0.25, 0.15, 0.95);
+    let npc_glow_color = Color::srgba(1.0, 0.4, 0.4, 0.35);
+    let player_ship_uuid: Option<String> =
+        player_ship_q.single().ok().map(|u| u.0.clone());
+    for (_src_uuid, src_t, phaser) in npc_beam_q.iter() {
+        if !phaser.beam_active {
+            continue;
+        }
+        let Some(target_uuid) = phaser.beam_target else { continue };
+        let target_uuid_str = target_uuid.to_string();
+
+        // Target could be the player ship, another NPC, or an asteroid.
+        let target_xz = if player_ship_uuid.as_deref() == Some(target_uuid_str.as_str()) {
+            Some((ship.x, ship.z))
+        } else {
+            npc_q
+                .iter()
+                .find_map(|(u, t)| (u.0 == target_uuid_str).then(|| (t.translation.x, t.translation.z)))
+                .or_else(|| asteroid_q
+                    .iter()
+                    .find_map(|(u, t)| (u.0 == target_uuid_str).then(|| (t.translation.x, t.translation.z))))
+        };
+        let Some((tx, tz)) = target_xz else { continue };
+
+        let origin = Vec3::new(src_t.translation.x, -1.0, src_t.translation.z);
+        let target = Vec3::new(tx, 0.0, tz);
+
+        gizmos.line(origin, target, npc_beam_color);
+
         let perp = {
             let dx = target.x - origin.x;
             let dz = target.z - origin.z;
             let len = (dx * dx + dz * dz).sqrt().max(0.001);
             Vec3::new(-dz / len * 0.5, 0.0, dx / len * 0.5)
         };
-        gizmos.line(origin + perp, target + perp, glow_color);
-        gizmos.line(origin - perp, target - perp, glow_color);
+        gizmos.line(origin + perp, target + perp, npc_glow_color);
+        gizmos.line(origin - perp, target - perp, npc_glow_color);
     }
 }
 

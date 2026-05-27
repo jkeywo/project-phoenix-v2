@@ -610,6 +610,7 @@ mod tests {
     fn server_beam_started_round_trips() {
         let msg = ServerMessage::BeamStarted {
             bank: "port".to_string(),
+            source_uuid: "11111111-1111-1111-1111-111111111111".into(),
             target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -620,6 +621,7 @@ mod tests {
     fn server_beam_ended_round_trips() {
         let msg = ServerMessage::BeamEnded {
             bank: "port".to_string(),
+            source_uuid: "11111111-1111-1111-1111-111111111111".into(),
             target_uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

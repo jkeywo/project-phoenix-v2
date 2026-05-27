@@ -863,13 +863,19 @@ pub enum ServerMessage {
     },
     /// Broadcast when a phaser beam starts. Sent to all players so the renderer
     /// can draw the beam on the viewscreen.
+    ///
+    /// `source_uuid` is the firing entity's UUID — the player ship for player
+    /// phasers, an NPC's `EntityUuid` for NPC phasers. The renderer resolves
+    /// it to a Transform to anchor the beam's origin point.
     BeamStarted {
         bank: PhaserBank,
+        source_uuid: String,
         target_uuid: String,
     },
     /// Broadcast when a phaser beam ends (natural expiry, sever, or cancel).
     BeamEnded {
         bank: PhaserBank,
+        source_uuid: String,
         target_uuid: String,
     },
     /// Broadcast when an asteroid's HP reaches 0 and it is despawned.

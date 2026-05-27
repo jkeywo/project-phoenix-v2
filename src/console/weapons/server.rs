@@ -459,45 +459,6 @@ fn handle_fire_phaser_npc(
                     && c.controller.blackboard.target.is_some()
             });
 
-        // DEBUG: instrument the NPC fire decision so we can see why phasers
-        // are (or aren't) connecting in play sessions. Logged once per tick per
-        // NPC that wants to fire. Remove once the geometry bug is diagnosed.
-        if should_fire {
-            if let Some(t_uuid) = target_uuid {
-                if let Some((_, tx, tz)) = target_positions.iter().find(|(u, _, _)| *u == t_uuid) {
-                    let dx = tx - npc_x;
-                    let dz = tz - npc_z;
-                    let dist = (dx * dx + dz * dz).sqrt();
-                    // Same formula as is_fire_ready_with_range: forward = (sin(yaw), -cos(yaw)),
-                    // so radar_y = dx*sin(yaw) - dz*cos(yaw). >= 0 means in forward hemisphere.
-                    let radar_y = dx * npc_yaw.sin() - dz * npc_yaw.cos();
-                    info!(
-                        "[npc-fire] uuid={} target={} dist={:.1} beam_range={:.1} radar_y={:.2} ready={} beam_active={} cooldown={:.2}",
-                        npc_uuid.0,
-                        t_uuid,
-                        dist,
-                        beam_range,
-                        radar_y,
-                        phaser_state.is_ready(),
-                        phaser_state.beam_active,
-                        phaser_state.cooldown_remaining,
-                    );
-                } else {
-                    info!(
-                        "[npc-fire] uuid={} target={} TARGET_NOT_FOUND_IN_HULL_QUERY ready={}",
-                        npc_uuid.0,
-                        t_uuid,
-                        phaser_state.is_ready(),
-                    );
-                }
-            } else {
-                info!(
-                    "[npc-fire] uuid={} should_fire=true but blackboard.target=None",
-                    npc_uuid.0,
-                );
-            }
-        }
-
         if should_fire && phaser_state.is_ready() {
             if let Some(t_uuid) = target_uuid {
                 let fire_ok = target_positions
@@ -509,13 +470,6 @@ fn handle_fire_phaser_npc(
                         )
                     })
                     .unwrap_or(false);
-
-                if !fire_ok {
-                    info!(
-                        "[npc-fire] uuid={} GATE_REJECTED (out of range or wrong arc)",
-                        npc_uuid.0
-                    );
-                }
 
                 if fire_ok {
                     phaser_state.beam_active = true;
@@ -2082,6 +2036,114 @@ mod tests {
         let ps = app.world().get::<EntityPhaserState>(npc_entity).unwrap();
         assert!(!ps.beam_active, "beam_active must be false after beam expires");
         assert!(ps.cooldown_remaining > 0.0, "cooldown_remaining must be positive after beam ends, got {}", ps.cooldown_remaining);
+    }
+
+    #[test]
+    fn npc_beam_targeting_player_ship_routes_damage_through_ship_shields_and_hull() {
+        // When an NPC's beam target_uuid matches the player ship's EntityUuid,
+        // damage must flow through ShipShields -> ShipHullIntegrity (the
+        // canonical player-damage path) and broadcast `DamageTaken`, NOT into
+        // the unused `EntityConsoleHull` on the player-ship entity.
+        use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
+        use crate::entity_spawner::{EntityUuid, EntityConsoleHull};
+        use crate::simulation::{Ship, ShipShields};
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+
+        // Insert ShipShields (test_app doesn't include it).
+        app.insert_resource(ShipShields(crate::shield::ShieldSystem::default()));
+
+        let npc_uuid = "00000000-0000-0000-0000-000000000007";
+        let player_uuid = "11111111-1111-1111-1111-111111111111";
+
+        // NPC at origin with an active beam targeting the player.
+        let (npc_entity, _placeholder_target) =
+            setup_npc_shooter(&mut app, npc_uuid, player_uuid, 0.0, -10.0);
+
+        // Spawn the player ship entity with the `Ship` marker (so the
+        // handle_fire_phaser_npc query resolves it) and an EntityConsoleHull
+        // that should NOT take damage.
+        let unused_console_hull = EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[
+            (crate::messages::Console::CaptainChair, 100.0),
+        ]));
+        let player_entity = app.world_mut().spawn((
+            Ship,
+            EntityUuid(player_uuid.to_string()),
+            unused_console_hull,
+            Transform::from_xyz(0.0, 0.0, -10.0),
+        )).id();
+
+        let player_uuid_parsed = uuid::Uuid::parse_str(player_uuid).unwrap();
+        {
+            let mut ps = app.world_mut().get_mut::<EntityPhaserState>(npc_entity).unwrap();
+            ps.beam_active = true;
+            ps.beam_target = Some(player_uuid_parsed);
+            ps.beam_remaining_secs = 5.0; // long enough for several ticks
+        }
+
+        let initial_player_console_hp = app
+            .world()
+            .get::<EntityConsoleHull>(player_entity)
+            .unwrap()
+            .0
+            .total_current();
+        let initial_ship_hull = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
+        let initial_shield_total: i32 = app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .facings
+            .iter()
+            .map(|f| f.hp)
+            .sum();
+
+        // Tick the beam several times so damage accumulates.
+        for _ in 0..5 {
+            app.update();
+        }
+
+        // The unused EntityConsoleHull on the player-ship entity MUST NOT
+        // have taken damage — that was the bug.
+        let final_player_console_hp = app
+            .world()
+            .get::<EntityConsoleHull>(player_entity)
+            .unwrap()
+            .0
+            .total_current();
+        assert_eq!(
+            final_player_console_hp, initial_player_console_hp,
+            "EntityConsoleHull on player ship must NOT take damage; NPC damage must \
+             route through ShipShields/ShipHullIntegrity instead"
+        );
+
+        // Either ShipShields took damage, or shields leaked through to ShipHullIntegrity.
+        let final_ship_hull = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
+        let final_shield_total: i32 = app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .facings
+            .iter()
+            .map(|f| f.hp)
+            .sum();
+        let total_absorbed = (initial_shield_total - final_shield_total) as f32
+            + (initial_ship_hull - final_ship_hull);
+        assert!(
+            total_absorbed > 0.0,
+            "ShipShields + ShipHullIntegrity must have absorbed some NPC beam damage \
+             (shields_delta={}, hull_delta={})",
+            (initial_shield_total - final_shield_total) as f32,
+            initial_ship_hull - final_ship_hull
+        );
     }
 
     // ── End-to-end: tick_ai_controllers → InboundMessage → handle_fire_phaser_npc ──

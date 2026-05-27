@@ -37,6 +37,11 @@ pub struct TorpedoConfig {
     pub lifespan: f32,
     /// Default tube reload time in seconds.
     pub load_time: f32,
+    /// Proximity-detonation radius in world units. A torpedo explodes when
+    /// its centre comes within `detonation_radius + target_radius` of any
+    /// entity. Independent of homing — an un-locked torpedo still detonates
+    /// on contact.
+    pub detonation_radius: f32,
 }
 
 impl Default for TorpedoConfig {
@@ -49,6 +54,7 @@ impl Default for TorpedoConfig {
             turn_rate: PI / 4.0,
             lifespan: 20.0,
             load_time: 10.0,
+            detonation_radius: 5.0,
         }
     }
 }
@@ -263,6 +269,44 @@ impl TorpedoSystem {
         } else {
             None
         }
+    }
+
+    /// Find proximity-detonation hits between in-flight torpedoes and the
+    /// supplied target volumes. Returns `(torpedo_uuid, target_uuid)` pairs.
+    ///
+    /// A torpedo `T` hits target `E` when
+    /// `distance(T, E) <= detonation_radius + target_radius`.
+    ///
+    /// A torpedo will never detonate on its own homing target's source — i.e.
+    /// every entity is fair game including asteroids. Each torpedo can only
+    /// hit one target per call (the nearest qualifying one); the caller is
+    /// responsible for removing detonated torpedoes via [`Self::handle_collision`].
+    ///
+    /// `targets` is a slice of `(uuid, x, z, radius)` tuples.
+    pub fn find_detonation_hits(
+        &self,
+        targets: &[(String, f32, f32, f32)],
+    ) -> Vec<(String, String)> {
+        let det = self.config.detonation_radius;
+        let mut hits = Vec::new();
+        for torpedo in &self.in_flight {
+            let mut best: Option<(f32, &String)> = None;
+            for (uuid, tx, tz, radius) in targets {
+                let dx = tx - torpedo.x;
+                let dz = tz - torpedo.z;
+                let dist_sq = dx * dx + dz * dz;
+                let threshold = det + radius;
+                if dist_sq <= threshold * threshold {
+                    if best.map(|(d, _)| dist_sq < d).unwrap_or(true) {
+                        best = Some((dist_sq, uuid));
+                    }
+                }
+            }
+            if let Some((_, uuid)) = best {
+                hits.push((torpedo.uuid.clone(), uuid.clone()));
+            }
+        }
+        hits
     }
 }
 
@@ -490,5 +534,90 @@ mod tests {
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         sys.tick(9.9, &targets);
         assert!(!sys.tube("fore_port").unwrap().is_loaded());
+    }
+
+    // ── proximity detonation ──────────────────────────────────────────────
+
+    fn detonation_system(detonation_radius: f32) -> TorpedoSystem {
+        let mut config = TorpedoConfig::default();
+        config.detonation_radius = detonation_radius;
+        let tubes = vec![cfg("fore_port", -30.0, 90.0)];
+        TorpedoSystem::from_configs(&tubes, config)
+    }
+
+    #[test]
+    fn find_detonation_hits_returns_empty_when_no_targets_in_range() {
+        let mut sys = detonation_system(5.0);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        // Target far away with small radius.
+        let targets = vec![("enemy".to_string(), 100.0, 100.0, 1.0)];
+        let hits = sys.find_detonation_hits(&targets);
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn find_detonation_hits_reports_target_within_detonation_radius() {
+        let mut sys = detonation_system(5.0);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        // Target at (0, -4): distance 4, threshold 5+0 = 5.
+        let targets = vec![("enemy".to_string(), 0.0, -4.0, 0.0)];
+        let hits = sys.find_detonation_hits(&targets);
+        assert_eq!(hits, vec![("t1".to_string(), "enemy".to_string())]);
+    }
+
+    #[test]
+    fn find_detonation_hits_includes_target_radius_in_threshold() {
+        // Detonation radius 1, target radius 10, distance 9 → should hit.
+        let mut sys = detonation_system(1.0);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        let targets = vec![("rock".to_string(), 0.0, -9.0, 10.0)];
+        let hits = sys.find_detonation_hits(&targets);
+        assert_eq!(hits, vec![("t1".to_string(), "rock".to_string())]);
+    }
+
+    #[test]
+    fn find_detonation_hits_picks_nearest_when_multiple_in_range() {
+        let mut sys = detonation_system(50.0);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        let targets = vec![
+            ("far".to_string(), 0.0, -40.0, 0.0),
+            ("near".to_string(), 0.0, -5.0, 0.0),
+        ];
+        let hits = sys.find_detonation_hits(&targets);
+        assert_eq!(hits, vec![("t1".to_string(), "near".to_string())]);
+    }
+
+    #[test]
+    fn find_detonation_hits_detonates_unlocked_torpedo_on_contact() {
+        // Bug repro: shot without a target lock should still explode.
+        let mut sys = detonation_system(5.0);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, /*target_uuid*/ None);
+        let targets = vec![("raider".to_string(), 0.0, -3.0, 1.0)];
+        let hits = sys.find_detonation_hits(&targets);
+        assert_eq!(hits, vec![("t1".to_string(), "raider".to_string())]);
+    }
+
+    #[test]
+    fn find_detonation_hits_handles_multiple_torpedoes_independently() {
+        let mut sys = detonation_system(2.0);
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, None);
+        // Move tube ready by skipping reload — instead launch via a fresh tube.
+        // Manually push a second torpedo to avoid tube cooldown.
+        sys.in_flight.push(Torpedo {
+            uuid: "t2".into(),
+            x: 100.0,
+            z: 100.0,
+            heading: 0.0,
+            lifespan_remaining: 10.0,
+            target_uuid: None,
+        });
+        let targets = vec![
+            ("a".to_string(), 1.0, 0.0, 0.0), // close to t1
+            ("b".to_string(), 101.0, 100.0, 0.0), // close to t2
+        ];
+        let hits = sys.find_detonation_hits(&targets);
+        assert_eq!(hits.len(), 2);
+        assert!(hits.contains(&("t1".to_string(), "a".to_string())));
+        assert!(hits.contains(&("t2".to_string(), "b".to_string())));
     }
 }

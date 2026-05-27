@@ -717,6 +717,9 @@ pub struct TorpedoesConfig {
     pub lifespan: f32,
     #[serde(default = "default_torpedo_load_time")]
     pub load_time: f32,
+    /// Proximity-detonation radius in world units.
+    #[serde(default = "default_torpedo_detonation_radius")]
+    pub detonation_radius: f32,
     /// Per-tube torpedo definitions parsed from `[[torpedoes.tubes]]`.
     /// Each tube has its own facing and fire arc. Ammo is shared via
     /// the top-level `count` field. Empty when the ship has no explicit
@@ -746,6 +749,9 @@ fn default_torpedo_lifespan() -> f32 {
 fn default_torpedo_load_time() -> f32 {
     10.0
 }
+fn default_torpedo_detonation_radius() -> f32 {
+    5.0
+}
 
 impl Default for TorpedoesConfig {
     fn default() -> Self {
@@ -757,6 +763,7 @@ impl Default for TorpedoesConfig {
             turn_rate_deg_per_sec: default_torpedo_turn_rate_deg_per_sec(),
             lifespan: default_torpedo_lifespan(),
             load_time: default_torpedo_load_time(),
+            detonation_radius: default_torpedo_detonation_radius(),
             tubes: Vec::new(),
         }
     }
@@ -774,6 +781,7 @@ impl TorpedoesConfig {
             turn_rate: self.turn_rate_deg_per_sec.to_radians(),
             lifespan: self.lifespan,
             load_time: self.load_time,
+            detonation_radius: self.detonation_radius,
         }
     }
 }

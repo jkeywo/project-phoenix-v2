@@ -539,9 +539,18 @@ fn handle_fire_torpedo(
 
 fn tick_torpedo_system(
     mut torpedo_sys: ResMut<TorpedoSystemResource>,
-    world: Res<WorldResource>,
+    mut world: ResMut<WorldResource>,
     time: Res<Time>,
     mut outbox: ResMut<SimOutbox>,
+    mut hull_query: Query<(
+        Entity,
+        Option<&AsteroidUuid>,
+        Option<&crate::entity_spawner::EntityUuid>,
+        &mut EntityConsoleHull,
+    )>,
+    mut commands: Commands,
+    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
+    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
 ) {
     let dt = time.delta_secs();
     let target_positions: std::collections::HashMap<String, (f32, f32)> = world.0.entities
@@ -551,6 +560,59 @@ fn tick_torpedo_system(
     let result = torpedo_sys.0.tick(dt, &target_positions);
     for expired_uuid in result.expired {
         outbox.0.push((Target::All, ServerMessage::TorpedoDestroyed { uuid: expired_uuid }));
+    }
+
+    // Proximity detonation. Build a (uuid, x, z, radius) target list from the
+    // world snapshot, ask the pure system for hit pairs, then apply hull damage
+    // and broadcast destruction. NPC shields are not yet modelled server-side;
+    // when they are, the torpedo's `damage_shields` should be applied here
+    // first (mirroring apply_damage_with_shields on the ship).
+    let targets: Vec<(String, f32, f32, f32)> = world.0.entities
+        .iter()
+        .map(|e| (e.uuid.clone(), e.x(), e.z(), e.radius_or_zero()))
+        .collect();
+    let hits = torpedo_sys.0.find_detonation_hits(&targets);
+    for (torpedo_uuid, target_uuid) in hits {
+        let Some(damage) = torpedo_sys.0.handle_collision(&torpedo_uuid) else { continue };
+        outbox.0.push((Target::All, ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid }));
+
+        let mut asteroid_destroyed = false;
+        let mut npc_destroyed = false;
+        let mut hit_x = 0.0_f32;
+        let mut hit_z = 0.0_f32;
+
+        for (entity, asteroid_uuid, entity_uuid, mut hull_comp) in hull_query.iter_mut() {
+            let uuid_matches = asteroid_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str())
+                || entity_uuid.map(|u| u.0.as_str()) == Some(target_uuid.as_str());
+            if !uuid_matches {
+                continue;
+            }
+            let is_asteroid = asteroid_uuid.is_some();
+            let mut rng = rand::rng();
+            hull_comp.0.apply_damage(damage as f32, &mut rng);
+            if hull_comp.0.is_destroyed() {
+                commands.entity(entity).despawn();
+                if is_asteroid {
+                    asteroid_destroyed = true;
+                } else {
+                    npc_destroyed = true;
+                }
+                if let Some(info) = world.0.entities.iter().find(|e| e.uuid == target_uuid) {
+                    hit_x = info.x();
+                    hit_z = info.z();
+                }
+            }
+        }
+
+        if asteroid_destroyed {
+            world.0.entities.retain(|a| a.uuid != target_uuid);
+            vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
+            outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid }));
+        } else if npc_destroyed {
+            world.0.entities.retain(|a| a.uuid != target_uuid);
+            destroyed_events.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: target_uuid.clone() });
+            outbox.0.push((Target::All, ServerMessage::EntityDespawned { uuid: target_uuid }));
+        }
     }
 }
 

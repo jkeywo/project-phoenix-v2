@@ -232,7 +232,7 @@ impl PhaserSystem {
 // ── helpers ────────────────────────────────────────────────────────────────
 
 /// Convert a world-space target to ship-local (radar) coordinates.
-fn ship_local(target_x: f32, target_z: f32, ship_x: f32, ship_z: f32, ship_yaw: f32) -> (f32, f32) {
+pub(crate) fn ship_local(target_x: f32, target_z: f32, ship_x: f32, ship_z: f32, ship_yaw: f32) -> (f32, f32) {
     let dx = target_x - ship_x;
     let dz = target_z - ship_z;
     let cos_y = ship_yaw.cos();
@@ -274,7 +274,6 @@ mod tests {
             fire_arc_deg,
             auto_arc_deg,
             beam_range: 0.0,
-            shield_pierce: None,
         }
     }
 

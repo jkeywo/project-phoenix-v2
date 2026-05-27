@@ -157,6 +157,10 @@ struct RawTriggerEntry {
     entity: Option<String>,
     #[serde(default)]
     after_secs: Option<f32>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    when: Option<String>,
     #[serde(default, rename = "action")]
     actions: Vec<RawActionEntry>,
 }
@@ -191,6 +195,15 @@ struct RawActionEntry {
     message: Option<String>,
     #[serde(default)]
     path: Option<String>,
+    /// Flag name for `set_flag` / `clear_flag` / `increment_flag` / `set_flag_value`.
+    #[serde(default)]
+    name: Option<String>,
+    /// Increment delta for `increment_flag`.
+    #[serde(default)]
+    by: Option<i64>,
+    /// Direct counter assignment for `set_flag_value`.
+    #[serde(default)]
+    value: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -254,6 +267,10 @@ pub enum TriggerCondition {
     OnTimer { after_secs: f32 },
     /// Fires when a `Hail` message arrives for the named entity.
     OnHailed { entity_name: String },
+    /// Fires on the TRANSITION false→true of a named flag.
+    OnFlagSet { name: String },
+    /// Fires on the TRANSITION true→false of a named flag.
+    OnFlagCleared { name: String },
 }
 
 /// An action to execute when a trigger fires.
@@ -274,6 +291,14 @@ pub enum TriggerAction {
     LoadWorld { path: String },
     /// Unload a previously loaded sub-world identified by `path`.
     UnloadWorld { path: String },
+    /// Set a world flag to true (counter = 1).
+    SetWorldFlag { name: String },
+    /// Clear a world flag to false (counter = 0).
+    ClearWorldFlag { name: String },
+    /// Increment a world flag counter by `by` (can be negative).
+    IncrementWorldFlag { name: String, by: i64 },
+    /// Assign a world flag counter directly to `value`.
+    SetWorldFlagValue { name: String, value: i64 },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -281,6 +306,11 @@ pub enum TriggerAction {
 pub struct Trigger {
     pub condition: TriggerCondition,
     pub actions: Vec<TriggerAction>,
+    /// Optional predicate gate. When `Some`, the predicate is evaluated
+    /// against the world flag store before each firing; a `false` result
+    /// suppresses actions for that firing but does NOT consume the trigger
+    /// lifecycle (the `fired` flag stays unset).
+    pub when: Option<crate::world::flags::Predicate>,
 }
 
 /// A single response option within a comms dialogue node.
@@ -418,6 +448,20 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
             "unload_world" => TriggerAction::UnloadWorld {
                 path: raw_action.path.clone().ok_or_else(|| "Action 'unload_world' requires a 'path' field".to_string())?,
             },
+            "set_flag" => TriggerAction::SetWorldFlag {
+                name: raw_action.name.clone().ok_or_else(|| "Action 'set_flag' requires a 'name' field".to_string())?,
+            },
+            "clear_flag" => TriggerAction::ClearWorldFlag {
+                name: raw_action.name.clone().ok_or_else(|| "Action 'clear_flag' requires a 'name' field".to_string())?,
+            },
+            "increment_flag" => TriggerAction::IncrementWorldFlag {
+                name: raw_action.name.clone().ok_or_else(|| "Action 'increment_flag' requires a 'name' field".to_string())?,
+                by: raw_action.by.ok_or_else(|| "Action 'increment_flag' requires a 'by' field".to_string())?,
+            },
+            "set_flag_value" => TriggerAction::SetWorldFlagValue {
+                name: raw_action.name.clone().ok_or_else(|| "Action 'set_flag_value' requires a 'name' field".to_string())?,
+                value: raw_action.value.ok_or_else(|| "Action 'set_flag_value' requires a 'value' field".to_string())?,
+            },
             other => return Err(format!("Unknown trigger action '{}'", other)),
         };
         actions.push(action);
@@ -444,6 +488,7 @@ fn parse_trigger_condition_from_string(
     name: &str,
     entity: Option<String>,
     after_secs: Option<f32>,
+    flag_name: Option<String>,
     ctx: &str,
 ) -> Result<TriggerCondition, String> {
     match name {
@@ -458,6 +503,12 @@ fn parse_trigger_condition_from_string(
         }),
         "on_hailed" => Ok(TriggerCondition::OnHailed {
             entity_name: entity.ok_or_else(|| format!("{ctx} 'on_hailed' requires an 'entity' field"))?,
+        }),
+        "on_flag_set" => Ok(TriggerCondition::OnFlagSet {
+            name: flag_name.ok_or_else(|| format!("{ctx} 'on_flag_set' requires a 'name' field"))?,
+        }),
+        "on_flag_cleared" => Ok(TriggerCondition::OnFlagCleared {
+            name: flag_name.ok_or_else(|| format!("{ctx} 'on_flag_cleared' requires a 'name' field"))?,
         }),
         other => Err(format!("Unknown {ctx} condition '{}'", other)),
     }
@@ -540,10 +591,18 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             &raw_trigger.condition,
             raw_trigger.entity,
             raw_trigger.after_secs,
+            raw_trigger.name,
             "Trigger",
         )?;
         let actions = parse_raw_actions(&raw_trigger.actions)?;
-        triggers.push(Trigger { condition, actions });
+        let when = match raw_trigger.when {
+            Some(src) => Some(
+                crate::world::flags::parse_predicate(&src)
+                    .map_err(|e| format!("Trigger 'when' predicate parse error: {e}"))?,
+            ),
+            None => None,
+        };
+        triggers.push(Trigger { condition, actions, when });
     }
 
     // Comms templates.
@@ -552,6 +611,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         let trigger = parse_trigger_condition_from_string(
             &raw_comms.trigger,
             raw_comms.entity,
+            None,
             None,
             "Comms block",
         )?;
@@ -1304,6 +1364,146 @@ condition = "on_zombie"
 "#;
         let err = parse_world(toml).expect_err("unknown trigger condition must error");
         assert!(err.contains("on_zombie"), "error must mention the bad condition: {err}");
+    }
+
+    // -- Flag-system triggers (issue #412) ---------------------------------
+
+    #[test]
+    fn parse_world_reads_when_predicate_on_trigger() {
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider_alpha"
+when      = "flag(phase_one_done)"
+
+  [[trigger.action]]
+  type = "complete_objective"
+  id   = "obj-cleanup"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(cfg.triggers.len(), 1);
+        let when = cfg.triggers[0].when.as_ref().expect("when must be parsed");
+        assert_eq!(
+            *when,
+            crate::world::flags::Predicate::Flag {
+                name: "phase_one_done".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_world_rejects_malformed_when_predicate() {
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider_alpha"
+when      = "flag(a) &&"
+"#;
+        let err = parse_world(toml).expect_err("malformed predicate must error");
+        assert!(
+            err.contains("when") || err.contains("predicate"),
+            "error must mention predicate/when: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_world_reads_on_flag_set_condition() {
+        let toml = r#"
+[[trigger]]
+condition = "on_flag_set"
+name      = "phase_one_done"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-phase-two"
+  text = "Begin phase two."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(
+            cfg.triggers[0].condition,
+            TriggerCondition::OnFlagSet { name: "phase_one_done".into() }
+        );
+    }
+
+    #[test]
+    fn parse_world_reads_on_flag_cleared_condition() {
+        let toml = r#"
+[[trigger]]
+condition = "on_flag_cleared"
+name      = "shields_up"
+
+  [[trigger.action]]
+  type = "fail_objective"
+  id   = "obj-defend"
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        assert_eq!(
+            cfg.triggers[0].condition,
+            TriggerCondition::OnFlagCleared { name: "shields_up".into() }
+        );
+    }
+
+    #[test]
+    fn parse_world_reads_flag_mutation_actions() {
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider_alpha"
+
+  [[trigger.action]]
+  type = "set_flag"
+  name = "raider_down"
+
+  [[trigger.action]]
+  type = "clear_flag"
+  name = "danger"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "kills"
+  by   = 2
+
+  [[trigger.action]]
+  type  = "set_flag_value"
+  name  = "wave"
+  value = 3
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let actions = &cfg.triggers[0].actions;
+        assert_eq!(actions.len(), 4);
+        assert_eq!(actions[0], TriggerAction::SetWorldFlag { name: "raider_down".into() });
+        assert_eq!(actions[1], TriggerAction::ClearWorldFlag { name: "danger".into() });
+        assert_eq!(actions[2], TriggerAction::IncrementWorldFlag { name: "kills".into(), by: 2 });
+        assert_eq!(actions[3], TriggerAction::SetWorldFlagValue { name: "wave".into(), value: 3 });
+    }
+
+    #[test]
+    fn parse_world_set_flag_requires_name() {
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type = "set_flag"
+"#;
+        let err = parse_world(toml).expect_err("set_flag without name must error");
+        assert!(err.contains("name"), "error must mention name: {err}");
+    }
+
+    #[test]
+    fn parse_world_increment_flag_requires_by() {
+        let toml = r#"
+[[trigger]]
+condition = "on_destroyed"
+entity    = "raider"
+
+  [[trigger.action]]
+  type = "increment_flag"
+  name = "kills"
+"#;
+        let err = parse_world(toml).expect_err("increment_flag without by must error");
+        assert!(err.contains("by"), "error must mention by: {err}");
     }
 
     #[test]

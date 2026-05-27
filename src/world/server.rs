@@ -14,7 +14,7 @@ use crate::objectives::ObjectiveManager;
 use crate::world::content::{
     ActiveDialogue, CommsTemplateState, TriggerAction,
     TriggerState, WorldEvent, comms_template_states_from_world, evaluate_comms_templates,
-    evaluate_triggers, trigger_states_from_world,
+    evaluate_triggers_with_flags, trigger_states_from_world,
 };
 
 // -- Resources --------------------------------------------------------------
@@ -55,6 +55,14 @@ pub struct WorldContentRuntime {
     /// and is maintaining `range_flags`. While `false`, range gating is
     /// fully bypassed (preserves lobby + pure-handler tests).
     pub range_active: bool,
+    /// World flag / counter store consumed by predicate-gated triggers
+    /// (`when = "..."`) and mutated by `set_flag` / `clear_flag` /
+    /// `increment_flag` / `set_flag_value` trigger actions. Mutations are
+    /// observed inside `handle_ai_events`, which emits `FlagSet` /
+    /// `FlagCleared` `WorldEvent`s on transitions and re-evaluates the
+    /// trigger table in the same tick so chained `on_flag_set` /
+    /// `on_flag_cleared` triggers fire as part of the same Bevy frame.
+    pub flags: crate::world::flags::FlagStore,
 }
 
 /// Resolve the current `sender_in_range` flag for an injection-time message,
@@ -711,8 +719,12 @@ fn handle_respond_to_message(
                 | TriggerAction::RemoveIntModifier { .. }
                 | TriggerAction::GameOver { .. }
                 | TriggerAction::LoadWorld { .. }
-                | TriggerAction::UnloadWorld { .. } => {
-                    // Modifier/flag/game-over/load-world/unload-world
+                | TriggerAction::UnloadWorld { .. }
+                | TriggerAction::SetWorldFlag { .. }
+                | TriggerAction::ClearWorldFlag { .. }
+                | TriggerAction::IncrementWorldFlag { .. }
+                | TriggerAction::SetWorldFlagValue { .. } => {
+                    // Modifier/flag/game-over/load-world/unload-world/world-flag
                     // actions are handled by the AI-event trigger or damage systems.
                     // No-op in the comms response path.
                 }
@@ -1092,181 +1104,244 @@ fn handle_ai_events(
         );
     }
 
-    let fired = evaluate_triggers(&mut runtime.trigger_states, &world_events, &name_to_uuid);
+    // Loop to support within-tick chaining: a trigger that fires a
+    // `set_flag` action emits a `FlagSet` event which a downstream
+    // `on_flag_set` trigger can react to in the same Bevy frame. Bounded
+    // for safety against pathological feedback loops.
+    let mut current_events = world_events.clone();
+    let mut pass = 0;
+    let max_passes = 16;
+    loop {
+        pass += 1;
+        let flags_snapshot = runtime.flags.clone();
+        let chain: &[&crate::world::flags::FlagStore] = &[&flags_snapshot];
+        let fired = evaluate_triggers_with_flags(
+            &mut runtime.trigger_states,
+            &current_events,
+            &name_to_uuid,
+            chain,
+        );
+        if fired.is_empty() {
+            break;
+        }
 
-    for ft in fired {
-        for action in &ft.actions {
-            match action {
-                TriggerAction::AddObjective { id, text, mandatory } => {
-                    objectives.0.add(id.clone(), text.clone(), *mandatory);
-                }
-                TriggerAction::CompleteObjective { id } => {
-                    objectives.0.complete(id);
-                }
-                TriggerAction::FailObjective { id } => {
-                    objectives.0.fail(id);
-                }
-                TriggerAction::SetAiState { entity, state, target } => {
-                    // Resolve spawn name ? UUID
-                    let target_uuid = match name_to_uuid.get(entity) {
-                        Some(u) => u.clone(),
-                        None => {
+        let mut next_events: Vec<WorldEvent> = Vec::new();
+        for ft in fired {
+            for action in &ft.actions {
+                match action {
+                    TriggerAction::AddObjective { id, text, mandatory } => {
+                        objectives.0.add(id.clone(), text.clone(), *mandatory);
+                    }
+                    TriggerAction::CompleteObjective { id } => {
+                        objectives.0.complete(id);
+                    }
+                    TriggerAction::FailObjective { id } => {
+                        objectives.0.fail(id);
+                    }
+                    TriggerAction::SetAiState { entity, state, target } => {
+                        // Resolve spawn name ? UUID
+                        let target_uuid = match name_to_uuid.get(entity) {
+                            Some(u) => u.clone(),
+                            None => {
+                                bevy::log::warn!(
+                                    "handle_ai_events: SetAiState: unknown entity name '{entity}'"
+                                );
+                                continue;
+                            }
+                        };
+                        // Find the Bevy entity with that UUID and mutate its controller.
+                        for (uuid_comp, mut ctrl, behaviour) in ai_query.iter_mut() {
+                            if uuid_comp.0 != target_uuid {
+                                continue;
+                            }
+                            let new_ai_state = crate::ai::build_initial_state(
+                                &crate::entity_config::BehaviourConfig {
+                                    initial_state: state.clone(),
+                                    state: behaviour.0.state.clone(),
+                                    transition: behaviour.0.transition.clone(),
+                                },
+                            );
+                            ctrl.controller.current_state = new_ai_state;
+                            ctrl.controller.current_state_name = state.clone();
+                            if let Some(target_name) = target {
+                                if let Some(target_uuid) = name_to_uuid.get(target_name) {
+                                    if let Ok(uuid) = uuid::Uuid::parse_str(target_uuid) {
+                                        ctrl.controller.blackboard.target = Some(uuid);
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    TriggerAction::ApplyModifier { entity, tag, slot, bonus } => {
+                        if !name_to_uuid.contains_key(entity) {
                             bevy::log::warn!(
-                                "handle_ai_events: SetAiState: unknown entity name '{entity}'"
+                                "handle_ai_events: ApplyModifier: unknown entity name '{entity}'"
                             );
                             continue;
                         }
-                    };
-                    // Find the Bevy entity with that UUID and mutate its controller.
-                    for (uuid_comp, mut ctrl, behaviour) in ai_query.iter_mut() {
-                        if uuid_comp.0 != target_uuid {
+                        if let Some(ref mut mods) = modifiers {
+                            mods.add_or_update(crate::modifiers::Modifier {
+                                source: crate::messages::ModifierSource::World {
+                                    id: "world".to_string(),
+                                    tag: tag.clone(),
+                                },
+                                slot: slot.clone(),
+                                bonus: *bonus,
+                            });
+                        }
+                    }
+                    TriggerAction::RemoveModifier { entity, tag, slot } => {
+                        if !name_to_uuid.contains_key(entity) {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveModifier: unknown entity name '{entity}'"
+                            );
                             continue;
                         }
-                        // Build the new AiState from the behaviour config.
-                        let new_ai_state = crate::ai::build_initial_state(
-                            &crate::entity_config::BehaviourConfig {
-                                initial_state: state.clone(),
-                                state: behaviour.0.state.clone(),
-                                transition: behaviour.0.transition.clone(),
-                            },
-                        );
-                        ctrl.controller.current_state = new_ai_state;
-                        ctrl.controller.current_state_name = state.clone();
-                        if let Some(target_name) = target {
-                            if let Some(target_uuid) = name_to_uuid.get(target_name) {
-                                if let Ok(uuid) = uuid::Uuid::parse_str(target_uuid) {
-                                    ctrl.controller.blackboard.target = Some(uuid);
-                                }
-                            }
+                        if let Some(ref mut mods) = modifiers {
+                            mods.remove(
+                                &crate::messages::ModifierSource::World {
+                                    id: "world".to_string(),
+                                    tag: tag.clone(),
+                                },
+                                slot,
+                            );
                         }
-                        break;
                     }
-                }
-                TriggerAction::ApplyModifier { entity, tag, slot, bonus } => {
-                    if !name_to_uuid.contains_key(entity) {
-                        bevy::log::warn!(
-                            "handle_ai_events: ApplyModifier: unknown entity name '{entity}'"
-                        );
-                        continue;
+                    TriggerAction::ApplyFlag { entity, tag, kind } => {
+                        if !name_to_uuid.contains_key(entity) {
+                            bevy::log::warn!(
+                                "handle_ai_events: ApplyFlag: unknown entity name '{entity}'"
+                            );
+                            continue;
+                        }
+                        if let Some(ref mut mods) = modifiers {
+                            mods.add_flag(
+                                crate::messages::ModifierSource::World {
+                                    id: "world".to_string(),
+                                    tag: tag.clone(),
+                                },
+                                kind.clone(),
+                            );
+                        }
                     }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.add_or_update(crate::modifiers::Modifier {
-                            source: crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot: slot.clone(),
-                            bonus: *bonus,
-                        });
+                    TriggerAction::RemoveFlag { entity, tag, kind } => {
+                        if !name_to_uuid.contains_key(entity) {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveFlag: unknown entity name '{entity}'"
+                            );
+                            continue;
+                        }
+                        if let Some(ref mut mods) = modifiers {
+                            mods.remove_flag(
+                                crate::messages::ModifierSource::World {
+                                    id: "world".to_string(),
+                                    tag: tag.clone(),
+                                },
+                                kind.clone(),
+                            );
+                        }
                     }
-                }
-                TriggerAction::RemoveModifier { entity, tag, slot } => {
-                    if !name_to_uuid.contains_key(entity) {
-                        bevy::log::warn!(
-                            "handle_ai_events: RemoveModifier: unknown entity name '{entity}'"
-                        );
-                        continue;
+                    TriggerAction::ApplyIntModifier { entity, tag, slot, bonus } => {
+                        if !name_to_uuid.contains_key(entity) {
+                            bevy::log::warn!(
+                                "handle_ai_events: ApplyIntModifier: unknown entity name '{entity}'"
+                            );
+                            continue;
+                        }
+                        if let Some(ref mut mods) = modifiers {
+                            mods.add_or_update_int(crate::modifiers::IntModifier {
+                                source: crate::messages::ModifierSource::World {
+                                    id: "world".to_string(),
+                                    tag: tag.clone(),
+                                },
+                                slot: slot.clone(),
+                                bonus: *bonus,
+                            });
+                        }
                     }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.remove(
-                            &crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot,
-                        );
+                    TriggerAction::RemoveIntModifier { entity, tag, slot } => {
+                        if !name_to_uuid.contains_key(entity) {
+                            bevy::log::warn!(
+                                "handle_ai_events: RemoveIntModifier: unknown entity name '{entity}'"
+                            );
+                            continue;
+                        }
+                        if let Some(ref mut mods) = modifiers {
+                            mods.remove_int(
+                                &crate::messages::ModifierSource::World {
+                                    id: "world".to_string(),
+                                    tag: tag.clone(),
+                                },
+                                slot,
+                            );
+                        }
                     }
-                }
-                TriggerAction::ApplyFlag { entity, tag, kind } => {
-                    if !name_to_uuid.contains_key(entity) {
-                        bevy::log::warn!(
-                            "handle_ai_events: ApplyFlag: unknown entity name '{entity}'"
-                        );
-                        continue;
+                    TriggerAction::GameOver { message } => {
+                        let reason = message.clone().unwrap_or_default();
+                        if let Some(ref mut gr) = game_over_reason {
+                            gr.0 = Some(reason);
+                        }
+                        if let Some(ref mut ns) = next_state {
+                            ns.set(GamePhase::GameOver);
+                        }
                     }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.add_flag(
-                            crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            kind.clone(),
-                        );
+                    TriggerAction::LoadWorld { path } => {
+                        if let Some(ref mut lc) = pending_layers {
+                            lc.0.push(WorldLayerChange::Load(path.clone()));
+                        }
                     }
-                }
-                TriggerAction::RemoveFlag { entity, tag, kind } => {
-                    if !name_to_uuid.contains_key(entity) {
-                        bevy::log::warn!(
-                            "handle_ai_events: RemoveFlag: unknown entity name '{entity}'"
-                        );
-                        continue;
+                    TriggerAction::UnloadWorld { path } => {
+                        if let Some(ref mut lc) = pending_layers {
+                            lc.0.push(WorldLayerChange::Unload(path.clone()));
+                        }
                     }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.remove_flag(
-                            crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            kind.clone(),
-                        );
+                    TriggerAction::SetWorldFlag { name } => {
+                        let (before, after) = runtime.flags.set_flag(name);
+                        emit_flag_transition(&mut next_events, name, before, after);
                     }
-                }
-                TriggerAction::ApplyIntModifier { entity, tag, slot, bonus } => {
-                    if !name_to_uuid.contains_key(entity) {
-                        bevy::log::warn!(
-                            "handle_ai_events: ApplyIntModifier: unknown entity name '{entity}'"
-                        );
-                        continue;
+                    TriggerAction::ClearWorldFlag { name } => {
+                        let (before, after) = runtime.flags.clear_flag(name);
+                        emit_flag_transition(&mut next_events, name, before, after);
                     }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.add_or_update_int(crate::modifiers::IntModifier {
-                            source: crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot: slot.clone(),
-                            bonus: *bonus,
-                        });
+                    TriggerAction::IncrementWorldFlag { name, by } => {
+                        let (before, after) = runtime.flags.increment_flag(name, *by);
+                        emit_flag_transition(&mut next_events, name, before, after);
                     }
-                }
-                TriggerAction::RemoveIntModifier { entity, tag, slot } => {
-                    if !name_to_uuid.contains_key(entity) {
-                        bevy::log::warn!(
-                            "handle_ai_events: RemoveIntModifier: unknown entity name '{entity}'"
-                        );
-                        continue;
-                    }
-                    if let Some(ref mut mods) = modifiers {
-                        mods.remove_int(
-                            &crate::messages::ModifierSource::World {
-                                id: "world".to_string(),
-                                tag: tag.clone(),
-                            },
-                            slot,
-                        );
-                    }
-                }
-                TriggerAction::GameOver { message } => {
-                    let reason = message.clone().unwrap_or_default();
-                    if let Some(ref mut gr) = game_over_reason {
-                        gr.0 = Some(reason);
-                    }
-                    if let Some(ref mut ns) = next_state {
-                        ns.set(GamePhase::GameOver);
-                    }
-                }
-                TriggerAction::LoadWorld { path } => {
-                    if let Some(ref mut lc) = pending_layers {
-                        lc.0.push(WorldLayerChange::Load(path.clone()));
-                    }
-                }
-                TriggerAction::UnloadWorld { path } => {
-                    if let Some(ref mut lc) = pending_layers {
-                        lc.0.push(WorldLayerChange::Unload(path.clone()));
+                    TriggerAction::SetWorldFlagValue { name, value } => {
+                        let (before, after) = runtime.flags.set_flag_value(name, *value);
+                        emit_flag_transition(&mut next_events, name, before, after);
                     }
                 }
             }
         }
+
+        if next_events.is_empty() {
+            break;
+        }
+        if pass >= max_passes {
+            bevy::log::warn!(
+                "handle_ai_events: trigger chain exceeded {max_passes} passes; \
+                 stopping to prevent infinite loop"
+            );
+            break;
+        }
+        current_events = next_events;
+    }
+}
+
+/// Compare `before`/`after` flag values and push a `FlagSet` or `FlagCleared`
+/// event into `events` when the boolean view (`counter != 0`) flips.
+fn emit_flag_transition(events: &mut Vec<WorldEvent>, name: &str, before: i64, after: i64) {
+    let was_set = before != 0;
+    let is_set = after != 0;
+    if was_set == is_set {
+        return;
+    }
+    if is_set {
+        events.push(WorldEvent::FlagSet { name: name.to_string() });
+    } else {
+        events.push(WorldEvent::FlagCleared { name: name.to_string() });
     }
 }
 
@@ -1998,6 +2073,7 @@ mod tests {
                     text: "Station destroyed".to_string(),
                     mandatory: false,
                 }],
+                when: None,
             },
             fired: false,
         }];
@@ -2013,6 +2089,212 @@ mod tests {
         assert!(
             objectives.sorted_snapshots().iter().any(|o| o.id == "obj-001"),
             "AddObjective action must have fired"
+        );
+    }
+
+    // -- Flag-system integration tests (issue #412) ---------------------------
+
+    #[test]
+    fn when_predicate_suppresses_action_dispatch_when_false() {
+        // on_destroyed with when="flag(green_light)" must not fire its actions
+        // while the flag is unset, but the trigger MUST remain live so it can
+        // fire on a subsequent matching event once the flag is set.
+        let mut app = ai_trigger_test_app();
+        let npc_uuid = "uuid-destroyed-target";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert("target".into(), npc_uuid.into());
+            runtime.trigger_states = vec![TriggerState {
+                trigger: crate::world::content::Trigger {
+                    condition: TriggerCondition::OnDestroyed {
+                        entity_name: "target".into(),
+                    },
+                    actions: vec![TriggerAction::AddObjective {
+                        id: "obj-gated".into(),
+                        text: "Should only fire after flag is set".into(),
+                        mandatory: false,
+                    }],
+                    when: Some(crate::world::flags::parse_predicate("flag(green_light)").unwrap()),
+                },
+                fired: false,
+            }];
+        }
+        // First firing: flag unset → no objective.
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+        app.update();
+        {
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert!(!runtime.trigger_states[0].fired, "trigger must remain live");
+            let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+            assert!(
+                !objs.sorted_snapshots().iter().any(|o| o.id == "obj-gated"),
+                "gated action must NOT have fired"
+            );
+        }
+        // Set the flag and re-fire.
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.flags.set_flag("green_light");
+        }
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+        app.update();
+        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objs.sorted_snapshots().iter().any(|o| o.id == "obj-gated"),
+            "gated action must fire once the flag is set"
+        );
+    }
+
+    #[test]
+    fn set_flag_action_fires_on_flag_set_trigger_within_same_tick() {
+        // Trigger A: on_destroyed → set_flag a
+        // Trigger B: on_flag_set { name="a" } → add_objective B
+        // A and B must both fire in a single tick.
+        let mut app = ai_trigger_test_app();
+        let npc_uuid = "uuid-chain-source";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime.trigger_states = vec![
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnDestroyed {
+                            entity_name: "source".into(),
+                        },
+                        actions: vec![TriggerAction::SetWorldFlag { name: "a".into() }],
+                        when: None,
+                    },
+                    fired: false,
+                },
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnFlagSet { name: "a".into() },
+                        actions: vec![TriggerAction::AddObjective {
+                            id: "obj-chain".into(),
+                            text: "Reacted to flag set".into(),
+                            mandatory: false,
+                        }],
+                        when: None,
+                    },
+                    fired: false,
+                },
+            ];
+        }
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(runtime.flags.flag("a"), "set_flag action must have mutated the store");
+        assert!(runtime.trigger_states[1].fired, "on_flag_set trigger must have fired");
+        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objs.sorted_snapshots().iter().any(|o| o.id == "obj-chain"),
+            "chained AddObjective must have fired in the same tick"
+        );
+    }
+
+    #[test]
+    fn no_op_reset_of_already_set_flag_does_not_emit_transition() {
+        // Flag "a" starts set. A trigger fires set_flag a (no-op, value stays 1).
+        // An on_flag_set trigger for "a" must NOT fire (transitions only).
+        let mut app = ai_trigger_test_app();
+        let npc_uuid = "uuid-noop-source";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.flags.set_flag("a"); // pre-set
+            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime.trigger_states = vec![
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnDestroyed {
+                            entity_name: "source".into(),
+                        },
+                        actions: vec![TriggerAction::SetWorldFlag { name: "a".into() }],
+                        when: None,
+                    },
+                    fired: false,
+                },
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnFlagSet { name: "a".into() },
+                        actions: vec![TriggerAction::AddObjective {
+                            id: "obj-no-op".into(),
+                            text: "Should not fire on no-op re-set".into(),
+                            mandatory: false,
+                        }],
+                        when: None,
+                    },
+                    fired: false,
+                },
+            ];
+        }
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(
+            !runtime.trigger_states[1].fired,
+            "on_flag_set must not fire when the flag was already set (no transition)"
+        );
+        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            !objs.sorted_snapshots().iter().any(|o| o.id == "obj-no-op"),
+            "no objective expected from a no-op flag re-set"
+        );
+    }
+
+    #[test]
+    fn clear_flag_action_fires_on_flag_cleared_trigger() {
+        let mut app = ai_trigger_test_app();
+        let npc_uuid = "uuid-clear-source";
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.flags.set_flag("shields_up"); // pre-set so we transition true→false
+            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime.trigger_states = vec![
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnDestroyed {
+                            entity_name: "source".into(),
+                        },
+                        actions: vec![TriggerAction::ClearWorldFlag { name: "shields_up".into() }],
+                        when: None,
+                    },
+                    fired: false,
+                },
+                TriggerState {
+                    trigger: crate::world::content::Trigger {
+                        condition: TriggerCondition::OnFlagCleared { name: "shields_up".into() },
+                        actions: vec![TriggerAction::AddObjective {
+                            id: "obj-shields-down".into(),
+                            text: "Shields are down".into(),
+                            mandatory: true,
+                        }],
+                        when: None,
+                    },
+                    fired: false,
+                },
+            ];
+        }
+        app.world_mut()
+            .resource_mut::<Messages<AiEntityDestroyed>>()
+            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+        app.update();
+
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert!(!runtime.flags.flag("shields_up"));
+        let objs = &app.world().resource::<ObjectiveManagerRes>().0;
+        assert!(
+            objs.sorted_snapshots().iter().any(|o| o.id == "obj-shields-down"),
+            "on_flag_cleared trigger must fire on true→false transition"
         );
     }
 
@@ -2033,6 +2315,7 @@ mod tests {
                         text: "Enemy attacked".to_string(),
                         mandatory: false,
                     }],
+                    when: None,
                 },
                 fired: false,
             }];
@@ -2100,6 +2383,7 @@ mod tests {
                         state: "chase".to_string(),
                         target: None,
                     }],
+                    when: None,
                 },
                 fired: false,
             }];
@@ -2619,6 +2903,7 @@ transition = []
                     actions: vec![TriggerAction::LoadWorld {
                         path: "assets/worlds/patrol.toml".into(),
                     }],
+                    when: None,
                 },
                 fired: false,
             }];
@@ -2657,6 +2942,7 @@ transition = []
                     actions: vec![TriggerAction::UnloadWorld {
                         path: "assets/worlds/patrol.toml".into(),
                     }],
+                    when: None,
                 },
                 fired: false,
             }];

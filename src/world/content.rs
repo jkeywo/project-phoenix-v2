@@ -21,6 +21,7 @@ use std::collections::HashMap;
 pub use crate::world::config::{
     CommsDialogueNode, CommsResponse, CommsTemplate, Trigger, TriggerAction, TriggerCondition,
 };
+use crate::world::flags::FlagStore;
 
 // ── World events ──────────────────────────────────────────────────────────
 
@@ -35,6 +36,10 @@ pub enum WorldEvent {
     TimerElapsed { elapsed_secs: f32 },
     /// A `Hail` message arrived for `target_uuid`.
     Hailed { target_uuid: String },
+    /// A world flag transitioned false→true (single-pass / next-pass).
+    FlagSet { name: String },
+    /// A world flag transitioned true→false.
+    FlagCleared { name: String },
 }
 
 // ── Runtime state ─────────────────────────────────────────────────────────
@@ -85,11 +90,30 @@ pub struct ActiveDialogue {
 /// Each trigger fires at most once (single-shot). When a trigger fires its
 /// `fired` flag is set to `true` and its actions are collected into a
 /// `FiredTrigger`.
+///
+/// Convenience wrapper that passes an empty flag chain — any `when`
+/// predicate that references a flag will evaluate as if the flag is unset
+/// (so a `when` of `flag(a)` always evaluates false through this entry
+/// point). Production code should call `evaluate_triggers_with_flags`.
 #[allow(clippy::ptr_arg)]
 pub fn evaluate_triggers(
     states: &mut Vec<TriggerState>,
     events: &[WorldEvent],
     name_to_uuid: &HashMap<String, String>,
+) -> Vec<FiredTrigger> {
+    evaluate_triggers_with_flags(states, events, name_to_uuid, &[])
+}
+
+/// Evaluate all triggers, including `when` predicate gating.
+///
+/// `flag_chain` is the layer of flag stores used by `when` predicate
+/// evaluation (innermost first).
+#[allow(clippy::ptr_arg)]
+pub fn evaluate_triggers_with_flags(
+    states: &mut Vec<TriggerState>,
+    events: &[WorldEvent],
+    name_to_uuid: &HashMap<String, String>,
+    flag_chain: &[&FlagStore],
 ) -> Vec<FiredTrigger> {
     let mut results = Vec::new();
     for state in states.iter_mut() {
@@ -99,12 +123,21 @@ pub fn evaluate_triggers(
         let fires = events.iter().any(|event| {
             condition_matches(&state.trigger.condition, event, name_to_uuid)
         });
-        if fires {
-            state.fired = true;
-            results.push(FiredTrigger {
-                actions: state.trigger.actions.clone(),
-            });
+        if !fires {
+            continue;
         }
+        // `when` predicate gate. False suppresses actions for this firing
+        // WITHOUT consuming the trigger lifecycle (so it can re-fire next
+        // time the condition matches and the predicate is true).
+        if let Some(pred) = &state.trigger.when {
+            if !pred.evaluate(flag_chain) {
+                continue;
+            }
+        }
+        state.fired = true;
+        results.push(FiredTrigger {
+            actions: state.trigger.actions.clone(),
+        });
     }
     results
 }
@@ -157,6 +190,8 @@ fn condition_matches(
         (TriggerCondition::OnHailed { entity_name }, WorldEvent::Hailed { target_uuid }) => {
             name_to_uuid.get(entity_name).map(|u| u == target_uuid).unwrap_or(false)
         }
+        (TriggerCondition::OnFlagSet { name }, WorldEvent::FlagSet { name: n }) => name == n,
+        (TriggerCondition::OnFlagCleared { name }, WorldEvent::FlagCleared { name: n }) => name == n,
         _ => false,
     }
 }
@@ -232,6 +267,7 @@ mod tests {
         Trigger {
             condition: TriggerCondition::OnDestroyed { entity_name: name.into() },
             actions: vec![action],
+            when: None,
         }
     }
 
@@ -296,6 +332,7 @@ mod tests {
             trigger: Trigger {
                 condition: TriggerCondition::OnTimer { after_secs: 30.0 },
                 actions: vec![add_obj("obj-timer")],
+                when: None,
             },
             fired: false,
         }];
@@ -314,6 +351,7 @@ mod tests {
             trigger: Trigger {
                 condition: TriggerCondition::OnAttacked { entity_name: "raider".into() },
                 actions: vec![add_obj("obj-atk")],
+                when: None,
             },
             fired: false,
         }];
@@ -333,6 +371,7 @@ mod tests {
             trigger: Trigger {
                 condition: TriggerCondition::OnHailed { entity_name: "starbase".into() },
                 actions: vec![add_obj("obj-hail")],
+                when: None,
             },
             fired: false,
         }];

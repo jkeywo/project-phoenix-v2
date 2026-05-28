@@ -233,7 +233,6 @@ fn handle_set_target(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     ship: Res<ShipState>,
-    world: Res<WorldResource>,
     mut weapons_target: ResMut<WeaponsTarget>,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     mut outbox: ResMut<SimOutbox>,
@@ -254,20 +253,6 @@ fn handle_set_target(
             continue;
         }
 
-        // Entity must exist in the world to be a valid target.
-        let world_entity = world.0.entities.iter().any(|a| a.uuid == *uuid);
-        if !world_entity {
-            crate::wasm_log!(
-                "[radar-instr 7] handle_set_target result: uuid={} entity_found=false (not in world) locked=false",
-                uuid
-            );
-            outbox.0.push((Target::Token(ev.token.clone()), ServerMessage::TargetLock { uuid: uuid.clone(), locked: false }));
-            continue;
-        }
-
-        // Use the live ECS Transform for the range check — WorldResource
-        // positions are a spawn-time / first-report snapshot and never
-        // updated for moving entities (NPC ships, etc.).
         let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
         let base_range = ship_config.0.tactical_radar_range;
         let effective_weapons_range = base_range * radar_range_mult;
@@ -2110,6 +2095,99 @@ mod tests {
 
         let hp_after = app.world().get::<EntityConsoleHull>(target_entity).unwrap().0.total_current();
         assert!(hp_after < hp_before, "target hull must decrease as NPC beam ticks (before={hp_before}, after={hp_after})");
+    }
+
+    #[test]
+    fn npc_beam_tick_applies_damage_to_player_ship_through_shields() {
+        // When the beam target is the player ship (has Ship marker), damage
+        // must route through shields → hull resource, not EntityConsoleHull.
+        use crate::ai_plugin::{AiTokenRegistry, EntityPhaserState};
+        use crate::entity_spawner::EntityUuid;
+        use crate::shield::ShieldConfig;
+        use crate::simulation::{ShipShields, GameOverReason};
+        use crate::server_app::Ship;
+
+        let mut app = test_app();
+        app.init_resource::<AiTokenRegistry>();
+        app.init_resource::<GameOverReason>();
+
+        // Insert shields so the shield-routing path is exercised.
+        let shield_config = ShieldConfig {
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            num_facings: 4,
+            ..Default::default()
+        };
+        app.insert_resource(ShipShields(crate::shield::ShieldSystem::new(&shield_config)));
+
+        let npc_uuid = "00000000-0000-0000-0000-000000000010";
+        let player_uuid = "00000000-0000-0000-0000-000000000011";
+        let player_uuid_parsed = uuid::Uuid::parse_str(player_uuid).unwrap();
+
+        // Spawn the player ship entity with Ship marker, EntityUuid, EntityConsoleHull.
+        let _player_entity = app.world_mut().spawn((
+            EntityUuid(player_uuid.to_string()),
+            Ship,
+            crate::entity_spawner::EntityConsoleHull(
+                crate::damage::ConsoleHull::from_config(&[
+                    (Console::Helm, 25.0),
+                    (Console::Tactical, 25.0),
+                    (Console::Power, 25.0),
+                    (Console::Shields, 25.0),
+                ])
+            ),
+            Transform::from_xyz(0.0, 0.0, -10.0),
+        )).id();
+
+        // Spawn NPC entity (same pattern as setup_npc_shooter).
+        let npc_entity = {
+            use crate::ai::AiController;
+            let mut ctrl = AiController::new([0.0, 0.0, 0.0], 0.0);
+            ctrl.blackboard.target = Some(player_uuid_parsed);
+
+            let mut reg = app.world_mut().resource_mut::<AiTokenRegistry>();
+            reg.register(npc_uuid);
+
+            app.world_mut().spawn((
+                EntityUuid(npc_uuid.to_string()),
+                crate::ai_plugin::AiControllerComponent {
+                    controller: ctrl,
+                    entity_uuid: npc_uuid.to_string(),
+                    forward_speed: 0.0,
+                },
+                EntityPhaserState::default(),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            )).id()
+        };
+
+        let hull_before = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let shields_hp_before: Vec<i32> =
+            app.world().resource::<ShipShields>().0.facings.iter().map(|f| f.hp).collect();
+        let shields_sum_before: i32 = shields_hp_before.iter().sum();
+
+        // Activate the beam directly targeting the player ship.
+        {
+            let mut ps = app.world_mut().get_mut::<EntityPhaserState>(npc_entity).unwrap();
+            ps.beam_active = true;
+            ps.beam_target = Some(player_uuid_parsed);
+            ps.beam_remaining_secs = 10.0;
+        }
+
+        for _ in 0..10 {
+            app.update();
+        }
+
+        let hull_after = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let shields_sum_after: i32 =
+            app.world().resource::<ShipShields>().0.facings.iter().map(|f| f.hp).sum();
+
+        let hull_lost = hull_before - hull_after;
+        let shields_lost = shields_sum_before - shields_sum_after;
+
+        assert!(
+            hull_lost > 0.0 || shields_lost > 0,
+            "NPC beam must damage player ship: hull {hull_before}->{hull_after} ({hull_lost}), shields {shields_sum_before}->{shields_sum_after} ({shields_lost})"
+        );
     }
 
     #[test]

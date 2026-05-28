@@ -63,13 +63,19 @@ async function startGameWithTactical(context: BrowserContext) {
   );
 
   // Make the raider stationary: set initial_state = "idle" and zero every
-  // target_speed so it never moves regardless of AI transitions.
+  // target_speed so it never moves regardless of AI transitions.  Also
+  // disable the enemy_in_range transition (200-unit radius) so the raider
+  // never transitions out of idle and never auto-fires at the player ship.
+  // Without this patch the raider would produce a BeamStarted (attacking
+  // the player) before the player fires, causing the test's
+  // waitForMessage('BeamStarted') to pick up the wrong target_uuid.
   await context.route('**/assets/entities/pirate_raider.toml', async (route) => {
     const response = await route.fetch();
     const text = await response.text();
     const patched = text
       .replace(/initial_state\s*=\s*"patrol"/, 'initial_state = "idle"')
-      .replace(/target_speed\s*=\s*[\d.]+/g, 'target_speed = 0.0');
+      .replace(/target_speed\s*=\s*[\d.]+/g, 'target_speed = 0.0')
+      .replace(/condition = "enemy_in_range"/, 'condition = "never_matches"');
     await route.fulfill({ contentType: 'text/plain', body: patched });
   });
 

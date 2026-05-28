@@ -13,10 +13,11 @@ import type { BrowserContext } from '@playwright/test';
 
 // Self-contained smoke-test world — intentionally does NOT read or depend on
 // assets/worlds/default.toml so changes to the default world never break this
-// test.  The player ship spawns at the origin; a single raider is placed 20
-// units directly ahead (within the 100-unit phaser range).  The raider
-// template is intercepted inside startGameWithTactical to zero every
-// target_speed and set initial_state = "idle" so it stays put.
+// test.  The player ship spawns at the origin facing -Z; a single raider is
+// placed 15.8 units to the port bow (within the port bank's 135° arc and
+// well within the 100-unit phaser range).  The raider template is intercepted
+// inside startGameWithTactical to zero every target_speed and set
+// initial_state = "idle" so it stays put.
 const MINIMAL_TEST_WORLD = `
 [global]
 seed = 42
@@ -39,7 +40,7 @@ spawn_on = "game_start"
 [[entity]]
 template_path = "assets/entities/pirate_raider.toml"
 name          = "raider_alpha"
-transform     = { position = [0.0, 0.0, -20.0] }
+transform     = { position = [-15.0, 0.0, -5.0] }
 `;
 
 async function waitForStation(

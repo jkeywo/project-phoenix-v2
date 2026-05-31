@@ -42,36 +42,35 @@ pub struct ActiveBeam {
     pub bank: Option<PhaserBank>,
 }
 
-/// Post-beam cooldown. The weapons console is locked out for
-/// `PhaserCombatConfigResource.beam_cooldown_secs` after every beam end
-/// (natural, sever, or cancel).
+/// Post-beam cooldown, tracked independently per phaser bank.
+/// The weapons console rejects a fire request for a specific bank while
+/// that bank's cooldown is active; other banks remain unaffected.
 #[derive(Resource, Default)]
 pub struct PhaserCooldown {
-    pub remaining_secs: f32,
+    per_bank: std::collections::HashMap<String, f32>,
 }
 
 impl PhaserCooldown {
-    pub fn is_active(&self) -> bool {
-        self.remaining_secs > 0.0
+    pub fn is_bank_active(&self, bank: &str) -> bool {
+        self.per_bank.get(bank).copied().unwrap_or(0.0) > 0.0
     }
 
-    /// Start the cooldown. Reads the per-ship cooldown from
-    /// `PhaserCombatConfig`; callers without access to the resource
-    /// (legacy tests) can use [`Self::start_with_cooldown`].
-    pub fn start(&mut self, config: &crate::entity_config::PhaserCombatConfig) {
-        self.remaining_secs = config.beam_cooldown_secs;
+    pub fn bank_remaining_secs(&self, bank: &str) -> f32 {
+        self.per_bank.get(bank).copied().unwrap_or(0.0)
     }
 
-    /// Start the cooldown with an explicit value. Convenience for unit
-    /// tests that don't construct a `PhaserCombatConfig`.
-    pub fn start_with_cooldown(&mut self, secs: f32) {
-        self.remaining_secs = secs;
+    pub fn start_bank(&mut self, bank: &str, config: &crate::entity_config::PhaserCombatConfig) {
+        self.per_bank.insert(bank.to_string(), config.beam_cooldown_secs);
     }
-}
 
-impl PhaserCooldown {
+    pub fn start_bank_with_cooldown(&mut self, bank: &str, secs: f32) {
+        self.per_bank.insert(bank.to_string(), secs);
+    }
+
     pub fn tick(&mut self, dt: f32) {
-        self.remaining_secs = (self.remaining_secs - dt).max(0.0);
+        for v in self.per_bank.values_mut() {
+            *v = (*v - dt).max(0.0);
+        }
     }
 }
 
@@ -301,7 +300,7 @@ fn handle_fire_phaser(
         if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
             continue;
         }
-        if cooldown.is_active() || beam.target_uuid.is_some() {
+        if cooldown.is_bank_active(bank) || beam.target_uuid.is_some() {
             continue;
         }
         let Some(target_uuid) = &weapons_target.0 else { continue };
@@ -882,7 +881,7 @@ fn tick_active_beam(
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start(&combat_config.0);
+        cooldown.start_bank(&active_bank, &combat_config.0);
         commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
         return;
     };
@@ -903,7 +902,7 @@ fn tick_active_beam(
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start(&combat_config.0);
+        cooldown.start_bank(&active_bank, &combat_config.0);
         commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
         return;
     }
@@ -958,7 +957,7 @@ fn tick_active_beam(
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            cooldown.start(&combat_config.0);
+            cooldown.start_bank(&active_bank, &combat_config.0);
 
             outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
             commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
@@ -974,7 +973,7 @@ fn tick_active_beam(
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            cooldown.start(&combat_config.0);
+            cooldown.start_bank(&active_bank, &combat_config.0);
 
             commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
             return;
@@ -986,7 +985,7 @@ fn tick_active_beam(
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
-        cooldown.start(&combat_config.0);
+        cooldown.start_bank(&active_bank, &combat_config.0);
         commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
     }
 }
@@ -1005,10 +1004,13 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 (s.x, s.z, s.yaw)
             };
             let target_uuid: Option<String> = world.resource::<WeaponsTarget>().0.clone();
-            let (on_cooldown, cooldown_remaining) = {
-                let cooldown = world.resource::<PhaserCooldown>();
-                let beam = world.resource::<ActiveBeam>();
-                (cooldown.is_active() || beam.target_uuid.is_some(), cooldown.remaining_secs)
+            let (beam_active, active_beam_bank) = {
+                let b = world.resource::<ActiveBeam>();
+                (b.target_uuid.is_some(), b.bank.clone())
+            };
+            let bank_cooldowns: std::collections::HashMap<String, f32> = {
+                let cd = world.resource::<PhaserCooldown>();
+                cd.per_bank.clone()
             };
             let tubes: Vec<TorpedoTubeState> = {
                 let ts = &world.resource::<TorpedoSystemResource>().0;
@@ -1066,11 +1068,12 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                     None => false,
                     Some((tx, tz)) => crate::radar::is_fire_ready_with_range(tx, tz, ship_x, ship_z, ship_yaw, effective_phaser_range),
                 };
+                let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
                 vec![PhaserBankState {
                     id: String::new(),
                     fire_ready,
-                    on_cooldown,
-                    cooldown_remaining,
+                    on_cooldown: beam_active || cd > 0.0,
+                    cooldown_remaining: cd,
                 }]
             } else {
                 banks_config.iter().map(|b| {
@@ -1084,11 +1087,14 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                             range_ok && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
                         }
                     };
+                    let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
+                    let beam_on_this_bank = beam_active
+                        && active_beam_bank.as_deref() == Some(b.id.as_str());
                     PhaserBankState {
                         id: b.id.clone(),
                         fire_ready: bank_ready,
-                        on_cooldown,
-                        cooldown_remaining,
+                        on_cooldown: beam_on_this_bank || cd > 0.0,
+                        cooldown_remaining: cd,
                     }
                 }).collect()
             };
@@ -1387,7 +1393,7 @@ mod tests {
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
         app.world_mut().resource_mut::<ActiveBeam>().target_uuid = None;
-        app.world_mut().resource_mut::<PhaserCooldown>().remaining_secs = 3.0;
+        app.world_mut().resource_mut::<PhaserCooldown>().start_bank_with_cooldown("port", 3.0);
 
         push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
@@ -1469,7 +1475,7 @@ mod tests {
 
         assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none());
 
-        assert!(app.world().resource::<PhaserCooldown>().is_active(),
+        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"),
             "cooldown should start after beam end");
 
         assert!(app.world().get::<EntityConsoleHull>(asteroid_entity).is_none(),
@@ -1493,7 +1499,7 @@ mod tests {
             "expected BeamEnded when target leaves bank fire arc");
         assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none(),
             "beam should be cleared after sever-by-arc");
-        assert!(app.world().resource::<PhaserCooldown>().is_active(),
+        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"),
             "cooldown should start after arc sever");
     }
 
@@ -1519,7 +1525,7 @@ mod tests {
             "expected BeamEnded when target leaves phaser range");
         assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none(),
             "beam should be cleared after sever-by-range");
-        assert!(app.world().resource::<PhaserCooldown>().is_active(),
+        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"),
             "cooldown should start after range sever");
     }
 
@@ -1585,9 +1591,9 @@ mod tests {
         app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 0.0;
         let _ = tick(&mut app);
 
-        assert!(app.world().resource::<PhaserCooldown>().is_active());
+        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"));
 
-        app.world_mut().resource_mut::<PhaserCooldown>().remaining_secs = 0.0;
+        app.world_mut().resource_mut::<PhaserCooldown>().start_bank_with_cooldown("port", 0.0);
 
         push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t2".into() });
         let _ = tick(&mut app);
@@ -1692,11 +1698,11 @@ mod tests {
             "phaser_range must match TOML beam_range");
 
         // And starting the cooldown produces exactly that value, so it flows
-        // through to live `PhaserCooldown.remaining_secs`.
+        // through to live `PhaserCooldown.bank_remaining_secs`.
         let mut cd = PhaserCooldown::default();
-        cd.start(&combat);
-        assert_eq!(cd.remaining_secs, wc.cooldown_secs,
-            "PhaserCooldown::start must use the TOML-sourced cooldown");
+        cd.start_bank("test", &combat);
+        assert_eq!(cd.bank_remaining_secs("test"), wc.cooldown_secs,
+            "PhaserCooldown::start_bank must use the TOML-sourced cooldown");
     }
 
     #[test]
@@ -1987,7 +1993,7 @@ mod tests {
 
         // Beam cleared, cooldown started
         assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none());
-        assert!(app.world().resource::<PhaserCooldown>().is_active());
+        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"));
     }
 
     // ── Cycle 3: AiEntityDestroyed message written on NPC destruction ─────

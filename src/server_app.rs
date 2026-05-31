@@ -2504,7 +2504,7 @@ mod tests {
         app.world_mut().resource_mut::<ActiveBeam>().target_uuid = None;
         app.world_mut()
             .resource_mut::<PhaserCooldown>()
-            .remaining_secs = 3.0;
+            .start_bank_with_cooldown("port", 3.0);
 
         push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
         let out = tick(&mut app);
@@ -2631,7 +2631,7 @@ mod tests {
 
         // Cooldown started.
         assert!(
-            app.world().resource::<PhaserCooldown>().is_active(),
+            app.world().resource::<PhaserCooldown>().is_bank_active("port"),
             "cooldown should start after beam end"
         );
 
@@ -2665,7 +2665,7 @@ mod tests {
             "beam should be cleared after sever-by-arc"
         );
         assert!(
-            app.world().resource::<PhaserCooldown>().is_active(),
+            app.world().resource::<PhaserCooldown>().is_bank_active("port"),
             "cooldown should start after arc sever"
         );
     }
@@ -2698,7 +2698,7 @@ mod tests {
             "beam should be cleared after sever-by-range"
         );
         assert!(
-            app.world().resource::<PhaserCooldown>().is_active(),
+            app.world().resource::<PhaserCooldown>().is_bank_active("port"),
             "cooldown should start after range sever"
         );
     }
@@ -2797,12 +2797,12 @@ mod tests {
         let _ = tick(&mut app); // beam ends, cooldown starts
 
         // Cooldown should be active.
-        assert!(app.world().resource::<PhaserCooldown>().is_active());
+        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"));
 
         // Force cooldown to expire.
         app.world_mut()
             .resource_mut::<PhaserCooldown>()
-            .remaining_secs = 0.0;
+            .start_bank_with_cooldown("port", 0.0);
 
         // Lock and fire at t2.
         push(

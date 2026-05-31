@@ -528,7 +528,11 @@ fn handle_fire_phaser_npc(
             phaser_state.beam_remaining_secs = (phaser_state.beam_remaining_secs - dt).max(0.0);
 
             if let Some(t_uuid) = phaser_state.beam_target {
-                let damage = damage_per_sec * dt;
+                // Accumulate fractional damage so sub-integer per-tick values
+                // (e.g. 0.3/tick) are not lost when flushed as whole i32 units.
+                phaser_state.damage_accumulator += damage_per_sec * dt;
+                let damage = phaser_state.damage_accumulator.floor();
+                phaser_state.damage_accumulator -= damage;
                 let target_uuid_str = t_uuid.to_string();
 
                 // Check if the beam target is the player ship.
@@ -536,12 +540,11 @@ fn handle_fire_phaser_npc(
 
                 if is_player {
                     // Player ship damage path: route through shields → hull resource → broadcast.
+                    // Only apply when at least 1 whole unit has accumulated.
+                    if damage >= 1.0 {
                     let npc_x = transform.translation.x;
                     let npc_z = transform.translation.z;
 
-                    if target_positions.iter().all(|(u, _, _)| u.to_string() != target_uuid_str) {
-                        info!("[npc-damage] player uuid={} NOT in target_positions (len={})", target_uuid_str, target_positions.len());
-                    }
                     if let Some((_, tx, tz)) = target_positions.iter().find(|(u, _, _)| u.to_string() == target_uuid_str) {
                         let shield_pierce = weapons_section
                             .map(|wc| wc.0.shield_pierce)
@@ -605,6 +608,7 @@ fn handle_fire_phaser_npc(
                             }
                         }
                     }
+                    } // end if damage >= 1.0
 
                     // Deactivate beam if elapsed.
                     if phaser_state.beam_remaining_secs <= 0.0 {
@@ -621,6 +625,7 @@ fn handle_fire_phaser_npc(
                 } else {
                     // NPC/asteroid target: existing EntityConsoleHull component path.
                     let mut target_destroyed = false;
+                    if damage >= 1.0 {
                     for (tgt_entity, tgt_uid, _tgt_transform, mut tgt_hull) in hull_query.iter_mut() {
                         if tgt_uid.0 != target_uuid_str {
                             continue;
@@ -635,6 +640,7 @@ fn handle_fire_phaser_npc(
                         }
                         break;
                     }
+                    } // end if damage >= 1.0
                     if target_destroyed || phaser_state.beam_remaining_secs <= 0.0 {
                         let ended_uuid = t_uuid.to_string();
                         phaser_state.beam_active = false;

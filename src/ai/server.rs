@@ -123,6 +123,10 @@ pub struct EntityPhaserState {
     pub beam_target: Option<uuid::Uuid>,
     /// Duration left on the current beam in seconds.
     pub beam_remaining_secs: f32,
+    /// Sub-integer damage accumulator so that fractional per-tick damage
+    /// (e.g. 0.3/tick) is flushed in whole-integer chunks rather than being
+    /// lost to rounding when passed to shield/hull functions.
+    pub damage_accumulator: f32,
 }
 
 impl Default for EntityPhaserState {
@@ -132,6 +136,7 @@ impl Default for EntityPhaserState {
             beam_active: false,
             beam_target: None,
             beam_remaining_secs: 0.0,
+            damage_accumulator: 0.0,
         }
     }
 }

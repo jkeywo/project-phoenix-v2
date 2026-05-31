@@ -50,8 +50,8 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     if material.highlighted > 0.5 {
         let uv_center = in.uv - vec2(0.5, 0.5);
         let dist = length(uv_center);
-        let ring_radius: f32 = 0.44;
-        let ring_half_width: f32 = 0.07;
+        let ring_radius: f32 = 0.42;
+        let ring_half_width: f32 = 0.035;
         if abs(dist - ring_radius) < ring_half_width {
             let frac = 1.0 - abs(dist - ring_radius) / ring_half_width;
             return vec4<f32>(1.0, 0.2, 0.2, frac * 0.85);

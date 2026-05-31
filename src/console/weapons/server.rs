@@ -718,7 +718,10 @@ fn handle_fire_torpedo(
             continue;
         }
         let uuid = uuid::Uuid::new_v4().to_string();
-        let launch_heading = ship.yaw;
+        let tube_facing_rad = torpedo_sys.0.tube(tube.as_str())
+            .map(|t| t.facing_deg.to_radians())
+            .unwrap_or(0.0);
+        let launch_heading = ship.yaw + tube_facing_rad;
         let source_uuid = player_ship_q.single().map(|u| u.0.clone()).ok();
         use crate::torpedo::LaunchResult;
         match torpedo_sys.0.launch(tube.as_str(), uuid, ship.x, ship.z, launch_heading, target_uuid.clone(), source_uuid) {

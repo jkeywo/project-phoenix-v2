@@ -540,6 +540,9 @@ fn handle_fire_phaser_npc(
                     let npc_x = transform.translation.x;
                     let npc_z = transform.translation.z;
 
+                    if target_positions.iter().all(|(u, _, _)| u.to_string() != target_uuid_str) {
+                        info!("[npc-damage] player uuid={} NOT in target_positions (len={})", target_uuid_str, target_positions.len());
+                    }
                     if let Some((_, tx, tz)) = target_positions.iter().find(|(u, _, _)| u.to_string() == target_uuid_str) {
                         let shield_pierce = weapons_section
                             .map(|wc| wc.0.shield_pierce)
@@ -553,6 +556,12 @@ fn handle_fire_phaser_npc(
                         let mut hull_amount = pierced;
                         let mut shield_amount = 0.0;
 
+                        info!(
+                            "[npc-damage] uuid={} damage={:.3} shield_pierce={:.2} pierced={:.3} absorbed={:.3} hull_res={} shield_res={}",
+                            npc_uuid.0, damage, shield_pierce, pierced, absorbed,
+                            hull_resource.is_some(), shields_resource.is_some(),
+                        );
+
                         if absorbed > 0.0 {
                             if let Some(ref mut shields) = shields_resource {
                                 let leak = crate::damage::apply_damage_with_shields(
@@ -562,6 +571,7 @@ fn handle_fire_phaser_npc(
                                 );
                                 shield_amount = (absorbed - leak as f32).max(0.0);
                                 hull_amount += leak as f32;
+                                info!("[npc-damage] shield absorbed={:.1} leak={} hull_amount_after={:.3}", shield_amount, leak, hull_amount);
                             } else {
                                 hull_amount += absorbed;
                             }

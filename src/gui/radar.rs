@@ -756,6 +756,7 @@ fn sync_radar_blip_nodes(
         Option<&AutoScaleRadar>,
         Option<&RadarOverlayEntity>,
         Option<&RadarTargetHighlight>,
+        Option<&mut RadarTargetRing>,
     )>,
     overlay_nodes: Query<&ComputedNode>,
     blips: Query<(Entity, &OnRadar, &RadarAppearance, &BlipWorldPose, Option<&RadarEntityUuid>)>,
@@ -790,6 +791,7 @@ fn sync_radar_blip_nodes(
         auto_scale,
         overlay,
         target_highlight,
+        mut target_ring,
     ) in radars.iter_mut()
     {
         if !vis.get() {
@@ -862,6 +864,9 @@ fn sync_radar_blip_nodes(
 
         // ── Build intended blip set (point entities) ─────────────────────────
         let mut intended: HashMap<Entity, BlipIntent> = HashMap::new();
+        // Track the screen position of the highlighted blip so we can place
+        // the targeting ring node (spawned separately at a fixed pixel size).
+        let mut highlighted_blip_center: Option<(f32, f32)> = None;
 
         // ── Build intended region set (region shape entities) ────────────────
         // source entity → (nx, ny, colour, shape, outer_size_px)
@@ -924,25 +929,20 @@ fn sync_radar_blip_nodes(
                     effective_yaw,
                     &widget.orientation,
                 );
-                // Compute highlight first so we can inflate the blip size when
-                // targeted. The ring is drawn inside the blip UV space (shader),
-                // so a minimum display size is required for it to be visible.
-                // Without this, an 8 px blip produces a ~0.3 px ring — subpixel
-                // and invisible. 28 px gives a ring ~12 px wide at the edge.
-                let highlight_match = matches!(
-                    (target_highlight, blip_uuid),
-                    (Some(hl), Some(uuid)) if hl.0.as_deref() == Some(uuid.0.as_str())
-                );
-                const MIN_HIGHLIGHTED_BLIP_PX: f32 = 28.0;
-                let size_px = {
-                    let base = world_size_to_px(appearance.world_size, range, radar_radius_px);
-                    if highlight_match { base.max(MIN_HIGHLIGHTED_BLIP_PX) } else { base }
-                };
+                let size_px = world_size_to_px(appearance.world_size, range, radar_radius_px);
                 let half = size_px * 0.5;
                 let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
                 let icon_handle = icons.0.get(&appearance.icon).cloned();
                 let size_frac = half / radar_radius_px;
                 let clip_circle = if widget.clip_mode == RadarClipMode::Circle { 1.0_f32 } else { 0.0_f32 };
+                let highlight_match = matches!(
+                    (target_highlight, blip_uuid),
+                    (Some(hl), Some(uuid)) if hl.0.as_deref() == Some(uuid.0.as_str())
+                );
+                if highlight_match {
+                    // Record blip centre so we can position the ring node below.
+                    highlighted_blip_center = Some((left + half, top + half));
+                }
                 let blip_color = if highlight_match {
                     Color::srgb(1.0, 0.85, 0.1)
                 } else {
@@ -1087,6 +1087,55 @@ fn sync_radar_blip_nodes(
                     ));
                 }
             });
+        }
+
+        // ── Targeting ring node ───────────────────────────────────────────────
+        // When this widget has a `RadarTargetRing` component, spawn/update a
+        // fixed-size circular ring UI node centred on the highlighted blip.
+        // The ring is independent of the blip icon size so it is always visible.
+        const RING_PX: f32 = 28.0;
+        const RING_BORDER_PX: f32 = 2.0;
+        if let Some(ref mut ring) = target_ring {
+            match highlighted_blip_center {
+                Some((cx, cy)) => {
+                    // Position the ring centred on the blip icon.
+                    let ring_left = cx - RING_PX * 0.5;
+                    let ring_top  = cy - RING_PX * 0.5;
+                    let ring_node = Node {
+                        position_type: PositionType::Absolute,
+                        left:   Val::Px(ring_left),
+                        top:    Val::Px(ring_top),
+                        width:  Val::Px(RING_PX),
+                        height: Val::Px(RING_PX),
+                        border: UiRect::all(Val::Px(RING_BORDER_PX)),
+                        border_radius: BorderRadius::all(Val::Percent(50.0)),
+                        ..default()
+                    };
+                    match ring.0 {
+                        Some(e) => {
+                            // Update existing ring node position.
+                            commands.entity(e).insert(ring_node);
+                        }
+                        None => {
+                            // Spawn a new ring node as a child of the radar widget.
+                            let e = commands.spawn((
+                                ring_node,
+                                BorderColor::all(Color::srgb(1.0, 0.2, 0.2)),
+                                BackgroundColor(Color::NONE),
+                                ZIndex(20),
+                            )).id();
+                            commands.entity(radar_entity).add_child(e);
+                            ring.0 = Some(e);
+                        }
+                    }
+                }
+                None => {
+                    // No highlighted blip — despawn the ring node if it exists.
+                    if let Some(e) = ring.0.take() {
+                        commands.entity(e).despawn();
+                    }
+                }
+            }
         }
     }
 }
@@ -1246,6 +1295,14 @@ pub struct RadarArcs(pub Vec<RadarArc>);
 /// [`RadarEntityUuid`].
 #[derive(Component, Clone, Default, Debug)]
 pub struct RadarTargetHighlight(pub Option<String>);
+
+/// Optional companion to [`RadarTargetHighlight`] on a `GenericRadarWidget`.
+/// When present, `sync_radar_blip_nodes` spawns a fixed-size circular ring
+/// node centred on the currently targeted blip and despawns it when there is
+/// no target. The ring is independent of the blip icon size, so it is always
+/// clearly visible regardless of how small the blip is in world-space.
+#[derive(Component, Default, Debug)]
+pub struct RadarTargetRing(pub Option<Entity>);
 
 /// Component on a blip-source ECS entity (e.g. an NPC ship snapshot) exposing
 /// the entity's wire UUID to the radar widget. Required for

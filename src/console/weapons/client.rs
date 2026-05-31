@@ -27,7 +27,7 @@ use crate::gui::{
     bridge_sim_to_radar, spawn_gui_button, ButtonPressed,
     ButtonSize, ConsoleRadar, GenericRadar, OrientationMode, RadarArc,
     RadarArcKind, RadarArcs, RadarBlipClicked, RadarBlipMap, RadarCenterPose, RadarClipMode,
-    RadarEntityUuid, RadarFilter, RadarTargetHighlight, RadioButtonConfig, RadioGroup,
+    RadarEntityUuid, RadarFilter, RadarTargetHighlight, RadarTargetRing, RadioButtonConfig, RadioGroup,
     RadioSelected, StateVisuals, Disabled,
 };
 use crate::messages::{Console, GamePhase, PhaserBankClientConfig, TorpedoTube, TorpedoTubeClientConfig};
@@ -344,6 +344,7 @@ fn fill_tactical_radar(
         RadarBlipMap::default(),
         RadarArcs(arcs),
         RadarTargetHighlight(None),
+        RadarTargetRing::default(),
     ));
     commands.entity(radar).observe(on_tactical_radar_blip_clicked);
     commands.entity(col).add_child(radar);

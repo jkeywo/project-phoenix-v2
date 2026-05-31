@@ -36,7 +36,7 @@ pub use radar::{
     BlipWorldPose, ConsoleRadar, GenericRadar, GenericRadarWidget, OnRadar, OrientationMode,
     RadarAppearance, RadarArc, RadarArcKind, RadarArcs, RadarBlipClicked, RadarBlipMap,
     RadarCenter, RadarCenterPose, RadarClipMode, RadarEntityUuid, RadarFilter, RadarIcon,
-    RadarIconLookup, RadarRegionNode, RadarTargetHighlight, RegionRadarShape, WorldCentredRadar,
+    RadarIconLookup, RadarRegionNode, RadarTargetHighlight, RadarTargetRing, RegionRadarShape, WorldCentredRadar,
 };
 pub use radio::{
     next_radio_selection, on_radio_member_pressed, RadioButtonConfig, RadioGroup, RadioGroupMarker,

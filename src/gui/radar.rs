@@ -924,22 +924,25 @@ fn sync_radar_blip_nodes(
                     effective_yaw,
                     &widget.orientation,
                 );
-                let size_px =
-                    world_size_to_px(appearance.world_size, range, radar_radius_px);
+                // Compute highlight first so we can inflate the blip size when
+                // targeted. The ring is drawn inside the blip UV space (shader),
+                // so a minimum display size is required for it to be visible.
+                // Without this, an 8 px blip produces a ~0.3 px ring — subpixel
+                // and invisible. 28 px gives a ring ~12 px wide at the edge.
+                let highlight_match = matches!(
+                    (target_highlight, blip_uuid),
+                    (Some(hl), Some(uuid)) if hl.0.as_deref() == Some(uuid.0.as_str())
+                );
+                const MIN_HIGHLIGHTED_BLIP_PX: f32 = 28.0;
+                let size_px = {
+                    let base = world_size_to_px(appearance.world_size, range, radar_radius_px);
+                    if highlight_match { base.max(MIN_HIGHLIGHTED_BLIP_PX) } else { base }
+                };
                 let half = size_px * 0.5;
                 let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
                 let icon_handle = icons.0.get(&appearance.icon).cloned();
                 let size_frac = half / radar_radius_px;
                 let clip_circle = if widget.clip_mode == RadarClipMode::Circle { 1.0_f32 } else { 0.0_f32 };
-                // Override blip colour for the currently-locked target, if any.
-                // The widget's optional `RadarTargetHighlight` carries the
-                // server-confirmed lock uuid; the blip's optional
-                // `RadarEntityUuid` carries its wire uuid. When both are
-                // present and match, render in highlight yellow.
-                let highlight_match = matches!(
-                    (target_highlight, blip_uuid),
-                    (Some(hl), Some(uuid)) if hl.0.as_deref() == Some(uuid.0.as_str())
-                );
                 let blip_color = if highlight_match {
                     Color::srgb(1.0, 0.85, 0.1)
                 } else {

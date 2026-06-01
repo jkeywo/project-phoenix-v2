@@ -154,3 +154,58 @@ entity = "Ironveil"
   [[trigger.action]]
   type = "load_world"
   path = "assets/worlds/btf_path_c.toml"
+
+# ── Aphelion Protocol arming — OR-composition (issue #404) ───────────────────
+#
+# The weapon arms when EITHER:
+#   A) Ironveil is destroyed (Ashrender executes contingency immediately), OR
+#   B) 600 seconds elapse without Ironveil being destroyed (Ashrender proceeds
+#      on schedule).
+#
+# Both triggers attempt to set_flag aphelion_armed. FlagStore.set_flag is
+# idempotent: the false→true transition fires only once, so the on_flag_set
+# trigger below fires exactly once regardless of which path arms the weapon.
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "Ironveil"
+
+  [[trigger.action]]
+  type = "set_flag"
+  name = "aphelion_armed"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-ironveil-destroyed"
+  text      = "I.V. Ironveil destroyed. Ashrender executing contingency — Aphelion Protocol armed."
+  mandatory = false
+
+# 600-second fallback: only fires if Ironveil was not already destroyed.
+[[trigger]]
+condition  = "on_timer"
+after_secs = 600.0
+when       = "not flag(aphelion_armed)"
+
+  [[trigger.action]]
+  type = "set_flag"
+  name = "aphelion_armed"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-protocol-timer"
+  text      = "Aphelion Protocol armed on schedule — Ashrender is charging the weapon."
+  mandatory = false
+
+# React to aphelion_armed being set (from either path above).
+[[trigger]]
+condition = "on_flag_set"
+name      = "aphelion_armed"
+
+  [[trigger.action]]
+  type  = "set_ai_state"
+  entity = "Ashrender"
+  state = "attacking"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_aphelion_protocol.toml"

@@ -2,7 +2,7 @@ tags = ["ship", "npc"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
 [hull]
-captain_chair = 200.0
+captain_chair = 400.0
 
 [collider]
 shape = "Capsule"
@@ -27,14 +27,3 @@ name = "attacking"
 kind = "attacking"
 maintain_range = 120.0
 target_speed = 0.8
-
-[[behaviour.transition]]
-from = "idle"
-condition = "enemy_in_range"
-radius = 300.0
-to = "attacking"
-
-[[behaviour.transition]]
-from = "idle"
-condition = "on_attacked"
-to = "attacking"

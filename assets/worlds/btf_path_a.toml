@@ -1,0 +1,82 @@
+# btf_path_a.toml — Diplomat branch: Administrator Chen + Dr. Varen's escape pod
+# Loaded when the crew hails Axiom Station (root world trigger: on_hailed Axiom Station).
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+
+# Case A: path_a loaded AFTER Ironveil was already destroyed.
+# The root world sets parent:ironveil_destroyed; on_world_loaded fires immediately
+# with the current flag value.
+[[trigger]]
+condition = "on_world_loaded"
+when      = "flag(parent:ironveil_destroyed)"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/station_outpost.toml"
+  name          = "Varen Escape Pod"
+  position      = [200.0, 0.0, -100.0]
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-rescue-varen"
+  text      = "Rescue Dr. Varen's escape pod from the inner asteroid belt."
+  mandatory = false
+
+# Case B: path_a loaded BEFORE Ironveil is destroyed.
+# on_flag_set fires in the tick when the root world sets ironveil_destroyed.
+[[trigger]]
+condition = "on_flag_set"
+name      = "parent:ironveil_destroyed"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/station_outpost.toml"
+  name          = "Varen Escape Pod"
+  position      = [200.0, 0.0, -100.0]
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-rescue-varen"
+  text      = "Rescue Dr. Varen's escape pod from the inner asteroid belt."
+  mandatory = false
+
+# ── Comms templates ───────────────────────────────────────────────────────────
+
+[[comms]]
+from    = "Axiom Station"
+trigger = "on_world_loaded"
+entity  = "Axiom Station"
+message = "Ardent, Administrator Chen here. Thank you for responding. Dr. Sol Varen — the Alliance's lead negotiator — disappeared three hours ago. They were due to transmit the final accord terms. The Harrow patrol, I.V. Ironveil, has been operating in restricted space near their last known position. I cannot reach Varen and I suspect Ironveil knows why."
+
+  [[comms.response]]
+  text = "We will investigate Ironveil's patrol route."
+
+    [[comms.response.action]]
+    type      = "add_objective"
+    id        = "obj-investigate-ironveil"
+    text      = "Investigate I.V. Ironveil's patrol route near the inner asteroid belt."
+    mandatory = false
+
+  [[comms.response]]
+  text = "Is Ironveil actively hostile?"
+
+    [comms.response.follow_up]
+    message = "Their transponder data shows them holding position near the inner belt, running active sensors. They haven't fired on anything yet, but they're not patrolling normally — they're watching for something. Or someone. If Varen is alive out there, Ironveil knows exactly where they are."
+
+      [[comms.response.follow_up.response]]
+      text = "Understood. We'll deal with Ironveil."
+
+        [[comms.response.follow_up.response.action]]
+        type      = "add_objective"
+        id        = "obj-investigate-ironveil"
+        text      = "Investigate I.V. Ironveil's patrol route near the inner asteroid belt."
+        mandatory = false
+
+[[comms]]
+from    = "Axiom Station"
+trigger = "on_destroyed"
+entity  = "Ironveil"
+message = "Ardent — we're picking up an escape pod distress signal from the inner asteroid belt. Life signs confirmed. That has to be Varen. Get to them before the debris closes in."
+
+  [[comms.response]]
+  text = "On our way."

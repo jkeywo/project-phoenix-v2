@@ -1,0 +1,192 @@
+# btf_aphelion_protocol.toml — Aphelion Protocol finale sub-world
+#
+# Loaded by before_the_fire.toml when the `aphelion_armed` flag is set.
+# Ashrender is already set to attacking by the root-world trigger.
+#
+# Four endings are available:
+#   FIGHT      — destroy Ashrender (on_destroyed Ashrender)
+#   EVACUATE   — coordinate evacuation with Axiom Station (three-round dialogue
+#                + on_timer at 300 s gated by evacuation_rounds counter)
+#   CONTAINMENT — hold position in the Radiation Zone for 30 s
+#                (on_entered_region sets flag; on_timer at 30 s checks it)
+#   REQUIEM OVERRIDE — hail Requiem Courier and accept the abort code
+
+# ── Entities ──────────────────────────────────────────────────────────────────
+
+[[entity]]
+template_path = "assets/entities/region_radiation_zone.toml"
+name          = "Radiation Zone"
+transform     = { position = [620.0, 0.0, -380.0] }
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+
+# Issue #405 — finale objective on world load
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-finale"
+  text      = "Aphelion Protocol armed. Choose your response: Fight, Evacuate, Contain, or Override."
+  mandatory = true
+
+# Issue #406 — FIGHT ending: destroy Ashrender
+[[trigger]]
+condition = "on_destroyed"
+entity    = "Ashrender"
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "PARTIAL DETONATION — The Aphelion weapon discharged on Ashrender's destruction, triggering a partial resonance cascade. Axiom Station sustained heavy structural damage. The quantum interference zone has formed — smaller than planned, but permanent. It will grow over decades. In 35 years it will be called the Neutral Zone.\n\nHarrow High Command issued a communiqué within hours: an Alliance warship destroyed an Imperium vessel in the Axiom System during peace negotiations. The A.E.V. Ardent is named. The war begins not with a declaration but with a press release.\n\nThe Neutral Zone exists because you fought.\n\nEND: FIGHT"
+
+# Issue #408 — CONTAINMENT: enter the Radiation Zone to begin survival window
+[[trigger]]
+condition = "on_entered_region"
+entity    = "Radiation Zone"
+
+  [[trigger.action]]
+  type = "set_flag"
+  name = "containment_started"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-containment"
+  text      = "Containment position held. Survive 30 seconds in the radiation discharge zone."
+  mandatory = false
+
+# Issue #408 — CONTAINMENT: 30-second survival window fires game_over
+# (crew must enter the zone within the first 30 s of this sub-world loading)
+[[trigger]]
+condition  = "on_timer"
+after_secs = 30.0
+when       = "flag(containment_started)"
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "CONTAINMENT HELD — Ardent absorbed the weapon's discharge. Hull integrity critical; multiple console failures. The quantum resonance was partially contained — the interference zone formed but smaller than projected.\n\nAxiom Station survived. Kaleth Prime sustained atmospheric disturbance but no population loss. The A.E.V. Ardent limped to Axiom Station under emergency power. Three crew were lost to hull breach. The rest received commendations they never spoke about.\n\nThe Neutral Zone exists because you stood in the way.\n\nEND: CONTAINMENT"
+
+# Issue #407 — EVACUATE: full evacuation game_over (all three rounds complete)
+[[trigger]]
+condition  = "on_timer"
+after_secs = 300.0
+when       = "counter(parent:evacuation_rounds) >= 3"
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "EVACUATION COMPLETE — The weapon fired. Axiom Station and the Kaleth Prime orbital platforms were destroyed. But 70% of the civilian population reached safety. The quantum interference zone formed as predicted.\n\nStarcorp Command's official account credits the A.E.V. Ardent with saving an estimated 28 million lives. Your name appears in the historical record not as the crew that stopped the war, but as the crew that made it survivable.\n\nThe Neutral Zone exists because you chose people over victory.\n\nEND: EVACUATE"
+
+# Issue #407 — EVACUATE: partial evacuation game_over (at least one round, fewer than three)
+[[trigger]]
+condition  = "on_timer"
+after_secs = 300.0
+when       = "counter(parent:evacuation_rounds) >= 1 and not counter(parent:evacuation_rounds) >= 3"
+
+  [[trigger.action]]
+  type    = "game_over"
+  message = "PARTIAL EVACUATION — The weapon fired. Casualties were reduced but not minimised. The quantum interference zone formed.\n\nYou saved some of them. The records note the partial evacuation effort.\n\nThe Neutral Zone exists.\n\nEND: EVACUATE (PARTIAL)"
+
+# ── Comms templates ───────────────────────────────────────────────────────────
+
+# Issue #405 — Ashrender's warning transmission (on world load, no responses)
+[[comms]]
+from    = "Ashrender"
+trigger = "on_world_loaded"
+entity  = "Ashrender"
+message = "This is I.V. Ashrender to A.E.V. Ardent. The Aphelion Protocol is armed and charging. You cannot stop this. What you choose to do in the next ten minutes will determine which side history blames. Stand clear."
+
+# Issue #405 — Starcorp Command urgent order (on world load, no responses)
+[[comms]]
+from    = "Starcorp Command"
+trigger = "on_world_loaded"
+message = "Ardent, this is Starcorp Command — FLASH priority. Aphelion Protocol confirmed active. You are hereby ordered to stand down and withdraw immediately. Do NOT engage Harrow forces. We cannot afford an incident. Command out."
+
+# Issue #405 — Requiem House encrypted offer (on world load, no responses)
+# The actual override exchange is handled by the on_hailed comms below.
+[[comms]]
+from    = "Requiem Courier"
+trigger = "on_world_loaded"
+entity  = "Requiem Courier"
+message = "This is the channel you were told to stand by for. We have the weapon's abort code. One accepted exchange and Ashrender cannot fire. There will be consequences for us — but the weapon will not fire. Your move, Ardent."
+
+# Issue #407 — Axiom Station evacuation: three-round dialogue via nested follow-ups.
+# Round 1 fires when the crew hails Axiom Station; rounds 2 and 3 are chained
+# as follow-up nodes within the same dialogue session so the evacuation_rounds
+# counter can be incremented correctly without requiring schema-level comms gating.
+[[comms]]
+from    = "Axiom Station"
+trigger = "on_hailed"
+entity  = "Axiom Station"
+message = "Ardent, we've received the evacuation order. We're beginning to load the shuttles but we need navigation vectors — Helm, plot us an escape route away from the weapon's axis of fire. Science, we need atmospheric dispersal models for Kaleth Prime's eastern continent evacuation. Acknowledge."
+
+  [[comms.response]]
+  text = "Vectors confirmed. Initiating evacuation coordination — round one."
+
+    [[comms.response.action]]
+    type = "increment_flag"
+    name = "evacuation_rounds"
+    by   = 1
+
+    [[comms.response.action]]
+    type      = "add_objective"
+    id        = "obj-evacuate-r1"
+    text      = "Evacuation round 1 complete. Hail Axiom Station for the next vector."
+    mandatory = false
+
+    [comms.response.follow_up]
+    message = "First vector confirmed. We have 40% of the civilian population moving. We need two more vectors before the weapon fires. Round two — deep colony vectors and sub-orbital trajectories for the northern settlements. Helm, compensate for the interference zone forming on the starboard approach."
+
+      [[comms.response.follow_up.response]]
+      text = "Round two vectors transmitted."
+
+        [[comms.response.follow_up.response.action]]
+        type = "increment_flag"
+        name = "evacuation_rounds"
+        by   = 1
+
+        [[comms.response.follow_up.response.action]]
+        type      = "add_objective"
+        id        = "obj-evacuate-r2"
+        text      = "Evacuation round 2 complete. One more vector needed."
+        mandatory = false
+
+        [comms.response.follow_up.response.follow_up]
+        message = "Second vector confirmed. We're at 70% evacuation capacity. Final vector — the weapon is nearly charged. Whatever happens in the next few minutes, Ardent, you've saved most of them. Transmit the final trajectory and we'll execute."
+
+          [[comms.response.follow_up.response.follow_up.response]]
+          text = "Final vector transmitted. Evacuation complete."
+
+            [[comms.response.follow_up.response.follow_up.response.action]]
+            type = "increment_flag"
+            name = "evacuation_rounds"
+            by   = 1
+
+            [[comms.response.follow_up.response.follow_up.response.action]]
+            type      = "add_objective"
+            id        = "obj-evacuate-r3"
+            text      = "Evacuation complete. Casualties minimised."
+            mandatory = false
+
+# Issue #409 — Requiem Override: hail the Requiem Courier to accept the abort code
+[[comms]]
+from    = "Requiem Courier"
+trigger = "on_hailed"
+entity  = "Requiem Courier"
+message = "Confirm: you are accepting the override channel. Once you acknowledge, we transmit the abort code and Ashrender cannot fire. But Harrow will know we helped you. They will come for us. This is the price of doing the right thing at the wrong time. Confirm acceptance."
+
+  [[comms.response]]
+  text = "Confirmed. Transmit the abort code."
+
+    [[comms.response.action]]
+    type = "set_flag"
+    name = "requiem_override_accepted"
+
+    [[comms.response.action]]
+    type   = "destroy_entity"
+    entity = "Requiem Courier"
+
+    [[comms.response.action]]
+    type    = "game_over"
+    message = "REQUIEM OVERRIDE — The abort code was transmitted. Ashrender's weapon discharge sequence terminated. I.V. Ashrender stands down.\n\nWithin minutes, Harrow warships arrived in the Axiom System. The Requiem courier was destroyed. House Requiem was denounced as traitors to the Imperium. High Executor Veth Harrow had the casus belli he needed — not a weapon discharge, but an act of treachery.\n\nThe war began differently. It began the same.\n\nThe quantum resonance from Ashrender's aborted charge left a sub-harmonic scar in the system's spatial fabric. Smaller than the full discharge would have created. But permanent. In 35 years, navigators will notice something strange about this region of space.\n\nThe Neutral Zone exists because a deal was made.\n\nEND: REQUIEM OVERRIDE"
+
+  [[comms.response]]
+  text = "We need more time. Stand by."

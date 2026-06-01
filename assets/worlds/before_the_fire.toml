@@ -1,0 +1,219 @@
+# Before the Fire — Axiom System scenario
+#
+# The player arrives in the Axiom System to investigate a distress signal.
+# Ashrender (a Harrow Warhawk-class warship) is dormant near the nebula until
+# activated by a world trigger. The Requiem Courier carries a cryptic warning.
+
+[global]
+seed = 399
+
+[ambient_light]
+color      = [0.55, 0.55, 0.65]
+brightness = 280.0
+
+[anchors]
+ship_start         = [0.0,   0.0,   0.0]
+axiom_station      = [350.0, 0.0,  50.0]
+research_outpost   = [-100.0, 0.0, 450.0]
+requiem_courier    = [-230.0, 0.0, -80.0]
+ironveil_patrol_a  = [180.0, 0.0, -160.0]
+ironveil_patrol_b  = [320.0, 0.0, -280.0]
+ashrender_start    = [620.0, 0.0, -380.0]
+nebula_center      = [680.0, 0.0, -440.0]
+escape_pod_spawn   = [200.0, 0.0, -100.0]
+
+# ── Static map entities ───────────────────────────────────────────────────────
+
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_belt_axiom.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+transform = { position = [250.0, 0.0, 300.0] }
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+id = "player-ship"
+transform = { anchor = "ship_start" }
+spawn_on = "game_start"
+
+# ── Named entities (trigger / comms-eligible) ────────────────────────────────
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "Axiom Station"
+transform = { anchor = "axiom_station" }
+
+[[entity]]
+template_path = "assets/entities/station_research_outpost.toml"
+name = "Research Outpost"
+transform = { anchor = "research_outpost" }
+
+[[entity]]
+template_path = "assets/entities/ship_requiem_courier.toml"
+name = "Requiem Courier"
+transform = { anchor = "requiem_courier" }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "Ironveil"
+transform = { anchor = "ironveil_patrol_a" }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_warhawk.toml"
+name = "Ashrender"
+transform = { anchor = "ashrender_start" }
+
+[[entity]]
+template_path = "assets/entities/region_kaleth_nebula.toml"
+name = "Kaleth Nebula"
+transform = { anchor = "nebula_center" }
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-investigate"
+  text      = "Investigate the situation in the Axiom System."
+  mandatory = true
+
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-hail-briefing"
+  text      = "Hail Axiom Station or Research Outpost for a briefing."
+  mandatory = false
+
+# ── Opening twin comms (on_world_loaded) ─────────────────────────────────────
+
+[[comms]]
+from = "Starcorp Command"
+trigger = "on_world_loaded"
+message = """A.E.V. Ardent, this is Starcorp Command. You are ordered to \
+proceed to the Axiom System immediately. Harrow vessels have been observed \
+acting outside normal patrol parameters. Investigate and report. \
+Do not engage unless fired upon. Command out."""
+
+[[comms]]
+from = "Axiom Station"
+trigger = "on_world_loaded"
+entity = "Axiom Station"
+message = """This is Axiom Station to any Alliance vessel — we have a situation. \
+Our lead negotiator, Dr. Sol Varen, has gone missing. Their last confirmed \
+position puts them near the Harrow patrol operating area. The peace talks \
+cannot continue without them. Please respond."""
+
+  [[comms.response]]
+  text = "Understood, Axiom Station. We are proceeding to your location."
+
+  [[comms.response]]
+  text = "Axiom Station, do you know where the Harrow patrol is operating?"
+    [comms.response.follow_up]
+    message = "The Harrow patrol — I.V. Ironveil — was last observed near the inner asteroid belt, between our position and the outer system. They have not responded to our hails. I don't know what they're waiting for, but Dr. Varen is somewhere near their patrol route."
+
+# ── Comms templates ──────────────────────────────────────────────────────────
+
+[[comms]]
+from    = "Requiem Courier"
+trigger = "on_hailed"
+entity  = "Requiem Courier"
+message = "This channel is not secure. We know what Ashrender carries. When the time comes, there may be an alternative. Stand by."
+
+# ── Branch loading triggers (single-shot, fired on first hail) ────────────────
+
+[[trigger]]
+condition = "on_hailed"
+entity = "Axiom Station"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_path_a.toml"
+
+[[trigger]]
+condition = "on_hailed"
+entity = "Research Outpost"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_path_b.toml"
+
+[[trigger]]
+condition = "on_attacked"
+entity = "Ironveil"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_path_c.toml"
+
+# ── Aphelion Protocol arming — OR-composition (issue #404) ───────────────────
+#
+# The weapon arms when EITHER:
+#   A) Ironveil is destroyed (Ashrender executes contingency immediately), OR
+#   B) 600 seconds elapse without Ironveil being destroyed (Ashrender proceeds
+#      on schedule).
+#
+# Both triggers attempt to set_flag aphelion_armed. FlagStore.set_flag is
+# idempotent: the false→true transition fires only once, so the on_flag_set
+# trigger below fires exactly once regardless of which path arms the weapon.
+
+[[trigger]]
+condition = "on_destroyed"
+entity    = "Ironveil"
+
+  [[trigger.action]]
+  type = "set_flag"
+  name = "ironveil_destroyed"
+
+  [[trigger.action]]
+  type = "set_flag"
+  name = "aphelion_armed"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-ironveil-destroyed"
+  text      = "I.V. Ironveil destroyed. Ashrender executing contingency — Aphelion Protocol armed."
+  mandatory = false
+
+# 600-second fallback: only fires if Ironveil was not already destroyed.
+[[trigger]]
+condition  = "on_timer"
+after_secs = 600.0
+when       = "not flag(aphelion_armed)"
+
+  [[trigger.action]]
+  type = "set_flag"
+  name = "aphelion_armed"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-protocol-timer"
+  text      = "Aphelion Protocol armed on schedule — Ashrender is charging the weapon."
+  mandatory = false
+
+# React to aphelion_armed being set (from either path above).
+[[trigger]]
+condition = "on_flag_set"
+name      = "aphelion_armed"
+
+  [[trigger.action]]
+  type  = "set_ai_state"
+  entity = "Ashrender"
+  state = "attacking"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_aphelion_protocol.toml"
+
+# Issue #410 — Save checkpoint intent (no-op until PRD #116 save/load is implemented).
+# When PRD #116 lands, insert a `save_checkpoint` action here (on_flag_set aphelion_armed)
+# so the game auto-saves before the finale. No TOML schema change needed now.

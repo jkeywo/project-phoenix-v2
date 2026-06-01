@@ -3,9 +3,30 @@
 
 # ── Triggers ──────────────────────────────────────────────────────────────────
 
+# Case A: path_a loaded AFTER Ironveil was already destroyed.
+# The root world sets parent:ironveil_destroyed; on_world_loaded fires immediately
+# with the current flag value.
 [[trigger]]
-condition = "on_destroyed"
-entity    = "Ironveil"
+condition = "on_world_loaded"
+when      = "flag(parent:ironveil_destroyed)"
+
+  [[trigger.action]]
+  type          = "spawn_entity"
+  template_path = "assets/entities/station_outpost.toml"
+  name          = "Varen Escape Pod"
+  position      = [200.0, 0.0, -100.0]
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-rescue-varen"
+  text      = "Rescue Dr. Varen's escape pod from the inner asteroid belt."
+  mandatory = false
+
+# Case B: path_a loaded BEFORE Ironveil is destroyed.
+# on_flag_set fires in the tick when the root world sets ironveil_destroyed.
+[[trigger]]
+condition = "on_flag_set"
+name      = "parent:ironveil_destroyed"
 
   [[trigger.action]]
   type          = "spawn_entity"

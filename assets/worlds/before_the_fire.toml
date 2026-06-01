@@ -172,6 +172,10 @@ entity    = "Ironveil"
 
   [[trigger.action]]
   type = "set_flag"
+  name = "ironveil_destroyed"
+
+  [[trigger.action]]
+  type = "set_flag"
   name = "aphelion_armed"
 
   [[trigger.action]]
@@ -209,3 +213,7 @@ name      = "aphelion_armed"
   [[trigger.action]]
   type = "load_world"
   path = "assets/worlds/btf_aphelion_protocol.toml"
+
+# Issue #410 — Save checkpoint intent (no-op until PRD #116 save/load is implemented).
+# When PRD #116 lands, insert a `save_checkpoint` action here (on_flag_set aphelion_armed)
+# so the game auto-saves before the finale. No TOML schema change needed now.

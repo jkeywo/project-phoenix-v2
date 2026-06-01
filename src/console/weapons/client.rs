@@ -822,7 +822,7 @@ fn on_fire_torpedo_pressed(
     if !is_tube_loaded(&sim, &tube) || sim.torpedo_count == 0 {
         return;
     }
-    outbound.write(OutboundClientMessage(fire_torpedo_message(tube, None)));
+    outbound.write(OutboundClientMessage(fire_torpedo_message(tube, sim.current_target_uuid.clone())));
 }
 
 // â”€â”€ Phaser refresh system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1154,6 +1154,29 @@ mod tests {
         assert_eq!(msg, ClientMessage::FireTorpedo {
             tube: "aft".to_string(),
             target_uuid: Some("uuid-1".into()),
+        });
+    }
+
+    #[test]
+    fn fire_torpedo_carries_current_target_uuid() {
+        // on_fire_torpedo_pressed passes sim.current_target_uuid — verify the
+        // fire_torpedo_message builder threads it through correctly.
+        use crate::messages::ClientMessage;
+        let msg = fire_torpedo_message("fore_port".to_string(), Some("enemy-1".into()));
+        assert_eq!(msg, ClientMessage::FireTorpedo {
+            tube: "fore_port".to_string(),
+            target_uuid: Some("enemy-1".into()),
+        });
+    }
+
+    #[test]
+    fn fire_torpedo_with_no_current_target_sends_none() {
+        // Dumb-fire (no current target) still works.
+        use crate::messages::ClientMessage;
+        let msg = fire_torpedo_message("fore_port".to_string(), None);
+        assert_eq!(msg, ClientMessage::FireTorpedo {
+            tube: "fore_port".to_string(),
+            target_uuid: None,
         });
     }
 

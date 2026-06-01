@@ -522,6 +522,31 @@ mod tests {
     }
 
     #[test]
+    fn torpedo_target_uuid_locked_at_launch_and_never_updated() {
+        // Fire at "target-a". Then tick with positions for both "target-a"
+        // (far right) and a new "target-b" (straight ahead). The torpedo must
+        // keep homing toward "target-a", never re-routing to "target-b", and
+        // its stored target_uuid must remain "target-a" throughout.
+        let mut sys = default_system();
+        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("target-a".into()), None);
+        let mut targets = HashMap::new();
+        targets.insert("target-a".into(), (100.0_f32, 0.0_f32)); // hard right
+        targets.insert("target-b".into(), (0.0_f32, -100.0_f32)); // straight ahead
+
+        let h0 = sys.in_flight[0].heading;
+        sys.tick(0.1, &targets);
+
+        // The torpedo must have turned right (toward target-a), not stayed straight.
+        assert!(sys.in_flight[0].heading > h0, "should home toward target-a (rightward turn)");
+        // The stored target_uuid is still "target-a".
+        assert_eq!(
+            sys.in_flight[0].target_uuid.as_deref(),
+            Some("target-a"),
+            "target_uuid must not change after launch"
+        );
+    }
+
+    #[test]
     fn torpedo_expires_after_lifespan() {
         let mut config = TorpedoConfig::default();
         config.lifespan = 5.0;

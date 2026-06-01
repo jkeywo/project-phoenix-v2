@@ -94,6 +94,33 @@ condition = "on_world_loaded"
   text      = "Hail Axiom Station or Research Outpost for a briefing."
   mandatory = false
 
+# ── Opening twin comms (on_world_loaded) ─────────────────────────────────────
+
+[[comms]]
+from = "Starcorp Command"
+trigger = "on_world_loaded"
+message = """A.E.V. Ardent, this is Starcorp Command. You are ordered to \
+proceed to the Axiom System immediately. Harrow vessels have been observed \
+acting outside normal patrol parameters. Investigate and report. \
+Do not engage unless fired upon. Command out."""
+
+[[comms]]
+from = "Axiom Station"
+trigger = "on_world_loaded"
+entity = "Axiom Station"
+message = """This is Axiom Station to any Alliance vessel — we have a situation. \
+Our lead negotiator, Dr. Sol Varen, has gone missing. Their last confirmed \
+position puts them near the Harrow patrol operating area. The peace talks \
+cannot continue without them. Please respond."""
+
+  [[comms.response]]
+  text = "Understood, Axiom Station. We are proceeding to your location."
+
+  [[comms.response]]
+  text = "Axiom Station, do you know where the Harrow patrol is operating?"
+    [comms.response.follow_up]
+    message = "The Harrow patrol — I.V. Ironveil — was last observed near the inner asteroid belt, between our position and the outer system. They have not responded to our hails. I don't know what they're waiting for, but Dr. Varen is somewhere near their patrol route."
+
 # ── Comms templates ──────────────────────────────────────────────────────────
 
 [[comms]]
@@ -101,3 +128,29 @@ from    = "Requiem Courier"
 trigger = "on_hailed"
 entity  = "Requiem Courier"
 message = "This channel is not secure. We know what Ashrender carries. When the time comes, there may be an alternative. Stand by."
+
+# ── Branch loading triggers (single-shot, fired on first hail) ────────────────
+
+[[trigger]]
+condition = "on_hailed"
+entity = "Axiom Station"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_path_a.toml"
+
+[[trigger]]
+condition = "on_hailed"
+entity = "Research Outpost"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_path_b.toml"
+
+[[trigger]]
+condition = "on_attacked"
+entity = "Ironveil"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_path_c.toml"

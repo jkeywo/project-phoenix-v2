@@ -78,6 +78,11 @@ pub struct WorldContentRuntime {
 /// the message lands in the inbox (belt-and-braces against future refactors
 /// that bypass the broadcast stamp pass).
 fn current_sender_in_range(runtime: &WorldContentRuntime, sender_uuid: &str) -> bool {
+    // Synthetic senders (not a real UUID4 — e.g. "_self", "Starcorp Command") are
+    // always readable: they have no physical entity to range-check against.
+    if uuid::Uuid::parse_str(sender_uuid).is_err() {
+        return true;
+    }
     match runtime.range_flags.get(sender_uuid).copied() {
         Some(flag) => flag,
         None => !runtime.range_active,
@@ -1455,10 +1460,12 @@ fn broadcast_comms_state(
         if let Some(flag) = runtime.range_flags.get(&m.sender_uuid).copied() {
             m.sender_in_range = flag;
         } else if runtime.range_active {
-            // Range tracking is on but this sender has no flag entry â€” the
-            // entity has been despawned or never had a `[comms]` block.
-            // Treat as out of range so clients hide the response controls.
-            m.sender_in_range = false;
+            // Synthetic senders (non-UUID ids like "_self", "Starcorp Command")
+            // are always readable — they have no physical entity to range-check.
+            if uuid::Uuid::parse_str(&m.sender_uuid).is_ok() {
+                m.sender_in_range = false;
+            }
+            // else: leave sender_in_range = true for synthetic senders
         }
     }
     let objectives_snap = objectives.0.sorted_snapshots();
@@ -1556,7 +1563,14 @@ fn handle_ai_events(
     );
     for fc in fired_comms {
         let msg_id = uuid::Uuid::new_v4().to_string();
-        let sender_name = fc.from.clone();
+        // `_self` is the reserved synthetic internal-sender name; render it as
+        // "Internal Report" in the comms UI so the crew sees a ship-generated
+        // intelligence summary rather than a literal "_self" sender label.
+        let sender_name = if fc.from == "_self" {
+            "Internal Report".to_string()
+        } else {
+            fc.from.clone()
+        };
         let sender_uuid = name_to_uuid
             .get(&fc.from)
             .cloned()
@@ -4789,7 +4803,9 @@ entity = "layer_npc"
         use crate::entities::spawner::EntityUuid;
         use crate::simulation::Ship;
 
-        let station_uuid = "station-despawn";
+        // Use a real UUID4 so the non-UUID synthetic-sender exception introduced
+        // for `_self` / "Starcorp Command" does not suppress the range flip.
+        let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456789";
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 

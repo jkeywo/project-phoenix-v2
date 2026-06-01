@@ -131,6 +131,11 @@ pub const WAYPOINT_ARRIVAL_RADIUS: f32 = 20.0;
 pub const PATROL_DEADBAND_RAD: f32 = 0.05;
 /// Angular error at which steering saturates to ±1.
 pub const PATROL_FULL_STEER_RAD: f32 = PI / 4.0;
+/// Extra clearance (world units) added on top of the sum of radii for both
+/// target-approach offsetting and predictive collision avoidance.
+const AVOIDANCE_BUFFER: f32 = 5.0;
+/// Look-ahead horizon (seconds) for predictive collision avoidance.
+const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
 
 // ── AiInput ───────────────────────────────────────────────────────────────────
 
@@ -211,7 +216,7 @@ impl AiController {
 // ── WorldView ─────────────────────────────────────────────────────────────────
 
 /// A visible entity in the AI's world view.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AiWorldEntity {
     /// Stable UUID of the entity.
     pub uuid: Uuid,
@@ -225,6 +230,10 @@ pub struct AiWorldEntity {
     pub hull_fraction: Option<f32>,
     /// Yaw in radians (Y-up, forward = -Z at yaw 0), if known.
     pub yaw: Option<f32>,
+    /// Physical radius of the entity (world units) used for collision avoidance.
+    pub radius: f32,
+    /// Current forward speed of the entity (world units/s) used for predictive avoidance.
+    pub forward_speed: f32,
 }
 
 /// A read-only snapshot of world state visible to the AI.
@@ -256,6 +265,8 @@ pub struct WorldView {
     /// Set to `true` when the current scenario is being unloaded.
     /// Causes `on_scenario_unloaded` transitions to fire.
     pub scenario_unloaded: bool,
+    /// Physical radius of this AI entity (world units), used for collision avoidance.
+    pub self_radius: f32,
 }
 
 // ── AiTickOutput ─────────────────────────────────────────────────────────────
@@ -319,7 +330,117 @@ pub fn steer_toward(yaw: f32, target_dir: [f32; 2], deadband_rad: f32, full_stee
     ratio.clamp(-1.0, 1.0)
 }
 
-// ── tick ──────────────────────────────────────────────────────────────────────
+// ── Collision avoidance helpers ───────────────────────────────────────────────
+
+/// Returns the nav point the AI should steer toward when approaching `target_pos`.
+///
+/// Instead of flying into the target's center the AI aims for a point on the
+/// boundary sphere at distance `min_dist` from `target_pos`, measured along the
+/// current approach vector.  When the AI is already inside that boundary the
+/// returned point is the nearest boundary point (so the AI steers *away*).
+///
+/// `min_dist` should be `self_radius + target_radius + AVOIDANCE_BUFFER`.
+fn offset_approach_target(self_pos: [f32; 3], target_pos: [f32; 3], min_dist: f32) -> [f32; 3] {
+    let dx = self_pos[0] - target_pos[0];
+    let dz = self_pos[2] - target_pos[2];
+    let dist = (dx * dx + dz * dz).sqrt();
+    if dist < 1.0 {
+        // Directly on top — return a point directly ahead of self; caller handles it.
+        return target_pos;
+    }
+    // Unit vector from target toward self.
+    let inv_dist = 1.0 / dist;
+    let ux = dx * inv_dist;
+    let uz = dz * inv_dist;
+    // Nav point = target center + unit_toward_self * min_dist
+    [
+        target_pos[0] + ux * min_dist,
+        target_pos[1],
+        target_pos[2] + uz * min_dist,
+    ]
+}
+
+/// Computes a proportional avoidance steering correction in `[-1, 1]`.
+///
+/// For each entity in `world_entities` (excluding `excluded_uuid`) the function
+/// projects both the AI's position and the entity's position forward by
+/// `AVOIDANCE_LOOK_AHEAD_SECS` using their respective headings and speeds.
+/// If the projected separation is less than the combined avoidance radius
+/// (`self_radius + entity.radius + AVOIDANCE_BUFFER`) the entity is a threat.
+///
+/// The direction of the correction is determined by the signed lateral offset of
+/// the threat's projected position relative to the AI's heading (using a 2-D
+/// cross product):
+/// - Threat is to the **right** → steer **left** (negative)
+/// - Threat is to the **left** → steer **right** (positive)
+///
+/// The avoidance contribution from each threat is proportional to penetration
+/// depth:
+///
+/// ```text
+/// threat_fraction = 1 − (projected_dist / avoidance_radius)   ∈ (0, 1]
+/// ```
+///
+/// Contributions are summed (preserving sign) and clamped to `[-1, 1]`.
+/// Returns `0.0` when no threats are detected.
+fn avoidance_steering(
+    self_pos: [f32; 3],
+    self_yaw: f32,
+    self_speed: f32,
+    self_radius: f32,
+    excluded_uuid: Uuid,
+    world_entities: &[AiWorldEntity],
+) -> f32 {
+    let fwd_x = self_yaw.sin();
+    let fwd_z = -self_yaw.cos();
+    let proj_self_x = self_pos[0] + fwd_x * self_speed * AVOIDANCE_LOOK_AHEAD_SECS;
+    let proj_self_z = self_pos[2] + fwd_z * self_speed * AVOIDANCE_LOOK_AHEAD_SECS;
+
+    let mut total_avoidance: f32 = 0.0;
+
+    for entity in world_entities {
+        if entity.uuid == excluded_uuid {
+            continue;
+        }
+        let avoidance_radius = self_radius + entity.radius + AVOIDANCE_BUFFER;
+
+        // Project the other entity forward using its yaw and forward_speed.
+        let (ent_proj_x, ent_proj_z) = if let Some(ent_yaw) = entity.yaw {
+            let ent_fwd_x = ent_yaw.sin();
+            let ent_fwd_z = -ent_yaw.cos();
+            (
+                entity.position[0] + ent_fwd_x * entity.forward_speed * AVOIDANCE_LOOK_AHEAD_SECS,
+                entity.position[2] + ent_fwd_z * entity.forward_speed * AVOIDANCE_LOOK_AHEAD_SECS,
+            )
+        } else {
+            // Static entity — use current position.
+            (entity.position[0], entity.position[2])
+        };
+
+        let ddx = proj_self_x - ent_proj_x;
+        let ddz = proj_self_z - ent_proj_z;
+        let proj_dist = (ddx * ddx + ddz * ddz).sqrt();
+
+        if proj_dist < avoidance_radius {
+            // Proportional: deepest penetration → strongest correction.
+            let threat_fraction = 1.0 - (proj_dist / avoidance_radius);
+
+            // Determine which side of the AI's heading the threat's projected
+            // position falls on using the 2-D cross product:
+            //   fwd × to_threat = fwd_x * to_threat_z - fwd_z * to_threat_x
+            // Positive → threat is to the right → steer left (subtract).
+            // Negative → threat is to the left  → steer right (add).
+            let to_x = ent_proj_x - proj_self_x;
+            let to_z = ent_proj_z - proj_self_z;
+            let cross = fwd_x * to_z - fwd_z * to_x;
+            // cross > 0 means threat is to the right; we steer left (negative).
+            let sign = if cross >= 0.0 { -1.0_f32 } else { 1.0_f32 };
+            total_avoidance += sign * threat_fraction;
+        }
+    }
+
+    total_avoidance.clamp(-1.0, 1.0)
+}
 
 /// Advance an AI controller by one tick.
 ///
@@ -405,9 +526,27 @@ fn tick_pursuing(
         };
     }
 
-    let inv_dist = 1.0 / dist;
-    let dir = [dx * inv_dist, dz * inv_dist];
-    let steering = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+    // Approach to the boundary of the target rather than its center.
+    let min_dist = world_view.self_radius + target_entity.radius + AVOIDANCE_BUFFER;
+    let nav_point = offset_approach_target(pos, target_entity.position, min_dist);
+    let ndx = nav_point[0] - pos[0];
+    let ndz = nav_point[2] - pos[2];
+    let nav_dist = (ndx * ndx + ndz * ndz).sqrt();
+
+    let inv_dist = 1.0 / nav_dist.max(0.001);
+    let dir = [ndx * inv_dist, ndz * inv_dist];
+    let base_steering = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+
+    // Blend in proportional avoidance from all nearby entities.
+    let avoid = avoidance_steering(
+        pos,
+        world_view.entity_yaw,
+        target_speed.abs(),
+        world_view.self_radius,
+        target_uuid,
+        &world_view.entities,
+    );
+    let steering = (base_steering + avoid).clamp(-1.0, 1.0);
 
     AiTickOutput {
         new_state: controller.current_state.clone(),
@@ -517,15 +656,33 @@ fn tick_attacking(
     let dz = target_entity.position[2] - pos[2];
     let dist = (dx * dx + dz * dz).sqrt();
 
+    // Minimum approach distance accounts for physical radii so the AI never
+    // tries to fly into the target's hull.
+    let min_dist = world_view.self_radius + target_entity.radius + AVOIDANCE_BUFFER;
+    let effective_range = maintain_range.max(min_dist);
+
     // Steer toward target always.
     let (steering, thrust) = if dist < 1.0 {
         (0.0_f32, 0.0_f32)
     } else {
-        let inv_dist = 1.0 / dist;
-        let dir = [dx * inv_dist, dz * inv_dist];
-        let s = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
-        // Thrust: 0 inside maintain_range, target_speed outside; never reverses.
-        let t = if dist <= maintain_range { 0.0 } else { target_speed };
+        let nav_point = offset_approach_target(pos, target_entity.position, min_dist);
+        let ndx = nav_point[0] - pos[0];
+        let ndz = nav_point[2] - pos[2];
+        let nav_dist = (ndx * ndx + ndz * ndz).sqrt();
+        let inv_dist = 1.0 / nav_dist.max(0.001);
+        let dir = [ndx * inv_dist, ndz * inv_dist];
+        let base_s = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+        let avoid = avoidance_steering(
+            pos,
+            world_view.entity_yaw,
+            target_speed.abs(),
+            world_view.self_radius,
+            target_uuid,
+            &world_view.entities,
+        );
+        let s = (base_s + avoid).clamp(-1.0, 1.0);
+        // Thrust: 0 inside effective orbit range, target_speed outside; never reverses.
+        let t = if dist <= effective_range { 0.0 } else { target_speed };
         (s, t)
     };
 
@@ -561,7 +718,7 @@ fn tick_fleeing(
     world_view: &WorldView,
     target_speed: f32,
 ) -> AiTickOutput {
-    let steering = if let Some(attacker_uuid) = controller.blackboard.last_attacker {
+    let base_steering = if let Some(attacker_uuid) = controller.blackboard.last_attacker {
         if let Some(attacker) = world_view.entities.iter().find(|e| e.uuid == attacker_uuid) {
             let pos = world_view.entity_pos;
             let dx = pos[0] - attacker.position[0]; // direction AWAY from attacker
@@ -580,6 +737,17 @@ fn tick_fleeing(
     } else {
         0.0 // no last_attacker, hold heading
     };
+
+    let pos = world_view.entity_pos;
+    let avoid = avoidance_steering(
+        pos,
+        world_view.entity_yaw,
+        target_speed.abs(),
+        world_view.self_radius,
+        controller.blackboard.last_attacker.unwrap_or(Uuid::nil()),
+        &world_view.entities,
+    );
+    let steering = (base_steering + avoid).clamp(-1.0, 1.0);
 
     AiTickOutput {
         new_state: controller.current_state.clone(),
@@ -863,10 +1031,19 @@ fn tick_patrolling(
         };
     }
 
-    // Steer toward waypoint
+    // Steer toward waypoint, blended with collision avoidance.
     let inv_dist = 1.0 / dist;
     let dir = [dx * inv_dist, dz * inv_dist];
-    let steering = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+    let base_steering = steer_toward(world_view.entity_yaw, dir, PATROL_DEADBAND_RAD, PATROL_FULL_STEER_RAD);
+    let avoid = avoidance_steering(
+        pos,
+        world_view.entity_yaw,
+        target_speed.abs(),
+        world_view.self_radius,
+        Uuid::nil(), // no target to exclude — all entities considered
+        &world_view.entities,
+    );
+    let steering = (base_steering + avoid).clamp(-1.0, 1.0);
 
     AiTickOutput {
         new_state: controller.current_state.clone(),
@@ -932,7 +1109,7 @@ mod tests {
 
     /// Construct a minimal `AiWorldEntity` with only required fields, rest defaulted.
     fn make_world_entity(uuid: Uuid, position: [f32; 3], faction: Option<Uuid>) -> AiWorldEntity {
-        AiWorldEntity { uuid, position, faction, shields: None, hull_fraction: None, yaw: None }
+        AiWorldEntity { uuid, position, faction, shields: None, hull_fraction: None, yaw: None, radius: 0.0, forward_speed: 0.0 }
     }
     fn fed_uuid() -> Uuid { Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap() }
     fn pirate_uuid() -> Uuid { Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000002").unwrap() }
@@ -1424,7 +1601,7 @@ mod tests {
         // Add a hostile entity within range
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![AiWorldEntity { uuid: enemy_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: enemy_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None, radius: 0.0, forward_speed: 0.0 }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1454,7 +1631,7 @@ mod tests {
         let registry = mutual_hostile_registry();
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![AiWorldEntity { uuid: pirate_id, position: [50.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: pirate_id, position: [50.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None, radius: 0.0, forward_speed: 0.0 }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1485,7 +1662,7 @@ mod tests {
         // Friendly = same faction as self
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![AiWorldEntity { uuid: friendly_id, position: [50.0, 0.0, 0.0], faction: Some(fed_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: friendly_id, position: [50.0, 0.0, 0.0], faction: Some(fed_uuid()) , shields: None, hull_fraction: None, yaw: None, radius: 0.0, forward_speed: 0.0 }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1514,7 +1691,7 @@ mod tests {
         let registry = mutual_hostile_registry();
         let world = WorldView {
             self_faction: Some(fed_uuid()),
-            entities: vec![AiWorldEntity { uuid: pirate_id, position: [200.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: pirate_id, position: [200.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None, radius: 0.0, forward_speed: 0.0 }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1560,7 +1737,7 @@ mod tests {
         let mut ctrl = pursuing_controller(Some(target_id), 0.8);
         ctrl.current_state_name = "chase".to_string();
         let world = WorldView {
-            entities: vec![AiWorldEntity { uuid: target_id, position: [100.0, 0.0, 0.0], faction: None, shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: target_id, position: [100.0, 0.0, 0.0], faction: None, shields: None, hull_fraction: None, yaw: None, radius: 0.0, forward_speed: 0.0 }],
             ..Default::default()
         };
         let behaviour = chase_behaviour_with_target_destroyed_to_patrol();
@@ -1616,7 +1793,7 @@ mod tests {
         let world = WorldView {
             self_faction: Some(fed_uuid()),
             attacker_this_tick: Some(attacker_id),
-            entities: vec![AiWorldEntity { uuid: attacker_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None }],
+            entities: vec![AiWorldEntity { uuid: attacker_id, position: [10.0, 0.0, 0.0], faction: Some(pirate_uuid()) , shields: None, hull_fraction: None, yaw: None, radius: 0.0, forward_speed: 0.0 }],
             ..Default::default()
         };
         let output = do_tick_with(&ctrl, &world, &behaviour, &registry);
@@ -1888,6 +2065,7 @@ mod tests {
                 ShieldFacingStatus { label: "Starboard".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
             ]),
             hull_fraction: Some(1.0),
+            ..Default::default()
         };
         let world = WorldView {
             entity_pos: [0.0, 0.0, 0.0],
@@ -1917,6 +2095,7 @@ mod tests {
                 ShieldFacingStatus { label: "Starboard".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
             ]),
             hull_fraction: Some(1.0),
+            ..Default::default()
         };
         let world = WorldView {
             entity_pos: [0.0, 0.0, 0.0],
@@ -1943,6 +2122,7 @@ mod tests {
                 ShieldFacingStatus { label: "Fore".into(), hp: 0, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
             ]),
             hull_fraction: Some(1.0),
+            ..Default::default()
         };
         let world = WorldView {
             entity_pos: [0.0, 0.0, 0.0],

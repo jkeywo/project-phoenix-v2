@@ -21,7 +21,7 @@ pub fn anchors_from_world_config(
 }
 
 use crate::ai::{AiController, AiTickOutput, WorldView, AiWorldEntity};
-use crate::entity_spawner::{BehaviourSection, EntityUuid};
+use crate::entity_spawner::{BehaviourSection, ColliderSection, EntityUuid};
 
 use crate::config_cache::FactionRegistryResource;
 
@@ -289,11 +289,12 @@ fn tick_ai_controllers(
         Option<&crate::entities::spawner::WeaponsConsoleSection>,
         Option<&EntityPhaserState>,
         Option<&crate::entities::spawner::HelmConsoleSection>,
+        Option<&ColliderSection>,
     )>,
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     faction_registry: Res<FactionRegistryResource>,
-    entity_query: Query<(&EntityUuid, &Transform, Option<&crate::entities::spawner::FactionComponent>, Option<&crate::entities::spawner::EntityConsoleHull>), Without<AiControllerComponent>>,
+    entity_query: Query<(&EntityUuid, &Transform, Option<&crate::entities::spawner::FactionComponent>, Option<&crate::entities::spawner::EntityConsoleHull>, Option<&ColliderSection>), Without<AiControllerComponent>>,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
     mut inbound: MessageWriter<crate::lobby::InboundMessage>,
     registry_res: Res<AiTokenRegistry>,
@@ -307,7 +308,7 @@ fn tick_ai_controllers(
     };
 
     // Collect world entities from all non-AI entities, including faction and hull if present.
-    let world_entities: Vec<AiWorldEntity> = entity_query.iter().map(|(uid, t, faction_comp, hull_comp)| {
+    let mut world_entities: Vec<AiWorldEntity> = entity_query.iter().map(|(uid, t, faction_comp, hull_comp, collider)| {
         AiWorldEntity {
             uuid: uuid::Uuid::parse_str(&uid.0).unwrap_or_default(),
             position: [t.translation.x, t.translation.y, t.translation.z],
@@ -318,13 +319,33 @@ fn tick_ai_controllers(
                 if max > 0.0 { Some(h.0.total_current() / max) } else { None }
             }),
             yaw: None,
+            radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+            forward_speed: 0.0,
         }
     }).collect();
+
+    // Also snapshot all AI-controlled entities so ships can avoid each other.
+    // This immutable pass MUST come before the mutable loop below; sequential
+    // borrows of the same Query are fine, simultaneous ones are not.
+    let ai_snapshots: Vec<AiWorldEntity> = query.iter().map(|(_, ctrl, t, _, _, _, _, _, _, _, _, collider)| {
+        let yaw = t.rotation.to_euler(EulerRot::YXZ).0;
+        AiWorldEntity {
+            uuid: uuid::Uuid::parse_str(&ctrl.entity_uuid).unwrap_or_default(),
+            position: [t.translation.x, t.translation.y, t.translation.z],
+            faction: None,
+            shields: None,
+            hull_fraction: None,
+            yaw: Some(yaw),
+            radius: collider.map(|c| c.0.radius).unwrap_or(0.0),
+            forward_speed: ctrl.forward_speed,
+        }
+    }).collect();
+    world_entities.extend(ai_snapshots);
 
     let dt = time.delta_secs();
     let sim_time = time.elapsed_secs_f64();
 
-    for (entity, mut ctrl, mut transform, behaviour, attacker_comp, self_faction_comp, unloaded_marker, hull_comp, weapons_section, phaser_state, helm_section) in &mut query {
+    for (entity, mut ctrl, mut transform, behaviour, attacker_comp, self_faction_comp, unloaded_marker, hull_comp, weapons_section, phaser_state, helm_section, collider_section) in &mut query {
         let pos = transform.translation;
         let yaw = transform.rotation.to_euler(EulerRot::YXZ).0;
 
@@ -369,7 +390,14 @@ fn tick_ai_controllers(
             entity_pos: [pos.x, pos.y, pos.z],
             entity_yaw: yaw,
             anchors: anchors.clone(),
-            entities: world_entities.clone(),
+            // Exclude self from the entity list — the AI shouldn't try to avoid itself.
+            entities: {
+                let self_uuid_str = &ctrl.entity_uuid;
+                world_entities.iter()
+                    .filter(|e| e.uuid.to_string() != *self_uuid_str)
+                    .cloned()
+                    .collect()
+            },
             attacker_this_tick,
             self_faction: self_faction_comp.map(|f| f.0),
             entity_phaser_ready,
@@ -377,6 +405,7 @@ fn tick_ai_controllers(
             torpedo_tube_ready: None,
             self_hull_fraction,
             scenario_unloaded,
+            self_radius: collider_section.map(|c| c.0.radius).unwrap_or(0.0),
         };
 
         let registry = &faction_registry.0;

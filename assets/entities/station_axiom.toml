@@ -14,3 +14,6 @@ shape = "torus"
 radius = 18.0
 minor_radius = 4.5
 colour = [0.3, 0.8, 0.6]
+
+[comms]
+range = 800.0

@@ -15,3 +15,5 @@ shield_pierce = 1.0
 range_modifier = 0.4
 
 [effects.sensor_blind]
+
+[effects.comms_jammed]

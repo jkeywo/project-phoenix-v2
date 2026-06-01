@@ -1,0 +1,27 @@
+tags = ["field", "axiom", "asteroid_field"]
+
+[asteroid_field]
+inner_radius = 90.0
+outer_radius = 260.0
+density = 0.003
+spawn_distance = 250.0
+despawn_distance = 300.0
+asteroid_type_paths = [
+    "assets/entities/asteroid_small.toml",
+    "assets/entities/asteroid_large.toml",
+]
+cosmetic_type_paths = [
+    "assets/entities/asteroid_cosmetic.toml",
+]
+
+[asteroid_field.grid]
+resolution = 25.0
+fill_gameplay = 0.4
+fill_cosmetic = 0.2
+uniformity = 0.3
+noise_freq = 0.02
+noise_octaves = 3
+density_noise_freq = 0.01
+density_noise_octaves = 2
+jitter = 20.0
+cosmetic_y_offset = 15.0

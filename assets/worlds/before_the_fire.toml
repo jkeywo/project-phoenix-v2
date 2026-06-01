@@ -1,0 +1,103 @@
+# Before the Fire — Axiom System scenario
+#
+# The player arrives in the Axiom System to investigate a distress signal.
+# Ashrender (a Harrow Warhawk-class warship) is dormant near the nebula until
+# activated by a world trigger. The Requiem Courier carries a cryptic warning.
+
+[global]
+seed = 399
+
+[ambient_light]
+color      = [0.55, 0.55, 0.65]
+brightness = 280.0
+
+[anchors]
+ship_start         = [0.0,   0.0,   0.0]
+axiom_station      = [350.0, 0.0,  50.0]
+research_outpost   = [-100.0, 0.0, 450.0]
+requiem_courier    = [-230.0, 0.0, -80.0]
+ironveil_patrol_a  = [180.0, 0.0, -160.0]
+ironveil_patrol_b  = [320.0, 0.0, -280.0]
+ashrender_start    = [620.0, 0.0, -380.0]
+nebula_center      = [680.0, 0.0, -440.0]
+escape_pod_spawn   = [200.0, 0.0, -100.0]
+
+# ── Static map entities ───────────────────────────────────────────────────────
+
+[[entity]]
+template_path = "assets/entities/star_sun.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/asteroid_belt_axiom.toml"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/planet_earth.toml"
+transform = { position = [250.0, 0.0, 300.0] }
+
+[[entity]]
+template_path = "assets/entities/player_ship.toml"
+id = "player-ship"
+transform = { anchor = "ship_start" }
+spawn_on = "game_start"
+
+# ── Named entities (trigger / comms-eligible) ────────────────────────────────
+
+[[entity]]
+template_path = "assets/entities/station_axiom.toml"
+name = "Axiom Station"
+transform = { anchor = "axiom_station" }
+
+[[entity]]
+template_path = "assets/entities/station_research_outpost.toml"
+name = "Research Outpost"
+transform = { anchor = "research_outpost" }
+
+[[entity]]
+template_path = "assets/entities/ship_requiem_courier.toml"
+name = "Requiem Courier"
+transform = { anchor = "requiem_courier" }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_patrol.toml"
+name = "Ironveil"
+transform = { anchor = "ironveil_patrol_a" }
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_warhawk.toml"
+name = "Ashrender"
+transform = { anchor = "ashrender_start" }
+
+[[entity]]
+template_path = "assets/entities/region_kaleth_nebula.toml"
+name = "Kaleth Nebula"
+transform = { anchor = "nebula_center" }
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-investigate"
+  text      = "Investigate the situation in the Axiom System."
+  mandatory = true
+
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-hail-briefing"
+  text      = "Hail Axiom Station or Research Outpost for a briefing."
+  mandatory = false
+
+# ── Comms templates ──────────────────────────────────────────────────────────
+
+[[comms]]
+from    = "Requiem Courier"
+trigger = "on_hailed"
+entity  = "Requiem Courier"
+message = "This channel is not secure. We know what Ashrender carries. When the time comes, there may be an alternative. Stand by."

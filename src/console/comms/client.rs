@@ -272,13 +272,12 @@ fn spawn_comms_ui(
                 .spawn((
                     CommsObjectivesFooter,
                     Node {
-                        flex_direction: FlexDirection::Row,
+                        flex_direction: FlexDirection::Column,
                         width: Val::Percent(100.0),
-                        height: Val::Px(28.0),
+                        max_height: Val::Px(120.0),
                         overflow: Overflow::scroll(),
-                        column_gap: Val::Px(8.0),
-                        padding: UiRect::horizontal(Val::Px(6.0)),
-                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(4.0),
+                        padding: UiRect::all(Val::Px(6.0)),
                         ..default()
                     },
                 ))
@@ -576,6 +575,7 @@ fn refresh_all_comms_ui(
                     TextColor(Color::srgb(0.8, 0.8, 0.9)),
                     Node {
                         margin: UiRect::vertical(Val::Px(6.0)),
+                        width: Val::Percent(100.0),
                         ..default()
                     },
                 ));
@@ -656,22 +656,29 @@ fn refresh_all_comms_ui(
                     crate::messages::ObjectiveStatus::Completed => Color::srgb(0.5, 0.5, 0.5),
                     crate::messages::ObjectiveStatus::Failed => Color::srgb(0.8, 0.3, 0.3),
                 };
-                let label = if obj.text.len() > 40 {
-                    format!("{}...", &obj.text[..40])
-                } else {
-                    obj.text.clone()
-                };
                 commands.entity(container).with_children(|p| {
-                    p.spawn((
-                        Text::new(format!("[{}]", status_str)),
-                        TextFont { font_size: 11.0, ..default() },
-                        TextColor(status_color),
-                    ));
-                    p.spawn((
-                        Text::new(label),
-                        TextFont { font_size: 11.0, ..default() },
-                        TextColor(Color::srgb(0.7, 0.7, 0.8)),
-                    ));
+                    p.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        width: Val::Percent(100.0),
+                        column_gap: Val::Px(6.0),
+                        align_items: AlignItems::FlexStart,
+                        ..default()
+                    }).with_children(|row| {
+                        row.spawn((
+                            Text::new(format!("[{}]", status_str)),
+                            TextFont { font_size: 11.0, ..default() },
+                            TextColor(status_color),
+                        ));
+                        row.spawn((
+                            Text::new(obj.text.clone()),
+                            TextFont { font_size: 11.0, ..default() },
+                            TextColor(Color::srgb(0.7, 0.7, 0.8)),
+                            Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            },
+                        ));
+                    });
                 });
             }
         }

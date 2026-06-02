@@ -43,6 +43,7 @@ name      = "parent:ironveil_destroyed"
 # ── Comms templates ───────────────────────────────────────────────────────────
 
 [[comms]]
+thread_id = "axiom-diplomat"
 from    = "Axiom Station"
 trigger = "on_world_loaded"
 entity  = "Axiom Station"
@@ -73,6 +74,7 @@ message = "Ardent, Administrator Chen here. Thank you for responding. Dr. Sol Va
         mandatory = false
 
 [[comms]]
+thread_id = "axiom-diplomat"
 from    = "Axiom Station"
 trigger = "on_destroyed"
 entity  = "Ironveil"

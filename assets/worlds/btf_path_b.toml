@@ -4,6 +4,7 @@
 # ── Comms templates ───────────────────────────────────────────────────────────
 
 [[comms]]
+thread_id = "research-scholar"
 from    = "Research Outpost"
 trigger = "on_world_loaded"
 entity  = "Research Outpost"

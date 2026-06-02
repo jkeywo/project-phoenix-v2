@@ -244,6 +244,7 @@ fn spawn_comms_ui(
                 .spawn(Node {
                     flex_direction: FlexDirection::Column,
                     width: Val::Percent(100.0),
+                    min_width: Val::Px(0.0),
                     height: Val::Percent(100.0),
                     ..default()
                 })
@@ -257,6 +258,7 @@ fn spawn_comms_ui(
                     Node {
                         flex_direction: FlexDirection::Column,
                         width: Val::Percent(100.0),
+                        min_width: Val::Px(0.0),
                         flex_grow: 1.0,
                         overflow: Overflow::scroll(),
                         row_gap: Val::Px(4.0),
@@ -576,6 +578,7 @@ fn refresh_all_comms_ui(
                     Node {
                         margin: UiRect::vertical(Val::Px(6.0)),
                         width: Val::Percent(100.0),
+                        min_width: Val::Px(0.0),
                         ..default()
                     },
                 ));

@@ -202,6 +202,7 @@ impl ConsoleShell {
                             .spawn((Node {
                                 flex_shrink: 0.0,
                                 flex_grow: 1.0,
+                                min_width: Val::Px(0.0),
                                 width: if is_landscape {
                                     Val::Auto
                                 } else {

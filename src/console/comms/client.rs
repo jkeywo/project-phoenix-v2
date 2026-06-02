@@ -260,7 +260,7 @@ fn spawn_comms_ui(
                         width: Val::Percent(100.0),
                         min_width: Val::Px(0.0),
                         flex_grow: 1.0,
-                        overflow: Overflow::scroll(),
+                        overflow: Overflow { x: OverflowAxis::Clip, y: OverflowAxis::Scroll },
                         row_gap: Val::Px(4.0),
                         padding: UiRect::all(Val::Px(4.0)),
                         ..default()
@@ -277,7 +277,7 @@ fn spawn_comms_ui(
                         flex_direction: FlexDirection::Column,
                         width: Val::Percent(100.0),
                         max_height: Val::Px(120.0),
-                        overflow: Overflow::scroll(),
+                        overflow: Overflow { x: OverflowAxis::Clip, y: OverflowAxis::Scroll },
                         row_gap: Val::Px(4.0),
                         padding: UiRect::all(Val::Px(6.0)),
                         ..default()

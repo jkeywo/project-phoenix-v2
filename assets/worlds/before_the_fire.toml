@@ -50,6 +50,11 @@ name = "Axiom Station"
 transform = { anchor = "axiom_station" }
 
 [[entity]]
+template_path = "assets/entities/region_axiom_station_dock.toml"
+name          = "Axiom Station Dock"
+transform     = { anchor = "axiom_station" }
+
+[[entity]]
 template_path = "assets/entities/station_research_outpost.toml"
 name = "Research Outpost"
 transform = { anchor = "research_outpost" }
@@ -124,16 +129,33 @@ cannot continue without them. Please respond."""
 # ── Comms templates ──────────────────────────────────────────────────────────
 
 [[comms]]
+from    = "Research Outpost"
+trigger = "on_hailed"
+entity  = "Research Outpost"
+message = "A.E.V. Ardent, this is the Research Outpost. We read you. Stand by — patching you through to Dr. Myst now."
+
+[[comms]]
 from    = "Requiem Courier"
 trigger = "on_hailed"
 entity  = "Requiem Courier"
 message = "This channel is not secure. We know what Ashrender carries. When the time comes, there may be an alternative. Stand by."
 
-# ── Branch loading triggers (single-shot, fired on first hail) ────────────────
+# ── Branch loading triggers (single-shot, fired on first hail or arrival) ─────
 
+# Fires when the player hails Axiom Station from range.
 [[trigger]]
 condition = "on_hailed"
-entity = "Axiom Station"
+entity    = "Axiom Station"
+
+  [[trigger.action]]
+  type = "load_world"
+  path = "assets/worlds/btf_path_a.toml"
+
+# Fires when the player physically arrives at Axiom Station (proximity 60 u).
+# Matches the "proceeding to your location" dialogue response.
+[[trigger]]
+condition = "on_entered_region"
+entity    = "Axiom Station Dock"
 
   [[trigger.action]]
   type = "load_world"

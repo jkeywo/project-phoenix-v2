@@ -148,6 +148,10 @@ condition = "on_hailed"
 entity    = "Axiom Station"
 
   [[trigger.action]]
+  type      = "complete_objective"
+  id        = "obj-hail-briefing"
+
+  [[trigger.action]]
   type = "load_world"
   path = "assets/worlds/btf_path_a.toml"
 
@@ -164,6 +168,10 @@ entity    = "Axiom Station Dock"
 [[trigger]]
 condition = "on_hailed"
 entity = "Research Outpost"
+
+  [[trigger.action]]
+  type      = "complete_objective"
+  id        = "obj-hail-briefing"
 
   [[trigger.action]]
   type = "load_world"

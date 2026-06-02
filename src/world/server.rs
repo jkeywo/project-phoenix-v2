@@ -712,6 +712,14 @@ fn handle_hail(
             name_to_uuid,
         );
 
+        // Route the Hailed event into the trigger system so that
+        // on_hailed triggers (e.g. complete_objective, load_world)
+        // can fire. handle_ai_events drains pending_world_events
+        // in SimSet::Physics, which runs after SimSet::Input.
+        runtime.pending_world_events.push(WorldEvent::Hailed {
+            target_uuid: target_uuid.clone(),
+        });
+
         for f in fired {
             // Build a CommsMessage and inject it.
             let msg_id = uuid::Uuid::new_v4().to_string();

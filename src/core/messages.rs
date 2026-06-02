@@ -524,6 +524,10 @@ pub struct EntitySnapshot {
     pub uuid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Display name from the entity TOML `name` scalar (e.g. "Pirate Raider").
+    /// `None` for entities that have no name (e.g. asteroids).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f32; 3]>,
     #[serde(default)]
@@ -595,6 +599,7 @@ impl EntitySnapshot {
         Self {
             uuid: uuid.into(),
             id: None,
+            name: None,
             position: Some([x, 0.0, z]),
             tags: vec!["asteroid".into()],
             shape: None,
@@ -622,6 +627,7 @@ impl EntitySnapshot {
         Self {
             uuid: uuid.into(),
             id: None,
+            name: None,
             position: Some([x, 0.0, z]),
             tags: vec!["asteroid_field".into()],
             shape: Some("torus".into()),
@@ -643,6 +649,7 @@ impl EntitySnapshot {
         Self {
             uuid: uuid.into(),
             id: None,
+            name: None,
             position: Some([x, 0.0, z]),
             tags,
             shape: None,

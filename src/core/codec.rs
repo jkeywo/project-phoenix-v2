@@ -402,6 +402,7 @@ mod tests {
                 entities: vec![EntitySnapshot {
                     uuid: "550e8400-e29b-41d4-a716-446655440000".into(),
                     id: None,
+                    name: None,
                     position: Some([12.5, 0.0, -8.0]),
                     tags: vec!["asteroid".into()],
                     shape: None,
@@ -431,6 +432,7 @@ mod tests {
                     EntitySnapshot {
                         uuid: "a1b2c3d4-e5f6-4789-8abc-def012345678".into(),
                         id: None,
+                        name: None,
                         position: Some([1.0, 0.0, 2.0]),
                         tags: vec!["asteroid".into()],
                         shape: None,
@@ -448,6 +450,7 @@ mod tests {
                     EntitySnapshot {
                         uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(),
                         id: None,
+                        name: None,
                         position: Some([-3.5, 0.0, 4.25]),
                         tags: vec!["asteroid".into()],
                         shape: None,
@@ -481,6 +484,7 @@ mod tests {
                     entities: vec![EntitySnapshot {
                         uuid: "c3d4e5f6-a7b8-4901-acde-f01234567890".into(),
                         id: None,
+                        name: None,
                         position: Some([0.0, 0.0, 0.0]),
                         tags: vec!["asteroid".into()],
                         shape: None,
@@ -1246,6 +1250,7 @@ mod tests {
                 entities: vec![EntitySnapshot {
                     uuid: "u1".into(),
                     id: None,
+                    name: None,
                     position: None,
                     tags: vec!["asteroid".into()],
                     shape: None,
@@ -1274,6 +1279,7 @@ mod tests {
                 entities: vec![EntitySnapshot {
                     uuid: "u1".into(),
                     id: Some("station-alpha".into()),
+                    name: Some("Station Alpha".into()),
                     position: Some([10.5, 0.0, -20.3]),
                     tags: vec!["station".into(), "ship".into()],
                     shape: Some("sphere".into()),
@@ -1302,6 +1308,7 @@ mod tests {
                 entities: vec![EntitySnapshot {
                     uuid: "npc-1".into(),
                     id: None,
+                    name: None,
                     position: Some([5.0, 0.0, 10.0]),
                     tags: vec![],
                     shape: None,
@@ -1330,6 +1337,7 @@ mod tests {
                 entities: vec![EntitySnapshot {
                     uuid: "u-radar".into(),
                     id: None,
+                    name: None,
                     position: Some([1.0, 0.0, 2.0]),
                     tags: vec!["ship".into()],
                     shape: None,
@@ -1358,6 +1366,7 @@ mod tests {
                 entities: vec![EntitySnapshot {
                     uuid: "u-noradar".into(),
                     id: None,
+                    name: None,
                     position: Some([0.0, 0.0, 0.0]),
                     tags: vec![],
                     shape: None,
@@ -1391,6 +1400,7 @@ mod tests {
                     EntitySnapshot {
                         uuid: "ast-1".into(),
                         id: None,
+                        name: None,
                         position: Some([0.0, 0.0, -25.0]),
                         tags: vec!["asteroid".into()],
                         shape: None,
@@ -1408,6 +1418,7 @@ mod tests {
                     EntitySnapshot {
                         uuid: "field-1".into(),
                         id: None,
+                        name: None,
                         position: Some([50.0, 0.0, -100.0]),
                         tags: vec!["asteroid_field".into()],
                         shape: None,
@@ -1623,6 +1634,7 @@ mod tests {
             snapshot: EntitySnapshot {
                 uuid: "run-entity-001".into(),
                 id: Some("station-alpha".into()),
+                name: None,
                 position: Some([100.0, 0.0, -200.0]),
                 tags: vec!["station".into(), "ship".into()],
                 shape: Some("sphere".into()),
@@ -1648,6 +1660,7 @@ mod tests {
             snapshot: EntitySnapshot {
                 uuid: "run-minimal".into(),
                 id: None,
+                name: None,
                 position: Some([10.0, 0.0, 20.0]),
                 tags: vec![],
                 shape: None,

@@ -663,6 +663,7 @@ mod tests {
         EntitySnapshot {
             uuid: "".into(),
             id: None,
+            name: None,
             position: Some([x, 0.0, z]),
             tags: tags.iter().map(|s| s.to_string()).collect(),
             shape: None,
@@ -908,6 +909,7 @@ mod tests {
         EntitySnapshot {
             uuid: "field-1".into(),
             id: None,
+            name: None,
             position: Some([x, 0.0, z]),
             tags: vec!["asteroid_field".into()],
             shape: None,

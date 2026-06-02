@@ -775,6 +775,7 @@ fn reconcile_runtime_entities(
             Entity,
             &EntityUuid,
             Option<&EntityId>,
+            Option<&EntityName>,
             &Transform,
             Option<&RegionShapeSection>,
             Option<&EntityTagsSection>,
@@ -801,7 +802,7 @@ fn reconcile_runtime_entities(
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _, _, _, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _, _, _, _, _)| (u.0.clone(), e))
         .collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
@@ -821,12 +822,13 @@ fn reconcile_runtime_entities(
     if !registry.seeded {
         for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance, asteroid_field)) =
+            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field)) =
                 query.get(*entity)
             {
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
+                    name: name.as_ref().map(|n| n.0.clone()),
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,
@@ -887,12 +889,13 @@ fn reconcile_runtime_entities(
     // Emit EntitySpawned for new entities.
     for (uuid, entity) in &current {
         if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, transform, region_shape, entity_tags, radar_appearance, asteroid_field)) =
+            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field)) =
                 query.get(*entity)
             {
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
+                    name: name.as_ref().map(|n| n.0.clone()),
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,

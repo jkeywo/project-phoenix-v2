@@ -111,6 +111,10 @@ struct TubeRadioGroup(Vec<String>);
 #[derive(Resource, Default, Clone, PartialEq, Eq, Debug)]
 pub struct SelectedTube(pub Option<TorpedoTube>);
 
+/// Marker on the text node that displays the locked target's name and hull.
+#[derive(Component)]
+pub struct WeaponsTargetInfoText;
+
 // â”€â”€ State visuals helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Danger (red) button visuals â€” used for Fire Phasers.
@@ -200,6 +204,7 @@ impl Plugin for WeaponsPanelPlugin {
                 refresh_torpedo_ui,
                 bridge_client_sim_to_weapons_radar,
                 sync_weapons_radar_target_highlight,
+                sync_weapons_target_info,
                 respawn_weapons_on_orientation_change,
                 respawn_weapons_on_layout_change,
             ));
@@ -348,6 +353,21 @@ fn fill_tactical_radar(
     ));
     commands.entity(radar).observe(on_tactical_radar_blip_clicked);
     commands.entity(col).add_child(radar);
+
+    // Target info text below the radar
+    let target_info = commands
+        .spawn((
+            WeaponsTargetInfoText,
+            Text::new("No target"),
+            TextFont { font_size: 14.0, ..default() },
+            TextColor(Color::srgb(0.6, 0.6, 0.6)),
+            Node {
+                width: Val::Px(240.0),
+                ..default()
+            },
+        ))
+        .id();
+    commands.entity(col).add_child(target_info);
 }
 
 /// Observer: when a blip on the tactical radar is clicked, look up the
@@ -1026,6 +1046,39 @@ fn sync_weapons_radar_target_highlight(
             hl.0 = sim.current_target_uuid.clone();
         }
     }
+}
+
+/// Update the target info text below the weapons radar with the
+/// currently locked target's display name and hull health.
+fn sync_weapons_target_info(
+    sim: Res<ClientSimState>,
+    mut q: Query<&mut Text, With<WeaponsTargetInfoText>>,
+) {
+    let Ok(mut text) = q.get_single_mut() else { return };
+    let Some(ref target_uuid) = sim.current_target_uuid else {
+        text.0 = "No target".to_string();
+        return;
+    };
+    let Some(entity) = sim.world.entities.iter().find(|e| e.uuid == *target_uuid) else {
+        text.0 = "No target".to_string();
+        return;
+    };
+    let display_name = entity
+        .name
+        .clone()
+        .or_else(|| entity.tags.first().map(|t| {
+            let mut c = t.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        }))
+        .unwrap_or_else(|| "Unknown".to_string());
+    let hull = entity
+        .hull_fraction
+        .map(|f| format!("{:.0}%", f * 100.0))
+        .unwrap_or_else(|| "--".to_string());
+    text.0 = format!("{}\nHull: {}", display_name, hull);
 }
 
 // â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -302,13 +302,13 @@ previous = "Engineering"
 
 [[stations.6]]
 name = "Comms"
-description = "Hail stations and relay intelligence."
-consoles = ["Comms"]
+description = "Hail stations, navigate, and relay intelligence."
+consoles = ["Comms", "Navigation"]
 rank = "Ens."
 
 [[stations.6]]
 name = "Sensors"
-description = "Monitor long-range sensors, shields, and navigation."
-consoles = ["Sensors", "Shields", "Navigation"]
+description = "Monitor long-range sensors and shields."
+consoles = ["Sensors", "Shields"]
 rank = "Ens."
 previous = "Science"

@@ -105,6 +105,15 @@ impl CommsInbox {
             .find(|r| r.message.id == message_id)
             .map(|r| r.message.sender_name.clone())
     }
+
+    /// Return all messages that share `thread_id`, in insertion order.
+    pub fn messages_for_thread(&self, thread_id: &str) -> Vec<&CommsMessage> {
+        self.records
+            .iter()
+            .filter(|r| r.message.thread_id == thread_id)
+            .map(|r| &r.message)
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +132,7 @@ mod tests {
             is_read: false,
             is_orphaned: false,
             sender_in_range: true,
+            thread_id: id.into(),
         }
     }
 
@@ -191,5 +201,30 @@ mod tests {
         assert!(inbox.is_dirty());
         inbox.mark_clean();
         assert!(!inbox.is_dirty());
+    }
+
+    #[test]
+    fn messages_for_thread_returns_matching_messages_in_order() {
+        let mut inbox = CommsInbox::new();
+        let mut m1 = msg("m1");
+        m1.thread_id = "thread-a".into();
+        let mut m2 = msg("m2");
+        m2.thread_id = "thread-b".into();
+        let mut m3 = msg("m3");
+        m3.thread_id = "thread-a".into();
+        inbox.inject(m1);
+        inbox.inject(m2);
+        inbox.inject(m3);
+
+        let thread_a = inbox.messages_for_thread("thread-a");
+        assert_eq!(thread_a.len(), 2);
+        assert_eq!(thread_a[0].id, "m1");
+        assert_eq!(thread_a[1].id, "m3");
+
+        let thread_b = inbox.messages_for_thread("thread-b");
+        assert_eq!(thread_b.len(), 1);
+        assert_eq!(thread_b[0].id, "m2");
+
+        assert!(inbox.messages_for_thread("missing").is_empty());
     }
 }

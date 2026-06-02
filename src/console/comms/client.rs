@@ -94,10 +94,10 @@ pub struct CommsContactPill {
     pub target_uuid: String,
 }
 
-/// Marker + data for an inbox row: carries the message ID.
+/// Marker + data for an inbox row: carries the thread ID.
 #[derive(Component)]
 pub struct CommsMessageRow {
-    pub message_id: String,
+    pub thread_id: String,
 }
 
 /// Marker + data for a response button: carries (response_index, message_id).
@@ -349,9 +349,9 @@ fn detect_comms_clicks(
     }
     for (interaction, row) in messages.iter() {
         if *interaction == Interaction::Pressed {
-            state.select_message(&row.message_id);
+            state.select_thread(&row.thread_id);
             outbound.write(OutboundClientMessage(
-                ClientMessage::SelectCommsMessage { message_id: row.message_id.clone() },
+                ClientMessage::SelectCommsMessage { message_id: row.thread_id.clone() },
             ));
         }
     }
@@ -467,38 +467,38 @@ fn refresh_all_comms_ui(
         if let Ok(existing) = children.get(container) {
             clear_children(existing, &mut commands);
         }
-        let messages = state.sorted_messages();
-        if messages.is_empty() {
+        let threads = state.sorted_threads();
+        if threads.is_empty() {
             spawn_empty_label(container, "Inbox empty", &mut commands);
         } else {
-            for msg in messages {
-                let sender_text = if msg.is_orphaned {
-                    format!("{} (disconnected)", msg.sender_name)
+            for thread in &threads {
+                let sender_text = if thread.latest_orphaned {
+                    format!("{} (disconnected)", thread.sender_name)
                 } else {
-                    msg.sender_name.clone()
+                    thread.sender_name.clone()
                 };
-                let subject_text = if msg.subject.len() > 32 {
-                    format!("{}...", &msg.subject[..32])
+                let subject_text = if thread.subject.len() > 32 {
+                    format!("{}...", &thread.subject[..32])
                 } else {
-                    msg.subject.clone()
+                    thread.subject.clone()
                 };
-                let row_label = if msg.sender_in_range {
-                    format!("{} \u{2014} {}", sender_text, subject_text)
-                } else {
+                let row_label = if thread.latest_out_of_range {
                     format!("{} \u{2014} {} [OUT OF RANGE]", sender_text, subject_text)
+                } else {
+                    format!("{} \u{2014} {}", sender_text, subject_text)
                 };
-                let (bg, fg) = if !msg.sender_in_range {
-                    // Alert red (`#ff3344`) to match viewscreen_border.rs
-                    // COLOR_ALERT_RED so out-of-range stands out at a glance.
+                let (bg, fg) = if thread.latest_out_of_range {
+                    // Alert red to match viewscreen_border.rs COLOR_ALERT_RED.
                     (Color::srgb_u8(35, 25, 25), Color::srgb(1.0, 0.2, 0.267))
-                } else if msg.is_read {
+                } else if !thread.any_unread {
                     (Color::srgb_u8(30, 30, 40), Color::srgb(0.4, 0.4, 0.5))
                 } else {
                     (Color::srgb_u8(40, 40, 55), Color::srgb(0.9, 0.9, 1.0))
                 };
+                let tid = thread.thread_id.clone();
                 commands.entity(container).with_children(|p| {
                     p.spawn((
-                        CommsMessageRow { message_id: msg.id.clone() },
+                        CommsMessageRow { thread_id: tid },
                         Button,
                         Node {
                             flex_direction: FlexDirection::Row,
@@ -523,7 +523,11 @@ fn refresh_all_comms_ui(
         if let Ok(existing) = children.get(container) {
             clear_children(existing, &mut commands);
         }
-        if let Some(msg) = state.selected_message() {
+        if let Some(ref tid) = state.selected_thread_id.clone() {
+            let thread_msgs: Vec<_> = state.thread_messages(tid);
+            let latest_msg_id = thread_msgs.last().map(|m| m.id.clone()).unwrap_or_default();
+            let active_msg = state.active_message_for_thread(tid).cloned();
+
             // Back button
             commands.entity(container).with_children(|p| {
                 p.spawn((
@@ -542,10 +546,10 @@ fn refresh_all_comms_ui(
                 ));
             });
 
-            // On Screen button (puts this message on the viewscreen)
+            // On Screen button (uses the latest message in the thread)
             commands.entity(container).with_children(|p| {
                 p.spawn((
-                    CommsOnScreenButton { message_id: msg.id.clone() },
+                    CommsOnScreenButton { message_id: latest_msg_id },
                     Button,
                     Node {
                         padding: UiRect::all(Val::Px(4.0)),
@@ -560,66 +564,73 @@ fn refresh_all_comms_ui(
                 ));
             });
 
-            // Sender name header
-            commands.entity(container).with_children(|p| {
-                p.spawn((
-                    Text::new(msg.sender_name.clone()),
-                    TextFont { font_size: 16.0, ..default() },
-                    TextColor(Color::srgb(0.8, 0.7, 1.0)),
-                ));
-            });
-
-            // Body text
-            commands.entity(container).with_children(|p| {
-                p.spawn((
-                    Text::new(msg.body.clone()),
-                    TextFont { font_size: 13.0, ..default() },
-                    TextColor(Color::srgb(0.8, 0.8, 0.9)),
-                    Node {
-                        margin: UiRect::vertical(Val::Px(6.0)),
+            // Chat messages: render each message and any player reply inline.
+            for msg in &thread_msgs {
+                // Contact message bubble: sender name + body
+                commands.entity(container).with_children(|p| {
+                    p.spawn(Node {
+                        flex_direction: FlexDirection::Column,
                         width: Val::Percent(100.0),
-                        min_width: Val::Px(0.0),
+                        padding: UiRect::all(Val::Px(6.0)),
+                        row_gap: Val::Px(3.0),
+                        margin: UiRect::bottom(Val::Px(2.0)),
                         ..default()
-                    },
-                ));
-            });
+                    })
+                    .with_children(|bubble| {
+                        bubble.spawn((
+                            Text::new(msg.sender_name.clone()),
+                            TextFont { font_size: 13.0, ..default() },
+                            TextColor(Color::srgb(0.8, 0.7, 1.0)),
+                        ));
+                        bubble.spawn((
+                            Text::new(msg.body.clone()),
+                            TextFont { font_size: 13.0, ..default() },
+                            TextColor(Color::srgb(0.8, 0.8, 0.9)),
+                            Node {
+                                width: Val::Percent(100.0),
+                                min_width: Val::Px(0.0),
+                                ..default()
+                            },
+                        ));
+                    });
+                });
 
-            // Response area
-            if msg.is_orphaned {
-                commands.entity(container).with_children(|p| {
-                    p.spawn((
-                        Text::new("Transmission ended \u{2014} source no longer available."),
-                        TextFont { font_size: 12.0, ..default() },
-                        TextColor(Color::srgb(0.6, 0.4, 0.4)),
-                    ));
-                });
-            } else if !msg.sender_in_range {
-                commands.entity(container).with_children(|p| {
-                    p.spawn((
-                        Text::new("OUT OF RANGE \u{2014} cannot respond."),
-                        TextFont { font_size: 12.0, ..default() },
-                        TextColor(Color::srgb(1.0, 0.2, 0.267)),
-                    ));
-                });
-            } else if let Some(selected_idx) = msg.selected_response {
-                let response_text = msg.responses.get(selected_idx)
-                    .map(|s| format!("Response sent: {}", s))
-                    .unwrap_or_else(|| "Response sent.".to_string());
-                commands.entity(container).with_children(|p| {
-                    p.spawn((
-                        Text::new(response_text),
-                        TextFont { font_size: 12.0, ..default() },
-                        TextColor(Color::srgb(0.5, 0.8, 0.5)),
-                    ));
-                });
-            } else {
-                for (idx, response) in msg.responses.iter().enumerate() {
+                // Player reply bubble shown inline after the message it responded to.
+                if let Some(selected_idx) = msg.selected_response {
+                    let reply_text = msg.responses
+                        .get(selected_idx)
+                        .map(|s| format!("You: {}", s))
+                        .unwrap_or_else(|| "You: [response]".to_string());
                     commands.entity(container).with_children(|p| {
                         p.spawn((
-                            CommsResponseButton {
-                                response_index: idx,
-                                message_id: msg.id.clone(),
+                            Node {
+                                flex_direction: FlexDirection::Row,
+                                justify_content: JustifyContent::FlexEnd,
+                                width: Val::Percent(100.0),
+                                padding: UiRect::axes(Val::Px(6.0), Val::Px(4.0)),
+                                margin: UiRect::bottom(Val::Px(4.0)),
+                                ..default()
                             },
+                            BackgroundColor(Color::srgb_u8(30, 50, 35)),
+                        ))
+                        .with_children(|row| {
+                            row.spawn((
+                                Text::new(reply_text),
+                                TextFont { font_size: 12.0, ..default() },
+                                TextColor(Color::srgb(0.5, 0.9, 0.6)),
+                            ));
+                        });
+                    });
+                }
+            }
+
+            // Response area at the bottom of the thread.
+            if let Some(active) = active_msg {
+                for (idx, response) in active.responses.iter().enumerate() {
+                    let mid = active.id.clone();
+                    commands.entity(container).with_children(|p| {
+                        p.spawn((
+                            CommsResponseButton { response_index: idx, message_id: mid },
                             Button,
                             Node {
                                 padding: UiRect::all(Val::Px(6.0)),
@@ -634,6 +645,26 @@ fn refresh_all_comms_ui(
                         ));
                     });
                 }
+            } else if let Some(latest) = thread_msgs.last() {
+                // No active message — show status based on the latest message.
+                if latest.is_orphaned {
+                    commands.entity(container).with_children(|p| {
+                        p.spawn((
+                            Text::new("Transmission ended \u{2014} source no longer available."),
+                            TextFont { font_size: 12.0, ..default() },
+                            TextColor(Color::srgb(0.6, 0.4, 0.4)),
+                        ));
+                    });
+                } else if !latest.sender_in_range {
+                    commands.entity(container).with_children(|p| {
+                        p.spawn((
+                            Text::new("OUT OF RANGE \u{2014} cannot respond."),
+                            TextFont { font_size: 12.0, ..default() },
+                            TextColor(Color::srgb(1.0, 0.2, 0.267)),
+                        ));
+                    });
+                }
+                // Info-only message (no responses) — nothing extra to show.
             }
         } else {
             spawn_empty_label(container, "Select a message", &mut commands);

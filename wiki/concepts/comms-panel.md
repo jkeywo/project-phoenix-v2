@@ -4,94 +4,153 @@ title: CommsPanelPlugin
 
 # CommsPanelPlugin
 
-Extracted as part of the client split series (issue [#262](https://github.com/jkeywo/project-phoenix-v2/issues/262)).
-Replaces and deletes the old `src/comms_plugin.rs` husk (~24 lines).
+Client-side Comms console: two-panel inbox + chat room layout.
 
 ## Location
 
-`src/comms_panel.rs` — compiled under the `client` Cargo feature.
+- `src/console/comms/client.rs` — `CommsPanelPlugin` (Bevy, client feature)
+- `src/client_comms.rs` — `ClientCommsState` (pure, Bevy-free, unit-tested)
+- `src/console/comms/inbox.rs` — `CommsInbox` (pure server-side, no Bevy)
 
-Re-exported as `crate::comms_panel::CommsPanelPlugin`.
+## Layout
 
-## Ownership
+```
+┌──────────────────┬───────────────────────────┐
+│  Contacts strip  │                           │
+│  (hail buttons)  │   CommsChatPanel          │
+├──────────────────┤   ─ Back / On Screen      │
+│  INBOX  Clear All│   ─ Contact messages      │
+├──────────────────┤     (sender name + body)  │
+│  CommsInboxList  │   ─ "You: …" reply bubbles│
+│  (thread rows)   │   ─ Response buttons      │
+│                  ├───────────────────────────┤
+│                  │  CommsObjectivesFooter    │
+└──────────────────┴───────────────────────────┘
+```
 
-`CommsPanelPlugin` owns the Comms console UI placeholder and initialises
-`ClientCommsState`:
+## Threading model
 
-- `ClientCommsState` resource initialisation (folded in from `comms_plugin.rs`)
-- `CommsView` resource — placeholder for the sub-view switcher until PRD #119 fills it
-- Panel root visibility toggling (driven by `LobbyState` + `ActiveConsole`)
-- Minimal panel UI (placeholder label until PRD #119 fills in the full inbox layout)
+All messages that belong to the same hail/dialogue tree share a `thread_id` UUID.
+The server generates `thread_id` when the first message is injected; follow-up nodes
+inherit the same id. Auto-triggered messages (no hail) each get their own `thread_id`
+(single-message threads). Old wire payloads without `thread_id` default to `""` and
+the client treats that as "own thread" (`effective_thread_id` falls back to `msg.id`).
 
-The pure Comms state logic lives in `client_comms.rs` (unchanged).
+### Inbox list — one row per thread
 
-### Resources
+`sorted_threads()` groups `messages` by `effective_thread_id`, then sorts unread
+threads first. Each `ThreadSummary` carries metadata from the **latest** message in
+the thread:
 
-| Resource | Purpose |
+| Field | Source |
 |---|---|
-| `ClientCommsState` | Inbox messages, objectives, contacts, and selected-message state. Initialised here; updated by `client_comms::apply()`. |
-| `CommsView` | Tracks the active sub-view. Placeholder until PRD #119 fills in the full comms design. Default: `Inbox`. |
+| `sender_name` | latest message |
+| `subject` | latest message |
+| `any_unread` | any message in thread has `!is_read` |
+| `latest_out_of_range` | latest message `!sender_in_range` |
+| `latest_orphaned` | latest message `is_orphaned` |
 
-### Systems
+Row styling mirrors the old per-message style:
+- out-of-range → alert-red `(35,25,25)` bg / `rgb(1.0,0.2,0.267)` fg
+- all-read → dim `(30,30,40)` / `0.4,0.4,0.5`
+- any-unread → bright `(40,40,55)` / `0.9,0.9,1.0`
 
-| System | Responsibility |
+### Chat panel — chat-room view
+
+When the operator opens a thread, all messages are displayed in chronological order:
+
+1. **Contact bubble** — sender name (purple) + body text.
+2. **Player reply bubble** — green, right-aligned, "You: \<text\>" rendered
+   immediately after each message that has a `selected_response` set.
+3. **Response buttons** — shown below the last contact message only if there is an
+   *active message* (latest message with non-empty `responses`, no
+   `selected_response`, not orphaned, `sender_in_range`).
+4. **Status text** — if no active message, shows "Transmission ended" (orphaned)
+   or "OUT OF RANGE" based on latest message state.
+
+The **On Screen** button targets the latest message in the thread.
+
+## ClientCommsState (pure)
+
+`src/client_comms.rs`
+
+| Method | Description |
 |---|---|
-| `setup_comms_ui` | Spawns the comms panel root (hidden on spawn). One-shot; called at `Startup`. |
-| `toggle_comms_panel_visibility` | Shows/hides `CommsPanel` based on phase, console assignment, and active tab. Delegates to pure `comms_panel_visible`. |
+| `apply(&ServerMessage)` | Replaces messages/objectives/contacts from `CommsState`; drops `selected_thread_id` if thread no longer present. |
+| `select_thread(thread_id)` | Opens a thread in the chat panel. |
+| `thread_messages(thread_id)` | All messages in thread, insertion order. |
+| `active_message_for_thread(tid)` | Last message with pending responses. |
+| `sorted_threads()` | `Vec<ThreadSummary>` for the inbox list. |
+| `response_buttons_enabled()` | True when selected thread has an active message. |
+| `clear_selection()` | Back button / deselect thread. |
+| `can_hail(uuid)` | True if contact exists and `in_range`. |
 
-### Pure helpers
+## Wire types
 
-| Function | Signature | Testability |
-|---|---|---|
-| `comms_panel_visible(lobby, token, active) -> bool` | Pure, Bevy-free | Yes — unit tests in `comms_panel.rs` |
+`src/core/messages.rs`
 
-### Visibility rules (`comms_panel_visible`)
+```rust
+pub struct CommsMessage {
+    pub id: String,
+    pub sender_uuid: String,
+    pub sender_name: String,
+    pub subject: String,
+    pub body: String,
+    pub responses: Vec<String>,
+    pub selected_response: Option<usize>,
+    pub is_read: bool,
+    pub is_orphaned: bool,
+    pub sender_in_range: bool,   // #[serde(default = "default_true")]
+    pub thread_id: String,       // #[serde(default)]  "" = own thread
+}
+```
 
-1. Game phase must be `InProgress`.
-2. Local player must hold `Console::Comms`.
-3. If the player holds **one console only**, show automatically (no tab override).
-4. If the player holds **multiple consoles**, show only when `ActiveConsole` is
-   explicitly set to `Comms`.
-
-### Marker components
+## Marker components
 
 | Component | Purpose |
 |---|---|
 | `CommsPanel` | Root node; visibility target. |
+| `CommsContactsStrip` | Horizontal contacts strip. |
+| `CommsInboxList` | Vertical scrollable thread list. |
+| `CommsChatPanel` | Chat view (right/bottom). |
+| `CommsObjectivesFooter` | Objectives strip (right/bottom). |
+| `CommsClearButton` | "Clear All" button. |
+| `CommsBackButton` | Back button in chat view. |
+| `CommsOnScreenButton { message_id }` | On Screen; carries latest message id in thread. |
+| `CommsContactPill { target_uuid }` | Hail button in contacts strip. |
+| `CommsMessageRow { thread_id }` | Inbox row; carries thread id. |
+| `CommsResponseButton { response_index, message_id }` | Response option button. |
 
-## Registration
+## Systems (CommsPanelPlugin)
 
-```rust
-.add_plugins(crate::comms_panel::CommsPanelPlugin)
-```
+| System | Trigger | Responsibility |
+|---|---|---|
+| `spawn_comms_ui` | once (no `CommsPanelSpawned`) | Spawns ConsoleShell with two panes. |
+| `toggle_comms_panel_visibility` | every frame | Shows/hides `CommsPanel` via `comms_panel_visible`. |
+| `respawn_comms_on_orientation_change` | `DeviceOrientation` changed | Despawns panel; clears `CommsPanelSpawned`. |
+| `refresh_all_comms_ui` | every frame, if dirty | Rebuilds contacts, inbox, chat, objectives from `ClientCommsState`. |
+| `detect_comms_clicks` | every frame | Routes `Interaction::Pressed` → outbound `ClientMessage`s + state mutations. |
 
-Registered by `wasm_client_init` in `src/client/bridge.rs`, after `SciencePanelPlugin`.
+### Visibility rules (`comms_panel_visible`)
 
-## What was deleted
-
-`src/comms_plugin.rs` (the old 24-line husk) was deleted. Its only content — 
-`app.init_resource::<ClientCommsState>()` — is now handled by `CommsPanelPlugin::build`.
-
-`pub mod comms_plugin;` removed from `src/lib.rs`.
+1. Phase must be `InProgress`.
+2. Local player must hold `Console::Comms`.
+3. One-console player → always visible.
+4. Multi-console player → visible only when `ActiveConsole == Some(Comms)`.
 
 ## Tests
 
-Tests live in `src/comms_panel.rs` under `#[cfg(test)]`. Run with:
+Pure unit tests in `src/client_comms.rs` and `src/console/comms/client.rs`. Run with:
 
 ```bash
-cargo test comms_panel
+cargo test comms
 ```
-
-Coverage:
-
-- `comms_panel_not_visible_in_lobby_phase` — panel stays hidden in Lobby
-- `comms_panel_not_visible_when_player_does_not_hold_comms` — wrong token → hidden
-- `comms_view_default_is_inbox` — resource default check
 
 ## Sources
 
-- `src/comms_panel.rs`
-- `src/client_comms.rs` (pure state model; unchanged)
-- `src/client/bridge.rs`
-- Issue [#262](https://github.com/jkeywo/project-phoenix-v2/issues/262)
-- PRD [#119](https://github.com/jkeywo/project-phoenix-v2/issues/119) — Stations, Scenarios & Comms (will fill in full panel design)
+- `src/console/comms/client.rs`
+- `src/client_comms.rs`
+- `src/console/comms/inbox.rs`
+- `src/core/messages.rs`
+- `src/world/server.rs` (thread_id generation in handle_hail, handle_respond_to_message, auto-triggered comms)
+- `src/world/content.rs` (ActiveDialogue.thread_id)

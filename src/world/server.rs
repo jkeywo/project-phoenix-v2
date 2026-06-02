@@ -715,6 +715,7 @@ fn handle_hail(
         for f in fired {
             // Build a CommsMessage and inject it.
             let msg_id = uuid::Uuid::new_v4().to_string();
+            let thread_id = uuid::Uuid::new_v4().to_string();
             let sender_uuid = target_uuid.clone();
             // Resolve sender display name from contacts (best effort).
             let sender_name = runtime
@@ -738,6 +739,7 @@ fn handle_hail(
                 is_read: false,
                 is_orphaned: false,
                 sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                thread_id: thread_id.clone(),
             };
 
             inbox.0.inject(msg);
@@ -746,8 +748,8 @@ fn handle_hail(
             runtime.active_dialogues.insert(
                 msg_id,
                 ActiveDialogue {
-                    message_id: String::new(), // not needed in the map key
                     current_node: f.node.clone(),
+                    thread_id,
                 },
             );
         }
@@ -1212,6 +1214,7 @@ fn handle_respond_to_message(
         if let Some(follow_up) = &response.follow_up {
             // Inject a new message for the follow-up node.
             let new_msg_id = uuid::Uuid::new_v4().to_string();
+            let thread_id = dialogue.thread_id.clone();
             let sender_uuid = inbox
                 .0
                 .sender_uuid_for(message_id)
@@ -1235,16 +1238,17 @@ fn handle_respond_to_message(
                 is_read: false,
                 is_orphaned: false,
                 sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                thread_id: thread_id.clone(),
             };
 
             inbox.0.inject(new_msg);
 
-            // Record the follow-up dialogue.
+            // Record the follow-up dialogue, inheriting the same thread_id.
             runtime.active_dialogues.insert(
                 new_msg_id,
                 ActiveDialogue {
-                    message_id: String::new(),
                     current_node: follow_up.clone(),
+                    thread_id,
                 },
             );
         }
@@ -1563,6 +1567,7 @@ fn handle_ai_events(
     );
     for fc in fired_comms {
         let msg_id = uuid::Uuid::new_v4().to_string();
+        let thread_id = uuid::Uuid::new_v4().to_string();
         // `_self` is the reserved synthetic internal-sender name; render it as
         // "Internal Report" in the comms UI so the crew sees a ship-generated
         // intelligence summary rather than a literal "_self" sender label.
@@ -1587,13 +1592,14 @@ fn handle_ai_events(
             is_read: false,
             is_orphaned: false,
             sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+            thread_id: thread_id.clone(),
         };
         inbox.0.inject(msg);
         runtime.active_dialogues.insert(
             msg_id,
             ActiveDialogue {
-                message_id: String::new(),
                 current_node: fc.node.clone(),
+                thread_id,
             },
         );
     }
@@ -2881,6 +2887,7 @@ mod tests {
             is_read: false,
             is_orphaned: true,
             sender_in_range: true,
+            thread_id: "orphaned-001".into(),
         };
         // Orphan it before injection so clear() will remove it.
         app.world_mut()
@@ -2930,6 +2937,113 @@ mod tests {
             contacts.iter().any(|c| c.uuid == station_uuid),
             "station must appear as a contact"
         );
+    }
+
+    // -- Cycle 6: hail generates non-empty thread_id --------------------------
+
+    #[test]
+    fn hail_generates_non_empty_thread_id_on_message() {
+        let station_uuid = "station-uuid-006";
+        let mut app = comms_test_app();
+        setup_game_with_comms(&mut app, station_uuid);
+        let _ = tick(&mut app);
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
+        let out = tick(&mut app);
+
+        let msg = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                messages.first().cloned()
+            } else {
+                None
+            }
+        });
+        let msg = msg.expect("CommsState with a message expected after hail");
+        assert!(
+            !msg.thread_id.is_empty(),
+            "thread_id must be a non-empty UUID after hail"
+        );
+    }
+
+    // -- Cycle 7: follow-up message inherits parent thread_id -----------------
+
+    #[test]
+    fn respond_to_message_follow_up_inherits_parent_thread_id() {
+        let station_uuid = "station-uuid-007b";
+        let mut app2 = comms_test_app();
+        setup_game_with_comms_and_followup(&mut app2, station_uuid);
+        let _ = tick(&mut app2);
+
+        push_msg(&mut app2, "comms", ClientMessage::Hail { target_uuid: station_uuid.into() });
+        let out = tick(&mut app2);
+
+        let first_msg = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                messages.first().cloned()
+            } else {
+                None
+            }
+        });
+        let first_msg = first_msg.expect("CommsState expected after hail");
+        let parent_thread_id = first_msg.thread_id.clone();
+        assert!(!parent_thread_id.is_empty(), "parent message must have a non-empty thread_id");
+
+        push_msg(
+            &mut app2,
+            "comms",
+            ClientMessage::RespondToMessage {
+                message_id: first_msg.id.clone(),
+                response_index: 0,
+            },
+        );
+        let out2 = tick(&mut app2);
+
+        let follow_up_msg = out2.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                // The follow-up is the second message (index 1).
+                messages.get(1).cloned()
+            } else {
+                None
+            }
+        });
+        let follow_up_msg = follow_up_msg.expect("follow-up CommsMessage expected after respond");
+        assert_eq!(
+            follow_up_msg.thread_id, parent_thread_id,
+            "follow-up message must carry the same thread_id as the parent"
+        );
+    }
+
+    fn setup_game_with_comms_and_followup(app: &mut App, station_uuid: &str) {
+        setup_game_with_comms(app, station_uuid);
+        // Replace the single template with one that has a follow-up node.
+        let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+        runtime.comms_template_states.clear();
+        runtime.comms_template_states.push(crate::world::content::CommsTemplateState {
+            template: crate::world::content::CommsTemplate {
+                from: "starbase_alpha".into(),
+                trigger: TriggerCondition::OnHailed {
+                    entity_name: "starbase_alpha".into(),
+                },
+                node: CommsDialogueNode {
+                    body: "Identify yourself.".into(),
+                    responses: vec![CommsResponse {
+                        text: "We are the Phoenix.".into(),
+                        actions: vec![],
+                        follow_up: Some(CommsDialogueNode {
+                            body: "Welcome, Phoenix.".into(),
+                            responses: vec![],
+                        }),
+                    }],
+                },
+            },
+            fired: false,
+        });
     }
 
     // -- AI-event trigger tests -----------------------------------------------

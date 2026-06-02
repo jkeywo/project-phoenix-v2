@@ -8,7 +8,7 @@
 //   * `WorldEvent` — events triggers / comms templates react to.
 //   * `TriggerState` / `CommsTemplateState` — per-trigger fired flag.
 //   * `evaluate_triggers` / `evaluate_comms_templates` — single-shot evaluators.
-//   * `ActiveDialogue` / `process_response` — dialogue state machine.
+//   * `ActiveDialogue` — dialogue state machine.
 //   * `trigger_states_from_world` / `comms_template_states_from_world` —
 //     factories that derive runtime states from a parsed `WorldConfig`.
 //
@@ -104,10 +104,11 @@ pub struct FiredCommsTemplate {
 /// Runtime state for one active dialogue conversation.
 #[derive(Clone, Debug)]
 pub struct ActiveDialogue {
-    /// ID of the `CommsMessage` that was sent to the Comms inbox for this dialogue.
-    pub message_id: String,
     /// The current dialogue node being presented.
     pub current_node: CommsDialogueNode,
+    /// Thread identifier shared by all messages in this dialogue tree.
+    /// Set when the first message is injected; follow-ups inherit the same id.
+    pub thread_id: String,
 }
 
 // ── Evaluators ────────────────────────────────────────────────────────────
@@ -357,34 +358,6 @@ pub fn comms_template_states_from_world(
             fired: false,
         })
         .collect()
-}
-
-// ── Dialogue state machine ────────────────────────────────────────────────
-
-/// Result returned by `process_response`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProcessResponseResult {
-    /// Actions from the chosen response to execute.
-    pub actions: Vec<TriggerAction>,
-    /// Follow-up dialogue node to present next, if any.
-    pub follow_up: Option<CommsDialogueNode>,
-}
-
-/// Process a player's response to an active dialogue.
-///
-/// Looks up `message_id` in `dialogues`. If found and `response_index` is
-/// valid, returns the response's actions and optional follow-up node.
-pub fn process_response(
-    dialogues: &[ActiveDialogue],
-    message_id: &str,
-    response_index: usize,
-) -> Option<ProcessResponseResult> {
-    let dialogue = dialogues.iter().find(|d| d.message_id == message_id)?;
-    let response = dialogue.current_node.responses.get(response_index)?;
-    Some(ProcessResponseResult {
-        actions: response.actions.clone(),
-        follow_up: response.follow_up.clone(),
-    })
 }
 
 // ── Unit Tests ────────────────────────────────────────────────────────────
@@ -645,65 +618,6 @@ mod tests {
         }];
         let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
         assert!(fired.is_empty());
-    }
-
-    // ── process_response ──────────────────────────────────────────────────
-
-    #[test]
-    fn process_response_executes_response_actions() {
-        let dialogues = vec![ActiveDialogue {
-            message_id: "msg-1".into(),
-            current_node: CommsDialogueNode {
-                body: "hi".into(),
-                responses: vec![CommsResponse {
-                    text: "yes".into(),
-                    actions: vec![add_obj("obj-yes")],
-                    follow_up: None,
-                }],
-            },
-        }];
-        let result = process_response(&dialogues, "msg-1", 0).unwrap();
-        assert_eq!(result.actions.len(), 1);
-        assert!(result.follow_up.is_none());
-    }
-
-    #[test]
-    fn process_response_returns_follow_up_when_present() {
-        let dialogues = vec![ActiveDialogue {
-            message_id: "msg-1".into(),
-            current_node: CommsDialogueNode {
-                body: "hi".into(),
-                responses: vec![CommsResponse {
-                    text: "more".into(),
-                    actions: vec![],
-                    follow_up: Some(CommsDialogueNode {
-                        body: "follow up body".into(),
-                        responses: vec![],
-                    }),
-                }],
-            },
-        }];
-        let result = process_response(&dialogues, "msg-1", 0).unwrap();
-        assert!(result.follow_up.is_some());
-        assert_eq!(result.follow_up.unwrap().body, "follow up body");
-    }
-
-    #[test]
-    fn process_response_returns_none_for_unknown_message_id() {
-        let dialogues: Vec<ActiveDialogue> = vec![];
-        assert!(process_response(&dialogues, "ghost-id", 0).is_none());
-    }
-
-    #[test]
-    fn process_response_returns_none_for_out_of_bounds_index() {
-        let dialogues = vec![ActiveDialogue {
-            message_id: "msg-1".into(),
-            current_node: CommsDialogueNode {
-                body: "hi".into(),
-                responses: vec![CommsResponse { text: "a".into(), actions: vec![], follow_up: None }],
-            },
-        }];
-        assert!(process_response(&dialogues, "msg-1", 99).is_none());
     }
 
     // ── Shipped-world integration ─────────────────────────────────────────

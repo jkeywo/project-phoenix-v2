@@ -299,6 +299,12 @@ pub struct CommsMessage {
     /// marker shown. Defaults to true for backward compatibility.
     #[serde(default = "default_true")]
     pub sender_in_range: bool,
+    /// Conversation thread identifier. All messages belonging to the same
+    /// hail/dialogue tree (initial message + all follow-ups) share this UUID.
+    /// Defaults to empty string for backward compatibility with old wire
+    /// payloads; the client treats an empty value as "own thread" (= message id).
+    #[serde(default)]
+    pub thread_id: String,
 }
 
 /// A contact the Comms operator can hail.

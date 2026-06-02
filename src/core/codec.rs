@@ -1859,6 +1859,7 @@ mod tests {
                 is_read: false,
                 is_orphaned: false,
                 sender_in_range: true,
+                thread_id: "thread-001".into(),
             }],
             objectives: vec![],
             contacts: vec![crate::messages::CommsContact {
@@ -1885,6 +1886,7 @@ mod tests {
                 is_read: false,
                 is_orphaned: true,
                 sender_in_range: true,
+                thread_id: "thread-002".into(),
             }],
             objectives: vec![],
             contacts: vec![],
@@ -1907,6 +1909,7 @@ mod tests {
                 is_read: false,
                 is_orphaned: false,
                 sender_in_range: false,
+                thread_id: "thread-003".into(),
             }],
             objectives: vec![],
             contacts: vec![crate::messages::CommsContact {
@@ -1931,6 +1934,13 @@ mod tests {
         let json = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false}"#;
         let msg: crate::messages::CommsMessage = serde_json::from_str(json).unwrap();
         assert!(msg.sender_in_range, "sender_in_range should default to true for backward compat");
+    }
+
+    #[test]
+    fn comms_message_missing_thread_id_defaults_to_empty() {
+        let json = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false}"#;
+        let msg: crate::messages::CommsMessage = serde_json::from_str(json).unwrap();
+        assert!(msg.thread_id.is_empty(), "thread_id should default to empty string for backward compat");
     }
 
     #[test]

@@ -7,6 +7,37 @@
 use crate::messages::{ClientMessage, CommsContact, CommsMessage, ObjectiveSnapshot, ServerMessage};
 use bevy::prelude::Resource;
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/// Returns the effective thread id for a message.
+///
+/// Old wire payloads (pre-threading) have `thread_id = ""`. Treat those as
+/// their own thread by falling back to the message's own `id`.
+fn effective_thread_id(msg: &CommsMessage) -> &str {
+    if msg.thread_id.is_empty() { &msg.id } else { &msg.thread_id }
+}
+
+// ── ThreadSummary ──────────────────────────────────────────────────────────
+
+/// A summary of one conversation thread shown in the inbox list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadSummary {
+    /// The shared thread identifier.
+    pub thread_id: String,
+    /// Sender name taken from the latest message in the thread.
+    pub sender_name: String,
+    /// Subject taken from the latest message in the thread.
+    pub subject: String,
+    /// True if any message in the thread is unread.
+    pub any_unread: bool,
+    /// True if the latest message's sender is out of range.
+    pub latest_out_of_range: bool,
+    /// True if the latest message is orphaned.
+    pub latest_orphaned: bool,
+}
+
+// ── ClientCommsState ───────────────────────────────────────────────────────
+
 /// The client's view of the Comms console state.
 #[derive(Clone, Debug, PartialEq, Default, Resource)]
 pub struct ClientCommsState {
@@ -16,8 +47,8 @@ pub struct ClientCommsState {
     pub objectives: Vec<ObjectiveSnapshot>,
     /// Hailable contacts.
     pub contacts: Vec<CommsContact>,
-    /// The message the operator has currently selected (opened in chat view).
-    pub selected_message_id: Option<String>,
+    /// The thread the operator has currently open (selected in the inbox).
+    pub selected_thread_id: Option<String>,
     /// Monotonically-increasing version number incremented on each `apply()`.
     /// Used by the refresh systems to detect state changes.
     pub version: u64,
@@ -34,30 +65,50 @@ impl ClientCommsState {
             self.messages = messages.clone();
             self.objectives = objectives.clone();
             self.contacts = contacts.clone();
-            // Drop selected id if the message it pointed to no longer exists.
-            if let Some(ref id) = self.selected_message_id {
-                if !self.messages.iter().any(|m| &m.id == id) {
-                    self.selected_message_id = None;
+            // Drop selected thread if no messages with that thread_id remain.
+            if let Some(ref tid) = self.selected_thread_id {
+                if !self.messages.iter().any(|m| effective_thread_id(m) == tid.as_str()) {
+                    self.selected_thread_id = None;
                 }
             }
             self.version += 1;
         }
     }
 
-    /// Mark a message as the currently selected one (opens the chat view).
-    /// Does nothing if `id` is not present in the current inbox.
-    pub fn select_message(&mut self, id: &str) {
-        if self.messages.iter().any(|m| m.id == id) {
-            self.selected_message_id = Some(id.to_string());
+    /// Open a conversation thread in the chat view.
+    ///
+    /// Does nothing if no message with `thread_id` exists.
+    pub fn select_thread(&mut self, thread_id: &str) {
+        if self.messages.iter().any(|m| effective_thread_id(m) == thread_id) {
+            self.selected_thread_id = Some(thread_id.to_string());
             self.version += 1;
         }
     }
 
-    /// The message currently open in the chat view, if any.
-    pub fn selected_message(&self) -> Option<&CommsMessage> {
-        self.selected_message_id
-            .as_ref()
-            .and_then(|id| self.messages.iter().find(|m| &m.id == id))
+    /// All messages belonging to `thread_id`, in insertion (chronological) order.
+    pub fn thread_messages(&self, thread_id: &str) -> Vec<&CommsMessage> {
+        self.messages
+            .iter()
+            .filter(|m| effective_thread_id(m) == thread_id)
+            .collect()
+    }
+
+    /// The active message for `thread_id`: the last message in the thread that
+    /// still has pending responses (non-empty `responses`, no `selected_response`,
+    /// not orphaned, sender in range).
+    ///
+    /// This is the message whose response buttons are shown at the bottom of the
+    /// chat panel.
+    pub fn active_message_for_thread(&self, thread_id: &str) -> Option<&CommsMessage> {
+        self.thread_messages(thread_id)
+            .into_iter()
+            .rev()
+            .find(|m| {
+                !m.responses.is_empty()
+                    && m.selected_response.is_none()
+                    && !m.is_orphaned
+                    && m.sender_in_range
+            })
     }
 
     /// Returns the available response texts for `msg`, or an empty slice if
@@ -70,9 +121,10 @@ impl ClientCommsState {
         }
     }
 
+    /// True when the selected thread has an active message with pending responses.
     pub fn response_buttons_enabled(&self) -> bool {
-        match self.selected_message() {
-            Some(msg) => msg.selected_response.is_none() && !msg.responses.is_empty() && !msg.is_orphaned && msg.sender_in_range,
+        match &self.selected_thread_id {
+            Some(tid) => self.active_message_for_thread(tid).is_some(),
             None => false,
         }
     }
@@ -93,24 +145,54 @@ impl ClientCommsState {
         self.clean_version = self.version;
     }
 
-    /// Clear the currently selected message.
+    /// Clear the currently selected thread.
     pub fn clear_selection(&mut self) {
-        if self.selected_message_id.is_some() {
-            self.selected_message_id = None;
+        if self.selected_thread_id.is_some() {
+            self.selected_thread_id = None;
             self.version += 1;
         }
     }
 
-    /// Returns messages sorted: unread first, then chronological (by id descending).
-    pub fn sorted_messages(&self) -> Vec<&CommsMessage> {
-        let mut msgs: Vec<_> = self.messages.iter().collect();
-        msgs.sort_by(|a, b| {
-            let a_read = a.is_read as u8;
-            let b_read = b.is_read as u8;
+    /// Thread summaries sorted for display: threads with any unread message
+    /// first, then by position of first message in the inbox (stable, chronological).
+    ///
+    /// Each thread appears exactly once; its metadata reflects the **latest**
+    /// message in the thread.
+    pub fn sorted_threads(&self) -> Vec<ThreadSummary> {
+        // Collect unique thread_ids in first-seen order (preserves inbox order).
+        let mut seen: Vec<&str> = Vec::new();
+        for msg in &self.messages {
+            let tid = effective_thread_id(msg);
+            if !seen.contains(&tid) {
+                seen.push(tid);
+            }
+        }
+
+        let mut summaries: Vec<ThreadSummary> = seen
+            .into_iter()
+            .map(|tid| {
+                let thread_msgs = self.thread_messages(tid);
+                let latest = thread_msgs.last().copied().expect("non-empty thread");
+                let any_unread = thread_msgs.iter().any(|m| !m.is_read);
+                ThreadSummary {
+                    thread_id: tid.to_string(),
+                    sender_name: latest.sender_name.clone(),
+                    subject: latest.subject.clone(),
+                    any_unread,
+                    latest_out_of_range: !latest.sender_in_range,
+                    latest_orphaned: latest.is_orphaned,
+                }
+            })
+            .collect();
+
+        // Sort: unread threads first, preserving relative order within each group.
+        summaries.sort_by(|a, b| {
+            let a_read = !a.any_unread as u8;
+            let b_read = !b.any_unread as u8;
             a_read.cmp(&b_read)
-                .then_with(|| a.id.cmp(&b.id))
         });
-        msgs
+
+        summaries
     }
 }
 
@@ -121,7 +203,11 @@ pub fn hail_message(target_uuid: &str) -> ClientMessage {
     ClientMessage::Hail { target_uuid: target_uuid.to_string() }
 }
 
-/// `ClientMessage` to send when the operator selects a message in the inbox.
+/// `ClientMessage` to send when the operator selects a thread in the inbox.
+///
+/// The server does not currently handle this message (it is forwarded but
+/// ignored); it is sent for completeness. The `message_id` carries the
+/// `thread_id` since only the client acts on this.
 pub fn select_comms_message(message_id: &str) -> ClientMessage {
     ClientMessage::SelectCommsMessage { message_id: message_id.to_string() }
 }
@@ -160,7 +246,14 @@ mod tests {
             is_read: false,
             is_orphaned: false,
             sender_in_range: true,
+            thread_id: id.into(),
         }
+    }
+
+    fn msg_in_thread(id: &str, thread: &str) -> CommsMessage {
+        let mut m = msg(id);
+        m.thread_id = thread.into();
+        m
     }
 
     fn comms_state(messages: Vec<CommsMessage>, contacts: Vec<CommsContact>) -> ServerMessage {
@@ -179,7 +272,7 @@ mod tests {
         assert!(s.messages.is_empty());
         assert!(s.objectives.is_empty());
         assert!(s.contacts.is_empty());
-        assert!(s.selected_message_id.is_none());
+        assert!(s.selected_thread_id.is_none());
     }
 
     #[test]
@@ -229,58 +322,82 @@ mod tests {
     }
 
     #[test]
-    fn apply_comms_state_preserves_selected_id_when_message_still_present() {
+    fn apply_comms_state_preserves_selected_thread_when_messages_remain() {
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![msg("m1"), msg("m2")], vec![]));
-        s.select_message("m1");
-        // Update still contains m1.
+        s.select_thread("m1");
+        // Update still contains a message with thread_id "m1".
         s.apply(&comms_state(vec![msg("m1")], vec![]));
-        assert_eq!(s.selected_message_id.as_deref(), Some("m1"));
+        assert_eq!(s.selected_thread_id.as_deref(), Some("m1"));
     }
 
     #[test]
-    fn apply_comms_state_clears_selected_id_when_message_removed() {
+    fn apply_comms_state_clears_selected_thread_when_messages_removed() {
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![msg("m1")], vec![]));
-        s.select_message("m1");
-        // New state does not contain m1.
+        s.select_thread("m1");
+        // New state does not contain any message with thread_id "m1".
         s.apply(&comms_state(vec![msg("m2")], vec![]));
-        assert!(s.selected_message_id.is_none());
+        assert!(s.selected_thread_id.is_none());
     }
 
-    // ── select_message ─────────────────────────────────────────────────────
+    // ── select_thread ──────────────────────────────────────────────────────
 
     #[test]
-    fn select_message_sets_selected_id_when_present() {
+    fn select_thread_sets_id_when_present() {
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![msg("m1"), msg("m2")], vec![]));
-        s.select_message("m2");
-        assert_eq!(s.selected_message_id.as_deref(), Some("m2"));
+        s.select_thread("m2");
+        assert_eq!(s.selected_thread_id.as_deref(), Some("m2"));
     }
 
     #[test]
-    fn select_message_does_nothing_for_unknown_id() {
+    fn select_thread_does_nothing_for_unknown_id() {
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![msg("m1")], vec![]));
-        s.select_message("ghost");
-        assert!(s.selected_message_id.is_none());
+        s.select_thread("ghost");
+        assert!(s.selected_thread_id.is_none());
     }
 
-    // ── selected_message ───────────────────────────────────────────────────
+    // ── thread_messages ────────────────────────────────────────────────────
 
     #[test]
-    fn selected_message_returns_none_when_nothing_selected() {
-        let s = ClientCommsState::default();
-        assert!(s.selected_message().is_none());
-    }
-
-    #[test]
-    fn selected_message_returns_the_selected_entry() {
+    fn thread_messages_returns_messages_in_thread_order() {
         let mut s = ClientCommsState::default();
-        s.apply(&comms_state(vec![msg("m1"), msg("m2")], vec![]));
-        s.select_message("m2");
-        let sel = s.selected_message().unwrap();
-        assert_eq!(sel.id, "m2");
+        s.apply(&comms_state(
+            vec![
+                msg_in_thread("m1", "t1"),
+                msg_in_thread("m2", "t2"),
+                msg_in_thread("m3", "t1"),
+            ],
+            vec![],
+        ));
+        let t1 = s.thread_messages("t1");
+        assert_eq!(t1.len(), 2);
+        assert_eq!(t1[0].id, "m1");
+        assert_eq!(t1[1].id, "m3");
+    }
+
+    // ── active_message_for_thread ──────────────────────────────────────────
+
+    #[test]
+    fn active_message_is_last_unresponded_in_thread() {
+        let mut s = ClientCommsState::default();
+        let mut m1 = msg_in_thread("m1", "t1");
+        m1.selected_response = Some(0); // already responded
+        let m2 = msg_in_thread("m2", "t1"); // pending
+        s.apply(&comms_state(vec![m1, m2], vec![]));
+        let active = s.active_message_for_thread("t1").unwrap();
+        assert_eq!(active.id, "m2");
+    }
+
+    #[test]
+    fn active_message_none_when_all_responded() {
+        let mut s = ClientCommsState::default();
+        let mut m = msg_in_thread("m1", "t1");
+        m.selected_response = Some(0);
+        s.apply(&comms_state(vec![m], vec![]));
+        assert!(s.active_message_for_thread("t1").is_none());
     }
 
     // ── outbound builders ──────────────────────────────────────────────────
@@ -310,36 +427,31 @@ mod tests {
 
     // ── response_buttons_enabled / available_responses ────────────────────
 
-    // Cycle 40: buttons enabled when selected message has no response yet
     #[test]
-    fn response_buttons_enabled_when_no_selected_response() {
+    fn response_buttons_enabled_when_thread_has_pending_response() {
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![msg("m1")], vec![]));
-        s.select_message("m1");
+        s.select_thread("m1");
         assert!(s.response_buttons_enabled());
     }
 
-    // Cycle 41: buttons disabled after response is chosen (selected_response set)
     #[test]
     fn response_buttons_disabled_after_response() {
         let mut m = msg("m1");
         m.selected_response = Some(0);
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![m], vec![]));
-        s.select_message("m1");
+        s.select_thread("m1");
         assert!(!s.response_buttons_enabled());
     }
 
-    // Cycle 42: buttons disabled when no message is selected
     #[test]
-    fn response_buttons_disabled_when_no_message_selected() {
+    fn response_buttons_disabled_when_no_thread_selected() {
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![msg("m1")], vec![]));
-        // Don't select any message
         assert!(!s.response_buttons_enabled());
     }
 
-    // Cycle 43: available_responses returns empty slice when already responded
     #[test]
     fn available_responses_returns_empty_when_already_responded() {
         let mut m = msg("m1");
@@ -349,7 +461,6 @@ mod tests {
         assert!(responses.is_empty());
     }
 
-    // Cycle 44: available_responses returns full slice when not yet responded
     #[test]
     fn available_responses_returns_responses_when_not_responded() {
         let m = msg("m1");
@@ -358,26 +469,24 @@ mod tests {
         assert_eq!(responses, &["Ack".to_string()]);
     }
 
-    // Cycle 45: buttons disabled when message has no responses (empty list)
     #[test]
     fn response_buttons_disabled_when_message_has_no_responses() {
         let mut m = msg("m1");
         m.responses = vec![];
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![m], vec![]));
-        s.select_message("m1");
+        s.select_thread("m1");
         assert!(!s.response_buttons_enabled());
     }
 
-    // Cycle 46: buttons disabled when message is orphaned
     #[test]
     fn response_buttons_disabled_when_message_is_orphaned() {
         let mut m = msg("m1");
         m.is_orphaned = true;
-        m.responses = vec![]; // orphaned messages have responses cleared
+        m.responses = vec![];
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![m], vec![]));
-        s.select_message("m1");
+        s.select_thread("m1");
         assert!(!s.response_buttons_enabled());
     }
 
@@ -423,23 +532,23 @@ mod tests {
     // ── clear_selection ────────────────────────────────────────────────────
 
     #[test]
-    fn clear_selection_deselects_current_message() {
+    fn clear_selection_deselects_current_thread() {
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![msg("m1")], vec![]));
-        s.select_message("m1");
-        assert!(s.selected_message_id.is_some());
+        s.select_thread("m1");
+        assert!(s.selected_thread_id.is_some());
         s.clear_selection();
-        assert!(s.selected_message_id.is_none());
+        assert!(s.selected_thread_id.is_none());
     }
 
     #[test]
     fn clear_selection_is_noop_when_nothing_selected() {
         let mut s = ClientCommsState::default();
         s.clear_selection();
-        assert!(s.selected_message_id.is_none());
+        assert!(s.selected_thread_id.is_none());
     }
 
-    // ── sorted_messages ────────────────────────────────────────────────────
+    // ── sorted_threads ─────────────────────────────────────────────────────
 
     fn read_msg(id: &str) -> CommsMessage {
         let mut m = msg(id);
@@ -448,35 +557,43 @@ mod tests {
     }
 
     #[test]
-    fn sorted_messages_returns_unread_first() {
+    fn sorted_threads_returns_unread_first() {
         let mut s = ClientCommsState::default();
         s.apply(&comms_state(vec![read_msg("m1"), msg("m2")], vec![]));
-        let sorted = s.sorted_messages();
-        assert_eq!(sorted.len(), 2);
-        assert_eq!(sorted[0].id, "m2");
-        assert!(!sorted[0].is_read);
-        assert_eq!(sorted[1].id, "m1");
-        assert!(sorted[1].is_read);
+        let threads = s.sorted_threads();
+        assert_eq!(threads.len(), 2);
+        assert!(threads[0].any_unread);
+        assert_eq!(threads[0].thread_id, "m2");
+        assert!(!threads[1].any_unread);
+        assert_eq!(threads[1].thread_id, "m1");
     }
 
     #[test]
-    fn sorted_messages_preserves_order_within_group() {
+    fn sorted_threads_uses_latest_message_subject() {
         let mut s = ClientCommsState::default();
-        s.apply(&comms_state(vec![msg("m1"), msg("m2"), msg("m3")], vec![]));
-        let sorted = s.sorted_messages();
-        assert_eq!(sorted.len(), 3);
-        for w in sorted.windows(2) {
-            assert!(!w[0].is_read || w[1].is_read);
-        }
+        let mut m1 = msg_in_thread("m1", "t1");
+        m1.subject = "First".into();
+        let mut m2 = msg_in_thread("m2", "t1");
+        m2.subject = "Follow-up".into();
+        s.apply(&comms_state(vec![m1, m2], vec![]));
+        let threads = s.sorted_threads();
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].subject, "Follow-up");
     }
 
     #[test]
-    fn sorted_messages_all_unread_maintains_order() {
+    fn sorted_threads_groups_messages_by_thread_id() {
         let mut s = ClientCommsState::default();
-        s.apply(&comms_state(vec![msg("m1"), msg("m2")], vec![]));
-        let sorted = s.sorted_messages();
-        assert_eq!(sorted[0].id, "m1");
-        assert_eq!(sorted[1].id, "m2");
+        s.apply(&comms_state(
+            vec![
+                msg_in_thread("m1", "t1"),
+                msg_in_thread("m2", "t2"),
+                msg_in_thread("m3", "t1"),
+            ],
+            vec![],
+        ));
+        let threads = s.sorted_threads();
+        assert_eq!(threads.len(), 2);
     }
 
     // ── Slice 8: range flag passthrough + response gating ──────────────────
@@ -505,7 +622,7 @@ mod tests {
         let mut m = msg("m1");
         m.sender_in_range = false;
         s.apply(&comms_state(vec![m], vec![]));
-        s.select_message("m1");
+        s.select_thread("m1");
         assert!(!s.response_buttons_enabled());
     }
 

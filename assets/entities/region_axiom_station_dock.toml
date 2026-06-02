@@ -1,0 +1,5 @@
+tags = ["region"]
+
+[shape]
+type   = "sphere"
+radius = 60.0

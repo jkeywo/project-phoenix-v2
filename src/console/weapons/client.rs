@@ -1054,7 +1054,7 @@ fn sync_weapons_target_info(
     sim: Res<ClientSimState>,
     mut q: Query<&mut Text, With<WeaponsTargetInfoText>>,
 ) {
-    let Ok(mut text) = q.get_single_mut() else { return };
+    let Ok(mut text) = q.single_mut() else { return };
     let Some(ref target_uuid) = sim.current_target_uuid else {
         text.0 = "No target".to_string();
         return;

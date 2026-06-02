@@ -675,6 +675,7 @@ mod tests {
             radar_world_size: None,
             half_extents: None,
             radar_icon: None,
+            objective_target: false,
         }
     }
 
@@ -919,6 +920,7 @@ mod tests {
             radar_world_size: None,
             half_extents: None,
             radar_icon: None,
+            objective_target: false,
         }
     }
 

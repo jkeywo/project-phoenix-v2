@@ -90,6 +90,11 @@ pub struct FiredTrigger {
     /// Used by `spawn_entity` action dispatch (issue #417) to attach the
     /// new entity to the right `WorldLayerMap` entry.
     pub origin_layer: Option<String>,
+    /// The entity name from the trigger condition that caused this trigger
+    /// to fire (e.g. from `OnDestroyed`, `OnAttacked`, `OnHailed`,
+    /// `OnEnteredRegion`, `OnExitedRegion`). Propagated to `AddObjective`
+    /// actions so the objective can be linked to an entity on radar.
+    pub entity_name: Option<String>,
 }
 
 /// A comms template that fired in response to world events.
@@ -99,6 +104,9 @@ pub struct FiredCommsTemplate {
     pub from: String,
     /// The root dialogue node to inject into the inbox.
     pub node: CommsDialogueNode,
+    /// Thread_id from the template, if set. When absent a UUID is generated
+    /// at injection time.
+    pub thread_id: Option<String>,
 }
 
 /// Runtime state for one active dialogue conversation.
@@ -112,6 +120,21 @@ pub struct ActiveDialogue {
 }
 
 // ── Evaluators ────────────────────────────────────────────────────────────
+
+/// Extract the entity name from a `TriggerCondition`, if the variant carries one.
+pub fn entity_name_from_condition(condition: &TriggerCondition) -> Option<String> {
+    match condition {
+        TriggerCondition::OnDestroyed { entity_name }
+        | TriggerCondition::OnAttacked { entity_name }
+        | TriggerCondition::OnHailed { entity_name }
+        | TriggerCondition::OnEnteredRegion { entity_name }
+        | TriggerCondition::OnExitedRegion { entity_name } => Some(entity_name.clone()),
+        TriggerCondition::OnTimer { .. }
+        | TriggerCondition::OnFlagSet { .. }
+        | TriggerCondition::OnFlagCleared { .. }
+        | TriggerCondition::OnWorldLoaded => None,
+    }
+}
 
 /// Evaluate all triggers in `states` against the given `events`.
 ///
@@ -173,6 +196,7 @@ pub fn evaluate_triggers_with_flags(
         results.push(FiredTrigger {
             actions: state.trigger.actions.clone(),
             origin_layer: state.origin_layer.clone(),
+            entity_name: entity_name_from_condition(&state.trigger.condition),
         });
     }
     results
@@ -219,6 +243,7 @@ pub fn evaluate_single_trigger(
     Some(FiredTrigger {
         actions: state.trigger.actions.clone(),
         origin_layer: state.origin_layer.clone(),
+        entity_name: entity_name_from_condition(&state.trigger.condition),
     })
 }
 
@@ -273,6 +298,7 @@ pub fn evaluate_comms_templates(
             results.push(FiredCommsTemplate {
                 from: state.template.from.clone(),
                 node: state.template.node.clone(),
+                thread_id: state.template.thread_id.clone(),
             });
         }
     }
@@ -548,6 +574,7 @@ mod tests {
             from: "starbase".into(),
             trigger: TriggerCondition::OnHailed { entity_name: "starbase".into() },
             node: CommsDialogueNode { body: "hello".into(), responses: vec![] },
+            thread_id: None,
         });
         let states = comms_template_states_from_world(&world);
         assert_eq!(states.len(), 1);
@@ -563,6 +590,7 @@ mod tests {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
+                thread_id: None,
             },
             fired: false,
         }];
@@ -584,6 +612,7 @@ mod tests {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
+                thread_id: None,
             },
             fired: false,
         }];
@@ -606,6 +635,7 @@ mod tests {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
+                thread_id: None,
             },
             fired: false,
         }];

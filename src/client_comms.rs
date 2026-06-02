@@ -293,6 +293,7 @@ mod tests {
             text: "Make contact".into(),
             mandatory: true,
             status: ObjectiveStatus::Active,
+            entity_name: None,
         };
         s.apply(&ServerMessage::CommsState {
             messages: vec![],

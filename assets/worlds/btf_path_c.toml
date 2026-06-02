@@ -16,11 +16,13 @@ entity    = "Ironveil"
 # ── Comms templates ───────────────────────────────────────────────────────────
 
 [[comms]]
+thread_id = "path-c-internal"
 from    = "_self"
 trigger = "on_world_loaded"
 message = "TACTICAL ALERT — I.V. Ironveil has opened fire. Science is tracking hull frequencies. Recommend Tactical tune shield harmonics to counter gamma-frequency phaser banks."
 
 [[comms]]
+thread_id = "path-c-internal"
 from    = "_self"
 trigger = "on_destroyed"
 entity  = "Ironveil"

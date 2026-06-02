@@ -22,6 +22,7 @@ use crate::entity_spawner::{
     AsteroidFieldSection, BehaviourSection, EntityId, EntityName, EntityTagsSection, EntityUuid,
     FactionComponent, MeshSection, RadarAppearanceSection, RegionShapeSection,
 };
+use crate::world::server::ObjectiveManagerRes;
 use crate::impulse::ImpulseState;
 use crate::messages::ModifierSlot;
 use crate::modifiers::ShipModifiers;
@@ -783,7 +784,20 @@ fn reconcile_runtime_entities(
         Without<Asteroid>,
     >,
     mut outbox: ResMut<SimOutbox>,
+    objectives: Option<Res<ObjectiveManagerRes>>,
 ) {
+    // Build set of entity names referenced by active mission objectives.
+    let active_objective_names: std::collections::HashSet<String> = objectives
+        .as_ref()
+        .map(|obj| {
+            obj.0
+                .sorted_snapshots()
+                .into_iter()
+                .filter(|s| s.status == crate::messages::ObjectiveStatus::Active)
+                .filter_map(|s| s.entity_name)
+                .collect()
+        })
+        .unwrap_or_default();
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
@@ -860,6 +874,9 @@ fn reconcile_runtime_entities(
                     radar_appearance.and_then(|r| r.0.icon.clone())
                         .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags))
                 );
+                if let Some(ref id) = snapshot.id {
+                    snapshot.objective_target = active_objective_names.contains(id);
+                }
                 world.0.entities.push(snapshot);
             }
         }
@@ -923,6 +940,9 @@ fn reconcile_runtime_entities(
                     radar_appearance.and_then(|r| r.0.icon.clone())
                         .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags))
                 );
+                if let Some(ref id) = snapshot.id {
+                    snapshot.objective_target = active_objective_names.contains(id);
+                }
                 world.0.entities.push(snapshot.clone());
                 outbox
                     .0

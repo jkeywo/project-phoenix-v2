@@ -96,6 +96,7 @@ message = "This is I.V. Ashrender to A.E.V. Ardent. The Aphelion Protocol is arm
 
 # Issue #405 — Starcorp Command urgent order (on world load, no responses)
 [[comms]]
+thread_id = "starcorp-command"
 from    = "Starcorp Command"
 trigger = "on_world_loaded"
 message = "Ardent, this is Starcorp Command — FLASH priority. Aphelion Protocol confirmed active. You are hereby ordered to stand down and withdraw immediately. Do NOT engage Harrow forces. We cannot afford an incident. Command out."
@@ -103,6 +104,7 @@ message = "Ardent, this is Starcorp Command — FLASH priority. Aphelion Protoco
 # Issue #405 — Requiem House encrypted offer (on world load, no responses)
 # The actual override exchange is handled by the on_hailed comms below.
 [[comms]]
+thread_id = "requiem-override"
 from    = "Requiem Courier"
 trigger = "on_world_loaded"
 entity  = "Requiem Courier"
@@ -168,6 +170,7 @@ message = "Ardent, we've received the evacuation order. We're beginning to load 
 
 # Issue #409 — Requiem Override: hail the Requiem Courier to accept the abort code
 [[comms]]
+thread_id = "requiem-override"
 from    = "Requiem Courier"
 trigger = "on_hailed"
 entity  = "Requiem Courier"

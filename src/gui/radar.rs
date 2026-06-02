@@ -91,6 +91,9 @@ pub struct RadarAppearance {
     /// `region_colour` is `Some`. When `Some` and `region_colour`
     /// is `Some`, the shape is rendered on the radar.
     pub region_shape: Option<RegionRadarShape>,
+    /// When `true` the entity is referenced by an active mission objective
+    /// and should render a gold ring indicator on the radar.
+    pub objective_target: bool,
 }
 
 impl RadarAppearance {
@@ -103,6 +106,7 @@ impl RadarAppearance {
             color: Color::srgb(0.95, 0.95, 1.0),
             region_colour: None,
             region_shape: None,
+            objective_target: false,
         }
     }
 
@@ -114,6 +118,7 @@ impl RadarAppearance {
             color,
             region_colour: None,
             region_shape: None,
+            objective_target: false,
         }
     }
 
@@ -130,6 +135,7 @@ impl RadarAppearance {
             color: region_colour,
             region_colour: Some(region_colour),
             region_shape: shape,
+            objective_target: false,
         }
     }
 }
@@ -674,7 +680,7 @@ pub fn bridge_sim_to_radar(
             .filter(|s| *s > 0.0)
             .unwrap_or(4.0);
 
-        let appearance = if is_region || is_field {
+        let mut appearance = if is_region || is_field {
             let default_col = if is_field {
                 Color::srgb(0.25, 0.75, 0.55)
             } else {
@@ -687,6 +693,7 @@ pub fn bridge_sim_to_radar(
             let color = tag_colour.unwrap_or(Color::srgb(0.95, 0.95, 1.0));
             RadarAppearance::point(icon, world_size, color)
         };
+        appearance.objective_target = snapshot.objective_target;
 
         let bundle = (
             OnRadar(snapshot.tags.clone()),
@@ -757,6 +764,7 @@ fn sync_radar_blip_nodes(
         Option<&RadarOverlayEntity>,
         Option<&RadarTargetHighlight>,
         Option<&mut RadarTargetRing>,
+        Option<&mut RadarObjectiveRingEntities>,
     )>,
     overlay_nodes: Query<&ComputedNode>,
     blips: Query<(Entity, &OnRadar, &RadarAppearance, &BlipWorldPose, Option<&RadarEntityUuid>)>,
@@ -792,6 +800,7 @@ fn sync_radar_blip_nodes(
         overlay,
         target_highlight,
         mut target_ring,
+        mut objective_rings,
     ) in radars.iter_mut()
     {
         if !vis.get() {
@@ -867,6 +876,8 @@ fn sync_radar_blip_nodes(
         // Track the screen position of the highlighted blip so we can place
         // the targeting ring node (spawned separately at a fixed pixel size).
         let mut highlighted_blip_center: Option<(f32, f32)> = None;
+        // Track the screen positions of objective-target blips for gold rings.
+        let mut objective_blip_centers: HashMap<Entity, (f32, f32)> = HashMap::new();
 
         // ── Build intended region set (region shape entities) ────────────────
         // source entity → (nx, ny, colour, shape, outer_size_px)
@@ -942,6 +953,9 @@ fn sync_radar_blip_nodes(
                 if highlight_match {
                     // Record blip centre so we can position the ring node below.
                     highlighted_blip_center = Some((left + half, top + half));
+                }
+                if appearance.objective_target {
+                    objective_blip_centers.insert(src, (left + half, top + half));
                 }
                 let blip_color = if highlight_match {
                     Color::srgb(1.0, 0.85, 0.1)
@@ -1137,6 +1151,59 @@ fn sync_radar_blip_nodes(
                 }
             }
         }
+
+        // ── Objective ring nodes ──────────────────────────────────────────────
+        // Maintain a set of ring nodes, one per blip referenced by an active
+        // mission objective. Each ring is a fixed-size gold circle positioned
+        // at the blip center. Rings are tracked in RadarObjectiveRingEntities.
+        const OBJ_RING_PX: f32 = 24.0;
+        const OBJ_RING_BORDER_PX: f32 = 2.0;
+        if let Some(ref mut rings) = objective_rings {
+            let mut next_rings: Vec<(Entity, Entity)> = Vec::new();
+
+            // Update existing rings or spawn new ones for current objective blips.
+            for (blip_src, &(cx, cy)) in &objective_blip_centers {
+                let ring_left = cx - OBJ_RING_PX * 0.5;
+                let ring_top  = cy - OBJ_RING_PX * 0.5;
+                let ring_node = Node {
+                    position_type: PositionType::Absolute,
+                    left:   Val::Px(ring_left),
+                    top:    Val::Px(ring_top),
+                    width:  Val::Px(OBJ_RING_PX),
+                    height: Val::Px(OBJ_RING_PX),
+                    border: UiRect::all(Val::Px(OBJ_RING_BORDER_PX)),
+                    border_radius: BorderRadius::all(Val::Percent(50.0)),
+                    ..default()
+                };
+
+                let ring_entity = match rings.0.iter().find(|(blip, _)| blip == blip_src) {
+                    Some((_, ring)) => {
+                        commands.entity(*ring).insert(ring_node);
+                        *ring
+                    }
+                    None => {
+                        let e = commands.spawn((
+                            ring_node,
+                            BorderColor::all(Color::srgb(1.0, 0.75, 0.1)),
+                            BackgroundColor(Color::NONE),
+                            ZIndex(15),
+                        )).id();
+                        commands.entity(radar_entity).add_child(e);
+                        e
+                    }
+                };
+                next_rings.push((*blip_src, ring_entity));
+            }
+
+            // Despawn rings for blips that are no longer objective targets.
+            for (blip, ring) in &rings.0 {
+                if !next_rings.iter().any(|(b, _)| b == blip) {
+                    commands.entity(*ring).despawn();
+                }
+            }
+
+            rings.0 = next_rings;
+        }
     }
 }
 
@@ -1303,6 +1370,12 @@ pub struct RadarTargetHighlight(pub Option<String>);
 /// clearly visible regardless of how small the blip is in world-space.
 #[derive(Component, Default, Debug)]
 pub struct RadarTargetRing(pub Option<Entity>);
+
+/// Stores ring-node entities for blips that are mission-objective targets.
+/// Each entry is `(blip_entity, ring_node_entity)`. Reconciled every frame in
+/// `sync_radar_blip_nodes` — stale rings are despawned, new ones are spawned.
+#[derive(Component, Default, Debug)]
+pub struct RadarObjectiveRingEntities(pub Vec<(Entity, Entity)>);
 
 /// Component on a blip-source ECS entity (e.g. an NPC ship snapshot) exposing
 /// the entity's wire UUID to the radar widget. Required for

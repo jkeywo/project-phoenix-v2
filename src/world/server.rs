@@ -723,7 +723,7 @@ fn handle_hail(
         for f in fired {
             // Build a CommsMessage and inject it.
             let msg_id = uuid::Uuid::new_v4().to_string();
-            let thread_id = uuid::Uuid::new_v4().to_string();
+            let thread_id = f.thread_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let sender_uuid = target_uuid.clone();
             // Resolve sender display name from contacts (best effort).
             let sender_name = runtime
@@ -841,10 +841,20 @@ fn handle_respond_to_message(
         // parity test guards against drift.
         let origin_layer: Option<String> = None;
         let name_to_uuid_snapshot = runtime.name_to_uuid.clone();
+        // Build reverse map (UUID → entity name) so we can associate objectives
+        // added by comms responses with the sender entity.
+        let uuid_to_name: std::collections::HashMap<&str, &str> = name_to_uuid_snapshot
+            .iter()
+            .map(|(name, uuid)| (uuid.as_str(), name.as_str()))
+            .collect();
+        let sender_uuid = inbox.0.sender_uuid_for(message_id);
         for action in &response.actions {
             match action {
                 TriggerAction::AddObjective { id, text, mandatory } => {
-                    objectives.0.add(id, text, *mandatory);
+                    let entity_name = sender_uuid.clone()
+                        .and_then(|suid| uuid_to_name.get(suid.as_str()).copied())
+                        .map(String::from);
+                    objectives.0.add(id, text, *mandatory, entity_name);
                 }
                 TriggerAction::CompleteObjective { id } => {
                     objectives.0.complete(id);
@@ -1575,7 +1585,7 @@ fn handle_ai_events(
     );
     for fc in fired_comms {
         let msg_id = uuid::Uuid::new_v4().to_string();
-        let thread_id = uuid::Uuid::new_v4().to_string();
+        let thread_id = fc.thread_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         // `_self` is the reserved synthetic internal-sender name; render it as
         // "Internal Report" in the comms UI so the crew sees a ship-generated
         // intelligence summary rather than a literal "_self" sender label.
@@ -1707,7 +1717,12 @@ fn handle_ai_events(
             for action in &ft.actions {
                 match action {
                     TriggerAction::AddObjective { id, text, mandatory } => {
-                        objectives.0.add(id.clone(), text.clone(), *mandatory);
+                        objectives.0.add(
+                            id.clone(),
+                            text.clone(),
+                            *mandatory,
+                            ft.entity_name.clone(),
+                        );
                     }
                     TriggerAction::CompleteObjective { id } => {
                         objectives.0.complete(id);
@@ -2726,6 +2741,7 @@ mod tests {
                         follow_up: None,
                     }],
                 },
+                thread_id: None,
             },
             fired: false,
         });
@@ -3049,6 +3065,7 @@ mod tests {
                         }),
                     }],
                 },
+                thread_id: None,
             },
             fired: false,
         });
@@ -3632,6 +3649,7 @@ mod tests {
                         body: "Mayday! We are under attack!".to_string(),
                         responses: vec![],
                     },
+                    thread_id: None,
                 },
                 fired: false,
             }];
@@ -3675,6 +3693,7 @@ mod tests {
                         body: "Distress signal transmitted.".to_string(),
                         responses: vec![],
                     },
+                    thread_id: None,
                 },
                 fired: false,
             }];
@@ -6351,6 +6370,7 @@ size_max = 2.0
                             follow_up: None,
                         }],
                     },
+                    thread_id: None,
                 },
                 fired: false,
             });
@@ -6700,6 +6720,7 @@ size_max = 2.0
                             follow_up: None,
                         }],
                     },
+                    thread_id: None,
                 },
                 fired: false,
             });

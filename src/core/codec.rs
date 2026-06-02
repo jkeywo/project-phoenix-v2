@@ -413,8 +413,9 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: None,
                     half_extents: None,
-                radar_icon: None,
-                }],
+                    radar_icon: None,
+                    objective_target: false,
+                    }],
                 ..Default::default()
             },
         };
@@ -442,6 +443,7 @@ mod tests {
                         radar_world_size: None,
                     half_extents: None,
                     radar_icon: None,
+                    objective_target: false,
                     },
                     EntitySnapshot {
                         uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(),
@@ -458,6 +460,7 @@ mod tests {
                         radar_world_size: None,
                     half_extents: None,
                     radar_icon: None,
+                    objective_target: false,
                     },
                 ],
                 ..Default::default()
@@ -490,6 +493,7 @@ mod tests {
                         radar_world_size: None,
                         half_extents: None,
                     radar_icon: None,
+                    objective_target: false,
                     }],
                     ..Default::default()
                 }),
@@ -1253,8 +1257,9 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: None,
                     half_extents: None,
-                radar_icon: None,
-                }],
+                    radar_icon: None,
+                    objective_target: false,
+                    }],
                 ..Default::default()
             },
         };
@@ -1280,8 +1285,9 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: None,
                     half_extents: None,
-                radar_icon: None,
-                }],
+                    radar_icon: None,
+                    objective_target: false,
+                    }],
                 ..Default::default()
             },
         };
@@ -1307,8 +1313,9 @@ mod tests {
                     warp_out_remaining_secs: Some(3.5),
                     radar_world_size: None,
                     half_extents: None,
-                radar_icon: None,
-                }],
+                    radar_icon: None,
+                    objective_target: false,
+                    }],
                 ..Default::default()
             },
         };
@@ -1334,8 +1341,9 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: Some(12.5),
                     half_extents: None,
-                radar_icon: None,
-                }],
+                    radar_icon: None,
+                    objective_target: false,
+                    }],
                 ..Default::default()
             },
         };
@@ -1361,8 +1369,9 @@ mod tests {
                     warp_out_remaining_secs: None,
                     radar_world_size: None,
                     half_extents: None,
-                radar_icon: None,
-                }],
+                    radar_icon: None,
+                    objective_target: false,
+                    }],
                 ..Default::default()
             },
         };
@@ -1394,6 +1403,7 @@ mod tests {
                         radar_world_size: None,
                     half_extents: None,
                     radar_icon: None,
+                    objective_target: false,
                     },
                     EntitySnapshot {
                         uuid: "field-1".into(),
@@ -1410,6 +1420,7 @@ mod tests {
                         radar_world_size: None,
                     half_extents: None,
                     radar_icon: None,
+                    objective_target: false,
                     },
                 ],
                 ..Default::default()
@@ -1624,6 +1635,7 @@ mod tests {
                 radar_world_size: None,
                 half_extents: None,
             radar_icon: None,
+            objective_target: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1648,6 +1660,7 @@ mod tests {
                 radar_world_size: None,
                 half_extents: None,
             radar_icon: None,
+            objective_target: false,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1755,12 +1768,21 @@ mod tests {
                     text: "Destroy the convoy".into(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
+                    entity_name: None,
                 },
                 crate::messages::ObjectiveSnapshot {
                     id: "obj-2".into(),
                     text: "Scan the debris".into(),
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Completed,
+                    entity_name: None,
+                },
+                crate::messages::ObjectiveSnapshot {
+                    id: "obj-2".into(),
+                    text: "Scan the debris".into(),
+                    mandatory: false,
+                    status: crate::messages::ObjectiveStatus::Completed,
+                    entity_name: None,
                 },
             ],
         };
@@ -1783,6 +1805,7 @@ mod tests {
                 text: "Save the station".into(),
                 mandatory: true,
                 status: crate::messages::ObjectiveStatus::Failed,
+                entity_name: None,
             }],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

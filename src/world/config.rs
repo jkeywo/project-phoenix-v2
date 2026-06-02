@@ -246,6 +246,10 @@ struct RawCommsEntry {
     entity: Option<String>,
     #[serde(default, rename = "response")]
     responses: Vec<RawCommsResponse>,
+    /// When set, all messages from this template (and their follow-ups) share
+    /// this thread_id. When absent, a unique UUID is generated per fire.
+    #[serde(default)]
+    thread_id: Option<String>,
 }
 
 /// Raw single-pass deserialization of a world TOML.
@@ -381,6 +385,10 @@ pub struct CommsTemplate {
     pub trigger: TriggerCondition,
     /// The root dialogue node.
     pub node: CommsDialogueNode,
+    /// Optional thread_id override. When present, the server uses this
+    /// instead of generating a UUID, allowing multiple templates from the
+    /// same plot line to share a conversation thread.
+    pub thread_id: Option<String>,
 }
 
 // -- Parser helpers ---------------------------------------------------------
@@ -696,7 +704,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         )?;
         let responses = parse_comms_responses(&raw_comms.responses)?;
         let node = CommsDialogueNode { body: raw_comms.message, responses };
-        comms.push(CommsTemplate { from: raw_comms.from, trigger, node });
+        comms.push(CommsTemplate { from: raw_comms.from, trigger, node, thread_id: raw_comms.thread_id });
     }
 
     // Validate extra_worlds: every entry must be a non-empty string.

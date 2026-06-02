@@ -558,6 +558,10 @@ pub struct EntitySnapshot {
     /// `"torpedo"`. `None` defaults to `"ship"` on the client.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radar_icon: Option<String>,
+    /// Set to `true` when this entity is referenced by an active mission
+    /// objective. The client radar renders a visual indicator for these entities.
+    #[serde(default)]
+    pub objective_target: bool,
 }
 
 impl EntitySnapshot {
@@ -603,6 +607,7 @@ impl EntitySnapshot {
             radar_world_size: None,
             half_extents: None,
             radar_icon: Some("asteroid".into()),
+            objective_target: false,
         }
     }
 
@@ -629,6 +634,7 @@ impl EntitySnapshot {
             radar_world_size: None,
             half_extents: None,
             radar_icon: Some("asteroid".into()),
+            objective_target: false,
         }
     }
 
@@ -649,6 +655,7 @@ impl EntitySnapshot {
             radar_world_size: None,
             half_extents: None,
             radar_icon: None,
+            objective_target: false,
         }
     }
 }
@@ -1057,4 +1064,8 @@ pub struct ObjectiveSnapshot {
     /// Mandatory objectives must be completed; optional are bonus.
     pub mandatory: bool,
     pub status: ObjectiveStatus,
+    /// Entity name (EntityId) of the entity this objective is associated with,
+    /// if any. Used to mark the entity on radar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity_name: Option<String>,
 }

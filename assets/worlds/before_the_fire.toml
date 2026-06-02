@@ -102,6 +102,7 @@ condition = "on_world_loaded"
 # ── Opening twin comms (on_world_loaded) ─────────────────────────────────────
 
 [[comms]]
+thread_id = "starcorp-command"
 from = "Starcorp Command"
 trigger = "on_world_loaded"
 message = """A.E.V. Ardent, this is Starcorp Command. You are ordered to \
@@ -129,12 +130,14 @@ cannot continue without them. Please respond."""
 # ── Comms templates ──────────────────────────────────────────────────────────
 
 [[comms]]
+thread_id = "research-scholar"
 from    = "Research Outpost"
 trigger = "on_hailed"
 entity  = "Research Outpost"
 message = "A.E.V. Ardent, this is the Research Outpost. We read you. Stand by — patching you through to Dr. Myst now."
 
 [[comms]]
+thread_id = "requiem-override"
 from    = "Requiem Courier"
 trigger = "on_hailed"
 entity  = "Requiem Courier"

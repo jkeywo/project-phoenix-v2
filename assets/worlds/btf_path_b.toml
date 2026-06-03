@@ -4,17 +4,20 @@
 # ── Comms templates ───────────────────────────────────────────────────────────
 
 [[comms]]
-thread_id = "research-scholar"
-from    = "Research Outpost"
-trigger = "on_world_loaded"
-entity  = "Research Outpost"
-message = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying to reach someone for hours. I'm detecting an intermittent stellar resonance signature from the deep outer system — beyond the Kaleth Nebula. The frequency profile matches a theoretical class of weapon I've encountered in Imperium research archives. Whatever is out there is charging."
+thread_id  = "research-scholar"
+from       = "Research Outpost"
+trigger    = "on_world_loaded"
+entity     = "Research Outpost"
+delay_secs = 3.0
+message    = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying to reach someone for hours. I'm detecting an intermittent stellar resonance signature from the deep outer system — beyond the Kaleth Nebula. The frequency profile matches a theoretical class of weapon I've encountered in Imperium research archives. Whatever is out there is charging."
 
   [[comms.response]]
   text = "What happens if it fires?"
 
     [comms.response.follow_up]
-    message = "If it fires at full charge it will create a persistent quantum interference zone across this system. It's not a targeted weapon — it's a geography weapon. Navigation through this system will be effectively impossible for decades. The charge cycle is approximately twenty minutes. I don't know how far along they are. The signature is already strong."
+    from       = "Dr. Myst"
+    delay_secs = 2.0
+    message    = "If it fires at full charge it will create a persistent quantum interference zone across this system. It's not a targeted weapon — it's a geography weapon. Navigation through this system will be effectively impossible for decades. The charge cycle is approximately twenty minutes. I don't know how far along they are. The signature is already strong."
 
       [[comms.response.follow_up.response]]
       text = "Can you pinpoint the source?"
@@ -29,7 +32,9 @@ message = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying to
   text = "Is there anything unusual about the signal?"
 
     [comms.response.follow_up]
-    message = "Yes — there's a sub-harmonic embedded in the resonance signature I cannot explain. It doesn't match any known Harrow or Imperium technology. It may be nothing. Or it may be something this system has been doing for longer than the Harrow have been pointing weapons at it. I've flagged it in my logs."
+    from       = "Dr. Myst"
+    delay_secs = 2.0
+    message    = "Yes — there's a sub-harmonic embedded in the resonance signature I cannot explain. It doesn't match any known Harrow or Imperium technology. It may be nothing. Or it may be something this system has been doing for longer than the Harrow have been pointing weapons at it. I've flagged it in my logs."
 
       [[comms.response.follow_up.response]]
       text = "Understood. Keep monitoring."

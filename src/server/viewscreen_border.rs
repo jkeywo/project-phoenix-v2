@@ -705,11 +705,12 @@ fn approach(current: f32, target: f32, max_step: f32) -> f32 {
 /// Convert a ship yaw in radians to a 0–359 integer compass bearing.
 ///
 /// `yaw == 0` means the ship faces forward; the bearing increases
-/// clockwise as viewed from above. Negative yaw and multi-turn yaw
-/// wrap correctly. The rounding boundary at 359.5° rounds up to 360
-/// then wraps back to 0 (never returns 360).
+/// clockwise as viewed from above (equivalent to `360 − yaw°`).
+/// Negative yaw and multi-turn yaw wrap correctly. The rounding
+/// boundary at 359.5° rounds up to 360 then wraps back to 0 (never
+/// returns 360).
 pub fn yaw_to_compass_bearing(yaw_radians: f32) -> u32 {
-    let degrees = yaw_radians.to_degrees().rem_euclid(360.0);
+    let degrees = (-yaw_radians).to_degrees().rem_euclid(360.0);
     (degrees.round() as u32) % 360
 }
 
@@ -2208,8 +2209,8 @@ mod tests {
     }
 
     #[test]
-    fn bearing_quarter_turn_is_ninety() {
-        assert_eq!(yaw_to_compass_bearing(std::f32::consts::FRAC_PI_2), 90);
+    fn bearing_quarter_turn_is_two_seventy() {
+        assert_eq!(yaw_to_compass_bearing(std::f32::consts::FRAC_PI_2), 270);
     }
 
     #[test]
@@ -2218,8 +2219,8 @@ mod tests {
     }
 
     #[test]
-    fn bearing_three_quarter_turn_is_two_seventy() {
-        assert_eq!(yaw_to_compass_bearing(3.0 * std::f32::consts::FRAC_PI_2), 270);
+    fn bearing_three_quarter_turn_is_ninety() {
+        assert_eq!(yaw_to_compass_bearing(3.0 * std::f32::consts::FRAC_PI_2), 90);
     }
 
     #[test]
@@ -2229,21 +2230,21 @@ mod tests {
 
     #[test]
     fn bearing_negative_yaw_wraps_positive() {
-        // -π/2 rad = -90° → 270°
-        assert_eq!(yaw_to_compass_bearing(-std::f32::consts::FRAC_PI_2), 270);
+        // -π/2 rad = -90° → 90°
+        assert_eq!(yaw_to_compass_bearing(-std::f32::consts::FRAC_PI_2), 90);
     }
 
     #[test]
     fn bearing_multi_turn_yaw_wraps() {
-        // 2.5 turns: 2τ + π/2 → 90°
+        // 2.5 turns: 2τ + π/2 → 270°
         let yaw = 2.0 * std::f32::consts::TAU + std::f32::consts::FRAC_PI_2;
-        assert_eq!(yaw_to_compass_bearing(yaw), 90);
+        assert_eq!(yaw_to_compass_bearing(yaw), 270);
     }
 
     #[test]
     fn bearing_rounds_359_5_to_zero_not_360() {
-        // 359.5° rounds to 360 then wraps to 0.
-        let yaw = 359.5_f32.to_radians();
+        // -0.5° → 359.5°, rounds to 360 then wraps to 0.
+        let yaw = 0.5_f32.to_radians();
         assert_eq!(yaw_to_compass_bearing(yaw), 0);
     }
 

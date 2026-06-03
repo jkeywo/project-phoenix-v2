@@ -308,6 +308,26 @@ impl ShieldSystem {
         self.facings[idx].apply_damage(amount)
     }
 
+    /// Apply `amount` damage uniformly across all shield facings.
+    ///
+    /// Each facing receives an equal share; any remainder is distributed
+    /// one-at-a-time to the first `amount % N` facings. Returns the total
+    /// hull passthrough damage (sum of overflow from each facing).
+    pub fn apply_uniform_damage(&mut self, amount: i32) -> i32 {
+        let n = self.facings.len();
+        if n == 0 {
+            return amount;
+        }
+        let base = amount / n as i32;
+        let rem = amount % n as i32;
+        let mut total_leak = 0i32;
+        for i in 0..n {
+            let facing_amount = base + if (i as i32) < rem { 1 } else { 0 };
+            total_leak += self.facings[i].apply_damage(facing_amount);
+        }
+        total_leak
+    }
+
     /// Advance all facings by `dt` seconds (regen + offline timers + focus decay).
     ///
     /// Non-focused facings whose HP exceeds their (reduced) effective max_hp decay at

@@ -111,10 +111,8 @@ pub(crate) fn update_region_membership(
 
 /// Applies continuous damage from `DamageZone` regions to the ship each tick.
 /// Damage is split via the zone's `shield_pierce` field: the pierced fraction
-/// goes straight to the hull (preserving the historical "regions bypass
-/// shields" behaviour when `shield_pierce = 1.0`), and the absorbed fraction
-/// is routed through the shield-quadrant pipeline (treated as a fore-quadrant
-/// impact since regions have no bearing).
+/// goes straight to the hull, and the absorbed fraction is distributed
+/// uniformly across all shield facings (since regions have no bearing).
 /// Damaged regions are tracked via `RegionMembership`.
 fn apply_damage_zone_damage(
     time: Res<Time>,
@@ -155,16 +153,15 @@ fn apply_damage_zone_damage(
                 let (pierced, absorbed) =
                     crate::damage::split_damage_for_pierce(total_damage, *shield_pierce);
 
-                // Absorbed portion: route through fore-quadrant shield. Any
-                // shield leak adds to the pierced hull damage.
+                // Absorbed portion: distribute uniformly across all shield
+                // facings (regions have no bearing). Any shield leak adds
+                // to the pierced hull damage.
                 let mut hull_amount = pierced;
                 let mut shield_amount = 0.0;
                 if absorbed > 0.0 {
                     if let Some(shields) = shields.as_deref_mut() {
-                        let leak = crate::damage::apply_damage_with_shields(
+                        let leak = shields.0.apply_uniform_damage(
                             absorbed.round() as i32,
-                            0.0,
-                            &mut shields.0,
                         );
                         shield_amount = (absorbed - leak as f32).max(0.0);
                         hull_amount += leak as f32;
@@ -656,11 +653,12 @@ mod tests {
             "hull should be ~70 after 30 pierced damage on 100hp, got {}",
             hull_hp
         );
+        // 70 absorbed ÷ 4 facings = 17 rem 2. Fore and Port get 18, Aft and Starboard get 17.
         let shields = app.world().resource::<ShipShields>();
-        assert_eq!(
-            shields.0.facings[0].hp, 930,
-            "fore shield should have absorbed 70 damage (1000 - 70 = 930)"
-        );
+        assert_eq!(shields.0.facings[0].hp, 982, "fore should get 18 of 70");
+        assert_eq!(shields.0.facings[1].hp, 982, "port should get 18 of 70");
+        assert_eq!(shields.0.facings[2].hp, 983, "aft should get 17 of 70");
+        assert_eq!(shields.0.facings[3].hp, 983, "starboard should get 17 of 70");
     }
 
     #[test]
@@ -683,8 +681,12 @@ mod tests {
             "hull should be untouched at zero pierce, got {}",
             hull_hp
         );
+        // 50 absorbed ÷ 4 facings = 12 rem 2. Fore and Port get 13, Aft and Starboard get 12.
         let shields = app.world().resource::<ShipShields>();
-        assert_eq!(shields.0.facings[0].hp, 950, "fore shield should have absorbed 50");
+        assert_eq!(shields.0.facings[0].hp, 987, "fore should get 13 of 50");
+        assert_eq!(shields.0.facings[1].hp, 987, "port should get 13 of 50");
+        assert_eq!(shields.0.facings[2].hp, 988, "aft should get 12 of 50");
+        assert_eq!(shields.0.facings[3].hp, 988, "starboard should get 12 of 50");
     }
 
     #[test]

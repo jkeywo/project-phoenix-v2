@@ -133,6 +133,7 @@ mod tests {
             is_orphaned: false,
             sender_in_range: true,
             thread_id: id.into(),
+            is_urgent: false,
         }
     }
 

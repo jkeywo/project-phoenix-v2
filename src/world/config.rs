@@ -250,6 +250,9 @@ struct RawCommsEntry {
     /// this thread_id. When absent, a unique UUID is generated per fire.
     #[serde(default)]
     thread_id: Option<String>,
+    /// When true, the resulting `CommsMessage` is flagged as urgent.
+    #[serde(default)]
+    urgent: bool,
 }
 
 /// Raw single-pass deserialization of a world TOML.
@@ -389,6 +392,11 @@ pub struct CommsTemplate {
     /// instead of generating a UUID, allowing multiple templates from the
     /// same plot line to share a conversation thread.
     pub thread_id: Option<String>,
+    /// When true, the resulting `CommsMessage` is flagged as urgent.
+    /// Inbox rows and the sender's Hail button will display a `!` marker
+    /// and an amber tint while any unread urgent message from this sender
+    /// remains. Defaults to false.
+    pub urgent: bool,
 }
 
 // -- Parser helpers ---------------------------------------------------------
@@ -704,7 +712,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         )?;
         let responses = parse_comms_responses(&raw_comms.responses)?;
         let node = CommsDialogueNode { body: raw_comms.message, responses };
-        comms.push(CommsTemplate { from: raw_comms.from, trigger, node, thread_id: raw_comms.thread_id });
+        comms.push(CommsTemplate { from: raw_comms.from, trigger, node, thread_id: raw_comms.thread_id, urgent: raw_comms.urgent });
     }
 
     // Validate extra_worlds: every entry must be a non-empty string.

@@ -1896,12 +1896,14 @@ mod tests {
                 is_orphaned: false,
                 sender_in_range: true,
                 thread_id: "thread-001".into(),
+                is_urgent: false,
             }],
             objectives: vec![],
             contacts: vec![crate::messages::CommsContact {
                 uuid: "station-abc".into(),
                 name: "Starbase 12".into(),
                 in_range: true,
+                is_urgent: false,
             }],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1923,6 +1925,7 @@ mod tests {
                 is_orphaned: true,
                 sender_in_range: true,
                 thread_id: "thread-002".into(),
+                is_urgent: false,
             }],
             objectives: vec![],
             contacts: vec![],
@@ -1946,12 +1949,14 @@ mod tests {
                 is_orphaned: false,
                 sender_in_range: false,
                 thread_id: "thread-003".into(),
+                is_urgent: false,
             }],
             objectives: vec![],
             contacts: vec![crate::messages::CommsContact {
                 uuid: "raider-1".into(),
                 name: "Raider".into(),
                 in_range: false,
+                is_urgent: false,
             }],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

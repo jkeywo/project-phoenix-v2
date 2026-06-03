@@ -609,6 +609,7 @@ fn init_world_runtime(
                 uuid,
                 name: tmpl.from.clone(),
                 in_range: true,
+                is_urgent: false,
             });
         }
     }
@@ -748,6 +749,7 @@ fn handle_hail(
                 is_orphaned: false,
                 sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
                 thread_id: thread_id.clone(),
+                is_urgent: f.urgent,
             };
 
             inbox.0.inject(msg);
@@ -1257,6 +1259,7 @@ fn handle_respond_to_message(
                 is_orphaned: false,
                 sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
                 thread_id: thread_id.clone(),
+                is_urgent: false,
             };
 
             inbox.0.inject(new_msg);
@@ -1491,7 +1494,14 @@ fn broadcast_comms_state(
         }
     }
     let objectives_snap = objectives.0.sorted_snapshots();
-    let contacts = runtime.contacts.clone();
+    let mut contacts = runtime.contacts.clone();
+    // Auto-derive is_urgent: a contact is urgent when it has at least one
+    // unread urgent message in the current inbox.
+    for contact in contacts.iter_mut() {
+        contact.is_urgent = messages
+            .iter()
+            .any(|m| m.sender_uuid == contact.uuid && m.is_urgent && !m.is_read);
+    }
 
     outbox.0.push((Target::Token(comms_token.to_string()), ServerMessage::CommsState {
         messages,
@@ -1611,6 +1621,7 @@ fn handle_ai_events(
             is_orphaned: false,
             sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
             thread_id: thread_id.clone(),
+            is_urgent: fc.urgent,
         };
         inbox.0.inject(msg);
         runtime.active_dialogues.insert(
@@ -2310,6 +2321,7 @@ fn apply_pending_scenario_loads(
                                     uuid,
                                     name: tmpl.from.clone(),
                                     in_range: true,
+                                    is_urgent: false,
                                 });
                             }
                         }
@@ -2464,6 +2476,7 @@ fn apply_world_layer_changes(
                                             uuid,
                                             name: tmpl.from.clone(),
                                             in_range: true,
+                                            is_urgent: false,
                                         });
                                     }
                                 }
@@ -2722,6 +2735,7 @@ mod tests {
             uuid: station_uuid.into(),
             name: "Starbase Alpha".into(),
             in_range: true,
+            is_urgent: false,
         });
         runtime.comms_template_states.push(CommsTemplateState {
             template: crate::world::content::CommsTemplate {
@@ -2742,6 +2756,7 @@ mod tests {
                     }],
                 },
                 thread_id: None,
+                urgent: false,
             },
             fired: false,
         });
@@ -2900,7 +2915,7 @@ mod tests {
         let _ = tick(&mut app);
 
         // Inject an orphaned message directly.
-        let orphaned = CommsMessage {
+        let orphaned =         CommsMessage {
             id: "orphaned-001".into(),
             sender_uuid: station_uuid.into(),
             sender_name: "Starbase Alpha".into(),
@@ -2912,6 +2927,7 @@ mod tests {
             is_orphaned: true,
             sender_in_range: true,
             thread_id: "orphaned-001".into(),
+            is_urgent: false,
         };
         // Orphan it before injection so clear() will remove it.
         app.world_mut()
@@ -3066,6 +3082,7 @@ mod tests {
                     }],
                 },
                 thread_id: None,
+                urgent: false,
             },
             fired: false,
         });
@@ -3650,6 +3667,7 @@ mod tests {
                         responses: vec![],
                     },
                     thread_id: None,
+                    urgent: false,
                 },
                 fired: false,
             }];
@@ -3694,6 +3712,7 @@ mod tests {
                         responses: vec![],
                     },
                     thread_id: None,
+                    urgent: false,
                 },
                 fired: false,
             }];
@@ -4997,6 +5016,7 @@ entity = "layer_npc"
                 uuid: far_uuid.into(),
                 name: "Far".into(),
                 in_range: true,
+                is_urgent: false,
             });
         }
 
@@ -6355,6 +6375,7 @@ size_max = 2.0
                 uuid: station_uuid.into(),
                 name: "Starbase Alpha".into(),
                 in_range: true,
+                is_urgent: false,
             });
             runtime.comms_template_states.push(CommsTemplateState {
                 template: crate::world::content::CommsTemplate {
@@ -6371,6 +6392,7 @@ size_max = 2.0
                         }],
                     },
                     thread_id: None,
+                    urgent: false,
                 },
                 fired: false,
             });
@@ -6703,6 +6725,7 @@ size_max = 2.0
                 uuid: station_uuid.into(),
                 name: "Starbase Alpha".into(),
                 in_range: true,
+                is_urgent: false,
             });
             runtime.comms_template_states.push(CommsTemplateState {
                 template: crate::world::content::CommsTemplate {
@@ -6721,6 +6744,7 @@ size_max = 2.0
                         }],
                     },
                     thread_id: None,
+                    urgent: false,
                 },
                 fired: false,
             });

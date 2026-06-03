@@ -441,6 +441,16 @@ fn refresh_all_comms_ui(
             spawn_empty_label(container, "All contacts out of range", &mut commands);
         } else {
             for contact in visible_contacts {
+                let pill_label = if contact.is_urgent {
+                    format!("! {}", contact.name)
+                } else {
+                    contact.name.clone()
+                };
+                let (pill_bg, pill_fg) = if contact.is_urgent {
+                    (Color::srgb_u8(70, 55, 15), Color::srgb(1.0, 0.8, 0.2))
+                } else {
+                    (Color::srgb_u8(60, 60, 80), Color::srgb(0.8, 0.8, 1.0))
+                };
                 commands.entity(container).with_children(|p| {
                     p.spawn((
                         CommsContactPill { target_uuid: contact.uuid.clone() },
@@ -452,10 +462,10 @@ fn refresh_all_comms_ui(
                             align_items: AlignItems::Center,
                             ..default()
                         },
-                        BackgroundColor(Color::srgb_u8(60, 60, 80)),
-                        Text::new(contact.name.clone()),
+                        BackgroundColor(pill_bg),
+                        Text::new(pill_label),
                         TextFont { font_size: 13.0, ..default() },
-                        TextColor(Color::srgb(0.8, 0.8, 1.0)),
+                        TextColor(pill_fg),
                     ));
                 });
             }
@@ -484,12 +494,17 @@ fn refresh_all_comms_ui(
                 };
                 let row_label = if thread.latest_out_of_range {
                     format!("{} \u{2014} {} [OUT OF RANGE]", sender_text, subject_text)
+                } else if thread.any_urgent {
+                    format!("! {} \u{2014} {}", sender_text, subject_text)
                 } else {
                     format!("{} \u{2014} {}", sender_text, subject_text)
                 };
                 let (bg, fg) = if thread.latest_out_of_range {
                     // Alert red to match viewscreen_border.rs COLOR_ALERT_RED.
                     (Color::srgb_u8(35, 25, 25), Color::srgb(1.0, 0.2, 0.267))
+                } else if thread.any_urgent {
+                    // Amber tint for urgent unread messages.
+                    (Color::srgb_u8(50, 42, 20), Color::srgb(1.0, 0.8, 0.2))
                 } else if !thread.any_unread {
                     (Color::srgb_u8(30, 30, 40), Color::srgb(0.4, 0.4, 0.5))
                 } else {

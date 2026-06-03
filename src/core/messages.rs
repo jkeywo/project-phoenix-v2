@@ -305,6 +305,12 @@ pub struct CommsMessage {
     /// payloads; the client treats an empty value as "own thread" (= message id).
     #[serde(default)]
     pub thread_id: String,
+    /// True when this message was flagged as urgent by the world template.
+    /// Urgent messages are shown with a `!` marker and an amber tint in the
+    /// inbox; the sender's Hail button also receives the `!` marker while any
+    /// unread urgent message from that sender exists.
+    #[serde(default)]
+    pub is_urgent: bool,
 }
 
 /// A contact the Comms operator can hail.
@@ -319,6 +325,11 @@ pub struct CommsContact {
     /// Defaults to true for backward compatibility.
     #[serde(default = "default_true")]
     pub in_range: bool,
+    /// True when this contact has at least one unread urgent message in the
+    /// inbox. Derived server-side on each `CommsState` broadcast; not stored
+    /// persistently. Defaults to false for backward compatibility.
+    #[serde(default)]
+    pub is_urgent: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default, States)]

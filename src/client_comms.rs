@@ -30,6 +30,8 @@ pub struct ThreadSummary {
     pub subject: String,
     /// True if any message in the thread is unread.
     pub any_unread: bool,
+    /// True if any unread message in the thread is urgent.
+    pub any_urgent: bool,
     /// True if the latest message's sender is out of range.
     pub latest_out_of_range: bool,
     /// True if the latest message is orphaned.
@@ -174,22 +176,30 @@ impl ClientCommsState {
                 let thread_msgs = self.thread_messages(tid);
                 let latest = thread_msgs.last().copied().expect("non-empty thread");
                 let any_unread = thread_msgs.iter().any(|m| !m.is_read);
+                let any_urgent = thread_msgs.iter().any(|m| m.is_urgent && !m.is_read);
                 ThreadSummary {
                     thread_id: tid.to_string(),
                     sender_name: latest.sender_name.clone(),
                     subject: latest.subject.clone(),
                     any_unread,
+                    any_urgent,
                     latest_out_of_range: !latest.sender_in_range,
                     latest_orphaned: latest.is_orphaned,
                 }
             })
             .collect();
 
-        // Sort: unread threads first, preserving relative order within each group.
+        // Sort: urgent+unread first, then plain unread, then read.
+        // `any_urgent` implies `any_unread` by construction, so no second
+        // guard is needed. Relative order within each group is preserved
+        // (stable sort).
         summaries.sort_by(|a, b| {
-            let a_read = !a.any_unread as u8;
-            let b_read = !b.any_unread as u8;
-            a_read.cmp(&b_read)
+            let priority = |s: &ThreadSummary| {
+                if s.any_urgent { 0u8 }
+                else if s.any_unread { 1 }
+                else { 2 }
+            };
+            priority(a).cmp(&priority(b))
         });
 
         summaries
@@ -231,7 +241,7 @@ mod tests {
     use crate::messages::ObjectiveStatus;
 
     fn contact(uuid: &str, name: &str) -> CommsContact {
-        CommsContact { uuid: uuid.into(), name: name.into(), in_range: true }
+        CommsContact { uuid: uuid.into(), name: name.into(), in_range: true, is_urgent: false }
     }
 
     fn msg(id: &str) -> CommsMessage {
@@ -247,6 +257,7 @@ mod tests {
             is_orphaned: false,
             sender_in_range: true,
             thread_id: id.into(),
+            is_urgent: false,
         }
     }
 
@@ -595,6 +606,95 @@ mod tests {
         ));
         let threads = s.sorted_threads();
         assert_eq!(threads.len(), 2);
+    }
+
+    #[test]
+    fn sorted_threads_any_urgent_true_when_thread_has_unread_urgent_message() {
+        let mut s = ClientCommsState::default();
+        let mut m = msg("m1");
+        m.is_urgent = true;
+        s.apply(&comms_state(vec![m], vec![]));
+        let threads = s.sorted_threads();
+        assert_eq!(threads.len(), 1);
+        assert!(threads[0].any_urgent);
+        assert!(threads[0].any_unread);
+    }
+
+    #[test]
+    fn sorted_threads_any_urgent_false_when_urgent_message_is_read() {
+        let mut s = ClientCommsState::default();
+        let mut m = msg("m1");
+        m.is_urgent = true;
+        m.is_read = true;
+        s.apply(&comms_state(vec![m], vec![]));
+        let threads = s.sorted_threads();
+        assert_eq!(threads.len(), 1);
+        assert!(!threads[0].any_urgent);
+    }
+
+    #[test]
+    fn sorted_threads_any_urgent_false_for_non_urgent_unread_message() {
+        let mut s = ClientCommsState::default();
+        // is_urgent defaults to false in msg()
+        s.apply(&comms_state(vec![msg("m1")], vec![]));
+        let threads = s.sorted_threads();
+        assert!(!threads[0].any_urgent);
+        assert!(threads[0].any_unread);
+    }
+
+    #[test]
+    fn sorted_threads_urgent_unread_sorts_above_plain_unread() {
+        let mut s = ClientCommsState::default();
+        let plain = msg("plain");                  // unread, not urgent
+        let mut urgent = msg("urgent");             // unread, urgent
+        urgent.is_urgent = true;
+        // inbox order: plain first, urgent second
+        s.apply(&comms_state(vec![plain, urgent], vec![]));
+        let threads = s.sorted_threads();
+        assert_eq!(threads.len(), 2);
+        assert_eq!(threads[0].thread_id, "urgent");
+        assert_eq!(threads[1].thread_id, "plain");
+    }
+
+    #[test]
+    fn sorted_threads_urgent_unread_sorts_above_plain_unread_regardless_of_inbox_order() {
+        let mut s = ClientCommsState::default();
+        let mut urgent = msg("urgent");
+        urgent.is_urgent = true;
+        let plain = msg("plain");
+        // inbox order: urgent first — order within group must still be preserved
+        s.apply(&comms_state(vec![urgent, plain], vec![]));
+        let threads = s.sorted_threads();
+        assert_eq!(threads[0].thread_id, "urgent");
+        assert_eq!(threads[1].thread_id, "plain");
+    }
+
+    #[test]
+    fn sorted_threads_urgent_unread_sorts_above_plain_unread_and_read() {
+        let mut s = ClientCommsState::default();
+        let read = read_msg("read");
+        let plain = msg("plain");
+        let mut urgent = msg("urgent");
+        urgent.is_urgent = true;
+        s.apply(&comms_state(vec![read, plain, urgent], vec![]));
+        let threads = s.sorted_threads();
+        assert_eq!(threads[0].thread_id, "urgent");
+        assert_eq!(threads[1].thread_id, "plain");
+        assert_eq!(threads[2].thread_id, "read");
+    }
+
+    #[test]
+    fn sorted_threads_urgent_clears_after_all_urgent_messages_in_thread_are_read() {
+        let mut s = ClientCommsState::default();
+        let mut m1 = msg_in_thread("m1", "t1");
+        m1.is_urgent = true;
+        m1.is_read = true; // was urgent but now read
+        let m2 = msg_in_thread("m2", "t1"); // follow-up, not urgent
+        s.apply(&comms_state(vec![m1, m2], vec![]));
+        let threads = s.sorted_threads();
+        assert_eq!(threads.len(), 1);
+        assert!(!threads[0].any_urgent,
+            "any_urgent should be false once all urgent messages in the thread are read");
     }
 
     // ── Slice 8: range flag passthrough + response gating ──────────────────

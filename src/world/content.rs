@@ -107,6 +107,8 @@ pub struct FiredCommsTemplate {
     /// Thread_id from the template, if set. When absent a UUID is generated
     /// at injection time.
     pub thread_id: Option<String>,
+    /// When true, the injected `CommsMessage` should be flagged as urgent.
+    pub urgent: bool,
 }
 
 /// Runtime state for one active dialogue conversation.
@@ -299,6 +301,7 @@ pub fn evaluate_comms_templates(
                 from: state.template.from.clone(),
                 node: state.template.node.clone(),
                 thread_id: state.template.thread_id.clone(),
+                urgent: state.template.urgent,
             });
         }
     }
@@ -575,6 +578,7 @@ mod tests {
             trigger: TriggerCondition::OnHailed { entity_name: "starbase".into() },
             node: CommsDialogueNode { body: "hello".into(), responses: vec![] },
             thread_id: None,
+            urgent: false,
         });
         let states = comms_template_states_from_world(&world);
         assert_eq!(states.len(), 1);
@@ -591,6 +595,7 @@ mod tests {
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
                 thread_id: None,
+                urgent: false,
             },
             fired: false,
         }];
@@ -613,6 +618,7 @@ mod tests {
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
                 thread_id: None,
+                urgent: false,
             },
             fired: false,
         }];
@@ -636,6 +642,7 @@ mod tests {
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
                 node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
                 thread_id: None,
+                urgent: false,
             },
             fired: false,
         }];

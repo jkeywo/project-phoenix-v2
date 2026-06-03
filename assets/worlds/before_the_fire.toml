@@ -114,6 +114,7 @@ Do not engage unless fired upon. Command out."""
 from = "Axiom Station"
 trigger = "on_world_loaded"
 entity = "Axiom Station"
+urgent = true
 message = """This is Axiom Station to any Alliance vessel — we have a situation. \
 Our lead negotiator, Dr. Sol Varen, has gone missing. Their last confirmed \
 position puts them near the Harrow patrol operating area. The peace talks \

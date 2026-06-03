@@ -1776,6 +1776,26 @@ entity    = "raider"
         assert!(cfg.comms.is_empty());
     }
 
+    #[test]
+    fn parse_world_before_the_fire_scenario_files_parse_with_expected_urgent_flags() {
+        // Each entry: (file contents, expected number of urgent [[comms]] blocks).
+        let cases: &[(&str, &str, usize)] = &[
+            ("before_the_fire", include_str!("../../assets/worlds/before_the_fire.toml"), 1),
+            ("btf_path_a", include_str!("../../assets/worlds/btf_path_a.toml"), 1),
+            ("btf_path_b", include_str!("../../assets/worlds/btf_path_b.toml"), 1),
+            ("btf_path_c", include_str!("../../assets/worlds/btf_path_c.toml"), 2),
+            ("btf_aphelion_protocol", include_str!("../../assets/worlds/btf_aphelion_protocol.toml"), 2),
+        ];
+        for (name, toml, expected_urgent) in cases {
+            let cfg = parse_world(toml).unwrap_or_else(|e| panic!("{name}.toml must parse: {e}"));
+            let urgent = cfg.comms.iter().filter(|c| c.urgent).count();
+            assert_eq!(
+                urgent, *expected_urgent,
+                "{name}.toml should have {expected_urgent} urgent [[comms]] block(s), found {urgent}",
+            );
+        }
+    }
+
     // -- entity_template_paths ---------------------------------------------
 
     #[test]

@@ -92,6 +92,7 @@ when       = "counter(parent:evacuation_rounds) >= 1 and not counter(parent:evac
 from    = "Ashrender"
 trigger = "on_world_loaded"
 entity  = "Ashrender"
+urgent  = true
 message = "This is I.V. Ashrender to A.E.V. Ardent. The Aphelion Protocol is armed and charging. You cannot stop this. What you choose to do in the next ten minutes will determine which side history blames. Stand clear."
 
 # Issue #405 — Starcorp Command urgent order (on world load, no responses)
@@ -99,6 +100,7 @@ message = "This is I.V. Ashrender to A.E.V. Ardent. The Aphelion Protocol is arm
 thread_id = "starcorp-command"
 from    = "Starcorp Command"
 trigger = "on_world_loaded"
+urgent  = true
 message = "Ardent, this is Starcorp Command — FLASH priority. Aphelion Protocol confirmed active. You are hereby ordered to stand down and withdraw immediately. Do NOT engage Harrow forces. We cannot afford an incident. Command out."
 
 # Issue #405 — Requiem House encrypted offer (on world load, no responses)

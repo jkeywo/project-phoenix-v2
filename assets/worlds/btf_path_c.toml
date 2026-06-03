@@ -19,6 +19,7 @@ entity    = "Ironveil"
 thread_id = "path-c-internal"
 from    = "_self"
 trigger = "on_world_loaded"
+urgent  = true
 message = "TACTICAL ALERT — I.V. Ironveil has opened fire. Science is tracking hull frequencies. Recommend Tactical tune shield harmonics to counter gamma-frequency phaser banks."
 
 [[comms]]
@@ -26,4 +27,5 @@ thread_id = "path-c-internal"
 from    = "_self"
 trigger = "on_destroyed"
 entity  = "Ironveil"
+urgent  = true
 message = "INTERNAL REPORT — DECRYPTED SIGNAL INTERCEPT from I.V. Ironveil wreckage: HARROW OPERATIONAL ORDER HK-7 CONFIRMED. CODENAME: APHELION PROTOCOL. Authorised by High Executor Veth Harrow, countersigned Archivist Kallas. PRIMARY TARGET: Axiom Station (coordinates attached). SECONDARY TARGET: Kaleth Prime — atmospheric saturation required as territorial demonstration. ASHRENDER CONFIRMED ON STATION. WEAPON CHARGE: PROCEEDING ON SCHEDULE. NOTE: negotiator extraction complete. Varen is aboard Ashrender. — END INTERCEPT."

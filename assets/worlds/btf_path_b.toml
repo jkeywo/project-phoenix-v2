@@ -9,6 +9,7 @@ from       = "Research Outpost"
 trigger    = "on_world_loaded"
 entity     = "Research Outpost"
 delay_secs = 3.0
+urgent     = true
 message    = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying to reach someone for hours. I'm detecting an intermittent stellar resonance signature from the deep outer system — beyond the Kaleth Nebula. The frequency profile matches a theoretical class of weapon I've encountered in Imperium research archives. Whatever is out there is charging."
 
   [[comms.response]]

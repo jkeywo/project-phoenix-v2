@@ -781,6 +781,7 @@ fn reconcile_runtime_entities(
             Option<&EntityTagsSection>,
             Option<&RadarAppearanceSection>,
             Option<&AsteroidFieldSection>,
+            Option<&crate::entity_spawner::EntityConsoleHull>,
         ),
         Without<Asteroid>,
     >,
@@ -802,7 +803,7 @@ fn reconcile_runtime_entities(
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _, _, _, _, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _, _, _, _, _, _)| (u.0.clone(), e))
         .collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
@@ -822,13 +823,18 @@ fn reconcile_runtime_entities(
     if !registry.seeded {
         for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field)) =
+            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field, hull_comp)) =
                 query.get(*entity)
             {
+                let hull_fraction = hull_comp.map(|h| {
+                    let max = h.0.total_max();
+                    if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+                });
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
                     name: name.as_ref().map(|n| n.0.clone()),
+                    hull_fraction,
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,
@@ -889,13 +895,18 @@ fn reconcile_runtime_entities(
     // Emit EntitySpawned for new entities.
     for (uuid, entity) in &current {
         if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field)) =
+            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field, hull_comp)) =
                 query.get(*entity)
             {
+                let hull_fraction = hull_comp.map(|h| {
+                    let max = h.0.total_max();
+                    if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+                });
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
                     id: id.as_ref().map(|i| i.0.clone()),
                     name: name.as_ref().map(|n| n.0.clone()),
+                    hull_fraction,
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,

@@ -252,14 +252,17 @@ impl ClientSimState {
                 // per-tick state snapshot. Only position is updated; tags/radius
                 // come from the EntitySnapshot added when the entity was spawned.
                 for state in &snapshot.entity_states {
-                    if let Some(pos) = state.position {
-                        if let Some(entity) = self
-                            .world
-                            .entities
-                            .iter_mut()
-                            .find(|e| e.uuid == state.uuid)
-                        {
+                    if let Some(entity) = self
+                        .world
+                        .entities
+                        .iter_mut()
+                        .find(|e| e.uuid == state.uuid)
+                    {
+                        if let Some(pos) = state.position {
                             entity.position = Some(pos);
+                        }
+                        if let Some(hf) = state.hull_fraction {
+                            entity.hull_fraction = Some(hf);
                         }
                     }
                 }

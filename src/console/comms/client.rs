@@ -571,6 +571,7 @@ fn refresh_all_comms_ui(
                     p.spawn(Node {
                         flex_direction: FlexDirection::Column,
                         width: Val::Percent(100.0),
+                        min_width: Val::Px(0.0),
                         padding: UiRect::all(Val::Px(6.0)),
                         row_gap: Val::Px(3.0),
                         margin: UiRect::bottom(Val::Px(2.0)),
@@ -582,16 +583,27 @@ fn refresh_all_comms_ui(
                             TextFont { font_size: 13.0, ..default() },
                             TextColor(Color::srgb(0.8, 0.7, 1.0)),
                         ));
-                        bubble.spawn((
-                            Text::new(msg.body.clone()),
-                            TextFont { font_size: 13.0, ..default() },
-                            TextColor(Color::srgb(0.8, 0.8, 0.9)),
-                            Node {
-                                width: Val::Percent(100.0),
-                                min_width: Val::Px(0.0),
-                                ..default()
-                            },
-                        ));
+                        // Body text wrapped in a row so flex_grow assigns a
+                        // definite pixel width, which lets Bevy wrap the text.
+                        bubble.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            width: Val::Percent(100.0),
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        }).with_children(|row| {
+                            row.spawn((
+                                Text::new(msg.body.clone()),
+                                TextFont { font_size: 13.0, ..default() },
+                                TextColor(Color::srgb(0.8, 0.8, 0.9)),
+                                Node {
+                                    flex_grow: 1.0,
+                                    flex_shrink: 1.0,
+                                    width: Val::Px(0.0),
+                                    min_width: Val::Px(0.0),
+                                    ..default()
+                                },
+                            ));
+                        });
                     });
                 });
 

@@ -1,4 +1,4 @@
-tags = ["region"]
+tags = ["trigger_volume"]
 
 [shape]
 type   = "sphere"

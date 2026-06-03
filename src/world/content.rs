@@ -431,6 +431,7 @@ mod tests {
             id: id.into(),
             text: format!("Objective {id}"),
             mandatory: false,
+            targets: vec![],
         }
     }
 

@@ -1039,6 +1039,12 @@ fn sync_radar_blip_nodes(
             if !is_on_radar(&widget.filter, &on_radar.0) {
                 continue;
             }
+            // Objective-marker beacons are invisible until they become an active
+            // objective target. This keeps the nav chart uncluttered — beacons
+            // that haven't been referenced by any active objective never render.
+            if on_radar.0.iter().any(|t| t == "objective_marker") && !appearance.objective_target {
+                continue;
+            }
             let ent_radius = appearance.world_size * 0.5;
             let Some((nx, ny)) = project_radar_entity(
                 blip_pose.x,

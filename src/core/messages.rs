@@ -1082,8 +1082,11 @@ pub struct ObjectiveSnapshot {
     /// Mandatory objectives must be completed; optional are bonus.
     pub mandatory: bool,
     pub status: ObjectiveStatus,
-    /// Entity name (EntityId) of the entity this objective is associated with,
-    /// if any. Used to mark the entity on radar.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entity_name: Option<String>,
+    /// Entity names this objective is associated with. Each named entity is
+    /// marked on the nav radar with an objective ring. May reference real
+    /// entities (stations, ships) or invisible `objective_marker` beacons
+    /// placed at anchor coordinates. Empty when the objective has no spatial
+    /// target.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<String>,
 }

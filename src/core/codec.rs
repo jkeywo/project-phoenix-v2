@@ -1781,21 +1781,21 @@ mod tests {
                     text: "Destroy the convoy".into(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
-                    entity_name: None,
+                    targets: vec!["Axiom Station".into(), "Research Outpost".into()],
                 },
                 crate::messages::ObjectiveSnapshot {
                     id: "obj-2".into(),
                     text: "Scan the debris".into(),
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Completed,
-                    entity_name: None,
+                    targets: vec![],
                 },
                 crate::messages::ObjectiveSnapshot {
                     id: "obj-2".into(),
                     text: "Scan the debris".into(),
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Completed,
-                    entity_name: None,
+                    targets: vec![],
                 },
             ],
         };
@@ -1818,7 +1818,7 @@ mod tests {
                 text: "Save the station".into(),
                 mandatory: true,
                 status: crate::messages::ObjectiveStatus::Failed,
-                entity_name: None,
+                targets: vec![],
             }],
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());

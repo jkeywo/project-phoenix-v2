@@ -175,6 +175,11 @@ struct RawActionEntry {
     text: Option<String>,
     #[serde(default)]
     mandatory: Option<bool>,
+    /// Optional list of entity names to mark on the nav radar for an
+    /// `add_objective` action. Each name may reference a real entity
+    /// (station, ship) or an invisible `objective_marker` beacon.
+    #[serde(default)]
+    targets: Option<Vec<String>>,
     #[serde(default)]
     entity: Option<String>,
     #[serde(default)]
@@ -319,7 +324,7 @@ pub enum TriggerCondition {
 /// An action to execute when a trigger fires.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TriggerAction {
-    AddObjective { id: String, text: String, mandatory: bool },
+    AddObjective { id: String, text: String, mandatory: bool, targets: Vec<String> },
     CompleteObjective { id: String },
     FailObjective { id: String },
     SetAiState { entity: String, state: String, target: Option<String> },
@@ -456,6 +461,7 @@ fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction
                 id: raw_action.id.clone().ok_or_else(|| "Action 'add_objective' requires an 'id' field".to_string())?,
                 text: raw_action.text.clone().ok_or_else(|| "Action 'add_objective' requires a 'text' field".to_string())?,
                 mandatory: raw_action.mandatory.unwrap_or(false),
+                targets: raw_action.targets.clone().unwrap_or_default(),
             },
             "complete_objective" => TriggerAction::CompleteObjective {
                 id: raw_action.id.clone().ok_or_else(|| "Action 'complete_objective' requires an 'id' field".to_string())?,
@@ -1412,11 +1418,53 @@ entity    = "raider_alpha"
         );
         assert_eq!(cfg.triggers[0].actions.len(), 1);
         match &cfg.triggers[0].actions[0] {
-            TriggerAction::AddObjective { id, text, mandatory } => {
+            TriggerAction::AddObjective { id, text, mandatory, .. } => {
                 assert_eq!(id, "obj-raider-destroyed");
                 assert_eq!(text, "Pirate raider eliminated.");
                 assert_eq!(*mandatory, false);
             }
+            other => panic!("expected AddObjective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_reads_add_objective_targets() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type      = "add_objective"
+  id        = "obj-hail-briefing"
+  text      = "Hail Axiom Station or Research Outpost."
+  targets   = ["Axiom Station", "Research Outpost"]
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::AddObjective { targets, .. } => {
+                assert_eq!(
+                    targets,
+                    &vec!["Axiom Station".to_string(), "Research Outpost".to_string()]
+                );
+            }
+            other => panic!("expected AddObjective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_world_add_objective_targets_default_empty() {
+        let toml = r#"
+[[trigger]]
+condition = "on_world_loaded"
+
+  [[trigger.action]]
+  type = "add_objective"
+  id   = "obj-x"
+  text = "Do the thing."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        match &cfg.triggers[0].actions[0] {
+            TriggerAction::AddObjective { targets, .. } => assert!(targets.is_empty()),
             other => panic!("expected AddObjective, got {other:?}"),
         }
     }

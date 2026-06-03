@@ -29,6 +29,11 @@ pub enum EntityTag {
     /// scenario trigger on entry. Deliberately *not* shown on radars, unlike
     /// `Region`, which marks gameplay landmarks that also have `[effects]`.
     TriggerVolume,
+    /// An invisible nav beacon placed at a mission anchor coordinate.
+    /// Shown only on the Navigation console's system chart (not on tactical or
+    /// helm radars). Used to mark anchor-based objective targets (e.g. a patrol
+    /// route waypoint) that have no associated mesh or collider.
+    ObjectiveMarker,
 }
 
 impl EntityTag {
@@ -49,6 +54,7 @@ impl EntityTag {
             "player" => Some(EntityTag::Player),
             "missile" | "torpedo" => Some(EntityTag::Missile),
             "trigger_volume" => Some(EntityTag::TriggerVolume),
+            "objective_marker" => Some(EntityTag::ObjectiveMarker),
             _ => None,
         }
     }
@@ -66,6 +72,7 @@ impl EntityTag {
             EntityTag::Player => "player",
             EntityTag::Missile => "missile",
             EntityTag::TriggerVolume => "trigger_volume",
+            EntityTag::ObjectiveMarker => "objective_marker",
         }
     }
 }
@@ -104,6 +111,7 @@ mod tests {
             ("player", EntityTag::Player),
             ("missile", EntityTag::Missile),
             ("trigger_volume", EntityTag::TriggerVolume),
+            ("objective_marker", EntityTag::ObjectiveMarker),
         ];
         for (s, expected) in cases {
             assert_eq!(EntityTag::from_str(s), Some(expected), "from_str({s:?})");

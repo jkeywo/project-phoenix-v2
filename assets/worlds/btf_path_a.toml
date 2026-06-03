@@ -21,6 +21,7 @@ when      = "flag(parent:ironveil_destroyed)"
   id        = "obj-rescue-varen"
   text      = "Rescue Dr. Varen's escape pod from the inner asteroid belt."
   mandatory = false
+  targets   = ["Varen Escape Pod"]
 
 # Case B: path_a loaded BEFORE Ironveil is destroyed.
 # on_flag_set fires in the tick when the root world sets ironveil_destroyed.
@@ -39,6 +40,7 @@ name      = "parent:ironveil_destroyed"
   id        = "obj-rescue-varen"
   text      = "Rescue Dr. Varen's escape pod from the inner asteroid belt."
   mandatory = false
+  targets   = ["Varen Escape Pod"]
 
 # ── Comms templates ───────────────────────────────────────────────────────────
 
@@ -57,6 +59,7 @@ message = "Ardent, Administrator Chen here. Thank you for responding. Dr. Sol Va
     id        = "obj-investigate-ironveil"
     text      = "Investigate I.V. Ironveil's patrol route near the inner asteroid belt."
     mandatory = false
+    targets   = ["Ironveil Patrol Zone A", "Ironveil Patrol Zone B"]
 
   [[comms.response]]
   text = "Is Ironveil actively hostile?"
@@ -72,6 +75,7 @@ message = "Ardent, Administrator Chen here. Thank you for responding. Dr. Sol Va
         id        = "obj-investigate-ironveil"
         text      = "Investigate I.V. Ironveil's patrol route near the inner asteroid belt."
         mandatory = false
+        targets   = ["Ironveil Patrol Zone A", "Ironveil Patrol Zone B"]
 
 [[comms]]
 thread_id = "axiom-diplomat"
@@ -83,3 +87,4 @@ message = "Ardent — we're picking up an escape pod distress signal from the in
 
   [[comms.response]]
   text = "On our way."
+

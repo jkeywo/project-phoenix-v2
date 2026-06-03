@@ -23,7 +23,7 @@ struct ObjectiveRecord {
     text: String,
     mandatory: bool,
     status: ObjectiveStatus,
-    entity_name: Option<String>,
+    targets: Vec<String>,
 }
 
 // ── Manager ────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ impl ObjectiveManager {
         id: impl Into<String>,
         text: impl Into<String>,
         mandatory: bool,
-        entity_name: Option<String>,
+        targets: Vec<String>,
     ) -> bool {
         let id = id.into();
         if self.objectives.iter().any(|o| o.id == id) {
@@ -62,7 +62,7 @@ impl ObjectiveManager {
             text: text.into(),
             mandatory,
             status: ObjectiveStatus::Active,
-            entity_name,
+            targets,
         });
         self.dirty = true;
         true
@@ -129,7 +129,7 @@ fn record_to_snapshot(r: &ObjectiveRecord) -> ObjectiveSnapshot {
         text: r.text.clone(),
         mandatory: r.mandatory,
         status: r.status.clone(),
-        entity_name: r.entity_name.clone(),
+        targets: r.targets.clone(),
     }
 }
 
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn add_objective_appears_in_snapshots_as_active() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Destroy the convoy", true, None);
+        mgr.add("obj-1", "Destroy the convoy", true, vec![]);
         let snapshots = mgr.sorted_snapshots();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].id, "obj-1");
@@ -166,14 +166,14 @@ mod tests {
     #[test]
     fn add_objective_marks_dirty() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Text", false, None);
+        mgr.add("obj-1", "Text", false, vec![]);
         assert!(mgr.is_dirty());
     }
 
     #[test]
     fn mark_clean_clears_dirty_flag() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Text", false, None);
+        mgr.add("obj-1", "Text", false, vec![]);
         mgr.mark_clean();
         assert!(!mgr.is_dirty());
     }
@@ -181,8 +181,8 @@ mod tests {
     #[test]
     fn adding_duplicate_id_is_noop() {
         let mut mgr = ObjectiveManager::new();
-        let first = mgr.add("obj-1", "First", true, None);
-        let second = mgr.add("obj-1", "Second", false, None);
+        let first = mgr.add("obj-1", "First", true, vec![]);
+        let second = mgr.add("obj-1", "Second", false, vec![]);
         assert!(first);
         assert!(!second);
         assert_eq!(mgr.sorted_snapshots().len(), 1);
@@ -192,10 +192,10 @@ mod tests {
     #[test]
     fn mandatory_objectives_sort_before_optional() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("opt-1", "Optional A", false, None);
-        mgr.add("man-1", "Mandatory A", true, None);
-        mgr.add("opt-2", "Optional B", false, None);
-        mgr.add("man-2", "Mandatory B", true, None);
+        mgr.add("opt-1", "Optional A", false, vec![]);
+        mgr.add("man-1", "Mandatory A", true, vec![]);
+        mgr.add("opt-2", "Optional B", false, vec![]);
+        mgr.add("man-2", "Mandatory B", true, vec![]);
 
         let snaps = mgr.sorted_snapshots();
         assert_eq!(snaps.len(), 4);
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn complete_transitions_active_to_completed() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Destroy convoy", true, None);
+        mgr.add("obj-1", "Destroy convoy", true, vec![]);
         mgr.mark_clean();
 
         let result = mgr.complete("obj-1");
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn complete_returns_false_if_already_completed() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Text", true, None);
+        mgr.add("obj-1", "Text", true, vec![]);
         mgr.complete("obj-1");
         mgr.mark_clean();
 
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn fail_transitions_active_to_failed() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Save the station", true, None);
+        mgr.add("obj-1", "Save the station", true, vec![]);
         mgr.mark_clean();
 
         let result = mgr.fail("obj-1");
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn fail_returns_false_if_already_failed() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Text", true, None);
+        mgr.add("obj-1", "Text", true, vec![]);
         mgr.fail("obj-1");
         mgr.mark_clean();
         assert!(!mgr.fail("obj-1"));
@@ -271,18 +271,42 @@ mod tests {
     }
 
     #[test]
-    fn add_objective_stores_entity_name() {
+    fn add_objective_stores_targets() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Destroy Ironveil", true, Some("Ironveil".to_string()));
+        mgr.add("obj-1", "Destroy Ironveil", true, vec!["Ironveil".to_string()]);
         let snaps = mgr.sorted_snapshots();
-        assert_eq!(snaps[0].entity_name.as_deref(), Some("Ironveil"));
+        assert_eq!(snaps[0].targets, vec!["Ironveil".to_string()]);
     }
 
     #[test]
-    fn add_objective_without_entity_name_is_none() {
+    fn add_objective_stores_multiple_targets() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Survive", true, None);
+        mgr.add(
+            "obj-1",
+            "Hail Axiom Station or Research Outpost",
+            false,
+            vec!["Axiom Station".to_string(), "Research Outpost".to_string()],
+        );
         let snaps = mgr.sorted_snapshots();
-        assert!(snaps[0].entity_name.is_none());
+        assert_eq!(
+            snaps[0].targets,
+            vec!["Axiom Station".to_string(), "Research Outpost".to_string()]
+        );
+    }
+
+    #[test]
+    fn add_objective_without_targets_is_empty() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("obj-1", "Survive", true, vec![]);
+        let snaps = mgr.sorted_snapshots();
+        assert!(snaps[0].targets.is_empty());
+    }
+
+    #[test]
+    fn add_objective_without_targets_is_empty_vec() {
+        let mut mgr = ObjectiveManager::new();
+        mgr.add("obj-1", "Survive", true, vec![]);
+        let snaps = mgr.sorted_snapshots();
+        assert!(snaps[0].targets.is_empty());
     }
 }

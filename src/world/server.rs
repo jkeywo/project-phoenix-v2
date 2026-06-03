@@ -1,4 +1,4 @@
-﻿use bevy::prelude::*;
+use bevy::prelude::*;
 use crate::damage::ConsoleHull;
 use crate::simulation::{Ship, ShipHullIntegrity};
 use std::collections::{HashMap, HashSet};
@@ -938,11 +938,19 @@ fn handle_respond_to_message(
         let sender_uuid = inbox.0.sender_uuid_for(message_id);
         for action in &response.actions {
             match action {
-                TriggerAction::AddObjective { id, text, mandatory } => {
-                    let entity_name = sender_uuid.clone()
-                        .and_then(|suid| uuid_to_name.get(suid.as_str()).copied())
-                        .map(String::from);
-                    objectives.0.add(id, text, *mandatory, entity_name);
+                TriggerAction::AddObjective { id, text, mandatory, targets } => {
+                    // Explicit targets win; otherwise fall back to the comms
+                    // sender so legacy single-entity objectives still mark up.
+                    let resolved = if targets.is_empty() {
+                        sender_uuid.clone()
+                            .and_then(|suid| uuid_to_name.get(suid.as_str()).copied())
+                            .map(String::from)
+                            .into_iter()
+                            .collect()
+                    } else {
+                        targets.clone()
+                    };
+                    objectives.0.add(id, text, *mandatory, resolved);
                 }
                 TriggerAction::CompleteObjective { id } => {
                     objectives.0.complete(id);
@@ -1872,12 +1880,19 @@ fn handle_ai_events(
         for ft in fired {
             for action in &ft.actions {
                 match action {
-                    TriggerAction::AddObjective { id, text, mandatory } => {
+                    TriggerAction::AddObjective { id, text, mandatory, targets } => {
+                        // Explicit targets win; otherwise fall back to the
+                        // trigger condition's entity (legacy behaviour).
+                        let resolved = if targets.is_empty() {
+                            ft.entity_name.clone().into_iter().collect()
+                        } else {
+                            targets.clone()
+                        };
                         objectives.0.add(
                             id.clone(),
                             text.clone(),
                             *mandatory,
-                            ft.entity_name.clone(),
+                            resolved,
                         );
                     }
                     TriggerAction::CompleteObjective { id } => {
@@ -2895,7 +2910,7 @@ mod tests {
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-survey".into(),
                             text: "Complete the survey".into(),
-                            mandatory: true,
+                            mandatory: true, targets: vec![],
                         }],
                         follow_up: None,
                     }],
@@ -3271,7 +3286,7 @@ mod tests {
                 actions: vec![TriggerAction::AddObjective {
                     id: "obj-001".to_string(),
                     text: "Station destroyed".to_string(),
-                    mandatory: false,
+                    mandatory: false, targets: vec![],
                 }],
                 when: None,
             },
@@ -3313,7 +3328,7 @@ mod tests {
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-gated".into(),
                         text: "Should only fire after flag is set".into(),
-                        mandatory: false,
+                        mandatory: false, targets: vec![],
                     }],
                     when: Some(crate::world::flags::parse_predicate("flag(green_light)").unwrap()),
                 },
@@ -3379,7 +3394,7 @@ mod tests {
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-chain".into(),
                             text: "Reacted to flag set".into(),
-                            mandatory: false,
+                            mandatory: false, targets: vec![],
                         }],
                         when: None,
                     },
@@ -3431,7 +3446,7 @@ mod tests {
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-no-op".into(),
                             text: "Should not fire on no-op re-set".into(),
-                            mandatory: false,
+                            mandatory: false, targets: vec![],
                         }],
                         when: None,
                     },
@@ -3483,7 +3498,7 @@ mod tests {
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-shields-down".into(),
                             text: "Shields are down".into(),
-                            mandatory: true,
+                            mandatory: true, targets: vec![],
                         }],
                         when: None,
                     },
@@ -3543,7 +3558,7 @@ mod tests {
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-parent-when".into(),
                         text: "parent flag was set".into(),
-                        mandatory: false,
+                        mandatory: false, targets: vec![],
                     }],
                     when: Some(
                         crate::world::flags::parse_predicate("flag(parent:armed)").unwrap(),
@@ -3608,7 +3623,7 @@ mod tests {
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-base-armed".into(),
                             text: "should NOT fire — different layer".into(),
-                            mandatory: false,
+                            mandatory: false, targets: vec![],
                         }],
                         when: None,
                     },
@@ -3694,7 +3709,7 @@ mod tests {
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-002".to_string(),
                         text: "Enemy attacked".to_string(),
-                        mandatory: false,
+                        mandatory: false, targets: vec![],
                     }],
                     when: None,
                 },
@@ -5303,7 +5318,7 @@ entity = "layer_npc"
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-loaded".into(),
                         text: "World loaded.".into(),
-                        mandatory: false,
+                        mandatory: false, targets: vec![],
                     }],
                     when: None,
                 },
@@ -5348,7 +5363,7 @@ entity = "layer_npc"
             actions: vec![TriggerAction::AddObjective {
                 id: "obj-startup".into(),
                 text: "Startup objective.".into(),
-                mandatory: false,
+                mandatory: false, targets: vec![],
             }],
             when: None,
         });
@@ -5561,7 +5576,7 @@ condition = "on_world_loaded"
                 actions: vec![TriggerAction::AddObjective {
                     id: obj_id.into(),
                     text: "region trigger objective".into(),
-                    mandatory: false,
+                    mandatory: false, targets: vec![],
                 }],
                 when: None,
             },
@@ -5780,7 +5795,7 @@ condition = "on_world_loaded"
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-armed-entry".into(),
                         text: "Armed entry.".into(),
-                        mandatory: false,
+                        mandatory: false, targets: vec![],
                     }],
                     when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
                 },
@@ -6133,7 +6148,7 @@ size_max = 2.0
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-chained".into(),
                             text: "chained".into(),
-                            mandatory: false,
+                            mandatory: false, targets: vec![],
                         }],
                         when: None,
                     },
@@ -6960,7 +6975,7 @@ size_max = 2.0
             // every variant.
             let variants: Vec<TriggerAction> = vec![
                 TriggerAction::AddObjective {
-                    id: "x".into(), text: "x".into(), mandatory: false,
+                    id: "x".into(), text: "x".into(), mandatory: false, targets: vec![],
                 },
                 TriggerAction::CompleteObjective { id: "x".into() },
                 TriggerAction::FailObjective { id: "x".into() },

@@ -795,7 +795,7 @@ fn reconcile_runtime_entities(
                 .sorted_snapshots()
                 .into_iter()
                 .filter(|s| s.status == crate::messages::ObjectiveStatus::Active)
-                .filter_map(|s| s.entity_name)
+                .flat_map(|s| s.targets)
                 .collect()
         })
         .unwrap_or_default();

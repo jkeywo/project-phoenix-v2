@@ -226,6 +226,14 @@ struct RawCommsFollowUp {
     message: String,
     #[serde(default, rename = "response")]
     responses: Vec<RawCommsResponse>,
+    /// Optional sender name override for this follow-up node.
+    /// When absent the parent template's `from` is inherited.
+    #[serde(default)]
+    from: Option<String>,
+    /// Optional delay in seconds before this follow-up message is injected.
+    /// A `...` placeholder is shown in the chat during the wait.
+    #[serde(default)]
+    delay_secs: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -250,7 +258,10 @@ struct RawCommsEntry {
     /// this thread_id. When absent, a unique UUID is generated per fire.
     #[serde(default)]
     thread_id: Option<String>,
-    /// When true, the resulting `CommsMessage` is flagged as urgent.
+    /// Optional delay in seconds before this template's message is injected
+    /// after the trigger fires. A `...` placeholder is shown during the wait.
+    #[serde(default)]
+    delay_secs: Option<f32>,
     #[serde(default)]
     urgent: bool,
 }
@@ -377,6 +388,12 @@ pub struct CommsResponse {
 pub struct CommsDialogueNode {
     pub body: String,
     pub responses: Vec<CommsResponse>,
+    /// Sender name override for this node. When `Some`, it overrides the
+    /// template-level `from` when this node is injected as a follow-up.
+    pub from: Option<String>,
+    /// Delay in seconds before this node is injected after being triggered.
+    /// `None` / `0.0` means immediate injection.
+    pub delay_secs: Option<f32>,
 }
 
 /// A comms template: a root dialogue node associated with a trigger condition.
@@ -399,7 +416,7 @@ pub struct CommsTemplate {
     pub urgent: bool,
 }
 
-// -- Parser helpers ---------------------------------------------------------
+// -- Parser helpers -----------------------------------------------------------
 
 fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String> {
     use crate::messages::ModifierSlot;
@@ -563,7 +580,12 @@ fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<Comms
         let actions = parse_raw_actions(&raw_resp.actions)?;
         let follow_up = if let Some(ref raw_fu) = raw_resp.follow_up {
             let fu_responses = parse_comms_responses(&raw_fu.responses)?;
-            Some(CommsDialogueNode { body: raw_fu.message.clone(), responses: fu_responses })
+            Some(CommsDialogueNode {
+                body: raw_fu.message.clone(),
+                responses: fu_responses,
+                from: raw_fu.from.clone(),
+                delay_secs: raw_fu.delay_secs,
+            })
         } else {
             None
         };
@@ -711,7 +733,12 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             "Comms block",
         )?;
         let responses = parse_comms_responses(&raw_comms.responses)?;
-        let node = CommsDialogueNode { body: raw_comms.message, responses };
+        let node = CommsDialogueNode {
+            body: raw_comms.message,
+            responses,
+            from: None,           // root node always uses the template-level `from`
+            delay_secs: raw_comms.delay_secs,
+        };
         comms.push(CommsTemplate { from: raw_comms.from, trigger, node, thread_id: raw_comms.thread_id, urgent: raw_comms.urgent });
     }
 

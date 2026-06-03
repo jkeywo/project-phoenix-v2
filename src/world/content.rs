@@ -121,6 +121,28 @@ pub struct ActiveDialogue {
     pub thread_id: String,
 }
 
+/// A follow-up message that is waiting for its `delay_secs` timer to expire
+/// before being injected into the inbox.
+#[derive(Clone, Debug)]
+pub struct PendingFollowUp {
+    /// The dialogue node to inject once the delay expires.
+    pub node: CommsDialogueNode,
+    /// UUID of the entity sending this message.
+    pub sender_uuid: String,
+    /// Display name of the sender (already resolved to the per-node override
+    /// or the parent template's `from`).
+    pub sender_name: String,
+    /// Shared thread identifier for this conversation.
+    pub thread_id: String,
+    /// Remaining seconds before injection.
+    pub remaining_secs: f32,
+    /// The id of the `...` placeholder message currently shown in the inbox.
+    /// Replaced by the real message on expiry.
+    pub placeholder_id: String,
+    /// Whether the real message should be flagged as urgent.
+    pub urgent: bool,
+}
+
 // ── Evaluators ────────────────────────────────────────────────────────────
 
 /// Extract the entity name from a `TriggerCondition`, if the variant carries one.
@@ -576,7 +598,7 @@ mod tests {
         world.comms.push(CommsTemplate {
             from: "starbase".into(),
             trigger: TriggerCondition::OnHailed { entity_name: "starbase".into() },
-            node: CommsDialogueNode { body: "hello".into(), responses: vec![] },
+            node: CommsDialogueNode { body: "hello".into(), responses: vec![], from: None, delay_secs: None },
             thread_id: None,
             urgent: false,
         });
@@ -593,7 +615,7 @@ mod tests {
             template: CommsTemplate {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
+                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], from: None, delay_secs: None },
                 thread_id: None,
                 urgent: false,
             },
@@ -616,7 +638,7 @@ mod tests {
             template: CommsTemplate {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
+                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], from: None, delay_secs: None },
                 thread_id: None,
                 urgent: false,
             },
@@ -640,7 +662,7 @@ mod tests {
             template: CommsTemplate {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![] },
+                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], from: None, delay_secs: None },
                 thread_id: None,
                 urgent: false,
             },

@@ -645,6 +645,13 @@ fn refresh_all_comms_ui(
                                 Text::new(reply_text),
                                 TextFont { font_size: 12.0, ..default() },
                                 TextColor(Color::srgb(0.5, 0.9, 0.6)),
+                                Node {
+                                    flex_grow: 1.0,
+                                    flex_shrink: 1.0,
+                                    width: Val::Px(0.0),
+                                    min_width: Val::Px(0.0),
+                                    ..default()
+                                },
                             ));
                         });
                     });

@@ -12,7 +12,7 @@ use crate::messages::{
 use crate::ship_state::ShipState;
 use crate::objectives::ObjectiveManager;
 use crate::world::content::{
-    ActiveDialogue, CommsTemplateState, TriggerAction,
+    ActiveDialogue, CommsTemplateState, PendingFollowUp, TriggerAction,
     TriggerState, WorldEvent, comms_template_states_from_world, evaluate_comms_templates,
     trigger_states_from_world,
 };
@@ -70,6 +70,10 @@ pub struct WorldContentRuntime {
     /// without duplicating the dispatch logic that lives inside
     /// `handle_ai_events`.
     pub pending_world_events: Vec<WorldEvent>,
+    /// Follow-up messages awaiting their `delay_secs` timer before injection.
+    /// Each entry holds a `...` placeholder already shown in the inbox and
+    /// the real node that replaces it once the timer expires.
+    pub pending_follow_ups: Vec<PendingFollowUp>,
 }
 
 /// Resolve the current `sender_in_range` flag for an injection-time message,
@@ -213,6 +217,7 @@ impl Plugin for WorldPlugin {
                 ).chain(),
             )
             .add_systems(Update, handle_ai_events.in_set(crate::sim_sets::SimSet::Physics))
+            .add_systems(Update, tick_pending_follow_ups.in_set(crate::sim_sets::SimSet::Physics))
             .add_systems(Update, apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics))
             .add_systems(Update, apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics))
             .add_observer(handle_region_entered_event)
@@ -723,7 +728,6 @@ fn handle_hail(
 
         for f in fired {
             // Build a CommsMessage and inject it.
-            let msg_id = uuid::Uuid::new_v4().to_string();
             let thread_id = f.thread_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let sender_uuid = target_uuid.clone();
             // Resolve sender display name from contacts (best effort).
@@ -734,35 +738,117 @@ fn handle_hail(
                 .map(|c| c.name.clone())
                 .unwrap_or_else(|| target_uuid.clone());
 
-            let responses: Vec<String> =
-                f.node.responses.iter().map(|r| r.text.clone()).collect();
-
-            let msg = CommsMessage {
-                id: msg_id.clone(),
-                sender_uuid: sender_uuid.clone(),
-                sender_name,
-                subject: f.node.body.chars().take(40).collect(),
-                body: f.node.body.clone(),
-                responses,
-                selected_response: None,
-                is_read: false,
-                is_orphaned: false,
-                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
-                thread_id: thread_id.clone(),
-                is_urgent: f.urgent,
-            };
-
-            inbox.0.inject(msg);
-
-            // Record the active dialogue.
-            runtime.active_dialogues.insert(
-                msg_id,
-                ActiveDialogue {
-                    current_node: f.node.clone(),
+            let delay = f.node.delay_secs.unwrap_or(0.0);
+            if delay > 0.0 {
+                let placeholder_id = uuid::Uuid::new_v4().to_string();
+                let placeholder = CommsMessage {
+                    id: placeholder_id.clone(),
+                    sender_uuid: sender_uuid.clone(),
+                    sender_name: sender_name.clone(),
+                    subject: "...".to_string(),
+                    body: "...".to_string(),
+                    responses: vec![],
+                    selected_response: None,
+                    is_read: false,
+                    is_orphaned: false,
+                    sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                    thread_id: thread_id.clone(),
+                    is_urgent: f.urgent,
+                };
+                inbox.0.inject(placeholder);
+                runtime.pending_follow_ups.push(PendingFollowUp {
+                    node: f.node.clone(),
+                    sender_uuid,
+                    sender_name,
                     thread_id,
-                },
-            );
+                    remaining_secs: delay,
+                    placeholder_id,
+                    urgent: f.urgent,
+                });
+            } else {
+                let msg_id = uuid::Uuid::new_v4().to_string();
+                let responses: Vec<String> =
+                    f.node.responses.iter().map(|r| r.text.clone()).collect();
+                let msg = CommsMessage {
+                    id: msg_id.clone(),
+                    sender_uuid: sender_uuid.clone(),
+                    sender_name,
+                    subject: f.node.body.chars().take(40).collect(),
+                    body: f.node.body.clone(),
+                    responses,
+                    selected_response: None,
+                    is_read: false,
+                    is_orphaned: false,
+                    sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                    thread_id: thread_id.clone(),
+                    is_urgent: f.urgent,
+                };
+                inbox.0.inject(msg);
+                runtime.active_dialogues.insert(
+                    msg_id,
+                    ActiveDialogue {
+                        current_node: f.node.clone(),
+                        thread_id,
+                    },
+                );
+            }
         }
+    }
+}
+
+/// Tick pending follow-up messages: decrement their timers each frame and, when
+/// the timer reaches zero, replace the `...` placeholder with the real message.
+fn tick_pending_follow_ups(
+    time: Res<bevy::time::Time>,
+    mut runtime: ResMut<WorldContentRuntime>,
+    mut inbox: ResMut<CommsInboxRes>,
+) {
+    if runtime.pending_follow_ups.is_empty() {
+        return;
+    }
+
+    let dt = time.delta_secs();
+    let mut ready: Vec<PendingFollowUp> = Vec::new();
+
+    for pfu in &mut runtime.pending_follow_ups {
+        pfu.remaining_secs -= dt;
+        if pfu.remaining_secs <= 0.0 {
+            ready.push(pfu.clone());
+        }
+    }
+
+    // Remove the expired entries from the queue.
+    runtime.pending_follow_ups.retain(|p| p.remaining_secs > 0.0);
+
+    for pfu in ready {
+        // Remove the `...` placeholder.
+        inbox.0.remove(&pfu.placeholder_id);
+
+        // Inject the real message.
+        let new_msg_id = uuid::Uuid::new_v4().to_string();
+        let responses: Vec<String> = pfu.node.responses.iter().map(|r| r.text.clone()).collect();
+        let new_msg = CommsMessage {
+            id: new_msg_id.clone(),
+            sender_uuid: pfu.sender_uuid.clone(),
+            sender_name: pfu.sender_name.clone(),
+            subject: pfu.node.body.chars().take(40).collect(),
+            body: pfu.node.body.clone(),
+            responses,
+            selected_response: None,
+            is_read: false,
+            is_orphaned: false,
+            sender_in_range: current_sender_in_range(&runtime, &pfu.sender_uuid),
+            thread_id: pfu.thread_id.clone(),
+            is_urgent: pfu.urgent,
+        };
+        inbox.0.inject(new_msg);
+        runtime.active_dialogues.insert(
+            new_msg_id,
+            ActiveDialogue {
+                current_node: pfu.node.clone(),
+                thread_id: pfu.thread_id.clone(),
+            },
+        );
     }
 }
 
@@ -1232,46 +1318,75 @@ fn handle_respond_to_message(
 
         // Advance to follow-up node if present.
         if let Some(follow_up) = &response.follow_up {
-            // Inject a new message for the follow-up node.
-            let new_msg_id = uuid::Uuid::new_v4().to_string();
             let thread_id = dialogue.thread_id.clone();
             let sender_uuid = inbox
                 .0
                 .sender_uuid_for(message_id)
                 .unwrap_or_default();
-            let sender_name = inbox
-                .0
-                .sender_name_for(message_id)
-                .unwrap_or_default();
+            // Use the follow-up's own `from` override if set, otherwise inherit
+            // the sender name from the parent message.
+            let sender_name = follow_up
+                .from
+                .clone()
+                .unwrap_or_else(|| inbox.0.sender_name_for(message_id).unwrap_or_default());
 
-            let new_responses: Vec<String> =
-                follow_up.responses.iter().map(|r| r.text.clone()).collect();
-
-            let new_msg = CommsMessage {
-                id: new_msg_id.clone(),
-                sender_uuid: sender_uuid.clone(),
-                sender_name,
-                subject: follow_up.body.chars().take(40).collect(),
-                body: follow_up.body.clone(),
-                responses: new_responses,
-                selected_response: None,
-                is_read: false,
-                is_orphaned: false,
-                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
-                thread_id: thread_id.clone(),
-                is_urgent: false,
-            };
-
-            inbox.0.inject(new_msg);
-
-            // Record the follow-up dialogue, inheriting the same thread_id.
-            runtime.active_dialogues.insert(
-                new_msg_id,
-                ActiveDialogue {
-                    current_node: follow_up.clone(),
+            let delay = follow_up.delay_secs.unwrap_or(0.0);
+            if delay > 0.0 {
+                // Show a `...` placeholder immediately and queue the real
+                // message to be injected once the timer expires.
+                let placeholder_id = uuid::Uuid::new_v4().to_string();
+                let placeholder = CommsMessage {
+                    id: placeholder_id.clone(),
+                    sender_uuid: sender_uuid.clone(),
+                    sender_name: sender_name.clone(),
+                    subject: "...".to_string(),
+                    body: "...".to_string(),
+                    responses: vec![],
+                    selected_response: None,
+                    is_read: false,
+                    is_orphaned: false,
+                    sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                    thread_id: thread_id.clone(),
+                    is_urgent: false,
+                };
+                inbox.0.inject(placeholder);
+                runtime.pending_follow_ups.push(PendingFollowUp {
+                    node: follow_up.clone(),
+                    sender_uuid,
+                    sender_name,
                     thread_id,
-                },
-            );
+                    remaining_secs: delay,
+                    placeholder_id,
+                    urgent: false, // follow-up urgency is not a TOML-level concept
+                });
+            } else {
+                // Inject immediately (no delay).
+                let new_msg_id = uuid::Uuid::new_v4().to_string();
+                let new_responses: Vec<String> =
+                    follow_up.responses.iter().map(|r| r.text.clone()).collect();
+                let new_msg = CommsMessage {
+                    id: new_msg_id.clone(),
+                    sender_uuid: sender_uuid.clone(),
+                    sender_name,
+                    subject: follow_up.body.chars().take(40).collect(),
+                    body: follow_up.body.clone(),
+                    responses: new_responses,
+                    selected_response: None,
+                    is_read: false,
+                    is_orphaned: false,
+                    sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                    thread_id: thread_id.clone(),
+                    is_urgent: false,
+                };
+                inbox.0.inject(new_msg);
+                runtime.active_dialogues.insert(
+                    new_msg_id,
+                    ActiveDialogue {
+                        current_node: follow_up.clone(),
+                        thread_id,
+                    },
+                );
+            }
         }
     }
 }
@@ -1594,7 +1709,6 @@ fn handle_ai_events(
         &name_to_uuid,
     );
     for fc in fired_comms {
-        let msg_id = uuid::Uuid::new_v4().to_string();
         let thread_id = fc.thread_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         // `_self` is the reserved synthetic internal-sender name; render it as
         // "Internal Report" in the comms UI so the crew sees a ship-generated
@@ -1608,29 +1722,60 @@ fn handle_ai_events(
             .get(&fc.from)
             .cloned()
             .unwrap_or_else(|| fc.from.clone());
-        let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
-        let msg = crate::messages::CommsMessage {
-            id: msg_id.clone(),
-            sender_uuid: sender_uuid.clone(),
-            sender_name,
-            subject: fc.node.body.chars().take(40).collect(),
-            body: fc.node.body.clone(),
-            responses,
-            selected_response: None,
-            is_read: false,
-            is_orphaned: false,
-            sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
-            thread_id: thread_id.clone(),
-            is_urgent: fc.urgent,
-        };
-        inbox.0.inject(msg);
-        runtime.active_dialogues.insert(
-            msg_id,
-            ActiveDialogue {
-                current_node: fc.node.clone(),
+
+        let delay = fc.node.delay_secs.unwrap_or(0.0);
+        if delay > 0.0 {
+            let placeholder_id = uuid::Uuid::new_v4().to_string();
+            let placeholder = crate::messages::CommsMessage {
+                id: placeholder_id.clone(),
+                sender_uuid: sender_uuid.clone(),
+                sender_name: sender_name.clone(),
+                subject: "...".to_string(),
+                body: "...".to_string(),
+                responses: vec![],
+                selected_response: None,
+                is_read: false,
+                is_orphaned: false,
+                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                thread_id: thread_id.clone(),
+                is_urgent: fc.urgent,
+            };
+            inbox.0.inject(placeholder);
+            runtime.pending_follow_ups.push(PendingFollowUp {
+                node: fc.node.clone(),
+                sender_uuid,
+                sender_name,
                 thread_id,
-            },
-        );
+                remaining_secs: delay,
+                placeholder_id,
+                urgent: fc.urgent,
+            });
+        } else {
+            let msg_id = uuid::Uuid::new_v4().to_string();
+            let responses: Vec<String> = fc.node.responses.iter().map(|r| r.text.clone()).collect();
+            let msg = crate::messages::CommsMessage {
+                id: msg_id.clone(),
+                sender_uuid: sender_uuid.clone(),
+                sender_name,
+                subject: fc.node.body.chars().take(40).collect(),
+                body: fc.node.body.clone(),
+                responses,
+                selected_response: None,
+                is_read: false,
+                is_orphaned: false,
+                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
+                thread_id: thread_id.clone(),
+                is_urgent: fc.urgent,
+            };
+            inbox.0.inject(msg);
+            runtime.active_dialogues.insert(
+                msg_id,
+                ActiveDialogue {
+                    current_node: fc.node.clone(),
+                    thread_id,
+                },
+            );
+        }
     }
 
     // Loop to support within-tick chaining: a trigger that fires a
@@ -2754,6 +2899,8 @@ mod tests {
                         }],
                         follow_up: None,
                     }],
+                    from: None,
+                    delay_secs: None,
                 },
                 thread_id: None,
                 urgent: false,
@@ -3078,8 +3225,12 @@ mod tests {
                         follow_up: Some(CommsDialogueNode {
                             body: "Welcome, Phoenix.".into(),
                             responses: vec![],
+                            from: None,
+                            delay_secs: None,
                         }),
                     }],
+                    from: None,
+                    delay_secs: None,
                 },
                 thread_id: None,
                 urgent: false,
@@ -3665,6 +3816,8 @@ mod tests {
                     node: CommsDialogueNode {
                         body: "Mayday! We are under attack!".to_string(),
                         responses: vec![],
+                        from: None,
+                        delay_secs: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -3710,6 +3863,8 @@ mod tests {
                     node: CommsDialogueNode {
                         body: "Distress signal transmitted.".to_string(),
                         responses: vec![],
+                        from: None,
+                        delay_secs: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -6390,6 +6545,8 @@ size_max = 2.0
                             actions,
                             follow_up: None,
                         }],
+                        from: None,
+                        delay_secs: None,
                     },
                     thread_id: None,
                     urgent: false,
@@ -6742,6 +6899,8 @@ size_max = 2.0
                             }],
                             follow_up: None,
                         }],
+                        from: None,
+                        delay_secs: None,
                     },
                     thread_id: None,
                     urgent: false,

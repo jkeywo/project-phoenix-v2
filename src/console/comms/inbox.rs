@@ -63,6 +63,16 @@ impl CommsInbox {
         self.records.iter().map(|r| r.message.clone()).collect()
     }
 
+    /// Remove a single message by id (no-op if not found). Used by the
+    /// pending-follow-up timer to retire the `...` placeholder on expiry.
+    pub fn remove(&mut self, message_id: &str) {
+        let before = self.records.len();
+        self.records.retain(|r| r.message.id != message_id);
+        if self.records.len() != before {
+            self.dirty = true;
+        }
+    }
+
     /// Returns `true` if the inbox has changed since last `mark_clean`.
     pub fn is_dirty(&self) -> bool {
         self.dirty

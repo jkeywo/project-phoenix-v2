@@ -1,0 +1,17 @@
+# Invisible navigation beacon.
+#
+# Placed at anchor/coordinate positions to serve as spatial objective targets.
+# Carries no mesh, collider, or hull — it exists purely to give the objective
+# marker system an entity to ring on the nav radar.
+#
+# The `objective_marker` tag keeps it off the helm/tactical/sensors radars;
+# only [navigation_console.system_chart] shows = [..., "objective_marker"]
+# makes it visible on the nav chart — and then only when it is the target of
+# an active objective (objective_target ring).
+
+tags = ["objective_marker"]
+
+[radar_appearance]
+colour = [1.0, 0.85, 0.2]
+radius = 4.0
+icon   = "station"

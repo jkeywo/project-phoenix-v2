@@ -79,6 +79,19 @@ template_path = "assets/entities/region_kaleth_nebula.toml"
 name = "Kaleth Nebula"
 transform = { anchor = "nebula_center" }
 
+# Invisible nav beacons — mark the two waypoints of Ironveil's patrol route.
+# Used by btf_path_a objectives to put a gold ring on the nav chart.
+
+[[entity]]
+template_path = "assets/entities/nav_beacon.toml"
+name = "Ironveil Patrol Zone A"
+transform = { anchor = "ironveil_patrol_a" }
+
+[[entity]]
+template_path = "assets/entities/nav_beacon.toml"
+name = "Ironveil Patrol Zone B"
+transform = { anchor = "ironveil_patrol_b" }
+
 # ── Triggers ──────────────────────────────────────────────────────────────────
 
 [[trigger]]
@@ -89,6 +102,7 @@ condition = "on_world_loaded"
   id        = "obj-investigate"
   text      = "Investigate the situation in the Axiom System."
   mandatory = true
+  targets   = ["Axiom Station"]
 
 [[trigger]]
 condition = "on_world_loaded"
@@ -98,6 +112,7 @@ condition = "on_world_loaded"
   id        = "obj-hail-briefing"
   text      = "Hail Axiom Station or Research Outpost for a briefing."
   mandatory = false
+  targets   = ["Axiom Station", "Research Outpost"]
 
 # ── Opening twin comms (on_world_loaded) ─────────────────────────────────────
 
@@ -114,6 +129,7 @@ Do not engage unless fired upon. Command out."""
 from = "Axiom Station"
 trigger = "on_world_loaded"
 entity = "Axiom Station"
+urgent = true
 message = """This is Axiom Station to any Alliance vessel — we have a situation. \
 Our lead negotiator, Dr. Sol Varen, has gone missing. Their last confirmed \
 position puts them near the Harrow patrol operating area. The peace talks \

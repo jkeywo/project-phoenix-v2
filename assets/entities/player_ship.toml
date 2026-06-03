@@ -118,7 +118,7 @@ shows = ["player", "asteroid", "ship", "station", "planet", "star"]
 
 [navigation_console.system_chart]
 range = 800.0
-shows = ["region", "asteroid_field", "star", "planet", "station", "player"]
+shows = ["region", "asteroid_field", "star", "planet", "station", "player", "objective_marker"]
 
 # Comms range — within this radius the player ship can hail / be hailed.
 # Scale matches helm radar / system chart so default-world entities are

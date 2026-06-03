@@ -17,9 +17,10 @@ use crate::client_app::OutboundClientMessage;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
-    bridge_sim_to_radar, spawn_gui_button, AutoScaleRadar, ButtonPressed, ButtonSize,
-    ConsoleRadar, GenericRadar, OrientationMode, RadarBlipMap, RadarCenterPose, RadarClipMode,
-    RadarFilter, ReadoutValue, StateVisuals, TextReadout, WorldCentredRadar,
+    apply_zoom_step, bridge_sim_to_radar, pinch_zoom, px_to_world_delta, spawn_gui_button,
+    AutoScaleRadar, ButtonPressed, ButtonSize, ConsoleRadar, GenericRadar, OrientationMode,
+    RadarBlipLabels, RadarBlipMap, RadarCenterPose, RadarClipMode, RadarFilter, RadarLastGeom,
+    RadarViewControl, ReadoutValue, StateVisuals, TextReadout, WorldCentredRadar,
 };
 use crate::messages::{ClientMessage, Console, GamePhase, ViewMode};
 use crate::phone_border::framing::{DeviceOrientation, PhoneAssets};
@@ -132,7 +133,7 @@ pub struct NavigationPanelPlugin;
 
 impl Plugin for NavigationPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<NavPinchState>().add_systems(
             Update,
             (
                 spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
@@ -140,6 +141,7 @@ impl Plugin for NavigationPanelPlugin {
                 refresh_navigation_panel,
                 respawn_navigation_on_orientation_change,
                 bridge_client_sim_to_nav_radar,
+                nav_radar_pinch_zoom,
             ),
         );
     }
@@ -161,6 +163,94 @@ fn on_cancel_impulse_pressed(
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     outbound.write(OutboundClientMessage(ClientMessage::CancelImpulse));
+}
+
+// ── Nav radar view control (zoom / pan) ─────────────────────────────────────
+
+/// Sign mapping a downward (screen +Y) drag onto world Z when panning.
+///
+/// The nav widget is north-up (`WorldFixed`, effective yaw 0). In
+/// `project_radar_entity` the normalised `ny = -(entity_z - center_z) / range`,
+/// and the screen `top = center_y_px - ny * radar_radius_px`, so a blip's
+/// screen-Y increases with `entity_z`: **+Z maps to screen-down**. To make the
+/// content follow the finger on a downward drag we must move the world centre
+/// *up* in Z (decrease `center_z`), so `pan_z` is decremented by the positive
+/// world delta — i.e. `NAV_Z_SIGN = +1`.
+const NAV_Z_SIGN: f32 = 1.0;
+
+/// Tracks the previous two-finger distance between frames for pinch-to-zoom.
+#[derive(Resource, Default)]
+pub struct NavPinchState {
+    pub last_dist: Option<f32>,
+}
+
+/// Pan the nav radar by dragging. The world centre moves opposite to the finger
+/// so the chart content tracks the drag.
+fn on_nav_radar_drag(
+    trigger: On<Pointer<Drag>>,
+    mut q: Query<(&mut RadarViewControl, &RadarLastGeom)>,
+) {
+    let e = trigger.entity;
+    let Ok((mut vc, geom)) = q.get_mut(e) else {
+        return;
+    };
+    let d = trigger.event().delta;
+    vc.pan_x -= px_to_world_delta(d.x, geom.range, geom.radar_radius_px);
+    vc.pan_z -= px_to_world_delta(d.y, geom.range, geom.radar_radius_px) * NAV_Z_SIGN;
+    vc.user_engaged = true;
+}
+
+/// Pinch-to-zoom: while exactly two touches are active, scale the nav radar's
+/// zoom by the change in finger-to-finger distance.
+fn nav_radar_pinch_zoom(
+    touches: Res<Touches>,
+    mut pinch: ResMut<NavPinchState>,
+    mut q: Query<&mut RadarViewControl>,
+) {
+    let active: Vec<_> = touches.iter().collect();
+    if active.len() != 2 {
+        pinch.last_dist = None;
+        return;
+    }
+    let new_dist = active[0].position().distance(active[1].position());
+    if let Some(last) = pinch.last_dist {
+        if let Ok(mut vc) = q.single_mut() {
+            vc.zoom = pinch_zoom(vc.zoom, last, new_dist);
+            vc.user_engaged = true;
+        }
+    }
+    pinch.last_dist = Some(new_dist);
+}
+
+fn on_nav_zoom_in_pressed(_trigger: On<ButtonPressed>, mut q: Query<&mut RadarViewControl>) {
+    if let Ok(mut vc) = q.single_mut() {
+        vc.zoom = apply_zoom_step(vc.zoom, 1.25);
+        vc.user_engaged = true;
+    }
+}
+
+fn on_nav_zoom_out_pressed(_trigger: On<ButtonPressed>, mut q: Query<&mut RadarViewControl>) {
+    if let Ok(mut vc) = q.single_mut() {
+        vc.zoom = apply_zoom_step(vc.zoom, 0.8);
+        vc.user_engaged = true;
+    }
+}
+
+fn on_nav_recenter_pressed(_trigger: On<ButtonPressed>, mut q: Query<&mut RadarViewControl>) {
+    if let Ok(mut vc) = q.single_mut() {
+        *vc = RadarViewControl::default();
+    }
+}
+
+/// Zoom button visuals: neutral blue-grey.
+fn zoom_button_visuals() -> StateVisuals {
+    StateVisuals::from_colors(
+        Color::srgb(0.12, 0.20, 0.30), // idle
+        Color::srgb(0.16, 0.28, 0.42), // hover
+        Color::srgb(0.18, 0.32, 0.48), // active
+        Color::srgb(0.22, 0.38, 0.55), // press
+        Color::srgb(0.06, 0.10, 0.15), // disabled
+    )
 }
 
 // â”€â”€ Spawn (ConsoleShell) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -244,7 +334,10 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity, _is_landsca
         ConsoleRadar::Navigation,
         RadarBlipMap::default(),
         WorldCentredRadar,
+        RadarBlipLabels,
         AutoScaleRadar { margin: 1.1, min_range: 50.0 },
+        RadarViewControl::default(),
+        RadarLastGeom::default(),
         Node {
             width: Val::Percent(100.0),
             height: Val::Auto,
@@ -254,6 +347,7 @@ fn fill_navigation_chart(commands: &mut Commands, container: Entity, _is_landsca
             ..default()
         },
     ));
+    commands.entity(radar).observe(on_nav_radar_drag);
     commands.entity(col).add_child(radar);
 
     // Title as an absolute overlay so it doesn't compete with the radar for space.
@@ -335,6 +429,53 @@ fn fill_navigation_controls(commands: &mut Commands, container: Entity) {
     });
     commands.entity(on_screen_btn).observe(on_on_screen_pressed);
     commands.entity(col).add_child(on_screen_btn);
+
+    // ── Zoom / recenter row ───────────────────────────────────────────────────
+    let zoom_row = commands
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(8.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .id();
+    commands.entity(col).add_child(zoom_row);
+
+    let zoom_in_btn =
+        spawn_gui_button(commands, ButtonSize::Rect { width: 44.0, height: 36.0 }, zoom_button_visuals());
+    commands.entity(zoom_in_btn).with_children(|btn| {
+        btn.spawn((
+            Text::new("+"),
+            TextFont { font_size: 20.0, ..default() },
+            TextColor(Color::srgb(0.7, 0.9, 1.0)),
+        ));
+    });
+    commands.entity(zoom_in_btn).observe(on_nav_zoom_in_pressed);
+    commands.entity(zoom_row).add_child(zoom_in_btn);
+
+    let zoom_out_btn =
+        spawn_gui_button(commands, ButtonSize::Rect { width: 44.0, height: 36.0 }, zoom_button_visuals());
+    commands.entity(zoom_out_btn).with_children(|btn| {
+        btn.spawn((
+            Text::new("-"),
+            TextFont { font_size: 20.0, ..default() },
+            TextColor(Color::srgb(0.7, 0.9, 1.0)),
+        ));
+    });
+    commands.entity(zoom_out_btn).observe(on_nav_zoom_out_pressed);
+    commands.entity(zoom_row).add_child(zoom_out_btn);
+
+    let recenter_btn =
+        spawn_gui_button(commands, ButtonSize::Rect { width: 120.0, height: 36.0 }, zoom_button_visuals());
+    commands.entity(recenter_btn).with_children(|btn| {
+        btn.spawn((
+            Text::new("RECENTER"),
+            TextFont { font_size: 14.0, ..default() },
+            TextColor(Color::srgb(0.7, 0.9, 1.0)),
+        ));
+    });
+    commands.entity(recenter_btn).observe(on_nav_recenter_pressed);
+    commands.entity(zoom_row).add_child(recenter_btn);
 }
 
 // â”€â”€ Orientation respawn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

@@ -31,12 +31,15 @@ pub use progress::{
     SegmentCount,
 };
 pub use radar::{
-    blip_local_offset, bridge_sim_to_radar, icon_from_radar_icon_str, is_on_radar,
-    project_radar_entity, region_shape_from_snapshot, world_size_to_px, AutoScaleRadar,
+    apply_zoom_step, blip_local_offset, bridge_sim_to_radar, icon_from_radar_icon_str, is_on_radar,
+    pinch_zoom, project_radar_entity, px_to_world_delta, region_shape_from_snapshot,
+    world_size_to_px, AutoScaleRadar,
     BlipWorldPose, ConsoleRadar, GenericRadar, GenericRadarWidget, OnRadar, OrientationMode,
-    RadarAppearance, RadarArc, RadarArcKind, RadarArcs, RadarBlipClicked, RadarBlipMap,
+    RadarAppearance, RadarArc, RadarArcKind, RadarArcs, RadarBlipClicked, RadarBlipLabels,
+    RadarBlipMap,
     RadarCenter, RadarCenterPose, RadarClipMode, RadarEntityUuid, RadarFilter, RadarIcon,
-    RadarIconLookup, RadarRegionNode, RadarTargetHighlight, RadarTargetRing, RegionRadarShape, WorldCentredRadar,
+    RadarIconLookup, RadarLastGeom, RadarRegionNode, RadarTargetHighlight, RadarTargetRing,
+    RadarViewControl, RegionRadarShape, WorldCentredRadar, RADAR_MAX_ZOOM, RADAR_MIN_ZOOM,
 };
 pub use radio::{
     next_radio_selection, on_radio_member_pressed, RadioButtonConfig, RadioGroup, RadioGroupMarker,

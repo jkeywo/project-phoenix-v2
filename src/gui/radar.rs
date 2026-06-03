@@ -249,6 +249,47 @@ pub struct AutoScaleRadar {
     pub min_range: f32,
 }
 
+/// Render text name labels for named navigational blips; opt-in per widget.
+#[derive(Component)]
+pub struct RadarBlipLabels;
+
+/// User-controlled zoom/pan overlay for a radar widget. When `user_engaged`
+/// is true, the widget ignores AutoScaleRadar's fitted range and WorldCentred
+/// origin, instead centring on `(pan_x, pan_z)` (world units, relative to the
+/// widget's natural centre) and dividing the fitted range by `zoom`.
+#[derive(Component, Clone, Debug)]
+pub struct RadarViewControl {
+    pub pan_x: f32,
+    pub pan_z: f32,
+    pub zoom: f32,
+    pub user_engaged: bool,
+}
+
+impl Default for RadarViewControl {
+    fn default() -> Self {
+        Self { pan_x: 0.0, pan_z: 0.0, zoom: 1.0, user_engaged: false }
+    }
+}
+
+/// Smallest user zoom factor (most zoomed-out relative to the fitted range).
+pub const RADAR_MIN_ZOOM: f32 = 0.25;
+/// Largest user zoom factor (most zoomed-in relative to the fitted range).
+pub const RADAR_MAX_ZOOM: f32 = 8.0;
+/// Absolute floor on the world-unit range when zooming in, so the view never
+/// collapses to a degenerate (sub-`project_radar_entity`-safe) range.
+const RADAR_MIN_RANGE: f32 = 10.0;
+
+/// Last-known per-frame geometry of a radar widget, written by
+/// [`sync_radar_blip_nodes`] so that pointer observers (which cannot read the
+/// system's locals) can convert pixel deltas into world-unit pan deltas.
+#[derive(Component, Default)]
+pub struct RadarLastGeom {
+    /// Pixel radius that maps to one `range` of world units across the half-width.
+    pub radar_radius_px: f32,
+    /// Effective world-unit range in use after auto-scale / view-control.
+    pub range: f32,
+}
+
 // ── Reference entity ──────────────────────────────────────────────────────────
 
 /// Attach to the player ship (or any reference entity) so the radar widget
@@ -281,6 +322,11 @@ pub struct BlipWorldPose {
     pub yaw: f32,
 }
 
+/// Carries the optional display name of a radar blip so the per-frame
+/// reconciler can render a text label next to it (on opt-in widgets).
+#[derive(Component, Clone, Debug, Default)]
+pub struct BlipLabel(pub Option<String>);
+
 // ── Blip node tag ────────────────────────────────────────────────────────────
 
 /// Tags a UI node spawned by `sync_radar_blip_nodes` to represent a
@@ -295,6 +341,14 @@ struct RadarBlipNode {
 /// diff can reconcile and render the correct geometry.
 #[derive(Component)]
 pub struct RadarRegionNode {
+    source: Entity,
+}
+
+/// Tags a UI text node spawned by `sync_radar_blip_nodes` to render the
+/// name label of a navigational blip. Holds the source `Entity` so the
+/// diff can reconcile.
+#[derive(Component)]
+struct RadarLabelNode {
     source: Entity,
 }
 
@@ -474,6 +528,41 @@ pub fn blip_local_offset(
     (left, top)
 }
 
+/// Apply a single multiplicative zoom step, clamped to the user zoom range.
+///
+/// Pure function — fully unit-testable without a running `App`.
+pub fn apply_zoom_step(zoom: f32, factor: f32) -> f32 {
+    (zoom * factor).clamp(RADAR_MIN_ZOOM, RADAR_MAX_ZOOM)
+}
+
+/// Update a zoom factor from a pinch gesture given the previous and new
+/// finger-to-finger distances. A non-positive `prev_dist` (the first frame of
+/// a pinch) is a no-op so the zoom does not jump.
+///
+/// Pure function — fully unit-testable without a running `App`.
+pub fn pinch_zoom(zoom: f32, prev_dist: f32, new_dist: f32) -> f32 {
+    const EPS: f32 = 1e-3;
+    if prev_dist > EPS {
+        apply_zoom_step(zoom, new_dist / prev_dist)
+    } else {
+        zoom
+    }
+}
+
+/// Convert a pixel delta into a world-unit delta for panning, given the
+/// current `range` and the radar's pixel radius. `radar_radius_px` maps to one
+/// `range` of world units across the half-width (the inverse of
+/// [`world_size_to_px`]). A non-positive radius yields `0.0`.
+///
+/// Pure function — fully unit-testable without a running `App`.
+pub fn px_to_world_delta(px_delta: f32, range: f32, radar_radius_px: f32) -> f32 {
+    if radar_radius_px > 0.0 {
+        px_delta * range / radar_radius_px
+    } else {
+        0.0
+    }
+}
+
 /// Project a world-space entity position onto the radar's normalised coordinate
 /// space `[-1.0, 1.0]`, or `None` if the entity is beyond `range`.
 ///
@@ -630,6 +719,18 @@ pub struct RadarCenterPose {
 ///
 /// Every blip is tagged with [`RadarEntityUuid`] so tap-to-target and
 /// `RadarTargetHighlight` work on any radar.
+/// Navigational tags whose named entities receive a text label on opt-in
+/// radars (currently only the Navigation console).
+const NAV_LABEL_TAGS: [&str; 5] = ["star", "planet", "station", "asteroid_field", "region"];
+
+/// Predicate: should this blip receive a text name label? True when the
+/// display name is present and non-empty AND at least one tag is in the
+/// navigational label set. Pure (Bevy-free) so it is unit-testable.
+fn should_label(name: &Option<String>, tags: &[String]) -> bool {
+    let has_name = name.as_deref().map(|n| !n.trim().is_empty()).unwrap_or(false);
+    has_name && tags.iter().any(|t| NAV_LABEL_TAGS.contains(&t.as_str()))
+}
+
 pub fn bridge_sim_to_radar(
     commands: &mut Commands,
     widget: Entity,
@@ -700,6 +801,7 @@ pub fn bridge_sim_to_radar(
             appearance,
             BlipWorldPose { x: snapshot.x(), z: snapshot.z(), yaw: entity_yaw },
             RadarEntityUuid(uuid.clone()),
+            BlipLabel(snapshot.name.clone()),
         );
 
         if let Some(&existing) = map.blips.get(uuid) {
@@ -751,6 +853,9 @@ struct BlipIntent {
 ///   instead of the `RadarCenter` entity, and forces north-up orientation.
 /// - [`AutoScaleRadar`] — recomputes `GenericRadarWidget::range` each frame
 ///   so every visible blip fits within the display area.
+/// - [`RadarViewControl`] — when `user_engaged`, overrides the fitted range
+///   (divided by `zoom`) and the projection centre (offset by pan), and the
+///   resulting geometry is published to [`RadarLastGeom`] for pointer observers.
 fn sync_radar_blip_nodes(
     mut commands: Commands,
     mut radars: Query<(
@@ -765,13 +870,22 @@ fn sync_radar_blip_nodes(
         Option<&RadarTargetHighlight>,
         Option<&mut RadarTargetRing>,
         Option<&mut RadarObjectiveRingEntities>,
+        Option<&RadarBlipLabels>,
+        Option<&mut RadarViewControl>,
     )>,
     overlay_nodes: Query<&ComputedNode>,
-    blips: Query<(Entity, &OnRadar, &RadarAppearance, &BlipWorldPose, Option<&RadarEntityUuid>)>,
+    blips: Query<(
+        Entity,
+        &OnRadar,
+        &RadarAppearance,
+        &BlipWorldPose,
+        Option<&RadarEntityUuid>,
+        Option<&BlipLabel>,
+    )>,
     centers: Query<&RadarCenter>,
     mut existing_blip_nodes: Query<
         (&mut Node, &MaterialNode<RadarBlipMaterial>, &mut Transform, &RadarBlipNode),
-        Without<RadarRegionNode>,
+        (Without<RadarRegionNode>, Without<RadarLabelNode>),
     >,
     mut existing_region_nodes: Query<
         (
@@ -780,7 +894,11 @@ fn sync_radar_blip_nodes(
             &mut BorderColor,
             &RadarRegionNode,
         ),
-        Without<RadarBlipNode>,
+        (Without<RadarBlipNode>, Without<RadarLabelNode>),
+    >,
+    mut existing_label_nodes: Query<
+        (&mut Node, &RadarLabelNode),
+        (Without<RadarBlipNode>, Without<RadarRegionNode>),
     >,
     icons: Res<RadarIconLookup>,
     mut blip_materials: ResMut<Assets<RadarBlipMaterial>>,
@@ -801,6 +919,8 @@ fn sync_radar_blip_nodes(
         target_highlight,
         mut target_ring,
         mut objective_rings,
+        show_labels,
+        view_control,
     ) in radars.iter_mut()
     {
         if !vis.get() {
@@ -850,8 +970,8 @@ fn sync_radar_blip_nodes(
         if let Some(auto_scale) = auto_scale {
             let max_dist = blips
                 .iter()
-                .filter(|(_, on_radar, _, _, _)| is_on_radar(&widget.filter, &on_radar.0))
-                .filter_map(|(_, _, appearance, blip_pose, _)| {
+                .filter(|(_, on_radar, _, _, _, _)| is_on_radar(&widget.filter, &on_radar.0))
+                .filter_map(|(_, _, appearance, blip_pose, _, _)| {
                     let dx = blip_pose.x - center_x;
                     let dz = blip_pose.z - center_z;
                     let dist = (dx * dx + dz * dz).sqrt() + appearance.world_size;
@@ -867,6 +987,31 @@ fn sync_radar_blip_nodes(
             } else {
                 widget.range = auto_scale.min_range;
             }
+        }
+
+        // ── User zoom / pan override ──────────────────────────────────────────
+        // The auto-scale block above fitted `widget.range` around the BASE
+        // (world-centred or ship-centred) centre, independent of pan. When the
+        // user has engaged manual control, divide that fitted range by `zoom`
+        // and offset the projection centre by the accumulated pan (world units).
+        let (center_x, center_z) =
+            if let Some(vc) = view_control.as_deref().filter(|v| v.user_engaged) {
+                let fitted = widget.range;
+                let zoomed = (fitted / vc.zoom).max(RADAR_MIN_RANGE);
+                widget.range = zoomed;
+                (center_x + vc.pan_x, center_z + vc.pan_z)
+            } else {
+                (center_x, center_z)
+            };
+
+        // Publish geometry so pointer observers can map pixels → world units.
+        // Only widgets that opt into manual zoom/pan (`RadarViewControl`) have a
+        // pointer observer that reads this, so skip the per-frame write elsewhere.
+        if view_control.is_some() {
+            commands.entity(radar_entity).insert(RadarLastGeom {
+                radar_radius_px,
+                range: widget.range,
+            });
         }
 
         let range = widget.range;
@@ -886,7 +1031,11 @@ fn sync_radar_blip_nodes(
             (f32, f32, Color, RegionRadarShape, f32),
         > = HashMap::new();
 
-        for (src, on_radar, appearance, blip_pose, blip_uuid) in blips.iter() {
+        // ── Build intended label set (named navigational blips) ──────────────
+        // source entity → (text, label_left, label_top)
+        let mut intended_labels: HashMap<Entity, (String, f32, f32)> = HashMap::new();
+
+        for (src, on_radar, appearance, blip_pose, blip_uuid, blip_label) in blips.iter() {
             if !is_on_radar(&widget.filter, &on_radar.0) {
                 continue;
             }
@@ -933,6 +1082,15 @@ fn sync_radar_blip_nodes(
                     }
                 };
                 intended_regions.insert(src, (nx, ny, region_colour, shape, outer_size_px));
+                if show_labels.is_some() {
+                    let name = blip_label.and_then(|l| l.0.clone());
+                    if should_label(&name, &on_radar.0) {
+                        let label_left = center_x_px + nx * radar_radius_px;
+                        let label_top = center_y_px - ny * radar_radius_px;
+                        intended_labels
+                            .insert(src, (name.unwrap_or_default(), label_left, label_top));
+                    }
+                }
             } else {
                 // ── Point entity: render as icon ─────────────────────────────
                 let icon_angle = icon_rotation_angle(
@@ -975,6 +1133,15 @@ fn sync_radar_blip_nodes(
                     clip_circle,
                     highlighted: highlight_match,
                 });
+                if show_labels.is_some() {
+                    let name = blip_label.and_then(|l| l.0.clone());
+                    if should_label(&name, &on_radar.0) {
+                        let label_left = left + size_px;
+                        let label_top = top;
+                        intended_labels
+                            .insert(src, (name.unwrap_or_default(), label_left, label_top));
+                    }
+                }
             }
         }
 
@@ -1030,12 +1197,21 @@ fn sync_radar_blip_nodes(
                     } else {
                         commands.entity(child).despawn();
                     }
+                } else if let Ok((mut node, tag)) = existing_label_nodes.get_mut(child) {
+                    if let Some((_text, label_left, label_top)) =
+                        intended_labels.remove(&tag.source)
+                    {
+                        node.left = Val::Px(label_left);
+                        node.top = Val::Px(label_top);
+                    } else {
+                        commands.entity(child).despawn();
+                    }
                 }
             }
         }
 
         // ── Spawn new blip nodes ─────────────────────────────────────────────
-        if !intended.is_empty() || !intended_regions.is_empty() {
+        if !intended.is_empty() || !intended_regions.is_empty() || !intended_labels.is_empty() {
             let fallback_icon: Handle<Image> =
                 fallback.as_ref().map(|f| f.0.clone()).unwrap_or_default();
             commands.entity(radar_entity).with_children(|parent| {
@@ -1098,6 +1274,21 @@ fn sync_radar_blip_nodes(
                         border_color,
                         ZIndex(3),
                         RadarRegionNode { source },
+                    ));
+                }
+                for (source, (text, label_left, label_top)) in intended_labels.drain() {
+                    parent.spawn((
+                        Text::new(text),
+                        TextFont { font_size: 11.0, ..default() },
+                        TextColor(Color::srgba(0.6, 1.0, 0.85, 0.9)),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(label_left),
+                            top: Val::Px(label_top),
+                            ..default()
+                        },
+                        ZIndex(11),
+                        RadarLabelNode { source },
                     ));
                 }
             });
@@ -1571,6 +1762,31 @@ impl Plugin for GuiRadarPlugin {
 mod tests {
     use super::*;
 
+    // ── should_label predicate ────────────────────────────────────────────────
+
+    #[test]
+    fn should_label_named_nav_entity() {
+        assert!(should_label(&Some("Sol".to_string()), &["star".to_string()]));
+        assert!(should_label(
+            &Some("Starbase 12".to_string()),
+            &["station".to_string(), "friendly".to_string()]
+        ));
+    }
+
+    #[test]
+    fn should_label_rejects_missing_or_empty_name() {
+        assert!(!should_label(&None, &["star".to_string()]));
+        assert!(!should_label(&Some("".to_string()), &["planet".to_string()]));
+        assert!(!should_label(&Some("   ".to_string()), &["planet".to_string()]));
+    }
+
+    #[test]
+    fn should_label_rejects_non_nav_tags() {
+        assert!(!should_label(&Some("Raider".to_string()), &["pirate".to_string()]));
+        assert!(!should_label(&Some("Torp".to_string()), &["torpedo".to_string()]));
+        assert!(!should_label(&Some("You".to_string()), &["player".to_string()]));
+    }
+
     // ── icon_from_radar_icon_str ──────────────────────────────────────────────
 
     #[test]
@@ -1940,6 +2156,62 @@ mod tests {
             8.0,
         );
         assert!(bad_left > logical_size, "regression sentinel: bad_left={bad_left} should overflow {logical_size}");
+    }
+
+    // ── apply_zoom_step ───────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_zoom_step_multiplies_in_range() {
+        assert!((apply_zoom_step(1.0, 1.25) - 1.25).abs() < 1e-6);
+        assert!((apply_zoom_step(2.0, 0.5) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn apply_zoom_step_clamps_at_max() {
+        assert_eq!(apply_zoom_step(RADAR_MAX_ZOOM, 4.0), RADAR_MAX_ZOOM);
+    }
+
+    #[test]
+    fn apply_zoom_step_clamps_at_min() {
+        assert_eq!(apply_zoom_step(RADAR_MIN_ZOOM, 0.1), RADAR_MIN_ZOOM);
+    }
+
+    // ── pinch_zoom ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn pinch_zoom_applies_distance_ratio() {
+        // Fingers move apart 2× → zoom in 2×.
+        assert!((pinch_zoom(1.0, 50.0, 100.0) - 2.0).abs() < 1e-6);
+        // Fingers move together → zoom out.
+        assert!((pinch_zoom(2.0, 100.0, 50.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn pinch_zoom_zero_prev_dist_is_noop() {
+        assert_eq!(pinch_zoom(1.5, 0.0, 100.0), 1.5);
+    }
+
+    #[test]
+    fn pinch_zoom_respects_clamp() {
+        assert_eq!(pinch_zoom(RADAR_MAX_ZOOM, 10.0, 1000.0), RADAR_MAX_ZOOM);
+    }
+
+    // ── px_to_world_delta ─────────────────────────────────────────────────────
+
+    #[test]
+    fn px_to_world_delta_zero_radius_is_zero() {
+        assert_eq!(px_to_world_delta(50.0, 1000.0, 0.0), 0.0);
+        assert_eq!(px_to_world_delta(50.0, 1000.0, -1.0), 0.0);
+    }
+
+    #[test]
+    fn px_to_world_delta_scales_linearly() {
+        // Half the radar half-width across a 1000-unit range = 500 world units.
+        assert!((px_to_world_delta(100.0, 1000.0, 200.0) - 500.0).abs() < 1e-4);
+        // Doubling the pixel delta doubles the world delta.
+        let a = px_to_world_delta(10.0, 800.0, 160.0);
+        let b = px_to_world_delta(20.0, 800.0, 160.0);
+        assert!((b - 2.0 * a).abs() < 1e-4);
     }
 
     #[cfg(feature = "client")]

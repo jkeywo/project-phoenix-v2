@@ -25,6 +25,10 @@ pub enum EntityTag {
     /// the player dot without also showing all NPC vessels.
     Player,
     Missile,
+    /// A pure trigger volume: carries geometry (`[shape]`) only to fire a
+    /// scenario trigger on entry. Deliberately *not* shown on radars, unlike
+    /// `Region`, which marks gameplay landmarks that also have `[effects]`.
+    TriggerVolume,
 }
 
 impl EntityTag {
@@ -44,6 +48,7 @@ impl EntityTag {
             "station" => Some(EntityTag::Station),
             "player" => Some(EntityTag::Player),
             "missile" | "torpedo" => Some(EntityTag::Missile),
+            "trigger_volume" => Some(EntityTag::TriggerVolume),
             _ => None,
         }
     }
@@ -60,6 +65,7 @@ impl EntityTag {
             EntityTag::Station => "station",
             EntityTag::Player => "player",
             EntityTag::Missile => "missile",
+            EntityTag::TriggerVolume => "trigger_volume",
         }
     }
 }
@@ -97,6 +103,7 @@ mod tests {
             ("station", EntityTag::Station),
             ("player", EntityTag::Player),
             ("missile", EntityTag::Missile),
+            ("trigger_volume", EntityTag::TriggerVolume),
         ];
         for (s, expected) in cases {
             assert_eq!(EntityTag::from_str(s), Some(expected), "from_str({s:?})");
@@ -163,5 +170,22 @@ mod tests {
     #[test]
     fn matches_any_both_empty_returns_false() {
         assert!(!matches_any(&[], &[]));
+    }
+
+    // ── trigger volumes are excluded from navigational radars ──────────────
+
+    #[test]
+    fn trigger_volume_not_matched_by_navigation_chart_filter() {
+        // The navigation chart shows Star, Planet, AsteroidField, Region.
+        // A pure trigger volume carries only `TriggerVolume`, so it must not
+        // match (otherwise it would appear on radars).
+        let nav_filter = vec![
+            EntityTag::Star,
+            EntityTag::Planet,
+            EntityTag::AsteroidField,
+            EntityTag::Region,
+        ];
+        let trigger_volume = vec![EntityTag::TriggerVolume];
+        assert!(!matches_any(&trigger_volume, &nav_filter));
     }
 }

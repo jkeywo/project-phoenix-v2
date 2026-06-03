@@ -8,6 +8,7 @@ pub enum RegionEffectKind {
     RadarDampening { multiplier: f32 },
     CommsJam,
     SensorBlind,
+    NebulaFog { color: [f32; 3], density: f32 },
 }
 
 // ── Effect config types for TOML entity templates ─────────────────────
@@ -44,6 +45,14 @@ pub struct CommsJamEffect {}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SensorBlindEffect {}
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NebulaFogEffect {
+    /// RGB fog/cloud colour in linear 0–1 range.
+    pub color: [f32; 3],
+    /// Exponential fog density. Higher = thicker. Typical range: 0.002–0.02.
+    pub density: f32,
+}
+
 /// TOML-deserializable effects block.
 ///
 /// Each field corresponds to an optional `[effects.*]` sub-table.
@@ -61,6 +70,8 @@ pub struct RegionEffectsConfig {
     pub comms_jammed: Option<CommsJamEffect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensor_blind: Option<SensorBlindEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nebula_fog: Option<NebulaFogEffect>,
 }
 
 impl RegionEffectsConfig {
@@ -72,6 +83,7 @@ impl RegionEffectsConfig {
             && self.radar_dampening.is_none()
             && self.comms_jammed.is_none()
             && self.sensor_blind.is_none()
+            && self.nebula_fog.is_none()
     }
 
     /// Convert to a `Vec<RegionEffectKind>` for runtime use.
@@ -100,6 +112,9 @@ impl RegionEffectsConfig {
         }
         if self.sensor_blind.is_some() {
             kinds.push(RegionEffectKind::SensorBlind);
+        }
+        if let Some(n) = &self.nebula_fog {
+            kinds.push(RegionEffectKind::NebulaFog { color: n.color, density: n.density });
         }
         kinds
     }
@@ -151,6 +166,12 @@ mod tests {
     }
 
     #[test]
+    fn serde_round_trip_nebula_fog() {
+        round_trip(RegionEffectKind::NebulaFog { color: [0.25, 0.08, 0.32], density: 0.008 });
+        round_trip(RegionEffectKind::NebulaFog { color: [0.5, 0.1, 0.2], density: 0.015 });
+    }
+
+    #[test]
     fn serde_round_trip_negative_values() {
         round_trip(RegionEffectKind::DamageZone { dps: -5.0, shield_pierce: 0.0 });
         round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(-1.0), yaw_rate_modifier: None });
@@ -193,9 +214,11 @@ mod tests {
             radar_dampening: Some(RadarDampeningEffect { range_modifier: 0.3 }),
             comms_jammed: Some(CommsJamEffect {}),
             sensor_blind: Some(SensorBlindEffect {}),
+            nebula_fog: Some(NebulaFogEffect { color: [0.25, 0.08, 0.32], density: 0.008 }),
         };
         let kinds = cfg.to_kinds();
-        assert_eq!(kinds.len(), 6);
+        assert_eq!(kinds.len(), 7);
+        assert_eq!(kinds[6], RegionEffectKind::NebulaFog { color: [0.25, 0.08, 0.32], density: 0.008 });
     }
 
     #[test]
@@ -254,6 +277,24 @@ range_modifier = 0.4
         }
         let wrap: Wrap = toml::from_str(toml_str).unwrap();
         assert_eq!(wrap.effects.radar_dampening.unwrap().range_modifier, 0.4);
+    }
+
+    #[test]
+    fn effects_config_toml_nebula_fog_parses() {
+        let toml_str = r#"
+[effects]
+[effects.nebula_fog]
+color = [0.25, 0.08, 0.32]
+density = 0.008
+"#;
+        #[derive(Deserialize)]
+        struct Wrap {
+            effects: RegionEffectsConfig,
+        }
+        let wrap: Wrap = toml::from_str(toml_str).unwrap();
+        let fog = wrap.effects.nebula_fog.unwrap();
+        assert_eq!(fog.color, [0.25, 0.08, 0.32]);
+        assert!((fog.density - 0.008).abs() < 1e-6);
     }
 
     #[test]

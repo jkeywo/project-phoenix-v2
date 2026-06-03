@@ -16,3 +16,7 @@ range_modifier = 0.4
 [effects.sensor_blind]
 
 [effects.comms_jammed]
+
+[effects.nebula_fog]
+color = [0.25, 0.08, 0.32]
+density = 0.008

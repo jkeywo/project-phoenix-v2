@@ -1,8 +1,15 @@
 use bevy::prelude::*;
+use bevy::pbr::{DistanceFog, FogFalloff};
+use rand::Rng;
+use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
 
+use crate::entity_spawner::{RegionEffectsSection, RegionShapeSection};
 use crate::lobby::GameStateCache;
 use crate::messages::{GamePhase, ViewDirection, ViewMode};
+use crate::region_effects::RegionEffectKind;
+use crate::region_plugin::RegionMembership;
+use crate::region_shape::RegionShape;
 use crate::ship_state::ShipState;
 use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource};
 use crate::beam_render;
@@ -82,6 +89,8 @@ pub struct RendererPlugin;
 impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TorpedoEntityMap>()
+            .init_resource::<NebulaFogState>()
+            .init_resource::<NebulaCloudState>()
             .add_systems(Startup, setup)
             .add_systems(
                 PostStartup,
@@ -106,7 +115,10 @@ impl Plugin for RendererPlugin {
                 tick_ripples.run_if(in_state(GamePhase::InProgress)),
                 sync_torpedo_entities.run_if(in_state(GamePhase::InProgress)),
                 draw_warp_exit_markers.run_if(in_state(GamePhase::InProgress)),
-            ));
+                nebula_fog_system.run_if(in_state(GamePhase::InProgress)),
+                spawn_nebula_cloud_particles,
+            ))
+            .add_systems(OnExit(GamePhase::InProgress), cleanup_nebula_fog);
     }
 }
 
@@ -695,6 +707,182 @@ fn sync_torpedo_entities(
                 transform.translation.z = t.z;
             }
         }
+    }
+}
+
+// ── Nebula Fog & Cloud ──────────────────────────────────────────
+
+/// Marker on nebula cloud particle meshes.
+#[derive(Component)]
+struct NebulaCloudParticle;
+
+/// Tracks which region entities have had their cloud particles spawned.
+#[derive(Resource, Default)]
+struct NebulaCloudState {
+    entities: HashMap<Entity, Vec<Entity>>,
+}
+
+/// Fog transition state — lerps intensity for a smooth fade-in/out.
+#[derive(Resource)]
+struct NebulaFogState {
+    intensity: f32,
+}
+
+impl Default for NebulaFogState {
+    fn default() -> Self { Self { intensity: 0.0 } }
+}
+
+/// How fast the fog intensity approaches its target (per second).
+/// At this rate the transition completes in ~1.43 s.
+const NEBULA_FOG_LERP_RATE: f32 = 0.7;
+
+/// Number of small mesh spheres per nebula used to render the exterior cloud.
+const NEBULA_CLOUD_PARTICLE_COUNT: usize = 60;
+
+/// Each frame, checks whether the ship is inside a region with the `NebulaFog`
+/// effect and smoothly transitions `DistanceFog` on the `GameCamera`.
+fn nebula_fog_system(
+    membership: Res<RegionMembership>,
+    region_q: Query<&RegionEffectsSection>,
+    ship_q: Query<Entity, With<crate::server_app::Ship>>,
+    cam_q: Query<Entity, With<GameCamera>>,
+    mut state: ResMut<NebulaFogState>,
+    mut commands: Commands,
+    time: Res<Time>,
+) {
+    let Ok(ship_entity) = ship_q.single() else { return };
+    let Ok(cam_entity) = cam_q.single() else { return };
+    let dt = time.delta_secs();
+
+    let mut active_fog: Option<([f32; 3], f32)> = None;
+    if let Some(inside) = membership.inside.get(&ship_entity) {
+        for &region in inside.iter() {
+            if let Ok(effects) = region_q.get(region) {
+                if let Some(e) = effects.0.iter().find_map(|e| {
+                    if let RegionEffectKind::NebulaFog { color, density } = e {
+                        Some((*color, *density))
+                    } else { None }
+                }) {
+                    active_fog = Some(e);
+                    break;
+                }
+            }
+        }
+    }
+
+    let target = if active_fog.is_some() { 1.0 } else { 0.0 };
+
+    if state.intensity < target {
+        state.intensity = (state.intensity + NEBULA_FOG_LERP_RATE * dt).min(target);
+    } else if state.intensity > target {
+        state.intensity = (state.intensity - NEBULA_FOG_LERP_RATE * dt).max(target);
+    }
+
+    if state.intensity <= 0.0 {
+        commands.entity(cam_entity).remove::<DistanceFog>();
+    } else {
+        let (color, density) = active_fog.unwrap();
+        commands.entity(cam_entity).insert(DistanceFog {
+            color: Color::srgb(color[0], color[1], color[2]),
+            falloff: FogFalloff::Exponential {
+                density: density * state.intensity,
+            },
+            ..default()
+        });
+    }
+}
+
+/// Remove fog when the game leaves `InProgress` so residual settings do not
+/// carry over (the camera entity persists between phases).
+fn cleanup_nebula_fog(
+    mut commands: Commands,
+    cam_q: Query<Entity, With<GameCamera>>,
+) {
+    if let Ok(cam) = cam_q.single() {
+        commands.entity(cam).remove::<DistanceFog>();
+    }
+}
+
+/// Scans for region entities that have a `NebulaFog` effect and spawns a set
+/// of small semi-transparent spheres (the exterior cloud) at deterministic
+/// positions within the region volume.  Also cleans up particles for regions
+/// that have been despawned (e.g. during world reload).
+fn spawn_nebula_cloud_particles(
+    mut state: ResMut<NebulaCloudState>,
+    region_q: Query<(Entity, &RegionEffectsSection, &Transform, &RegionShapeSection)>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let active: HashSet<Entity> = region_q.iter().map(|(e, ..)| e).collect();
+
+    // Despawn particles for regions that no longer exist.
+    let dead: Vec<Entity> = state.entities.keys().copied().filter(|e| !active.contains(e)).collect();
+    for region in dead {
+        if let Some(particles) = state.entities.remove(&region) {
+            for p in particles {
+                commands.entity(p).despawn();
+            }
+        }
+    }
+
+    // Spawn particles for new nebula regions.
+    for (entity, effects, transform, shape) in region_q.iter() {
+        if state.entities.contains_key(&entity) { continue; }
+
+        let nebula_color = match effects.0.iter().find(|e| matches!(e, RegionEffectKind::NebulaFog { .. })) {
+            Some(RegionEffectKind::NebulaFog { color, .. }) => *color,
+            _ => continue,
+        };
+
+        let radius = match &shape.0 {
+            RegionShape::Sphere { radius } => *radius,
+            RegionShape::Box { half_extents, .. } => half_extents[0].max(half_extents[2]),
+            RegionShape::Torus { outer_radius, .. } => *outer_radius,
+        };
+
+        let center = transform.translation;
+
+        let particle_mesh = meshes.add(Sphere { radius: 1.0 });
+        let particle_mat = materials.add(StandardMaterial {
+            base_color: Color::srgba(nebula_color[0], nebula_color[1], nebula_color[2], 0.10),
+            emissive: LinearRgba::new(
+                nebula_color[0] * 0.25, nebula_color[1] * 0.25, nebula_color[2] * 0.25, 1.0,
+            ),
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        });
+
+        // Deterministic seed from region centre so the cloud looks the same
+        // every time the world is loaded.
+        let seed = (center.x.to_bits() as u64)
+            .wrapping_mul(0x9e3779b97f4a7c15)
+            .wrapping_add(center.z.to_bits() as u64);
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
+
+        let mut particles = Vec::with_capacity(NEBULA_CLOUD_PARTICLE_COUNT);
+        for _ in 0..NEBULA_CLOUD_PARTICLE_COUNT {
+            let theta = rng.random::<f32>() * std::f32::consts::TAU;
+            let phi = (rng.random::<f32>() * 2.0 - 1.0).acos();
+            let r = rng.random::<f32>().powf(0.333) * radius * 0.85;
+            let y_scale = 0.15;
+            let scale = rng.random::<f32>() * 17.0 + 8.0;
+
+            let pos = Vec3::new(
+                center.x + r * phi.sin() * theta.cos(),
+                center.y + (rng.random::<f32>() - 0.5) * radius * y_scale,
+                center.z + r * phi.sin() * theta.sin(),
+            );
+
+            let p = commands.spawn((
+                NebulaCloudParticle,
+                Mesh3d(particle_mesh.clone()),
+                MeshMaterial3d(particle_mat.clone()),
+                Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
+            )).id();
+            particles.push(p);
+        }
+        state.entities.insert(entity, particles);
     }
 }
 

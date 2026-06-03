@@ -108,7 +108,7 @@ pub fn apply_region_effects(
     let source = ModifierSource::RegionEffect { uuid: region_uuid };
     for effect in effects {
         match effect {
-            RegionEffectKind::DamageZone { .. } | RegionEffectKind::BlocksImpulse => {}
+            RegionEffectKind::DamageZone { .. } | RegionEffectKind::BlocksImpulse | RegionEffectKind::NebulaFog { .. } => {}
             RegionEffectKind::CommsJam => {
                 modifiers.add_flag(source.clone(), FlagKind::CommsJammed);
             }

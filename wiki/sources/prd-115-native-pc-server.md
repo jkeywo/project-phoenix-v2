@@ -4,7 +4,7 @@ type: source
 tags: [prd, native, transport, websocket, cloudflared, tunnel, distribution, on-hold]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/115
 status: shipped-prd-on-hold-slices
-updated: 2026-05-13
+updated: 2026-06-04
 ---
 
 # PRD #115 — Native PC Server
@@ -28,7 +28,7 @@ A `cargo build --release --features native` produces an executable. Double-click
 - **New `native` Cargo feature.** Mutually exclusive with `server`/`client` at build time, co-exists in the same crate. `wasm-bindgen` becomes conditional.
 - **New `[[bin]]` target** compiled only under `native`. Loads config from disk, builds Bevy `App`, spawns tunnel, blocks on `App::run()`.
 - **`native_bridge` module** owns the axum router: `GET /client/*` static files + `GET /ws` WebSocket upgrade. Single TCP port. `ConnectionMap` (`ConnectionId → (SessionToken, sender)`) mirrors the JS `peerTokens`/`tokenConns` maps. Three Bevy systems mirror `bridge.rs`: `drain_inbound`, `drain_disconnects`, `flush_outbound`. Tokio runtime on a background thread; channels (not `thread_local!`) bridge to Bevy.
-- **`native_config_loader` module** — pure Rust, sync `std::fs`, reuses `MapConfig`/`EntityConfig` parsers. Replaces the JS-fetch preload chain on native.
+- **`native_config_loader` module** — pure Rust, sync `std::fs`. Reuses the existing `WorldConfig`/`parse_world` (`src/world/config.rs`) and `EntityConfig` (`src/entities/config.rs`) parsers — note there is no `MapConfig`/`map_config.rs`; the map + scenario are one world TOML. Must reproduce the **full** preload chain, populating all three `ConfigCachePlugin` resource families: entity configs (world-driven traversal of referenced paths), complexity presets (`assets/complexity/`), and the faction registry (`assets/factions/`) — not just world + entity, or console AI and NPC patrols would be missing. Replaces the JS-fetch preload chain on native.
 - **`tunnel_manager` module** — pure Rust. Spawns `cloudflared` child, parses the `trycloudflare.com` URL from stdout, exposes `TunnelState::{Pending, Ready, Failed}` via a `poll()` callable from the Bevy main thread. Kills child on `Drop`.
 - **Single client page.** `client.html` adds one `if/else`: hash starting with `wss://` or `ws://` → open WebSocket and send `Identify` first; otherwise PeerJS as today.
 - **In-window QR + status overlay.** Native-only Bevy UI (behind `#[cfg(feature = "native")]`) renders the QR (via `qrcode` crate) plus tunnel status (spinner / URL / error).
@@ -49,7 +49,8 @@ A `cargo build --release --features native` produces an executable. Double-click
 - macOS / Windows code signing, installers.
 - Native audio backend differences.
 - Any change to simulation, lobby, session, physics, damage, breakdown, codec.
-- The `src/server/`, `src/client/`, `src/shared/` draft refactor.
+
+> Reconciled 2026-06-04 against the code: the original "out of scope" bullet excluding the `src/server/`/`src/client/`/`src/shared/` draft refactor was removed — that refactor has since landed; `src/server/` and `src/client/` are now the live feature-gated bridge modules (and there is no `src/shared/`). The console-count references in PRD #115 were also corrected (4 → 9; native gets all nine free via the shared sim core).
 
 ## Cross-references
 

@@ -845,9 +845,9 @@ fn spawn_nebula_cloud_particles(
 
         let particle_mesh = meshes.add(Sphere { radius: 1.0 });
         let particle_mat = materials.add(StandardMaterial {
-            base_color: Color::srgba(nebula_color[0], nebula_color[1], nebula_color[2], 0.04),
+            base_color: Color::srgba(nebula_color[0], nebula_color[1], nebula_color[2], 0.15),
             emissive: LinearRgba::new(
-                nebula_color[0] * 0.08, nebula_color[1] * 0.03, nebula_color[2] * 0.10, 1.0,
+                nebula_color[0] * 1.2, nebula_color[1] * 1.2, nebula_color[2] * 1.2, 1.0,
             ),
             alpha_mode: AlphaMode::Blend,
             ..default()

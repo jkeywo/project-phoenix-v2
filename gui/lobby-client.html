@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Project Phoenix — Console</title>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --signal-cyan: #5fd8e8;
+      --alert: #ff3344;
+      --bg: #07080c;
+      --surface: #0e1117;
+      --surface2: #161a22;
+      --edge: #282c38;
+      --dim: #6a7178;
+      --amber: #f0a030;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden;
+      background: var(--bg); color: #d8dde2;
+      font-family: 'Chakra Petch', system-ui, sans-serif;
+      -webkit-user-select: none; user-select: none;
+    }
+    /* ── Phone bezel ────────────────────────────────────────────────── */
+    #bezel {
+      position: fixed; inset: 0; z-index: 1000;
+      pointer-events: none;
+    }
+    #bezel-corner-tl, #bezel-corner-tr, #bezel-corner-bl, #bezel-corner-br,
+    #bezel-edge-t, #bezel-edge-b, #bezel-edge-l, #bezel-edge-r {
+      position: fixed; z-index: 1000;
+    }
+    #bezel-corner-tl { top: 0; left: 0; width: 24px; height: 24px;
+      border-top: 3px solid var(--edge); border-left: 3px solid var(--edge); }
+    #bezel-corner-tr { top: 0; right: 0; width: 24px; height: 24px;
+      border-top: 3px solid var(--edge); border-right: 3px solid var(--edge); }
+    #bezel-corner-bl { bottom: 0; left: 0; width: 24px; height: 24px;
+      border-bottom: 3px solid var(--edge); border-left: 3px solid var(--edge); }
+    #bezel-corner-br { bottom: 0; right: 0; width: 24px; height: 24px;
+      border-bottom: 3px solid var(--edge); border-right: 3px solid var(--edge); }
+    #bezel-edge-t { top: 0; left: 24px; right: 24px; height: 3px; background: var(--edge); }
+    #bezel-edge-b { bottom: 0; left: 24px; right: 24px; height: 3px; background: var(--edge); }
+    #bezel-edge-l { left: 0; top: 24px; bottom: 24px; width: 3px; background: var(--edge); }
+    #bezel-edge-r { right: 0; top: 24px; bottom: 24px; width: 3px; background: var(--edge); }
+    /* Top-centre notch mimic */
+    #bezel-notch {
+      position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+      width: 120px; height: 18px; z-index: 1001;
+      background: var(--bg);
+      border-radius: 0 0 10px 10px;
+      border: 3px solid var(--edge); border-top: none;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    #bezel-notch-dot { width: 6px; height: 6px; border-radius: 50%; background: #1a1e28; }
+    #bezel-notch-dot2 { width: 10px; height: 10px; border-radius: 3px; background: #141820; }
+
+    /* ── App container (lives inside bezel) ─────────────────────────── */
+    #app {
+      position: fixed; inset: 3px; z-index: 1;
+      display: flex; flex-direction: column;
+      overflow: hidden; padding: 28px 12px 6px;
+    }
+    /* ── Ship header ────────────────────────────────────────────────── */
+    #header { display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 0 8px; border-bottom: 1px solid var(--edge); flex-shrink: 0; }
+    #ship-info { display: flex; flex-direction: column; gap: 1px; }
+    #ship-name { font-size: 1rem; font-weight: 600; color: #eef; letter-spacing: .06em; }
+    #ship-mission { font-size: 0.6rem; color: var(--dim); letter-spacing: .04em; }
+    #crew-ready { display: flex; align-items: center; gap: 8px; }
+    #crew-display { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--dim); }
+    #ready-pill { padding: 2px 10px; border-radius: 10px; font-size: 0.6rem;
+      font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+      background: #221e10; color: var(--amber); border: 1px solid var(--amber);
+      transition: all .3s ease; }
+    #ready-pill.go { background: #0a2830; color: var(--signal-cyan); border-color: var(--signal-cyan);
+      animation: pill-pulse 1.5s ease-in-out infinite; }
+    @keyframes pill-pulse {
+      0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.2); }
+      50% { box-shadow: 0 0 12px rgba(95,216,232,0.5); }
+    }
+
+    /* ── Station list ───────────────────────────────────────────────── */
+    #station-list { flex: 1; overflow-y: auto; padding: 8px 0; display: flex;
+      flex-direction: column; gap: 6px; }
+    .station-row { display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-radius: 6px;
+      background: var(--surface); border: 1px solid var(--edge);
+      transition: border-color .2s, background .2s; }
+    .station-row.mine { border-color: var(--signal-cyan); background: #0a1a24; }
+    .station-row.taken { opacity: 0.7; }
+    .station-row .glyph { width: 36px; height: 36px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+      background: var(--surface2); color: var(--dim); border: 1px solid var(--edge); }
+    .station-row.mine .glyph { border-color: var(--signal-cyan); color: var(--signal-cyan); }
+    .station-row .info { flex: 1; min-width: 0; }
+    .station-row .info .name { font-size: 0.85rem; font-weight: 600; }
+    .station-row .info .meta { font-size: 0.6rem; color: var(--dim);
+      display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+    .station-row .info .meta .cons {
+      padding: 1px 5px; border-radius: 2px; background: var(--surface2);
+      font-size: 0.55rem; color: #7aa; }
+    .station-row .info .occupant { font-size: 0.7rem; color: var(--signal-cyan); }
+    .station-row .action { flex-shrink: 0; }
+    .station-row .action button { padding: 4px 12px; border-radius: 4px;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.7rem;
+      font-weight: 600; letter-spacing: .06em; cursor: pointer; border: 1px solid;
+      transition: background .15s; }
+    .station-row .action .claim-btn { background: #0a2830; color: var(--signal-cyan);
+      border-color: var(--signal-cyan); }
+    .station-row .action .claim-btn:hover { background: #1a3848; }
+    .station-row .action .mine-btn { background: #0a1a24; color: var(--signal-cyan);
+      border-color: var(--signal-cyan); }
+    .station-row .action .taken-btn { background: #111; color: var(--dim);
+      border-color: var(--edge); cursor: default; }
+
+    /* ── At-your-station detail panel ───────────────────────────────── */
+    #detail-panel { flex-shrink: 0; border-top: 1px solid var(--edge);
+      padding: 8px 0 4px; margin-top: 4px;
+      transition: opacity .3s ease; }
+    #detail-panel.idle { opacity: 0.4; }
+    #detail-panel .detail-header { display: flex; align-items: center;
+      justify-content: space-between; }
+    #detail-panel .detail-station-name { font-size: 0.85rem; font-weight: 600;
+      color: var(--dim); }
+    #detail-panel.active .detail-station-name { color: var(--signal-cyan); }
+    #detail-panel .detail-consoles { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
+    #detail-panel .detail-consoles .chip { padding: 2px 8px; border-radius: 3px;
+      font-size: 0.6rem; background: var(--surface2); color: #7aa;
+      border: 1px solid var(--edge); }
+    #detail-panel .complexity-row { display: flex; align-items: center; gap: 6px;
+      margin-top: 4px; }
+    #detail-panel .complexity-row label { font-size: 0.6rem; color: var(--dim); }
+    #detail-panel .segmented { display: flex; gap: 2px; }
+    #detail-panel .segmented button { padding: 2px 10px; border-radius: 3px;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
+      font-weight: 500; cursor: pointer; border: 1px solid var(--edge);
+      background: var(--surface); color: var(--dim);
+      transition: background .15s, border-color .15s; }
+    #detail-panel .segmented button.active { background: #0a2830;
+      border-color: var(--signal-cyan); color: var(--signal-cyan); }
+
+    /* ── Footer ─────────────────────────────────────────────────────── */
+    #footer { flex-shrink: 0; display: flex; align-items: center;
+      justify-content: space-between; padding: 6px 0 4px;
+      border-top: 1px solid var(--edge); margin-top: auto; }
+    #status-line { font-size: 0.65rem; color: var(--dim); }
+    #engage-btn { padding: 6px 16px; border-radius: 4px;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.75rem;
+      font-weight: 700; letter-spacing: .12em; cursor: pointer;
+      border: 1px solid var(--edge); background: var(--surface); color: var(--dim);
+      transition: all .3s ease; display: none; }
+    #engage-btn.armed { display: block; background: #0a2830;
+      border-color: var(--signal-cyan); color: var(--signal-cyan); }
+    #engage-btn.armed:hover { background: #1a3848; }
+    #engage-btn.armed.glow { animation: engage-pulse 1s ease-in-out infinite; }
+    @keyframes engage-pulse {
+      0%, 100% { box-shadow: 0 0 6px rgba(95,216,232,0.3); }
+      50% { box-shadow: 0 0 18px rgba(95,216,232,0.7); }
+    }
+    #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
+
+    /* ── Connection overlay ─────────────────────────────────────────── */
+    #conn-status { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+      z-index: 2000; padding: 4px 12px; border-radius: 4px;
+      font-size: 0.65rem; font-family: 'JetBrains Mono', monospace;
+      background: rgba(0,0,0,0.85); border: 1px solid var(--edge); }
+    #conn-status.error { color: var(--alert); border-color: var(--alert); }
+    #conn-status.connected { color: #5fe88a; border-color: #5fe88a; }
+  </style>
+</head>
+<body>
+  <!-- ── Phone bezel ────────────────────────────────────────────── -->
+  <div id="bezel">
+    <div id="bezel-corner-tl"></div>
+    <div id="bezel-corner-tr"></div>
+    <div id="bezel-corner-bl"></div>
+    <div id="bezel-corner-br"></div>
+    <div id="bezel-edge-t"></div>
+    <div id="bezel-edge-b"></div>
+    <div id="bezel-edge-l"></div>
+    <div id="bezel-edge-r"></div>
+    <div id="bezel-notch">
+      <div id="bezel-notch-dot"></div>
+      <div id="bezel-notch-dot2"></div>
+    </div>
+  </div>
+
+  <!-- ── App ────────────────────────────────────────────────────── -->
+  <div id="app">
+    <!-- Ship header -->
+    <div id="header">
+      <div id="ship-info">
+        <div id="ship-name">Phoenix</div>
+        <div id="ship-mission">Standing by</div>
+      </div>
+      <div id="crew-ready">
+        <span id="crew-display">0/0</span>
+        <span id="ready-pill">CONNECTING</span>
+      </div>
+    </div>
+
+    <!-- Station list -->
+    <div id="station-list"></div>
+
+    <!-- At-your-station detail panel -->
+    <div id="detail-panel" class="idle">
+      <div class="detail-header">
+        <span class="detail-station-name">No station assigned</span>
+      </div>
+      <div id="detail-console-area">
+        <div class="detail-consoles"></div>
+        <div class="complexity-row">
+          <label>Complexity</label>
+          <div class="segmented">
+            <button data-complexity="Low">Low</button>
+            <button data-complexity="Std" class="active">Normal</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div id="footer">
+      <span id="status-line">Connecting to host…</span>
+      <button id="engage-btn">ENGAGE</button>
+    </div>
+  </div>
+
+  <div id="conn-status" class="error">Connecting…</div>
+
+  <script>
+    // ── Constants ──────────────────────────────────────────────────────
+    const CONSOLE_LABEL = {
+      CaptainChair: 'Captain', Helm: 'Helm', Tactical: 'Tactical',
+      Repair: 'Repair', Sensors: 'Sensors', Shields: 'Shields',
+      Navigation: 'Navigation', Power: 'Power', Comms: 'Comms',
+    };
+    const CONSOLE_INITIAL = {
+      CaptainChair: 'CC', Helm: 'H', Tactical: 'T', Repair: 'R',
+      Sensors: 'S', Shields: 'SH', Navigation: 'N', Power: 'P', Comms: 'C',
+    };
+
+    // ── State ──────────────────────────────────────────────────────────
+    const state = {
+      phase: 'Lobby',
+      players: [],
+      stations: [],
+      myToken: null,
+      myName: null,
+      maxPlayers: 0,
+      complexity: {},
+      allFilled: false,
+    };
+    // Cached station configs from ShipStations (keyed by player count).
+    let stationConfigs = {};
+
+    // ── Persistence ────────────────────────────────────────────────────
+    const NAMES = ['Vega','Altair','Rigel','Deneb','Sirius','Nova','Quasar','Nebula','Pulsar','Proxima'];
+    function randomName() { return NAMES[Math.floor(Math.random() * NAMES.length)]; }
+
+    let myToken = localStorage.getItem('session-token');
+    if (!myToken) {
+      myToken = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('session-token', myToken);
+    }
+    let myName = localStorage.getItem('player-name') || randomName();
+    localStorage.setItem('player-name', myName);
+
+    let savedComplexity = {};
+    try { savedComplexity = JSON.parse(localStorage.getItem('complexity-presets')) || {}; } catch (_) {}
+
+    // ── Helpers ────────────────────────────────────────────────────────
+    const $ = id => document.getElementById(id);
+    function setStatus(text, cls) {
+      const el = $('conn-status');
+      el.textContent = text;
+      el.className = cls || '';
+    }
+    function me() { return state.players.find(p => p.token === myToken); }
+    function isCaptain() { const m = me(); return m && m.consoles && m.consoles.includes('CaptainChair'); }
+
+    // ── Rendering ─────────────────────────────────────────────────────
+    function render() {
+      const list = $('station-list');
+      list.innerHTML = '';
+
+      const stations = state.stations || [];
+      for (const st of stations) {
+        const row = document.createElement('div');
+        const isMine = st.holder_name && me() && st.holder_name === myName;
+        row.className = 'station-row'
+          + (isMine ? ' mine' : '')
+          + (st.holder_name && !isMine ? ' taken' : '');
+
+        // Glyph
+        const glyph = document.createElement('div');
+        glyph.className = 'glyph';
+        glyph.textContent = st.short_code ? st.short_code.substring(0,2).toUpperCase() : '--';
+        row.appendChild(glyph);
+
+        // Info
+        const info = document.createElement('div');
+        info.className = 'info';
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = st.name || '';
+        info.appendChild(name);
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        if (st.rank) {
+          const rank = document.createElement('span');
+          rank.textContent = st.rank;
+          meta.appendChild(rank);
+        }
+        if (st.consoles) {
+          for (const c of st.consoles) {
+            const chip = document.createElement('span');
+            chip.className = 'cons';
+            chip.textContent = CONSOLE_LABEL[c] || c;
+            meta.appendChild(chip);
+          }
+        }
+        info.appendChild(meta);
+
+        if (st.holder_name && !isMine) {
+          const occupant = document.createElement('div');
+          occupant.className = 'occupant';
+          occupant.textContent = st.holder_name;
+          info.appendChild(occupant);
+        }
+        row.appendChild(info);
+
+        // Action button
+        const action = document.createElement('div');
+        action.className = 'action';
+        const btn = document.createElement('button');
+        if (isMine) {
+          btn.className = 'mine-btn';
+          btn.textContent = 'RELEASE';
+          btn.addEventListener('click', () => sendMessage('ReleaseStation'));
+        } else if (st.holder_name) {
+          btn.className = 'taken-btn';
+          btn.textContent = 'TAKEN';
+          btn.disabled = true;
+        } else {
+          btn.className = 'claim-btn';
+          btn.textContent = 'CLAIM';
+          btn.addEventListener('click', () => {
+            sendMessage('SelectStation', { station: st.name });
+          });
+        }
+        action.appendChild(btn);
+        row.appendChild(action);
+        list.appendChild(row);
+      }
+
+      // ── Detail panel ────────────────────────────────────────────────
+      const detail = $('detail-panel');
+      const holder = me();
+      const myStation = holder && holder.consoles && holder.consoles.length > 0
+        ? state.stations.find(st => st.holder_name === myName)
+        : null;
+
+      if (myStation) {
+        detail.className = 'active';
+        detail.querySelector('.detail-station-name').textContent = myStation.name;
+        const consolesArea = detail.querySelector('.detail-consoles');
+        consolesArea.innerHTML = '';
+        if (myStation.consoles) {
+          for (const c of myStation.consoles) {
+            const chip = document.createElement('span');
+            chip.className = 'chip';
+            chip.textContent = CONSOLE_LABEL[c] || c;
+            consolesArea.appendChild(chip);
+          }
+        }
+        // Complexity controls
+        const seg = detail.querySelector('.segmented');
+        seg.querySelectorAll('button').forEach(btn => {
+          btn.classList.remove('active');
+          const preset = savedComplexity[myStation.consoles[0]] || 'Std';
+          if (btn.dataset.complexity === preset) btn.classList.add('active');
+          btn.onclick = () => {
+            const console = myStation.consoles[0];
+            const presetName = btn.dataset.complexity;
+            savedComplexity[console] = presetName;
+            localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
+            seg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            sendMessage('SetComplexity', { console, preset_name: presetName });
+          };
+        });
+      } else {
+        detail.className = 'idle';
+        detail.querySelector('.detail-station-name').textContent = 'No station assigned';
+        detail.querySelector('.detail-consoles').innerHTML = '';
+      }
+
+      // ── Header ──────────────────────────────────────────────────────
+      const crewN = state.stations ? state.stations.filter(s => s.holder_name).length : 0;
+      const maxP = state.maxPlayers || 0;
+      $('crew-display').textContent = crewN + '/' + maxP;
+
+      const pill = $('ready-pill');
+      if (state.allFilled) {
+        pill.textContent = 'READY TO LAUNCH';
+        pill.className = 'go';
+      } else {
+        pill.textContent = 'AWAITING CREW';
+        pill.className = '';
+      }
+
+      // ── Footer / Engage ─────────────────────────────────────────────
+      const engageBtn = $('engage-btn');
+      if (isCaptain()) {
+        engageBtn.style.display = 'block';
+        if (state.allFilled) {
+          engageBtn.textContent = 'ENGAGE';
+          engageBtn.className = 'armed glow';
+          engageBtn.disabled = false;
+          engageBtn.onclick = () => {
+            engageBtn.disabled = true;
+            engageBtn.textContent = 'LAUNCHING';
+            engageBtn.className = 'armed';
+            sendMessage('StartGame');
+          };
+        } else {
+          engageBtn.textContent = 'ENGAGE';
+          engageBtn.className = 'armed';
+          engageBtn.disabled = true;
+        }
+      } else {
+        engageBtn.style.display = 'none';
+      }
+
+      // Status line
+      const statusLine = $('status-line');
+      if (!me()) {
+        statusLine.textContent = 'Select a station to join the crew';
+      } else if (isCaptain() && state.allFilled) {
+        statusLine.textContent = 'All stations filled — press Engage!';
+      } else if (isCaptain()) {
+        statusLine.textContent = 'Waiting for crew to claim stations…';
+      } else if (myStation) {
+        statusLine.textContent = 'Standing by at ' + myStation.name;
+      } else {
+        statusLine.textContent = 'Select a station to join the crew';
+      }
+    }
+
+    // ── Message protocol ──────────────────────────────────────────────
+    let conn = null;
+    function sendMessage(type, data) {
+      if (!conn || !conn.open) return;
+      const msg = data !== undefined ? { type, data } : { type };
+      conn.send(JSON.stringify(msg));
+    }
+
+    function handleServerMessage(json) {
+      let msg;
+      try { msg = JSON.parse(json); } catch (_) { return; }
+
+      switch (msg.type) {
+        case 'Welcome': {
+          const s = msg.data;
+          state.players = s.state.players || [];
+          state.complexity = s.state.complexity || {};
+          if (s.ship_stations) {
+            state.maxPlayers = s.ship_stations.max_players || 0;
+            stationConfigs = s.ship_stations.configs || {};
+          }
+          if (s.state.world) {
+            $('ship-name').textContent = s.state.world.scenario_title || 'Phoenix';
+            $('ship-mission').textContent = s.state.world.scenario_description || '';
+          }
+          rebuildStations();
+          setStatus('Connected', 'connected');
+          break;
+        }
+        case 'PlayerJoined': {
+          const p = msg.data.player;
+          const existing = state.players.findIndex(x => x.token === p.token);
+          if (existing >= 0) state.players[existing] = p;
+          else state.players.push(p);
+          rebuildStations();
+          break;
+        }
+        case 'PlayerLeft': {
+          state.players = state.players.filter(p => p.token !== msg.data.token);
+          rebuildStations();
+          break;
+        }
+        case 'StationAssigned': {
+          const { token, consoles } = msg.data;
+          // Clear other players who had these consoles
+          for (const c of (consoles || [])) {
+            for (const p of state.players) {
+              if (p.token !== token && p.consoles) {
+                p.consoles = p.consoles.filter(x => x !== c);
+              }
+            }
+          }
+          const target = state.players.find(p => p.token === token);
+          if (target) target.consoles = consoles || [];
+          rebuildStations();
+          break;
+        }
+        case 'NameChanged': {
+          const target = state.players.find(p => p.token === msg.data.token);
+          if (target) target.name = msg.data.name;
+          rebuildStations();
+          break;
+        }
+        case 'ComplexityChanged': {
+          state.complexity[msg.data.console] = msg.data.preset_name;
+          rebuildStations();
+          break;
+        }
+        case 'GameStarted': {
+          state.phase = 'InProgress';
+          break;
+        }
+        case 'GameOver': {
+          state.phase = 'GameOver';
+          setStatus('Game Over: ' + (msg.data.reason || ''), 'error');
+          break;
+        }
+      }
+    }
+
+    function rebuildStations() {
+      state.stations = [];
+      const count = Math.max(1, Math.min(state.players.length || 1, state.maxPlayers || 1));
+      const defs = stationConfigs[count] || stationConfigs[String(count)] || [];
+
+      for (const def of defs) {
+        const holder = state.players.find(p =>
+          p.consoles && p.consoles.length > 0
+          && def.consoles && def.consoles.every(c => p.consoles.includes(c))
+        );
+        state.stations.push({
+          name: def.name || '',
+          short_code: def.short_code || '',
+          rank: def.rank || '',
+          consoles: def.consoles || [],
+          holder_name: holder ? holder.name : null,
+          preset_names: (def.consoles || []).map(c => state.complexity[c] || 'Std'),
+        });
+      }
+
+      state.allFilled = state.stations.length > 0 && state.stations.every(s => s.holder_name);
+      render();
+    }
+
+    // ── PeerJS ─────────────────────────────────────────────────────────
+    const hostPeerId = location.hash.slice(1);
+    if (!hostPeerId) {
+      setStatus('No host ID in URL. Scan the QR code on the view screen.', 'error');
+      $('status-line').textContent = 'No host ID found';
+    } else {
+      const clientPeer = new Peer({ config: { iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject', transport: 'tcp' },
+      ] } });
+
+      clientPeer.on('open', () => {
+        setStatus('Connecting to host…', 'error');
+
+        function startConnect() {
+          conn = clientPeer.connect(hostPeerId, { reliable: true });
+
+          const connectTimeout = setTimeout(() => {
+            if (conn && !conn.open) {
+              conn.close();
+              conn = null;
+              startConnect();
+            }
+          }, 8000);
+
+          conn.on('open', () => {
+            clearTimeout(connectTimeout);
+            setStatus('Connected', 'connected');
+            sendMessage('Identify', { token: myToken, name: myName });
+          });
+
+          conn.on('data', raw => {
+            try {
+              const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+              handleServerMessage(str);
+            } catch (e) { console.error('[lobby-client] bad message', e, raw); }
+          });
+
+          conn.on('close', () => {
+            clearTimeout(connectTimeout);
+            setStatus('Disconnected', 'error');
+            conn = null;
+          });
+          conn.on('error', e => {
+            clearTimeout(connectTimeout);
+            setStatus('Connection error: ' + e.type, 'error');
+          });
+        }
+
+        startConnect();
+      });
+
+      clientPeer.on('disconnected', () => {
+        setStatus('Disconnected — reconnecting…', 'error');
+        clientPeer.reconnect();
+      });
+      clientPeer.on('error', e => {
+        setStatus('Peer error: ' + e.type, 'error');
+      });
+    }
+
+
+  </script>
+</body>
+</html>

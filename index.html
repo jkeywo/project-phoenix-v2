@@ -15,6 +15,10 @@
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
+  <!-- HUD overlay fonts (match raw/gui/borders/demo.html) -->
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000 url('assets/logo.png') center center / contain no-repeat; overflow: hidden; }
     #canvas { display: block; width: 100vw; height: 100vh; }
@@ -76,9 +80,246 @@
     }
     .world-btn:hover { background: #223; border-color: #558; }
     .world-btn.active { background: #224; border-color: #66c; color: #ccf; }
+    /* ── Lobby panel (issue #436) ────────────────────────────────────────── */
+    .station-card {
+      display: flex; flex-direction: column; gap: 6px;
+      padding: 10px 12px; border-radius: 6px;
+      background: #0e0e14; border: 1px solid #2a2d3a;
+      transition: border-color .2s, box-shadow .2s;
+      font-family: 'Chakra Petch', system-ui, monospace;
+    }
+    .station-card.claimed {
+      border-color: #2a8a96; box-shadow: 0 0 8px rgba(42,138,150,0.25);
+    }
+    .station-card.empty {
+      opacity: 0.5; border-style: dashed;
+      background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(255,255,255,0.02) 6px,rgba(255,255,255,0.02) 12px);
+    }
+    .station-card .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .station-card .card-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; font-weight: bold; background: #191e28;
+      color: #5fd8e8; border: 1px solid #2a3a48;
+    }
+    .station-card .card-name {
+      font-size: 0.9rem; font-weight: 600; color: #cce;
+    }
+    .station-card .card-rank {
+      font-size: 0.65rem; color: #778; text-transform: uppercase; letter-spacing: .06em;
+    }
+    .station-card .card-consoles {
+      display: flex; flex-wrap: wrap; gap: 4px;
+    }
+    .station-card .console-chip {
+      padding: 2px 8px; border-radius: 3px;
+      font-size: 0.65rem; background: #181e2a; color: #7aa;
+      border: 1px solid #2a3a48;
+    }
+    .station-card .complexity-pill {
+      padding: 1px 8px; border-radius: 8px;
+      font-size: 0.6rem; font-weight: 600; text-transform: uppercase;
+      background: #2a3a48; color: #7aa;
+    }
+    .station-card .complexity-pill.low {
+      background: #1a3828; color: #5fd88a; border: 1px solid #2a6850;
+    }
+    /* Crew dots */
+    .crew-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #2a2d3a; border: 1px solid #3a3d4a;
+      transition: background .2s, border-color .2s;
+    }
+    .crew-dot.filled { background: #5fd8e8; border-color: #5fd8e8; }
+    /* Ready badge states */
+    #lobby-ready-badge.go {
+      background: #0a2830; color: #5fd8e8; border-color: #5fd8e8;
+      animation: ready-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes ready-pulse {
+      0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.3); }
+      50% { box-shadow: 0 0 14px rgba(95,216,232,0.6); }
+    }
+
+    /* ── HTML viewscreen HUD overlay (issue #422) ───────────────────────── */
+    #hud-overlay {
+      position: absolute; inset: 0; z-index: 15;
+      pointer-events: none;
+      --signal-cyan: #5fd8e8;
+      --alert: #ff3344;
+    }
+    /* Red-alert inner glow — full-screen vignette, pulsing. Ported from
+       raw/gui/borders/demo.html .screen::after / @keyframes pulse. */
+    #hud-vignette {
+      position: absolute; inset: 0;
+      pointer-events: none;
+      box-shadow: inset 0 0 0 1px var(--alert),
+                  inset 0 0 32px 4px rgba(255, 51, 68, 0.55),
+                  inset 0 0 80px 0 rgba(255, 51, 68, 0.18);
+      opacity: 0;
+      transition: opacity .25s ease;
+    }
+    #hud-overlay.alert-on #hud-vignette {
+      opacity: 1;
+      animation: hud-pulse 1.3s ease-in-out infinite;
+    }
+    @keyframes hud-pulse {
+      0%, 100% { opacity: 0.55; }
+      50%      { opacity: 1; }
+    }
+    /* Bottom-centre status strip: HEADING / HULL / CONDITION. */
+    #hud-strip {
+      position: absolute; left: 50%; bottom: 0.6rem;
+      transform: translateX(-50%);
+      display: none; /* hidden until first __updateHud call */
+      flex-direction: row; gap: 2.4rem;
+      align-items: center; justify-content: center;
+      padding: 0.4rem 1.4rem;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+    }
+    #hud-strip.shown { display: flex; }
+    .hud-cell { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+    .hud-label {
+      font: 600 11px/1 "Chakra Petch", system-ui, sans-serif;
+      letter-spacing: 0.14em; color: #b8c0c8;
+    }
+    .hud-value {
+      font: 500 18px/1 "JetBrains Mono", monospace;
+      color: var(--signal-cyan);
+    }
+    #hud-overlay.alert-on .hud-value { color: var(--alert); }
+
+    /* ─── Viewscreen border frame (raw/gui/borders/demo.html) ──────────────── */
+    #hud-overlay {
+      --t: 44px;
+      --vs-signal: #5fd8e8;
+      --vs-alert: #ff3344;
+      --vs-text: #b8c0c8;
+    }
+    /* All frame pieces are absolute children of #hud-overlay (inset:0) */
+    .vs-piece, .vs-edge {
+      position: absolute;
+      pointer-events: none;
+    }
+    /* Tiled edges */
+    .vs-edge { background-repeat: repeat; image-rendering: pixelated; }
+    .vs-edge.top {
+      top: 0; left: 240px; right: 240px;
+      height: var(--t);
+      background-image: url("gui/borders/edge-top.png");
+      background-size: 64px 44px;
+    }
+    .vs-edge.bottom {
+      bottom: 0; left: 240px; right: 240px;
+      height: var(--t);
+      background-image: url("gui/borders/edge-bottom.png");
+      background-size: 64px 44px;
+    }
+    .vs-edge.left {
+      left: 0; top: 140px; bottom: 140px;
+      width: var(--t);
+      background-image: url("gui/borders/edge-left.png");
+      background-size: 44px 64px;
+    }
+    .vs-edge.right {
+      right: 0; top: 140px; bottom: 140px;
+      width: var(--t);
+      background-image: url("gui/borders/edge-right.png");
+      background-size: 44px 64px;
+    }
+    /* Corners (240×140 px) */
+    .vs-corner {
+      width: 240px; height: 140px;
+      background-repeat: no-repeat; background-size: contain;
+      image-rendering: pixelated;
+    }
+    .vs-corner.tl { top: 0; left: 0;     background-image: url("gui/borders/corner-tl.png"); }
+    .vs-corner.tr { top: 0; right: 0;    background-image: url("gui/borders/corner-tr.png"); }
+    .vs-corner.bl { bottom: 0; left: 0;  background-image: url("gui/borders/corner-bl.png"); }
+    .vs-corner.br { bottom: 0; right: 0; background-image: url("gui/borders/corner-br.png"); }
+    /* Caps (centred top/bottom) */
+    .vs-cap {
+      background-repeat: no-repeat; background-size: contain;
+      image-rendering: pixelated;
+    }
+    .vs-cap.top {
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 320px; height: 56px;
+      background-image: url("gui/borders/cap-top.png");
+    }
+    .vs-cap.bottom {
+      bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 520px; height: 56px;
+      background-image: url("gui/borders/cap-bottom.png");
+    }
+    /* Red alert — swap PNG assets */
+    #hud-overlay.alert-on .vs-edge.top    { background-image: url("gui/borders/edge-top-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.bottom { background-image: url("gui/borders/edge-bottom-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.left   { background-image: url("gui/borders/edge-left-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.right  { background-image: url("gui/borders/edge-right-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.tl   { background-image: url("gui/borders/corner-tl-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.tr   { background-image: url("gui/borders/corner-tr-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.bl   { background-image: url("gui/borders/corner-bl-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.br   { background-image: url("gui/borders/corner-br-alert.png"); }
+    #hud-overlay.alert-on .vs-cap.top     { background-image: url("gui/borders/cap-top-alert.png"); }
+    #hud-overlay.alert-on .vs-cap.bottom  { background-image: url("gui/borders/cap-bottom-alert.png"); }
+    /* Ship designation text (top-centre, over cap-top) */
+    .vs-designation {
+      position: absolute;
+      top: 18px; left: 50%; transform: translateX(-50%);
+      z-index: 5;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 0.5em;
+      color: var(--vs-signal);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #hud-overlay.alert-on .vs-designation { color: var(--vs-alert); }
+    /* 4-slot status strip (bottom-centre, over cap-bottom) */
+    .vs-status-strip {
+      position: absolute;
+      bottom: 8px; left: 50%; transform: translateX(-50%);
+      width: 408px; height: 36px;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 0 12px;
+      pointer-events: none;
+    }
+    .vs-status-slot {
+      display: flex; flex-direction: column;
+      justify-content: center;
+      padding-left: 18px;
+    }
+    .vs-slot-label {
+      font-family: "Chakra Petch", system-ui, sans-serif; font-weight: 600;
+      font-size: 8px; letter-spacing: 0.32em;
+      color: var(--vs-text);
+      text-transform: uppercase;
+    }
+    .vs-slot-value {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; color: var(--vs-signal);
+      margin-top: 2px; letter-spacing: 0.06em;
+    }
+    #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-feeeffff9f22f601.js" crossorigin="anonymous" integrity="sha384-qX9+diEglYBtP/Pbv0mImhBEaLsTJCgopqPRFAGkz7aENnBIchcIt7rws3bOdUEE"><link rel="preload" href="./project-phoenix-feeeffff9f22f601_bg.wasm" crossorigin="anonymous" integrity="sha384-0mY3dTUaQFz9WPXlvQboMsQMGOTda9W4udYpXNHfwkn9XsTBbkHd2fzbY8G41UF+" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-c51e970dcd8e725b.js" crossorigin="anonymous" integrity="sha384-795H7Xn9e0w5NDAdQWnn7CUNDlu3Gph/ABV8/m25L7gE/DysW/04F4adWdgfVdGj"><link rel="preload" href="./project-phoenix-c51e970dcd8e725b_bg.wasm" crossorigin="anonymous" integrity="sha384-+UJeCvVqtXLzXRanZLOAhUmWMwk1FRsTOp06vtrc5yVV5EnNnYlR/G0mzOk32Lw4" as="fetch" type="application/wasm"></head>
 <body>
+  <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
+  <script>
+    window.__sendAction = function(json) {
+      if (window.ipc) {
+        window.ipc.postMessage(json);          // wry native server
+      } else {
+        window.wasmBindings.wasm_ui_action(json); // browser WASM (server or client)
+      }
+    };
+  </script>
+
   <!-- Game audio (browser Web Audio API — Bevy 0.18 WASM audio is broken) -->
   <audio id="bg-hum"          src="assets/sounds/background_hum.ogg"  loop></audio>
   <audio id="ship-engine"     src="assets/sounds/ship_engine.wav"      loop></audio>
@@ -94,6 +335,49 @@
     </div>
   </div>
 
+  <!-- ── HTML Lobby Panel (issue #436) ──────────────────────────────────── -->
+  <div id="lobby-panel" style="display:none;position:fixed;inset:0;z-index:180;font-family:monospace;color:#cce;">
+    <!-- Background overlay -->
+    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.82);"></div>
+
+    <div style="position:relative;z-index:1;display:flex;flex-direction:column;height:100%;padding:2rem 3rem;box-sizing:border-box;">
+
+      <!-- Header row: title + crew counter + ready badge -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:1rem;border-bottom:1px solid #334;">
+        <div>
+          <div id="lobby-title" style="font-size:1.6rem;font-weight:bold;letter-spacing:.08em;color:#cce;">Loading…</div>
+          <div id="lobby-subtitle" style="font-size:0.8rem;color:#778;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:1.5rem;">
+          <div style="display:flex;align-items:center;gap:0.5rem;">
+            <span style="font-size:0.75rem;color:#889;text-transform:uppercase;letter-spacing:.06em;">Crew</span>
+            <span id="lobby-crew-count" style="font-size:1.4rem;font-weight:bold;color:#aae;font-family:'JetBrains Mono',monospace;">0/0</span>
+            <div id="lobby-crew-dots" style="display:flex;gap:4px;"></div>
+            <span id="lobby-spectator-tag" style="display:none;font-size:0.7rem;color:#667;padding:2px 6px;border:1px solid #445;border-radius:3px;">Spectator</span>
+          </div>
+          <div id="lobby-ready-badge" style="padding:6px 14px;border-radius:4px;font-size:0.8rem;font-weight:bold;letter-spacing:.1em;background:#332;color:#ca0;border:1px solid #ca0;transition:all .3s ease;">AWAITING SELECTION</div>
+        </div>
+      </div>
+
+      <!-- Body: station grid + log rail -->
+      <div style="display:flex;flex:1;gap:2rem;padding-top:1rem;overflow:hidden;">
+
+        <!-- Station grid: 3×2 -->
+        <div id="station-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;flex:1;align-content:start;overflow-y:auto;"></div>
+
+        <!-- Log rail: spectators + status -->
+        <div style="width:18rem;min-width:14rem;display:flex;flex-direction:column;gap:0.75rem;border-left:1px solid #334;padding-left:1.5rem;">
+          <div>
+            <div style="font-size:0.7rem;color:#667;text-transform:uppercase;letter-spacing:.08em;margin-bottom:0.5rem;">Connected</div>
+            <div id="lobby-spectator-list" style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:#889;"></div>
+          </div>
+          <div style="flex:1;"></div>
+          <div id="lobby-status-hint" style="font-size:0.75rem;color:#667;text-align:right;padding-top:0.5rem;border-top:1px solid #334;">Waiting for players to connect…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Loading spinner shown until WASM is ready -->
   <div id="wasm-spinner">
     <div class="spinner-ring"></div>
@@ -102,6 +386,45 @@
 
   <!-- Bevy renders into the canvas that DefaultPlugins creates at startup -->
   <canvas id="canvas"></canvas>
+
+  <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
+       z-index; pointer-events:none so it never intercepts canvas input.
+       Driven by window.__updateHud(stateJson).
+       Also hosts the viewscreen border frame (corners/edges/caps/status-strip)
+       from raw/gui/borders/demo.html — assets served from gui/borders/. -->
+  <div id="hud-overlay">
+    <div id="hud-vignette"></div>
+
+    <!-- Hidden backward-compat elements (smoke-test targets: #hud-heading etc.) -->
+    <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
+      <span id="hud-heading">000</span>
+      <span id="hud-hull">100</span>
+      <span id="hud-condition">NOMINAL</span>
+    </div>
+
+    <!-- Viewscreen border frame (tiled edges) -->
+    <div class="vs-edge top"></div>
+    <div class="vs-edge bottom"></div>
+    <div class="vs-edge left"></div>
+    <div class="vs-edge right"></div>
+    <!-- Corners -->
+    <div class="vs-piece vs-corner tl"></div>
+    <div class="vs-piece vs-corner tr"></div>
+    <div class="vs-piece vs-corner bl"></div>
+    <div class="vs-piece vs-corner br"></div>
+    <!-- Caps (centred top/bottom) -->
+    <div class="vs-piece vs-cap top"></div>
+    <div class="vs-piece vs-cap bottom"></div>
+    <!-- Ship designation (top-centre, above cap) -->
+    <div class="vs-designation" id="hud-designation">PHOENIX</div>
+    <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
+    <div class="vs-status-strip">
+      <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
+    </div>
+  </div>
 
   <!-- QR code shown over the canvas during lobby phase -->
   <div id="overlay">
@@ -134,8 +457,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-feeeffff9f22f601.js';
-const wasm = await init({ module_or_path: './project-phoenix-feeeffff9f22f601_bg.wasm' });
+import init, * as bindings from './project-phoenix-c51e970dcd8e725b.js';
+const wasm = await init({ module_or_path: './project-phoenix-c51e970dcd8e725b_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -148,8 +471,242 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   
   
   
+  <!-- HTML console pages (issue #422): copied to dist/gui/ -->
+  
 
   <script>
+  // ── HTML viewscreen HUD overlay (issue #422) ───────────────────────────
+  //
+  // Rust pushes ViewscreenHudState JSON here via the registered
+  // set_hud_state_callback. We parse it, write the status strip cells, and
+  // toggle the red-alert vignette class.
+
+  window.__updateHud = function(json) {
+    let s;
+    try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
+    const overlay   = document.getElementById('hud-overlay');
+    const strip     = document.getElementById('hud-strip');
+    const heading   = document.getElementById('hud-heading');
+    const hull      = document.getElementById('hud-hull');
+    const condition = document.getElementById('hud-condition');
+    // Legacy compat (smoke-test targets — kept hidden, values still updated)
+    if (strip) strip.classList.add('shown');
+    if (heading && typeof s.heading === 'number') {
+      heading.textContent = String(s.heading).padStart(3, '0');
+    }
+    if (hull && typeof s.hull_pct === 'number') {
+      hull.textContent = String(s.hull_pct);
+    }
+    if (condition && typeof s.condition === 'string') {
+      condition.textContent = s.condition;
+    }
+    if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
+    // ── 4-slot viewscreen status strip ──────────────────────────────────────
+    const vNav = document.getElementById('v-nav');
+    const vTac = document.getElementById('v-tac');
+    const vEng = document.getElementById('v-eng');
+    const vSys = document.getElementById('v-sys');
+    if (vNav && typeof s.heading === 'number') {
+      vNav.textContent = 'HEADING ' + String(s.heading).padStart(3, '0');
+    }
+    if (vTac) {
+      vTac.textContent = s.red_alert ? 'WEAPONS HOT' : 'CLEAR';
+    }
+    if (vEng && typeof s.hull_pct === 'number') {
+      vEng.textContent = 'HULL ' + s.hull_pct;
+    }
+    if (vSys && typeof s.condition === 'string') {
+      vSys.textContent = s.condition;
+    }
+    // Optional: ship name shown in the designation badge
+    if (s.ship_name) {
+      const desig = document.getElementById('hud-designation');
+      if (desig) desig.textContent = s.ship_name;
+    }
+  };
+
+  // ── HTML lobby panel (issue #436) ──────────────────────────────────────
+  //
+  // Rust pushes LobbyStatePayload JSON here via the registered
+  // set_lobby_state_callback. We parse it and render the station grid,
+  // crew counter, ready badge, and spectator list.
+
+  window.__updateLobby = function(json) {
+    let s;
+    try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+
+    // ── Title / subtitle ──────────────────────────────────────────────
+    const titleEl = document.getElementById('lobby-title');
+    const subEl = document.getElementById('lobby-subtitle');
+    if (titleEl) titleEl.textContent = s.scenario_title || 'Unknown Scenario';
+    if (subEl) subEl.textContent = s.scenario_body || '';
+
+    // ── Crew count ────────────────────────────────────────────────────
+    const crewEl = document.getElementById('lobby-crew-count');
+    const dotsEl = document.getElementById('lobby-crew-dots');
+    const maxP = s.max_players || 0;
+    const crewN = s.crew_count || 0;
+    if (crewEl) crewEl.textContent = crewN + '/' + maxP;
+
+    // Crew dot indicators
+    if (dotsEl) {
+      dotsEl.innerHTML = '';
+      for (let i = 0; i < maxP; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'crew-dot' + (i < crewN ? ' filled' : '');
+        dotsEl.appendChild(dot);
+      }
+    }
+
+    // Spectator tag
+    const specTag = document.getElementById('lobby-spectator-tag');
+    if (specTag) {
+      const hasSpecs = s.spectators && s.spectators.length > 0;
+      specTag.style.display = hasSpecs ? 'inline' : 'none';
+      if (hasSpecs) specTag.textContent = '+' + s.spectators.length;
+    }
+
+    // ── Ready badge ───────────────────────────────────────────────────
+    const badge = document.getElementById('lobby-ready-badge');
+    if (badge) {
+      if (s.all_stations_filled) {
+        badge.textContent = 'READY TO LAUNCH';
+        badge.className = 'go';
+      } else {
+        badge.textContent = 'AWAITING SELECTION';
+        badge.className = '';
+      }
+    }
+
+    // ── Station grid ──────────────────────────────────────────────────
+    const grid = document.getElementById('station-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const stations = s.stations || [];
+
+    // Fill grid: always show exactly 6 cells (3×2)
+    const MAX_SLOTS = 6;
+    for (let i = 0; i < MAX_SLOTS; i++) {
+      const st = i < stations.length ? stations[i] : null;
+      const card = document.createElement('div');
+
+      if (st) {
+        card.className = 'station-card' + (st.holder_name ? ' claimed' : '');
+
+        // Header row: avatar + name + rank
+        const header = document.createElement('div');
+        header.className = 'card-header';
+        const nameInfo = document.createElement('div');
+        nameInfo.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+        const name = document.createElement('div');
+        name.className = 'card-name';
+        name.textContent = st.name || st.short_code || '';
+        const rank = document.createElement('div');
+        rank.className = 'card-rank';
+        rank.textContent = st.rank || '';
+        nameInfo.appendChild(name);
+        nameInfo.appendChild(rank);
+        header.appendChild(nameInfo);
+
+        // Avatar initials
+        const avatar = document.createElement('div');
+        avatar.className = 'card-avatar';
+        if (st.holder_name) {
+          avatar.textContent = st.holder_name.substring(0, 2).toUpperCase();
+        } else {
+          avatar.textContent = st.short_code ? st.short_code.substring(0, 2).toUpperCase() : '--';
+          avatar.style.color = '#556';
+        }
+        header.appendChild(avatar);
+        card.appendChild(header);
+
+        // Console chips
+        const chips = document.createElement('div');
+        chips.className = 'card-consoles';
+        if (st.consoles && st.consoles.length > 0) {
+          for (const c of st.consoles) {
+            const chip = document.createElement('span');
+            chip.className = 'console-chip';
+            chip.textContent = c;
+            chips.appendChild(chip);
+          }
+        }
+        card.appendChild(chips);
+
+        // Footer: complexity pill(s)
+        if (st.preset_names && st.preset_names.length > 0) {
+          const footer = document.createElement('div');
+          footer.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:2px;';
+          for (const pn of st.preset_names) {
+            const pill = document.createElement('span');
+            pill.className = 'complexity-pill' + (pn === 'Low' ? ' low' : '');
+            pill.textContent = pn === 'Low' ? 'LOW' : 'NORMAL';
+            footer.appendChild(pill);
+          }
+          card.appendChild(footer);
+        }
+      } else {
+        // Empty slot
+        card.className = 'station-card empty';
+        const label = document.createElement('div');
+        label.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;font-size:0.75rem;color:#556;letter-spacing:.06em;';
+        label.textContent = 'RESERVED';
+        card.appendChild(label);
+      }
+
+      grid.appendChild(card);
+    }
+
+    // ── Spectator list ─────────────────────────────────────────────────
+    const specList = document.getElementById('lobby-spectator-list');
+    if (specList) {
+      specList.innerHTML = '';
+      const allPlayers = s.stations
+        ? s.stations.filter(st => st.holder_name).map(st => ({ name: st.holder_name, station: st.name }))
+        : [];
+      for (const p of allPlayers) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:3px 0;';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = p.name;
+        const stationSpan = document.createElement('span');
+        stationSpan.style.cssText = 'font-size:0.7rem;color:#667;';
+        stationSpan.textContent = '@ ' + p.station;
+        row.appendChild(nameSpan);
+        row.appendChild(stationSpan);
+        specList.appendChild(row);
+      }
+      if (s.spectators && s.spectators.length > 0) {
+        for (const sp of s.spectators) {
+          const row = document.createElement('div');
+          row.style.cssText = 'padding:3px 0;color:#667;font-style:italic;font-size:0.75rem;';
+          row.textContent = sp + ' (waiting)';
+          specList.appendChild(row);
+        }
+      }
+      if (allPlayers.length === 0 && (!s.spectators || s.spectators.length === 0)) {
+        specList.textContent = 'No players connected yet';
+        specList.style.color = '#556';
+      }
+    }
+
+    // ── Status hint ───────────────────────────────────────────────────
+    const hint = document.getElementById('lobby-status-hint');
+    if (hint) {
+      if (s.all_stations_filled) {
+        hint.textContent = 'All stations filled. Ready for launch.';
+        hint.style.color = '#5fd8e8';
+      } else if (crewN === 0) {
+        hint.textContent = 'Waiting for players to connect…';
+        hint.style.color = '#667';
+      } else {
+        hint.textContent = 'Waiting for stations to be claimed…';
+        hint.style.color = '#889';
+      }
+    }
+  };
+
     // ── Connection status ──────────────────────────────────────────────────
 
     function setConnectionStatus(state) {
@@ -276,10 +833,16 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     let selectedScenario = null;
     let wasmReady = false;
 
+    function showLobbyPanel() {
+      const panel = document.getElementById('lobby-panel');
+      if (panel) panel.style.display = '';
+    }
+
     document.querySelectorAll('.world-btn').forEach(function(btn) {
       btn.addEventListener('click', function() {
         selectedScenario = this.dataset.path;
         document.getElementById('scenario-panel').style.display = 'none';
+        showLobbyPanel();
         initPeerJS();
         acquireWakeLock();
         if (wasmReady) startPhoenix();
@@ -293,6 +856,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (sp) {
         selectedScenario = sp;
         document.getElementById('scenario-panel').style.display = 'none';
+        showLobbyPanel();
         initPeerJS();
         acquireWakeLock();
       }
@@ -461,6 +1025,21 @@ function finishInit() {
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;
   window.wasm_toggle_entity_inspector = wasmBindings.wasm_toggle_entity_inspector;
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
+
+  // ── HTML console bridge exports (issue #422 / ADR-0001) ─────────────────
+  // Expose the inbound action entry point and the state-push callback
+  // registrations. The HUD callback is wired immediately so the viewscreen
+  // overlay starts receiving state as soon as the sim runs.
+  window.wasm_ui_action = wasmBindings.wasm_ui_action;
+  window.set_console_state_callback = wasmBindings.set_console_state_callback;
+  window.set_hud_state_callback = wasmBindings.set_hud_state_callback;
+  window.set_lobby_state_callback = wasmBindings.set_lobby_state_callback;
+  if (typeof set_hud_state_callback === 'function') {
+    set_hud_state_callback(window.__updateHud);
+  }
+  if (typeof set_lobby_state_callback === 'function') {
+    set_lobby_state_callback(window.__updateLobby);
+  }
 
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.

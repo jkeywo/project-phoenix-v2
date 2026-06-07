@@ -4,30 +4,95 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Project Phoenix — Tactical Console</title>
+  <link rel="stylesheet" href="console.css">
   <style>
-    :root { --signal-cyan: #5fd8e8; --alert: #ff3344; --bg: #0a0c0f; --dim: #6a7178; }
-    html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: #d8dde2;
-      font-family: "Chakra Petch", system-ui, sans-serif; }
-    main { padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
-    h1 { font-size: 1.1rem; letter-spacing: 0.1em; margin: 0; color: var(--signal-cyan); }
-    .group { border: 1px solid #233; padding: 0.6rem; }
-    .group h2 { font-size: 0.7rem; letter-spacing: 0.14em; color: var(--dim); margin: 0 0 0.5rem; }
-    .bank, .tube { display: flex; gap: 0.5rem; align-items: center; font-family: "JetBrains Mono", monospace;
-      font-size: 0.85rem; padding: 0.2rem 0; }
-    .bank .id, .tube .id { min-width: 5rem; color: var(--signal-cyan); }
-    .ready { color: #5fe88a; }
-    .not-ready { color: var(--dim); }
-    #torpedo-count { font-family: "JetBrains Mono", monospace; font-size: 1.2rem; color: var(--signal-cyan); }
-    .actions { display: flex; gap: 0.6rem; }
-    button { background: #122; color: var(--signal-cyan); border: 1px solid var(--signal-cyan);
-      padding: 0.6rem 1rem; font-family: "Chakra Petch", system-ui, sans-serif; letter-spacing: 0.08em;
-      cursor: pointer; }
-    button:hover { background: #1a3338; }
-    #radar { display: block; background: #050810; border: 1px solid #233; }
+    /* ── Landscape layout (2160×1080) — mirrors weapons-landscape.html ── */
+    body { font-size: 16px; }
+    .panel-inner {
+      padding: 24px 60px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .panel-mid {
+      flex: 1;
+      display: flex;
+      flex-direction: row;
+      gap: 36px;
+      min-height: 0;
+    }
+    .panel-mid > .radar-col   { width: 1020px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+    .panel-mid > .ctrl-col    { flex: 1; display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+    .panel-inner > .hero       { padding: 4px 0 4px; flex-shrink: 0; }
+    .panel-inner > .footer-bar { flex-shrink: 0; }
+
+    /* Compress hero on landscape */
+    .hero h1 { font-size: 48px; letter-spacing: 0.30em; }
+    .hero h1 .sub { font-size: 14px; margin-top: 2px; }
+    .hero .bar { width: 6px; }
+    .hero { gap: 18px; }
+
+    /* Radar — fills column, square aspect, capped at 720px */
+    .radar-col .radar-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+    .radar-col .radar { aspect-ratio: 1/1; width: auto; height: 100%; max-height: 720px; max-width: 720px; }
+
+    /* Compress inset bodies */
+    .ctrl-col .inset             { flex: 1; min-height: 0; }
+    .ctrl-col .inset .inset-body { padding: 14px 26px; }
+    .ctrl-col .section-header    { margin-bottom: 8px; font-size: 18px; }
+    .ctrl-col .section-header .tag { font-size: 10px; }
+    .ctrl-col .readout           { padding: 8px 18px; }
+    .ctrl-col .readout .v        { font-size: 36px; }
+    .ctrl-col .readout .v.tactical { font-size: 36px; }
+    .ctrl-col .readout .k        { font-size: 12px; }
+    .ctrl-col .readout .u        { font-size: 12px; }
+    .ctrl-col .readout .sub      { font-size: 11px; }
+    .ctrl-col .chip              { --h: 56px; font-size: 18px; }
+    .ctrl-col .tube-status-row   { margin-top: 8px; }
+    .ctrl-col .tube-status       { height: 30px; font-size: 14px; }
+    .ctrl-col .btn               { --h: 68px; font-size: 22px; padding: 0 22px 0 56px; }
+    .ctrl-col .btn .led          { width: 18px; height: 18px; left: 18px; }
+    .ctrl-col .cooldown          { padding: 8px 0; }
+    .ctrl-col .cooldown .value   { font-size: 18px; }
+    .ctrl-col .frequency         { padding: 8px 0 4px; }
+    .ctrl-col .frequency .freq-bar { height: 26px; }
+    .ctrl-col .tubes             { display: flex; gap: 10px; margin-top: 6px; }
+    .ctrl-col .fire-row          { margin-top: 12px; }
+    .radar-col > .readout        { padding: 10px 22px; }
+    .radar-col > .readout .v     { font-size: 28px; }
+
+    /* Side-rail micro-labels (centred top/bottom of frame) */
+    .side-rail {
+      position: absolute;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--ink-faint);
+      letter-spacing: 0.4em;
+    }
+    .side-rail.top    { top: 16px;    left: 50%; transform: translateX(-50%); }
+    .side-rail.bottom { bottom: 14px; left: 50%; transform: translateX(-50%); }
+
+    /* Live-canvas overlay in the radar div */
+    .radar canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* Hidden data-attr containers (smoke-test targets — not visible) */
+    #banks, #tubes {
+      position: absolute;
+      left: -9999px;
+      visibility: hidden;
+    }
   </style>
 </head>
-<body>
-  <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
+<body style="background:#000; overflow:hidden;">
+
+  <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────── -->
   <script>
     window.__sendAction = function(json) {
       if (window.ipc) {
@@ -38,143 +103,386 @@
     };
   </script>
 
-  <main>
-    <h1>TACTICAL</h1>
+  <!-- Hidden data containers for smoke tests (#banks .bank, #tubes .tube) -->
+  <div id="banks" aria-hidden="true"></div>
+  <div id="tubes" aria-hidden="true"></div>
 
-    <div class="group">
-      <h2>PHASER BANKS</h2>
-      <div id="banks"></div>
-    </div>
+  <div id="fit-wrap" style="position:fixed; top:0; left:0; transform-origin: top left;">
+  <div class="frame landscape" data-screen-label="Weapons Console">
+    <div class="panel">
+      <div class="panel-inner">
 
-    <div class="group">
-      <h2>TORPEDO TUBES</h2>
-      <div id="tubes"></div>
-    </div>
+        <div class="side-rail top">PROJECT PHOENIX · TACTICAL CONSOLE · WEAPONS STATION</div>
+        <div class="side-rail bottom" id="footer-ticker">TICK — · LATENCY — · LINK OK</div>
 
-    <div class="group">
-      <h2>TORPEDO MAGAZINE</h2>
-      <span id="torpedo-count" data-count="0">0</span>
-    </div>
+        <!-- ── Hero header ───────────────────────────────────────────── -->
+        <header class="hero">
+          <div class="bar"></div>
+          <h1>WEAPONS
+            <span class="sub" id="hero-sub">TACTICAL · STATION</span>
+          </h1>
+          <div class="spacer"></div>
+          <div class="hull" id="hull-display" style="display:none;">
+            <span>HULL</span>
+            <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
+            <span class="val" id="hull-val">—</span>
+          </div>
+          <div class="complexity">CPX: STD ▾</div>
+        </header>
 
-    <div class="group">
-      <h2>TACTICAL RADAR</h2>
-      <canvas id="radar" width="220" height="220"></canvas>
-    </div>
+        <!-- ── Main split: radar (left) + controls (right) ───────────── -->
+        <div class="panel-mid">
 
-    <div class="actions">
-      <button id="fire-phaser" type="button">FIRE PHASER</button>
-      <button id="fire-torpedo" type="button">FIRE TORPEDO</button>
+          <!-- ── LEFT: Tactical radar ─────────────────────────────────── -->
+          <section class="radar-col">
+            <div class="radar-wrap">
+              <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
+                <!-- Background image (decorative) -->
+                <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
+                <!-- Corner brackets -->
+                <div class="radar-bracket tl"><div class="nub"></div></div>
+                <div class="radar-bracket tr"><div class="nub"></div></div>
+                <div class="radar-bracket bl"><div class="nub"></div></div>
+                <div class="radar-bracket br"><div class="nub"></div></div>
+                <!-- Scan sweep animation -->
+                <div class="scan"></div>
+                <!-- Crosshairs -->
+                <div class="crosshair-h"></div>
+                <div class="crosshair-v"></div>
+                <!-- Range ring labels (updated by JS when range is known) -->
+                <div class="range-label" id="rl-33" style="top:50%; left:8%;  transform:translateY(-50%);">—</div>
+                <div class="range-label" id="rl-66" style="top:50%; left:20%; transform:translateY(-50%);">—</div>
+                <div class="range-label" id="rl-100" style="top:50%; left:33%; transform:translateY(-50%);">—</div>
+                <!-- Live canvas: drawRadar() renders blips + arcs here (z-index:2) -->
+                <canvas id="radar" width="720" height="720"></canvas>
+              </div>
+            </div>
+
+            <!-- Target readout strip under radar -->
+            <div class="readout">
+              <div>
+                <div class="k">LOCKED TARGET</div>
+                <div class="v" id="target-name" style="font-size:32px;">—</div>
+              </div>
+              <div class="spacer"></div>
+              <div class="sub" id="target-sub">NO LOCK</div>
+            </div>
+          </section>
+
+          <!-- ── RIGHT: Torpedo bay + Phaser array ───────────────────── -->
+          <section class="ctrl-col">
+
+            <!-- TORPEDO BAY ──────────────────────────────── -->
+            <div class="inset">
+              <div class="inset-body">
+                <div class="section-header">
+                  <span>TORPEDO BAY</span>
+                  <span class="tag" id="tube-count-tag">— TUBES</span>
+                </div>
+
+                <div class="readout">
+                  <div class="k">MAG</div>
+                  <div class="v tactical" id="torpedo-count" data-count="0">0</div>
+                  <div class="u">RDS</div>
+                  <div class="spacer"></div>
+                </div>
+
+                <!-- Tube selector chips (built dynamically from state) -->
+                <div class="tubes" id="tube-chips"></div>
+
+                <!-- Per-tube status indicators (built dynamically) -->
+                <div class="tube-status-row" id="tube-status-row"></div>
+
+                <!-- Fire torpedo -->
+                <div class="fire-row">
+                  <button id="fire-torpedo" class="btn armed" style="width:100%;" type="button">
+                    <span class="btn-bg"></span>
+                    <span class="led on" id="torpedo-led"></span>
+                    <span class="label" id="torpedo-fire-label">FIRE TORPEDO</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- PHASER ARRAY ──────────────────────────────── -->
+            <div class="inset">
+              <div class="inset-body">
+                <div class="section-header">
+                  <span>PHASER ARRAY</span>
+                  <span class="tag" id="phaser-tag">BEAM</span>
+                </div>
+
+                <div style="display:flex; gap:18px; align-items:stretch;">
+                  <button class="btn" id="phaser-mode-btn" style="flex:1;" type="button">
+                    <span class="btn-bg"></span>
+                    <span class="led cyan"></span>
+                    <span class="label" id="phaser-mode-label">MODE: AUTO</span>
+                  </button>
+                  <div class="mini-toggle" style="align-self:center;">
+                    <div class="opt" id="mode-man">MAN</div>
+                    <div class="opt active" id="mode-auto">AUTO</div>
+                  </div>
+                </div>
+
+                <div class="cooldown">
+                  <div class="label">COOLDOWN</div>
+                  <div class="bar">
+                    <div class="fill" id="phaser-cooldown-fill" style="width:100%;"></div>
+                    <div class="ticks"></div>
+                  </div>
+                  <div class="value" id="phaser-cooldown-val">READY</div>
+                </div>
+
+                <!-- Beam frequency display -->
+                <div>
+                  <div class="frequency" id="phaser-freq-bars">
+                    <div class="freq-bar"></div>
+                    <div class="freq-bar"></div>
+                    <div class="freq-bar tgt"></div>
+                    <div class="freq-bar on"></div>
+                    <div class="freq-bar"></div>
+                    <div class="freq-bar"></div>
+                    <div class="freq-bar"></div>
+                    <div class="freq-bar"></div>
+                    <div class="freq-bar"></div>
+                    <div class="freq-bar"></div>
+                  </div>
+                  <div class="freq-row">
+                    <span>PHASER FREQ</span>
+                    <span id="phaser-freq-info">—</span>
+                  </div>
+                </div>
+
+                <!-- Fire phasers -->
+                <div class="fire-row" style="margin-top:auto; padding-top:18px;">
+                  <button id="fire-phaser" class="btn danger" style="width:100%;" type="button">
+                    <span class="btn-bg"></span>
+                    <span class="led fire"></span>
+                    <span class="label">FIRE PHASERS</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </section>
+        </div>
+        <!-- /panel-mid -->
+
+        <!-- Footer bar -->
+        <footer class="console-footer footer-bar">
+          <span class="dot"></span>
+          <span id="footer-status">TACTICAL ONLINE</span>
+          <span class="sep">·</span>
+          <span id="footer-lock" style="color:var(--ink-faint);">NO LOCK</span>
+          <span style="flex:1"></span>
+          <span id="footer-right" style="color:var(--ink-faint);">—</span>
+        </footer>
+
+      </div>
     </div>
-  </main>
+  </div>
+  </div>
 
   <script>
-    // ── Inbound state push (ADR-0001 §2) ──────────────────────────────────
-    // Rust calls window.__updateConsole("Tactical", stateJson) on change.
+    // ── State ────────────────────────────────────────────────────────────
+    // Defaults ensure FIRE buttons work before first __updateConsole call
+    // (smoke-test requirement: fire_phaser→bank:'port', fire_torpedo→tube:'fore').
+    var _selectedBank  = 'port';
+    var _selectedTube  = 'fore';
+    var _lastName      = null;
+    var _lastStateJson = null;
+    var _state         = null;
+
+    // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
+    // Called by the host page: window.__updateConsole("Tactical", stateJson)
     window.__updateConsole = function(name, stateJson) {
-      let s;
-      try { s = JSON.parse(stateJson); } catch (e) { console.warn('[Tactical] bad state json', e); return; }
-
-      const banks = document.getElementById('banks');
-      banks.innerHTML = '';
-      (s.banks || []).forEach(function(b) {
-        const row = document.createElement('div');
-        row.className = 'bank';
-        row.dataset.id = b.id;
-        row.dataset.fireReady = String(!!b.fire_ready);
-        row.dataset.onCooldown = String(!!b.on_cooldown);
-        const id = document.createElement('span'); id.className = 'id'; id.textContent = b.id || '(default)';
-        const st = document.createElement('span');
-        st.className = b.fire_ready ? 'ready' : 'not-ready';
-        st.textContent = b.fire_ready ? 'FIRE-READY' : (b.on_cooldown ? 'COOLDOWN' : 'STANDBY');
-        row.appendChild(id); row.appendChild(st);
-        banks.appendChild(row);
-      });
-
-      const tubes = document.getElementById('tubes');
-      tubes.innerHTML = '';
-      (s.tubes || []).forEach(function(t) {
-        const row = document.createElement('div');
-        row.className = 'tube';
-        row.dataset.id = t.id;
-        row.dataset.loaded = String(!!t.loaded);
-        row.dataset.reloadSecs = String(t.reload_secs);
-        const id = document.createElement('span'); id.className = 'id'; id.textContent = t.id;
-        const st = document.createElement('span');
-        st.className = t.loaded ? 'ready' : 'not-ready';
-        st.textContent = t.loaded ? 'LOADED' : ('RELOAD ' + Number(t.reload_secs).toFixed(1) + 's');
-        row.appendChild(id); row.appendChild(st);
-        tubes.appendChild(row);
-      });
-
-      const count = document.getElementById('torpedo-count');
-      const n = (typeof s.torpedo_count === 'number') ? s.torpedo_count : 0;
-      count.textContent = String(n);
-      count.dataset.count = String(n);
-
-      drawRadar(s);
+      _lastName      = name;
+      _lastStateJson = stateJson;
+      _renderConsole(name, stateJson);
     };
 
+    function _renderConsole(name, stateJson) {
+      var s;
+      try { s = JSON.parse(stateJson); } catch (e) { console.warn('[Tactical] bad state json', e); return; }
+      _state = s;
+
+      // ── Hidden data-attr containers (smoke-test targets) ────────────────
+      // #banks .bank[data-id][data-fire-ready][data-on-cooldown]
+      // #tubes .tube[data-id][data-loaded][data-reload-secs]
+      var banksEl = document.getElementById('banks');
+      banksEl.innerHTML = '';
+      (s.banks || []).forEach(function(b) {
+        var row = document.createElement('div');
+        row.className = 'bank';
+        row.dataset.id = b.id;
+        row.dataset.fireReady  = String(!!b.fire_ready);
+        row.dataset.onCooldown = String(!!b.on_cooldown);
+        banksEl.appendChild(row);
+      });
+
+      var tubesDataEl = document.getElementById('tubes');
+      tubesDataEl.innerHTML = '';
+      (s.tubes || []).forEach(function(t) {
+        var row = document.createElement('div');
+        row.className = 'tube';
+        row.dataset.id         = t.id;
+        row.dataset.loaded     = String(!!t.loaded);
+        row.dataset.reloadSecs = String(t.reload_secs);
+        tubesDataEl.appendChild(row);
+      });
+
+      // ── Torpedo magazine count ───────────────────────────────────────────
+      var countEl = document.getElementById('torpedo-count');
+      var n = (typeof s.torpedo_count === 'number') ? s.torpedo_count : 0;
+      countEl.textContent   = String(n);
+      countEl.dataset.count = String(n);
+
+      // ── Tube chips & status row ──────────────────────────────────────────
+      var tubes = s.tubes || [];
+      var tubeCountTag = document.getElementById('tube-count-tag');
+      if (tubeCountTag) tubeCountTag.textContent = tubes.length + ' TUBE' + (tubes.length !== 1 ? 'S' : '');
+
+      // Validate selected tube still exists; fall back to first
+      if (!tubes.some(function(t) { return t.id === _selectedTube; }) && tubes.length > 0) {
+        _selectedTube = tubes[0].id;
+      }
+
+      var chipsEl = document.getElementById('tube-chips');
+      chipsEl.innerHTML = '';
+      tubes.forEach(function(t) {
+        var btn = document.createElement('button');
+        btn.className = 'chip' + (t.id === _selectedTube ? ' selected' : '');
+        btn.type = 'button';
+        btn.innerHTML = '<span class="chip-bg"></span><span class="lbl">' + t.id.toUpperCase() + '</span>';
+        btn.addEventListener('click', (function(id) { return function() {
+          _selectedTube = id;
+          if (_lastStateJson) _renderConsole(_lastName, _lastStateJson);
+        }; })(t.id));
+        chipsEl.appendChild(btn);
+      });
+
+      var statusRow = document.getElementById('tube-status-row');
+      statusRow.innerHTML = '';
+      tubes.forEach(function(t) {
+        var cell = document.createElement('div');
+        cell.className = t.loaded ? 'tube-status loaded' : 'tube-status loading';
+        var dot = document.createElement('span');
+        dot.className = 'dot';
+        cell.appendChild(dot);
+        cell.appendChild(document.createTextNode(
+          t.loaded ? 'LOADED' : (Number(t.reload_secs).toFixed(1) + 's')
+        ));
+        statusRow.appendChild(cell);
+      });
+
+      // Fire torpedo label shows selected tube
+      var fireLabelEl = document.getElementById('torpedo-fire-label');
+      if (fireLabelEl) {
+        fireLabelEl.textContent = 'FIRE TORPEDO · ' + _selectedTube.toUpperCase();
+      }
+
+      // ── Phaser state ─────────────────────────────────────────────────────
+      var banks   = s.banks || [];
+      var anyReady = banks.some(function(b) { return b.fire_ready; });
+
+      var modeStr        = String(s.phaser_mode || 'Auto');
+      var phaserModeLabel = document.getElementById('phaser-mode-label');
+      var modeMEl        = document.getElementById('mode-man');
+      var modeAEl        = document.getElementById('mode-auto');
+      if (phaserModeLabel) phaserModeLabel.textContent = 'MODE: ' + modeStr.toUpperCase();
+      if (modeMEl) modeMEl.className = 'opt' + (modeStr === 'Manual' ? ' active' : '');
+      if (modeAEl) modeAEl.className = 'opt' + (modeStr !== 'Manual' ? ' active' : '');
+
+      var cooldownVal  = document.getElementById('phaser-cooldown-val');
+      var cooldownFill = document.getElementById('phaser-cooldown-fill');
+      if (anyReady) {
+        if (cooldownVal)  { cooldownVal.textContent = 'READY'; cooldownVal.style.color = 'var(--loaded)'; }
+        if (cooldownFill) cooldownFill.style.width = '100%';
+      } else {
+        var hasCooldown = banks.some(function(b) { return b.on_cooldown; });
+        if (hasCooldown) {
+          if (cooldownVal)  { cooldownVal.textContent = 'COOLING'; cooldownVal.style.color = 'var(--reloading)'; }
+          if (cooldownFill) cooldownFill.style.width = '35%';
+        } else {
+          if (cooldownVal)  { cooldownVal.textContent = 'STANDBY'; cooldownVal.style.color = 'var(--ink-faint)'; }
+          if (cooldownFill) cooldownFill.style.width = '0%';
+        }
+      }
+
+      var firePhaserBtn = document.getElementById('fire-phaser');
+      if (firePhaserBtn) {
+        firePhaserBtn.className = 'btn ' + (anyReady ? 'danger' : 'disabled');
+      }
+
+      // ── Target readout ────────────────────────────────────────────────
+      var nameEl  = document.getElementById('target-name');
+      var subEl   = document.getElementById('target-sub');
+      var hasLock = !!s.target_uuid;
+      if (nameEl) nameEl.textContent = hasLock ? s.target_uuid.substring(0, 20) + '…' : '—';
+      if (subEl)  subEl.textContent  = hasLock ? '◉ LOCK ACTIVE' : 'NO LOCK';
+
+      var footerLock = document.getElementById('footer-lock');
+      if (footerLock) {
+        footerLock.textContent = hasLock ? '◉ LOCK ACTIVE' : 'NO LOCK';
+        footerLock.style.color = hasLock ? 'var(--tactical)' : 'var(--ink-faint)';
+      }
+
+      // ── Radar canvas ──────────────────────────────────────────────────
+      drawRadar(s);
+    }
+
     // ── Tactical radar renderer ───────────────────────────────────────────
-    // Draws a ship-centred, ship-aligned radar: forward = up, right = right.
-    // `state.blips`       — [{uuid, radar_x, radar_y, scaled_radius, kind}]
-    //   radar_x / radar_y normalised to [-1,1] at effective tactical range.
-    // `state.phaser_arcs` — [{id, facing_deg, fire_arc_deg}]
-    //   facing_deg: 0 = forward, 90 = starboard, -90 = port.
-    // `state.torpedo_arcs`— same schema.
+    // Draws ship-centred, ship-aligned radar: forward = up, right = right.
+    //   state.blips        [{uuid, radar_x, radar_y, scaled_radius, kind}]
+    //   state.phaser_arcs  [{id, facing_deg, fire_arc_deg}]
+    //   state.torpedo_arcs [{id, facing_deg, fire_arc_deg}]
     function drawRadar(state) {
       var canvas = document.getElementById('radar');
       if (!canvas || !canvas.getContext) return;
       var ctx = canvas.getContext('2d');
       var W = canvas.width, H = canvas.height;
       var cx = W / 2, cy = H / 2;
-      var R = Math.min(W, H) / 2 - 6; // radar disc radius in px
+      var R  = Math.min(W, H) / 2 - 8;
 
       ctx.clearRect(0, 0, W, H);
 
-      // ── Background disc ────────────────────────────────────────────────
-      ctx.fillStyle = '#050810';
+      // Background disc (semi-transparent overlay on radar-bg.png)
+      ctx.fillStyle = 'rgba(5,8,22,0.52)';
       ctx.beginPath();
       ctx.arc(cx, cy, R, 0, Math.PI * 2);
       ctx.fill();
 
-      // ── Range rings ────────────────────────────────────────────────────
-      ctx.strokeStyle = '#1a2a3a';
-      ctx.lineWidth = 0.8;
+      // Range rings
+      ctx.strokeStyle = 'rgba(106,124,164,0.28)';
+      ctx.lineWidth = 1;
       [0.33, 0.66, 1.0].forEach(function(f) {
         ctx.beginPath();
         ctx.arc(cx, cy, R * f, 0, Math.PI * 2);
         ctx.stroke();
       });
 
-      // ── Cross-hairs ────────────────────────────────────────────────────
-      ctx.strokeStyle = '#0d1e2e';
-      ctx.lineWidth = 0.5;
-      ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
-
-      // ── Fire-arc sectors ───────────────────────────────────────────────
-      // facing_deg=0 → forward (up on canvas) = canvas angle −π/2.
-      // canvas_angle = (facing_deg − 90) × π / 180
-      function drawArcSector(arcs, innerFraction, fillColor, strokeColor) {
-        var arcR = R * innerFraction;
+      // ── Fire-arc sectors ──────────────────────────────────────────────
+      // facing_deg=0 → forward (up). canvas_angle = (facing_deg − 90) × π/180
+      function drawArcSector(arcs, innerFrac, fillColor, strokeColor) {
+        var arcR = R * innerFrac;
         (arcs || []).forEach(function(arc) {
-          var facingRad = (arc.facing_deg - 90) * Math.PI / 180;
+          var facing  = (arc.facing_deg - 90) * Math.PI / 180;
           var halfArc = arc.fire_arc_deg * Math.PI / 180 / 2;
           ctx.beginPath();
           ctx.moveTo(cx, cy);
-          ctx.arc(cx, cy, arcR, facingRad - halfArc, facingRad + halfArc);
+          ctx.arc(cx, cy, arcR, facing - halfArc, facing + halfArc);
           ctx.closePath();
-          ctx.fillStyle = fillColor;
+          ctx.fillStyle   = fillColor;
           ctx.fill();
           ctx.strokeStyle = strokeColor;
-          ctx.lineWidth = 1;
+          ctx.lineWidth   = 1;
           ctx.stroke();
         });
       }
-      drawArcSector(state.torpedo_arcs,  0.70, 'rgba(60,160,240,0.08)',  'rgba(60,160,240,0.35)');
-      drawArcSector(state.phaser_arcs,   0.90, 'rgba(240,132,56,0.10)',  'rgba(240,132,56,0.40)');
+      drawArcSector(state.torpedo_arcs, 0.70, 'rgba(60,160,240,0.08)',  'rgba(60,160,240,0.35)');
+      drawArcSector(state.phaser_arcs,  0.90, 'rgba(240,132,56,0.10)',  'rgba(240,132,56,0.40)');
 
-      // ── Clip future draws to disc ──────────────────────────────────────
+      // Clip subsequent draws to the disc
       ctx.save();
       ctx.beginPath();
       ctx.arc(cx, cy, R, 0, Math.PI * 2);
@@ -183,53 +491,88 @@
       // ── Blips ─────────────────────────────────────────────────────────
       var kindColor = {
         asteroid: '#7ac0ff',
-        ship:     '#ff6060',
+        ship:     '#ff8060',
         station:  '#ffe060',
-        unknown:  '#808080'
+        unknown:  '#a8b0c0'
       };
       var targetUuid = state.target_uuid || null;
       (state.blips || []).forEach(function(b) {
         // radar_x = right, radar_y = forward (up) → negate Y for canvas
-        var bx = cx + b.radar_x * R;
-        var by = cy - b.radar_y * R;
+        var bx       = cx + b.radar_x * R;
+        var by       = cy - b.radar_y * R;
         var isTarget = targetUuid && targetUuid === b.uuid;
-        var color = isTarget ? '#ff3344' : (kindColor[b.kind] || kindColor.unknown);
-        // Minimum visible dot size; scale_radius provides relative size hint
-        var dotR = Math.max(2.5, b.scaled_radius * R * 0.6);
+        var color    = isTarget ? '#ff3344' : (kindColor[b.kind] || kindColor.unknown);
+        var dotR     = Math.max(3, b.scaled_radius * R * 0.6);
+
         ctx.beginPath();
         ctx.arc(bx, by, dotR, 0, Math.PI * 2);
         ctx.fillStyle = color;
         ctx.fill();
+
         if (isTarget) {
+          // Lock ring around target
           ctx.strokeStyle = '#ff3344';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth   = 2;
           ctx.beginPath();
-          ctx.arc(bx, by, dotR + 4, 0, Math.PI * 2);
+          ctx.arc(bx, by, dotR + 7, 0, Math.PI * 2);
           ctx.stroke();
+          // Cross ticks on lock ring
+          ctx.lineWidth = 1.5;
+          var lr = dotR + 7;
+          [[0, -lr-4, 0, -lr+4],[0, lr-4, 0, lr+4],[lr-4, 0, lr+4, 0],[-lr-4, 0, -lr+4, 0]].forEach(function(pts) {
+            ctx.beginPath();
+            ctx.moveTo(bx + pts[0], by + pts[1]);
+            ctx.lineTo(bx + pts[2], by + pts[3]);
+            ctx.stroke();
+          });
         }
       });
 
       ctx.restore();
 
-      // ── Own-ship marker (always at centre) ────────────────────────────
-      // Diamond shape pointing forward (up).
-      ctx.fillStyle = '#5fd8e8';
+      // ── Own-ship marker (always at centre, pointing forward = up) ─────
+      ctx.fillStyle = '#6cb6d0';
       ctx.beginPath();
-      ctx.moveTo(cx,     cy - 7); // forward tip
-      ctx.lineTo(cx + 4, cy + 2); // starboard
-      ctx.lineTo(cx,     cy - 1); // aft indent
-      ctx.lineTo(cx - 4, cy + 2); // port
+      ctx.moveTo(cx,     cy - 9);  // forward tip
+      ctx.lineTo(cx + 5, cy + 3);  // starboard
+      ctx.lineTo(cx,     cy - 1);  // aft indent
+      ctx.lineTo(cx - 5, cy + 3);  // port
       ctx.closePath();
       ctx.fill();
     }
 
     // ── Outbound actions ──────────────────────────────────────────────────
     document.getElementById('fire-phaser').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'fire_phaser', console: 'Tactical', bank: 'port' }));
+      // Fire with first fire-ready bank, falling back to _selectedBank ('port')
+      var bank = _selectedBank || 'port';
+      if (_state && _state.banks) {
+        var ready = _state.banks.filter(function(b) { return b.fire_ready; });
+        if (ready.length > 0) bank = ready[0].id;
+      }
+      window.__sendAction(JSON.stringify({ action: 'fire_phaser', console: 'Tactical', bank: bank }));
     });
+
     document.getElementById('fire-torpedo').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'fire_torpedo', console: 'Tactical', tube: 'fore', target_uuid: null }));
+      var tube       = _selectedTube || 'fore';
+      var targetUuid = (_state && _state.target_uuid) ? _state.target_uuid : null;
+      window.__sendAction(JSON.stringify({ action: 'fire_torpedo', console: 'Tactical', tube: tube, target_uuid: targetUuid }));
     });
+  </script>
+
+  <script>
+    // ── Fit-to-screen (scales the 2160×1080 frame to fill any viewport) ──
+    (function fit() {
+      var wrap = document.getElementById('fit-wrap');
+      var W = 2160, H = 1080;
+      function apply() {
+        var s = Math.min(window.innerWidth / W, window.innerHeight / H);
+        wrap.style.transform = 'scale(' + s + ')';
+        wrap.style.left = ((window.innerWidth  - W * s) / 2) + 'px';
+        wrap.style.top  = ((window.innerHeight - H * s) / 2) + 'px';
+      }
+      window.addEventListener('resize', apply);
+      apply();
+    })();
   </script>
 </body>
 </html>

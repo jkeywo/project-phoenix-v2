@@ -1,0 +1,676 @@
+/* ───────────────────────────────────────────────────────────────
+   Weapons Console — shared styles
+   Design system reused from /src_assets:
+   - Navy chamfered panels (captain_console/panel-bg)
+   - Pill buttons with LED dots (gui/button-*, captain_console/red-alert-*)
+   - Tactical radar (helm_console/radar-bg)
+   - Type: Chakra Petch SemiBold (display), JetBrains Mono (readouts)
+   ─────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: "Chakra Petch";
+  src: url("src_assets/fonts/ChakraPetch-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("src_assets/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: block;
+}
+
+:root {
+  /* Surface colours, picked from panel-bg.png */
+  --bg-deep:        #050818;
+  --bg-mid:         #0a1028;
+  --bg-up:          #131a3a;
+  --bg-card:        #0d1430;
+  --bg-card-up:     #161e44;
+
+  /* Stroke / line work */
+  --line:           #6a7ca4;
+  --line-soft:      #3a4674;
+  --line-faint:     #1f2750;
+
+  /* Text */
+  --ink:            #d8e2ff;
+  --ink-dim:        #8a98c4;
+  --ink-faint:      #5a6694;
+
+  /* Accents */
+  --tactical:       #f08438;   /* weapons orange */
+  --tactical-dim:   #8c4818;
+  --fire:           #e0402c;   /* danger red */
+  --fire-bright:    #ff5a3a;
+  --fire-dim:       #6c1a14;
+  --loaded:         #4ec870;   /* armed/ready green */
+  --loaded-dim:     #1e5028;
+  --reloading:      #d8a040;   /* amber */
+  --reloading-dim:  #5a3c10;
+  --cyan:           #6cb6d0;
+  --cyan-dim:       #1a3848;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: #000;
+  font-family: "Chakra Petch", system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.02em;
+}
+
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+/* ── Frame ──────────────────────────────────────────────────── */
+.frame {
+  position: relative;
+  background:
+    radial-gradient(ellipse at 50% 30%, #0a0e22 0%, #03050e 70%, #000 100%);
+  overflow: hidden;
+}
+.frame.portrait  { width: 1080px; height: 2400px; }
+.frame.landscape { width: 2160px; height: 1080px; }
+
+/* ── Chamfered panel — outer thin light stroke + inner dark fill ── */
+.panel {
+  position: absolute;
+  inset: 0;
+  --cham: 28px;
+  background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
+  clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  );
+}
+.panel-inner {
+  position: absolute;
+  inset: 1.5px;
+  --cham: 27px;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(80,110,170,0.18) 0%, transparent 55%),
+    linear-gradient(180deg, #131a3a 0%, #0a0f28 45%, #050918 100%);
+  clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  );
+}
+
+/* tactical tick marks down the side edges (echoes captain_console) */
+.panel-inner::before,
+.panel-inner::after {
+  content: "";
+  position: absolute;
+  top: 80px;
+  bottom: 80px;
+  width: 1px;
+  background: repeating-linear-gradient(
+    180deg,
+    var(--line-soft) 0px,
+    var(--line-soft) 1px,
+    transparent 1px,
+    transparent 24px
+  );
+  background-size: 1px 24px;
+}
+.panel-inner::before { left: 10px;
+  background:
+    linear-gradient(90deg, var(--line-soft) 0, var(--line-soft) 6px, transparent 6px) 0 0 / 100% 24px repeat-y;
+}
+.panel-inner::after { right: 10px;
+  background:
+    linear-gradient(90deg, transparent calc(100% - 6px), var(--line-soft) calc(100% - 6px)) 0 0 / 100% 24px repeat-y;
+}
+
+/* the title arrow indent that captain panel has */
+.panel-arrow {
+  position: absolute;
+  top: 24px; left: 50%;
+  width: 28px; height: 14px;
+  transform: translateX(-50%);
+  border-left: 1.5px solid var(--line);
+  border-bottom: 1.5px solid var(--line);
+  transform-origin: center;
+  transform: translateX(-50%) rotate(-45deg) skew(0);
+}
+.panel-arrow-line {
+  position: absolute;
+  top: 38px; left: 32px; right: 32px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line) 12%, var(--line) 88%, transparent);
+}
+
+/* ── Header / footer strips ─────────────────────────────────── */
+.console-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.console-header .meta,
+.console-header .complexity {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 18px;
+  color: var(--ink-dim);
+  letter-spacing: 0.18em;
+}
+.console-header .complexity { color: var(--cyan); }
+.console-header h1 {
+  font-size: 42px;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  color: var(--tactical);
+  text-shadow: 0 0 18px rgba(240,132,56,0.35);
+}
+
+.console-footer {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  color: var(--ink-faint);
+  letter-spacing: 0.22em;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.console-footer .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--loaded);
+  box-shadow: 0 0 8px var(--loaded);
+}
+.console-footer .sep { color: var(--line-soft); }
+
+/* ── Inset card (chamfered, smaller chamfer) ───────────────── */
+.inset {
+  position: relative;
+  --cham: 18px;
+  background: linear-gradient(180deg, #1a2148 0%, #2a3568 100%);
+  clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  );
+  padding: 1.5px;
+}
+.inset > .inset-body {
+  --cham: 17px;
+  background:
+    linear-gradient(180deg, #0e1633 0%, #060b1f 100%);
+  clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  );
+  width: 100%; height: 100%;
+  padding: 28px 36px;
+  display: flex; flex-direction: column;
+}
+
+.section-header {
+  display: flex; align-items: center; gap: 14px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  color: var(--ink-dim);
+  margin-bottom: 18px;
+}
+.section-header::before,
+.section-header::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-soft) 50%, transparent);
+}
+.section-header .tag {
+  flex: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: var(--ink-faint);
+  padding: 2px 8px;
+  border: 1px solid var(--line-faint);
+}
+
+/* ── Pill button (chamfered like gui/button-normal) ─────────── */
+.btn {
+  --h: 88px;
+  --cham: 14px;
+  position: relative;
+  height: var(--h);
+  padding: 0 28px 0 64px;
+  display: flex; align-items: center;
+  font-family: "Chakra Petch", sans-serif;
+  font-weight: 600;
+  font-size: 28px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
+  clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  );
+  border: none;
+  cursor: default;
+  user-select: none;
+}
+.btn > .btn-bg {
+  position: absolute; inset: 1.5px;
+  --cham: 13px;
+  background: linear-gradient(180deg, #1a2148 0%, #0e1432 50%, #070b22 100%);
+  clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  );
+  z-index: 0;
+}
+.btn > .led,
+.btn > .label {
+  position: relative; z-index: 1;
+}
+.btn .led {
+  position: absolute;
+  left: 22px; top: 50%;
+  transform: translateY(-50%);
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #34406a 0%, #0a1028 70%);
+  box-shadow: inset 0 0 4px rgba(0,0,0,0.6);
+}
+.btn .led.on            { background: radial-gradient(circle at 35% 30%, #aef0c0 0%, var(--loaded) 35%, #1e5028 80%); box-shadow: 0 0 16px var(--loaded), inset 0 0 3px rgba(255,255,255,0.5); }
+.btn .led.fire          { background: radial-gradient(circle at 35% 30%, #ffb89a 0%, var(--fire) 35%, var(--fire-dim) 80%); box-shadow: 0 0 16px var(--fire), inset 0 0 3px rgba(255,255,255,0.5); }
+.btn .led.amber         { background: radial-gradient(circle at 35% 30%, #ffd896 0%, var(--reloading) 35%, var(--reloading-dim) 80%); box-shadow: 0 0 14px var(--reloading), inset 0 0 3px rgba(255,255,255,0.5); }
+.btn .led.cyan          { background: radial-gradient(circle at 35% 30%, #d0f0ff 0%, var(--cyan) 35%, var(--cyan-dim) 80%); box-shadow: 0 0 14px var(--cyan), inset 0 0 3px rgba(255,255,255,0.5); }
+
+.btn.large { --h: 120px; padding: 0 36px 0 84px; font-size: 36px; }
+.btn.large .led { left: 28px; width: 30px; height: 30px; }
+
+/* Variant colors */
+.btn.armed         { color: var(--loaded); }
+.btn.armed > .btn-bg { background: linear-gradient(180deg, #0e3422 0%, #082014 50%, #04120a 100%); }
+.btn.armed         { background: linear-gradient(180deg, #4ec870 0%, #1e5028 60%, #0e2818 100%); }
+
+.btn.danger        { color: var(--fire-bright); }
+.btn.danger > .btn-bg { background: linear-gradient(180deg, #3a0e0e 0%, #200808 50%, #100404 100%); }
+.btn.danger        { background: linear-gradient(180deg, #ff5a3a 0%, #6c1a14 60%, #2c0a08 100%); }
+
+.btn.tactical      { color: var(--tactical); }
+.btn.tactical > .btn-bg { background: linear-gradient(180deg, #2a1408 0%, #180a04 50%, #0a0402 100%); }
+.btn.tactical      { background: linear-gradient(180deg, #f08438 0%, #8c4818 60%, #3a1e0c 100%); }
+
+.btn.disabled      { color: var(--ink-faint); }
+.btn.disabled > .btn-bg { background: linear-gradient(180deg, #0a0f28 0%, #050918 100%); }
+.btn.disabled      { background: linear-gradient(180deg, #2a3050 0%, #14182c 100%); }
+
+/* small chip button (tube selector) */
+.chip {
+  --h: 68px;
+  --cham: 10px;
+  height: var(--h);
+  padding: 0 22px 0 22px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "Chakra Petch", sans-serif;
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: 0.22em;
+  color: var(--ink-dim);
+  background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
+  clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  );
+  position: relative;
+  text-transform: uppercase;
+  flex: 1 1 0;
+}
+.chip > .chip-bg {
+  position: absolute; inset: 1.5px;
+  --cham: 9px;
+  background: linear-gradient(180deg, #0e1432 0%, #060b1f 100%);
+  clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  );
+  z-index: 0;
+}
+.chip > .lbl { position: relative; z-index: 1; }
+.chip.selected      { color: #cde6ff; }
+.chip.selected      { background: linear-gradient(180deg, #6cb6d0 0%, #1a3848 60%, #0a1c24 100%); }
+.chip.selected > .chip-bg { background: linear-gradient(180deg, #1a3848 0%, #0a1c24 100%); border: 1px solid var(--cyan); clip-path: polygon(
+    var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
+    100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%,
+    var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
+  ); }
+
+/* ── Readout pill ────────────────────────────────────────────── */
+.readout {
+  display: flex; align-items: baseline; gap: 14px;
+  padding: 18px 28px;
+  background: linear-gradient(180deg, rgba(20,28,60,0.6), rgba(8,12,28,0.4));
+  border-top: 1px solid var(--line-faint);
+  border-bottom: 1px solid var(--line-faint);
+}
+.readout .k {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  color: var(--ink-faint);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.readout .v {
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 56px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+.readout .v.tactical { color: var(--tactical); }
+.readout .u {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  color: var(--ink-faint);
+  letter-spacing: 0.2em;
+}
+.readout .spacer { flex: 1; }
+.readout .sub {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+  color: var(--ink-faint);
+  letter-spacing: 0.18em;
+  line-height: 1.6;
+  text-align: right;
+}
+.readout .sub .ok { color: var(--loaded); }
+.readout .sub .warn { color: var(--reloading); }
+
+/* ── Tube status row ───────────────────────────────────────── */
+.tube-status-row {
+  display: flex; gap: 16px; margin-top: 12px;
+}
+.tube-status {
+  flex: 1 1 0;
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px;
+  height: 44px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 18px;
+  letter-spacing: 0.22em;
+  border-top: 1px solid var(--line-faint);
+}
+.tube-status.loaded   { color: var(--loaded); }
+.tube-status.loading  { color: var(--reloading); }
+.tube-status .dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 10px currentColor;
+}
+
+/* ── Cooldown meter ─────────────────────────────────────────── */
+.cooldown {
+  display: flex; align-items: center; gap: 18px;
+  padding: 14px 0;
+}
+.cooldown .label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  color: var(--ink-faint);
+  letter-spacing: 0.22em;
+}
+.cooldown .bar {
+  flex: 1;
+  height: 16px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-faint);
+  position: relative;
+  overflow: hidden;
+}
+.cooldown .bar .fill {
+  position: absolute; top: 0; left: 0; bottom: 0;
+  width: 100%;
+  background: linear-gradient(90deg, var(--tactical-dim), var(--tactical));
+  box-shadow: 0 0 12px rgba(240,132,56,0.4);
+}
+.cooldown .bar .ticks {
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0, transparent 19px, rgba(0,0,0,0.4) 19px, rgba(0,0,0,0.4) 20px);
+}
+.cooldown .value {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 22px;
+  color: var(--loaded);
+  letter-spacing: 0.18em;
+  min-width: 70px; text-align: right;
+}
+
+/* ── Phaser frequency ───────────────────────────────────────── */
+.frequency {
+  display: flex; gap: 6px;
+  padding: 18px 0 6px;
+}
+.frequency .freq-bar {
+  flex: 1;
+  height: 36px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-faint);
+  position: relative;
+}
+.frequency .freq-bar.on {
+  background: linear-gradient(180deg, var(--tactical), var(--tactical-dim));
+  box-shadow: 0 0 10px rgba(240,132,56,0.4);
+  border-color: var(--tactical);
+}
+.frequency .freq-bar.tgt {
+  background: linear-gradient(180deg, var(--loaded), var(--loaded-dim));
+  border-color: var(--loaded);
+}
+.freq-row {
+  display: flex; justify-content: space-between;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+  color: var(--ink-faint);
+  letter-spacing: 0.2em;
+  margin-top: 4px;
+}
+
+/* ── Radar ──────────────────────────────────────────────────── */
+.radar-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.radar {
+  position: relative;
+  aspect-ratio: 1 / 1;
+}
+.radar .bg {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+}
+.radar .crosshair-h,
+.radar .crosshair-v {
+  position: absolute;
+  background: var(--line-soft);
+}
+.radar .crosshair-h { left: 6%; right: 6%; top: 50%; height: 1px; transform: translateY(-0.5px); }
+.radar .crosshair-v { top: 6%; bottom: 6%; left: 50%; width: 1px; transform: translateX(-0.5px); }
+
+.radar .scan {
+  position: absolute; inset: 0;
+  background:
+    conic-gradient(from 0deg at 50% 50%,
+      rgba(108,182,208,0.22) 0deg,
+      rgba(108,182,208,0.08) 20deg,
+      transparent 60deg,
+      transparent 360deg);
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  animation: sweep 4s linear infinite;
+}
+@keyframes sweep { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+.radar .blip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.radar .blip img { width: 28px; height: 28px; display: block; image-rendering: pixelated; }
+.radar .blip .tag {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  color: currentColor;
+  letter-spacing: 0.15em;
+  white-space: nowrap;
+}
+.radar .blip.hostile { color: #ff8060; }
+.radar .blip.self    { color: var(--cyan); }
+.radar .blip.lock    { color: var(--tactical); }
+.radar .blip.torpedo { color: var(--loaded); }
+
+.radar .lock-ring {
+  position: absolute;
+  width: 80px; height: 80px;
+  border: 2px solid var(--tactical);
+  transform: translate(-50%,-50%);
+  filter: drop-shadow(0 0 8px var(--tactical));
+}
+.radar .lock-ring::before,
+.radar .lock-ring::after,
+.radar .lock-ring .b1,
+.radar .lock-ring .b2 {
+  content: "";
+  position: absolute;
+  width: 16px; height: 16px;
+  border: 2px solid var(--tactical);
+}
+.radar .lock-ring::before { top: -6px; left: -6px; border-right: none; border-bottom: none; }
+.radar .lock-ring::after  { top: -6px; right: -6px; border-left: none; border-bottom: none; }
+.radar .lock-ring .b1     { bottom: -6px; left: -6px; border-right: none; border-top: none; }
+.radar .lock-ring .b2     { bottom: -6px; right: -6px; border-left: none; border-top: none; }
+
+.radar .range-label {
+  position: absolute;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+  color: var(--ink-faint);
+  letter-spacing: 0.18em;
+}
+
+/* corner brackets around the radar that echo radar-surround.png */
+.radar-bracket {
+  position: absolute;
+  width: 56px; height: 56px;
+  border: 2px solid var(--line);
+  pointer-events: none;
+}
+.radar-bracket.tl { top: 0; left: 0; border-right: none; border-bottom: none; }
+.radar-bracket.tr { top: 0; right: 0; border-left: none; border-bottom: none; }
+.radar-bracket.bl { bottom: 0; left: 0; border-right: none; border-top: none; }
+.radar-bracket.br { bottom: 0; right: 0; border-left: none; border-top: none; }
+.radar-bracket .nub {
+  position: absolute;
+  background: linear-gradient(180deg, #2a3568, #0e1432);
+  border: 1px solid var(--line);
+  width: 64px; height: 18px;
+}
+.radar-bracket.tl .nub { top: 14px; left: 14px; }
+.radar-bracket.tr .nub { top: 14px; right: 14px; }
+.radar-bracket.bl .nub { bottom: 14px; left: 14px; }
+.radar-bracket.br .nub { bottom: 14px; right: 14px; }
+
+/* ── Title block / hero (orange bar) ─────────────────────────── */
+.hero {
+  display: flex; align-items: center; gap: 24px;
+  padding: 20px 0 24px;
+}
+.hero .bar {
+  width: 8px; align-self: stretch;
+  background: var(--tactical);
+  box-shadow: 0 0 14px var(--tactical);
+}
+.hero h1 {
+  font-size: 64px;
+  font-weight: 600;
+  letter-spacing: 0.36em;
+  color: var(--tactical);
+  text-shadow: 0 0 24px rgba(240,132,56,0.5);
+}
+.hero h1 .sub {
+  display: block;
+  font-size: 18px;
+  letter-spacing: 0.32em;
+  color: var(--ink-dim);
+  margin-top: 4px;
+  text-shadow: none;
+}
+.hero .spacer { flex: 1; }
+.hero .complexity {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  color: var(--cyan);
+  letter-spacing: 0.22em;
+  border: 1px solid var(--cyan-dim);
+  padding: 8px 14px;
+}
+
+/* ── Toggle / segmented mini ─────────────────────────────────── */
+.mini-toggle {
+  display: flex; gap: 0;
+  padding: 0;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-faint);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  letter-spacing: 0.2em;
+}
+.mini-toggle .opt {
+  padding: 10px 18px;
+  color: var(--ink-faint);
+}
+.mini-toggle .opt.active {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+}
+
+/* ── Damage indicator chip (red dot from REQ) ───────────────── */
+.damage-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+  color: var(--ink-dim);
+  letter-spacing: 0.2em;
+}
+.damage-chip .dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--loaded);
+  box-shadow: 0 0 8px var(--loaded);
+}
+
+/* ── Hull HP mini bar ───────────────────────────────────────── */
+.hull {
+  display: flex; align-items: center; gap: 12px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+  color: var(--ink-faint);
+  letter-spacing: 0.22em;
+}
+.hull .bar {
+  width: 140px; height: 8px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-faint);
+  position: relative;
+}
+.hull .bar .fill {
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, var(--loaded), #2a8040);
+  width: 100%;
+}
+.hull .val { color: var(--ink); }

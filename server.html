@@ -190,6 +190,122 @@
       color: var(--signal-cyan);
     }
     #hud-overlay.alert-on .hud-value { color: var(--alert); }
+
+    /* ─── Viewscreen border frame (raw/gui/borders/demo.html) ──────────────── */
+    #hud-overlay {
+      --t: 44px;
+      --vs-signal: #5fd8e8;
+      --vs-alert: #ff3344;
+      --vs-text: #b8c0c8;
+    }
+    /* All frame pieces are absolute children of #hud-overlay (inset:0) */
+    .vs-piece, .vs-edge {
+      position: absolute;
+      pointer-events: none;
+    }
+    /* Tiled edges */
+    .vs-edge { background-repeat: repeat; image-rendering: pixelated; }
+    .vs-edge.top {
+      top: 0; left: 240px; right: 240px;
+      height: var(--t);
+      background-image: url("gui/borders/edge-top.png");
+      background-size: 64px 44px;
+    }
+    .vs-edge.bottom {
+      bottom: 0; left: 240px; right: 240px;
+      height: var(--t);
+      background-image: url("gui/borders/edge-bottom.png");
+      background-size: 64px 44px;
+    }
+    .vs-edge.left {
+      left: 0; top: 140px; bottom: 140px;
+      width: var(--t);
+      background-image: url("gui/borders/edge-left.png");
+      background-size: 44px 64px;
+    }
+    .vs-edge.right {
+      right: 0; top: 140px; bottom: 140px;
+      width: var(--t);
+      background-image: url("gui/borders/edge-right.png");
+      background-size: 44px 64px;
+    }
+    /* Corners (240×140 px) */
+    .vs-corner {
+      width: 240px; height: 140px;
+      background-repeat: no-repeat; background-size: contain;
+      image-rendering: pixelated;
+    }
+    .vs-corner.tl { top: 0; left: 0;     background-image: url("gui/borders/corner-tl.png"); }
+    .vs-corner.tr { top: 0; right: 0;    background-image: url("gui/borders/corner-tr.png"); }
+    .vs-corner.bl { bottom: 0; left: 0;  background-image: url("gui/borders/corner-bl.png"); }
+    .vs-corner.br { bottom: 0; right: 0; background-image: url("gui/borders/corner-br.png"); }
+    /* Caps (centred top/bottom) */
+    .vs-cap {
+      background-repeat: no-repeat; background-size: contain;
+      image-rendering: pixelated;
+    }
+    .vs-cap.top {
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 320px; height: 56px;
+      background-image: url("gui/borders/cap-top.png");
+    }
+    .vs-cap.bottom {
+      bottom: 0; left: 50%; transform: translateX(-50%);
+      width: 520px; height: 56px;
+      background-image: url("gui/borders/cap-bottom.png");
+    }
+    /* Red alert — swap PNG assets */
+    #hud-overlay.alert-on .vs-edge.top    { background-image: url("gui/borders/edge-top-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.bottom { background-image: url("gui/borders/edge-bottom-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.left   { background-image: url("gui/borders/edge-left-alert.png"); }
+    #hud-overlay.alert-on .vs-edge.right  { background-image: url("gui/borders/edge-right-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.tl   { background-image: url("gui/borders/corner-tl-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.tr   { background-image: url("gui/borders/corner-tr-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.bl   { background-image: url("gui/borders/corner-bl-alert.png"); }
+    #hud-overlay.alert-on .vs-corner.br   { background-image: url("gui/borders/corner-br-alert.png"); }
+    #hud-overlay.alert-on .vs-cap.top     { background-image: url("gui/borders/cap-top-alert.png"); }
+    #hud-overlay.alert-on .vs-cap.bottom  { background-image: url("gui/borders/cap-bottom-alert.png"); }
+    /* Ship designation text (top-centre, over cap-top) */
+    .vs-designation {
+      position: absolute;
+      top: 18px; left: 50%; transform: translateX(-50%);
+      z-index: 5;
+      font-family: "Chakra Petch", system-ui, sans-serif;
+      font-size: 9px; font-weight: 600;
+      letter-spacing: 0.5em;
+      color: var(--vs-signal);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #hud-overlay.alert-on .vs-designation { color: var(--vs-alert); }
+    /* 4-slot status strip (bottom-centre, over cap-bottom) */
+    .vs-status-strip {
+      position: absolute;
+      bottom: 8px; left: 50%; transform: translateX(-50%);
+      width: 408px; height: 36px;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 0 12px;
+      pointer-events: none;
+    }
+    .vs-status-slot {
+      display: flex; flex-direction: column;
+      justify-content: center;
+      padding-left: 18px;
+    }
+    .vs-slot-label {
+      font-family: "Chakra Petch", system-ui, sans-serif; font-weight: 600;
+      font-size: 8px; letter-spacing: 0.32em;
+      color: var(--vs-text);
+      text-transform: uppercase;
+    }
+    .vs-slot-value {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; color: var(--vs-signal);
+      margin-top: 2px; letter-spacing: 0.06em;
+    }
+    #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
 </head>
 <body>
@@ -273,22 +389,40 @@
 
   <!-- HTML viewscreen HUD overlay (issue #422). Sits above the canvas via
        z-index; pointer-events:none so it never intercepts canvas input.
-       Driven by window.__updateHud(stateJson). -->
+       Driven by window.__updateHud(stateJson).
+       Also hosts the viewscreen border frame (corners/edges/caps/status-strip)
+       from raw/gui/borders/demo.html — assets served from gui/borders/. -->
   <div id="hud-overlay">
     <div id="hud-vignette"></div>
-    <div id="hud-strip">
-      <div class="hud-cell">
-        <span class="hud-label">HEADING</span>
-        <span class="hud-value" id="hud-heading">000</span>
-      </div>
-      <div class="hud-cell">
-        <span class="hud-label">HULL</span>
-        <span class="hud-value" id="hud-hull">100</span>
-      </div>
-      <div class="hud-cell">
-        <span class="hud-label">CONDITION</span>
-        <span class="hud-value" id="hud-condition">NOMINAL</span>
-      </div>
+
+    <!-- Hidden backward-compat elements (smoke-test targets: #hud-heading etc.) -->
+    <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
+      <span id="hud-heading">000</span>
+      <span id="hud-hull">100</span>
+      <span id="hud-condition">NOMINAL</span>
+    </div>
+
+    <!-- Viewscreen border frame (tiled edges) -->
+    <div class="vs-edge top"></div>
+    <div class="vs-edge bottom"></div>
+    <div class="vs-edge left"></div>
+    <div class="vs-edge right"></div>
+    <!-- Corners -->
+    <div class="vs-piece vs-corner tl"></div>
+    <div class="vs-piece vs-corner tr"></div>
+    <div class="vs-piece vs-corner bl"></div>
+    <div class="vs-piece vs-corner br"></div>
+    <!-- Caps (centred top/bottom) -->
+    <div class="vs-piece vs-cap top"></div>
+    <div class="vs-piece vs-cap bottom"></div>
+    <!-- Ship designation (top-centre, above cap) -->
+    <div class="vs-designation" id="hud-designation">PHOENIX</div>
+    <!-- 4-slot status strip (bottom-centre, inside cap-bottom) -->
+    <div class="vs-status-strip">
+      <div class="vs-status-slot"><div class="vs-slot-label">Nav</div><div class="vs-slot-value" id="v-nav">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Tac</div><div class="vs-slot-value" id="v-tac">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Eng</div><div class="vs-slot-value" id="v-eng">—</div></div>
+      <div class="vs-status-slot"><div class="vs-slot-label">Sys</div><div class="vs-slot-value" id="v-sys">—</div></div>
     </div>
   </div>
 
@@ -339,12 +473,13 @@
   window.__updateHud = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
-    const overlay = document.getElementById('hud-overlay');
-    const strip = document.getElementById('hud-strip');
-    const heading = document.getElementById('hud-heading');
-    const hull = document.getElementById('hud-hull');
+    const overlay   = document.getElementById('hud-overlay');
+    const strip     = document.getElementById('hud-strip');
+    const heading   = document.getElementById('hud-heading');
+    const hull      = document.getElementById('hud-hull');
     const condition = document.getElementById('hud-condition');
-    if (strip) strip.classList.add('shown'); // reveal on first update
+    // Legacy compat (smoke-test targets — kept hidden, values still updated)
+    if (strip) strip.classList.add('shown');
     if (heading && typeof s.heading === 'number') {
       heading.textContent = String(s.heading).padStart(3, '0');
     }
@@ -355,6 +490,28 @@
       condition.textContent = s.condition;
     }
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
+    // ── 4-slot viewscreen status strip ──────────────────────────────────────
+    const vNav = document.getElementById('v-nav');
+    const vTac = document.getElementById('v-tac');
+    const vEng = document.getElementById('v-eng');
+    const vSys = document.getElementById('v-sys');
+    if (vNav && typeof s.heading === 'number') {
+      vNav.textContent = 'HEADING ' + String(s.heading).padStart(3, '0');
+    }
+    if (vTac) {
+      vTac.textContent = s.red_alert ? 'WEAPONS HOT' : 'CLEAR';
+    }
+    if (vEng && typeof s.hull_pct === 'number') {
+      vEng.textContent = 'HULL ' + s.hull_pct;
+    }
+    if (vSys && typeof s.condition === 'string') {
+      vSys.textContent = s.condition;
+    }
+    // Optional: ship name shown in the designation badge
+    if (s.ship_name) {
+      const desig = document.getElementById('hud-designation');
+      if (desig) desig.textContent = s.ship_name;
+    }
   };
 
   // ── HTML lobby panel (issue #436) ──────────────────────────────────────

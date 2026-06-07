@@ -336,7 +336,10 @@ impl Plugin for ViewscreenBorderPlugin {
             .add_message::<LobbyStateChanged>()
             .init_resource::<ShieldFlashState>()
             .init_resource::<ShakeState>()
-            .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup, attach_initial_strip, spawn_lobby_screen, spawn_hud_state_entity).chain())
+            // The border frame and lobby screen are now rendered by the HTML overlay in
+            // server.html (issue #422). Only the vignette-material + HUD-state-entity
+            // startup steps are kept; the frame/lobby Bevy nodes are not spawned.
+            .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup, spawn_hud_state_entity).chain())
             .add_systems(
                 Update,
                 (
@@ -492,7 +495,11 @@ fn spawn_border_on_startup(
         _pad0: 0.0,
     });
     commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
-    spawn_border_frame(&mut commands, &assets, vignette);
+    // Border frame is now rendered by the HTML overlay in server.html (issue #422).
+    // spawn_border_frame is kept but not called so the HTML corners/edges/caps
+    // are the sole visual border — no Bevy UI nodes are spawned for the frame.
+    // The vignette material is still created above for the shield-hit white flash.
+    let _ = &assets; // suppress unused-variable warning
 }
 
 /// Startup system that runs after `spawn_border_on_startup` to attach the
@@ -547,9 +554,13 @@ fn sync_hud_strips_to_phase(
             }
         }
         GamePhase::Lobby => {
+            // Only spawn the Bevy lobby strip when the border frame exists (i.e.
+            // `bottom_cap` is Some). When the HTML overlay owns the border
+            // (issue #422), `bottom_cap` is None and we skip the Bevy strip so
+            // no stray root node appears on screen.
             if lobby_strip.is_empty() {
-                let strip = spawn_lobby_hud_strip(&mut commands, &assets);
                 if let Some(parent) = bottom_cap {
+                    let strip = spawn_lobby_hud_strip(&mut commands, &assets);
                     commands.entity(parent).add_child(strip);
                 }
             }

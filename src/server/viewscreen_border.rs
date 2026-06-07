@@ -28,15 +28,14 @@
 //!
 //! ## Bottom cap HUD strip
 //!
-//! Two separate node trees are swapped on phase transition:
-//!
 //! - **Lobby strip** (spawned at startup): CLOCK / PLAYERS / STATUS.
 //!   CLOCK shows the real-world `hh:mm:ss` via `js_sys::Date`.
 //!   PLAYERS shows `connected / max_players` from `SessionManager` and
 //!   `ShipStations`. STATUS shows `AWAITING CREW` when any connected
 //!   player has no console, `READY FOR DEPARTURE` when all do.
-//! - **In-game strip** (spawned on `InProgress`, lobby strip despawned):
-//!   HEADING / HULL / CONDITION driven by `ShipState`.
+//! - On `InProgress` the lobby strip is despawned; the in-game
+//!   HEADING / HULL / CONDITION readout is now rendered by the HTML
+//!   viewscreen overlay (issue #422), fed by `HudStateChanged` messages.
 //!
 //! ## Red Alert
 //!
@@ -44,14 +43,11 @@
 //!
 //! - Each border `ImageNode`'s texture handle is swapped instantly
 //!   between its normal and alert variant by [`swap_border_textures`].
-//! - The vignette material's `intensity` uniform is driven each frame
-//!   by [`drive_vignette_intensity`], which calls the pure helper
-//!   [`pulse_intensity`] to combine a quarter-second on/off ease with a
-//!   1.3-second sine pulse between [`MIN_INTENSITY`] and
-//!   [`MAX_INTENSITY`].
-//!
-//! The Red Alert visual is owned end-to-end here. The previous CSS
-//! vignette in `server.html` was removed in the same change.
+//! - The full-screen red vignette pulse is owned by the HTML viewscreen
+//!   overlay's CSS (issue #422), driven by the `red_alert` field of the
+//!   `ViewscreenHudState` pushed to JS. The shared
+//!   [`RedAlertVignetteMaterial`] is kept only for the shield-hit white
+//!   flash; its red `intensity` uniform is held at `0.0`.
 
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
@@ -63,9 +59,11 @@ use js_sys::Date;
 
 use rand::Rng;
 
+use crate::codec;
 use crate::console_ai_plugin::ConsoleComplexityState;
-use crate::lobby::{OutboundMessage, Sessions};
-use crate::messages::{GamePhase, ServerMessage};
+use crate::lobby::{OutboundMessage, Sessions, WorldResource};
+use crate::console_bridge::{HudStateChanged, LobbyStateChanged};
+use crate::messages::{GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState};
 use crate::server::renderer::GameCamera;
 use crate::ship_state::ShipState;
 use crate::sim_sets::SimSet;
@@ -85,22 +83,6 @@ const CAP_BOTTOM_W: f32 = 520.0;
 const CAP_H: f32 = 56.0;
 const EDGE_THICKNESS: f32 = 44.0;
 
-// ── Pulse constants ──────────────────────────────────────────────────
-//
-// Visual tuning, not gameplay. All module-private.
-
-/// Quarter-second ease window when toggling Red Alert on or off.
-const EASE_DURATION: f32 = 0.25;
-
-/// Sine pulse period when Red Alert is steady-on.
-const PULSE_PERIOD: f32 = 1.3;
-
-/// Vignette intensity at the trough of the sine pulse.
-const MIN_INTENSITY: f32 = 0.55;
-
-/// Vignette intensity at the crest of the sine pulse.
-const MAX_INTENSITY: f32 = 1.0;
-
 // ── Shield flash constants ────────────────────────────────────────────
 
 /// Rate at which shield-hit flash decays per second (1.0 → 0.0 in 0.3 s).
@@ -114,9 +96,6 @@ const SHAKE_DECAY_RATE: f32 = 5.0;
 
 /// Signal-cyan `#5fd8e8` — designation + status values when nominal.
 const COLOR_SIGNAL_CYAN: Color = Color::srgb(0.373, 0.847, 0.910);
-
-/// Alert-red `#ff3344` — designation + status values at red alert.
-const COLOR_ALERT_RED: Color = Color::srgb(1.0, 0.2, 0.267);
 
 /// Neutral `#b8c0c8` — status labels (never swap colour).
 const COLOR_NEUTRAL_LABEL: Color = Color::srgb(0.722, 0.753, 0.784);
@@ -293,25 +272,9 @@ struct LobbyReadyVal;
 
 // ── HUD marker components ────────────────────────────────────────────
 
-/// Marker for the designation `Text` node on the top cap. Driven by
-/// [`update_hud`] — toggles between signal-cyan and alert-red.
+/// Marker for the designation `Text` node on the top cap.
 #[derive(Component)]
 struct DesignationText;
-
-/// Identifies which HUD value cell a `Text` node is, so [`update_hud`]
-/// can write the formatted heading / hull / condition string into the
-/// right entity.
-#[derive(Component, Copy, Clone, Debug, PartialEq, Eq)]
-enum HudValue {
-    Heading,
-    Hull,
-    Condition,
-}
-
-/// Marker for the root node of the in-game HUD strip.
-/// Despawned when transitioning back to Lobby.
-#[derive(Component)]
-struct InGameHudStrip;
 
 /// Marker for the root node of the lobby HUD strip.
 /// Despawned when transitioning to InProgress.
@@ -328,11 +291,10 @@ enum LobbyHudValue {
 
 // ── Red Alert vignette material ──────────────────────────────────────
 
-/// `UiMaterial` driving the inset radial-gradient red vignette behind
-/// the border. The single `intensity` uniform is in `[0.0, 1.0]`; the
-/// shader fades the red glow from invisible at 0.0 to fully bright at
-/// 1.0. Driven each frame by [`drive_vignette_intensity`] via the pure
-/// helper [`pulse_intensity`].
+/// `UiMaterial` behind the border. The `intensity` uniform (red vignette) is
+/// held at `0.0` — red alert is now drawn by the HTML overlay's CSS (issue
+/// #422). The `flash_intensity` uniform is still driven each frame by
+/// [`drive_vignette_intensity`] for the shield-hit white flash.
 ///
 /// The struct is padded to 16 bytes (4×f32) so the uniform buffer binding
 /// satisfies `BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED` requirements on
@@ -370,9 +332,11 @@ pub struct ViewscreenBorderPlugin;
 impl Plugin for ViewscreenBorderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(UiMaterialPlugin::<RedAlertVignetteMaterial>::default())
+            .add_message::<HudStateChanged>()
+            .add_message::<LobbyStateChanged>()
             .init_resource::<ShieldFlashState>()
             .init_resource::<ShakeState>()
-            .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup, attach_initial_strip, spawn_lobby_screen).chain())
+            .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup, attach_initial_strip, spawn_lobby_screen, spawn_hud_state_entity).chain())
             .add_systems(
                 Update,
                 (
@@ -385,13 +349,97 @@ impl Plugin for ViewscreenBorderPlugin {
                         .after(process_shield_flash)
                         .after(process_hull_shake)
                         .run_if(in_state(GamePhase::InProgress)),
-                    update_hud,
                     update_lobby_hud,
                     toggle_lobby_screen_visibility,
                     rebuild_lobby_station_grid,
                     update_lobby_header_values,
+                    push_lobby_state,
                 ),
+            )
+            // HUD overlay reflects in-game readouts (heading / hull / condition);
+            // only push while InProgress so the lobby phase emits no HUD state.
+            .add_systems(
+                Update,
+                (
+                    recompute_hud_state,
+                    push_hud_state.after(recompute_hud_state),
+                )
+                    .run_if(in_state(GamePhase::InProgress)),
             );
+    }
+}
+
+/// Reads server lobby resources and emits `LobbyStateChanged` for the HTML
+/// lobby overlay whenever the state changes. Runs in `Update` so the bridge's
+/// `flush_lobby_state` (in `PostUpdate`) forwards it to JS.
+fn push_lobby_state(
+    sessions: Option<Res<Sessions>>,
+    ship_stations: Option<Res<ShipStations>>,
+    phase: Res<State<GamePhase>>,
+    complexity: Option<Res<ConsoleComplexityState>>,
+    world_resource: Option<Res<WorldResource>>,
+    mut writer: MessageWriter<LobbyStateChanged>,
+) {
+    let Some(sessions) = sessions else { return };
+    let Some(stations) = ship_stations else { return };
+    let Some(complexity) = complexity else { return };
+
+    let players = sessions.0.players();
+    let connected_count = players.iter().filter(|p| p.connected).count() as u32;
+    let display_count = connected_count.max(stations.min_players).min(stations.max_players);
+
+    let mut station_payloads: Vec<StationPayload> = Vec::new();
+    let mut spectators: Vec<String> = Vec::new();
+
+    if let Some(defs) = stations.configs.get(&display_count) {
+        for def in defs {
+            let holder = players.iter().find(|p| {
+                p.connected && !p.consoles.is_empty()
+                    && def.consoles.iter().all(|c| p.consoles.contains(c))
+            });
+            let preset_names: Vec<String> = def.consoles.iter()
+                .map(|c| complexity.presets.get(c).map(String::as_str).unwrap_or("Std").to_string())
+                .collect();
+            station_payloads.push(StationPayload {
+                name: def.name.clone(),
+                short_code: def.short_code.clone(),
+                rank: def.rank.clone(),
+                consoles: def.consoles.clone(),
+                holder_name: holder.map(|p| p.name.clone()),
+                is_mine: false,
+                preset_names,
+            });
+        }
+    }
+
+    // Players with no consoles who are connected are spectators
+    // (only when connected count exceeds max_players).
+    if stations.max_players > 0 && connected_count > stations.max_players {
+        for p in players.iter().filter(|p| p.connected && p.consoles.is_empty()) {
+            spectators.push(p.name.clone());
+        }
+    }
+
+    let all_held: Vec<_> = players.iter().flat_map(|p| p.consoles.iter().cloned()).collect();
+    let all_filled = crate::stations_config::all_stations_filled(&stations, display_count, &all_held);
+
+    let scenario_title = world_resource.as_ref()
+        .map(|w| w.0.scenario_title.clone())
+        .unwrap_or_default();
+
+    let payload = LobbyStatePayload {
+        phase: format!("{:?}", phase.get()),
+        scenario_title,
+        scenario_body: String::new(),
+        crew_count: station_payloads.iter().filter(|s| s.holder_name.is_some()).count() as u32,
+        max_players: stations.max_players,
+        all_stations_filled: all_filled,
+        stations: station_payloads,
+        spectators,
+    };
+
+    if let Ok(json) = codec::encode_lobby_state(&payload) {
+        writer.write(LobbyStateChanged { json });
     }
 }
 
@@ -465,20 +513,21 @@ fn attach_initial_strip(
     commands.entity(parent).add_child(strip);
 }
 
-/// Swaps HUD strips on phase transition.
+/// Swaps the lobby HUD strip on phase transition.
 ///
-/// - `Lobby → InProgress`: despawn lobby strip, spawn in-game strip.
-/// - `InProgress → Lobby`: despawn in-game strip, spawn lobby strip.
+/// The in-game HEADING/HULL/CONDITION strip is now owned by the HTML
+/// viewscreen overlay (issue #422), so on `InProgress` we simply despawn the
+/// lobby strip and spawn nothing in-game. On `Lobby` the lobby strip is
+/// (re)spawned.
 ///
-/// Idempotent — re-entering a phase while the correct strip already
-/// exists is a no-op.
+/// Idempotent — re-entering a phase while the correct strip already exists is
+/// a no-op.
 fn sync_hud_strips_to_phase(
     mut commands: Commands,
     state: Res<State<GamePhase>>,
     assets: Option<Res<ViewscreenAssets>>,
     slots: Query<(&BorderSlot, Entity)>,
     lobby_strip: Query<Entity, With<LobbyHudStrip>>,
-    ingame_strip: Query<Entity, With<InGameHudStrip>>,
 ) {
     if !state.is_changed() {
         return;
@@ -492,20 +541,12 @@ fn sync_hud_strips_to_phase(
 
     match state.get() {
         GamePhase::InProgress => {
+            // In-game HUD moved to HTML — just tear down the lobby strip.
             for e in lobby_strip.iter() {
                 commands.entity(e).despawn();
             }
-            if ingame_strip.is_empty() {
-                let strip = spawn_ingame_hud_strip(&mut commands, &assets);
-                if let Some(parent) = bottom_cap {
-                    commands.entity(parent).add_child(strip);
-                }
-            }
         }
         GamePhase::Lobby => {
-            for e in ingame_strip.iter() {
-                commands.entity(e).despawn();
-            }
             if lobby_strip.is_empty() {
                 let strip = spawn_lobby_hud_strip(&mut commands, &assets);
                 if let Some(parent) = bottom_cap {
@@ -611,18 +652,19 @@ fn apply_camera_shake(
     }
 }
 
-/// Per-frame system that drives the vignette material's `intensity`
-/// uniform via the pure [`pulse_intensity`] helper, and decays the
-/// shield-hit white flash toward zero.
+/// Per-frame system that decays the shield-hit white flash toward zero and
+/// applies it to the vignette material.
+///
+/// Red alert is now owned by the HTML CSS vignette (issue #422), so the
+/// material's `intensity` uniform is held at `0.0` — only the shield-flash
+/// path still drives this shared material.
 fn drive_vignette_intensity(
     time: Res<Time>,
-    ship: Option<Res<ShipState>>,
     window: Query<&Window>,
     handle: Option<Res<VignetteMaterialHandle>>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
     mut flash: ResMut<ShieldFlashState>,
 ) {
-    let Some(ship) = ship else { return };
     let Some(handle) = handle else { return };
     let Some(material) = materials.get_mut(&handle.0) else { return };
 
@@ -630,12 +672,8 @@ fn drive_vignette_intensity(
     flash.intensity = (flash.intensity - time.delta_secs() * FLASH_DECAY_RATE).max(0.0);
     material.flash_intensity = flash.intensity;
 
-    material.intensity = pulse_intensity(
-        time.elapsed_secs(),
-        ship.red_alert(),
-        material.intensity,
-        time.delta_secs(),
-    );
+    // CSS owns the red-alert vignette now; keep the Bevy ring dark.
+    material.intensity = 0.0;
 
     // Keep aspect ratio in sync with the window (handles resize).
     if let Some(window) = window.iter().next() {
@@ -644,63 +682,6 @@ fn drive_vignette_intensity(
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────
-
-/// State-transition function for the Red Alert vignette intensity.
-///
-/// Combines a quarter-second on/off ease with a 1.3-second sine pulse
-/// between [`MIN_INTENSITY`] and [`MAX_INTENSITY`] when active. Returns
-/// `0.0` when fully off.
-///
-/// - `time_secs`: monotonic time (drives the sine phase).
-/// - `red_alert`: the current alert state.
-/// - `prev_intensity`: the previous frame's intensity (for ease ramping).
-/// - `dt`: seconds since last frame.
-///
-/// Behaviour:
-/// - `red_alert == false && prev_intensity == 0.0` → returns `0.0`.
-/// - `red_alert == true` → ramps `prev_intensity` toward the current
-///   sine target by at most `MAX_INTENSITY / EASE_DURATION * dt`, so the
-///   rise from `0.0` to the band takes ~`EASE_DURATION` seconds.
-/// - `red_alert == false && prev_intensity > 0.0` → ramps toward `0.0`
-///   by the same per-second rate (~`EASE_DURATION` seconds to fully off).
-///
-/// Once `prev_intensity` is inside the pulse band, the sine target moves
-/// strictly slower than the ease ramp, so the helper tracks the sine
-/// directly — the band stays within `[MIN_INTENSITY, MAX_INTENSITY]`.
-pub fn pulse_intensity(time_secs: f32, red_alert: bool, prev_intensity: f32, dt: f32) -> f32 {
-    let max_step = (MAX_INTENSITY / EASE_DURATION) * dt;
-    if red_alert {
-        let target = sine_pulse(time_secs);
-        approach(prev_intensity, target, max_step)
-    } else if prev_intensity <= 0.0 {
-        0.0
-    } else {
-        approach(prev_intensity, 0.0, max_step).max(0.0)
-    }
-}
-
-/// Sine-wave value in `[MIN_INTENSITY, MAX_INTENSITY]` with period
-/// [`PULSE_PERIOD`]. Phase 0 sits at the midpoint; the crest is at a
-/// quarter period.
-fn sine_pulse(time_secs: f32) -> f32 {
-    let mid = (MIN_INTENSITY + MAX_INTENSITY) * 0.5;
-    let amp = (MAX_INTENSITY - MIN_INTENSITY) * 0.5;
-    mid + amp * (std::f32::consts::TAU * time_secs / PULSE_PERIOD).sin()
-}
-
-/// Move `current` toward `target` by at most `max_step` (always
-/// non-negative). If the difference is already within `max_step`,
-/// snap to `target`.
-fn approach(current: f32, target: f32, max_step: f32) -> f32 {
-    let delta = target - current;
-    if delta.abs() <= max_step {
-        target
-    } else if delta > 0.0 {
-        current + max_step
-    } else {
-        current - max_step
-    }
-}
 
 /// Convert a ship yaw in radians to a 0–359 integer compass bearing.
 ///
@@ -1113,72 +1094,6 @@ fn spawn_lobby_hud_strip(commands: &mut Commands, assets: &ViewscreenAssets) -> 
         .id()
 }
 
-/// Spawn the in-game HUD strip (HEADING / HULL / CONDITION) as an overlay
-/// that fills the bottom cap. The strip should be attached as a child of
-/// the bottom cap entity.
-fn spawn_ingame_hud_strip(commands: &mut Commands, assets: &ViewscreenAssets) -> Entity {
-    commands
-        .spawn((
-            InGameHudStrip,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceAround,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-        ))
-        .with_children(|strip| {
-            spawn_status_column(strip, assets, "HEADING", "000", HudValue::Heading);
-            spawn_status_column(strip, assets, "HULL", "100", HudValue::Hull);
-            spawn_status_column(strip, assets, "CONDITION", "NOMINAL", HudValue::Condition);
-        })
-        .id()
-}
-
-/// Build one HEADING/HULL/CONDITION column inside the bottom-cap strip:
-/// a Chakra Petch label above a JetBrains Mono value cell.
-fn spawn_status_column(
-    parent: &mut ChildSpawnerCommands,
-    assets: &ViewscreenAssets,
-    label: &str,
-    initial_value: &str,
-    value_kind: HudValue,
-) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
-        .with_children(|col| {
-            col.spawn((
-                Text::new(label),
-                TextFont {
-                    font: assets.font_display.clone(),
-                    font_size: STATUS_LABEL_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(COLOR_NEUTRAL_LABEL),
-            ));
-            col.spawn((
-                value_kind,
-                Text::new(initial_value),
-                TextFont {
-                    font: assets.font_mono.clone(),
-                    font_size: STATUS_VALUE_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(COLOR_SIGNAL_CYAN),
-            ));
-        });
-}
-
 /// Build one CLOCK/PLAYERS/STATUS column inside the lobby bottom-cap strip.
 fn spawn_lobby_column(
     parent: &mut ChildSpawnerCommands,
@@ -1217,46 +1132,74 @@ fn spawn_lobby_column(
         });
 }
 
-/// Per-frame system: format heading / hull / condition strings, write
-/// them into the value `Text` nodes, and toggle `TextColor` on the
-/// designation and value cells between signal-cyan and alert-red.
-///
-/// Runs unconditionally — no change-detection plumbing. Per the PRD,
-/// the cost (three `format!` calls + a few component writes) is
-/// negligible and the simplicity is worth more than the saving.
-fn update_hud(
+// ── HUD state push (issue #422) ──────────────────────────────────────
+//
+// The in-game HEADING/HULL/CONDITION readout is now rendered by the HTML
+// viewscreen overlay. The Bevy side recomputes the serialised HUD state from
+// `ShipState` + `ShipHullIntegrity` each frame, writes it into a single
+// `ViewscreenHud` component only when it changes, and a `Changed<ViewscreenHud>`
+// system encodes + emits a `HudStateChanged` message. The wasm forwarding to
+// JS lives in `bridge::flush_hud_state`.
+
+/// Single-entity component carrying the latest serialised HUD state. Bevy
+/// change-detection drives the JS push.
+#[derive(Component, Clone, PartialEq)]
+struct ViewscreenHud(ViewscreenHudState);
+
+/// Startup system: spawn the single entity that carries the HUD state.
+fn spawn_hud_state_entity(mut commands: Commands) {
+    commands.spawn(ViewscreenHud(ViewscreenHudState {
+        heading: 0,
+        hull_pct: 100,
+        condition: "NOMINAL".to_string(),
+        red_alert: false,
+    }));
+}
+
+/// Compute the current HUD state from ship + hull resources. Reuses the exact
+/// formulas from the retired in-game HUD strip.
+fn compute_hud_state(ship: &ShipState, hull: &ShipHullIntegrity) -> ViewscreenHudState {
+    let alert = ship.red_alert();
+    let hull_pct = if hull.0.total_max() > 0.0 {
+        (hull.0.total_current() / hull.0.total_max() * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+    ViewscreenHudState {
+        heading: yaw_to_compass_bearing(ship.yaw),
+        hull_pct: hull_pct.round() as i32,
+        condition: if alert { "ALERT" } else { "NOMINAL" }.to_string(),
+        red_alert: alert,
+    }
+}
+
+/// Per-frame system: recompute the HUD state and write it into the
+/// `ViewscreenHud` component only when it differs, so `Changed<ViewscreenHud>`
+/// fires only on actual change.
+fn recompute_hud_state(
     ship: Option<Res<ShipState>>,
     hull: Option<Res<ShipHullIntegrity>>,
-    mut designation: Query<&mut TextColor, (With<DesignationText>, Without<HudValue>)>,
-    mut values: Query<(&HudValue, &mut Text, &mut TextColor), Without<DesignationText>>,
+    mut hud_q: Query<&mut ViewscreenHud>,
 ) {
     let Some(ship) = ship else { return };
     let Some(hull) = hull else { return };
-    let alert = ship.red_alert();
-    let active_color = if alert { COLOR_ALERT_RED } else { COLOR_SIGNAL_CYAN };
-
-    for mut color in designation.iter_mut() {
-        if color.0 != active_color {
-            *color = TextColor(active_color);
+    let next = compute_hud_state(&ship, &hull);
+    for mut hud in hud_q.iter_mut() {
+        if hud.0 != next {
+            hud.0 = next.clone();
         }
     }
+}
 
-    for (kind, mut text, mut color) in values.iter_mut() {
-        let new_value = match kind {
-            HudValue::Heading => format!("{:03}", yaw_to_compass_bearing(ship.yaw)),
-            HudValue::Hull => {
-                let pct = if hull.0.total_max() > 0.0 {
-                    (hull.0.total_current() / hull.0.total_max() * 100.0).clamp(0.0, 100.0)
-                } else { 0.0 };
-                format!("{}", pct.round() as i32)
-            },
-            HudValue::Condition => if alert { "ALERT" } else { "NOMINAL" }.to_string(),
-        };
-        if text.0 != new_value {
-            text.0 = new_value;
-        }
-        if color.0 != active_color {
-            *color = TextColor(active_color);
+/// `Changed<ViewscreenHud>` system: encode the HUD state and emit a
+/// `HudStateChanged` message for the wasm bridge to forward to JS.
+fn push_hud_state(
+    hud_q: Query<&ViewscreenHud, Changed<ViewscreenHud>>,
+    mut writer: MessageWriter<HudStateChanged>,
+) {
+    for hud in hud_q.iter() {
+        if let Ok(json) = codec::encode_hud_state(&hud.0) {
+            writer.write(HudStateChanged { json });
         }
     }
 }
@@ -2062,143 +2005,42 @@ fn spawn_station_placeholder(
 mod tests {
     use super::*;
 
-    // Per-frame `dt` at 60 Hz; matches the typical render cadence.
-    const DT_60HZ: f32 = 1.0 / 60.0;
+    use crate::damage::ConsoleHull;
+    use crate::messages::Console;
 
-    /// Per-frame ramp ceiling used internally by `pulse_intensity` —
-    /// kept in sync with the implementation so tests can reason about
-    /// the ease window without hard-coding magic numbers.
-    fn max_step_per_frame() -> f32 {
-        (MAX_INTENSITY / EASE_DURATION) * DT_60HZ
+    // ── compute_hud_state ────────────────────────────────────────────
+
+    fn hull_at(current: f32, max: f32) -> ShipHullIntegrity {
+        // ConsoleHull built from a single console so total_current/total_max
+        // are exactly the values we want; apply damage to lower current.
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, max)]);
+        let mut rng = rand::rng();
+        hull.apply_damage(max - current, &mut rng);
+        ShipHullIntegrity(hull)
     }
 
     #[test]
-    fn idle_stays_at_zero() {
-        // red_alert=false, prev=0 → exactly 0, no drift.
-        let out = pulse_intensity(0.0, false, 0.0, DT_60HZ);
-        assert_eq!(out, 0.0);
-
-        // Time advancing while idle never lifts off zero.
-        let out = pulse_intensity(123.4, false, 0.0, DT_60HZ);
-        assert_eq!(out, 0.0);
+    fn compute_hud_state_nominal() {
+        let ship = ShipState::new();
+        let hull = hull_at(100.0, 100.0);
+        let state = compute_hud_state(&ship, &hull);
+        assert_eq!(state.heading, 0);
+        assert_eq!(state.hull_pct, 100);
+        assert_eq!(state.condition, "NOMINAL");
+        assert!(!state.red_alert);
     }
 
     #[test]
-    fn alert_on_rises_monotonically_during_ease_window() {
-        // From a cold start, simulate the quarter-second ease at 60 Hz
-        // and confirm the intensity only ever goes up until it reaches
-        // the pulse band.
-        let mut prev = 0.0;
-        let mut t = 0.0;
-        let frames_in_ease = (EASE_DURATION / DT_60HZ).ceil() as usize;
-        for _ in 0..frames_in_ease {
-            let next = pulse_intensity(t, true, prev, DT_60HZ);
-            assert!(
-                next >= prev - 1e-6,
-                "intensity decreased during alert-on ease (prev={prev}, next={next})"
-            );
-            prev = next;
-            t += DT_60HZ;
-        }
-        // After the ease window, the intensity should have reached at
-        // least MIN_INTENSITY (i.e. it has caught up with the pulse band).
-        assert!(
-            prev >= MIN_INTENSITY - 1e-3,
-            "intensity {prev} did not reach pulse band after {EASE_DURATION}s ease"
-        );
-    }
-
-    #[test]
-    fn alert_off_decays_smoothly_to_zero_within_ease_window() {
-        // Start at peak intensity, toggle off, simulate forward —
-        // the intensity must fall monotonically and hit exactly 0.0
-        // within the ease window (plus a small slack frame).
-        let mut prev = MAX_INTENSITY;
-        let mut t = 0.0;
-        let frames = (EASE_DURATION / DT_60HZ).ceil() as usize + 2;
-        let mut hit_zero = false;
-        for _ in 0..frames {
-            let next = pulse_intensity(t, false, prev, DT_60HZ);
-            assert!(
-                next <= prev + 1e-6,
-                "intensity increased during alert-off decay (prev={prev}, next={next})"
-            );
-            assert!(next >= 0.0, "intensity went negative");
-            if next == 0.0 {
-                hit_zero = true;
-            }
-            prev = next;
-            t += DT_60HZ;
-        }
-        assert!(hit_zero, "intensity did not reach 0 within {EASE_DURATION}s ease");
-
-        // Once at zero, further idle frames must stay at zero.
-        let next = pulse_intensity(t, false, 0.0, DT_60HZ);
-        assert_eq!(next, 0.0);
-    }
-
-    #[test]
-    fn steady_state_pulse_stays_within_band() {
-        // After the ease window, simulate a few full pulse periods and
-        // confirm the intensity stays inside [MIN_INTENSITY, MAX_INTENSITY]
-        // within a small numeric slack.
-        let mut prev = MIN_INTENSITY; // pretend we already eased in
-        let mut t = 0.0;
-        let frames = ((PULSE_PERIOD * 3.0) / DT_60HZ).ceil() as usize;
-        let mut min_seen = f32::INFINITY;
-        let mut max_seen = f32::NEG_INFINITY;
-        for _ in 0..frames {
-            let next = pulse_intensity(t, true, prev, DT_60HZ);
-            min_seen = min_seen.min(next);
-            max_seen = max_seen.max(next);
-            prev = next;
-            t += DT_60HZ;
-        }
-        let slack = max_step_per_frame() + 1e-3;
-        assert!(
-            min_seen >= MIN_INTENSITY - slack,
-            "min {min_seen} below band lower bound {MIN_INTENSITY}"
-        );
-        assert!(
-            max_seen <= MAX_INTENSITY + 1e-3,
-            "max {max_seen} above band upper bound {MAX_INTENSITY}"
-        );
-    }
-
-    #[test]
-    fn sine_phase_points_match_target_band() {
-        // sine_pulse(t) at t=0 should be the band midpoint.
-        let mid = (MIN_INTENSITY + MAX_INTENSITY) * 0.5;
-        assert!((sine_pulse(0.0) - mid).abs() < 1e-5);
-
-        // Quarter period → crest (MAX_INTENSITY).
-        let quarter = PULSE_PERIOD / 4.0;
-        assert!((sine_pulse(quarter) - MAX_INTENSITY).abs() < 1e-5);
-
-        // Half period → midpoint again (descending).
-        let half = PULSE_PERIOD / 2.0;
-        assert!((sine_pulse(half) - mid).abs() < 1e-5);
-
-        // Three-quarter period → trough (MIN_INTENSITY).
-        let three_quarter = 3.0 * PULSE_PERIOD / 4.0;
-        assert!((sine_pulse(three_quarter) - MIN_INTENSITY).abs() < 1e-5);
-
-        // Full period → back to midpoint.
-        assert!((sine_pulse(PULSE_PERIOD) - mid).abs() < 1e-5);
-    }
-
-    #[test]
-    fn approach_snaps_when_within_step() {
-        // delta smaller than max_step → returns target exactly.
-        assert_eq!(approach(0.5, 0.51, 0.1), 0.51);
-        assert_eq!(approach(0.5, 0.49, 0.1), 0.49);
-    }
-
-    #[test]
-    fn approach_steps_toward_target_when_outside_step() {
-        // Larger delta → moves by exactly max_step.
-        assert!((approach(0.0, 1.0, 0.25) - 0.25).abs() < 1e-6);
-        assert!((approach(1.0, 0.0, 0.25) - 0.75).abs() < 1e-6);
+    fn compute_hud_state_alert_and_partial_hull() {
+        let mut ship = ShipState::new();
+        ship.toggle_red_alert();
+        ship.yaw = std::f32::consts::FRAC_PI_2; // → bearing 270
+        let hull = hull_at(50.0, 100.0);
+        let state = compute_hud_state(&ship, &hull);
+        assert_eq!(state.heading, 270);
+        assert_eq!(state.hull_pct, 50);
+        assert_eq!(state.condition, "ALERT");
+        assert!(state.red_alert);
     }
 
     // ── yaw_to_compass_bearing ───────────────────────────────────────

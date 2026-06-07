@@ -4,11 +4,13 @@
 // gated behind #[cfg(target_arch = "wasm32")].
 
 #[cfg(target_arch = "wasm32")]
-use {
-    crate::asteroid_lifecycle::AsteroidLifecyclePlugin,
-    crate::codec::{JsonCodec, MessageCodec},
-    crate::config_cache::ConfigCachePlugin,
-    crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
+    use {
+        crate::asteroid_lifecycle::AsteroidLifecyclePlugin,
+        crate::codec::{self, JsonCodec, MessageCodec},
+        crate::config_cache::ConfigCachePlugin,
+        crate::console_bridge::{ConsoleStateChanged, HudStateChanged, LOCAL_CONSOLE_TOKEN, LobbyStateChanged},
+        crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
+    crate::messages,
     crate::modifier_coordination::ModifierCoordinationPlugin,
     crate::renderer::RendererPlugin,
     crate::server_app::add_simulation_plugins,
@@ -89,6 +91,22 @@ thread_local! {
     /// each `PostUpdate` frame when the overlay is enabled. Read by
     /// `wasm_get_entity_inspector()` from JS.
     static ENTITY_INSPECTOR_STRING: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// Raw `__sendAction` JSON envelopes pushed by `wasm_ui_action`, waiting to
+    /// be decoded and injected into Bevy by `drain_ui_actions`.
+    static UI_ACTION_QUEUE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+
+    /// JS callback registered by the HTML console to receive per-console state
+    /// pushes. Signature: `callback(name: string, stateJson: string)`.
+    static CONSOLE_STATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// JS callback registered by the HTML viewscreen overlay to receive HUD
+    /// state pushes. Signature: `callback(stateJson: string)`.
+    static HUD_STATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
+
+    /// JS callback registered by the HTML lobby overlay to receive lobby state
+    /// pushes. Signature: `callback(stateJson: string)`.
+    static LOBBY_STATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -162,8 +180,8 @@ pub fn wasm_init() {
             react_to_window_events: true,
         },
     })
-    .add_systems(PreUpdate, (drain_inbound, drain_disconnects, drain_debug_toggles))
-    .add_systems(PostUpdate, flush_outbound);
+    .add_systems(PreUpdate, (drain_inbound, drain_disconnects, drain_debug_toggles, drain_ui_actions))
+    .add_systems(PostUpdate, (flush_outbound, flush_hud_state, flush_console_state, flush_lobby_state));
 
     // Insert the validated ShipStations resource if it was pre-validated.
     SHIP_STATIONS.with(|slot| {
@@ -212,6 +230,48 @@ pub fn wasm_player_disconnected(token: &str) {
 #[wasm_bindgen]
 pub fn set_message_callback(callback: Function) {
     OUTBOUND_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by the HTML transport shim (ADR-0001 §3) when a local HTML console
+/// triggers an action. `json` is the raw `__sendAction` envelope; it is queued
+/// and decoded by `drain_ui_actions` on the next `PreUpdate` frame.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_ui_action(json: &str) {
+    UI_ACTION_QUEUE.with(|q| {
+        q.borrow_mut().push(json.to_string());
+    });
+}
+
+/// Called by JS once to register the per-console state-push callback.
+/// Bevy calls `callback(name: string, stateJson: string)` on console change.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_console_state_callback(callback: Function) {
+    CONSOLE_STATE_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by JS once to register the viewscreen HUD-state push callback.
+/// Bevy calls `callback(stateJson: string)` on HUD change.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_hud_state_callback(callback: Function) {
+    HUD_STATE_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by JS once to register the lobby-state push callback.
+/// Bevy calls `callback(stateJson: string)` on lobby state change.
+/// Must be registered before `wasm_init()` so the first push is never missed.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_lobby_state_callback(callback: Function) {
+    LOBBY_STATE_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
     });
 }
@@ -542,6 +602,81 @@ fn flush_outbound(mut reader: MessageReader<OutboundMessage>) {
                     &JsValue::from_str(target),
                     &JsValue::from_str(payload),
                 );
+            }
+        }
+    });
+}
+
+/// Drains the UI-action queue each frame: decodes each `__sendAction` envelope
+/// into a `UiAction`, maps it to the corresponding `ClientMessage`, and injects
+/// it as an `InboundMessage` from the local console token so the existing
+/// weapons handlers process it. Decode failures are ignored (matching
+/// `drain_inbound`).
+#[cfg(target_arch = "wasm32")]
+fn drain_ui_actions(mut writer: MessageWriter<InboundMessage>) {
+    let pending: Vec<String> = UI_ACTION_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
+    for json in pending {
+        if let Ok(action) = codec::decode_ui_action(&json) {
+            let msg = messages::ui_action_to_client_message(&action);
+            writer.write(InboundMessage {
+                token: LOCAL_CONSOLE_TOKEN.to_string(),
+                msg,
+            });
+        }
+    }
+}
+
+/// Reads `HudStateChanged` messages each frame and forwards the JSON to the
+/// registered HUD-state callback via `cb.call1(NULL, json)`.
+#[cfg(target_arch = "wasm32")]
+fn flush_hud_state(mut reader: MessageReader<HudStateChanged>) {
+    let payloads: Vec<String> = reader.read().map(|m| m.json.clone()).collect();
+    if payloads.is_empty() {
+        return;
+    }
+    HUD_STATE_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            for json in &payloads {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
+            }
+        }
+    });
+}
+
+/// Reads `ConsoleStateChanged` messages each frame and forwards `(name, json)`
+/// to the registered console-state callback via `cb.call2(NULL, name, json)`.
+#[cfg(target_arch = "wasm32")]
+fn flush_console_state(mut reader: MessageReader<ConsoleStateChanged>) {
+    let payloads: Vec<(String, String)> =
+        reader.read().map(|m| (m.name.clone(), m.json.clone())).collect();
+    if payloads.is_empty() {
+        return;
+    }
+    CONSOLE_STATE_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            for (name, json) in &payloads {
+                let _ = cb.call2(
+                    &JsValue::NULL,
+                    &JsValue::from_str(name),
+                    &JsValue::from_str(json),
+                );
+            }
+        }
+    });
+}
+
+/// Reads `LobbyStateChanged` messages each frame and forwards the JSON to the
+/// registered lobby-state callback via `cb.call1(NULL, json)`.
+#[cfg(target_arch = "wasm32")]
+fn flush_lobby_state(mut reader: MessageReader<LobbyStateChanged>) {
+    let payloads: Vec<String> = reader.read().map(|m| m.json.clone()).collect();
+    if payloads.is_empty() {
+        return;
+    }
+    LOBBY_STATE_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            for json in &payloads {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(json));
             }
         }
     });

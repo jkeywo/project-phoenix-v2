@@ -1062,6 +1062,109 @@ pub enum ServerMessage {
     },
 }
 
+// ── HTML console bridge wire types (ADR-0001 / PRD #419) ───────────────────
+
+/// Serialised HUD state pushed to the viewscreen HTML overlay (issue #422).
+///
+/// Produced by the viewscreen border plugin on change and encoded via
+/// `codec::encode_hud_state`. The JS `window.__updateHud` parses this to
+/// drive the bottom status strip and the red-alert vignette.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ViewscreenHudState {
+    /// Compass bearing 0–359 (from `yaw_to_compass_bearing`).
+    pub heading: u32,
+    /// Hull integrity percentage, clamped 0–100.
+    pub hull_pct: i32,
+    /// Condition string — `"ALERT"` or `"NOMINAL"`.
+    pub condition: String,
+    /// Whether the ship is at red alert (drives the CSS vignette).
+    pub red_alert: bool,
+}
+
+/// Serialised Tactical (Weapons) console state pushed to the HTML console
+/// (issue #422). Mirrors the data assembled by `weapons_update_broadcaster`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WeaponsConsoleState {
+    pub target_uuid: Option<String>,
+    pub banks: Vec<PhaserBankState>,
+    pub tubes: Vec<TorpedoTubeState>,
+    pub torpedo_count: u32,
+    pub phaser_mode: PhaserMode,
+}
+
+/// A console action decoded from the `window.__sendAction` envelope
+/// (ADR-0001 §1). The envelope's extra `console` field is ignored by serde.
+///
+/// Only the Tactical actions demonstrated by issue #422 are modelled here.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum UiAction {
+    FireTorpedo {
+        tube: String,
+        #[serde(default)]
+        target_uuid: Option<String>,
+    },
+    FirePhaser {
+        bank: String,
+    },
+}
+
+/// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
+/// weapons handlers already process. Pure — covered by a native unit test.
+pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
+    match a {
+        UiAction::FireTorpedo { tube, target_uuid } => ClientMessage::FireTorpedo {
+            tube: tube.clone(),
+            target_uuid: target_uuid.clone(),
+        },
+        UiAction::FirePhaser { bank } => ClientMessage::FirePhaser { bank: bank.clone() },
+    }
+}
+
+#[cfg(test)]
+mod ui_action_tests {
+    use super::*;
+
+    #[test]
+    fn fire_torpedo_maps_to_client_message() {
+        let action = UiAction::FireTorpedo {
+            tube: "fore".into(),
+            target_uuid: None,
+        };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::FireTorpedo {
+                tube: "fore".into(),
+                target_uuid: None
+            }
+        );
+    }
+
+    #[test]
+    fn fire_torpedo_with_target_maps_to_client_message() {
+        let action = UiAction::FireTorpedo {
+            tube: "fore".into(),
+            target_uuid: Some("abc".into()),
+        };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::FireTorpedo {
+                tube: "fore".into(),
+                target_uuid: Some("abc".into())
+            }
+        );
+    }
+
+    #[test]
+    fn fire_phaser_maps_to_client_message() {
+        let action = UiAction::FirePhaser { bank: "port".into() };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::FirePhaser { bank: "port".into() }
+        );
+    }
+}
+
 // ── Objective wire types ───────────────────────────────────────────────────
 
 /// Status of a mission objective.
@@ -1089,4 +1192,30 @@ pub struct ObjectiveSnapshot {
     /// target.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<String>,
+}
+
+/// JSON payload pushed to the HTML lobby via `LobbyStateChanged`.
+/// Mirrors the `LobbyView` derived state for server-side HTML rendering.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct LobbyStatePayload {
+    pub phase: String,
+    pub scenario_title: String,
+    pub scenario_body: String,
+    pub crew_count: u32,
+    pub max_players: u32,
+    pub all_stations_filled: bool,
+    pub stations: Vec<StationPayload>,
+    pub spectators: Vec<String>,
+}
+
+/// One station slot in the lobby grid payload.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct StationPayload {
+    pub name: String,
+    pub short_code: String,
+    pub rank: String,
+    pub consoles: Vec<Console>,
+    pub holder_name: Option<String>,
+    pub is_mine: bool,
+    pub preset_names: Vec<String>,
 }

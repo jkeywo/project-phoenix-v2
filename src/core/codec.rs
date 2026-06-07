@@ -30,6 +30,38 @@ impl MessageCodec for JsonCodec {
     }
 }
 
+// ── HTML console bridge (de)serialisation (ADR-0001 / PRD #419) ────────────
+//
+// These are the sanctioned `serde_json` surface for the HTML bridge: the
+// viewscreen HUD push, the generic console-state push, and the inbound
+// `__sendAction` decode. Bridge / plugin code must call these, never
+// `serde_json` directly.
+
+/// Encode a `ViewscreenHudState` to JSON for the HTML viewscreen overlay.
+pub fn encode_hud_state(
+    s: &crate::messages::ViewscreenHudState,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(s)
+}
+
+/// Encode any serialisable console-state struct to JSON for `__updateConsole`.
+pub fn encode_console_state<T: serde::Serialize>(s: &T) -> Result<String, serde_json::Error> {
+    serde_json::to_string(s)
+}
+
+/// Decode a `window.__sendAction` envelope into a typed `UiAction`. The
+/// envelope's extra `console` field is ignored by serde.
+pub fn decode_ui_action(s: &str) -> Result<crate::messages::UiAction, serde_json::Error> {
+    serde_json::from_str(s)
+}
+
+/// Encode a `LobbyStatePayload` to JSON for the HTML lobby overlay.
+pub fn encode_lobby_state(
+    s: &crate::messages::LobbyStatePayload,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2127,5 +2159,107 @@ mod tests {
         } else {
             panic!("expected SimState");
         }
+    }
+
+    // ── HTML console bridge (de)serialisation ─────────────────────────────
+
+    #[test]
+    fn decode_ui_action_fire_torpedo_envelope() {
+        // Full envelope as produced by window.__sendAction; the extra
+        // `console` field is ignored by serde.
+        let json = r#"{"action":"fire_torpedo","console":"Tactical","tube":"fore","target_uuid":null}"#;
+        let action = decode_ui_action(json).expect("decode fire_torpedo");
+        assert_eq!(
+            action,
+            UiAction::FireTorpedo {
+                tube: "fore".into(),
+                target_uuid: None
+            }
+        );
+    }
+
+    #[test]
+    fn decode_ui_action_fire_torpedo_with_target() {
+        let json = r#"{"action":"fire_torpedo","console":"Tactical","tube":"fore","target_uuid":"abc-123"}"#;
+        let action = decode_ui_action(json).expect("decode fire_torpedo");
+        assert_eq!(
+            action,
+            UiAction::FireTorpedo {
+                tube: "fore".into(),
+                target_uuid: Some("abc-123".into())
+            }
+        );
+    }
+
+    #[test]
+    fn decode_ui_action_fire_torpedo_omitted_target_defaults_none() {
+        // target_uuid omitted entirely → defaults to None via #[serde(default)].
+        let json = r#"{"action":"fire_torpedo","console":"Tactical","tube":"aft"}"#;
+        let action = decode_ui_action(json).expect("decode fire_torpedo");
+        assert_eq!(
+            action,
+            UiAction::FireTorpedo {
+                tube: "aft".into(),
+                target_uuid: None
+            }
+        );
+    }
+
+    #[test]
+    fn decode_ui_action_fire_phaser_envelope() {
+        let json = r#"{"action":"fire_phaser","console":"Tactical","bank":"port"}"#;
+        let action = decode_ui_action(json).expect("decode fire_phaser");
+        assert_eq!(action, UiAction::FirePhaser { bank: "port".into() });
+    }
+
+    #[test]
+    fn encode_hud_state_round_trips() {
+        let state = ViewscreenHudState {
+            heading: 90,
+            hull_pct: 75,
+            condition: "ALERT".into(),
+            red_alert: true,
+        };
+        let json = encode_hud_state(&state).expect("encode hud");
+        let decoded: ViewscreenHudState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn encode_hud_state_emits_snake_case_fields() {
+        let state = ViewscreenHudState {
+            heading: 0,
+            hull_pct: 100,
+            condition: "NOMINAL".into(),
+            red_alert: false,
+        };
+        let json = encode_hud_state(&state).expect("encode hud");
+        assert!(json.contains("\"heading\":0"), "got: {json}");
+        assert!(json.contains("\"hull_pct\":100"), "got: {json}");
+        assert!(json.contains("\"condition\":\"NOMINAL\""), "got: {json}");
+        assert!(json.contains("\"red_alert\":false"), "got: {json}");
+    }
+
+    #[test]
+    fn encode_console_state_round_trips_weapons() {
+        let state = WeaponsConsoleState {
+            target_uuid: Some("tgt-1".into()),
+            banks: vec![PhaserBankState {
+                id: "port".into(),
+                fire_ready: true,
+                on_cooldown: false,
+                cooldown_remaining: 0.0,
+            }],
+            tubes: vec![TorpedoTubeState {
+                id: "fore".into(),
+                loaded: true,
+                reload_secs: 0.0,
+            }],
+            torpedo_count: 6,
+            phaser_mode: PhaserMode::Auto,
+        };
+        let json = encode_console_state(&state).expect("encode console");
+        let decoded: WeaponsConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
     }
 }

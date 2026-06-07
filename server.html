@@ -338,7 +338,7 @@
   <!-- ── HTML Lobby Panel (issue #436) ──────────────────────────────────── -->
   <div id="lobby-panel" style="display:none;position:fixed;inset:0;z-index:180;font-family:monospace;color:#cce;">
     <!-- Background overlay -->
-    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.82);"></div>
+    <div style="position:absolute;inset:0;background:rgb(0,0,0);"></div>
 
     <div style="position:relative;z-index:1;display:flex;flex-direction:column;height:100%;padding:2rem 3rem;box-sizing:border-box;">
 
@@ -523,6 +523,15 @@
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+
+    // ── Show/hide panel + canvas based on phase ───────────────────────
+    const isLobby = s.phase === 'Lobby';
+    const panel = document.getElementById('lobby-panel');
+    const cv = document.getElementById('canvas');
+    const qrOverlay = document.getElementById('overlay');
+    if (panel) panel.style.display = isLobby ? '' : 'none';
+    if (cv) cv.style.display = isLobby ? 'none' : '';
+    if (qrOverlay) qrOverlay.style.display = isLobby ? '' : 'none';
 
     // ── Title / subtitle ──────────────────────────────────────────────
     const titleEl = document.getElementById('lobby-title');
@@ -759,7 +768,7 @@
 
     const hostPeerId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
-    const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/#' + hostPeerId;
+    const joinUrl = location.href.replace(/[^/]*$/, '') + 'gui/lobby-client.html#' + hostPeerId;
 
     function initPeerJS() {
       setConnectionStatus('connecting');

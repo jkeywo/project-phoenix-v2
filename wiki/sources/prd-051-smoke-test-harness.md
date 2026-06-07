@@ -27,7 +27,7 @@ WebRTC is mocked with a **`BroadcastChannel`-backed PeerJS shim** injected via P
 - **`BroadcastChannel` shim** replaces `window.Peer`. Same surface (`open`, `connection`, `data`, `close`).
 - **`window.__wasmReady`** is the test handshake. Set after both fake-peer-open AND `TrunkApplicationStarted`, with a `setTimeout(0)` so `startPhoenix()` runs first.
 - **Tests assert through the message layer**, not DOM/canvas state. Robust to renderer changes.
-- **CI workflow** (`smoke-test.yml`) runs on push and pull_request. Uses pre-built `dist/`, no recompile.
+- **CI workflow** (`.github/workflows/ci.yml`) runs on push and pull_request. Uses pre-built `dist/`, no recompile.
 
 ## Spec coverage
 

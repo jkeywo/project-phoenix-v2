@@ -49,7 +49,7 @@ The shim sets `window.__wasmReady` (and fires `wasm-ready`) only after **both** 
 | `lobby.spec.ts` | #56/#57 | `ConsoleSelected` broadcasts; non-captain `StartGame` ignored |
 | `sim-state.spec.ts` | #58/#59 | `SimState` shape valid; `HelmInput` changes ship position |
 
-CI runs the suite on every push and pull request via `.github/workflows/smoke-test.yml`.
+CI runs the suite on every push and pull request via `.github/workflows/ci.yml`.
 
 ## What's **not** automated
 

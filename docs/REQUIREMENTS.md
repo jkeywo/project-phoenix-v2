@@ -741,8 +741,7 @@ Transitions are evaluated in declaration order; first match fires. `from` accept
 - Native `[[bin]]` target compiled only when `native` is active.
 
 ### CI workflows
-- `deploy.yml` — Trunk build → push to `gh-pages` on `main`.
-- `smoke-test.yml` — Playwright suite on PR and `main`, downloads `dist/` artifact from the build job.
+- `ci.yml` — Unit tests, WASM build, Playwright smoke tests, deploy to `gh-pages` on `main`.
 - `release.yml` — produces native zips for Windows, macOS, and Linux per release tag (binary + bundled cloudflared + `dist/client/`).
 
 ### Asset handling

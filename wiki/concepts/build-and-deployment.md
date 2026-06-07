@@ -35,8 +35,7 @@ Outputs land in `dist/` with the client at `dist/client/`. The QR code on the vi
 
 ## CI workflows
 
-- **`.github/workflows/deploy.yml`** — on push to `main`: build both pages, merge into `dist/`, deploy to `gh-pages` branch via `peaceiris/actions-gh-pages`.
-- **`.github/workflows/smoke-test.yml`** — on push and pull_request: build `dist/`, run Playwright smoke suite (Chromium).
+- **`.github/workflows/ci.yml`** — on push and pull_request: unit tests, WASM build, Playwright smoke suite; on push to `main`: also deploy to `gh-pages`.
 
 ## Cargo notes
 

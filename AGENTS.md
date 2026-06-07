@@ -67,8 +67,7 @@ trunk build --release --config client-trunk.toml
 cd tests/smoke && npm install && npx playwright install chromium
 npx playwright test                            # from tests/smoke/
 
-# CI: deploy.yml builds + deploys on push to main
-#     smoke-test.yml builds dist/ and runs Playwright on push + PR
+# CI: ci.yml — unit tests → WASM build → Playwright smoke tests → deploy (on main)
 ```
 
 ---

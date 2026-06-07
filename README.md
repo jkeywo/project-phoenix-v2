@@ -128,7 +128,7 @@ The smoke suite covers:
 | `lobby.spec.ts` | Console selection broadcasts; only captain can start game |
 | `sim-state.spec.ts` | SimState broadcast; HelmInput changes ship position |
 
-CI runs the smoke suite automatically on every push and pull request via `.github/workflows/smoke-test.yml`.
+CI runs the smoke suite automatically on every push and pull request via `.github/workflows/ci.yml`.
 
 ### Production build
 

@@ -2257,6 +2257,9 @@ mod tests {
             }],
             torpedo_count: 6,
             phaser_mode: PhaserMode::Auto,
+            phaser_arcs: Vec::new(),
+            torpedo_arcs: Vec::new(),
+            blips: Vec::new(),
         };
         let json = encode_console_state(&state).expect("encode console");
         let decoded: WeaponsConsoleState = serde_json::from_str(&json).unwrap();

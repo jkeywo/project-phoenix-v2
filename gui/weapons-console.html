@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Phoenix — Tactical Console</title>
+  <style>
+    :root { --signal-cyan: #5fd8e8; --alert: #ff3344; --bg: #0a0c0f; --dim: #6a7178; }
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: #d8dde2;
+      font-family: "Chakra Petch", system-ui, sans-serif; }
+    main { padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+    h1 { font-size: 1.1rem; letter-spacing: 0.1em; margin: 0; color: var(--signal-cyan); }
+    .group { border: 1px solid #233; padding: 0.6rem; }
+    .group h2 { font-size: 0.7rem; letter-spacing: 0.14em; color: var(--dim); margin: 0 0 0.5rem; }
+    .bank, .tube { display: flex; gap: 0.5rem; align-items: center; font-family: "JetBrains Mono", monospace;
+      font-size: 0.85rem; padding: 0.2rem 0; }
+    .bank .id, .tube .id { min-width: 5rem; color: var(--signal-cyan); }
+    .ready { color: #5fe88a; }
+    .not-ready { color: var(--dim); }
+    #torpedo-count { font-family: "JetBrains Mono", monospace; font-size: 1.2rem; color: var(--signal-cyan); }
+    .actions { display: flex; gap: 0.6rem; }
+    button { background: #122; color: var(--signal-cyan); border: 1px solid var(--signal-cyan);
+      padding: 0.6rem 1rem; font-family: "Chakra Petch", system-ui, sans-serif; letter-spacing: 0.08em;
+      cursor: pointer; }
+    button:hover { background: #1a3338; }
+    #radar { display: block; background: #050810; border: 1px solid #233; }
+  </style>
+</head>
+<body>
+  <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
+  <script>
+    window.__sendAction = function(json) {
+      if (window.ipc) {
+        window.ipc.postMessage(json);          // wry native server
+      } else {
+        window.wasmBindings.wasm_ui_action(json); // browser WASM (server or client)
+      }
+    };
+  </script>
+
+  <main>
+    <h1>TACTICAL</h1>
+
+    <div class="group">
+      <h2>PHASER BANKS</h2>
+      <div id="banks"></div>
+    </div>
+
+    <div class="group">
+      <h2>TORPEDO TUBES</h2>
+      <div id="tubes"></div>
+    </div>
+
+    <div class="group">
+      <h2>TORPEDO MAGAZINE</h2>
+      <span id="torpedo-count" data-count="0">0</span>
+    </div>
+
+    <div class="group">
+      <h2>TACTICAL RADAR</h2>
+      <canvas id="radar" width="220" height="220"></canvas>
+    </div>
+
+    <div class="actions">
+      <button id="fire-phaser" type="button">FIRE PHASER</button>
+      <button id="fire-torpedo" type="button">FIRE TORPEDO</button>
+    </div>
+  </main>
+
+  <script>
+    // ── Inbound state push (ADR-0001 §2) ──────────────────────────────────
+    // Rust calls window.__updateConsole("Tactical", stateJson) on change.
+    window.__updateConsole = function(name, stateJson) {
+      let s;
+      try { s = JSON.parse(stateJson); } catch (e) { console.warn('[Tactical] bad state json', e); return; }
+
+      const banks = document.getElementById('banks');
+      banks.innerHTML = '';
+      (s.banks || []).forEach(function(b) {
+        const row = document.createElement('div');
+        row.className = 'bank';
+        row.dataset.id = b.id;
+        row.dataset.fireReady = String(!!b.fire_ready);
+        row.dataset.onCooldown = String(!!b.on_cooldown);
+        const id = document.createElement('span'); id.className = 'id'; id.textContent = b.id || '(default)';
+        const st = document.createElement('span');
+        st.className = b.fire_ready ? 'ready' : 'not-ready';
+        st.textContent = b.fire_ready ? 'FIRE-READY' : (b.on_cooldown ? 'COOLDOWN' : 'STANDBY');
+        row.appendChild(id); row.appendChild(st);
+        banks.appendChild(row);
+      });
+
+      const tubes = document.getElementById('tubes');
+      tubes.innerHTML = '';
+      (s.tubes || []).forEach(function(t) {
+        const row = document.createElement('div');
+        row.className = 'tube';
+        row.dataset.id = t.id;
+        row.dataset.loaded = String(!!t.loaded);
+        row.dataset.reloadSecs = String(t.reload_secs);
+        const id = document.createElement('span'); id.className = 'id'; id.textContent = t.id;
+        const st = document.createElement('span');
+        st.className = t.loaded ? 'ready' : 'not-ready';
+        st.textContent = t.loaded ? 'LOADED' : ('RELOAD ' + Number(t.reload_secs).toFixed(1) + 's');
+        row.appendChild(id); row.appendChild(st);
+        tubes.appendChild(row);
+      });
+
+      const count = document.getElementById('torpedo-count');
+      const n = (typeof s.torpedo_count === 'number') ? s.torpedo_count : 0;
+      count.textContent = String(n);
+      count.dataset.count = String(n);
+
+      drawRadar(s);
+    };
+
+    // ── Tactical radar renderer ───────────────────────────────────────────
+    // Draws a ship-centred, ship-aligned radar: forward = up, right = right.
+    // `state.blips`       — [{uuid, radar_x, radar_y, scaled_radius, kind}]
+    //   radar_x / radar_y normalised to [-1,1] at effective tactical range.
+    // `state.phaser_arcs` — [{id, facing_deg, fire_arc_deg}]
+    //   facing_deg: 0 = forward, 90 = starboard, -90 = port.
+    // `state.torpedo_arcs`— same schema.
+    function drawRadar(state) {
+      var canvas = document.getElementById('radar');
+      if (!canvas || !canvas.getContext) return;
+      var ctx = canvas.getContext('2d');
+      var W = canvas.width, H = canvas.height;
+      var cx = W / 2, cy = H / 2;
+      var R = Math.min(W, H) / 2 - 6; // radar disc radius in px
+
+      ctx.clearRect(0, 0, W, H);
+
+      // ── Background disc ────────────────────────────────────────────────
+      ctx.fillStyle = '#050810';
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.fill();
+
+      // ── Range rings ────────────────────────────────────────────────────
+      ctx.strokeStyle = '#1a2a3a';
+      ctx.lineWidth = 0.8;
+      [0.33, 0.66, 1.0].forEach(function(f) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, R * f, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+
+      // ── Cross-hairs ────────────────────────────────────────────────────
+      ctx.strokeStyle = '#0d1e2e';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
+
+      // ── Fire-arc sectors ───────────────────────────────────────────────
+      // facing_deg=0 → forward (up on canvas) = canvas angle −π/2.
+      // canvas_angle = (facing_deg − 90) × π / 180
+      function drawArcSector(arcs, innerFraction, fillColor, strokeColor) {
+        var arcR = R * innerFraction;
+        (arcs || []).forEach(function(arc) {
+          var facingRad = (arc.facing_deg - 90) * Math.PI / 180;
+          var halfArc = arc.fire_arc_deg * Math.PI / 180 / 2;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, arcR, facingRad - halfArc, facingRad + halfArc);
+          ctx.closePath();
+          ctx.fillStyle = fillColor;
+          ctx.fill();
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        });
+      }
+      drawArcSector(state.torpedo_arcs,  0.70, 'rgba(60,160,240,0.08)',  'rgba(60,160,240,0.35)');
+      drawArcSector(state.phaser_arcs,   0.90, 'rgba(240,132,56,0.10)',  'rgba(240,132,56,0.40)');
+
+      // ── Clip future draws to disc ──────────────────────────────────────
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.clip();
+
+      // ── Blips ─────────────────────────────────────────────────────────
+      var kindColor = {
+        asteroid: '#7ac0ff',
+        ship:     '#ff6060',
+        station:  '#ffe060',
+        unknown:  '#808080'
+      };
+      var targetUuid = state.target_uuid || null;
+      (state.blips || []).forEach(function(b) {
+        // radar_x = right, radar_y = forward (up) → negate Y for canvas
+        var bx = cx + b.radar_x * R;
+        var by = cy - b.radar_y * R;
+        var isTarget = targetUuid && targetUuid === b.uuid;
+        var color = isTarget ? '#ff3344' : (kindColor[b.kind] || kindColor.unknown);
+        // Minimum visible dot size; scale_radius provides relative size hint
+        var dotR = Math.max(2.5, b.scaled_radius * R * 0.6);
+        ctx.beginPath();
+        ctx.arc(bx, by, dotR, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        if (isTarget) {
+          ctx.strokeStyle = '#ff3344';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(bx, by, dotR + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      });
+
+      ctx.restore();
+
+      // ── Own-ship marker (always at centre) ────────────────────────────
+      // Diamond shape pointing forward (up).
+      ctx.fillStyle = '#5fd8e8';
+      ctx.beginPath();
+      ctx.moveTo(cx,     cy - 7); // forward tip
+      ctx.lineTo(cx + 4, cy + 2); // starboard
+      ctx.lineTo(cx,     cy - 1); // aft indent
+      ctx.lineTo(cx - 4, cy + 2); // port
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ── Outbound actions ──────────────────────────────────────────────────
+    document.getElementById('fire-phaser').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'fire_phaser', console: 'Tactical', bank: 'port' }));
+    });
+    document.getElementById('fire-torpedo').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'fire_torpedo', console: 'Tactical', tube: 'fore', target_uuid: null }));
+    });
+  </script>
+</body>
+</html>

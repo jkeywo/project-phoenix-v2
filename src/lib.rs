@@ -72,6 +72,7 @@ pub mod server_app;
 // Backward-compat alias: all `crate::simulation::*` imports continue to resolve.
 pub use server_app as simulation;
 pub mod sim_sets;
+pub mod console_bridge;
 pub mod ship_plugin;
 pub mod world;
 pub mod radar;

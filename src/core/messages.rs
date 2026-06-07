@@ -1081,15 +1081,54 @@ pub struct ViewscreenHudState {
     pub red_alert: bool,
 }
 
+/// A single radar blip on the Tactical console radar.
+///
+/// Positions are normalised to `[-1.0, 1.0]` where ±1.0 = the effective
+/// tactical radar range (base `tactical_radar_range` × `RadarRange` modifier).
+/// Produced server-side by `recompute_weapons_console_state` from live ECS
+/// transforms joined with the static world entity registry for tags/radius.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct RadarBlip {
+    /// Stable entity UUID — matches `EntitySnapshot::uuid`. Used to correlate
+    /// with `WeaponsConsoleState::target_uuid` for lock highlight.
+    pub uuid: String,
+    /// Radar-space X normalised to `[-1.0, 1.0]` at effective tactical range.
+    /// Positive = starboard (right on the radar display).
+    pub radar_x: f32,
+    /// Radar-space Y normalised to `[-1.0, 1.0]` at effective tactical range.
+    /// Positive = forward (up on the radar display).
+    pub radar_y: f32,
+    /// Scaled radius: `world_radius / effective_range`. Zero for entities
+    /// that carry no radius in the world registry.
+    pub scaled_radius: f32,
+    /// Display kind derived from entity tags.  One of `"asteroid"`, `"ship"`,
+    /// `"station"`, or `"unknown"`. Drives blip colour / icon in the HTML
+    /// radar renderer.
+    pub kind: String,
+}
+
 /// Serialised Tactical (Weapons) console state pushed to the HTML console
 /// (issue #422). Mirrors the data assembled by `weapons_update_broadcaster`.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsConsoleState {
     pub target_uuid: Option<String>,
     pub banks: Vec<PhaserBankState>,
     pub tubes: Vec<TorpedoTubeState>,
     pub torpedo_count: u32,
     pub phaser_mode: PhaserMode,
+    /// Phaser bank fire-arc geometry (static, sourced from `ShipClientConfigResource`).
+    /// Included in every push so the HTML console can draw arc overlays without
+    /// ever receiving a `Welcome` message (which only goes to Bevy clients).
+    #[serde(default)]
+    pub phaser_arcs: Vec<PhaserBankClientConfig>,
+    /// Torpedo tube fire-arc geometry (static, from `ShipClientConfigResource`).
+    #[serde(default)]
+    pub torpedo_arcs: Vec<TorpedoTubeClientConfig>,
+    /// Live radar blips: entities within effective tactical radar range, filtered
+    /// by `tactical_radar_shows`. Normalised to `[-1.0, 1.0]` radar space where
+    /// ±1.0 = effective range boundary.
+    #[serde(default)]
+    pub blips: Vec<RadarBlip>,
 }
 
 /// A console action decoded from the `window.__sendAction` envelope

@@ -1,9 +1,12 @@
 use bevy::prelude::*;
 
+use crate::codec;
+use crate::console_bridge::ConsoleStateChanged;
 use crate::lobby::{InboundMessage, Target, Sessions, WorldResource};
 use crate::messages::{
-    ClientMessage, Console, GamePhase, ModifierSlot, PhaserBank, PhaserBankState, ServerMessage,
-    TorpedoTubeState,
+    ClientMessage, Console, GamePhase, ModifierSlot, PhaserBank, PhaserBankClientConfig,
+    PhaserBankState, RadarBlip, ServerMessage, TorpedoTubeClientConfig, TorpedoTubeState,
+    WeaponsConsoleState,
 };
 use crate::simulation::{AsteroidUuid, GameOverReason, Ship, ShipHullIntegrity, ShipShields, SimOutbox};
 use crate::entity_spawner::EntityConsoleHull;
@@ -183,8 +186,10 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<PhaserCombatConfigResource>()
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .add_message::<AsteroidDestroyedVfx>()
+            .add_message::<ConsoleStateChanged>()
             .add_observer(on_beam_started)
             .add_observer(on_beam_ended)
+            .add_systems(Startup, spawn_weapons_console_state_entity)
             .add_systems(Update, (
                 handle_set_target.in_set(crate::sim_sets::SimSet::Input),
                 handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
@@ -196,7 +201,11 @@ impl Plugin for WeaponsPlugin {
             .add_systems(Update, (
                 tick_active_beam.in_set(crate::sim_sets::SimSet::Physics),
                 tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
-            ));
+            ))
+            .add_systems(Update, (
+                recompute_weapons_console_state,
+                push_weapons_console_state.after(recompute_weapons_console_state),
+            ).run_if(in_state(GamePhase::InProgress)));
     }
 }
 
@@ -279,6 +288,18 @@ fn handle_set_target(
     }
 }
 
+/// Returns true if `token` is authorized to issue Tactical fire orders.
+///
+/// Either the token is the connected player currently holding the Tactical
+/// console, or it is the local HTML-console operator
+/// ([`crate::console_bridge::LOCAL_CONSOLE_TOKEN`]) — the browser server
+/// viewscreen / native wry server case, where the operator drives the console
+/// directly with no remote PeerJS session (issue #422 / PRD #419).
+fn tactical_authorized(sessions: &Sessions, token: &str) -> bool {
+    sessions.0.console_holder(Console::Tactical) == Some(token)
+        || token == crate::console_bridge::LOCAL_CONSOLE_TOKEN
+}
+
 fn handle_fire_phaser(
     mut commands: Commands,
     mut reader: MessageReader<InboundMessage>,
@@ -297,7 +318,7 @@ fn handle_fire_phaser(
         let ClientMessage::FirePhaser { bank } = &ev.msg else {
             continue;
         };
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
+        if !tactical_authorized(&sessions, &ev.token) {
             continue;
         }
         if cooldown.is_bank_active(bank) || beam.target_uuid.is_some() {
@@ -714,7 +735,7 @@ fn handle_fire_torpedo(
 ) {
     for ev in reader.read() {
         let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else { continue };
-        if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
+        if !tactical_authorized(&sessions, &ev.token) {
             continue;
         }
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1117,6 +1138,287 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             }]
         },
     )
+}
+
+// ── HTML console state push (issue #422) ────────────────────────────────────
+//
+// Mirrors the data `weapons_update_broadcaster` assembles, but writes it into a
+// single `WeaponsConsoleStateComp` component on change so a `Changed<...>`
+// system can encode + emit a `ConsoleStateChanged` message. The wasm
+// forwarding to the JS `__updateConsole` callback lives in
+// `bridge::flush_console_state`.
+
+/// Single-entity component carrying the latest serialised Tactical console
+/// state. Bevy change-detection drives the JS push.
+#[derive(Component, Clone, PartialEq)]
+pub struct WeaponsConsoleStateComp(pub WeaponsConsoleState);
+
+/// Startup system: spawn the single entity carrying the Tactical console state.
+fn spawn_weapons_console_state_entity(mut commands: Commands) {
+    commands.spawn(WeaponsConsoleStateComp(WeaponsConsoleState {
+        target_uuid: None,
+        banks: Vec::new(),
+        tubes: Vec::new(),
+        torpedo_count: 0,
+        phaser_mode: crate::messages::PhaserMode::Auto,
+        phaser_arcs: Vec::new(),
+        torpedo_arcs: Vec::new(),
+        blips: Vec::new(),
+    }));
+}
+
+/// Project a world-space entity to a [`RadarBlip`] for the HTML Tactical radar.
+///
+/// Returns `None` when:
+/// - `shows` is empty (radar configured to show nothing)
+/// - the entity's tags don't overlap `shows` (OR-logic tag filter)
+/// - the entity is farther than `effective_range` from the ship (range cull)
+///
+/// Positions are normalised to `[-1.0, 1.0]` where ±1.0 = `effective_range`.
+/// The projection is ship-centred and ship-aligned (forward = +radar_y = up).
+fn project_blip(
+    uuid: &str,
+    wx: f32,
+    wz: f32,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+    effective_range: f32,
+    raw_tags: &[String],
+    shows: &[crate::entity_tags::EntityTag],
+    radius: f32,
+) -> Option<RadarBlip> {
+    let entity_tags = crate::entity_tags::parse_tags(raw_tags);
+    if !crate::entity_tags::matches_any(&entity_tags, shows) {
+        return None;
+    }
+    let dx = wx - ship_x;
+    let dz = wz - ship_z;
+    if dx * dx + dz * dz > effective_range * effective_range {
+        return None;
+    }
+    let cos_y = ship_yaw.cos();
+    let sin_y = ship_yaw.sin();
+    // Ship-aligned projection: forward = -Z at yaw=0, right = +X.
+    // radar_x = dot((dx,dz), right)   = dx*cos(yaw) + dz*sin(yaw)
+    // radar_y = dot((dx,dz), forward) = dx*sin(yaw) - dz*cos(yaw)
+    let radar_x = (dx * cos_y + dz * sin_y) / effective_range;
+    let radar_y = (dx * sin_y - dz * cos_y) / effective_range;
+    let scaled_radius = radius / effective_range;
+    let kind = entity_tags
+        .iter()
+        .find_map(|t| match t {
+            crate::entity_tags::EntityTag::Asteroid => Some("asteroid"),
+            crate::entity_tags::EntityTag::Ship => Some("ship"),
+            crate::entity_tags::EntityTag::Station => Some("station"),
+            _ => None,
+        })
+        .unwrap_or("unknown")
+        .to_string();
+    Some(RadarBlip {
+        uuid: uuid.to_string(),
+        radar_x,
+        radar_y,
+        scaled_radius,
+        kind,
+    })
+}
+
+/// Recompute the Tactical console state from the same resources as
+/// `weapons_update_broadcaster`, writing into `WeaponsConsoleStateComp` only on
+/// change so `Changed<WeaponsConsoleStateComp>` fires only on actual change.
+fn recompute_weapons_console_state(
+    ship: Res<ShipState>,
+    weapons_target: Res<WeaponsTarget>,
+    beam: Res<ActiveBeam>,
+    cooldown: Res<PhaserCooldown>,
+    modifiers: Res<crate::modifiers::ShipModifiers>,
+    combat_config: Res<PhaserCombatConfigResource>,
+    phaser_mode: Res<CurrentPhaserMode>,
+    torpedo_sys: Res<TorpedoSystemResource>,
+    ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
+    world_res: Res<WorldResource>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut comp_q: Query<&mut WeaponsConsoleStateComp>,
+) {
+    let target_uuid = weapons_target.0.clone();
+    let radar_range_mult = modifiers.get(&ModifierSlot::RadarRange);
+    let beam_active = beam.target_uuid.is_some();
+    let active_beam_bank = beam.bank.clone();
+
+    let target_live_pos: Option<(f32, f32)> = target_uuid
+        .as_deref()
+        .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
+
+    let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
+        let effective_phaser_range = combat_config.0.phaser_range * radar_range_mult;
+        let fire_ready = match target_live_pos {
+            None => false,
+            Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
+                tx, tz, ship.x, ship.z, ship.yaw, effective_phaser_range,
+            ),
+        };
+        let cd = cooldown.bank_remaining_secs("");
+        vec![PhaserBankState {
+            id: String::new(),
+            fire_ready,
+            on_cooldown: beam_active || cd > 0.0,
+            cooldown_remaining: cd,
+        }]
+    } else {
+        combat_config
+            .0
+            .banks
+            .iter()
+            .map(|b| {
+                let bank_ready = match target_live_pos {
+                    None => false,
+                    Some((tx, tz)) => {
+                        let bank_base_range = if b.beam_range > 0.0 {
+                            b.beam_range
+                        } else {
+                            combat_config.0.phaser_range
+                        };
+                        let effective_bank_range = bank_base_range * radar_range_mult;
+                        let (rx, ry) =
+                            crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
+                        let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
+                            <= effective_bank_range * effective_bank_range;
+                        range_ok && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
+                    }
+                };
+                let cd = cooldown.bank_remaining_secs(b.id.as_str());
+                let beam_on_this_bank =
+                    beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
+                PhaserBankState {
+                    id: b.id.clone(),
+                    fire_ready: bank_ready,
+                    on_cooldown: beam_on_this_bank || cd > 0.0,
+                    cooldown_remaining: cd,
+                }
+            })
+            .collect()
+    };
+
+    let tubes: Vec<TorpedoTubeState> = torpedo_sys
+        .0
+        .tubes
+        .iter()
+        .map(|t| TorpedoTubeState {
+            id: t.id.clone(),
+            loaded: t.is_loaded(),
+            reload_secs: t.reload_remaining,
+        })
+        .collect();
+
+    // ── Radar blips ──────────────────────────────────────────────────────────
+    //
+    // Join live ECS positions (from query iterators) with static entity
+    // metadata (tags, radius) from `WorldResource`. The ECS gives authoritative
+    // live positions for all currently-alive entities; `WorldResource` gives the
+    // stable tag set used for the `tactical_radar_shows` filter.
+    //
+    // The projection is the same ship-aligned radar transform used by
+    // `radar::project_to_radar` — forward = +radar_y, right = +radar_x,
+    // normalised to `[-1.0, 1.0]` at `effective_tactical_range`.
+    let effective_tactical_range =
+        ship_config.0.tactical_radar_range * radar_range_mult;
+    let shows: Vec<crate::entity_tags::EntityTag> = ship_config
+        .0
+        .tactical_radar_shows
+        .iter()
+        .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
+        .collect();
+
+    // Build UUID → EntitySnapshot lookup for tags + radius. Allocation is
+    // per-frame but bounded by world entity count (typically tens, not millions).
+    //
+    // NOTE: `WorldResource` is populated once at `StartGame` and is not
+    // updated when entities spawn at runtime (via `EntitySpawned`). This means
+    // dynamically-spawned NPCs/stations won't appear as radar blips — only
+    // entities from the initial world TOML are visible. Asteroids are always
+    // in the initial world so they always show. This limitation can be lifted
+    // later by updating `WorldResource` from the `EntitySpawned` broadcast.
+    let entity_meta: std::collections::HashMap<&str, &crate::messages::EntitySnapshot> =
+        world_res.0.entities.iter().map(|e| (e.uuid.as_str(), e)).collect();
+
+    let mut blips: Vec<RadarBlip> = Vec::new();
+
+    if !shows.is_empty() && effective_tactical_range > 0.0 {
+        // Asteroids
+        for (uuid_comp, transform) in asteroid_q.iter() {
+            let meta = entity_meta.get(uuid_comp.0.as_str());
+            let raw_tags = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
+            let radius = meta.and_then(|e| e.radius).unwrap_or(0.0);
+            if let Some(b) = project_blip(
+                &uuid_comp.0,
+                transform.translation.x,
+                transform.translation.z,
+                ship.x, ship.z, ship.yaw,
+                effective_tactical_range,
+                raw_tags, &shows, radius,
+            ) {
+                blips.push(b);
+            }
+        }
+        // Generic entities (NPC ships, stations, torpedoes, etc.)
+        for (uuid_comp, transform) in entity_q.iter() {
+            let meta = entity_meta.get(uuid_comp.0.as_str());
+            let raw_tags = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
+            let radius = meta.and_then(|e| e.radius).unwrap_or(0.0);
+            if let Some(b) = project_blip(
+                &uuid_comp.0,
+                transform.translation.x,
+                transform.translation.z,
+                ship.x, ship.z, ship.yaw,
+                effective_tactical_range,
+                raw_tags, &shows, radius,
+            ) {
+                blips.push(b);
+            }
+        }
+    }
+
+    // ── Fire-arc config (static after game start) ─────────────────────────
+    // Included in every push so the HTML console can render arc overlays
+    // without ever receiving the Bevy-only `Welcome` message.
+    let phaser_arcs: Vec<PhaserBankClientConfig> = ship_config.0.phaser_banks.clone();
+    let torpedo_arcs: Vec<TorpedoTubeClientConfig> = ship_config.0.torpedo_tubes.clone();
+
+    let next = WeaponsConsoleState {
+        target_uuid,
+        banks,
+        tubes,
+        torpedo_count: torpedo_sys.0.torpedoes_remaining,
+        phaser_mode: phaser_mode.0,
+        phaser_arcs,
+        torpedo_arcs,
+        blips,
+    };
+
+    for mut comp in comp_q.iter_mut() {
+        if comp.0 != next {
+            comp.0 = next.clone();
+        }
+    }
+}
+
+/// `Changed<WeaponsConsoleStateComp>` system: encode the state and emit a
+/// `ConsoleStateChanged { name: "Tactical", json }` message for the wasm
+/// bridge to forward to the JS `__updateConsole` callback.
+fn push_weapons_console_state(
+    comp_q: Query<&WeaponsConsoleStateComp, Changed<WeaponsConsoleStateComp>>,
+    mut writer: MessageWriter<ConsoleStateChanged>,
+) {
+    for comp in comp_q.iter() {
+        if let Ok(json) = codec::encode_console_state(&comp.0) {
+            writer.write(ConsoleStateChanged {
+                name: "Tactical".into(),
+                json,
+            });
+        }
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -1658,6 +1960,29 @@ mod tests {
         assert!(
             out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")),
             "expected TorpedoLaunched broadcast after Tactical fires torpedo"
+        );
+    }
+
+    #[test]
+    fn local_console_token_can_fire_torpedo() {
+        // issue #422: actions from the local HTML console (browser server
+        // viewscreen / native wry server) arrive under LOCAL_CONSOLE_TOKEN with
+        // no remote PeerJS session, so console_holder(Tactical) is None.
+        // `tactical_authorized` must treat that token as an authorized local
+        // operator so a button press actually launches end-to-end — the
+        // decode→map→InboundMessage→fire hop the wasm bridge cannot unit-test.
+        let mut app = test_app();
+        // No player holds Tactical here — authorization comes purely from the
+        // local-console bypass.
+        push(&mut app, crate::console_bridge::LOCAL_CONSOLE_TOKEN, ClientMessage::FireTorpedo {
+            tube: "fore_port".to_string(),
+            target_uuid: None,
+        });
+        let out = tick(&mut app);
+
+        assert!(
+            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { tube, .. } if tube == "fore_port")),
+            "local console token should be authorized to fire torpedoes end-to-end (issue #422)"
         );
     }
 
@@ -2388,6 +2713,142 @@ mod tests {
         assert!(
             ps.beam_active,
             "beam_active must be true after tick_ai_controllers → InboundMessage → handle_fire_phaser_npc routing"
+        );
+    }
+
+    // ── Weapons console state push (issue #422) ──────────────────────────
+
+    #[derive(Resource, Default)]
+    struct ConsolePushes(Vec<ConsoleStateChanged>);
+
+    fn collect_console_pushes(
+        mut reader: MessageReader<ConsoleStateChanged>,
+        mut sink: ResMut<ConsolePushes>,
+    ) {
+        for m in reader.read() {
+            sink.0.push(m.clone());
+        }
+    }
+
+    /// Minimal app exercising only the console-state push path: spawn the
+    /// component, register the push system + a mock observer that collects
+    /// `ConsoleStateChanged`, mutate the component, run an update, and assert a
+    /// single push carrying the expected JSON.
+    fn push_test_app() -> App {
+        let mut app = App::new();
+        app.add_message::<ConsoleStateChanged>()
+            .init_resource::<ConsolePushes>()
+            .add_systems(Update, (
+                push_weapons_console_state,
+                collect_console_pushes.after(push_weapons_console_state),
+            ));
+        app.world_mut().spawn(WeaponsConsoleStateComp(WeaponsConsoleState::default()));
+        app
+    }
+
+    #[test]
+    fn weapons_console_push_emits_one_message_with_expected_values() {
+        let mut app = push_test_app();
+
+        // First update: the freshly spawned component is `Changed`, so it
+        // pushes its initial state. Drain those.
+        app.update();
+        app.world_mut().resource_mut::<ConsolePushes>().0.clear();
+
+        // Mutate the component → next update should push exactly one message.
+        {
+            let mut q = app.world_mut().query::<&mut WeaponsConsoleStateComp>();
+            let mut comp = q.single_mut(app.world_mut()).unwrap();
+            comp.0 = WeaponsConsoleState {
+                target_uuid: Some("tgt-42".into()),
+                banks: vec![PhaserBankState {
+                    id: "port".into(),
+                    fire_ready: true,
+                    on_cooldown: false,
+                    cooldown_remaining: 0.0,
+                }],
+                tubes: vec![TorpedoTubeState {
+                    id: "fore".into(),
+                    loaded: true,
+                    reload_secs: 0.0,
+                }],
+                torpedo_count: 9,
+                phaser_mode: crate::messages::PhaserMode::Manual,
+                phaser_arcs: Vec::new(),
+                torpedo_arcs: Vec::new(),
+                blips: Vec::new(),
+            };
+        }
+        app.update();
+
+        let pushes = &app.world().resource::<ConsolePushes>().0;
+        assert_eq!(pushes.len(), 1, "expected exactly one push after a change");
+        let push = &pushes[0];
+        assert_eq!(push.name, "Tactical");
+        assert!(push.json.contains("\"target_uuid\":\"tgt-42\""), "json: {}", push.json);
+        assert!(push.json.contains("\"torpedo_count\":9"), "json: {}", push.json);
+        assert!(push.json.contains("\"id\":\"port\""), "json: {}", push.json);
+        assert!(push.json.contains("\"id\":\"fore\""), "json: {}", push.json);
+        assert!(push.json.contains("\"phaser_mode\":\"Manual\""), "json: {}", push.json);
+
+        // No further change → no further pushes.
+        app.world_mut().resource_mut::<ConsolePushes>().0.clear();
+        app.update();
+
+        assert!(
+            app.world().resource::<ConsolePushes>().0.is_empty(),
+            "no push expected without a change"
+        );
+    }
+
+    // ── Radar blip tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn radar_blip_appears_for_asteroid_within_tactical_range() {
+        let mut app = test_app();
+        // Configure tactical radar to show asteroids with range 300.
+        {
+            let mut cfg = app.world_mut()
+                .resource_mut::<crate::lobby::server::ShipClientConfigResource>();
+            cfg.0.tactical_radar_shows = vec!["asteroid".into()];
+            cfg.0.tactical_radar_range = 300.0;
+        }
+        // Asteroid 50 units ahead (z=-50, within 300 range).
+        setup_weapons_world(&mut app, 0.0, -50.0);
+        start_game(&mut app);
+        tick(&mut app); // first InProgress tick → recompute runs
+
+        let mut q = app.world_mut().query::<&WeaponsConsoleStateComp>();
+        let comp = q.single(app.world()).unwrap();
+        let blips = comp.0.blips.clone();
+
+        assert_eq!(blips.len(), 1, "expected one blip for in-range asteroid");
+        assert_eq!(blips[0].uuid, "target-uuid");
+        assert_eq!(blips[0].kind, "asteroid");
+        // Forward (z=-50) at yaw=0 maps to radar_y > 0 (forward = up).
+        assert!(blips[0].radar_y > 0.0, "asteroid ahead should have positive radar_y");
+        assert!((blips[0].radar_x).abs() < 1e-4, "asteroid directly ahead has radar_x ≈ 0");
+    }
+
+    #[test]
+    fn asteroid_beyond_tactical_range_not_in_blips() {
+        let mut app = test_app();
+        {
+            let mut cfg = app.world_mut()
+                .resource_mut::<crate::lobby::server::ShipClientConfigResource>();
+            cfg.0.tactical_radar_shows = vec!["asteroid".into()];
+            cfg.0.tactical_radar_range = 100.0;
+        }
+        // Asteroid 200 units ahead — beyond the 100-unit radar range.
+        setup_weapons_world(&mut app, 0.0, -200.0);
+        start_game(&mut app);
+        tick(&mut app);
+
+        let mut q = app.world_mut().query::<&WeaponsConsoleStateComp>();
+        let comp = q.single(app.world()).unwrap();
+        assert!(
+            comp.0.blips.is_empty(),
+            "asteroid beyond tactical range must not appear in blips"
         );
     }
 }

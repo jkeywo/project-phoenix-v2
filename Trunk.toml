@@ -4,5 +4,5 @@ dist = "dist"
 public_url = "./"
 
 [watch]
-watch_path = ["assets/", "client/"]
+watch_path = ["assets/", "client/", "gui/"]
 include = "*.toml"

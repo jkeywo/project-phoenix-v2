@@ -42,7 +42,7 @@ parsed into `EntityConfig` (`src/entities/config.rs`), and consumed by:
 
 See [weapons-plugin → Per-bank phasers and per-tube torpedoes](../concepts/weapons-plugin.md#per-bank-phasers-and-per-tube-torpedoes-2026-05)
 for the full TOML schema, wire shape, client UI, and drift guards. The
-canonical ship layout ships two phaser banks (`port`, `starboard`) and three
+canonical ship layout ships two phaser banks (`fore`, `aft`) and three
 torpedo tubes (`fore_port`, `fore_starboard`, `aft`), but everything is
 data-driven — NPC ships and player variants can declare any layout the
 validators accept.

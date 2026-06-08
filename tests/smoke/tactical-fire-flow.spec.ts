@@ -14,7 +14,7 @@ import type { BrowserContext } from '@playwright/test';
 // Self-contained smoke-test world — intentionally does NOT read or depend on
 // assets/worlds/default.toml so changes to the default world never break this
 // test.  The player ship spawns at the origin facing -Z; a single raider is
-// placed 15.8 units to the port bow (within the port bank's 135° arc and
+// placed 15.8 units to the port bow (within the fore bank's 270° arc and
 // well within the 100-unit phaser range).  The raider template is intercepted
 // inside startGameWithTactical to zero every target_speed and set
 // initial_state = "idle" so it stays put.
@@ -144,8 +144,8 @@ test('tactical fire-flow: BeamStarted received after locking NPC and firing', as
     { timeout: 5_000 },
   );
 
-  // Fire phasers — port bank is defined first in player_ship.toml.
-  await tactical.send('FirePhaser', { bank: 'port' });
+  // Fire phasers — fore bank is defined first in player_ship.toml.
+  await tactical.send('FirePhaser', { bank: 'fore' });
 
   // BeamStarted must be broadcast to all clients.
   const beamStarted = await tactical.waitForMessage('BeamStarted', 5_000) as any;
@@ -195,7 +195,7 @@ test('tactical fire-flow: NPC hull_fraction decreases after phaser hit', async (
   }, raiderUuid);
 
   // Fire phasers.
-  await tactical.send('FirePhaser', { bank: 'port' });
+  await tactical.send('FirePhaser', { bank: 'fore' });
   await tactical.waitForMessage('BeamStarted', 5_000);
 
   // Wait for a SimState where the raider's hull_fraction is lower than initial.

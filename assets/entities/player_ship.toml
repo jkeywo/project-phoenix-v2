@@ -43,20 +43,21 @@ torpedo_arc_color = [1.0, 0.55, 0.2, 0.15]
 range = 300.0
 shows = ["player", "ship", "asteroid", "station", "missile", "torpedo", "region"]
 
-# Port phaser bank: covers the port hemisphere (forward arc to aft arc).
-# Auto-fire window is narrower than the manual fire arc.
+# Fore phaser bank: forward-facing, 270° arc (blind spot is the rear 90°).
+# Auto-fire window covers the forward hemisphere only.
 [[weapons_console.phaser_banks]]
-id = "port"
-facing_deg = -90.0
-fire_arc_deg = 135.0
-auto_arc_deg = 90.0
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 270.0
+auto_arc_deg = 180.0
 
-# Starboard phaser bank: mirror of port.
+# Aft phaser bank: rear-facing, 270° arc (blind spot is the forward 90°).
+# Auto-fire window covers the rear hemisphere only.
 [[weapons_console.phaser_banks]]
-id = "starboard"
-facing_deg = 90.0
-fire_arc_deg = 135.0
-auto_arc_deg = 90.0
+id = "aft"
+facing_deg = 180.0
+fire_arc_deg = 270.0
+auto_arc_deg = 180.0
 
 [torpedoes]
 count = 10

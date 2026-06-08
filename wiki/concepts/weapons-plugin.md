@@ -209,16 +209,16 @@ beam_color = [1.0, 0.4, 0.1, 1.0]
 torpedo_arc_color = [1.0, 0.55, 0.2, 1.0]
 
 [[weapons_console.phaser_banks]]
-id = "port"
-facing_deg = -90.0
-fire_arc_deg = 90.0
-auto_arc_deg = 90.0     # auto_arc_deg ≤ fire_arc_deg (validator)
+id = "fore"
+facing_deg = 0.0
+fire_arc_deg = 270.0
+auto_arc_deg = 180.0    # auto_arc_deg ≤ fire_arc_deg (validator)
 
 [[weapons_console.phaser_banks]]
-id = "starboard"
-facing_deg = 90.0
-fire_arc_deg = 90.0
-auto_arc_deg = 90.0
+id = "aft"
+facing_deg = 180.0
+fire_arc_deg = 270.0
+auto_arc_deg = 180.0
 
 [torpedoes]
 count = 10              # shared ammo pool across all tubes

@@ -17,8 +17,8 @@ test('weapons console: __updateConsole renders banks, tubes and torpedo count', 
   const state = {
     target_uuid: 'tgt-1',
     banks: [
-      { id: 'port', fire_ready: true, on_cooldown: false, cooldown_remaining: 0.0 },
-      { id: 'starboard', fire_ready: false, on_cooldown: true, cooldown_remaining: 1.5 },
+      { id: 'fore', fire_ready: true, on_cooldown: false, cooldown_remaining: 0.0 },
+      { id: 'aft', fire_ready: false, on_cooldown: true, cooldown_remaining: 1.5 },
     ],
     tubes: [
       { id: 'fore', loaded: true, reload_secs: 0.0 },
@@ -32,8 +32,8 @@ test('weapons console: __updateConsole renders banks, tubes and torpedo count', 
 
   // Banks rendered with stable data-attrs.
   await expect(page.locator('#banks .bank')).toHaveCount(2);
-  await expect(page.locator('.bank[data-id="port"]')).toHaveAttribute('data-fire-ready', 'true');
-  await expect(page.locator('.bank[data-id="starboard"]')).toHaveAttribute('data-on-cooldown', 'true');
+  await expect(page.locator('.bank[data-id="fore"]')).toHaveAttribute('data-fire-ready', 'true');
+  await expect(page.locator('.bank[data-id="aft"]')).toHaveAttribute('data-on-cooldown', 'true');
 
   // Tubes rendered.
   await expect(page.locator('#tubes .tube')).toHaveCount(2);
@@ -60,7 +60,7 @@ test('weapons console: FIRE buttons call __sendAction with correct envelopes', a
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(2);
 
-  expect(JSON.parse(sent[0])).toEqual({ action: 'fire_phaser', console: 'Tactical', bank: 'port' });
+  expect(JSON.parse(sent[0])).toEqual({ action: 'fire_phaser', console: 'Tactical', bank: 'fore' });
   expect(JSON.parse(sent[1])).toEqual({
     action: 'fire_torpedo',
     console: 'Tactical',

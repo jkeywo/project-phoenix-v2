@@ -98,10 +98,16 @@
     this._destroyed       = false;
     this._projectedBlips  = null;  // cache for world-space hit-testing
 
-    // View state (zoom / pan) — populated by Slice 5b (#449)
+    // View state (zoom / pan) — Slice 5b (#449)
     this._zoom = 1.0;
     this._panX = 0.0;
     this._panZ = 0.0;
+
+    // Gesture tracking state (Slice 5b / #449)
+    this._pointers      = {};    // active pointers: id → {x, y}
+    this._lastPinchDist = null;  // last two-finger distance (pinch-zoom)
+    this._dragStart     = null;  // {x, y, panX, panZ, worldPerCss} at drag-start
+    this._didDrag       = false; // suppress click-based tap-to-lock after drag
 
     // Icon images pre-loaded in Slice 2 (#446)
     this._icons = {};
@@ -121,11 +127,22 @@
     this._rafLoop = function () { self._loop(); };
     this._rafId = requestAnimationFrame(this._rafLoop);
 
-    // Pointer / touch event listeners
-    this._boundClick    = this._onPointerTap.bind(this, 'click');
+    // Pointer / touch event listeners — tap-to-lock
+    this._boundClick      = this._onPointerTap.bind(this, 'click');
     this._boundTouchStart = this._onPointerTap.bind(this, 'touch');
     this._canvas.addEventListener('click',      this._boundClick);
     this._canvas.addEventListener('touchstart', this._boundTouchStart, { passive: false });
+
+    // Pointer events for drag-pan and pinch-zoom (Slice 5b / #449)
+    this._boundPointerDown = this._onPointerDown.bind(this);
+    this._boundPointerMove = this._onPointerMove.bind(this);
+    this._boundPointerUp   = this._onPointerUp.bind(this);
+    this._boundDblClick    = this._onDblClick.bind(this);
+    this._canvas.addEventListener('pointerdown',   this._boundPointerDown);
+    this._canvas.addEventListener('pointermove',   this._boundPointerMove);
+    this._canvas.addEventListener('pointerup',     this._boundPointerUp);
+    this._canvas.addEventListener('pointercancel', this._boundPointerUp);
+    this._canvas.addEventListener('dblclick',      this._boundDblClick);
   }
 
   // ── Resize / DPR ────────────────────────────────────────────────────────
@@ -478,6 +495,13 @@
       if (isTarget) {
         self._drawRing(ctx, bx, by, dotR + 7, 2, '#ff3344', true);
       }
+
+      // Text label — rendered when entity has a name (world-space mode)
+      if (p.name) {
+        ctx.font      = '11px "JetBrains Mono", monospace';
+        ctx.fillStyle = 'rgba(153,255,217,0.9)';  // spec: rgba(0.6, 1.0, 0.85, 0.9)
+        ctx.fillText(p.name, bx + dotR + 4, by + 4);
+      }
     });
   };
 
@@ -622,6 +646,8 @@
 
   RadarWidget.prototype._onPointerTap = function (kind, e) {
     if (!this._onBlipTap || !this._canvas) return;
+    // Suppress click that fires at the end of a drag gesture
+    if (kind === 'click' && this._didDrag) { this._didDrag = false; return; }
     if (kind === 'touch') e.preventDefault();
 
     var rect  = this._canvas.getBoundingClientRect();
@@ -635,6 +661,84 @@
     if (blip && blip.uuid) {
       this._onBlipTap(blip.uuid);
     }
+  };
+
+  // ── Gesture handlers (Slice 5b / #449) ────────────────────────────────────
+
+  RadarWidget.prototype._onPointerDown = function (e) {
+    if (!this._canvas) return;
+    this._pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+    if (this._canvas.setPointerCapture) {
+      try { this._canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+
+    var ids = Object.keys(this._pointers);
+    if (ids.length === 1) {
+      // Begin drag — record start state and worldPerCss factor
+      var rect  = this._canvas.getBoundingClientRect();
+      var R_css = Math.max(1, Math.min(rect.width, rect.height) / 2);
+      var data  = this._data;
+      var range = (data && data.effective_range != null) ? data.effective_range : this._range;
+      var effectiveRange = range / Math.max(this._zoom, 0.001);
+      this._dragStart = {
+        x:           e.clientX,
+        y:           e.clientY,
+        panX:        this._panX,
+        panZ:        this._panZ,
+        worldPerCss: effectiveRange / R_css,
+      };
+      this._didDrag = false;
+    } else if (ids.length === 2) {
+      // Cancel drag, begin pinch
+      this._dragStart = null;
+      var p0 = this._pointers[ids[0]], p1 = this._pointers[ids[1]];
+      this._lastPinchDist = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+    }
+  };
+
+  RadarWidget.prototype._onPointerMove = function (e) {
+    if (!this._pointers[e.pointerId]) return;
+    this._pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+
+    var ids = Object.keys(this._pointers);
+
+    if (ids.length >= 2) {
+      // Pinch zoom — use first two tracked pointers
+      var p0 = this._pointers[ids[0]], p1 = this._pointers[ids[1]];
+      var newDist = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+      if (this._lastPinchDist) {
+        this.setZoom(this._zoom * (newDist / this._lastPinchDist));
+        if (this._onZoomChange) this._onZoomChange(this._zoom);
+      }
+      this._lastPinchDist = newDist;
+      this._dragStart = null;  // cancel drag while pinching
+    } else if (ids.length === 1 && this._dragStart) {
+      // Drag pan
+      var dx = e.clientX - this._dragStart.x;
+      var dy = e.clientY - this._dragStart.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this._didDrag = true;
+
+      var wpc = this._dragStart.worldPerCss;
+      this._panX = this._dragStart.panX - dx * wpc;
+      this._panZ = this._dragStart.panZ + dy * wpc;  // canvas +Y is down = radar −Z = pan +Z
+      if (this._onPanChange) this._onPanChange(this._panX, this._panZ);
+    }
+  };
+
+  RadarWidget.prototype._onPointerUp = function (e) {
+    delete this._pointers[e.pointerId];
+    var ids = Object.keys(this._pointers);
+    if (ids.length < 2) this._lastPinchDist = null;
+    if (ids.length === 0) this._dragStart = null;
+  };
+
+  /** Double-tap / double-click — reset zoom and pan to defaults. */
+  RadarWidget.prototype._onDblClick = function (e) {
+    this._zoom = 1.0;
+    this._panX = 0.0;
+    this._panZ = 0.0;
+    if (this._onZoomChange) this._onZoomChange(this._zoom);
+    if (this._onPanChange)  this._onPanChange(this._panX, this._panZ);
   };
 
   return RadarWidget;

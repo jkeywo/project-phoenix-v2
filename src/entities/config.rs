@@ -2894,11 +2894,17 @@ pub struct GlobalConfig {
     /// Global seed for deterministic generation.
     #[serde(default = "default_global_seed")]
     pub seed: u64,
+    /// Display name shown in the lobby title bar.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Short description shown below the title in the lobby.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 impl Default for GlobalConfig {
     fn default() -> Self {
-        Self { seed: 42 }
+        Self { seed: 42, title: None, description: None }
     }
 }
 

@@ -578,11 +578,16 @@ fn init_world_runtime(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
-    _world: ResMut<WorldResource>,
+    mut world_resource: ResMut<WorldResource>,
 ) {
     let Some(world_config) = world_config else {
         return;
     };
+
+    // Populate scenario metadata so the lobby title/description render correctly.
+    world_resource.0.scenario_title = world_config.global.title.clone().unwrap_or_default();
+    world_resource.0.scenario_description =
+        world_config.global.description.clone().unwrap_or_default();
 
     // `spawn_world_entities` ran earlier in the Startup chain and already
     // populated `runtime.name_to_uuid` for named [[entity]] instances. Fold

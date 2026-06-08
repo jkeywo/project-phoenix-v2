@@ -430,10 +430,14 @@ fn push_lobby_state(
         .map(|w| w.0.scenario_title.clone())
         .unwrap_or_default();
 
+    let scenario_body = world_resource.as_ref()
+        .map(|w| w.0.scenario_description.clone())
+        .unwrap_or_default();
+
     let payload = LobbyStatePayload {
         phase: format!("{:?}", phase.get()),
         scenario_title,
-        scenario_body: String::new(),
+        scenario_body,
         crew_count: station_payloads.iter().filter(|s| s.holder_name.is_some()).count() as u32,
         max_players: stations.max_players,
         all_stations_filled: all_filled,

@@ -88,7 +88,7 @@ Shipped:
 - **[PRD #153 — Region Entities, Component-Driven Spawning & Modifier Flags](./sources/prd-153-region-entities-and-entity-pipeline.md)** — Shipped. Single `[[entity]]` pipeline; six region effects; `f32` hull; `FlagKind`; unified `EntitySnapshot`.
 - **[PRD #154 — Console Complexity: UI Hiding + AI Automation](./sources/prd-154-console-complexity.md)** — Shipped. Per-console `Low`/`Full` presets; hide UI + server-side `console_ai` to operate hidden controls.
 - **[PRD #180 — Viewscreen Frame](./sources/prd-180-viewscreen-frame.md)** — Shipped. Bevy UI border, `RedAlertVignetteMaterial`, designation + HEADING / HULL / CONDITION HUD.
-- **[PRD #187 — Phone Console HUD — Diegetic Bezel Frame](./sources/prd-187-phone-bezel.md)** — Shipped. `phone_border/` plugin: bezel wraps every console; full helm + captain chrome.
+- **[PRD #187 — Phone Console HUD — Diegetic Bezel Frame](./sources/prd-187-phone-console-hud.md)** — Shipped. `phone_border/` plugin: bezel wraps every console; full helm + captain chrome. *Being superseded by PRD #438.*
 - **[PRD #191 — Grid-Based Asteroid Lifecycle](./sources/prd-191-grid-asteroid-lifecycle.md)** — Shipped. `asteroid_window.rs`, player-centred ring buffer, destroyed asteroids respawn on return.
 
 Open (planned work):
@@ -97,6 +97,8 @@ Open (planned work):
 - **[PRD #119 — Stations, Scenarios & Comms](./sources/prd-119-stations-scenarios-comms.md)** — TOML scenario engine, station entities, `Console::Comms`. Builds on PRD #153's entity pipeline.
 - **[PRD #142 — AI and Behaviour System](./sources/prd-142-ai-and-behaviour.md)** — Data-driven state-machine NPCs that emit the same input messages as players. Depends on #119.
 - **[PRD #350 — Scenario Editor Rewrite](./sources/prd-350-scenario-editor-rewrite.md)** — Three-mode in-browser TOML editor (World / Entity / Definitions) over the FSA. Adds `extra_worlds` + `load_world`/`unload_world` trigger actions. Slices 1–6 = v1.
+- **[PRD #438 — HTML/JS Client GUI Shell](./sources/prd-438-html-client-gui-shell.md)** — In flight. Replace Bevy lobby + tab bar + phone bezel with HTML/CSS/JS. Slices: #439 (bezel, shipped), #440 (lobby), #441 (tab bar), #442 (Bevy cleanup).
+- **[Issue #439 — HTML Phone Bezel Frame](./sources/issue-439-html-phone-bezel.md)** — Shipped. First slice of #438; `gui/phone-bezel.js` + DOM bezel in `client.html`; SimState reads `snap.red_alert`.
 
 ### Design drafts (`docs/`)
 

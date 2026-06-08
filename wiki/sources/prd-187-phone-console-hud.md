@@ -1,10 +1,10 @@
 ---
 title: PRD #187 — Phone Console HUD: Diegetic Bezel Frame
 type: source
-tags: [prd, client, hud, bezel, phone, shipped]
+tags: [prd, client, hud, bezel, phone, shipped, superseded-by-438]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/187
 status: shipped
-updated: 2026-05-13
+updated: 2026-06-08
 ---
 
 # PRD #187 — Phone Console HUD: Diegetic Bezel Frame
@@ -14,6 +14,8 @@ A bezel frame around every phone console panel, plus full Helm and Captain chrom
 ## Status
 
 Shipped (2026-05-12). Companion to PRD #180 (the viewscreen frame on the server side).
+
+**Being superseded** by [PRD #438 — HTML/JS Client GUI Shell](./prd-438-html-client-gui-shell.md): the bezel is migrating to HTML/CSS in `client.html`. Issue #439 (shipped 2026-06-08) added the HTML bezel as a transitional overlay; issue #442 will remove the Bevy `PhoneBorderPlugin` once the HTML shell fully replaces it.
 
 ## Problem
 

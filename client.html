@@ -37,8 +37,9 @@
     button:active { background: #336; }
     button:disabled { opacity: 0.4; cursor: default; }
     button.mine { border-color: #8af; color: #8af; }
-    /* Status line: bottom-left, above canvas */
-    #status { position: fixed; bottom: 0.5rem; left: 0.75rem; color: #778; font-size: 0.75rem; z-index: 5; }
+    /* Status line: bottom-left, above canvas. z-index 25 keeps it above the
+       phone bezel (15) so connection status isn't obscured by the corner. */
+    #status { position: fixed; bottom: 0.5rem; left: 0.75rem; color: #778; font-size: 0.75rem; z-index: 25; }
     section { display: none; }
     section.active { display: block; }
     #top-bar {
@@ -128,6 +129,9 @@
       position: fixed; inset: 0;
       pointer-events: none;
       z-index: 15;
+      /* Hidden by default — the lobby is borderless. render() flips display
+         to '' once state.phase === 'InProgress'. */
+      display: none;
     }
     .bezel-corner, .bezel-edge {
       position: absolute;
@@ -447,16 +451,22 @@
     // Drives the .alert-on class on #phone-bezel (which CSS uses to swap
     // edge background-images) and re-sets the <img> src for each corner via
     // the bezelSrc() pure function exported by gui/phone-bezel.js.
+    let _bezelSrcMissingWarned = false;
     function applyBezelAlert(alert) {
       const root = document.getElementById('phone-bezel');
       if (!root) return;
       root.classList.toggle('alert-on', !!alert);
       const corners = root.querySelectorAll('img.bezel-corner');
+      if (typeof window.bezelSrc !== 'function') {
+        if (!_bezelSrcMissingWarned) {
+          console.warn('[phone-bezel] window.bezelSrc not loaded; corner <img> srcs will not swap on red alert');
+          _bezelSrcMissingWarned = true;
+        }
+        return;
+      }
       for (const el of corners) {
         const slot = el.dataset.slot;
-        if (slot && typeof window.bezelSrc === 'function') {
-          el.src = window.bezelSrc(slot, !!alert);
-        }
+        if (slot) el.src = window.bezelSrc(slot, !!alert);
       }
     }
 
@@ -650,6 +660,10 @@
         titleEl.textContent = 'Bridge';
       }
       $('lobby-ui').className = inGame ? '' : 'active';
+      // Phone bezel (issue #439) is part of the game shell only — the lobby
+      // is borderless. Toggle visibility on every phase change.
+      const bezel = $('phone-bezel');
+      if (bezel) bezel.style.display = inGame ? '' : 'none';
 
       // Reconcile activeConsole with current consoles list.
       const mine = myConsoles(s);

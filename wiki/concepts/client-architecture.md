@@ -18,7 +18,7 @@ All client-side plugins registered by `add_client_plugins` (see `src/client/app.
 |---|---|---|
 | `ClientAppPlugin` | `src/client/app.rs` | Lobby UI, sensors/shields/navigation panels, tab bar, complexity UI, hideable elements |
 | `ShipViewPlugin` | `src/ship_view.rs` | `ShipView` resource — ship pose, red-alert, power levels, impulse |
-| `PhoneBorderPlugin` | `src/client/phone_border/framing.rs` | Diegetic phone bezel frame around all panels |
+| `PhoneBorderPlugin` | `src/client/phone_border/framing.rs` | Diegetic phone bezel frame around all panels. *Being replaced by an HTML/CSS bezel in `client.html` (issues #439–#442); both implementations coexist transitionally.* |
 | `CaptainPanelPlugin` | `src/client/phone_border/captain.rs` | View selector + Red Alert toggle |
 | `HelmPanelPlugin` | `src/helm_panel.rs` | Joystick, helm radar gizmo, "On Screen" button |
 | `WeaponsPanelPlugin` | `src/weapons_panel.rs` | Phaser / torpedo UI, weapons radar gizmo |

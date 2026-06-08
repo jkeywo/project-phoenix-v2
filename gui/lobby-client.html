@@ -523,6 +523,7 @@
         }
         case 'GameStarted': {
           state.phase = 'InProgress';
+          window.location.href = '../client/index.html#' + location.hash.slice(1);
           break;
         }
         case 'GameOver': {

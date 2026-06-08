@@ -431,6 +431,10 @@
     // Divide by zoom to widen the visible range when zoomed out
     var effectiveRange = range / Math.max(this._zoom, 0.001);
 
+    // Draw regions BEFORE entities — matches Bevy ZIndex ordering (regions=3, blips=10)
+    this._drawWorldSpaceRegions(ctx, cx, cy, R, data.regions || [],
+      shipX, shipZ, shipYaw, orientation, effectiveRange);
+
     var targetUuid     = data.target_uuid     || null;
     var objectiveUuids = data.objective_uuids || [];
     var self           = this;
@@ -503,6 +507,162 @@
         ctx.fillText(p.name, bx + dotR + 4, by + 4);
       }
     });
+  };
+
+  // ── Region shape rendering (Slice 4 / PRD #443) ─────────────────────────────
+  //
+  // Parity with Bevy `GenericRadarWidget` region rendering (src/gui/radar.rs).
+  // Draw order:  regions FIRST (before entity blips), inside the circle clip.
+  // Shape variants: 'sphere' | 'box' | 'torus'  (any other shape is skipped).
+  //
+  // Colour convention (matching Bevy):
+  //   Sphere fill:  region.color @ 0.30 alpha
+  //   Torus fill:   none (Color::NONE in Bevy)
+  //   Box fill:     region.color @ 0.30 alpha
+  //   All stroke:   region.color @ 1.00 alpha, 1.5 px
+
+  /**
+   * Project and draw all regions from the world-space data payload.
+   *
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} cx      Canvas centre X (pixels)
+   * @param {number} cy      Canvas centre Y (pixels)
+   * @param {number} R       Inscribed radar circle radius (canvas buffer pixels)
+   * @param {Array}  regions data.regions array (RadarRegion wire objects)
+   * @param {number} shipX   World X of radar origin (ship or world-centre)
+   * @param {number} shipZ   World Z of radar origin
+   * @param {number} shipYaw Ship heading in radians (ignored for world_fixed/world_centred)
+   * @param {string} orientation 'ship_relative' | 'world_fixed' | 'world_centred'
+   * @param {number} effectiveRange Effective range in world units (range / zoom)
+   */
+  RadarWidget.prototype._drawWorldSpaceRegions = function (
+    ctx, cx, cy, R, regions, shipX, shipZ, shipYaw, orientation, effectiveRange
+  ) {
+    var math = this._math;
+    if (!math || !regions || regions.length === 0) return;
+
+    var scale = R / Math.max(effectiveRange, 0.001);  // canvas pixels per world unit
+    var self  = this;
+
+    regions.forEach(function (region) {
+      // Project the region centre using the same pipeline as entity blips
+      var rp = math.worldToRadar(
+        region.x || 0, region.z || 0,
+        shipX, shipZ, shipYaw, orientation
+      );
+      var rx = rp.rx - (self._panX || 0);
+      var rz = rp.rz - (self._panZ || 0);
+      var sp = math.radarToScreen(rx, rz, effectiveRange, R);
+      var bx = cx + sp.sx;
+      var by = cy + sp.sy;
+
+      // Build CSS colour strings from [r, g, b] float array
+      var c   = region.color || [0.6, 0.4, 1.0];
+      var ri  = Math.round(c[0] * 255);
+      var gi  = Math.round(c[1] * 255);
+      var bi  = Math.round(c[2] * 255);
+      var fillColor   = 'rgba(' + ri + ',' + gi + ',' + bi + ',0.3)';
+      var strokeColor = 'rgb('  + ri + ',' + gi + ',' + bi + ')';
+
+      switch (region.shape) {
+        case 'sphere':
+          self._drawRegionSphere(ctx, bx, by,
+            region.radius || 0,
+            scale, fillColor, strokeColor);
+          break;
+        case 'torus':
+          self._drawRegionTorus(ctx, bx, by,
+            region.outer_radius != null ? region.outer_radius : (region.radius || 0),
+            region.inner_radius || 0,
+            scale, strokeColor);
+          break;
+        case 'box': {
+          var he = region.half_extents || [0, 0];
+          self._drawRegionBox(ctx, bx, by,
+            he[0] || 0, he[1] || 0,
+            scale, fillColor, strokeColor);
+          break;
+        }
+        // Unknown shape — skip (matches Bevy's `_ => None` in region_shape_from_snapshot)
+      }
+
+      // Optional name label — same style as entity blip labels
+      if (region.name) {
+        var labelOffset = Math.max(4,
+          (region.radius || (region.half_extents ? (region.half_extents[0] || 0) : 0)) * scale
+        ) + 4;
+        ctx.font      = '11px "JetBrains Mono", monospace';
+        ctx.fillStyle = 'rgba(153,255,217,0.9)';
+        ctx.fillText(region.name, bx + labelOffset, by + 4);
+      }
+    });
+  };
+
+  /**
+   * Sphere region: filled circle (Bevy: border-radius 50%, fill @ 0.3 alpha, stroke @ 1.0).
+   *
+   * Sizing (parity with Bevy `world_size_to_px`):
+   *   radius_px = clamp(worldRadius * scale, 4, R)
+   *   where scale = R / effectiveRange
+   */
+  RadarWidget.prototype._drawRegionSphere = function (ctx, bx, by, worldRadius, scale, fillColor, strokeColor) {
+    var r_px = Math.max(4, Math.min(worldRadius * scale, scale > 0 ? 1e9 : 4));
+    // Practical max = R (the whole radar) — no additional clamping needed since
+    // anything bigger than R will just be off-screen or fill the disc.
+    ctx.beginPath();
+    ctx.arc(bx, by, r_px, 0, Math.PI * 2);
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+  };
+
+  /**
+   * Torus region: annular ring (Bevy: transparent fill, full-alpha CSS border = ring width).
+   *
+   * Sizing:
+   *   outerR_px = clamp(worldOuterR * scale, 4, ∞)  — Bevy uses world_size_to_px clamping
+   *   innerR_px = max(0, worldInnerR * scale)        — Bevy: no world_size_to_px for inner
+   *   ringCenter = (outerR + innerR) / 2
+   *   ringWidth  = max(1, outerR - innerR)
+   */
+  RadarWidget.prototype._drawRegionTorus = function (ctx, bx, by, worldOuterR, worldInnerR, scale, strokeColor) {
+    var outerR_px    = Math.max(4, worldOuterR * scale);
+    var innerR_px    = Math.max(0, worldInnerR * scale);
+    // Prevent inner from exceeding outer (degenerate data guard)
+    if (innerR_px >= outerR_px) innerR_px = Math.max(0, outerR_px - 1);
+    var ringCenter   = (outerR_px + innerR_px) / 2;
+    var ringWidth    = Math.max(1, outerR_px - innerR_px);
+    ctx.beginPath();
+    ctx.arc(bx, by, ringCenter, 0, Math.PI * 2);
+    ctx.lineWidth   = ringWidth;
+    ctx.strokeStyle = strokeColor;
+    ctx.stroke();
+  };
+
+  /**
+   * Box region: axis-aligned filled rectangle (Bevy: yaw is present in data but
+   * currently hardcoded to 0 and ignored in the renderer — we match that behaviour
+   * for full visual parity).
+   *
+   * Sizing:
+   *   halfW_px = max(4, halfExtentX * scale)
+   *   halfH_px = max(4, halfExtentZ * scale)   (Z half-extent = height on radar)
+   */
+  RadarWidget.prototype._drawRegionBox = function (ctx, bx, by, worldHalfX, worldHalfZ, scale, fillColor, strokeColor) {
+    var halfW_px = Math.max(4, worldHalfX * scale);
+    var halfH_px = Math.max(4, worldHalfZ * scale);
+    ctx.save();
+    ctx.translate(bx, by);
+    // NOTE: yaw rotation intentionally omitted — matches Bevy's axis-aligned rendering.
+    // To add rotation in future: ctx.rotate(-(region.yaw || 0));
+    ctx.fillStyle = fillColor;
+    ctx.fillRect(-halfW_px, -halfH_px, halfW_px * 2, halfH_px * 2);
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth   = 1.5;
+    ctx.strokeRect(-halfW_px, -halfH_px, halfW_px * 2, halfH_px * 2);
+    ctx.restore();
   };
 
   // ── Shared drawing helpers ────────────────────────────────────────────────

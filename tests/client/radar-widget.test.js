@@ -2,7 +2,8 @@
  * tests/client/radar-widget.test.js
  *
  * Unit tests for gui/radar-widget.js — zoom/pan, gesture handlers,
- * auto-scale, and text-label features introduced in Slice 5b (#449).
+ * auto-scale, text-label features (Slice 5b / #449), and region shape
+ * rendering (PRD #443 parity with Bevy GenericRadarWidget).
  *
  * Runs in Node (vitest environment: 'node'), so we provide minimal fakes for:
  *   - requestAnimationFrame / cancelAnimationFrame
@@ -14,32 +15,40 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // ── Minimal canvas / context fakes ───────────────────────────────────────────
 
 function makeCtx() {
-  const drawn = { texts: [], arcs: [] };
-  return {
+  const drawn = { texts: [], arcs: [], fillRects: [], strokeRects: [], lineWidths: [], fillStyles: [], strokeStyles: [] };
+  const ctx = {
     _drawn: drawn,
     clearRect: () => {},
     beginPath: () => {},
     arc:  (...a) => drawn.arcs.push(a),
     fill:  () => {},
     stroke: () => {},
-    fillRect: () => {},
+    fillRect:   (...a) => drawn.fillRects.push(a),
+    strokeRect: (...a) => drawn.strokeRects.push(a),
     moveTo: () => {},
     lineTo: () => {},
     closePath: () => {},
     save: () => {},
     restore: () => {},
     clip: () => {},
+    translate: () => {},
+    rotate: () => {},
     drawImage: () => {},
     fillText: (text, x, y) => drawn.texts.push({ text, x, y }),
     measureText: () => ({ width: 50 }),
-    // setters for style properties
-    set fillStyle(_v) {},
-    set strokeStyle(_v) {},
-    set lineWidth(_v) {},
-    set font(_v) {},
-    set globalCompositeOperation(_v) {},
-    set globalAlpha(_v) {},
   };
+  // Track mutable style properties via backing store so tests can inspect them
+  let _fillStyle = '', _strokeStyle = '', _lineWidth = 1, _font = '';
+  let _gco = '', _ga = 1;
+  Object.defineProperties(ctx, {
+    fillStyle:   { get: () => _fillStyle,   set: v => { _fillStyle = v;   drawn.fillStyles.push(v);   }, enumerable: true },
+    strokeStyle: { get: () => _strokeStyle, set: v => { _strokeStyle = v; drawn.strokeStyles.push(v); }, enumerable: true },
+    lineWidth:   { get: () => _lineWidth,   set: v => { _lineWidth = v;   drawn.lineWidths.push(v);   }, enumerable: true },
+    font:        { get: () => _font,        set: v => { _font = v; },         enumerable: true },
+    globalCompositeOperation: { get: () => _gco, set: v => { _gco = v; }, enumerable: true },
+    globalAlpha: { get: () => _ga,  set: v => { _ga = v; },  enumerable: true },
+  });
+  return ctx;
 }
 
 function makeCanvas(w, h) {
@@ -512,6 +521,302 @@ describe('RadarWidget: _getBlipAt', () => {
     const blip = widget._getBlipAt(156, 150);
     expect(blip).not.toBeNull();
     expect(blip.uuid).toBe('b');
+    widget.destroy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Region shape rendering — _drawWorldSpaceRegions, _drawRegionSphere,
+// _drawRegionTorus, _drawRegionBox
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Minimal RadarMath stub for injection into widgets that need world-space rendering
+const MATH_STUB = {
+  worldToRadar:  (ex, ez, sx, sz, yaw, ori) => ({ rx: ex - sx, rz: sz - ez }),
+  radarToScreen: (rx, rz, range, R) => ({ sx: rx * R / range, sy: -rz * R / range }),
+  autoScaleRange: (pts) => 300,
+};
+
+function makeWidgetWithMath(opts) {
+  setupGlobals();
+  const canvas = makeCanvas(300, 300);
+  const widget = new RadarWidget(canvas, Object.assign({ math: MATH_STUB }, opts || {}));
+  return { widget, canvas, ctx: canvas._ctx };
+}
+
+describe('RadarWidget: _drawRegionSphere', () => {
+  afterEach(teardownGlobals);
+
+  it('draws an arc for a sphere region', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    const arcsBefore = ctx._drawn.arcs.length;
+    widget._drawRegionSphere(ctx, 150, 150, 50, 1.42, 'rgba(255,0,0,0.3)', 'rgb(255,0,0)');
+    // Should have called arc at least once
+    expect(ctx._drawn.arcs.length).toBeGreaterThan(arcsBefore);
+    widget.destroy();
+  });
+
+  it('uses a minimum radius of 4px', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.arcs = [];
+    // worldRadius=0.001 * scale=1 = 0.001 < 4 → clamped to 4
+    widget._drawRegionSphere(ctx, 150, 150, 0.001, 1, 'rgba(0,0,0,0.3)', 'rgb(0,0,0)');
+    const lastArc = ctx._drawn.arcs[ctx._drawn.arcs.length - 1];
+    expect(lastArc[2]).toBe(4);  // radius arg (index 2)
+    widget.destroy();
+  });
+
+  it('scales radius correctly: worldRadius * scale', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.arcs = [];
+    // worldRadius=50, scale=1.0 → 50px; above minimum of 4
+    widget._drawRegionSphere(ctx, 150, 150, 50, 1.0, 'rgba(0,0,0,0.3)', 'rgb(0,0,0)');
+    const lastArc = ctx._drawn.arcs[ctx._drawn.arcs.length - 1];
+    expect(lastArc[2]).toBeCloseTo(50);
+    widget.destroy();
+  });
+
+  it('draws fill at 0.3 alpha and stroke at full alpha', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.fillStyles = [];
+    ctx._drawn.strokeStyles = [];
+    widget._drawRegionSphere(ctx, 0, 0, 20, 1, 'rgba(200,100,50,0.3)', 'rgb(200,100,50)');
+    expect(ctx._drawn.fillStyles.some(s => s.includes('0.3'))).toBe(true);
+    expect(ctx._drawn.strokeStyles.some(s => s.startsWith('rgb('))).toBe(true);
+    widget.destroy();
+  });
+});
+
+describe('RadarWidget: _drawRegionTorus', () => {
+  afterEach(teardownGlobals);
+
+  it('draws an arc for the ring', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.arcs = [];
+    widget._drawRegionTorus(ctx, 150, 150, 60, 30, 1.0, 'rgb(100,150,200)');
+    expect(ctx._drawn.arcs.length).toBeGreaterThan(0);
+    widget.destroy();
+  });
+
+  it('ring centre is at (outerR + innerR) / 2', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.arcs = [];
+    // outerR=60, innerR=30 → ringCenter=45
+    widget._drawRegionTorus(ctx, 150, 150, 60, 30, 1.0, 'rgb(0,0,0)');
+    const arc = ctx._drawn.arcs[0];
+    expect(arc[2]).toBeCloseTo(45);  // radius = ringCenter
+    widget.destroy();
+  });
+
+  it('lineWidth = outerR - innerR', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.lineWidths = [];
+    // outerR=60, innerR=30 → ringWidth=30
+    widget._drawRegionTorus(ctx, 150, 150, 60, 30, 1.0, 'rgb(0,0,0)');
+    expect(ctx._drawn.lineWidths).toContain(30);
+    widget.destroy();
+  });
+
+  it('clamps minimum ring width to 1px', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.lineWidths = [];
+    // outerR=5, innerR=4.9 → ringWidth=0.1 → clamped to 1
+    widget._drawRegionTorus(ctx, 150, 150, 5, 4.9, 1.0, 'rgb(0,0,0)');
+    const minLw = Math.min(...ctx._drawn.lineWidths.filter(v => v > 0));
+    expect(minLw).toBeGreaterThanOrEqual(1);
+    widget.destroy();
+  });
+
+  it('handles degenerate torus where inner >= outer without throwing', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    expect(() => widget._drawRegionTorus(ctx, 150, 150, 10, 50, 1.0, 'rgb(0,0,0)')).not.toThrow();
+    widget.destroy();
+  });
+
+  it('uses no fill (no fillRect / no fill style applied for torus)', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.fillRects = [];
+    ctx._drawn.fillStyles = [];
+    widget._drawRegionTorus(ctx, 150, 150, 60, 20, 1.0, 'rgb(0,0,0)');
+    // Torus is stroke-only — no fillRect and fillStyle should not be set
+    expect(ctx._drawn.fillRects).toHaveLength(0);
+    // fillStyle should not have been set by torus (Bevy: Color::NONE fill)
+    expect(ctx._drawn.fillStyles).toHaveLength(0);
+    widget.destroy();
+  });
+});
+
+describe('RadarWidget: _drawRegionBox', () => {
+  afterEach(teardownGlobals);
+
+  it('calls fillRect and strokeRect', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.fillRects = [];
+    ctx._drawn.strokeRects = [];
+    widget._drawRegionBox(ctx, 150, 150, 40, 30, 1.0, 'rgba(0,255,0,0.3)', 'rgb(0,255,0)');
+    expect(ctx._drawn.fillRects.length).toBeGreaterThan(0);
+    expect(ctx._drawn.strokeRects.length).toBeGreaterThan(0);
+    widget.destroy();
+  });
+
+  it('rect is centred: fillRect args are (-halfW, -halfH, 2*halfW, 2*halfH)', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.fillRects = [];
+    // worldHalfX=40, worldHalfZ=30, scale=1 → halfW=40, halfH=30
+    widget._drawRegionBox(ctx, 150, 150, 40, 30, 1.0, 'rgba(0,0,0,0.3)', 'rgb(0,0,0)');
+    const fr = ctx._drawn.fillRects[0];
+    expect(fr[0]).toBeCloseTo(-40);   // x
+    expect(fr[1]).toBeCloseTo(-30);   // y
+    expect(fr[2]).toBeCloseTo(80);    // width = 2*halfW
+    expect(fr[3]).toBeCloseTo(60);    // height = 2*halfH
+    widget.destroy();
+  });
+
+  it('scales half-extents by scale factor', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.fillRects = [];
+    // worldHalfX=10, scale=3.0 → halfW=30
+    widget._drawRegionBox(ctx, 150, 150, 10, 5, 3.0, 'rgba(0,0,0,0.3)', 'rgb(0,0,0)');
+    const fr = ctx._drawn.fillRects[0];
+    expect(fr[0]).toBeCloseTo(-30);   // -halfW = -10*3
+    expect(fr[1]).toBeCloseTo(-15);   // -halfH = -5*3
+    widget.destroy();
+  });
+
+  it('uses a minimum half-size of 4px', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.fillRects = [];
+    // worldHalfX=0.001, scale=1 → halfW=0.001 < 4 → clamped to 4
+    widget._drawRegionBox(ctx, 150, 150, 0.001, 0.001, 1, 'rgba(0,0,0,0.3)', 'rgb(0,0,0)');
+    const fr = ctx._drawn.fillRects[0];
+    expect(fr[0]).toBeCloseTo(-4);
+    widget.destroy();
+  });
+
+  it('draws fill at 0.3 alpha', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.fillStyles = [];
+    widget._drawRegionBox(ctx, 0, 0, 20, 20, 1, 'rgba(255,128,0,0.3)', 'rgb(255,128,0)');
+    expect(ctx._drawn.fillStyles.some(s => s.includes('0.3'))).toBe(true);
+    widget.destroy();
+  });
+});
+
+describe('RadarWidget: _drawWorldSpaceRegions projection', () => {
+  afterEach(teardownGlobals);
+
+  it('does nothing when regions array is empty', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.arcs = [];
+    ctx._drawn.fillRects = [];
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [], 0, 0, 0, 'ship_relative', 300);
+    expect(ctx._drawn.arcs).toHaveLength(0);
+    expect(ctx._drawn.fillRects).toHaveLength(0);
+    widget.destroy();
+  });
+
+  it('does nothing when math is not set', () => {
+    setupGlobals();
+    const canvas = makeCanvas(300, 300);
+    const widget = new RadarWidget(canvas, {});  // no math injected, no window.RadarMath
+    const ctx = canvas._ctx;
+    ctx._drawn.arcs = [];
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r1', x: 0, z: 0, shape: 'sphere', radius: 50, color: [1, 0, 0] },
+    ], 0, 0, 0, 'ship_relative', 300);
+    expect(ctx._drawn.arcs).toHaveLength(0);
+    widget.destroy();
+  });
+
+  it('sphere: draws arc at projected position', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.arcs = [];
+    // Ship at origin, entity at (10, 0) → projected offset
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r1', x: 10, z: 0, shape: 'sphere', radius: 20, color: [1, 0, 0] },
+    ], 0, 0, 0, 'ship_relative', 100);
+    const arc = ctx._drawn.arcs.find(a => a[2] > 4);  // find the sphere arc
+    expect(arc).toBeDefined();
+    // x-offset should be non-zero (entity is to starboard)
+    // arc[0] = cx + sx where sx = (10-0)*142/100 = 14.2, so arc[0] ≈ 150+14.2 = 164.2
+    expect(arc[0]).toBeGreaterThan(150);
+    widget.destroy();
+  });
+
+  it('torus: draws ring at projected position', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.arcs = [];
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r2', x: 0, z: 0, shape: 'torus', radius: 80, inner_radius: 40, outer_radius: 80, color: [0, 1, 0] },
+    ], 0, 0, 0, 'ship_relative', 200);
+    expect(ctx._drawn.arcs.length).toBeGreaterThan(0);
+    widget.destroy();
+  });
+
+  it('box: draws fillRect at projected position', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.fillRects = [];
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r3', x: 0, z: 0, shape: 'box', half_extents: [30, 20], color: [0, 0, 1] },
+    ], 0, 0, 0, 'ship_relative', 100);
+    expect(ctx._drawn.fillRects.length).toBeGreaterThan(0);
+    widget.destroy();
+  });
+
+  it('unknown shape is silently skipped', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.arcs = [];
+    ctx._drawn.fillRects = [];
+    expect(() => widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r4', x: 0, z: 0, shape: 'cylinder', radius: 10, color: [1, 1, 0] },
+    ], 0, 0, 0, 'ship_relative', 100)).not.toThrow();
+    expect(ctx._drawn.arcs).toHaveLength(0);
+    expect(ctx._drawn.fillRects).toHaveLength(0);
+    widget.destroy();
+  });
+
+  it('renders region name label when name is set', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.texts = [];
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r5', x: 0, z: 0, shape: 'sphere', radius: 30, color: [1, 0, 0], name: 'Danger Zone' },
+    ], 0, 0, 0, 'ship_relative', 100);
+    const label = ctx._drawn.texts.find(t => t.text === 'Danger Zone');
+    expect(label).toBeDefined();
+    widget.destroy();
+  });
+
+  it('does not render label when name is absent', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    ctx._drawn.texts = [];
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r6', x: 0, z: 0, shape: 'sphere', radius: 30, color: [1, 0, 0] },
+    ], 0, 0, 0, 'ship_relative', 100);
+    expect(ctx._drawn.texts).toHaveLength(0);
+    widget.destroy();
+  });
+
+  it('pan offset is applied to region positions', () => {
+    const { widget, ctx } = makeWidgetWithMath();
+    // Without pan
+    ctx._drawn.arcs = [];
+    widget.setPan(0, 0);
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r7', x: 50, z: 0, shape: 'sphere', radius: 5, color: [1, 1, 1] },
+    ], 0, 0, 0, 'ship_relative', 100);
+    const arcNoPan = ctx._drawn.arcs[0];
+
+    // With pan (shift region left by 50 world units → back to centre)
+    ctx._drawn.arcs = [];
+    widget.setPan(50, 0);
+    widget._drawWorldSpaceRegions(ctx, 150, 150, 142, [
+      { uuid: 'r7', x: 50, z: 0, shape: 'sphere', radius: 5, color: [1, 1, 1] },
+    ], 0, 0, 0, 'ship_relative', 100);
+    const arcWithPan = ctx._drawn.arcs[0];
+
+    // With pan=50, region at x=50 lands at same position as region at x=0 with pan=0
+    expect(arcWithPan[0]).toBeCloseTo(150, 0);
+    expect(arcNoPan[0]).toBeGreaterThan(150);
     widget.destroy();
   });
 });

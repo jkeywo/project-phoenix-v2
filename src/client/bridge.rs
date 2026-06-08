@@ -64,6 +64,11 @@ thread_local! {
     /// `wasm_client_init` so the Bevy UI can evaluate pop-up/dropdown
     /// state on first frame.
     static COMPLEXITY_PRESETS: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// Optional JS callback for world-space radar updates.
+    /// Signature: `callback(console_id: string, json: string)`.
+    /// Registered by JS via `set_radar_update_callback`.
+    static RADAR_UPDATE_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
 }
 
 // ── Placeholder plugin ─────────────────────────────────────────────────────
@@ -174,6 +179,48 @@ pub fn wasm_client_set_active_console(console: &str) {
 pub fn set_client_send_callback(callback: Function) {
     OUTBOUND_CB.with(|slot| {
         *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Register a JS callback to receive world-space radar data payloads.
+///
+/// Signature expected from JS: `callback(console_id: string, json: string)`.
+/// The host page calls this once on load; subsequently `wasm_client_update_radar`
+/// routes payloads through this callback to the appropriate `RadarWidget`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn set_radar_update_callback(callback: Function) {
+    RADAR_UPDATE_CB.with(|slot| {
+        *slot.borrow_mut() = Some(callback);
+    });
+}
+
+/// Called by JS to push world-space entity data directly to a console's
+/// `RadarWidget` without going through the Bevy `ServerMessage` pipeline.
+///
+/// `console_id` identifies the target console (e.g. `"tactical"`, `"helm"`).
+/// `json` is a JSON string matching the `RadarWidget` world-space data format
+/// (see PRD #443 — `mode: 'world-space'`).
+///
+/// The host page (client.html) calls this whenever it wants a console's HTML
+/// radar to render world-space entity positions client-side (as opposed to the
+/// pre-projected blip path that goes through `ConsoleStateChanged`).
+///
+/// Implementation note: this export intentionally does **not** decode the JSON
+/// through `JsonCodec` — it passes the raw string to JS via a registered JS
+/// callback so the console HTML can call `widget.update(JSON.parse(json))`.
+/// The bridge stores the raw string in a thread-local keyed by `console_id`.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_client_update_radar(console_id: &str, json: &str) {
+    RADAR_UPDATE_CB.with(|slot| {
+        if let Some(cb) = slot.borrow().as_ref() {
+            let _ = cb.call2(
+                &wasm_bindgen::JsValue::NULL,
+                &wasm_bindgen::JsValue::from_str(console_id),
+                &wasm_bindgen::JsValue::from_str(json),
+            );
+        }
     });
 }
 

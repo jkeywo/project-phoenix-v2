@@ -1105,6 +1105,61 @@ pub struct RadarBlip {
     /// `"station"`, or `"unknown"`. Drives blip colour / icon in the HTML
     /// radar renderer.
     pub kind: String,
+    /// PNG icon name resolved from `EntitySnapshot::radar_icon` or from entity
+    /// tags.  One of `"ship"`, `"player"`, `"asteroid"`, `"station"`,
+    /// `"planet"`, `"star"`, `"torpedo"`, `"unknown"`.
+    /// Introduced in issue #445 — `#[serde(default)]` for backwards compat.
+    #[serde(default)]
+    pub icon: String,
+    /// RGB colour tint in `[0.0, 1.0]` range, sourced from
+    /// `EntitySnapshot::colour` or per-icon default.
+    #[serde(default)]
+    pub color: [f32; 3],
+    /// True when this entity is referenced by an active mission objective.
+    /// The radar draws a gold ring around such blips.
+    #[serde(default)]
+    pub objective_target: bool,
+    /// Display name from the entity TOML (`EntitySnapshot::name`).
+    /// `None` for unnamed entities such as asteroids.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Region shape descriptor for the HTML tactical radar.
+///
+/// Built server-side from `WorldResource` entities that carry a `shape` field
+/// (sphere, box, or torus).  Used by `RadarWidget` to draw coloured overlays
+/// for gameplay zones.  Introduced in issue #445.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct RadarRegion {
+    pub uuid: String,
+    /// World-space X of the region centre.
+    pub x: f32,
+    /// World-space Z of the region centre.
+    pub z: f32,
+    /// Shape type: `"sphere"` | `"box"` | `"torus"`.
+    pub shape: String,
+    /// Sphere / torus outer radius in world units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f32>,
+    /// Torus inner radius (hole).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner_radius: Option<f32>,
+    /// Torus outer radius (alias, same as `radius` for torus shapes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outer_radius: Option<f32>,
+    /// Box half-extents `[x, z]` in world units (Y is ignored on the radar).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub half_extents: Option<[f32; 2]>,
+    /// Rotation around the world-up axis in radians (for box regions).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yaw: Option<f32>,
+    /// RGB colour tint in `[0.0, 1.0]` range.
+    #[serde(default)]
+    pub color: [f32; 3],
+    /// Optional display name shown as a label on the radar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Serialised Tactical (Weapons) console state pushed to the HTML console
@@ -1129,6 +1184,11 @@ pub struct WeaponsConsoleState {
     /// ±1.0 = effective range boundary.
     #[serde(default)]
     pub blips: Vec<RadarBlip>,
+    /// Region shape descriptors for all world entities that carry a `shape`
+    /// field.  Used by `RadarWidget` to draw zone overlays.
+    /// Introduced in issue #445 — `#[serde(default)]` for backwards compat.
+    #[serde(default)]
+    pub regions: Vec<RadarRegion>,
 }
 
 /// A console action decoded from the `window.__sendAction` envelope

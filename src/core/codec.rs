@@ -2260,8 +2260,126 @@ mod tests {
             phaser_arcs: Vec::new(),
             torpedo_arcs: Vec::new(),
             blips: Vec::new(),
+            regions: Vec::new(),
         };
         let json = encode_console_state(&state).expect("encode console");
+        let decoded: WeaponsConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn radar_blip_with_new_fields_round_trips() {
+        use crate::messages::RadarBlip;
+        let blip = RadarBlip {
+            uuid: "abc-123".into(),
+            radar_x: 0.5,
+            radar_y: -0.3,
+            scaled_radius: 0.02,
+            kind: "ship".into(),
+            icon: "ship".into(),
+            color: [1.0, 0.502, 0.376],
+            objective_target: true,
+            name: Some("Pirate Raider".into()),
+        };
+        let json = serde_json::to_string(&blip).unwrap();
+        let decoded: RadarBlip = serde_json::from_str(&json).unwrap();
+        assert_eq!(blip, decoded);
+        assert!(json.contains("\"icon\":\"ship\""), "got: {json}");
+        assert!(json.contains("\"objective_target\":true"), "got: {json}");
+        assert!(json.contains("\"name\":\"Pirate Raider\""), "got: {json}");
+    }
+
+    #[test]
+    fn radar_blip_new_fields_default_when_absent() {
+        use crate::messages::RadarBlip;
+        // JSON without the new fields (as emitted by pre-#445 server)
+        let json = r#"{"uuid":"old-uuid","radar_x":0.1,"radar_y":0.2,"scaled_radius":0.01,"kind":"asteroid"}"#;
+        let blip: RadarBlip = serde_json::from_str(json).unwrap();
+        assert_eq!(blip.icon, "");
+        assert_eq!(blip.color, [0.0, 0.0, 0.0]);
+        assert!(!blip.objective_target);
+        assert!(blip.name.is_none());
+    }
+
+    #[test]
+    fn radar_region_round_trips() {
+        use crate::messages::RadarRegion;
+        let region = RadarRegion {
+            uuid: "region-1".into(),
+            x: 100.0,
+            z: -200.0,
+            shape: "sphere".into(),
+            radius: Some(50.0),
+            inner_radius: None,
+            outer_radius: Some(50.0),
+            half_extents: None,
+            yaw: None,
+            color: [1.0, 0.0, 0.0],
+            name: Some("Danger Zone".into()),
+        };
+        let json = serde_json::to_string(&region).unwrap();
+        let decoded: RadarRegion = serde_json::from_str(&json).unwrap();
+        assert_eq!(region, decoded);
+    }
+
+    #[test]
+    fn radar_region_box_round_trips() {
+        use crate::messages::RadarRegion;
+        let region = RadarRegion {
+            uuid: "region-box".into(),
+            x: 0.0,
+            z: 0.0,
+            shape: "box".into(),
+            radius: None,
+            inner_radius: None,
+            outer_radius: None,
+            half_extents: Some([40.0, 30.0]),
+            yaw: Some(0.785),
+            color: [0.0, 1.0, 0.5],
+            name: None,
+        };
+        let json = serde_json::to_string(&region).unwrap();
+        let decoded: RadarRegion = serde_json::from_str(&json).unwrap();
+        assert_eq!(region, decoded);
+    }
+
+    #[test]
+    fn weapons_console_state_with_regions_round_trips() {
+        use crate::messages::{RadarBlip, RadarRegion, WeaponsConsoleState};
+        let state = WeaponsConsoleState {
+            target_uuid: None,
+            banks: Vec::new(),
+            tubes: Vec::new(),
+            torpedo_count: 0,
+            phaser_mode: PhaserMode::Auto,
+            phaser_arcs: Vec::new(),
+            torpedo_arcs: Vec::new(),
+            blips: vec![RadarBlip {
+                uuid: "ent-1".into(),
+                radar_x: 0.2,
+                radar_y: 0.4,
+                scaled_radius: 0.05,
+                kind: "asteroid".into(),
+                icon: "asteroid".into(),
+                color: [0.478, 0.753, 1.0],
+                objective_target: false,
+                name: None,
+            }],
+            regions: vec![RadarRegion {
+                uuid: "zone-1".into(),
+                x: 50.0,
+                z: 50.0,
+                shape: "torus".into(),
+                radius: Some(80.0),
+                inner_radius: Some(20.0),
+                outer_radius: Some(80.0),
+                half_extents: None,
+                yaw: None,
+                color: [0.5, 0.2, 1.0],
+                name: Some("Ion Storm".into()),
+            }],
+        };
+        let json = encode_console_state(&state).expect("encode");
         let decoded: WeaponsConsoleState = serde_json::from_str(&json).unwrap();
         assert_eq!(state, decoded);
     }

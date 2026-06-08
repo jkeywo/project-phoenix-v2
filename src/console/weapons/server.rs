@@ -5,8 +5,8 @@ use crate::console_bridge::ConsoleStateChanged;
 use crate::lobby::{InboundMessage, Target, Sessions, WorldResource};
 use crate::messages::{
     ClientMessage, Console, GamePhase, ModifierSlot, PhaserBank, PhaserBankClientConfig,
-    PhaserBankState, RadarBlip, ServerMessage, TorpedoTubeClientConfig, TorpedoTubeState,
-    WeaponsConsoleState,
+    PhaserBankState, RadarBlip, RadarRegion, ServerMessage, TorpedoTubeClientConfig,
+    TorpedoTubeState, WeaponsConsoleState,
 };
 use crate::simulation::{AsteroidUuid, GameOverReason, Ship, ShipHullIntegrity, ShipShields, SimOutbox};
 use crate::entity_spawner::EntityConsoleHull;
@@ -1164,6 +1164,7 @@ fn spawn_weapons_console_state_entity(mut commands: Commands) {
         phaser_arcs: Vec::new(),
         torpedo_arcs: Vec::new(),
         blips: Vec::new(),
+        regions: Vec::new(),
     }));
 }
 
@@ -1176,6 +1177,10 @@ fn spawn_weapons_console_state_entity(mut commands: Commands) {
 ///
 /// Positions are normalised to `[-1.0, 1.0]` where ±1.0 = `effective_range`.
 /// The projection is ship-centred and ship-aligned (forward = +radar_y = up).
+///
+/// `meta` supplies the full [`EntitySnapshot`] for richer blip data
+/// (icon name, colour tint, objective flag, display name). Pass `None`
+/// for dynamically-spawned entities not yet in `WorldResource`.
 fn project_blip(
     uuid: &str,
     wx: f32,
@@ -1184,10 +1189,12 @@ fn project_blip(
     ship_z: f32,
     ship_yaw: f32,
     effective_range: f32,
-    raw_tags: &[String],
+    meta: Option<&crate::messages::EntitySnapshot>,
     shows: &[crate::entity_tags::EntityTag],
-    radius: f32,
 ) -> Option<RadarBlip> {
+    let raw_tags: &[String] = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
+    let radius: f32 = meta.and_then(|e| e.radius).unwrap_or(0.0);
+
     let entity_tags = crate::entity_tags::parse_tags(raw_tags);
     if !crate::entity_tags::matches_any(&entity_tags, shows) {
         return None;
@@ -1215,13 +1222,60 @@ fn project_blip(
         })
         .unwrap_or("unknown")
         .to_string();
+
+    // Resolve icon name: prefer explicit `radar_icon` from snapshot, else
+    // derive from tags the same way `kind` does but with finer granularity
+    // (planet, star, torpedo).
+    let icon = meta
+        .and_then(|e| e.radar_icon.as_deref())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            entity_tags
+                .iter()
+                .find_map(|t| match t {
+                    crate::entity_tags::EntityTag::Asteroid => Some("asteroid"),
+                    crate::entity_tags::EntityTag::Ship => Some("ship"),
+                    crate::entity_tags::EntityTag::Station => Some("station"),
+                    _ => None,
+                })
+                .unwrap_or("unknown")
+                .to_string()
+        });
+
+    // Colour: from snapshot or per-icon default (matches JS KIND_COLOR).
+    let color: [f32; 3] = meta
+        .and_then(|e| e.colour)
+        .unwrap_or_else(|| blip_default_color(&icon));
+
+    let objective_target = meta.map(|e| e.objective_target).unwrap_or(false);
+    let name = meta.and_then(|e| e.name.clone());
+
     Some(RadarBlip {
         uuid: uuid.to_string(),
         radar_x,
         radar_y,
         scaled_radius,
         kind,
+        icon,
+        color,
+        objective_target,
+        name,
     })
+}
+
+/// Default RGB colour tint for a blip when the entity snapshot carries no
+/// explicit colour.  Mirrors the `KIND_COLOR` palette in `radar-widget.js`.
+fn blip_default_color(icon: &str) -> [f32; 3] {
+    match icon {
+        "asteroid" => [0.478, 0.753, 1.0],    // #7ac0ff
+        "ship"     => [1.0, 0.502, 0.376],    // #ff8060
+        "station"  => [1.0, 0.878, 0.376],    // #ffe060
+        "torpedo"  => [1.0, 0.376, 1.0],      // #ff60ff
+        "planet"   => [0.376, 1.0, 0.753],    // #60ffc0
+        "star"     => [1.0, 0.980, 0.753],    // #fffac0
+        "player"   => [0.424, 0.714, 0.816],  // #6cb6d0
+        _          => [0.659, 0.690, 0.753],  // #a8b0c0 unknown
+    }
 }
 
 /// Recompute the Tactical console state from the same resources as
@@ -1348,32 +1402,28 @@ fn recompute_weapons_console_state(
     if !shows.is_empty() && effective_tactical_range > 0.0 {
         // Asteroids
         for (uuid_comp, transform) in asteroid_q.iter() {
-            let meta = entity_meta.get(uuid_comp.0.as_str());
-            let raw_tags = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
-            let radius = meta.and_then(|e| e.radius).unwrap_or(0.0);
+            let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
             if let Some(b) = project_blip(
                 &uuid_comp.0,
                 transform.translation.x,
                 transform.translation.z,
                 ship.x, ship.z, ship.yaw,
                 effective_tactical_range,
-                raw_tags, &shows, radius,
+                meta, &shows,
             ) {
                 blips.push(b);
             }
         }
         // Generic entities (NPC ships, stations, torpedoes, etc.)
         for (uuid_comp, transform) in entity_q.iter() {
-            let meta = entity_meta.get(uuid_comp.0.as_str());
-            let raw_tags = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
-            let radius = meta.and_then(|e| e.radius).unwrap_or(0.0);
+            let meta = entity_meta.get(uuid_comp.0.as_str()).copied();
             if let Some(b) = project_blip(
                 &uuid_comp.0,
                 transform.translation.x,
                 transform.translation.z,
                 ship.x, ship.z, ship.yaw,
                 effective_tactical_range,
-                raw_tags, &shows, radius,
+                meta, &shows,
             ) {
                 blips.push(b);
             }
@@ -1386,6 +1436,28 @@ fn recompute_weapons_console_state(
     let phaser_arcs: Vec<PhaserBankClientConfig> = ship_config.0.phaser_banks.clone();
     let torpedo_arcs: Vec<TorpedoTubeClientConfig> = ship_config.0.torpedo_tubes.clone();
 
+    // ── Region shapes ──────────────────────────────────────────────────────
+    // Collect all world entities that carry a shape field so the HTML radar
+    // widget can draw coloured zone overlays.
+    let regions: Vec<RadarRegion> = world_res.0.entities.iter()
+        .filter_map(|e| {
+            let shape = e.shape.as_deref()?;
+            Some(RadarRegion {
+                uuid: e.uuid.clone(),
+                x: e.x(),
+                z: e.z(),
+                shape: shape.to_string(),
+                radius: e.radius,
+                inner_radius: e.inner_radius,
+                outer_radius: e.radius,   // torus: outer == radius
+                half_extents: e.half_extents.map(|h| [h[0], h[2]]),
+                yaw: e.yaw,
+                color: e.colour.unwrap_or([0.6, 0.4, 1.0]),
+                name: e.name.clone(),
+            })
+        })
+        .collect();
+
     let next = WeaponsConsoleState {
         target_uuid,
         banks,
@@ -1395,6 +1467,7 @@ fn recompute_weapons_console_state(
         phaser_arcs,
         torpedo_arcs,
         blips,
+        regions,
     };
 
     for mut comp in comp_q.iter_mut() {
@@ -2777,6 +2850,7 @@ mod tests {
                 phaser_arcs: Vec::new(),
                 torpedo_arcs: Vec::new(),
                 blips: Vec::new(),
+                regions: Vec::new(),
             };
         }
         app.update();

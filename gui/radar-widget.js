@@ -98,6 +98,7 @@
 
     // Icon images pre-loaded in Slice 2 (#446)
     this._icons = {};
+    this._loadIcons();
 
     // Enable pointer events so tap-to-lock works.
     // The console CSS may set pointer-events:none on .radar canvas; we override.
@@ -343,28 +344,31 @@
       var bx = cx + b.radar_x * R;
       var by = cy - b.radar_y * R;
       var isTarget    = targetUuid && targetUuid === b.uuid;
-      var isObjective = objectiveUuids.indexOf(b.uuid) !== -1;
+      var isObjective = b.objective_target || objectiveUuids.indexOf(b.uuid) !== -1;
       var dotR = Math.max(MIN_BLIP_PX / 2, (b.scaled_radius || 0) * R * 0.6);
 
-      // Objective gold ring (behind blip)
+      // Objective gold ring (drawn behind blip)
       if (isObjective) {
-        self._drawRing(ctx, bx, by, 12, 2, '#d4a820', false);
+        self._drawRing(ctx, bx, by, dotR + 6, 2, '#d4a820', false);
       }
 
-      // Try PNG icon; fall back to colored circle
-      var icon = self._icons[b.icon || b.kind];
-      if (icon && icon.complete && icon.naturalWidth > 0) {
-        var iconSize = dotR * 2;
-        ctx.drawImage(icon, bx - dotR, by - dotR, iconSize, iconSize);
+      // Blip: PNG icon or colored circle fallback
+      var iconName = b.icon || b.kind;
+      var icon = self._icons[iconName];
+      var iconLoaded = icon && icon.complete && icon.naturalWidth > 0;
+
+      if (iconLoaded) {
+        self._drawIconBlip(ctx, icon, bx, by, dotR, b.color);
       } else {
-        var color = isTarget ? '#ff3344' : (KIND_COLOR[b.kind] || KIND_COLOR.unknown);
+        // Colored circle fallback
+        var color = KIND_COLOR[b.kind] || KIND_COLOR.unknown;
         ctx.beginPath();
         ctx.arc(bx, by, dotR, 0, Math.PI * 2);
         ctx.fillStyle = color;
         ctx.fill();
       }
 
-      // Target highlight ring (red, on top)
+      // Target highlight ring (red, drawn on top)
       if (isTarget) {
         self._drawRing(ctx, bx, by, dotR + 7, 2, '#ff3344', true);
       }
@@ -383,6 +387,41 @@
   };
 
   // ── Shared drawing helpers ────────────────────────────────────────────────
+
+  /**
+   * Draw a PNG icon blip at (bx, by) with radius dotR, applying a colour tint
+   * from the entity's `color` field ([r, g, b] in 0–1 range).
+   *
+   * Tinting uses `source-atop` compositing: the icon is drawn first, then a
+   * filled coloured rectangle is overlaid only where the icon has pixels,
+   * at low opacity so the icon's own shading is still visible.
+   */
+  RadarWidget.prototype._drawIconBlip = function (ctx, icon, bx, by, dotR, color) {
+    ctx.save();
+    // Circular clip so the icon and tint stay within the blip circle
+    ctx.beginPath();
+    ctx.arc(bx, by, dotR, 0, Math.PI * 2);
+    ctx.clip();
+
+    var size = dotR * 2;
+    ctx.drawImage(icon, bx - dotR, by - dotR, size, size);
+
+    // Apply colour tint at 30% opacity using source-atop (paints only on
+    // existing opaque pixels from the icon above)
+    if (color && (color[0] !== 0 || color[1] !== 0 || color[2] !== 0)) {
+      var r = Math.round(color[0] * 255);
+      var g = Math.round(color[1] * 255);
+      var b = Math.round(color[2] * 255);
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+      ctx.fillRect(bx - dotR, by - dotR, size, size);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
+    }
+
+    ctx.restore();
+  };
 
   /**
    * Draw a decorative ring around a blip.
@@ -432,11 +471,13 @@
   // ── Icon loading (activated by Slice 2 / #446) ────────────────────────────
 
   /**
-   * Pre-load all 7 blip icon PNGs.  Called once, usually from constructor
-   * after base setup is done (Slice 2 wires this in).
+   * Pre-load all 7 blip icon PNGs in parallel.  Falls back gracefully when
+   * the Image constructor is unavailable (e.g. Node.js test environment) or
+   * when the PNG file does not exist (image.naturalWidth === 0 at render time).
    */
   RadarWidget.prototype._loadIcons = function () {
     var self = this;
+    if (typeof Image === 'undefined') return;  // non-browser (test) environment
     Object.keys(ICON_STEMS).forEach(function (key) {
       var img = new Image();
       img.src = self._iconBasePath + ICON_STEMS[key] + '.png';

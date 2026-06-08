@@ -13,7 +13,7 @@
 use bevy::prelude::*;
 
 use crate::client::console_shell::ConsoleShell;
-use crate::client_app::OutboundClientMessage;
+use crate::client_app::{ClientSet, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
@@ -137,7 +137,7 @@ impl Plugin for NavigationPanelPlugin {
             Update,
             (
                 spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
-                toggle_navigation_panel_visibility,
+                toggle_navigation_panel_visibility.in_set(ClientSet::ConsoleUpdate),
                 refresh_navigation_panel,
                 respawn_navigation_on_orientation_change,
                 bridge_client_sim_to_nav_radar,

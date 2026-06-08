@@ -17,7 +17,7 @@
 use bevy::prelude::*;
 
 use crate::client::console_shell::ConsoleShell;
-use crate::client_app::OutboundClientMessage;
+use crate::client_app::{ClientSet, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
@@ -186,7 +186,7 @@ impl Plugin for ShieldsPanelPlugin {
             Update,
             (
                 spawn_shields_ui.run_if(not(resource_exists::<ShieldsPanelSpawned>)),
-                toggle_shields_panel_visibility,
+                toggle_shields_panel_visibility.in_set(ClientSet::ConsoleUpdate),
                 refresh_shields_panel,
                 handle_clear_focus_press,
                 respawn_shields_on_orientation_change,

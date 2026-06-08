@@ -14,7 +14,7 @@ use crate::client::console_shell::ConsoleShell;
 use crate::client_app::{
     WeaponsPanel, OutboundClientMessage, RepairIconLabel,
     HideableElement, ComplexityPopupRoot, ComplexityPresetButton, ComplexityPopupConfirm,
-    ComplexityDropdownRoot,
+    ComplexityDropdownRoot, ClientSet,
 };
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::{
@@ -197,7 +197,7 @@ impl Plugin for WeaponsPanelPlugin {
             .init_resource::<SelectedTube>()
             .add_systems(Update, (
                 spawn_weapons_ui.run_if(not(resource_exists::<WeaponsPanelSpawned>)),
-                toggle_weapons_panel_visibility,
+                toggle_weapons_panel_visibility.in_set(ClientSet::ConsoleUpdate),
                 add_tube_button_labels,
                 refresh_weapons_panel,
                 sync_fire_phaser_disabled,

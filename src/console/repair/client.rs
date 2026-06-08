@@ -11,7 +11,7 @@
 use bevy::prelude::*;
 
 use crate::client::console_shell::ConsoleShell;
-use crate::client_app::OutboundClientMessage;
+use crate::client_app::{ClientSet, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
@@ -259,7 +259,7 @@ impl Plugin for RepairPanelPlugin {
         app
             .add_systems(Update, (
                 spawn_repair_ui.run_if(not(resource_exists::<RepairPanelSpawned>)),
-                toggle_repair_panel_visibility,
+                toggle_repair_panel_visibility.in_set(ClientSet::ConsoleUpdate),
                 refresh_repair_panel,
                 respawn_repair_on_orientation_change,
                 respawn_repair_on_team_count_change,

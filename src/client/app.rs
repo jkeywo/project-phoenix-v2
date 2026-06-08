@@ -121,13 +121,33 @@ pub struct ComplexityDropdownRoot;
 #[derive(Component)]
 pub struct HideableElement(pub String);
 
+// ── System sets ────────────────────────────────────────────────────
+
+/// Ordering labels for client-side `Update` systems.
+///
+/// `MessageProcessing` must run before `ConsoleUpdate` so that
+/// `apply_inbound_messages` (and `forward_inbound_messages` in the bridge)
+/// have committed their results to `LobbyState` / `ActiveConsole` before any
+/// `toggle_*_panel_visibility` system reads them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub enum ClientSet {
+    /// Drain inbound server messages and update lobby/sim state resources.
+    MessageProcessing,
+    /// Show/hide console panels based on the current lobby state.
+    ConsoleUpdate,
+}
+
 // ── Plugin ─────────────────────────────────────────────────────────
 
 pub struct ClientAppPlugin;
 
 impl Plugin for ClientAppPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ClearColor(Color::srgb(
+        app.configure_sets(
+                Update,
+                ClientSet::MessageProcessing.before(ClientSet::ConsoleUpdate),
+            )
+            .insert_resource(ClearColor(Color::srgb(
             10.0 / 255.0,
             10.0 / 255.0,
             26.0 / 255.0,
@@ -145,7 +165,7 @@ impl Plugin for ClientAppPlugin {
         .add_systems(
             Update,
             (
-                apply_inbound_messages,
+                apply_inbound_messages.in_set(ClientSet::MessageProcessing),
                 (handle_repair_button_press, refresh_repair_button),
                 (
                     refresh_complexity_ui,

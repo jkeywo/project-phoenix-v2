@@ -15,7 +15,7 @@
 use bevy::prelude::*;
 
 use crate::client::console_shell::ConsoleShell;
-use crate::client_app::{OutboundClientMessage, HideableElement};
+use crate::client_app::{ClientSet, OutboundClientMessage, HideableElement};
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
@@ -154,7 +154,7 @@ impl Plugin for PowerPanelPlugin {
         app
             .add_systems(Update, (
                 spawn_power_ui.run_if(not(resource_exists::<PowerPanelSpawned>)),
-                toggle_power_panel_visibility,
+                toggle_power_panel_visibility.in_set(ClientSet::ConsoleUpdate),
                 refresh_power_panel,
                 respawn_power_on_orientation_change,
             ));

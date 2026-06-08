@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 
 use crate::client::console_shell::ConsoleShell;
-use crate::client_app::{HelmPanel, OutboundClientMessage};
+use crate::client_app::{ClientSet, HelmPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::gui::{
@@ -136,7 +136,7 @@ impl Plugin for HelmPanelPlugin {
             (
                 spawn_phone_helm_ui.run_if(not(resource_exists::<PhoneHelmSpawned>)),
                 respawn_helm_on_orientation_change,
-                toggle_helm_panel_visibility,
+                toggle_helm_panel_visibility.in_set(ClientSet::ConsoleUpdate),
                 update_helm_readouts,
                 bridge_helm_radar,
                 refresh_helm_impulse_state,
@@ -153,6 +153,7 @@ fn toggle_helm_panel_visibility(
     active: Res<ActiveConsole>,
     mut panel: Query<&mut Visibility, With<HelmPanel>>,
     mut outbound: MessageWriter<OutboundClientMessage>,
+    mut was_visible: Local<bool>,
 ) {
     let visible = helm_panel_visible(&lobby, &token.0, &active);
     for mut vis in panel.iter_mut() {
@@ -162,13 +163,15 @@ fn toggle_helm_panel_visibility(
             Visibility::Hidden
         };
     }
-    if !visible {
-        // Send zero input when panel is hidden
+    // Send zero input only on the falling edge (visible → hidden) so we don't
+    // spam the server every frame while the panel is already hidden.
+    if *was_visible && !visible {
         outbound.write(OutboundClientMessage(ClientMessage::HelmInput {
             thrust: 0.0,
             steering: 0.0,
         }));
     }
+    *was_visible = visible;
 }
 
 // â”€â”€ Joystick observer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -429,8 +432,9 @@ fn spawn_phone_helm_ui(
         &assets,
     );
 
-    // Insert HelmPanel marker on the root for visibility queries
-    commands.entity(shell.root).insert(HelmPanel);
+    // Insert HelmPanel marker on the root for visibility queries.
+    // Start hidden; toggle_helm_panel_visibility reveals it when appropriate.
+    commands.entity(shell.root).insert((HelmPanel, Visibility::Hidden));
 }
 
 // â”€â”€ Fill helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

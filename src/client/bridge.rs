@@ -20,7 +20,7 @@
 
 #[cfg(target_arch = "wasm32")]
 use {
-    crate::client_app::{add_client_plugins, InboundServerMessage, OutboundClientMessage},
+    crate::client_app::{add_client_plugins, ClientSet, InboundServerMessage, OutboundClientMessage},
     crate::client_complexity::ComplexityStore,
     crate::client_lobby::{ActiveConsole, LocalPlayerToken},
     crate::messages::Console,
@@ -124,7 +124,7 @@ pub fn wasm_client_init() {
             forward_local_token,
             forward_active_console,
             forward_complexity_presets,
-            forward_inbound_messages,
+            forward_inbound_messages.in_set(ClientSet::MessageProcessing),
             flush_outbound_messages,
         ))
         .run();

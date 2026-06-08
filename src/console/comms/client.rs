@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::client::console_shell::ConsoleShell;
-use crate::client_app::OutboundClientMessage;
+use crate::client_app::{ClientSet, OutboundClientMessage};
 use crate::client_comms::ClientCommsState;
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::messages::{ClientMessage, Console, GamePhase};
@@ -120,7 +120,7 @@ impl Plugin for CommsPanelPlugin {
         app.init_resource::<ClientCommsState>()
             .add_systems(Update, (
                 spawn_comms_ui.run_if(not(resource_exists::<CommsPanelSpawned>)),
-                toggle_comms_panel_visibility,
+                toggle_comms_panel_visibility.in_set(ClientSet::ConsoleUpdate),
                 respawn_comms_on_orientation_change,
                 refresh_all_comms_ui,
                 detect_comms_clicks,

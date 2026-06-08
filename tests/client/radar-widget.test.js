@@ -401,3 +401,117 @@ describe('RadarWidget: destroy', () => {
     expect(() => { widget.destroy(); widget.destroy(); }).not.toThrow();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _getBlipAt hit-testing — pre-projected and world-space modes
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('RadarWidget: _getBlipAt', () => {
+  afterEach(teardownGlobals);
+
+  // ── Pre-projected mode ────────────────────────────────────────────────────
+
+  it('returns null when no data is set', () => {
+    const { widget } = makeWidget();
+    expect(widget._getBlipAt(150, 150)).toBeNull();
+    widget.destroy();
+  });
+
+  it('pre-projected: returns blip when clicking at its canvas position (centre)', () => {
+    const { widget } = makeWidget({ onBlipTap: () => {} });
+    // radar_x=0, radar_y=0 → canvas centre (150, 150) for a 300×300 canvas
+    widget.update({
+      mode: 'pre-projected',
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0, scaled_radius: 0.02, kind: 'ship' }],
+    });
+    const blip = widget._getBlipAt(150, 150);
+    expect(blip).not.toBeNull();
+    expect(blip.uuid).toBe('abc');
+    widget.destroy();
+  });
+
+  it('pre-projected: returns null when clicking away from all blips', () => {
+    const { widget } = makeWidget();
+    widget.update({
+      mode: 'pre-projected',
+      blips: [{ uuid: 'abc', radar_x: 0, radar_y: 0, scaled_radius: 0.01, kind: 'ship' }],
+    });
+    // Click far from centre (top-left corner — canvas (0, 0) vs blip at (150, 150))
+    const blip = widget._getBlipAt(0, 0);
+    expect(blip).toBeNull();
+    widget.destroy();
+  });
+
+  it('pre-projected: returns closest blip among multiple blips', () => {
+    const { widget } = makeWidget();
+    widget.update({
+      mode: 'pre-projected',
+      blips: [
+        { uuid: 'far',   radar_x:  0.5, radar_y: 0, scaled_radius: 0.01, kind: 'ship' },
+        { uuid: 'close', radar_x: -0.5, radar_y: 0, scaled_radius: 0.01, kind: 'ship' },
+      ],
+    });
+    // canvas width=height=300, centre=150, R≈142.
+    // 'close' blip is at x = 150 + (-0.5)*142 ≈ 79, y = 150.
+    // Clicking at (79, 150) should return 'close'.
+    const blip = widget._getBlipAt(79, 150);
+    expect(blip).not.toBeNull();
+    expect(blip.uuid).toBe('close');
+    widget.destroy();
+  });
+
+  // ── World-space mode ──────────────────────────────────────────────────────
+
+  it('world-space: returns null when _projectedBlips is null/empty', () => {
+    const { widget } = makeWidget();
+    widget.update({ mode: 'world-space', entities: [] });
+    // _projectedBlips is null until first render — update() only stores data, doesn't render
+    expect(widget._getBlipAt(150, 150)).toBeNull();
+    widget.destroy();
+  });
+
+  it('world-space: returns blip by stored canvas coords', () => {
+    const { widget } = makeWidget();
+    // Directly inject a projected blip (as _projectAndDrawWorldEntities would produce)
+    widget._projectedBlips = [{ uuid: 'ws-1', bx: 150, by: 150, dotR: 8 }];
+    widget._data = { mode: 'world-space' };
+    const blip = widget._getBlipAt(150, 150);
+    expect(blip).not.toBeNull();
+    expect(blip.uuid).toBe('ws-1');
+    widget.destroy();
+  });
+
+  it('world-space: returns null for click far from blip', () => {
+    const { widget } = makeWidget();
+    widget._projectedBlips = [{ uuid: 'ws-1', bx: 150, by: 150, dotR: 8 }];
+    widget._data = { mode: 'world-space' };
+    // click at canvas (0, 0) — far from centre
+    expect(widget._getBlipAt(0, 0)).toBeNull();
+    widget.destroy();
+  });
+
+  it('world-space: uses hitR = max(14, dotR+6), so small blips still have 14px minimum', () => {
+    const { widget } = makeWidget();
+    // Tiny blip dotR=2, hitR=max(14, 8)=14. Click 12px away — should still hit.
+    widget._projectedBlips = [{ uuid: 'ws-tiny', bx: 150, by: 150, dotR: 2 }];
+    widget._data = { mode: 'world-space' };
+    const blip = widget._getBlipAt(150 + 12, 150);  // 12 px right of centre
+    expect(blip).not.toBeNull();
+    expect(blip.uuid).toBe('ws-tiny');
+    widget.destroy();
+  });
+
+  it('world-space: picks closest among overlapping projected blips', () => {
+    const { widget } = makeWidget();
+    widget._projectedBlips = [
+      { uuid: 'a', bx: 150, by: 150, dotR: 10 },
+      { uuid: 'b', bx: 155, by: 150, dotR: 10 },  // 5 px to the right
+    ];
+    widget._data = { mode: 'world-space' };
+    // Click at (156, 150) — closer to 'b'
+    const blip = widget._getBlipAt(156, 150);
+    expect(blip).not.toBeNull();
+    expect(blip.uuid).toBe('b');
+    widget.destroy();
+  });
+});

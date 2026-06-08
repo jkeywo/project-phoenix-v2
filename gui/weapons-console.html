@@ -476,7 +476,7 @@
       if (!canvas || typeof RadarWidget === 'undefined') return null;
       return new RadarWidget(canvas, {
         consoleId:   'tactical',
-        orientation: 'ship_relative',
+        orientation: 'world_fixed',  // tactical = north-up (world-fixed); orientation is ignored in pre-projected mode
         onBlipTap:   function (uuid) {
           window.__sendAction(JSON.stringify({ action: 'set_target', console: 'Tactical', uuid: uuid }));
         },

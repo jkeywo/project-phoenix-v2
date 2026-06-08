@@ -618,29 +618,25 @@
     var cx = W / 2, cy = H / 2;
     var R  = Math.min(W, H) / 2 - 8;
 
-    var blips = null;
+    var best = null, bestDist = Infinity;
+
     if (data.mode === 'pre-projected') {
-      blips = data.blips || [];
+      var blips = data.blips || [];
+      blips.forEach(function (b) {
+        var bx   = cx + (b.radar_x != null ? b.radar_x * R : (b.sx || 0));
+        var by   = cy - (b.radar_y != null ? b.radar_y * R : (b.sy || 0));
+        var hitR = Math.max(14, (b.scaled_radius || 0) * R + 6);
+        var dist = Math.hypot(canvasX - bx, canvasY - by);
+        if (dist <= hitR && dist < bestDist) { best = b; bestDist = dist; }
+      });
     } else if (data.mode === 'world-space' && this._projectedBlips) {
       // World-space blips already have absolute canvas coords (bx, by)
-      var self = this;
       this._projectedBlips.forEach(function (b) {
         var hitR = Math.max(14, b.dotR + 6);
         var dist = Math.hypot(canvasX - b.bx, canvasY - b.by);
         if (dist <= hitR && dist < bestDist) { best = b; bestDist = dist; }
       });
-      return best;
     }
-    if (!blips) return null;
-
-    var best = null, bestDist = Infinity;
-    blips.forEach(function (b) {
-      var bx   = cx + (b.radar_x != null ? b.radar_x * R : (b.sx || 0));
-      var by   = cy - (b.radar_y != null ? b.radar_y * R : (b.sy || 0));
-      var hitR = Math.max(14, (b.scaled_radius || 0) * R + 6);
-      var dist = Math.hypot(canvasX - bx, canvasY - by);
-      if (dist <= hitR && dist < bestDist) { best = b; bestDist = dist; }
-    });
     return best;
   };
 

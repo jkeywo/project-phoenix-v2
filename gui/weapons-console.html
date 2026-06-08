@@ -361,7 +361,8 @@
         btn.className = 'chip' + (t.id === _selectedTube ? ' selected' : '');
         btn.type = 'button';
         btn.innerHTML = '<span class="chip-bg"></span><span class="lbl">' + t.id.toUpperCase() + '</span>';
-        btn.addEventListener('click', (function(id) { return function() {
+        btn.addEventListener('pointerdown', (function(id) { return function(e) {
+          e.preventDefault();  // prevent 300ms-delayed synthetic click after DOM rebuild
           _selectedTube = id;
           if (_lastStateJson) _renderConsole(_lastName, _lastStateJson);
         }; })(t.id));

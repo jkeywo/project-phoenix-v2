@@ -256,6 +256,7 @@ html, body {
   border: none;
   cursor: default;
   user-select: none;
+  touch-action: manipulation;
 }
 .btn > .btn-bg {
   position: absolute; inset: 1.5px;
@@ -327,6 +328,7 @@ html, body {
   position: relative;
   text-transform: uppercase;
   flex: 1 1 0;
+  touch-action: manipulation;
 }
 .chip > .chip-bg {
   position: absolute; inset: 1.5px;

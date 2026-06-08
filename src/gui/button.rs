@@ -1,8 +1,9 @@
 //! `GuiButton` widget — rect/square variants, observer events.
 
 use bevy::prelude::*;
+use bevy::picking::events::Press;
 
-use super::{StateVisuals, WidgetState};
+use super::{StateVisuals, WidgetState, Disabled};
 
 // ── Size variant ──────────────────────────────────────────────────────────────
 
@@ -95,7 +96,12 @@ pub fn spawn_gui_button(
     }
     // Attach stub observers at spawn so the observer infrastructure is wired.
     // Callers layer additional `.observe()` calls on the returned entity.
+    // `on_gui_button_press` replaces the old `detect_button_press` polling
+    // system: it fires `ButtonPressed` via the picking pipeline (`PreUpdate`)
+    // rather than polling `Changed<Interaction>` in `Update`, which missed
+    // fast taps where press+release completed within a single frame.
     builder
+        .observe(on_gui_button_press)
         .observe(|_: On<ButtonPressed>| {})
         .observe(|_: On<WidgetActivated>| {})
         .observe(|_: On<WidgetDeactivated>| {});
@@ -104,19 +110,50 @@ pub fn spawn_gui_button(
 
 // ── Systems ───────────────────────────────────────────────────────────────────
 
-/// Detects press transitions on `GuiButtonMarker` entities and fires
-/// `ButtonPressed`.
-fn detect_button_press(
-    query: Query<
-        (Entity, &Interaction),
-        (Changed<Interaction>, With<GuiButtonMarker>),
-    >,
+/// Stamps `Pickable::IGNORE` onto every direct child of a `GuiButtonMarker`
+/// entity that doesn't already have a `Pickable` component.
+///
+/// This prevents decorative children — text labels, icon nodes — from sitting
+/// in front of the button in the pick order and silently absorbing pointer
+/// events before they reach the button entity.  The system only runs when a
+/// button's `Children` list changes, so the overhead is negligible.
+fn auto_ignore_button_children(
+    buttons: Query<&Children, (With<GuiButtonMarker>, Changed<Children>)>,
+    without_pickable: Query<Entity, Without<Pickable>>,
     mut commands: Commands,
 ) {
-    for (entity, interaction) in query.iter() {
-        if *interaction == Interaction::Pressed {
-            commands.entity(entity).trigger(ButtonPressed);
+    for kids in buttons.iter() {
+        for child in kids.iter() {
+            if without_pickable.contains(child) {
+                commands.entity(child).insert(Pickable::IGNORE);
+            }
         }
+    }
+}
+
+/// Observer attached at spawn time to every `GuiButtonMarker` entity.
+/// Fires `ButtonPressed` when the picking system reports a pointer press
+/// directly on the button entity.
+///
+/// Using `Pointer<Press>` (fired in `PreUpdate` via the picking pipeline)
+/// instead of polling `Changed<Interaction>` in `Update` eliminates the
+/// fast-tap race where touchstart + touchend both land in the same Bevy frame
+/// and `Interaction` has already returned to `None` by the time any `Update`
+/// system runs.
+///
+/// `Pickable::IGNORE` on child nodes (stamped by `auto_ignore_button_children`)
+/// ensures that text labels do not intercept the pointer before it reaches
+/// this entity.
+fn on_gui_button_press(
+    trigger: On<Pointer<Press>>,
+    buttons: Query<Has<Disabled>, With<GuiButtonMarker>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.entity;
+    // Guard: only fire on button entities that are not disabled.
+    let Ok(is_disabled) = buttons.get(entity) else { return };
+    if !is_disabled {
+        commands.entity(entity).trigger(ButtonPressed);
     }
 }
 
@@ -145,7 +182,7 @@ pub struct GuiButtonPlugin;
 
 impl Plugin for GuiButtonPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (detect_button_press, detect_widget_state_change));
+        app.add_systems(Update, (detect_widget_state_change, auto_ignore_button_children));
     }
 }
 

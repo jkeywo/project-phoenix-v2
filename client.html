@@ -12,9 +12,11 @@
   <title>Project Phoenix — Console</title>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <!-- Pure-function helpers shared with Vitest unit tests (issue #439, #440). -->
+  <!-- Pure-function helpers shared with Vitest unit tests (issue #439, #440, #441). -->
   <script type="module" src="gui/phone-bezel.js"></script>
   <script type="module" src="gui/phase-toggle.js"></script>
+  <script type="module" src="gui/tab-bar.js"></script>
+  <script type="module" src="gui/content-switcher.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -70,7 +72,8 @@
     }
     /* In lobby phase the name input sits at the bottom; don't give it a
        background so the Bevy canvas shows through on either side. */
-    /* Console tabs removed - Bevy renders the tab bar in src/client/app.rs */
+    /* Console tab bar now rendered by gui/tab-bar.js (issue #441). See
+       the #console-tab-bar rule below for layout. */
     /* Helm console UI moved to Bevy WASM (#49). */
     /* Weapons console: full-viewport iframe overlay when active (issue #422).
        Padding leaves room for the phone bezel (issue #439); see --bezel-inset
@@ -130,10 +133,13 @@
       position: fixed; inset: 0;
       pointer-events: none;
       z-index: 15;
-      /* Hidden by default — the lobby is borderless. render() flips display
-         to '' once state.phase === 'InProgress'. */
-      display: none;
+      display: block;
     }
+    /* Hidden by default and during lobby — the lobby is borderless. render()
+       flips aria-hidden to 'false' once state.phase is in-game. Using an
+       attribute selector (not `style.display = ''`) so the stylesheet's
+       default state actually applies. */
+    #phone-bezel[aria-hidden="true"] { display: none; }
     .bezel-corner, .bezel-edge {
       position: absolute;
       pointer-events: none;
@@ -179,6 +185,68 @@
 
     /* Weapons iframe content sits inside the bezel safe zone. */
     #weapons-ui.active { padding: var(--bezel-inset); }
+
+    /* ── Console tab bar (issue #441) ──────────────────────────────────
+       Sits inside the bezel safe zone so it doesn't overlap the corner
+       art. Two layouts driven by [data-orientation]:
+         portrait  — horizontal strip across the top, centred between corners
+         landscape — vertical strip down the left, centred between corners
+       z-index 16 keeps it above the bezel (15) and weapons iframe (10)
+       and below the top-bar overlay (20). pointer-events: auto so taps
+       are received (bezel itself is pointer-events: none). */
+    #console-tab-bar {
+      position: fixed;
+      z-index: 16;
+      pointer-events: auto;
+      display: flex;
+      gap: 0.25rem;
+      align-items: stretch;
+      justify-content: center;
+    }
+    /* Visibility driven by aria-hidden, not inline style. renderTabBar()
+       toggles the attribute and the cascade does the rest — avoids the
+       trap where `style.display = ''` removes the override and the
+       stylesheet's `display: none` rule wins. */
+    #console-tab-bar[aria-hidden="true"] { display: none; }
+    #console-tab-bar[data-orientation="portrait"] {
+      top: var(--bezel-inset);
+      left: 120px; right: 120px;
+      flex-direction: row;
+      flex-wrap: wrap;
+      padding: 0.25rem 0;
+    }
+    #console-tab-bar[data-orientation="landscape"] {
+      left: var(--bezel-inset);
+      top: 72px; bottom: 72px;
+      flex-direction: column;
+      padding: 0 0.25rem;
+      width: 84px;
+    }
+    #console-tab-bar .tab-button {
+      display: block;
+      width: auto;
+      margin: 0;
+      padding: 0.4rem 0.6rem;
+      background: rgba(14, 17, 23, 0.85);
+      color: #cce;
+      border: 1px solid #446;
+      border-radius: 4px;
+      font-family: 'Chakra Petch', monospace;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-align: center;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    #console-tab-bar[data-orientation="portrait"] .tab-button { flex: 0 1 auto; }
+    #console-tab-bar[data-orientation="landscape"] .tab-button { flex: 0 0 auto; }
+    #console-tab-bar .tab-button:active { background: #1a2230; }
+    #console-tab-bar .tab-button.active {
+      background: rgba(95, 216, 232, 0.18);
+      border-color: var(--signal-cyan);
+      color: var(--signal-cyan);
+    }
 
     /* ── Lobby section: full-viewport when active ──────────────────────── */
     #lobby-ui.active {
@@ -323,7 +391,9 @@
        button) positioned above via z-index. -->
   <div id="wasm-host"><canvas id="canvas"></canvas></div>
 
-  <!-- Console tab bar removed - Bevy renders the tab bar in src/client/app.rs -->
+  <!-- Console tab bar (issue #441). Rendered by gui/tab-bar.js into the
+       bezel safe zone. Hidden in lobby and for single-console players. -->
+  <div id="console-tab-bar" role="tablist" aria-label="Console tabs" aria-hidden="true"></div>
 
   <div id="console-container">
     <section id="lobby-ui">
@@ -582,6 +652,19 @@
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
 
+    // Single source of truth for changing the active console. Called by
+    // the render() reconciler, the tab-bar onPress handler, and the swipe
+    // gesture. No-op if the value is already current. Forwards to WASM so
+    // the Bevy panels know which console to draw.
+    function setActiveConsole(name) {
+      const next = name || null;
+      if (next === activeConsole) return;
+      activeConsole = next;
+      if (typeof wasm_client_set_active_console === 'function') {
+        wasm_client_set_active_console(next || '');
+      }
+    }
+
     // ── Helpers ─────────────────────────────────────────────────
 
     const $ = id => document.getElementById(id);
@@ -670,33 +753,48 @@
       }
       $('lobby-ui').className = vis.lobby ? 'active' : '';
       // Phone bezel (issue #439) is part of the game shell only — the lobby
-      // is borderless. Toggle visibility on every phase change.
+      // is borderless. Toggle visibility via aria-hidden so the CSS
+      // [aria-hidden="true"] { display: none } rule drives the cascade.
       const bezel = $('phone-bezel');
-      if (bezel) bezel.style.display = vis.bezel ? '' : 'none';
+      if (bezel) bezel.setAttribute('aria-hidden', vis.bezel ? 'false' : 'true');
 
       // Reconcile activeConsole with current consoles list.
       const mine = myConsoles(s);
       if (inGame) {
         if (!activeConsole || !mine.includes(activeConsole)) {
-          activeConsole = mine[0] || null;
-          if (typeof wasm_client_set_active_console === 'function') {
-            wasm_client_set_active_console(activeConsole || '');
-          }
+          setActiveConsole(mine[0] || null);
         }
       } else {
-        if (activeConsole !== null) {
-          activeConsole = null;
-          if (typeof wasm_client_set_active_console === 'function') {
-            wasm_client_set_active_console('');
-          }
-        }
+        setActiveConsole(null);
       }
 
-      // Console sections: only the active one is visible while in-game.
-      $('game-ui').className = (inGame && activeConsole === 'CaptainChair') ? 'active' : '';
-      $('weapons-ui').className = (inGame && activeConsole === 'Tactical') ? 'active' : '';
-      $('repair-ui').className = (inGame && activeConsole === 'Repair') ? 'active' : '';
-      // Helm console UI is rendered by Bevy WASM (#49).
+      // Console sections (issue #441): map activeConsole → HTML section id
+      // via gui/content-switcher.js. Only the matching section gets `.active`;
+      // Bevy-rendered consoles (Helm, Sensors, etc.) leave all sections off
+      // and the WASM canvas takes the bezel content area.
+      const sections = (typeof window.consoleSections === 'function')
+        ? window.consoleSections(activeConsole, inGame)
+        : { 'game-ui': inGame && activeConsole === 'CaptainChair',
+            'weapons-ui': inGame && activeConsole === 'Tactical',
+            'repair-ui': inGame && activeConsole === 'Repair' };
+      $('game-ui').className = sections['game-ui'] ? 'active' : '';
+      $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
+      $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
+
+      // Console tab bar (issue #441): render into #console-tab-bar via
+      // gui/tab-bar.js. Hidden in lobby and for single-console players.
+      const tabRoot = $('console-tab-bar');
+      if (tabRoot && typeof window.tabBarLayout === 'function'
+          && typeof window.renderTabBar === 'function') {
+        const orientation = (typeof window.currentOrientation === 'function')
+          ? window.currentOrientation()
+          : (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
+        const layout = window.tabBarLayout(mine, activeConsole, orientation, inGame);
+        window.renderTabBar(tabRoot, layout, { onPress: (name) => {
+          setActiveConsole(name);
+          scheduleRender();
+        }});
+      }
 
       if (inGame) renderGame(s);
       else renderLobby(s);
@@ -1081,6 +1179,17 @@
     // View selector and Red Alert button moved to Bevy WASM captain UI (#48).
     // Helm joystick moved to Bevy WASM helm UI (#49).
 
+    // ── Orientation watcher (issue #441) ───────────────────────────────
+    // The tab bar layout depends on portrait/landscape (see gui/tab-bar.js).
+    // Re-render on every resize / orientationchange so the bar flips when
+    // the phone rotates. scheduleRender() is a no-op if a frame is already
+    // queued, so this is cheap even during a smooth resize.
+    (function initOrientationWatch() {
+      const handler = () => scheduleRender();
+      window.addEventListener('resize', handler);
+      window.addEventListener('orientationchange', handler);
+    })();
+
     // ── Swipe to switch console tabs (when 2+ consoles assigned) ───────
     (function initSwipe() {
       const root = document.body;
@@ -1130,11 +1239,10 @@
         const next = (dx < 0)
           ? (idx + 1) % mine.length
           : (idx - 1 + mine.length) % mine.length;
-        activeConsole = mine[next];
-        if (typeof wasm_client_set_active_console === 'function') {
-          wasm_client_set_active_console(mine[next]);
-        }
-        render(state);
+        // setActiveConsole() is the single source of truth — also called by
+        // the tab-bar onPress handler (issue #441) and the render() reconciler.
+        setActiveConsole(mine[next]);
+        scheduleRender();
       }, { passive: true });
     })();
 

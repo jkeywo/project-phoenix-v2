@@ -17,7 +17,7 @@ In flight. Broken down into four issues:
 
 - [Issue #439 — HTML Phone Bezel Frame](./issue-439-html-phone-bezel.md) — shipped 2026-06-08.
 - [Issue #440 — Lobby Integration + Phase Toggle](./issue-440-html-lobby-phase-toggle.md) — shipped 2026-06-08 (bulk landed in commit `7d5f0d0`; phase-toggle module + wiring landed today).
-- Issue #441 — Tab Bar + Content Switching — not started.
+- [Issue #441 — Tab Bar + Content Switching](./issue-441-html-tab-bar-content-switching.md) — shipped 2026-06-08.
 - Issue #442 — Bevy Cleanup (lobby, tab bar, border) — not started; blocked on #439–#441.
 
 ## Problem

@@ -307,7 +307,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-c51e970dcd8e725b.js" crossorigin="anonymous" integrity="sha384-795H7Xn9e0w5NDAdQWnn7CUNDlu3Gph/ABV8/m25L7gE/DysW/04F4adWdgfVdGj"><link rel="preload" href="./project-phoenix-c51e970dcd8e725b_bg.wasm" crossorigin="anonymous" integrity="sha384-+UJeCvVqtXLzXRanZLOAhUmWMwk1FRsTOp06vtrc5yVV5EnNnYlR/G0mzOk32Lw4" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-c905c7c4d2c1f5d8.js" crossorigin="anonymous" integrity="sha384-xrlZNkVXd70b/ZnAtnTvwJgizlge/ALvpBZ1fIs13RHvMp//kFhxGOKudxwjotqC"><link rel="preload" href="./project-phoenix-c905c7c4d2c1f5d8_bg.wasm" crossorigin="anonymous" integrity="sha384-eFVcqWTnUVFFMky5tQ7I1PAY1xI7OMSPTCNXU5CoctF/VzXgomvPyWdScpBP6Gnj" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -338,7 +338,7 @@
   <!-- ── HTML Lobby Panel (issue #436) ──────────────────────────────────── -->
   <div id="lobby-panel" style="display:none;position:fixed;inset:0;z-index:180;font-family:monospace;color:#cce;">
     <!-- Background overlay -->
-    <div style="position:absolute;inset:0;background:rgba(0,0,0,0.82);"></div>
+    <div style="position:absolute;inset:0;background:rgb(0,0,0);"></div>
 
     <div style="position:relative;z-index:1;display:flex;flex-direction:column;height:100%;padding:2rem 3rem;box-sizing:border-box;">
 
@@ -457,8 +457,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-c51e970dcd8e725b.js';
-const wasm = await init({ module_or_path: './project-phoenix-c51e970dcd8e725b_bg.wasm' });
+import init, * as bindings from './project-phoenix-c905c7c4d2c1f5d8.js';
+const wasm = await init({ module_or_path: './project-phoenix-c905c7c4d2c1f5d8_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -534,6 +534,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
   window.__updateLobby = function(json) {
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
+
+    // ── Show/hide panel + canvas based on phase ───────────────────────
+    const isLobby = s.phase === 'Lobby';
+    const panel = document.getElementById('lobby-panel');
+    const qrOverlay = document.getElementById('overlay');
+    if (panel) panel.style.display = isLobby ? '' : 'none';
+    // NOTE: do NOT hide the Bevy canvas (#canvas) here. The lobby panel already
+    // covers it completely (z-index:180, solid background). Hiding the canvas
+    // with display:none causes Bevy to see a 0×0 window and throttle / suspend
+    // its rAF loop, which delays SimState delivery after game start and breaks
+    // the smoke tests. The canvas must stay in the render tree at all times.
+    if (qrOverlay) qrOverlay.style.display = isLobby ? '' : 'none';
 
     // ── Title / subtitle ──────────────────────────────────────────────
     const titleEl = document.getElementById('lobby-title');
@@ -770,7 +782,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     const hostPeerId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
-    const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/#' + hostPeerId;
+    const joinUrl = location.href.replace(/[^/]*$/, '') + 'gui/lobby-client.html#' + hostPeerId;
 
     function initPeerJS() {
       setConnectionStatus('connecting');

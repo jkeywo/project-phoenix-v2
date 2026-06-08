@@ -95,7 +95,11 @@
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────── -->
   <script>
     window.__sendAction = function(json) {
-      if (window.ipc) {
+      if (window !== window.parent) {
+        // Running inside client.html iframe: forward action to parent via postMessage.
+        // client.html listens for {type:'console_action'} and sends to server via PeerJS.
+        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
+      } else if (window.ipc) {
         window.ipc.postMessage(json);          // wry native server
       } else {
         window.wasmBindings.wasm_ui_action(json); // browser WASM (server or client)
@@ -557,6 +561,46 @@
       var targetUuid = (_state && _state.target_uuid) ? _state.target_uuid : null;
       window.__sendAction(JSON.stringify({ action: 'fire_torpedo', console: 'Tactical', tube: tube, target_uuid: targetUuid }));
     });
+
+    // ── Radar tap-to-lock ─────────────────────────────────────────────────
+    // Tapping a blip on the radar canvas sends a set_target action so the
+    // server locks the phaser targeting on that entity.
+    (function initRadarTapLock() {
+      var canvas = document.getElementById('radar');
+      if (!canvas) return;
+
+      function getBlipAt(canvasX, canvasY) {
+        if (!_state || !_state.blips) return null;
+        var W = canvas.width, H = canvas.height;
+        var cx = W / 2, cy = H / 2;
+        var R  = Math.min(W, H) / 2 - 8;
+        var best = null, bestDist = Infinity;
+        (_state.blips || []).forEach(function(b) {
+          var bx = cx + b.radar_x * R;
+          var by = cy - b.radar_y * R;
+          var hitR = Math.max(14, (b.scaled_radius || 0) * R + 6);
+          var dist = Math.hypot(canvasX - bx, canvasY - by);
+          if (dist <= hitR && dist < bestDist) { best = b; bestDist = dist; }
+        });
+        return best;
+      }
+
+      function onTap(e) {
+        var rect = canvas.getBoundingClientRect();
+        var touch = e.touches ? e.touches[0] : e;
+        var x = touch.clientX - rect.left;
+        var y = touch.clientY - rect.top;
+        var scaleX = canvas.width  / rect.width;
+        var scaleY = canvas.height / rect.height;
+        var blip = getBlipAt(x * scaleX, y * scaleY);
+        if (blip && blip.uuid) {
+          window.__sendAction(JSON.stringify({ action: 'set_target', console: 'Tactical', uuid: blip.uuid }));
+        }
+      }
+
+      canvas.addEventListener('click', onTap);
+      canvas.addEventListener('touchstart', function(e) { e.preventDefault(); onTap(e); }, { passive: false });
+    })();
   </script>
 
   <script>

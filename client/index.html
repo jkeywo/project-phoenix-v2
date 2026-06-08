@@ -56,6 +56,21 @@
        background so the Bevy canvas shows through on either side. */
     /* Console tabs removed - Bevy renders the tab bar in src/client/app.rs */
     /* Helm console UI moved to Bevy WASM (#49). */
+    /* Weapons console: full-viewport iframe overlay when active (issue #422) */
+    #weapons-ui.active {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      padding: 0;
+      margin: 0;
+    }
+    #weapons-ui iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
     /* Bevy WASM canvas — full-viewport, behind the JS overlays so the
        lobby UI rendered by Bevy is visible while the name input,
        connection status, and fullscreen button stay clickable on top. */
@@ -146,23 +161,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         onclick="send('Repair', { console: 'CaptainChair' })">REPAIR</button>
     </section>
 
+    <!-- Weapons console: full-viewport polished HTML UI (issue #422).
+         Driven by __updateConsole via postMessage bridge.
+         Tap-to-lock, fire phaser, fire torpedo actions forwarded to server via PeerJS. -->
     <section id="weapons-ui">
-      <h2 style="margin:0 0 0.5rem;font-size:1.1rem;letter-spacing:.1em;color:#f84">TACTICAL</h2>
-      <p style="margin:0 0 0.5rem;font-size:0.8rem;color:#aaa">TAP ASTEROID TO LOCK TARGET</p>
-      <canvas id="weapons-radar" width="320" height="320"
-        style="display:block;margin:0 auto;border-radius:50%;background:#0a0a1a;cursor:crosshair;touch-action:none"
-        aria-label="Weapons radar"></canvas>
-      <p id="weapons-lock-status" style="margin:0.75rem 0 0;font-size:0.9rem;text-align:center;color:#aaa">No target locked</p>
-      <button id="weapons-fire-btn"
-        style="display:none;margin:0.75rem auto 0;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
-               letter-spacing:.15em;background:#900;color:#fff;border:2px solid #f44;border-radius:6px;
-               cursor:pointer;width:80%"
-        disabled>FIRE</button>
-      <button id="weapons-repair-btn"
-        style="margin:0.75rem auto 0;padding:0.6rem 2rem;font-size:1rem;font-weight:bold;
-               letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
-               cursor:pointer;width:80%;display:block"
-        onclick="send('Repair', { console: 'Tactical' })">REPAIR</button>
+      <iframe id="weapons-iframe" src="gui/weapons-console.html"
+        title="Tactical Console" allowfullscreen></iframe>
     </section>
 
     <section id="repair-ui">
@@ -308,7 +312,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
       shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
-      repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false };
+      repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
+      // Weapons console iframe state (issue #422)
+      weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto' };
     let conn = null;
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
@@ -512,132 +518,61 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
     }
 
-    // EntitySnapshot position helpers (position: [x, y, z]); shared between
-    // renderWeaponsRadar and the initWeaponsRadar tap-to-lock handler.
+    // EntitySnapshot position helpers (position: [x, y, z])
     function entityX(e) { return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0); }
     function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
     function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
 
-    function renderWeaponsRadar() {
-      const canvas = $('weapons-radar');
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      const W = canvas.width, H = canvas.height;
-      const cx = W / 2, cy = H / 2, r = Math.min(cx, cy) - 4;
-      const RANGE = 60.0;
+    // ── Weapons console iframe bridge (issue #422) ──────────────────────────
+    // Builds a WeaponsConsoleState JSON from client state and pushes it to the
+    // gui/weapons-console.html iframe via its window.__updateConsole function.
+    // The iframe's __sendAction postMessages back; we forward those to the server.
 
-      ctx.clearRect(0, 0, W, H);
+    const RADAR_RANGE = 60.0;
 
-      // Background circle
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = '#0a0a1a';
-      ctx.fill();
-
-      // Grid rings
-      [0.5, 1.0].forEach(frac => {
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * frac, 0, Math.PI * 2);
-        ctx.strokeStyle = '#1a3a2a';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      });
-
-      // Crosshairs
-      ctx.strokeStyle = '#1a3a2a';
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
-
-      // Ship at centre
-      ctx.beginPath();
-      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-      ctx.fillStyle = '#8af';
-      ctx.fill();
-
-      // Ship forward direction indicator
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.lineTo(cx, cy - 20);
-      ctx.strokeStyle = '#8af';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Project entities (ship-aligned, ship at origin)
+    function buildWeaponsConsoleState() {
       const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
-      for (const a of state.asteroids) {
+      const blips = (state.asteroids || []).map(a => {
         const ax = entityX(a), az = entityZ(a);
-        const dx = ax - state.shipX;
-        const dz = az - state.shipZ;
-        const dist2 = dx * dx + dz * dz;
-        if (dist2 > RANGE * RANGE) continue;
+        const dx = ax - state.shipX, dz = az - state.shipZ;
+        if (dx * dx + dz * dz > RADAR_RANGE * RADAR_RANGE) return null;
+        const radar_x = (dx * cosY + dz * sinY) / RADAR_RANGE;
+        const radar_y = (dx * sinY - dz * cosY) / RADAR_RANGE;
+        const radius   = entityRadius(a);
+        const tags     = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
+        const kind     = tags.includes('ship') ? 'ship'
+                       : tags.includes('station') ? 'station' : 'asteroid';
+        return { uuid: a.uuid, radar_x, radar_y, scaled_radius: radius / RADAR_RANGE, kind };
+      }).filter(Boolean);
 
-        // radar coords (same math as radar.rs project_to_radar)
-        const rx = (dx * cosY + dz * sinY) / RANGE;
-        const ry = (dx * sinY - dz * cosY) / RANGE;
-
-        const px = cx + rx * r;
-        const py = cy - ry * r; // y-up → y-down in canvas
-
-        const isLocked = state.weaponsLocked && state.weaponsTarget === a.uuid;
-        const dotR = Math.max(4, (entityRadius(a) / RANGE) * r);
-
-        if (isLocked) {
-          // Pulse red when fire-ready, orange otherwise.
-          const t = Date.now() / 300;
-          const pulse = state.weaponsFireReady ? (0.6 + 0.4 * Math.sin(t)) : 1.0;
-          const lockedColor = state.weaponsFireReady
-            ? `rgba(255,${Math.floor(40 * pulse)},${Math.floor(40 * pulse)},${pulse})`
-            : '#f84';
-          // Draw lock reticle
-          ctx.beginPath();
-          ctx.arc(px, py, dotR + 6, 0, Math.PI * 2);
-          ctx.strokeStyle = lockedColor;
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(px, py, dotR, 0, Math.PI * 2);
-          ctx.fillStyle = lockedColor;
-          ctx.fill();
-        } else {
-          ctx.beginPath();
-          ctx.arc(px, py, dotR, 0, Math.PI * 2);
-          ctx.fillStyle = '#fc0';
-          ctx.fill();
-        }
-      }
-
-      // Range label
-      ctx.fillStyle = '#556';
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText('60u', cx + r - 2, cy - 4);
-
-      // Fire button — visible and enabled only when fire-ready and not locked out.
-      const fireBtn = $('weapons-fire-btn');
-      if (fireBtn) {
-        fireBtn.style.display = state.weaponsLocked ? 'block' : 'none';
-        const canFire = state.weaponsFireReady && !state.weaponsOnCooldown && !state.weaponsFiring;
-        fireBtn.disabled = !canFire;
-        fireBtn.style.opacity = canFire ? '1' : '0.4';
-        if (state.weaponsFiring) {
-          fireBtn.textContent = 'FIRING';
-          fireBtn.style.background = '#640';
-          fireBtn.style.borderColor = '#fa0';
-          fireBtn.style.color = '#fa0';
-        } else if (state.weaponsOnCooldown) {
-          fireBtn.textContent = 'COOLDOWN';
-          fireBtn.style.background = '#900';
-          fireBtn.style.borderColor = '#f44';
-          fireBtn.style.color = '#fff';
-        } else {
-          fireBtn.textContent = 'FIRE';
-          fireBtn.style.background = '#900';
-          fireBtn.style.borderColor = '#f44';
-          fireBtn.style.color = '#fff';
-        }
-      }
+      return JSON.stringify({
+        target_uuid:   state.weaponsTarget || null,
+        banks:         state.weaponsBanks  || [],
+        tubes:         state.weaponsTubes  || [],
+        torpedo_count: state.weaponsTorpedoCount || 0,
+        phaser_mode:   state.weaponsPhaserMode   || 'Auto',
+        blips,
+        phaser_arcs:   [],   // server-side arcs not forwarded; UI gracefully handles []
+        torpedo_arcs:  [],
+      });
     }
+
+    function pushWeaponsConsoleState() {
+      if (activeConsole !== 'Tactical') return;
+      const iframe = $('weapons-iframe');
+      if (!iframe || !iframe.contentWindow) return;
+      try {
+        const fn = iframe.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn('Tactical', buildWeaponsConsoleState());
+      } catch (_) {}
+    }
+
+    // Re-push when the iframe finishes loading so it receives current state.
+    (function wireWeaponsIframe() {
+      const iframe = $('weapons-iframe');
+      if (!iframe) return;
+      iframe.addEventListener('load', () => { pushWeaponsConsoleState(); });
+    })();
 
     function renderGame(s) {
       const showCap = activeConsole === 'CaptainChair';
@@ -652,67 +587,29 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
     }
 
-    // ── Weapons radar tap-to-lock ──────────────────────────────
-    (function initWeaponsRadar() {
-      const canvas = $('weapons-radar');
-      if (!canvas) return;
-      const RANGE = 60.0;
-
-      function getEntityAtPoint(canvasX, canvasY) {
-        const cx = canvas.width / 2, cy = canvas.height / 2;
-        const r = Math.min(cx, cy) - 4;
-        const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
-        let best = null, bestDist = Infinity;
-        for (const a of state.asteroids) {
-          const ax = entityX(a), az = entityZ(a);
-          const dx = ax - state.shipX;
-          const dz = az - state.shipZ;
-          if (dx * dx + dz * dz > RANGE * RANGE) continue;
-          const rx = (dx * cosY + dz * sinY) / RANGE;
-          const ry = (dx * sinY - dz * cosY) / RANGE;
-          const px = cx + rx * r, py = cy - ry * r;
-          const dist = Math.hypot(canvasX - px, canvasY - py);
-          const hitR = Math.max(12, (entityRadius(a) / RANGE) * r + 6);
-          if (dist <= hitR && dist < bestDist) { best = a; bestDist = dist; }
-        }
-        return best;
+    // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
+    // The weapons-console.html iframe sends {type:'console_action', payload:json}
+    // via postMessage when the player fires or taps a target. We translate
+    // the action JSON to the appropriate ClientMessage and send via PeerJS.
+    window.addEventListener('message', (event) => {
+      if (!event.data || event.data.type !== 'console_action') return;
+      let action;
+      try { action = JSON.parse(event.data.payload); } catch (_) { return; }
+      if (!action || !action.action) return;
+      switch (action.action) {
+        case 'fire_phaser':
+          if (action.bank) send('FirePhaser', { bank: action.bank });
+          break;
+        case 'fire_torpedo':
+          send('FireTorpedo', { tube: action.tube || 'fore', target_uuid: action.target_uuid || null });
+          break;
+        case 'set_target':
+          if (action.uuid) send('SetTarget', { uuid: action.uuid });
+          break;
+        default:
+          break;
       }
-
-      function onTap(e) {
-        if (state.phase !== 'InProgress') return;
-        const rect = canvas.getBoundingClientRect();
-        const touch = e.touches ? e.touches[0] : e;
-        const x = touch.clientX - rect.left;
-        const y = touch.clientY - rect.top;
-        // Scale from CSS pixels to canvas pixels
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        const cx = x * scaleX, cy = y * scaleY;
-        const a = getEntityAtPoint(cx, cy);
-        if (a) {
-          // Optimistic pending lock indicator
-          const el = $('weapons-lock-status');
-          if (el) { el.textContent = 'Locking…'; el.style.color = '#aaa'; }
-          send('SetTarget', { uuid: a.uuid });
-        }
-      }
-
-      canvas.addEventListener('click', onTap);
-      canvas.addEventListener('touchstart', e => { e.preventDefault(); onTap(e); }, { passive: false });
-
-      // Fire button sends FirePhaser with the first fire-ready bank id.
-      const fireBtn = $('weapons-fire-btn');
-      if (fireBtn) {
-        fireBtn.addEventListener('click', () => {
-          if (state.weaponsFireReady && !state.weaponsOnCooldown && !state.weaponsFiring) {
-            const bank = state.weaponsReadyBankId;
-            if (bank) {
-              send('FirePhaser', { bank });
-            }
-          }
-        });
-      }
-    })();
+    });
 
     // ── Event wiring ────────────────────────────────────────────
 
@@ -869,76 +766,59 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             state.repairTarget = repairTarget;
             renderRepair(hp, repairTarget);
           }
-          renderWeaponsRadar();
+          pushWeaponsConsoleState();
           // View-direction highlighting is handled by the Bevy WASM UI (#48).
           return;
         }
         case 'WorldSetup': {
           state.asteroids = (msg.data.world && msg.data.world.entities) || [];
-          renderWeaponsRadar();
+          pushWeaponsConsoleState();
           return;
         }
         case 'TargetLock': {
           const { uuid, locked } = msg.data;
-          const el = $('weapons-lock-status');
           if (locked) {
             state.weaponsTarget = uuid;
             state.weaponsLocked = true;
-            if (el) { el.textContent = 'TARGET LOCKED'; el.style.color = '#f84'; }
           } else {
             state.weaponsTarget = null;
             state.weaponsLocked = false;
             state.weaponsFireReady = false;
-            if (el) { el.textContent = 'Lock rejected — out of range'; el.style.color = '#f44'; }
-            // Clear the rejected text after 2 s
-            setTimeout(() => {
-              if (el && !state.weaponsLocked) { el.textContent = 'No target locked'; el.style.color = '#aaa'; }
-            }, 2000);
           }
-          renderWeaponsRadar();
+          pushWeaponsConsoleState();
           return;
         }
         case 'WeaponsUpdate': {
-          // Per-bank wire format: aggregate across banks so the legacy
-          // HTML weapons UI keeps showing a single fire-ready indicator.
-          // `fire_ready` is true if *any* bank can fire; `on_cooldown` is
-          // true only if *all* banks are on cooldown.
-          const { target_uuid, banks } = msg.data;
+          // Save full bank/tube/torpedo/mode state for the iframe console.
+          const { target_uuid, banks, tubes, torpedo_count, phaser_mode } = msg.data;
           const bankList = Array.isArray(banks) ? banks : [];
-          const fire_ready = bankList.some(b => b.fire_ready);
+          const fire_ready  = bankList.some(b => b.fire_ready);
           const on_cooldown = bankList.length > 0 && bankList.every(b => b.on_cooldown);
-          // Remember the first fire-ready bank id so the fire button can
-          // address it. Falls back to the first bank or null.
-          const readyBank = bankList.find(b => b.fire_ready)
-            || bankList[0]
-            || null;
-          state.weaponsReadyBankId = readyBank ? readyBank.id : null;
-          state.weaponsFireReady = fire_ready;
-          state.weaponsOnCooldown = on_cooldown;
-          const el = $('weapons-lock-status');
+          const readyBank   = bankList.find(b => b.fire_ready) || bankList[0] || null;
+          state.weaponsReadyBankId   = readyBank ? readyBank.id : null;
+          state.weaponsFireReady     = fire_ready;
+          state.weaponsOnCooldown    = on_cooldown;
+          state.weaponsBanks         = bankList;
+          state.weaponsTubes         = Array.isArray(tubes) ? tubes : [];
+          state.weaponsTorpedoCount  = typeof torpedo_count === 'number' ? torpedo_count : 0;
+          state.weaponsPhaserMode    = phaser_mode || 'Auto';
           if (target_uuid) {
             state.weaponsTarget = target_uuid;
             state.weaponsLocked = true;
-            if (el) {
-              const label = on_cooldown ? 'COOLDOWN' : (fire_ready ? 'FIRE READY' : 'TARGET LOCKED');
-              const color = on_cooldown ? '#a4a' : (fire_ready ? '#f44' : '#f84');
-              el.textContent = label;
-              el.style.color = color;
-            }
           } else {
             state.weaponsFireReady = false;
           }
-          renderWeaponsRadar();
+          pushWeaponsConsoleState();
           return;
         }
         case 'BeamStarted': {
           state.weaponsFiring = true;
-          renderWeaponsRadar();
+          pushWeaponsConsoleState();
           return;
         }
         case 'BeamEnded': {
           state.weaponsFiring = false;
-          renderWeaponsRadar();
+          pushWeaponsConsoleState();
           return;
         }
         case 'RepairState': {
@@ -951,16 +831,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         }
         case 'AsteroidDestroyed': {
           const { uuid } = msg.data;
-          // Remove the destroyed asteroid from local state so it disappears from radar.
           state.asteroids = state.asteroids.filter(a => a.uuid !== uuid);
           if (state.weaponsTarget === uuid) {
             state.weaponsTarget = null;
             state.weaponsLocked = false;
             state.weaponsFireReady = false;
-            const el = $('weapons-lock-status');
-            if (el) { el.textContent = 'Target destroyed'; el.style.color = '#aaa'; }
           }
-          renderWeaponsRadar();
+          pushWeaponsConsoleState();
           return;
         }
         case 'DamageTaken': {

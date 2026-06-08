@@ -22,7 +22,7 @@
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000 url('assets/logo.png') center center / contain no-repeat; overflow: hidden; }
     #canvas { display: block; width: 100vw; height: 100vh; }
-    #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 10; }
+    #overlay { position: absolute; bottom: 1rem; right: 1rem; z-index: 190; }
     #qr { display: none; }
     #top-bar {
       position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
@@ -307,7 +307,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-c905c7c4d2c1f5d8.js" crossorigin="anonymous" integrity="sha384-xrlZNkVXd70b/ZnAtnTvwJgizlge/ALvpBZ1fIs13RHvMp//kFhxGOKudxwjotqC"><link rel="preload" href="./project-phoenix-c905c7c4d2c1f5d8_bg.wasm" crossorigin="anonymous" integrity="sha384-eFVcqWTnUVFFMky5tQ7I1PAY1xI7OMSPTCNXU5CoctF/VzXgomvPyWdScpBP6Gnj" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-de71b218d9955782.js" crossorigin="anonymous" integrity="sha384-mASu5ACXG72xyc7xVbOA6uh/C4kxMC9PsLo2obb9WoeeXIQzFGKRsluM3tNjkbx/"><link rel="preload" href="./project-phoenix-de71b218d9955782_bg.wasm" crossorigin="anonymous" integrity="sha384-FqeX1FOQQjtCEW/nycFmSMMmTT+LY9RIp8Xi6JrHdORnGLr4Ls85A0HZO2CE/bx4" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -457,8 +457,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-c905c7c4d2c1f5d8.js';
-const wasm = await init({ module_or_path: './project-phoenix-c905c7c4d2c1f5d8_bg.wasm' });
+import init, * as bindings from './project-phoenix-de71b218d9955782.js';
+const wasm = await init({ module_or_path: './project-phoenix-de71b218d9955782_bg.wasm' });
 
 
 window.wasmBindings = bindings;

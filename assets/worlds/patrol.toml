@@ -8,6 +8,8 @@
 
 [global]
 seed = 42
+title = "Patrol"
+description = "Hunt down a pirate raider on patrol through the sector."
 
 [anchors]
 patrol_alpha = [600.0, 0.0, -600.0]

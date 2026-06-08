@@ -12,8 +12,9 @@
   <title>Project Phoenix — Console</title>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <!-- Pure-function helpers shared with Vitest unit tests (issue #439). -->
+  <!-- Pure-function helpers shared with Vitest unit tests (issue #439, #440). -->
   <script type="module" src="gui/phone-bezel.js"></script>
+  <script type="module" src="gui/phase-toggle.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -646,7 +647,15 @@
     }
 
     function render(s) {
-      const inGame = s.phase === 'InProgress';
+      // Phase → section visibility (pure JS module, gui/phase-toggle.js).
+      // Falls back to a local check if the module hasn't loaded yet so the
+      // first paint isn't blank — module load races init on slow networks.
+      const vis = (typeof window.sectionVisibility === 'function')
+        ? window.sectionVisibility(s.phase)
+        : { lobby: s.phase !== 'InProgress' && s.phase !== 'GameOver',
+            game: s.phase === 'InProgress' || s.phase === 'GameOver',
+            bezel: s.phase === 'InProgress' || s.phase === 'GameOver' };
+      const inGame = vis.game;
       // Show the active console name in the top-bar during game phase.
       // In lobby the Bevy canvas renders its own "Lobby" heading.
       const titleEl = $('phase-title');
@@ -659,11 +668,11 @@
         titleEl.style.display = '';
         titleEl.textContent = 'Bridge';
       }
-      $('lobby-ui').className = inGame ? '' : 'active';
+      $('lobby-ui').className = vis.lobby ? 'active' : '';
       // Phone bezel (issue #439) is part of the game shell only — the lobby
       // is borderless. Toggle visibility on every phase change.
       const bezel = $('phone-bezel');
-      if (bezel) bezel.style.display = inGame ? '' : 'none';
+      if (bezel) bezel.style.display = vis.bezel ? '' : 'none';
 
       // Reconcile activeConsole with current consoles list.
       const mine = myConsoles(s);

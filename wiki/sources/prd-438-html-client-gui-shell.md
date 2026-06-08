@@ -16,7 +16,7 @@ Replaces the Bevy-rendered phone bezel, console-select tab bar, and lobby UI on 
 In flight. Broken down into four issues:
 
 - [Issue #439 — HTML Phone Bezel Frame](./issue-439-html-phone-bezel.md) — shipped 2026-06-08.
-- Issue #440 — Lobby Integration + Phase Toggle — partly landed in commit `7d5f0d0`; final wiring pending.
+- [Issue #440 — Lobby Integration + Phase Toggle](./issue-440-html-lobby-phase-toggle.md) — shipped 2026-06-08 (bulk landed in commit `7d5f0d0`; phase-toggle module + wiring landed today).
 - Issue #441 — Tab Bar + Content Switching — not started.
 - Issue #442 — Bevy Cleanup (lobby, tab bar, border) — not started; blocked on #439–#441.
 

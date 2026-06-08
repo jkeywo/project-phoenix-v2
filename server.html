@@ -527,10 +527,13 @@
     // ── Show/hide panel + canvas based on phase ───────────────────────
     const isLobby = s.phase === 'Lobby';
     const panel = document.getElementById('lobby-panel');
-    const cv = document.getElementById('canvas');
     const qrOverlay = document.getElementById('overlay');
     if (panel) panel.style.display = isLobby ? '' : 'none';
-    if (cv) cv.style.display = isLobby ? 'none' : '';
+    // NOTE: do NOT hide the Bevy canvas (#canvas) here. The lobby panel already
+    // covers it completely (z-index:180, solid background). Hiding the canvas
+    // with display:none causes Bevy to see a 0×0 window and throttle / suspend
+    // its rAF loop, which delays SimState delivery after game start and breaks
+    // the smoke tests. The canvas must stay in the render tree at all times.
     if (qrOverlay) qrOverlay.style.display = isLobby ? '' : 'none';
 
     // ── Title / subtitle ──────────────────────────────────────────────

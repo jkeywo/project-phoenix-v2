@@ -87,9 +87,16 @@
     this._onZoomChange = typeof opts.onZoomChange === 'function' ? opts.onZoomChange : null;
     this._onPanChange  = typeof opts.onPanChange  === 'function' ? opts.onPanChange  : null;
 
-    this._data      = null;
-    this._rafId     = null;
-    this._destroyed = false;
+    // radar-math.js functions — injected via opts.math or window.RadarMath.
+    // Required for world-space projection mode (Slice 5a / #447).
+    this._math = opts.math ||
+      (typeof window !== 'undefined' && window.RadarMath) ||
+      null;
+
+    this._data            = null;
+    this._rafId           = null;
+    this._destroyed       = false;
+    this._projectedBlips  = null;  // cache for world-space hit-testing
 
     // View state (zoom / pan) — populated by Slice 5b (#449)
     this._zoom = 1.0;
@@ -218,10 +225,11 @@
       }
     }
 
-    this._data   = null;
-    this._canvas = null;
-    this._ctx    = null;
-    this._icons  = {};
+    this._data            = null;
+    this._canvas          = null;
+    this._ctx             = null;
+    this._icons           = {};
+    this._projectedBlips  = null;
   };
 
   // ── Rendering ─────────────────────────────────────────────────────────────
@@ -375,15 +383,102 @@
     });
   };
 
-  // ── World-space blip rendering (wired in Slice 5a / #447) ────────────────
+  // ── World-space blip rendering (Slice 5a / #447) ─────────────────────────
 
   RadarWidget.prototype._drawWorldSpaceBlips = function (ctx, cx, cy, R, data) {
-    // Projection is handled by radar-math.js imported by the console page.
-    // The widget receives already-projected {sx, sy, dotR, ...} coords via
-    // _projectWorldEntities() which is populated in Slice 5a (#447).
-    if (typeof this._projectAndDrawWorldEntities === 'function') {
-      this._projectAndDrawWorldEntities(ctx, cx, cy, R, data);
+    this._projectAndDrawWorldEntities(ctx, cx, cy, R, data);
+  };
+
+  /**
+   * Project world-space entities via radar-math and draw them.
+   * Caches projected canvas coords in this._projectedBlips for hit-testing.
+   */
+  RadarWidget.prototype._projectAndDrawWorldEntities = function (ctx, cx, cy, R, data) {
+    var math = this._math;
+    if (!math) return;
+
+    var shipX       = data.ship_x        || 0;
+    var shipZ       = data.ship_z        || 0;
+    var shipYaw     = data.ship_yaw      || 0;
+    var orientation = data.orientation   || this._orientation;
+    var range       = data.effective_range != null ? data.effective_range : this._range;
+
+    // Auto-scale: find minimum range that contains all entities
+    if (this._autoScale || data.auto_scale) {
+      var positions = (data.entities || []).map(function (e) {
+        return math.worldToRadar(e.x || 0, e.z || 0, shipX, shipZ, shipYaw, orientation);
+      });
+      range = math.autoScaleRange(positions);
     }
+
+    // Divide by zoom to widen the visible range when zoomed out
+    var effectiveRange = range / Math.max(this._zoom, 0.001);
+
+    var targetUuid     = data.target_uuid     || null;
+    var objectiveUuids = data.objective_uuids || [];
+    var self           = this;
+
+    // Project each entity and collect canvas coords
+    var projected = [];
+    (data.entities || []).forEach(function (e) {
+      var rp = math.worldToRadar(
+        e.x || 0, e.z || 0,
+        shipX, shipZ, shipYaw, orientation
+      );
+      // Apply pan offset (in radar-space world units)
+      var rx = rp.rx - (self._panX || 0);
+      var rz = rp.rz - (self._panZ || 0);
+
+      var sp  = math.radarToScreen(rx, rz, effectiveRange, R);
+      var bx  = cx + sp.sx;
+      var by  = cy + sp.sy;  // sp.sy already negated by radarToScreen
+      var rawRadius = e.radius || 0;
+      var dotR = Math.max(MIN_BLIP_PX / 2, (rawRadius / effectiveRange) * R * 0.6);
+
+      projected.push({
+        bx: bx, by: by, dotR: dotR,
+        uuid:             e.uuid,
+        icon:             e.icon,
+        kind:             e.kind,
+        color:            e.color,
+        objective_target: e.objective_target,
+        name:             e.name,
+        // sx/sy stored for _getBlipAt
+        sx: sp.sx, sy: sp.sy,
+        scaled_radius: effectiveRange > 0 ? rawRadius / effectiveRange : 0,
+      });
+    });
+
+    // Cache for hit-testing (_getBlipAt uses _bx/_by when present)
+    this._projectedBlips = projected;
+
+    // Draw
+    projected.forEach(function (p) {
+      var bx = p.bx, by = p.by, dotR = p.dotR;
+      var isTarget    = targetUuid && targetUuid === p.uuid;
+      var isObjective = p.objective_target || objectiveUuids.indexOf(p.uuid) !== -1;
+
+      if (isObjective) {
+        self._drawRing(ctx, bx, by, dotR + 6, 2, '#d4a820', false);
+      }
+
+      var iconName = p.icon || p.kind;
+      var icon     = self._icons[iconName];
+      var iconLoaded = icon && icon.complete && icon.naturalWidth > 0;
+
+      if (iconLoaded) {
+        self._drawIconBlip(ctx, icon, bx, by, dotR, p.color);
+      } else {
+        ctx.beginPath();
+        ctx.arc(bx, by, dotR, 0, Math.PI * 2);
+        ctx.fillStyle = KIND_COLOR[p.kind] || KIND_COLOR.unknown;
+        ctx.fill();
+      }
+
+      if (isTarget) {
+        self._drawRing(ctx, bx, by, dotR + 7, 2, '#ff3344', true);
+      }
+    });
   };
 
   // ── Shared drawing helpers ────────────────────────────────────────────────
@@ -503,7 +598,14 @@
     if (data.mode === 'pre-projected') {
       blips = data.blips || [];
     } else if (data.mode === 'world-space' && this._projectedBlips) {
-      blips = this._projectedBlips;
+      // World-space blips already have absolute canvas coords (bx, by)
+      var self = this;
+      this._projectedBlips.forEach(function (b) {
+        var hitR = Math.max(14, b.dotR + 6);
+        var dist = Math.hypot(canvasX - b.bx, canvasY - b.by);
+        if (dist <= hitR && dist < bestDist) { best = b; bestDist = dist; }
+      });
+      return best;
     }
     if (!blips) return null;
 

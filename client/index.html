@@ -724,14 +724,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         case 'PlayerLeft':
           state.players = state.players.filter(p => p.token !== msg.data.token);
           break;
-        case 'ConsoleSelected': {
+        case 'StationAssigned': {
           const p = state.players.find(p => p.token === msg.data.token);
           if (p) p.consoles = msg.data.consoles || [];
-          break;
-        }
-        case 'ConsoleCleared': {
-          const p = state.players.find(p => p.token === msg.data.token);
-          if (p) p.consoles = [];
           break;
         }
         case 'NameChanged': {

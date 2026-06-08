@@ -81,6 +81,35 @@
     .world-btn:hover { background: #223; border-color: #558; }
     .world-btn.active { background: #224; border-color: #66c; color: #ccf; }
     /* ── Lobby panel (issue #436) ────────────────────────────────────────── */
+    .lobby-panel {
+      position: fixed;
+      inset: 0;
+      z-index: 180;
+      font-family: monospace;
+      color: #cce;
+    }
+    .lobby-bg {
+      position: absolute;
+      inset: 0;
+      background: rgb(0, 0, 0);
+    }
+    .lobby-panel-wrap {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 4vw, 3rem);
+      box-sizing: border-box;
+    }
+    .lobby-grid-column {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      gap: 8px;
+      min-width: 0;
+      min-height: 0;
+    }
     .station-card {
       display: flex; flex-direction: column; gap: 6px;
       padding: 10px 12px; border-radius: 6px;
@@ -141,6 +170,203 @@
     @keyframes ready-pulse {
       0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.3); }
       50% { box-shadow: 0 0 14px rgba(95,216,232,0.6); }
+    }
+
+    /* Lobby responsive layout */
+    .lobby-body {
+      display: flex;
+      flex: 1;
+      gap: 2rem;
+      padding-top: 1rem;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .lobby-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 360px));
+      gap: 12px;
+      flex: 1;
+      align-content: start;
+      justify-content: center;
+      overflow-y: auto;
+    }
+    .lobby-rail {
+      width: 18rem;
+      min-width: 14rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      border-left: 1px solid #334;
+      padding-left: 1.5rem;
+    }
+    .lobby-rail-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.8rem;
+      color: #889;
+    }
+    .lobby-rail-spacer { flex: 1; }
+    .lobby-status-hint {
+      font-size: 0.75rem;
+      color: #667;
+      text-align: right;
+      padding-top: 0.5rem;
+      border-top: 1px solid #334;
+    }
+    .lobby-rail-label {
+      font-size: 0.7rem;
+      color: #667;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Card font scaling for wide screens / readability */
+    .station-card .card-name { font-size: clamp(0.85rem, 1vw, 1rem); }
+    .station-card .card-rank { font-size: clamp(0.6rem, 0.7vw, 0.7rem); }
+    .station-card .console-chip { font-size: clamp(0.6rem, 0.7vw, 0.7rem); }
+    .station-card .complexity-pill { font-size: clamp(0.55rem, 0.65vw, 0.65rem); }
+
+    .station-card { min-height: 90px; }
+
+    /* Connected-list pills (used in both landscape column and compact wrap) */
+    .spectator-pill {
+      padding: 4px 10px;
+      border-radius: 3px;
+      background: #181e2a;
+      color: #aac;
+      border: 1px solid #2a3a48;
+      font-size: 0.75rem;
+      white-space: nowrap;
+      align-self: flex-start;
+    }
+    .spectator-pill.waiting {
+      font-style: italic;
+      color: #778;
+      border-style: dashed;
+    }
+    .spectator-empty {
+      color: #556;
+      font-size: 0.8rem;
+      font-style: italic;
+    }
+
+    /* Aggregate RESERVED chip (compact mode only) */
+    .reserved-aggregate {
+      display: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: 1px dashed #2a2d3a;
+      background: repeating-linear-gradient(45deg,transparent,transparent 6px,rgba(255,255,255,0.02) 6px,rgba(255,255,255,0.02) 12px);
+      font-size: 0.75rem;
+      color: #667;
+      text-align: center;
+      letter-spacing: .04em;
+      font-family: 'Chakra Petch', system-ui, monospace;
+    }
+
+    /* Header reflow */
+    .lobby-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      row-gap: 0.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #334;
+    }
+    .lobby-title-block { display: flex; flex-direction: column; }
+    .lobby-status-block {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      row-gap: 0.5rem;
+    }
+    .lobby-crew-info {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .lobby-crew-label {
+      font-size: 0.75rem;
+      color: #889;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    #lobby-title {
+      font-size: clamp(1.1rem, 2.5vw, 1.6rem);
+      font-weight: bold;
+      letter-spacing: .08em;
+      color: #cce;
+    }
+    #lobby-subtitle {
+      font-size: 0.8rem;
+      color: #778;
+    }
+    #lobby-crew-count {
+      font-size: clamp(1rem, 2vw, 1.4rem);
+      font-weight: bold;
+      color: #aae;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    #lobby-crew-dots { display: flex; gap: 4px; }
+    #lobby-spectator-tag {
+      font-size: 0.7rem;
+      color: #667;
+      padding: 2px 6px;
+      border: 1px solid #445;
+      border-radius: 3px;
+    }
+    #lobby-ready-badge {
+      padding: 6px 14px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: bold;
+      letter-spacing: .1em;
+      background: #332;
+      color: #ca0;
+      border: 1px solid #ca0;
+      transition: all .3s ease;
+    }
+
+    /* Compact form: portrait OR narrow landscape */
+    @media (orientation: portrait), (max-width: 720px) {
+      .lobby-body {
+        flex-direction: column;
+        overflow: auto;
+      }
+      .lobby-grid {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        overflow-y: visible;
+      }
+      /* Hide individual RESERVED placeholders, show aggregate */
+      .lobby-grid .station-card.empty.per-slot { display: none; }
+      .reserved-aggregate.active { display: block; }
+      /* Rail collapses to bottom strip */
+      .lobby-rail {
+        width: auto;
+        min-width: 0;
+        border-left: none;
+        border-top: 1px solid #334;
+        padding-left: 0;
+        padding-top: 0.75rem;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .lobby-rail-spacer { display: none; }
+      .lobby-status-hint {
+        text-align: left;
+        border-top: none;
+        padding-top: 0;
+      }
+      /* CONNECTED list becomes flex-wrap of pills */
+      .lobby-rail-section {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
     }
 
     /* ── HTML viewscreen HUD overlay (issue #422) ───────────────────────── */
@@ -307,7 +533,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-de71b218d9955782.js" crossorigin="anonymous" integrity="sha384-mASu5ACXG72xyc7xVbOA6uh/C4kxMC9PsLo2obb9WoeeXIQzFGKRsluM3tNjkbx/"><link rel="preload" href="./project-phoenix-de71b218d9955782_bg.wasm" crossorigin="anonymous" integrity="sha384-FqeX1FOQQjtCEW/nycFmSMMmTT+LY9RIp8Xi6JrHdORnGLr4Ls85A0HZO2CE/bx4" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-c3e7c3bdc5e2532f.js" crossorigin="anonymous" integrity="sha384-tTNesohP116BPfVXxRR63MHzz1UNcgGsxIkZoaz5eYW44NBLveuQLZcQWzfZyMHw"><link rel="preload" href="./project-phoenix-c3e7c3bdc5e2532f_bg.wasm" crossorigin="anonymous" integrity="sha384-6X5DPQMTnCsUHgx2Go24ZiRuiR9+Dn/XZboOoDEFZYTctfHbztGSF34aBdE+wzx4" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -336,44 +562,47 @@
   </div>
 
   <!-- ── HTML Lobby Panel (issue #436) ──────────────────────────────────── -->
-  <div id="lobby-panel" style="display:none;position:fixed;inset:0;z-index:180;font-family:monospace;color:#cce;">
+  <div id="lobby-panel" class="lobby-panel" style="display:none;">
     <!-- Background overlay -->
-    <div style="position:absolute;inset:0;background:rgb(0,0,0);"></div>
+    <div class="lobby-bg"></div>
 
-    <div style="position:relative;z-index:1;display:flex;flex-direction:column;height:100%;padding:2rem 3rem;box-sizing:border-box;">
+    <div class="lobby-panel-wrap">
 
       <!-- Header row: title + crew counter + ready badge -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:1rem;border-bottom:1px solid #334;">
-        <div>
-          <div id="lobby-title" style="font-size:1.6rem;font-weight:bold;letter-spacing:.08em;color:#cce;">Loading…</div>
-          <div id="lobby-subtitle" style="font-size:0.8rem;color:#778;"></div>
+      <div class="lobby-header">
+        <div class="lobby-title-block">
+          <div id="lobby-title">Loading…</div>
+          <div id="lobby-subtitle"></div>
         </div>
-        <div style="display:flex;align-items:center;gap:1.5rem;">
-          <div style="display:flex;align-items:center;gap:0.5rem;">
-            <span style="font-size:0.75rem;color:#889;text-transform:uppercase;letter-spacing:.06em;">Crew</span>
-            <span id="lobby-crew-count" style="font-size:1.4rem;font-weight:bold;color:#aae;font-family:'JetBrains Mono',monospace;">0/0</span>
-            <div id="lobby-crew-dots" style="display:flex;gap:4px;"></div>
-            <span id="lobby-spectator-tag" style="display:none;font-size:0.7rem;color:#667;padding:2px 6px;border:1px solid #445;border-radius:3px;">Spectator</span>
+        <div class="lobby-status-block">
+          <div class="lobby-crew-info">
+            <span class="lobby-crew-label">Crew</span>
+            <span id="lobby-crew-count">0/0</span>
+            <div id="lobby-crew-dots"></div>
+            <span id="lobby-spectator-tag" style="display:none;">Spectator</span>
           </div>
-          <div id="lobby-ready-badge" style="padding:6px 14px;border-radius:4px;font-size:0.8rem;font-weight:bold;letter-spacing:.1em;background:#332;color:#ca0;border:1px solid #ca0;transition:all .3s ease;">AWAITING SELECTION</div>
+          <div id="lobby-ready-badge">AWAITING SELECTION</div>
         </div>
       </div>
 
       <!-- Body: station grid + log rail -->
-      <div style="display:flex;flex:1;gap:2rem;padding-top:1rem;overflow:hidden;">
+      <div class="lobby-body">
 
-        <!-- Station grid: 3×2 -->
-        <div id="station-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;flex:1;align-content:start;overflow-y:auto;"></div>
+        <!-- Active station grid + aggregate RESERVED chip -->
+        <div class="lobby-grid-column">
+          <div id="station-grid" class="lobby-grid"></div>
+          <div id="reserved-aggregate" class="reserved-aggregate"></div>
+        </div>
 
         <!-- Log rail: spectators + status -->
-        <div style="width:18rem;min-width:14rem;display:flex;flex-direction:column;gap:0.75rem;border-left:1px solid #334;padding-left:1.5rem;">
+        <aside class="lobby-rail">
           <div>
-            <div style="font-size:0.7rem;color:#667;text-transform:uppercase;letter-spacing:.08em;margin-bottom:0.5rem;">Connected</div>
-            <div id="lobby-spectator-list" style="display:flex;flex-direction:column;gap:4px;font-size:0.8rem;color:#889;"></div>
+            <div class="lobby-rail-label">Connected</div>
+            <div id="lobby-spectator-list" class="lobby-rail-section"></div>
           </div>
-          <div style="flex:1;"></div>
-          <div id="lobby-status-hint" style="font-size:0.75rem;color:#667;text-align:right;padding-top:0.5rem;border-top:1px solid #334;">Waiting for players to connect…</div>
-        </div>
+          <div class="lobby-rail-spacer"></div>
+          <div id="lobby-status-hint" class="lobby-status-hint">Waiting for players to connect…</div>
+        </aside>
       </div>
     </div>
   </div>
@@ -457,8 +686,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-de71b218d9955782.js';
-const wasm = await init({ module_or_path: './project-phoenix-de71b218d9955782_bg.wasm' });
+import init, * as bindings from './project-phoenix-c3e7c3bdc5e2532f.js';
+const wasm = await init({ module_or_path: './project-phoenix-c3e7c3bdc5e2532f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -659,8 +888,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           card.appendChild(footer);
         }
       } else {
-        // Empty slot
-        card.className = 'station-card empty';
+        // Empty slot — visible in wide mode, hidden in compact (CSS)
+        card.className = 'station-card empty per-slot';
         const label = document.createElement('div');
         label.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;font-size:0.75rem;color:#556;letter-spacing:.06em;';
         label.textContent = 'RESERVED';
@@ -670,36 +899,46 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       grid.appendChild(card);
     }
 
+    // Aggregate RESERVED chip (visible only in compact mode via CSS)
+    const aggregate = document.getElementById('reserved-aggregate');
+    if (aggregate) {
+      const reservedCount = MAX_SLOTS - stations.length;
+      if (reservedCount > 0) {
+        aggregate.classList.add('active');
+        aggregate.textContent = `↻ ${reservedCount} station slot${reservedCount === 1 ? '' : 's'} reserved (max ${MAX_SLOTS})`;
+      } else {
+        aggregate.classList.remove('active');
+        aggregate.textContent = '';
+      }
+    }
+
     // ── Spectator list ─────────────────────────────────────────────────
     const specList = document.getElementById('lobby-spectator-list');
     if (specList) {
       specList.innerHTML = '';
+      specList.style.color = '';
       const allPlayers = s.stations
         ? s.stations.filter(st => st.holder_name).map(st => ({ name: st.holder_name, station: st.name }))
         : [];
       for (const p of allPlayers) {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:3px 0;';
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = p.name;
-        const stationSpan = document.createElement('span');
-        stationSpan.style.cssText = 'font-size:0.7rem;color:#667;';
-        stationSpan.textContent = '@ ' + p.station;
-        row.appendChild(nameSpan);
-        row.appendChild(stationSpan);
-        specList.appendChild(row);
+        const pill = document.createElement('span');
+        pill.className = 'spectator-pill';
+        pill.textContent = `${p.name} \u00b7 ${p.station}`;
+        specList.appendChild(pill);
       }
       if (s.spectators && s.spectators.length > 0) {
         for (const sp of s.spectators) {
-          const row = document.createElement('div');
-          row.style.cssText = 'padding:3px 0;color:#667;font-style:italic;font-size:0.75rem;';
-          row.textContent = sp + ' (waiting)';
-          specList.appendChild(row);
+          const pill = document.createElement('span');
+          pill.className = 'spectator-pill waiting';
+          pill.textContent = `${sp} (waiting)`;
+          specList.appendChild(pill);
         }
       }
       if (allPlayers.length === 0 && (!s.spectators || s.spectators.length === 0)) {
-        specList.textContent = 'No players connected yet';
-        specList.style.color = '#556';
+        const empty = document.createElement('span');
+        empty.className = 'spectator-empty';
+        empty.textContent = 'No players connected yet';
+        specList.appendChild(empty);
       }
     }
 

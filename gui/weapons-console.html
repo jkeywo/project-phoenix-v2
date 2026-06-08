@@ -292,8 +292,8 @@
   <script>
     // ── State ────────────────────────────────────────────────────────────
     // Defaults ensure FIRE buttons work before first __updateConsole call
-    // (smoke-test requirement: fire_phaser→bank:'port', fire_torpedo→tube:'fore').
-    var _selectedBank  = 'port';
+    // (smoke-test requirement: fire_phaser→bank:'fore', fire_torpedo→tube:'fore').
+    var _selectedBank  = 'fore';
     var _selectedTube  = 'fore';
     var _lastName      = null;
     var _lastStateJson = null;
@@ -361,7 +361,8 @@
         btn.className = 'chip' + (t.id === _selectedTube ? ' selected' : '');
         btn.type = 'button';
         btn.innerHTML = '<span class="chip-bg"></span><span class="lbl">' + t.id.toUpperCase() + '</span>';
-        btn.addEventListener('click', (function(id) { return function() {
+        btn.addEventListener('pointerdown', (function(id) { return function(e) {
+          e.preventDefault();  // prevent 300ms-delayed synthetic click after DOM rebuild
           _selectedTube = id;
           if (_lastStateJson) _renderConsole(_lastName, _lastStateJson);
         }; })(t.id));
@@ -442,14 +443,15 @@
           phaser_arcs:  s.phaser_arcs  || [],
           torpedo_arcs: s.torpedo_arcs || [],
           target_uuid:  s.target_uuid  || null,
+          regions:      s.regions      || [],
         });
       }
     }
 
     // ── Outbound actions ──────────────────────────────────────────────────
     document.getElementById('fire-phaser').addEventListener('click', function() {
-      // Fire with first fire-ready bank, falling back to _selectedBank ('port')
-      var bank = _selectedBank || 'port';
+      // Fire with first fire-ready bank, falling back to _selectedBank ('fore')
+      var bank = _selectedBank || 'fore';
       if (_state && _state.banks) {
         var ready = _state.banks.filter(function(b) { return b.fire_ready; });
         if (ready.length > 0) bank = ready[0].id;

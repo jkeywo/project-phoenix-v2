@@ -1,0 +1,32 @@
+# Reinforcements Layer
+#
+# Loaded as a layer on top of default.toml when raider_alpha first takes
+# damage (on_attacked trigger in default.toml).  Spawns a second pirate
+# raider at the patrol_beta position (~370 units from player start) using
+# the reinforcement variant that has an expanded detection radius so the
+# ship immediately pursues the player and enters tactical radar range
+# within seconds.
+#
+# This file is intentionally minimal — it defines only what is needed
+# for the reinforcement encounter.  Anchors from default.toml (patrol_alpha,
+# patrol_beta, patrol_gamma) are used by the AI for patrol waypoints after
+# the pursue/attack phase ends.
+
+[global]
+seed = 43
+title = "Reinforcements"
+description = "A second pirate raider drops out of warp to assist its wing-mate."
+
+[anchors]
+# Spawn anchor: patrol_beta position from default.toml.
+# Defined here so spawn_immediate_entities_internal can resolve it when
+# loading this file as a layer (entity position resolution uses the layer's
+# own anchor map, not the base world's).
+patrol_beta = [500.0, 0.0, -300.0]
+
+# ── Named entities ────────────────────────────────────────────────────────────
+
+[[entity]]
+template_path = "assets/entities/pirate_raider_reinforcement.toml"
+name          = "raider_beta"
+transform     = { anchor = "patrol_beta" }

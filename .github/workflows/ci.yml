@@ -58,6 +58,17 @@ jobs:
         with:
           version: latest
 
+      # Pre-install wasm-bindgen-cli at the exact version pinned in Cargo.lock.
+      # Trunk normally fetches this binary from github.com/rustwasm/wasm-bindgen/releases
+      # at build time, which intermittently 504s and fails the whole pipeline.
+      # taiki-e/install-action uses cached/mirrored binaries with retry+fallback,
+      # and Trunk will detect the pre-installed binary on PATH and skip its own
+      # download. The version must match the wasm-bindgen crate version in Cargo.lock.
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.120
+
       - name: Build server page (WASM + JS)
         run: trunk build --release
 

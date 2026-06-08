@@ -1144,6 +1144,9 @@
         case 'set_target':
           if (action.uuid) send('SetTarget', { uuid: action.uuid });
           break;
+        case 'set_phaser_mode':
+          if (action.mode) send('SetPhaserMode', { mode: action.mode });
+          break;
         default:
           break;
       }

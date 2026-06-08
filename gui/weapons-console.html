@@ -463,6 +463,12 @@
       window.__sendAction(JSON.stringify({ action: 'fire_torpedo', console: 'Tactical', tube: tube, target_uuid: targetUuid }));
     });
 
+    document.getElementById('phaser-mode-btn').addEventListener('click', function() {
+      var currentMode = (_state && _state.phaser_mode) ? _state.phaser_mode : 'Auto';
+      var nextMode = currentMode === 'Auto' ? 'Manual' : 'Auto';
+      window.__sendAction(JSON.stringify({ action: 'set_phaser_mode', console: 'Tactical', mode: nextMode }));
+    });
+
     // ── Radar tap-to-lock via RadarWidget ────────────────────────────────
     // RadarWidget handles hit-testing and calls onBlipTap with the uuid.
     _radarWidget = (function () {

@@ -97,7 +97,7 @@ entity    = "raider_alpha"
 
   [[trigger.action]]
   type = "load_world"
-  path = "assets/worlds/patrol.toml"
+  path = "assets/worlds/reinforcements.toml"
 
 # ── Comms templates ──────────────────────────────────────────────────────────
 

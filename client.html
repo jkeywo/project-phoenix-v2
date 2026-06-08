@@ -17,6 +17,7 @@
   <script type="module" src="gui/phase-toggle.js"></script>
   <script type="module" src="gui/tab-bar.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
+  <script type="module" src="gui/active-console.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -655,13 +656,17 @@
     // Single source of truth for changing the active console. Called by
     // the render() reconciler, the tab-bar onPress handler, and the swipe
     // gesture. No-op if the value is already current. Forwards to WASM so
-    // the Bevy panels know which console to draw.
+    // the Bevy panels know which console to draw. Delegates the
+    // null/undefined/"" → "" sentinel mapping to gui/active-console.js so
+    // the contract is locked by Vitest (see src/client/bridge.rs:160).
     function setActiveConsole(name) {
-      const next = name || null;
-      if (next === activeConsole) return;
-      activeConsole = next;
+      const step = (typeof window.nextActiveConsole === 'function')
+        ? window.nextActiveConsole(activeConsole, name)
+        : { changed: (name || null) !== activeConsole, next: name || null, wasmArg: name || '' };
+      if (!step.changed) return;
+      activeConsole = step.next;
       if (typeof wasm_client_set_active_console === 'function') {
-        wasm_client_set_active_console(next || '');
+        wasm_client_set_active_console(step.wasmArg);
       }
     }
 
@@ -696,28 +701,15 @@
     // ── Rendering ───────────────────────────────────────────────
 
     const CONSOLES = ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Sensors', 'Shields', 'Navigation', 'Power', 'Comms'];
-    const CONSOLE_LABEL = {
-      CaptainChair: "Captain's Chair",
-      Helm: 'Helm',
-      Tactical: 'Tactical',
-      Repair: 'Repair',
-      Sensors: 'Sensors',
-      Shields: 'Shields',
-      Navigation: 'Navigation',
-      Power: 'Power',
-      Comms: 'Comms',
-    };
-    const CONSOLE_INITIAL = {
-      CaptainChair: 'CC',
-      Helm: 'H',
-      Tactical: 'T',
-      Repair: 'R',
-      Sensors: 'S',
-      Shields: 'SH',
-      Navigation: 'N',
-      Power: 'P',
-      Comms: 'C',
-    };
+
+    // Console display name → human label. Reads the single source from
+    // gui/tab-bar.js (window.CONSOLE_LABEL, frozen). Falls back to the
+    // raw console name when the module hasn't loaded yet so the first
+    // paint never blanks out — same race-safety pattern as render()
+    // uses for sectionVisibility / consoleSections / tabBarLayout.
+    function consoleLabel(name) {
+      return (window.CONSOLE_LABEL && window.CONSOLE_LABEL[name]) || name;
+    }
 
     // Defer re-render so rapid server messages don't steal pointer events.
     let _renderFrame = null;
@@ -746,7 +738,7 @@
         titleEl.style.display = 'none';
       } else if (activeConsole) {
         titleEl.style.display = '';
-        titleEl.textContent = CONSOLE_LABEL[activeConsole] || activeConsole;
+        titleEl.textContent = consoleLabel(activeConsole);
       } else {
         titleEl.style.display = '';
         titleEl.textContent = 'Bridge';
@@ -834,7 +826,7 @@
         for (const c of (st.consoles || [])) {
           const chip = document.createElement('span');
           chip.className = 'cons';
-          chip.textContent = CONSOLE_LABEL[c] || c;
+          chip.textContent = consoleLabel(c);
           meta.appendChild(chip);
         }
         info.appendChild(meta);
@@ -880,7 +872,7 @@
           for (const c of (myStation.consoles || [])) {
             const chip = document.createElement('span');
             chip.className = 'chip';
-            chip.textContent = CONSOLE_LABEL[c] || c;
+            chip.textContent = consoleLabel(c);
             consolesArea.appendChild(chip);
           }
           const seg = detail.querySelector('.segmented');

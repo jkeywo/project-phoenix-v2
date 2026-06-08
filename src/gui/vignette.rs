@@ -1,15 +1,14 @@
 //! `GuiVignette` — full-screen `UiMaterial` overlay driven by `RedAlertIntensity`.
 //!
 //! The `RedAlertIntensity` resource is written by game logic (pulse, shield flash)
-//! each frame.  Two systems consume it:
+//! each frame.  One system consumes it: `drive_vignette_material` writes it
+//! into the `RedAlertVignetteMaterial` uniform.
 //!
-//! - One writes `RedAlertIntensity` into the `RedAlertVignetteMaterial` uniform.
-//! - The `GuiBorder` plugin reads it to swap border textures.
-//!
-//! Both the phone bezel and the viewscreen border share the same
-//! `RedAlertVignetteMaterial` shader but define their own material struct.
-//! The client version defined here uses 4 fields (16 bytes) for WGSL std140
-//! alignment with the shared WGSL shader.
+//! Pre-#442 the client also had a `GuiBorderPlugin` system that read this
+//! resource to swap phone-bezel textures; that border is now rendered by
+//! HTML/CSS in `client.html`, so only the shader uniform consumer remains.
+//! The viewscreen border on the server still uses the shared
+//! `RedAlertVignetteMaterial` shader.
 
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
@@ -21,8 +20,7 @@ use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 /// Shared intensity value for the red-alert vignette pulse, 0.0–1.0.
 ///
 /// Written by game logic each frame (pulse function, shield-flash decay, etc.).
-/// Read by `drive_vignette_material` to update the shader uniform, and by
-/// `GuiBorderPlugin::update_border_textures` to swap corner/edge images.
+/// Read by `drive_vignette_material` to update the shader uniform.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq)]
 pub struct RedAlertIntensity(pub f32);
 

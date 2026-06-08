@@ -6,10 +6,6 @@
 
 use bevy::prelude::*;
 
-pub use border::{
-    BorderAssets, BorderConfig, BorderContentArea, CornerSlot, EdgeSlot, GuiBorder,
-    GuiBorderPlugin, GuiBorderWidget,
-};
 pub use button::{
     spawn_gui_button, ButtonPressed, ButtonSize,
     GuiButtonMarker, WidgetActivated, WidgetDeactivated,
@@ -51,7 +47,6 @@ pub use vignette::{
     VignetteMaterialHandle,
 };
 
-pub mod border;
 pub mod button;
 mod foundation;
 pub mod joystick;
@@ -80,7 +75,6 @@ impl Plugin for GuiPlugin {
             .add_plugins(light::GuiLightPlugin)
             .add_plugins(readout::GuiReadoutPlugin)
             .add_plugins(radio::GuiRadioPlugin)
-            .add_plugins(border::GuiBorderPlugin)
             .add_plugins(vignette::GuiVignettePlugin);
     }
 }

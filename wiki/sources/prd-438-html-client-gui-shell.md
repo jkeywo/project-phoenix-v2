@@ -41,8 +41,8 @@ Single PeerJS connection serves both sections. Single `state` object drives all 
 4. **Content Switcher** — pure function: `(activeConsole) → canvas-vs-iframe visibility`. Issue #441.
 5. **Red Alert Wire** — one-line addition reading `snap.red_alert`. Issue #439.
 6. **Lobby Merge** — inline lobby HTML/CSS/JS into `client.html`. Issue #440.
-7. **Bevy Cleanup** — remove `LobbyRoot`, `EmbeddedTabBar`, `PhoneBorderPlugin`, `BorderAssets`. Issue #442.
-8. **Border Templates** — `gui/captain-{landscape,portrait}.html` reference files. (Optional design QA.)
+7. **Bevy Cleanup** — remove `LobbyRoot`, `EmbeddedTabBar`, `PhoneBorderPlugin`, `BorderAssets`. Issue #442 + post-merge cleanup pass (`src/gui/border.rs` fully deleted).
+8. **Border Templates** — `gui/captain-{landscape,portrait}.html` reference files. **Deferred** as "Optional design QA" — no GitHub issue, no follow-up planned. Future visual-polish passes can revisit if needed.
 
 ## Key decisions
 

@@ -120,9 +120,10 @@ fn apply_ship_view_messages(
 
 /// Marks the background container of the per-console hull bar.
 ///
-/// `pub(crate)` so that `client::phone_border::framing` can reparent the
-/// bar into the bezel's `BorderContentArea`, anchoring it just above the
-/// bottom border edge instead of floating over the raw viewport.
+/// `pub(crate)` so that other client modules can query the marker; the
+/// bar anchors itself just above the bottom edge of the HTML bezel via
+/// fixed-position CSS (the bezel is rendered by `client.html` after #442,
+/// not by Bevy).
 #[cfg(feature = "client")]
 #[derive(Component)]
 pub(crate) struct ConsoleHullBarBg;
@@ -153,10 +154,9 @@ const HULL_BAR_WIDTH: f32 = 220.0;
 #[cfg(feature = "client")]
 const HULL_BAR_HEIGHT: f32 = 18.0;
 
-/// Distance from the bottom edge of the bezel `BorderContentArea`.
-/// The reparenting system in `client::phone_border::framing` slots this
-/// bar inside the bezel safe zone, so this value is measured from the
-/// top of the bezel's bottom border rather than from the raw viewport.
+/// Distance from the bottom edge of the viewport in logical pixels.
+/// The HTML bezel reserves a 22 px inset around its content area, so
+/// this small offset keeps the bar above the bottom bezel edge.
 #[cfg(feature = "client")]
 const HULL_BAR_BOTTOM: f32 = 6.0;
 

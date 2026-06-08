@@ -126,11 +126,19 @@ None. The deletions don't touch any wire types, components consumed across the c
 ## Out of scope
 
 - Renaming `PhoneBorderPlugin` → `PhoneAssetsPlugin`. Mentioned above.
-- Removing `BorderAssets` from `src/gui/border.rs`. The struct is now unused on the client but harmless.
-- Fixing the stale `update_red_alert_intensity` reference in `src/gui/border.rs:271` doc comment.
-- Removing the duplicate inline `CONSOLE_LABEL` table in `client.html` (~lines 689-711). Flagged by the #441 reviewer; better handled as a follow-up.
-- Tightening `setActiveConsole(null)`, which currently pushes `''` to WASM. Also flagged by the #441 reviewer.
 - Migrating the remaining Bevy-rendered panels (Helm, Sensors, Shields, Navigation, Power, Comms) to HTML — explicitly out of scope per PRD #438.
+
+## Follow-up cleanup pass (post-merge, 2026-06-08)
+
+Three reviewer items from the `review-plan` pass against PRD #438 were addressed in a follow-up commit on the same day, before pushing the series to `origin/main`:
+
+- **Deleted `src/gui/border.rs` entirely.** Every export (`BorderAssets`, `BorderConfig`, `CornerSlot`, `EdgeSlot`, `GuiBorder`, `BorderContentArea`, `GuiBorderWidget`, `update_border_textures`, `GuiBorderPlugin`) and the five inline unit tests were orphaned after the `framing.rs` rewrite. `src/gui/mod.rs` dropped `pub mod border;`, the re-export block, and the `GuiBorderPlugin` registration in `GuiPlugin::build`. Doc comments in `src/gui/vignette.rs:1-25` and `src/ship_view.rs:121-161` were updated to drop stale `BorderContentArea` references. The server's `ViewscreenBorderPlugin` is unaffected — it uses its own `ViewscreenBorderAssets` and is independent.
+- **Extracted `nextActiveConsole` to `gui/active-console.js`** with 9 Vitest tests in `tests/client/active-console.test.js`. The inline `setActiveConsole(name)` in `client.html:659` now delegates the `null`/`undefined`/`""` → `""` sentinel mapping to the module, locking the `src/client/bridge.rs:160` contract (the `""` = "follow player's primary console" sentinel) by test instead of inspection. The inline function keeps a fallback inline branch so the first paint never blanks out if the module hasn't loaded yet.
+- **Replaced inline `CONSOLE_LABEL`/`CONSOLE_INITIAL` duplication in `client.html:699-720`** with a `consoleLabel(name)` helper that reads `window.CONSOLE_LABEL` from `gui/tab-bar.js` (the single frozen source). Three call sites (`client.html:749, 837, 883`) now route through the helper. `CONSOLE_INITIAL` was dropped entirely from the inline scope — it was declared but never referenced inline; only `gui/tab-bar.js` consumes it via its own module-local copy. The helper falls back to the raw console name when the module hasn't loaded yet, matching the race-safety pattern of `sectionVisibility` / `consoleSections` / `tabBarLayout`.
+
+Module 8 (`gui/captain-{landscape,portrait}.html` reference files) was marked "Optional design QA" in the PRD body and is deferred — no GitHub issue, no follow-up. See the parent PRD's Out of Scope section.
+
+After the cleanup pass: `cargo test` 2035/2035 pass (was 2040 pre-cleanup; the 5 inline tests in the deleted `src/gui/border.rs` are gone), `npm.cmd run test:editor` 1076/1076 pass (1067 pre-cleanup + 9 new), `cargo check --features client --no-default-features` and default `cargo check` both clean (13 pre-existing dead-code warnings in `src/server/viewscreen_border.rs` are not introduced by this slice and remain).
 
 ## Cross-references
 
@@ -143,3 +151,4 @@ None. The deletions don't touch any wire types, components consumed across the c
 - Surfaces retained for downstream callers: `ConsoleShell::spawn`, `ConsoleShellEntities { root, primary, secondary }`, `PhoneAssets`, `RadarIconHandles`, `DeviceOrientation`, `is_landscape`, `PhoneBorderPlugin`, `ClientAppPlugin`, `OutboundClientMessage`, `InboundServerMessage`, `add_client_plugins`.
 - HTML modules that replaced the deleted Bevy code: `gui/phone-bezel.js` (#439), `gui/phase-toggle.js` (#440), `gui/tab-bar.js` + `gui/content-switcher.js` (#441).
 - Predecessor (the Rust implementation now superseded): [PRD #187 — Phone Console HUD](./prd-187-phone-console-hud.md).
+- Post-merge cleanup pass: also deleted `src/gui/border.rs` and created `gui/active-console.js` + `tests/client/active-console.test.js`. Edited `src/gui/mod.rs`, `src/gui/vignette.rs`, `src/ship_view.rs`, and `client.html` (active-console module + `consoleLabel(name)` helper).

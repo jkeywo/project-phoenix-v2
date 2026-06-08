@@ -1010,7 +1010,7 @@
 
     const hostPeerId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
-    const joinUrl = location.href.replace(/[^/]*$/, '') + 'gui/lobby-client.html#' + hostPeerId;
+    const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/index.html#' + hostPeerId;
 
     function initPeerJS() {
       setConnectionStatus('connecting');

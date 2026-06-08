@@ -11,7 +11,21 @@
   <meta http-equiv="Expires" content="0" />
   <title>Project Phoenix — Console</title>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Pure-function helpers shared with Vitest unit tests (issue #439). -->
+  <script type="module" src="gui/phone-bezel.js"></script>
   <style>
+    /* ── CSS variables (lobby + shared) ──────────────────────────────── */
+    :root {
+      --signal-cyan: #5fd8e8;
+      --alert-red: #ff3344;
+      --bg: #07080c;
+      --surface: #0e1117;
+      --surface2: #161a22;
+      --edge: #282c38;
+      --dim: #6a7178;
+      --amber: #f0a030;
+    }
     html, body { margin: 0; padding: 0; background: transparent; color: #cce; font-family: monospace; }
     body { box-sizing: border-box; }
     label { display: block; margin-bottom: 0.5rem; font-size: 0.85rem; }
@@ -56,13 +70,14 @@
        background so the Bevy canvas shows through on either side. */
     /* Console tabs removed - Bevy renders the tab bar in src/client/app.rs */
     /* Helm console UI moved to Bevy WASM (#49). */
-    /* Weapons console: full-viewport iframe overlay when active (issue #422) */
+    /* Weapons console: full-viewport iframe overlay when active (issue #422).
+       Padding leaves room for the phone bezel (issue #439); see --bezel-inset
+       further down. */
     #weapons-ui.active {
       display: block;
       position: fixed;
       inset: 0;
       z-index: 10;
-      padding: 0;
       margin: 0;
     }
     #weapons-ui iframe {
@@ -97,6 +112,181 @@
       animation: spin 1s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Phone bezel frame (issue #439) ────────────────────────────────────
+       Eight fixed-position pieces (4 corners + 4 edges) overlay the canvas /
+       weapons iframe and form the diegetic phone-console border. Corners are
+       <img>; edges are <div> with a repeating background. Red alert toggles
+       the `.alert-on` class on #phone-bezel which swaps every -alert variant
+       via CSS (and JS re-sets the four <img> srcs via bezelSrc()).
+
+       z-index: 15 — above the weapons iframe (10) and canvas (0), below the
+       top-bar status overlay (20) and the loading spinner (200). The bezel
+       is purely cosmetic; pointer-events: none lets clicks through. */
+    :root { --bezel-inset: 22px; }
+    #phone-bezel {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 15;
+    }
+    .bezel-corner, .bezel-edge {
+      position: absolute;
+      pointer-events: none;
+      image-rendering: pixelated;
+    }
+    .bezel-corner { width: 120px; height: 72px; display: block; }
+    .bezel-corner.tl { top: 0;    left: 0; }
+    .bezel-corner.tr { top: 0;    right: 0; }
+    .bezel-corner.bl { bottom: 0; left: 0; }
+    .bezel-corner.br { bottom: 0; right: 0; }
+    .bezel-edge.top {
+      top: 0; left: 120px; right: 120px;
+      height: var(--bezel-inset);
+      background-image: url("gui/borders/phone-edge-top.png");
+      background-size: 48px 22px;
+      background-repeat: repeat-x;
+    }
+    .bezel-edge.bottom {
+      bottom: 0; left: 120px; right: 120px;
+      height: var(--bezel-inset);
+      background-image: url("gui/borders/phone-edge-bottom.png");
+      background-size: 48px 22px;
+      background-repeat: repeat-x;
+    }
+    .bezel-edge.left {
+      left: 0; top: 72px; bottom: 72px;
+      width: var(--bezel-inset);
+      background-image: url("gui/borders/phone-edge-left.png");
+      background-size: 22px 48px;
+      background-repeat: repeat-y;
+    }
+    .bezel-edge.right {
+      right: 0; top: 72px; bottom: 72px;
+      width: var(--bezel-inset);
+      background-image: url("gui/borders/phone-edge-right.png");
+      background-size: 22px 48px;
+      background-repeat: repeat-y;
+    }
+    #phone-bezel.alert-on .bezel-edge.top    { background-image: url("gui/borders/phone-edge-top-alert.png"); }
+    #phone-bezel.alert-on .bezel-edge.bottom { background-image: url("gui/borders/phone-edge-bottom-alert.png"); }
+    #phone-bezel.alert-on .bezel-edge.left   { background-image: url("gui/borders/phone-edge-left-alert.png"); }
+    #phone-bezel.alert-on .bezel-edge.right  { background-image: url("gui/borders/phone-edge-right-alert.png"); }
+
+    /* Weapons iframe content sits inside the bezel safe zone. */
+    #weapons-ui.active { padding: var(--bezel-inset); }
+
+    /* ── Lobby section: full-viewport when active ──────────────────────── */
+    #lobby-ui.active {
+      display: flex !important;
+      flex-direction: column;
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      overflow: hidden;
+      padding: 28px 12px 6px;
+      background: var(--bg);
+      color: #d8dde2;
+      font-family: 'Chakra Petch', system-ui, sans-serif;
+      -webkit-user-select: none; user-select: none;
+    }
+    /* Ship header */
+    #lobby-header { display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 0 8px; border-bottom: 1px solid var(--edge); flex-shrink: 0; }
+    #ship-info { display: flex; flex-direction: column; gap: 1px; }
+    #ship-name { font-size: 1rem; font-weight: 600; color: #eef; letter-spacing: .06em; }
+    #ship-mission { font-size: 0.6rem; color: var(--dim); letter-spacing: .04em; }
+    #crew-ready { display: flex; align-items: center; gap: 8px; }
+    #crew-display { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--dim); }
+    #ready-pill { padding: 2px 10px; border-radius: 10px; font-size: 0.6rem;
+      font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+      background: #221e10; color: var(--amber); border: 1px solid var(--amber);
+      transition: all .3s ease; }
+    #ready-pill.go { background: #0a2830; color: var(--signal-cyan); border-color: var(--signal-cyan);
+      animation: pill-pulse 1.5s ease-in-out infinite; }
+    @keyframes pill-pulse {
+      0%, 100% { box-shadow: 0 0 4px rgba(95,216,232,0.2); }
+      50%       { box-shadow: 0 0 12px rgba(95,216,232,0.5); }
+    }
+    /* Name input row */
+    #lobby-name-row { flex-shrink: 0; padding: 6px 0 2px; }
+    #lobby-name-row label { font-size: 0.7rem; color: var(--dim); margin: 0;
+      display: flex; align-items: center; gap: 8px; }
+    #lobby-name-row input { flex: 1; background: var(--surface); color: #d8dde2;
+      border: 1px solid var(--edge); padding: 4px 8px; border-radius: 3px;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.8rem;
+      display: inline; width: auto; margin: 0; }
+    /* Station list */
+    #station-list { flex: 1; overflow-y: auto; padding: 8px 0; display: flex;
+      flex-direction: column; gap: 6px; }
+    .station-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      border-radius: 6px; background: var(--surface); border: 1px solid var(--edge);
+      transition: border-color .2s, background .2s; }
+    .station-row.mine { border-color: var(--signal-cyan); background: #0a1a24; }
+    .station-row.taken { opacity: 0.7; }
+    .station-row .glyph { width: 36px; height: 36px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
+      background: var(--surface2); color: var(--dim); border: 1px solid var(--edge); }
+    .station-row.mine .glyph { border-color: var(--signal-cyan); color: var(--signal-cyan); }
+    .station-row .info { flex: 1; min-width: 0; }
+    .station-row .info .name { font-size: 0.85rem; font-weight: 600; }
+    .station-row .info .meta { font-size: 0.6rem; color: var(--dim);
+      display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+    .station-row .info .meta .cons { padding: 1px 5px; border-radius: 2px;
+      background: var(--surface2); font-size: 0.55rem; color: #7aa; }
+    .station-row .info .occupant { font-size: 0.7rem; color: var(--signal-cyan); }
+    .station-row .action { flex-shrink: 0; }
+    .station-row .action button { padding: 4px 12px; border-radius: 4px;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.7rem;
+      font-weight: 600; letter-spacing: .06em; cursor: pointer; border: 1px solid;
+      transition: background .15s; display: block; width: auto; margin: 0; text-align: center; }
+    .station-row .action .claim-btn { background: #0a2830; color: var(--signal-cyan);
+      border-color: var(--signal-cyan); }
+    .station-row .action .claim-btn:hover { background: #1a3848; }
+    .station-row .action .mine-btn { background: #0a1a24; color: var(--signal-cyan);
+      border-color: var(--signal-cyan); }
+    .station-row .action .taken-btn { background: #111; color: var(--dim);
+      border-color: var(--edge); cursor: default; }
+    /* Detail panel */
+    #detail-panel { flex-shrink: 0; border-top: 1px solid var(--edge);
+      padding: 8px 0 4px; margin-top: 4px; transition: opacity .3s ease; }
+    #detail-panel.idle { opacity: 0.4; }
+    #detail-panel .detail-header { display: flex; align-items: center; justify-content: space-between; }
+    #detail-panel .detail-station-name { font-size: 0.85rem; font-weight: 600; color: var(--dim); }
+    #detail-panel.active .detail-station-name { color: var(--signal-cyan); }
+    #detail-panel .detail-consoles { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
+    #detail-panel .detail-consoles .chip { padding: 2px 8px; border-radius: 3px;
+      font-size: 0.6rem; background: var(--surface2); color: #7aa; border: 1px solid var(--edge); }
+    #detail-panel .complexity-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+    #detail-panel .complexity-row label { font-size: 0.6rem; color: var(--dim);
+      display: inline; width: auto; margin: 0; }
+    #detail-panel .segmented { display: flex; gap: 2px; }
+    #detail-panel .segmented button { padding: 2px 10px; border-radius: 3px;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
+      font-weight: 500; cursor: pointer; border: 1px solid var(--edge);
+      background: var(--surface); color: var(--dim); display: block; width: auto; margin: 0;
+      transition: background .15s, border-color .15s; }
+    #detail-panel .segmented button.active { background: #0a2830;
+      border-color: var(--signal-cyan); color: var(--signal-cyan); }
+    /* Lobby footer */
+    #lobby-footer { flex-shrink: 0; display: flex; align-items: center;
+      justify-content: space-between; padding: 6px 0 4px;
+      border-top: 1px solid var(--edge); margin-top: auto; }
+    #status-line { font-size: 0.65rem; color: var(--dim); }
+    #engage-btn { padding: 6px 16px; border-radius: 4px;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.75rem;
+      font-weight: 700; letter-spacing: .12em; cursor: pointer;
+      border: 1px solid var(--edge); background: var(--surface); color: var(--dim);
+      transition: all .3s ease; display: none; width: auto; margin: 0; }
+    #engage-btn.armed { display: block; background: #0a2830;
+      border-color: var(--signal-cyan); color: var(--signal-cyan); }
+    #engage-btn.armed:hover { background: #1a3848; }
+    #engage-btn.armed.glow { animation: engage-pulse 1s ease-in-out infinite; }
+    @keyframes engage-pulse {
+      0%, 100% { box-shadow: 0 0 6px rgba(95,216,232,0.3); }
+      50%       { box-shadow: 0 0 18px rgba(95,216,232,0.7); }
+    }
+    #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
 </head>
 <body>
@@ -132,11 +322,50 @@
 
   <div id="console-container">
     <section id="lobby-ui">
-      <label>Name
-        <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
-      </label>
-      <!-- Player list, console buttons, and Engage button are rendered by
-           the Bevy WASM lobby UI; see src/client_app.rs (#47). -->
+      <!-- Ship header -->
+      <div id="lobby-header">
+        <div id="ship-info">
+          <div id="ship-name">Phoenix</div>
+          <div id="ship-mission">Standing by</div>
+        </div>
+        <div id="crew-ready">
+          <span id="crew-display">0/0</span>
+          <span id="ready-pill">CONNECTING</span>
+        </div>
+      </div>
+
+      <!-- Name input -->
+      <div id="lobby-name-row">
+        <label>Name
+          <input id="name-input" type="text" placeholder="Your name" autocomplete="off" />
+        </label>
+      </div>
+
+      <!-- Station list -->
+      <div id="station-list"></div>
+
+      <!-- At-your-station detail panel -->
+      <div id="detail-panel" class="idle">
+        <div class="detail-header">
+          <span class="detail-station-name">No station assigned</span>
+        </div>
+        <div id="detail-console-area">
+          <div class="detail-consoles"></div>
+          <div class="complexity-row">
+            <label>Complexity</label>
+            <div class="segmented">
+              <button data-complexity="Low">Low</button>
+              <button data-complexity="Std" class="active">Normal</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div id="lobby-footer">
+        <span id="status-line">Connecting to host…</span>
+        <button id="engage-btn">ENGAGE</button>
+      </div>
     </section>
 
     <section id="game-ui">
@@ -187,6 +416,20 @@
     <button id="fullscreen-btn" title="Toggle fullscreen">⛶</button>
   </div>
 
+  <!-- Phone bezel frame (issue #439). Eight fixed-position pieces overlay
+       the content area. The `.alert-on` class on this root, plus JS-driven
+       <img> src swaps, drives the red-alert visual swap. -->
+  <div id="phone-bezel" aria-hidden="true">
+    <img class="bezel-corner tl" data-slot="corner-tl" src="gui/borders/phone-corner-tl.png" alt="">
+    <img class="bezel-corner tr" data-slot="corner-tr" src="gui/borders/phone-corner-tr.png" alt="">
+    <img class="bezel-corner bl" data-slot="corner-bl" src="gui/borders/phone-corner-bl.png" alt="">
+    <img class="bezel-corner br" data-slot="corner-br" src="gui/borders/phone-corner-br.png" alt="">
+    <div class="bezel-edge top"></div>
+    <div class="bezel-edge bottom"></div>
+    <div class="bezel-edge left"></div>
+    <div class="bezel-edge right"></div>
+  </div>
+
   <script>
     // ── Click sound ────────────────────────────────────────────────────────
     // Message types that should NOT trigger a click (continuous / connection
@@ -198,6 +441,23 @@
       if (!el) return;
       el.currentTime = 0;
       el.play().catch(() => {});
+    }
+
+    // ── Phone bezel red-alert swap (issue #439) ───────────────────────────
+    // Drives the .alert-on class on #phone-bezel (which CSS uses to swap
+    // edge background-images) and re-sets the <img> src for each corner via
+    // the bezelSrc() pure function exported by gui/phone-bezel.js.
+    function applyBezelAlert(alert) {
+      const root = document.getElementById('phone-bezel');
+      if (!root) return;
+      root.classList.toggle('alert-on', !!alert);
+      const corners = root.querySelectorAll('img.bezel-corner');
+      for (const el of corners) {
+        const slot = el.dataset.slot;
+        if (slot && typeof window.bezelSrc === 'function') {
+          el.src = window.bezelSrc(slot, !!alert);
+        }
+      }
     }
 
     // ── Connection status ──────────────────────────────────────────────────
@@ -302,9 +562,12 @@
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
       shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
+      stations: [], maxPlayers: 0, complexity: {}, allFilled: false,
       // Weapons console iframe state (issue #422)
       weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto' };
     let conn = null;
+    // Station configs from server Welcome message (keyed by player count).
+    let stationConfigs = {};
     /// Currently-active console tab during InProgress. Null until set.
     let activeConsole = null;
 
@@ -413,13 +676,186 @@
       // Helm console UI is rendered by Bevy WASM (#49).
 
       if (inGame) renderGame(s);
-      // Lobby UI is rendered by the Bevy WASM bridge (#47).
+      else renderLobby(s);
     }
 
-    function renderLobby(_s) {
-      // Lobby UI moved to Bevy WASM (#47); this stub remains only so any
-      // accidental caller is a no-op rather than a ReferenceError. Remove
-      // once the in-game UI also migrates and no JS callers exist.
+    function renderLobby(s) {
+      const list = document.getElementById('station-list');
+      if (!list) return;
+      list.innerHTML = '';
+      const myPlayer = me(s);
+      const myPlayerName = myPlayer ? myPlayer.name : myName;
+      for (const st of (s.stations || [])) {
+        const isMine = st.holder_name && myPlayer && st.holder_name === myPlayerName;
+        const row = document.createElement('div');
+        row.className = 'station-row'
+          + (isMine ? ' mine' : '')
+          + (st.holder_name && !isMine ? ' taken' : '');
+
+        const glyph = document.createElement('div');
+        glyph.className = 'glyph';
+        glyph.textContent = st.short_code ? st.short_code.substring(0, 2).toUpperCase() : '--';
+        row.appendChild(glyph);
+
+        const info = document.createElement('div');
+        info.className = 'info';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'name';
+        nameEl.textContent = st.name || '';
+        info.appendChild(nameEl);
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        if (st.rank) {
+          const rankEl = document.createElement('span');
+          rankEl.textContent = st.rank;
+          meta.appendChild(rankEl);
+        }
+        for (const c of (st.consoles || [])) {
+          const chip = document.createElement('span');
+          chip.className = 'cons';
+          chip.textContent = CONSOLE_LABEL[c] || c;
+          meta.appendChild(chip);
+        }
+        info.appendChild(meta);
+        if (st.holder_name && !isMine) {
+          const occ = document.createElement('div');
+          occ.className = 'occupant';
+          occ.textContent = st.holder_name;
+          info.appendChild(occ);
+        }
+        row.appendChild(info);
+
+        const action = document.createElement('div');
+        action.className = 'action';
+        const btn = document.createElement('button');
+        if (isMine) {
+          btn.className = 'mine-btn';
+          btn.textContent = 'RELEASE';
+          btn.addEventListener('click', () => send('ReleaseStation'));
+        } else if (st.holder_name) {
+          btn.className = 'taken-btn';
+          btn.textContent = 'TAKEN';
+          btn.disabled = true;
+        } else {
+          btn.className = 'claim-btn';
+          btn.textContent = 'CLAIM';
+          btn.addEventListener('click', () => send('SelectStation', { station: st.name }));
+        }
+        action.appendChild(btn);
+        row.appendChild(action);
+        list.appendChild(row);
+      }
+
+      // Detail panel
+      const detail = document.getElementById('detail-panel');
+      if (detail) {
+        const myStation = myPlayer && myPlayer.consoles && myPlayer.consoles.length > 0
+          ? s.stations.find(st => st.holder_name === myPlayerName) : null;
+        if (myStation) {
+          detail.className = 'active';
+          detail.querySelector('.detail-station-name').textContent = myStation.name;
+          const consolesArea = detail.querySelector('.detail-consoles');
+          consolesArea.innerHTML = '';
+          for (const c of (myStation.consoles || [])) {
+            const chip = document.createElement('span');
+            chip.className = 'chip';
+            chip.textContent = CONSOLE_LABEL[c] || c;
+            consolesArea.appendChild(chip);
+          }
+          const seg = detail.querySelector('.segmented');
+          if (seg) {
+            seg.querySelectorAll('button').forEach(segBtn => {
+              segBtn.classList.remove('active');
+              const preset = savedComplexity[myStation.consoles[0]] || 'Std';
+              if (segBtn.dataset.complexity === preset) segBtn.classList.add('active');
+              segBtn.onclick = () => {
+                const consoleName = myStation.consoles[0];
+                const presetName = segBtn.dataset.complexity;
+                savedComplexity[consoleName] = presetName;
+                localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
+                seg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                segBtn.classList.add('active');
+                send('SetComplexity', { console: consoleName, preset_name: presetName });
+              };
+            });
+          }
+        } else {
+          detail.className = 'idle';
+          detail.querySelector('.detail-station-name').textContent = 'No station assigned';
+          detail.querySelector('.detail-consoles').innerHTML = '';
+        }
+      }
+
+      // Header
+      const crewEl = document.getElementById('crew-display');
+      if (crewEl) crewEl.textContent = (s.stations.filter(st => st.holder_name).length) + '/' + (s.maxPlayers || 0);
+      const pill = document.getElementById('ready-pill');
+      if (pill) {
+        if (s.allFilled) { pill.textContent = 'READY TO LAUNCH'; pill.className = 'go'; }
+        else { pill.textContent = 'AWAITING CREW'; pill.className = ''; }
+      }
+
+      // Engage button (captain only)
+      const engageBtn = document.getElementById('engage-btn');
+      if (engageBtn) {
+        if (isCaptain(s)) {
+          engageBtn.style.display = 'block';
+          if (s.allFilled) {
+            engageBtn.textContent = 'ENGAGE';
+            engageBtn.className = 'armed glow';
+            engageBtn.disabled = false;
+            engageBtn.onclick = () => {
+              engageBtn.disabled = true;
+              engageBtn.textContent = 'LAUNCHING…';
+              engageBtn.className = 'armed';
+              send('StartGame');
+            };
+          } else {
+            engageBtn.textContent = 'ENGAGE';
+            engageBtn.className = 'armed';
+            engageBtn.disabled = true;
+          }
+        } else {
+          engageBtn.style.display = 'none';
+        }
+      }
+
+      // Status line
+      const statusLine = document.getElementById('status-line');
+      if (statusLine) {
+        if (!myPlayer) {
+          statusLine.textContent = 'Select a station to join the crew';
+        } else if (isCaptain(s) && s.allFilled) {
+          statusLine.textContent = 'All stations filled — press Engage!';
+        } else if (isCaptain(s)) {
+          statusLine.textContent = 'Waiting for crew to claim stations…';
+        } else {
+          const myStation = s.stations.find(st => st.holder_name === myPlayerName);
+          statusLine.textContent = myStation
+            ? 'Standing by at ' + myStation.name
+            : 'Select a station to join the crew';
+        }
+      }
+    }
+
+    function rebuildStations() {
+      const count = Math.max(1, Math.min(state.players.length || 1, state.maxPlayers || 1));
+      const defs = stationConfigs[count] || stationConfigs[String(count)] || [];
+      state.stations = defs.map(def => {
+        const holder = state.players.find(p =>
+          p.consoles && p.consoles.length > 0
+          && def.consoles && def.consoles.every(c => p.consoles.includes(c))
+        );
+        return {
+          name: def.name || '',
+          short_code: def.short_code || '',
+          rank: def.rank || '',
+          consoles: def.consoles || [],
+          holder_name: holder ? holder.name : null,
+        };
+      });
+      state.allFilled = state.stations.length > 0 && state.stations.every(st => st.holder_name);
+      scheduleRender();
     }
 
     function renderRepair(hp, repairTarget) {
@@ -689,6 +1125,17 @@
             ...p,
             consoles: consolesOf(p),
           }));
+          state.complexity = msg.data.state.complexity || {};
+          if (msg.data.ship_stations) {
+            state.maxPlayers = msg.data.ship_stations.max_players || 0;
+            stationConfigs = msg.data.ship_stations.configs || {};
+          }
+          if (msg.data.state.world) {
+            const nameEl2 = document.getElementById('ship-name');
+            const missionEl = document.getElementById('ship-mission');
+            if (nameEl2) nameEl2.textContent = msg.data.state.world.scenario_title || 'Phoenix';
+            if (missionEl) missionEl.textContent = msg.data.state.world.scenario_description || '';
+          }
           setStatus('Connected');
           // Sync complexity presets: send SetComplexity for any console the
           // local player holds whose stored preference differs from the server.
@@ -703,25 +1150,40 @@
               }
             }
           }
+          rebuildStations();
           break;
-        case 'PlayerJoined':
-          if (!state.players.find(p => p.token === msg.data.player.token)) {
-            const p = msg.data.player;
-            state.players.push({ ...p, consoles: consolesOf(p) });
-          }
+        case 'PlayerJoined': {
+          const p = msg.data.player;
+          const existing = state.players.findIndex(x => x.token === p.token);
+          if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p) };
+          else state.players.push({ ...p, consoles: consolesOf(p) });
+          rebuildStations();
           break;
+        }
         case 'PlayerLeft':
           state.players = state.players.filter(p => p.token !== msg.data.token);
+          rebuildStations();
           break;
         case 'StationAssigned': {
-          const p = state.players.find(p => p.token === msg.data.token);
-          if (p) p.consoles = msg.data.consoles || [];
+          const { token, consoles } = msg.data;
+          // Clear these consoles from any other player who held them.
+          for (const c of (consoles || [])) {
+            for (const p of state.players) {
+              if (p.token !== token && p.consoles) {
+                p.consoles = p.consoles.filter(x => x !== c);
+              }
+            }
+          }
+          const target = state.players.find(p => p.token === token);
+          if (target) target.consoles = consoles || [];
+          rebuildStations();
           break;
         }
         case 'NameChanged': {
           const p = state.players.find(p => p.token === msg.data.token);
           if (p) p.name = msg.data.name;
           if (msg.data.token === myToken) myName = msg.data.name;
+          rebuildStations();
           break;
         }
         case 'GameStarted':
@@ -736,6 +1198,13 @@
           state.shipZ = snap.ship_z || 0;
           state.shipYaw = snap.ship_yaw || 0;
           if (vd) state.currentView = vd;
+          // Red alert visual (issue #439): drives the phone bezel image swap.
+          // `snap.red_alert` is a snake-cased serde field on SimSnapshot.
+          const nextAlert = !!snap.red_alert;
+          if (state.redAlert !== nextAlert) {
+            state.redAlert = nextAlert;
+            applyBezelAlert(nextAlert);
+          }
           // Update entity positions from per-tick entity state snapshots
           if (snap.entity_states) {
             for (const es of snap.entity_states) {
@@ -834,9 +1303,11 @@
           return;
         }
         case 'ComplexityChanged': {
-          const { console, preset_name } = msg.data;
-          savedComplexity[console] = preset_name;
+          const { console: consoleName, preset_name } = msg.data;
+          state.complexity[consoleName] = preset_name;
+          savedComplexity[consoleName] = preset_name;
           localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
+          rebuildStations();
           return;
         }
         default:

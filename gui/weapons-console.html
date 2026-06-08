@@ -287,6 +287,8 @@
   </div>
   </div>
 
+  <script src="radar-widget.js"></script>
+
   <script>
     // ── State ────────────────────────────────────────────────────────────
     // Defaults ensure FIRE buttons work before first __updateConsole call
@@ -296,6 +298,7 @@
     var _lastName      = null;
     var _lastStateJson = null;
     var _state         = null;
+    var _radarWidget   = null;
 
     // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
     // Called by the host page: window.__updateConsole("Tactical", stateJson)
@@ -431,118 +434,16 @@
         footerLock.style.color = hasLock ? 'var(--tactical)' : 'var(--ink-faint)';
       }
 
-      // ── Radar canvas ──────────────────────────────────────────────────
-      drawRadar(s);
-    }
-
-    // ── Tactical radar renderer ───────────────────────────────────────────
-    // Draws ship-centred, ship-aligned radar: forward = up, right = right.
-    //   state.blips        [{uuid, radar_x, radar_y, scaled_radius, kind}]
-    //   state.phaser_arcs  [{id, facing_deg, fire_arc_deg}]
-    //   state.torpedo_arcs [{id, facing_deg, fire_arc_deg}]
-    function drawRadar(state) {
-      var canvas = document.getElementById('radar');
-      if (!canvas || !canvas.getContext) return;
-      var ctx = canvas.getContext('2d');
-      var W = canvas.width, H = canvas.height;
-      var cx = W / 2, cy = H / 2;
-      var R  = Math.min(W, H) / 2 - 8;
-
-      ctx.clearRect(0, 0, W, H);
-
-      // Background disc (semi-transparent overlay on radar-bg.png)
-      ctx.fillStyle = 'rgba(5,8,22,0.52)';
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Range rings
-      ctx.strokeStyle = 'rgba(106,124,164,0.28)';
-      ctx.lineWidth = 1;
-      [0.33, 0.66, 1.0].forEach(function(f) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, R * f, 0, Math.PI * 2);
-        ctx.stroke();
-      });
-
-      // ── Fire-arc sectors ──────────────────────────────────────────────
-      // facing_deg=0 → forward (up). canvas_angle = (facing_deg − 90) × π/180
-      function drawArcSector(arcs, innerFrac, fillColor, strokeColor) {
-        var arcR = R * innerFrac;
-        (arcs || []).forEach(function(arc) {
-          var facing  = (arc.facing_deg - 90) * Math.PI / 180;
-          var halfArc = arc.fire_arc_deg * Math.PI / 180 / 2;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.arc(cx, cy, arcR, facing - halfArc, facing + halfArc);
-          ctx.closePath();
-          ctx.fillStyle   = fillColor;
-          ctx.fill();
-          ctx.strokeStyle = strokeColor;
-          ctx.lineWidth   = 1;
-          ctx.stroke();
+      // ── Radar widget ─────────────────────────────────────────────────
+      if (_radarWidget) {
+        _radarWidget.update({
+          mode:         'pre-projected',
+          blips:        s.blips        || [],
+          phaser_arcs:  s.phaser_arcs  || [],
+          torpedo_arcs: s.torpedo_arcs || [],
+          target_uuid:  s.target_uuid  || null,
         });
       }
-      drawArcSector(state.torpedo_arcs, 0.70, 'rgba(60,160,240,0.08)',  'rgba(60,160,240,0.35)');
-      drawArcSector(state.phaser_arcs,  0.90, 'rgba(240,132,56,0.10)',  'rgba(240,132,56,0.40)');
-
-      // Clip subsequent draws to the disc
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, Math.PI * 2);
-      ctx.clip();
-
-      // ── Blips ─────────────────────────────────────────────────────────
-      var kindColor = {
-        asteroid: '#7ac0ff',
-        ship:     '#ff8060',
-        station:  '#ffe060',
-        unknown:  '#a8b0c0'
-      };
-      var targetUuid = state.target_uuid || null;
-      (state.blips || []).forEach(function(b) {
-        // radar_x = right, radar_y = forward (up) → negate Y for canvas
-        var bx       = cx + b.radar_x * R;
-        var by       = cy - b.radar_y * R;
-        var isTarget = targetUuid && targetUuid === b.uuid;
-        var color    = isTarget ? '#ff3344' : (kindColor[b.kind] || kindColor.unknown);
-        var dotR     = Math.max(3, b.scaled_radius * R * 0.6);
-
-        ctx.beginPath();
-        ctx.arc(bx, by, dotR, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-
-        if (isTarget) {
-          // Lock ring around target
-          ctx.strokeStyle = '#ff3344';
-          ctx.lineWidth   = 2;
-          ctx.beginPath();
-          ctx.arc(bx, by, dotR + 7, 0, Math.PI * 2);
-          ctx.stroke();
-          // Cross ticks on lock ring
-          ctx.lineWidth = 1.5;
-          var lr = dotR + 7;
-          [[0, -lr-4, 0, -lr+4],[0, lr-4, 0, lr+4],[lr-4, 0, lr+4, 0],[-lr-4, 0, -lr+4, 0]].forEach(function(pts) {
-            ctx.beginPath();
-            ctx.moveTo(bx + pts[0], by + pts[1]);
-            ctx.lineTo(bx + pts[2], by + pts[3]);
-            ctx.stroke();
-          });
-        }
-      });
-
-      ctx.restore();
-
-      // ── Own-ship marker (always at centre, pointing forward = up) ─────
-      ctx.fillStyle = '#6cb6d0';
-      ctx.beginPath();
-      ctx.moveTo(cx,     cy - 9);  // forward tip
-      ctx.lineTo(cx + 5, cy + 3);  // starboard
-      ctx.lineTo(cx,     cy - 1);  // aft indent
-      ctx.lineTo(cx - 5, cy + 3);  // port
-      ctx.closePath();
-      ctx.fill();
     }
 
     // ── Outbound actions ──────────────────────────────────────────────────
@@ -562,44 +463,18 @@
       window.__sendAction(JSON.stringify({ action: 'fire_torpedo', console: 'Tactical', tube: tube, target_uuid: targetUuid }));
     });
 
-    // ── Radar tap-to-lock ─────────────────────────────────────────────────
-    // Tapping a blip on the radar canvas sends a set_target action so the
-    // server locks the phaser targeting on that entity.
-    (function initRadarTapLock() {
+    // ── Radar tap-to-lock via RadarWidget ────────────────────────────────
+    // RadarWidget handles hit-testing and calls onBlipTap with the uuid.
+    _radarWidget = (function () {
       var canvas = document.getElementById('radar');
-      if (!canvas) return;
-
-      function getBlipAt(canvasX, canvasY) {
-        if (!_state || !_state.blips) return null;
-        var W = canvas.width, H = canvas.height;
-        var cx = W / 2, cy = H / 2;
-        var R  = Math.min(W, H) / 2 - 8;
-        var best = null, bestDist = Infinity;
-        (_state.blips || []).forEach(function(b) {
-          var bx = cx + b.radar_x * R;
-          var by = cy - b.radar_y * R;
-          var hitR = Math.max(14, (b.scaled_radius || 0) * R + 6);
-          var dist = Math.hypot(canvasX - bx, canvasY - by);
-          if (dist <= hitR && dist < bestDist) { best = b; bestDist = dist; }
-        });
-        return best;
-      }
-
-      function onTap(e) {
-        var rect = canvas.getBoundingClientRect();
-        var touch = e.touches ? e.touches[0] : e;
-        var x = touch.clientX - rect.left;
-        var y = touch.clientY - rect.top;
-        var scaleX = canvas.width  / rect.width;
-        var scaleY = canvas.height / rect.height;
-        var blip = getBlipAt(x * scaleX, y * scaleY);
-        if (blip && blip.uuid) {
-          window.__sendAction(JSON.stringify({ action: 'set_target', console: 'Tactical', uuid: blip.uuid }));
-        }
-      }
-
-      canvas.addEventListener('click', onTap);
-      canvas.addEventListener('touchstart', function(e) { e.preventDefault(); onTap(e); }, { passive: false });
+      if (!canvas || typeof RadarWidget === 'undefined') return null;
+      return new RadarWidget(canvas, {
+        consoleId:   'tactical',
+        orientation: 'ship_relative',
+        onBlipTap:   function (uuid) {
+          window.__sendAction(JSON.stringify({ action: 'set_target', console: 'Tactical', uuid: uuid }));
+        },
+      });
     })();
   </script>
 

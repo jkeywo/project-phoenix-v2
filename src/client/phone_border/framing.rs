@@ -1,28 +1,25 @@
-//! Phone bezel frame — corners, edges, status banner and orientation.
+//! Phone asset loader and device orientation detection.
 //!
-//! This module owns the phone bezel frame that wraps console panels.  It
-//! is a slimmer cousin of the server-side `ViewscreenBorderPlugin`: the
-//! phone gets the 9-slice frame and red-alert texture swap, but NOT the
-//! fullscreen radial vignette (that overlay only makes sense on the
-//! viewscreen).  The bezel is always visible (both Lobby and InProgress).
+//! Pre-#442 this module owned the phone bezel frame (corners, edges,
+//! status banner) and reparented panels into it. Issue #442 moved all of
+//! that to the HTML/JS shell in `client.html`; this module is now a thin
+//! wrapper that:
 //!
-//! The 9-slice border itself is now built by `GuiBorderWidget::spawn` from
-//! the `gui` library; this module handles phone-specific wiring:
+//! - loads the per-console image and font handles into [`PhoneAssets`],
+//! - populates the shared [`RadarIconLookup`] from those handles,
+//! - detects landscape vs. portrait from window dimensions and exposes
+//!   the result as [`DeviceOrientation`].
 //!
-//! - Populating `BorderAssets` with the phone bezel textures
-//! - Spawning the `GuiBorderWidget` at startup
-//! - Driving the shared `RedAlertIntensity` resource (pulse math)
-//! - Showing/hiding the "RED ALERT" status banner
-//! - Reparenting console panels into the safe content area
-//! - Detecting device orientation
+//! It deliberately does NOT load the 9-slice bezel border art — the HTML
+//! bezel ships those PNGs via CSS, and the server's
+//! `ViewscreenBorderPlugin` has its own asset loader for the desktop
+//! viewscreen frame. The `BorderAssets` resource is left in place in
+//! `src/gui/border.rs` for future reuse but is no longer populated by
+//! the client.
 
 use bevy::prelude::*;
 
-use crate::gui::{
-    BorderAssets, BorderConfig, BorderContentArea, CornerSlot, EdgeSlot, GuiBorderWidget,
-    RadarIcon, RadarIconLookup, RedAlertIntensity,
-};
-use crate::ship_view::ShipView;
+use crate::gui::{RadarIcon, RadarIconLookup};
 
 // ── Resources ────────────────────────────────────────────────────────
 
@@ -38,9 +35,9 @@ pub struct RadarIconHandles {
     pub torpedo: Handle<Image>,
 }
 
-/// Holds non-border phone assets: compass ring, needle, tab corner, fonts,
-/// plus console-panel widget textures (buttons, panels, joysticks, radar, etc.).
-/// Border textures (corners + edges) now live in `BorderAssets`.
+/// Holds the per-console image and font handles every panel uses. Loaded
+/// once at startup by [`load_phone_assets`] and consumed via
+/// `Option<Res<PhoneAssets>>` by each panel's spawn system.
 #[derive(Resource, Debug, Clone)]
 pub struct PhoneAssets {
     pub compass_ring: Handle<Image>,
@@ -107,63 +104,37 @@ pub fn is_landscape(orientation: Option<&DeviceOrientation>) -> bool {
     matches!(orientation, Some(DeviceOrientation::Landscape))
 }
 
-// ── Pulse constants (mirrors viewscreen_border.rs) ───────────────────
-
-const EASE_DURATION: f32 = 0.25;
-const PULSE_PERIOD: f32 = 1.3;
-const MIN_INTENSITY: f32 = 0.55;
-const MAX_INTENSITY: f32 = 1.0;
-
-// ── Marker components ────────────────────────────────────────────────
-
-/// Marks the status banner "RED ALERT" text node.
-#[derive(Component)]
-struct AlertBannerText;
-
 // ── Plugin ───────────────────────────────────────────────────────────
 
-/// Loads phone bezel assets, borders, and spawns the bezel frame at
-/// startup.  The bezel is always visible in both lobby and in-progress
-/// phases.
+/// Loads phone-panel asset handles and drives [`DeviceOrientation`].
 ///
-/// Unlike the viewscreen, this plugin deliberately does NOT spawn a
-/// fullscreen `RedAlertVignetteMaterial` overlay — the phone is a control
-/// surface and a screen-filling red gradient there only adds noise.  The
-/// shared `RedAlertIntensity` resource is still driven so that the border
-/// texture swap continues to work.
+/// Pre-#442 this plugin also spawned the Bevy phone bezel frame, drove
+/// the red-alert texture swap, and reparented console panels into the
+/// bezel safe zone. All three responsibilities moved to the HTML shell
+/// (`client.html` issues #439/#440/#441); only asset loading and
+/// orientation detection remain on the Rust side.
+///
+/// The plugin name is retained for compatibility with
+/// `add_client_plugins`. A rename to `PhoneAssetsPlugin` is deferred to
+/// avoid churning the registration sites; the behavioural shape that
+/// matters is the resources it inserts.
 pub struct PhoneBorderPlugin;
 
 impl Plugin for PhoneBorderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DeviceOrientation>()
-            .init_resource::<RedAlertIntensity>()
-            .add_systems(Startup, (load_phone_assets, spawn_bezel_on_startup).chain())
-            // detect_orientation runs in PreUpdate so DeviceOrientation is always
-            // up-to-date before any Update system (including spawn_*_ui) reads it.
-            // This prevents consoles from spawning with the wrong orientation on
-            // the first frame when the window is landscape but the default is Portrait.
+            .add_systems(Startup, load_phone_assets)
+            // detect_orientation runs in PreUpdate so DeviceOrientation is
+            // always up-to-date before any Update system reads it. Panels
+            // use it to decide between portrait and landscape layouts.
             .add_systems(PreUpdate, detect_orientation)
-            .add_systems(
-                Update,
-                (
-                    update_red_alert_intensity,
-                    swap_phone_border_textures,
-                    refresh_alert_banner,
-                    populate_radar_icon_lookup,
-                ),
-            )
-            // reparent_panels_into_bezel runs in PostUpdate so all Update commands
-            // (including despawns from respawn_*_on_orientation_change) are already
-            // applied before it queries for panel entities. Without this ordering,
-            // set_parent_in_place would panic on entities despawned in the same frame.
-            .add_systems(PostUpdate, reparent_panels_into_bezel);
+            .add_systems(Update, populate_radar_icon_lookup);
     }
 }
 
 // ── Systems ──────────────────────────────────────────────────────────
 
 fn load_phone_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
-    // Populate PhoneAssets (non-border resources used by other consoles)
     let phone = PhoneAssets {
         compass_ring: asset_server.load("phone_border/compass-ring.png"),
         needle: asset_server.load("phone_border/needle.png"),
@@ -214,27 +185,6 @@ fn load_phone_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
     };
     commands.insert_resource(phone);
-
-    // Populate BorderAssets (9-slice border textures)
-    let border = BorderAssets {
-        corner_tl: asset_server.load("phone_border/bezel-corner-tl.png"),
-        corner_tr: asset_server.load("phone_border/bezel-corner-tr.png"),
-        corner_bl: asset_server.load("phone_border/bezel-corner-bl.png"),
-        corner_br: asset_server.load("phone_border/bezel-corner-br.png"),
-        edge_top: asset_server.load("phone_border/bezel-edge-top.png"),
-        edge_bottom: asset_server.load("phone_border/bezel-edge-bottom.png"),
-        edge_left: asset_server.load("phone_border/bezel-edge-left.png"),
-        edge_right: asset_server.load("phone_border/bezel-edge-right.png"),
-        corner_tl_alert: asset_server.load("phone_border/bezel-corner-tl-alert.png"),
-        corner_tr_alert: asset_server.load("phone_border/bezel-corner-tr-alert.png"),
-        corner_bl_alert: asset_server.load("phone_border/bezel-corner-bl-alert.png"),
-        corner_br_alert: asset_server.load("phone_border/bezel-corner-br-alert.png"),
-        edge_top_alert: asset_server.load("phone_border/bezel-edge-top-alert.png"),
-        edge_bottom_alert: asset_server.load("phone_border/bezel-edge-bottom-alert.png"),
-        edge_left_alert: asset_server.load("phone_border/bezel-edge-left-alert.png"),
-        edge_right_alert: asset_server.load("phone_border/bezel-edge-right-alert.png"),
-    };
-    commands.insert_resource(border);
 }
 
 /// Populate the shared `RadarIconLookup` from `PhoneAssets.radar_icons`
@@ -288,310 +238,21 @@ fn detect_orientation(windows: Query<&Window>, mut orientation: ResMut<DeviceOri
     }
 }
 
-/// Spawn the bezel frame at app startup using `GuiBorderWidget`. Also
-/// spawns the "RED ALERT" status banner.
-///
-/// The radial vignette overlay deliberately lives ONLY on the server
-/// viewscreen (`ViewscreenBorderPlugin`).  The phone client is meant to be
-/// a control surface, not a viewport into space, so a fullscreen red
-/// gradient there only adds visual noise without conveying useful state.
-fn spawn_bezel_on_startup(
-    mut commands: Commands,
-    border_assets: Res<BorderAssets>,
-    phone_assets: Res<PhoneAssets>,
-) {
-    // Spawn the 9-slice border via the gui library widget.
-    GuiBorderWidget::spawn(
-        &mut commands,
-        &border_assets,
-        &BorderConfig::default(),
-        false,
-    );
-
-    // Spawn the "RED ALERT" banner (phone-specific, not part of generic border).
-    //
-    // Positioned BELOW the tab bar so it doesn't overlap the console
-    // selection tabs.  Edge top inset is 22px; tab bar adds another ~36px.
-    // Banner sits just below at ~84px (comfortable margin above ~58px end).
-    commands.spawn((
-        AlertBannerText,
-        Text::new("RED ALERT"),
-        TextFont {
-            font: phone_assets.font_display.clone(),
-            font_size: 18.0,
-            ..default()
-        },
-        TextColor(Color::srgb(1.0, 0.2, 0.2)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(84.0),
-            left: Val::Percent(50.0),
-            margin: UiRect {
-                left: Val::Px(-60.0),
-                ..default()
-            },
-            ..default()
-        },
-        Visibility::Hidden,
-    ));
-}
-
-/// Reparent existing console panel root entities into the bezel content
-/// area so they render inside the bezel frame.
-///
-/// Runs every frame but is effectively a no-op once all panels are parented.
-/// Rather than caching entity IDs in a `Local` set (which becomes stale when
-/// orientation changes force a full despawn+respawn of a panel), we check
-/// each panel's current parent every frame. If it is already `target`, we
-/// skip it — no command queued, minimal overhead.  This correctly handles
-/// respawned panels (new entity, no parent yet) without any bookkeeping.
-fn reparent_panels_into_bezel(
-    mut commands: Commands,
-    content_area: Query<Entity, With<BorderContentArea>>,
-    captain: Query<Entity, With<crate::client_app::CaptainPanel>>,
-    helm: Query<Entity, With<crate::client_app::HelmPanel>>,
-    lobby: Query<Entity, With<crate::client_app::LobbyRoot>>,
-    sensors: Query<Entity, With<crate::sensors_panel::SensorsPanel>>,
-    shields: Query<Entity, With<crate::shields_panel::ShieldsPanel>>,
-    navigation: Query<Entity, With<crate::navigation_panel::NavigationPanel>>,
-    weapons: Query<Entity, With<crate::client_app::WeaponsPanel>>,
-    repair: Query<Entity, With<crate::repair_panel::RepairPanel>>,
-    power: Query<Entity, With<crate::power_panel::PowerPanel>>,
-    comms: Query<Entity, With<crate::comms_panel::CommsPanel>>,
-    hull_bar: Query<Entity, With<crate::ship_view::ConsoleHullBarBg>>,
-    parents: Query<&ChildOf>,
-) {
-    let Ok(target) = content_area.single() else {
-        return;
-    };
-    for entity in lobby
-        .iter()
-        .chain(captain.iter())
-        .chain(helm.iter())
-        .chain(sensors.iter())
-        .chain(shields.iter())
-        .chain(navigation.iter())
-        .chain(weapons.iter())
-        .chain(repair.iter())
-        .chain(power.iter())
-        .chain(comms.iter())
-        .chain(hull_bar.iter())
-    {
-        // Skip if already a direct child of the content area.
-        if parents
-            .get(entity)
-            .map(|p| p.parent() == target)
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        // Use add_child on the target so the ChildOf + Children pair
-        // is always maintained (set_parent_in_place guards add_child
-        // behind a GlobalTransform read, which can silently skip the
-        // hierarchy update when the parent lacks GlobalTransform).
-        commands.entity(target).add_child(entity);
-    }
-}
-
-/// Each frame: writes the pulse-computed intensity into the shared
-/// `RedAlertIntensity` resource, which drives both the vignette material
-/// (`GuiVignettePlugin`) and the border texture swap (`GuiBorderPlugin`).
-fn update_red_alert_intensity(
-    time: Res<Time>,
-    ship_view: Option<Res<ShipView>>,
-    mut intensity: ResMut<RedAlertIntensity>,
-) {
-    let Some(ship_view) = ship_view else { return };
-    let prev = intensity.0;
-    intensity.0 = pulse_intensity(
-        time.elapsed_secs(),
-        ship_view.red_alert,
-        prev,
-        time.delta_secs(),
-    );
-}
-
-/// Shows/hides the "RED ALERT" status banner text based on Red Alert state.
-fn refresh_alert_banner(
-    ship_view: Option<Res<ShipView>>,
-    mut banner: Query<&mut Visibility, With<AlertBannerText>>,
-) {
-    let Some(ship_view) = ship_view else { return };
-    for mut vis in banner.iter_mut() {
-        *vis = if ship_view.red_alert {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-}
-
-/// Swaps bezel corner/edge textures between normal and alert variants
-/// based on `ShipView::red_alert`.  Reads the game state directly
-/// (instead of going through `RedAlertIntensity`) so the swap is
-/// immediate — no one-frame lag.
-fn swap_phone_border_textures(
-    ship_view: Option<Res<ShipView>>,
-    assets: Option<Res<BorderAssets>>,
-    mut corners: Query<(&CornerSlot, &mut ImageNode), Without<EdgeSlot>>,
-    mut edges: Query<(&EdgeSlot, &mut ImageNode), Without<CornerSlot>>,
-) {
-    let Some(ship_view) = ship_view else { return };
-    let Some(assets) = assets else { return };
-    let alert = ship_view.red_alert;
-    for (slot, mut image) in corners.iter_mut() {
-        image.image = assets.corner(*slot, alert).clone();
-    }
-    for (slot, mut image) in edges.iter_mut() {
-        image.image = assets.edge(*slot, alert).clone();
-    }
-}
-
-// ── Pure helpers ─────────────────────────────────────────────────────
-
-/// State-transition function for the Red Alert vignette intensity.
-/// Mirrors `viewscreen_border::pulse_intensity`.
-pub fn pulse_intensity(time_secs: f32, red_alert: bool, prev_intensity: f32, dt: f32) -> f32 {
-    let max_step = (MAX_INTENSITY / EASE_DURATION) * dt;
-    if red_alert {
-        let target = sine_pulse(time_secs);
-        approach(prev_intensity, target, max_step)
-    } else if prev_intensity <= 0.0 {
-        0.0
-    } else {
-        approach(prev_intensity, 0.0, max_step).max(0.0)
-    }
-}
-
-fn sine_pulse(time_secs: f32) -> f32 {
-    let mid = (MIN_INTENSITY + MAX_INTENSITY) * 0.5;
-    let amp = (MAX_INTENSITY - MIN_INTENSITY) * 0.5;
-    mid + amp * (std::f32::consts::TAU * time_secs / PULSE_PERIOD).sin()
-}
-
-fn approach(current: f32, target: f32, max_step: f32) -> f32 {
-    let delta = target - current;
-    if delta.abs() <= max_step {
-        target
-    } else if delta > 0.0 {
-        current + max_step
-    } else {
-        current - max_step
-    }
-}
-
 // ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const DT_60HZ: f32 = 1.0 / 60.0;
-
-    fn max_step_per_frame() -> f32 {
-        (MAX_INTENSITY / EASE_DURATION) * DT_60HZ
+    #[test]
+    fn orientation_default_is_portrait() {
+        assert_eq!(DeviceOrientation::default(), DeviceOrientation::Portrait);
     }
 
     #[test]
-    fn idle_stays_at_zero() {
-        let out = pulse_intensity(0.0, false, 0.0, DT_60HZ);
-        assert_eq!(out, 0.0);
-
-        let out = pulse_intensity(123.4, false, 0.0, DT_60HZ);
-        assert_eq!(out, 0.0);
-    }
-
-    #[test]
-    fn alert_on_rises_monotonically_during_ease_window() {
-        let mut prev = 0.0;
-        let mut t = 0.0;
-        let frames_in_ease = (EASE_DURATION / DT_60HZ).ceil() as usize;
-        for _ in 0..frames_in_ease {
-            let next = pulse_intensity(t, true, prev, DT_60HZ);
-            assert!(
-                next >= prev - 1e-6,
-                "intensity decreased during alert-on ease (prev={prev}, next={next})"
-            );
-            prev = next;
-            t += DT_60HZ;
-        }
-        assert!(
-            prev >= MIN_INTENSITY - 1e-3,
-            "intensity {prev} did not reach pulse band after {EASE_DURATION}s ease"
-        );
-    }
-
-    #[test]
-    fn alert_off_decays_smoothly_to_zero_within_ease_window() {
-        let mut prev = MAX_INTENSITY;
-        let mut t = 0.0;
-        let frames = (EASE_DURATION / DT_60HZ).ceil() as usize + 2;
-        let mut hit_zero = false;
-        for _ in 0..frames {
-            let next = pulse_intensity(t, false, prev, DT_60HZ);
-            assert!(
-                next <= prev + 1e-6,
-                "intensity increased during alert-off decay (prev={prev}, next={next})"
-            );
-            assert!(next >= 0.0, "intensity went negative");
-            if next == 0.0 {
-                hit_zero = true;
-            }
-            prev = next;
-            t += DT_60HZ;
-        }
-        assert!(
-            hit_zero,
-            "intensity did not reach 0 within {EASE_DURATION}s ease"
-        );
-
-        let next = pulse_intensity(t, false, 0.0, DT_60HZ);
-        assert_eq!(next, 0.0);
-    }
-
-    #[test]
-    fn steady_state_pulse_stays_within_band() {
-        let mut prev = MIN_INTENSITY;
-        let mut t = 0.0;
-        let frames = ((PULSE_PERIOD * 3.0) / DT_60HZ).ceil() as usize;
-        let mut min_seen = f32::INFINITY;
-        let mut max_seen = f32::NEG_INFINITY;
-        for _ in 0..frames {
-            let next = pulse_intensity(t, true, prev, DT_60HZ);
-            min_seen = min_seen.min(next);
-            max_seen = max_seen.max(next);
-            prev = next;
-            t += DT_60HZ;
-        }
-        let slack = max_step_per_frame() + 1e-3;
-        assert!(
-            min_seen >= MIN_INTENSITY - slack,
-            "min {min_seen} below band lower bound {MIN_INTENSITY}"
-        );
-        assert!(
-            max_seen <= MAX_INTENSITY + 1e-3,
-            "max {max_seen} above band upper bound {MAX_INTENSITY}"
-        );
-    }
-
-    #[test]
-    fn orientation_detects_both_modes() {
-        assert_eq!(
-            DeviceOrientation::default(),
-            DeviceOrientation::Portrait,
-            "default should be Portrait"
-        );
-    }
-
-    #[test]
-    fn approach_snaps_when_within_step() {
-        assert_eq!(approach(0.5, 0.51, 0.1), 0.51);
-        assert_eq!(approach(0.5, 0.49, 0.1), 0.49);
-    }
-
-    #[test]
-    fn approach_steps_toward_target_when_outside_step() {
-        assert!((approach(0.0, 1.0, 0.25) - 0.25).abs() < 1e-6);
-        assert!((approach(1.0, 0.0, 0.25) - 0.75).abs() < 1e-6);
+    fn is_landscape_returns_true_only_for_landscape_variant() {
+        assert!(is_landscape(Some(&DeviceOrientation::Landscape)));
+        assert!(!is_landscape(Some(&DeviceOrientation::Portrait)));
+        assert!(!is_landscape(None));
     }
 }

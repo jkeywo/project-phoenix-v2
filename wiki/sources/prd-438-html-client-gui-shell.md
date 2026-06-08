@@ -1,9 +1,9 @@
 ---
 title: PRD #438 — HTML/JS Client GUI Shell
 type: source
-tags: [prd, client, hud, html, shell, phase-toggle, tab-bar, in-flight]
+tags: [prd, client, hud, html, shell, phase-toggle, tab-bar, shipped]
 source_url: https://github.com/jkeywo/project-phoenix-v2/issues/438
-status: in-flight
+status: shipped
 updated: 2026-06-08
 ---
 
@@ -13,12 +13,12 @@ Replaces the Bevy-rendered phone bezel, console-select tab bar, and lobby UI on 
 
 ## Status
 
-In flight. Broken down into four issues:
+Shipped 2026-06-08. All four slices landed in series:
 
 - [Issue #439 — HTML Phone Bezel Frame](./issue-439-html-phone-bezel.md) — shipped 2026-06-08.
-- [Issue #440 — Lobby Integration + Phase Toggle](./issue-440-html-lobby-phase-toggle.md) — shipped 2026-06-08 (bulk landed in commit `7d5f0d0`; phase-toggle module + wiring landed today).
-- [Issue #441 — Tab Bar + Content Switching](./issue-441-html-tab-bar-content-switching.md) — shipped 2026-06-08.
-- Issue #442 — Bevy Cleanup (lobby, tab bar, border) — not started; blocked on #439–#441.
+- [Issue #440 — Lobby Integration + Phase Toggle](./issue-440-html-lobby-phase-toggle.md) — shipped 2026-06-08 (bulk landed in commit `7d5f0d0`; phase-toggle module + wiring landed in `becdffa`).
+- [Issue #441 — Tab Bar + Content Switching](./issue-441-html-tab-bar-content-switching.md) — shipped 2026-06-08 (commit `7d45e09`).
+- [Issue #442 — Bevy Cleanup (lobby, tab bar, border)](./issue-442-bevy-cleanup.md) — shipped 2026-06-08. Three Rust files (`console_shell.rs`, `phone_border/framing.rs`, `app.rs`) shrunk from ~2700 → ~900 lines; Bevy client now spawns only the UI camera + nine per-console panel roots.
 
 ## Problem
 
@@ -61,7 +61,7 @@ Single PeerJS connection serves both sections. Single `state` object drives all 
 
 ## Cross-references
 
-- Child issues: #439 (bezel), #440 (lobby), #441 (tab bar), #442 (Bevy cleanup).
-- Predecessor (Rust implementation): [PRD #187 — Phone Console HUD](./prd-187-phone-console-hud.md).
-- Sibling (server-side): [PRD #180 — Viewscreen Frame](./prd-180-viewscreen-frame.md).
+- Child issues: [#439 (bezel)](./issue-439-html-phone-bezel.md), [#440 (lobby)](./issue-440-html-lobby-phase-toggle.md), [#441 (tab bar)](./issue-441-html-tab-bar-content-switching.md), [#442 (Bevy cleanup)](./issue-442-bevy-cleanup.md).
+- Predecessor (Rust implementation, now superseded): [PRD #187 — Phone Console HUD](./prd-187-phone-console-hud.md).
+- Sibling (server-side, unaffected): [PRD #180 — Viewscreen Frame](./prd-180-viewscreen-frame.md).
 - ADR-0001 — `__sendAction` / `__updateConsole` bridge contract.

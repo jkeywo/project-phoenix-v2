@@ -97,10 +97,11 @@ Open (planned work):
 - **[PRD #119 — Stations, Scenarios & Comms](./sources/prd-119-stations-scenarios-comms.md)** — TOML scenario engine, station entities, `Console::Comms`. Builds on PRD #153's entity pipeline.
 - **[PRD #142 — AI and Behaviour System](./sources/prd-142-ai-and-behaviour.md)** — Data-driven state-machine NPCs that emit the same input messages as players. Depends on #119.
 - **[PRD #350 — Scenario Editor Rewrite](./sources/prd-350-scenario-editor-rewrite.md)** — Three-mode in-browser TOML editor (World / Entity / Definitions) over the FSA. Adds `extra_worlds` + `load_world`/`unload_world` trigger actions. Slices 1–6 = v1.
-- **[PRD #438 — HTML/JS Client GUI Shell](./sources/prd-438-html-client-gui-shell.md)** — In flight. Replace Bevy lobby + tab bar + phone bezel with HTML/CSS/JS. Slices: #439 (bezel, shipped), #440 (lobby, shipped), #441 (tab bar, shipped), #442 (Bevy cleanup).
+- **[PRD #438 — HTML/JS Client GUI Shell](./sources/prd-438-html-client-gui-shell.md)** — Shipped. Bevy lobby + tab bar + phone bezel replaced with HTML/CSS/JS. Slices: #439 (bezel), #440 (lobby), #441 (tab bar), #442 (Bevy cleanup).
 - **[Issue #439 — HTML Phone Bezel Frame](./sources/issue-439-html-phone-bezel.md)** — Shipped. First slice of #438; `gui/phone-bezel.js` + DOM bezel in `client.html`; SimState reads `snap.red_alert`.
 - **[Issue #440 — Lobby Integration + Phase Toggle](./sources/issue-440-html-lobby-phase-toggle.md)** — Shipped. Lobby merged into `client.html` as `#lobby-ui`; `gui/phase-toggle.js` pure function drives section visibility (treats `GameOver` as in-game).
 - **[Issue #441 — Tab Bar + Content Switching](./sources/issue-441-html-tab-bar-content-switching.md)** — Shipped. `gui/tab-bar.js` + `gui/content-switcher.js` pure modules; `#console-tab-bar` strip in the bezel safe zone (portrait top / landscape left, initials at 5+ in portrait); `setActiveConsole()` consolidates the three call sites.
+- **[Issue #442 — Bevy Cleanup (lobby + tab bar + bezel)](./sources/issue-442-bevy-cleanup.md)** — Shipped. Final slice of #438; deletes the Bevy lobby UI, embedded tab bar widget, and phone bezel frame from `src/client/{app,console_shell,phone_border/framing}.rs` (~2700 → ~900 lines). `ConsoleShell::spawn` signature preserved so the nine per-console panels compile unchanged; `PhoneAssets` + `DeviceOrientation` retained.
 
 ### Design drafts (`docs/`)
 

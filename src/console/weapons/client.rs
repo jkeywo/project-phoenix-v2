@@ -1394,7 +1394,10 @@ mod tests {
         // The source entity is what RadarBlipClicked.source points to —
         // the ECS entity that carries the wire-level uuid.
         let source = app.world_mut()
-            .spawn(RadarEntityUuid("uuid-deadbeef".to_string()))
+            .spawn((
+                RadarEntityUuid("uuid-deadbeef".to_string()),
+                crate::gui::OnRadar(vec!["enemy".to_string()]),
+            ))
             .id();
 
         // The radar entity is what the observer is registered on.

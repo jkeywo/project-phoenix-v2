@@ -57,16 +57,31 @@
       font-size: 1.1rem; cursor: pointer; padding: 0; margin: 0; line-height: 1;
     }
     /* View selector cross and Red Alert button moved to Bevy WASM (#48). */
-    /* Red Alert border overlay on console container */
+    /* Console container: full-screen flex layout host for the tab bar and
+       all console sections. Orientation-driven via [data-orientation] so
+       the tab bar sits above (portrait) or to the left (landscape) of the
+       console content, taking up space rather than floating over it. */
     #console-container {
       position: fixed;
-      bottom: 2rem;
-      left: 0; right: 0;
+      inset: 0;
+      display: flex;
       border: 4px solid transparent;
-      padding: 0.5rem 0.75rem;
       transition: border-color 0.15s;
       z-index: 1;
       pointer-events: none;
+    }
+    #console-container[data-orientation="portrait"],
+    #console-container:not([data-orientation]) {
+      flex-direction: column;
+      /* Top padding clears the top bezel edge; tab bar adds its own
+         horizontal corner-clearance via padding. */
+      padding-top: var(--bezel-inset);
+    }
+    #console-container[data-orientation="landscape"] {
+      flex-direction: row;
+      /* Top/bottom padding clears the corner art height. */
+      padding-top: clamp(32px, 12vw, 72px);
+      padding-bottom: clamp(32px, 12vw, 72px);
     }
     #console-container > *, #console-container section.active > * {
       pointer-events: auto;
@@ -79,20 +94,23 @@
     /* Weapons console: full-viewport iframe overlay when active (issue #422).
        Padding leaves room for the phone bezel (issue #439); see --bezel-inset
        further down. */
+    /* Active HTML console sections fill the space below the tab bar. */
     #weapons-ui.active,
     #captain-ui.active,
     #helm-ui.active {
-      display: block;
-      position: fixed;
-      inset: 0;
-      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      min-width: 0;
       margin: 0;
     }
     #weapons-ui iframe,
     #captain-ui iframe,
     #helm-ui iframe {
+      flex: 1;
+      min-height: 0;
       width: 100%;
-      height: 100%;
       border: none;
       display: block;
     }
@@ -188,24 +206,32 @@
     #phone-bezel.alert-on .bezel-edge.left   { background-image: url("gui/borders/phone-edge-left-alert.png"); }
     #phone-bezel.alert-on .bezel-edge.right  { background-image: url("gui/borders/phone-edge-right-alert.png"); }
 
-    /* Iframe content sits inside the bezel safe zone. */
+    /* Iframe content sits inside the bezel safe zone.
+       No top padding — the container's padding-top + the tab bar already
+       clear the top bezel edge. Side + bottom still needed. */
     #weapons-ui.active,
     #captain-ui.active,
-    #helm-ui.active { padding: var(--bezel-inset); }
+    #helm-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
+
+    /* Repair console: scrollable flex item below the tab bar. */
+    #repair-ui.active {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 0.5rem var(--bezel-inset) var(--bezel-inset);
+    }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────
-       Sits inside the bezel safe zone so it doesn't overlap the corner
-       art. Two layouts driven by [data-orientation]:
-         portrait  — horizontal strip across the top, centred between corners
-         landscape — vertical strip down the left, centred between corners
-       z-index 16 keeps it above the bezel (15) and weapons iframe (10)
-       and below the top-bar overlay (20). pointer-events: auto so taps
-       are received (bezel itself is pointer-events: none). */
+       First flex child of #console-container. In-flow so it takes up
+       space and the console content below it is not obscured.
+       Two layouts driven by [data-orientation] on the container:
+         portrait  — horizontal strip; horizontal padding clears corner art
+         landscape — vertical strip on the left (width 84px)
+       pointer-events: auto so taps are received. */
     #console-tab-bar {
-      position: fixed;
-      z-index: 16;
       pointer-events: auto;
       display: flex;
+      flex-shrink: 0;
       gap: 0.25rem;
       align-items: stretch;
       justify-content: center;
@@ -215,18 +241,17 @@
        trap where `style.display = ''` removes the override and the
        stylesheet's `display: none` rule wins. */
     #console-tab-bar[aria-hidden="true"] { display: none; }
-    #console-tab-bar[data-orientation="portrait"] {
-      top: var(--bezel-inset);
-      left: clamp(50px, 20vw, 120px); right: clamp(50px, 20vw, 120px);
+    #console-tab-bar[data-orientation="portrait"],
+    #console-tab-bar:not([data-orientation]) {
       flex-direction: row;
       flex-wrap: wrap;
-      padding: 0.25rem 0;
+      /* Horizontal padding clears the corner art on each side. */
+      padding: 0.25rem clamp(50px, 20vw, 120px);
     }
     #console-tab-bar[data-orientation="landscape"] {
-      left: var(--bezel-inset);
-      top: clamp(32px, 12vw, 72px); bottom: clamp(32px, 12vw, 72px);
       flex-direction: column;
-      padding: 0 0.25rem;
+      /* Left padding clears the left bezel edge. */
+      padding: 0 0.25rem 0 var(--bezel-inset);
       width: 84px;
     }
     #console-tab-bar .tab-button {
@@ -245,6 +270,9 @@
       text-align: center;
       cursor: pointer;
       text-transform: uppercase;
+      /* Eliminates the 300 ms double-tap-to-zoom delay on mobile so
+         buttons feel instant alongside the pointerdown listener. */
+      touch-action: manipulation;
     }
     #console-tab-bar[data-orientation="portrait"] .tab-button { flex: 0 1 auto; }
     #console-tab-bar[data-orientation="landscape"] .tab-button { flex: 0 0 auto; }
@@ -368,7 +396,7 @@
     }
     #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-912db0a82efdff7b.js" crossorigin="anonymous" integrity="sha384-rOt2s4Yljvy33Jfgneo80qrDDv5MrMWx/8g6lWSwr1svpoZTczrJ9oqoYbV4uxhq"><link rel="preload" href="./project-phoenix-912db0a82efdff7b_bg.wasm" crossorigin="anonymous" integrity="sha384-cUfKjxk1ycY8JO7RaDPIR2GPIhyXn/tu+Al6HPvVGBzpRDesnMWZ4uJZqBBheLUg" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-6557e3f821bfa5b9.js" crossorigin="anonymous" integrity="sha384-GiVqHXAoyp9W7asT2rfYoH6tmj/tA2G8oWWiU8V9rK8wDnEQJXvSPZzh0LXTIeiE"><link rel="preload" href="./project-phoenix-6557e3f821bfa5b9_bg.wasm" crossorigin="anonymous" integrity="sha384-DxTZjzr2ZTgQMoUE5O1AbZt1HweGZvtmYwYkv/QbsQjIqJrUPxEVx1+0+khnFj36" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -377,8 +405,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-912db0a82efdff7b.js';
-const wasm = await init({ module_or_path: './project-phoenix-912db0a82efdff7b_bg.wasm' });
+import init, * as bindings from './project-phoenix-6557e3f821bfa5b9.js';
+const wasm = await init({ module_or_path: './project-phoenix-6557e3f821bfa5b9_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -409,11 +437,16 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
        button) positioned above via z-index. -->
   <div id="wasm-host"><canvas id="canvas"></canvas></div>
 
-  <!-- Console tab bar (issue #441). Rendered by gui/tab-bar.js into the
-       bezel safe zone. Hidden in lobby and for single-console players. -->
-  <div id="console-tab-bar" role="tablist" aria-label="Console tabs" aria-hidden="true"></div>
+  <!-- Console container: full-screen flex layout host for the tab bar and
+       all in-game console sections. [data-orientation] drives portrait
+       (column) vs landscape (row) layout; set by render() on each paint. -->
+  <div id="console-container" data-orientation="portrait">
 
-  <div id="console-container">
+    <!-- Console tab bar (issue #441). First flex child so it takes up space
+         above the console content rather than hovering over it. Hidden in
+         lobby and for single-console players via aria-hidden. -->
+    <div id="console-tab-bar" role="tablist" aria-label="Console tabs" aria-hidden="true"></div>
+
     <section id="lobby-ui">
       <!-- Ship header -->
       <div id="lobby-header">
@@ -799,14 +832,20 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
       $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
 
+      // Orientation drives both the tab-bar layout and the container's
+      // flex-direction (portrait = column, landscape = row). Computed once
+      // per render so both consumers see the same value.
+      const orientation = (typeof window.currentOrientation === 'function')
+        ? window.currentOrientation()
+        : (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
+      const container = $('console-container');
+      if (container) container.dataset.orientation = orientation;
+
       // Console tab bar (issue #441): render into #console-tab-bar via
       // gui/tab-bar.js. Hidden in lobby and for single-console players.
       const tabRoot = $('console-tab-bar');
       if (tabRoot && typeof window.tabBarLayout === 'function'
           && typeof window.renderTabBar === 'function') {
-        const orientation = (typeof window.currentOrientation === 'function')
-          ? window.currentOrientation()
-          : (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
         const layout = window.tabBarLayout(mine, activeConsole, orientation, inGame);
         window.renderTabBar(tabRoot, layout, { onPress: (name) => {
           setActiveConsole(name);
@@ -1183,7 +1222,23 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // Builds a HelmConsoleState JSON from client state and pushes it to the
     // gui/helm-console.html iframe via its window.__updateConsole function.
 
+    const HELM_RADAR_RANGE = 250.0;
+
     function buildHelmConsoleState() {
+      const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
+      const blips = (state.asteroids || []).map(a => {
+        const ax = entityX(a), az = entityZ(a);
+        const dx = ax - state.shipX, dz = az - state.shipZ;
+        if (dx * dx + dz * dz > HELM_RADAR_RANGE * HELM_RADAR_RANGE) return null;
+        const radar_x = (dx * cosY + dz * sinY) / HELM_RADAR_RANGE;
+        const radar_y = (dx * sinY - dz * cosY) / HELM_RADAR_RANGE;
+        const radius   = entityRadius(a);
+        const tags     = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
+        const kind     = tags.includes('ship') ? 'ship'
+                       : tags.includes('station') ? 'station' : 'asteroid';
+        return { uuid: a.uuid, radar_x, radar_y, scaled_radius: radius / HELM_RADAR_RANGE, kind };
+      }).filter(Boolean);
+
       return JSON.stringify({
         heading:                ((state.shipYaw * -180 / Math.PI) % 360 + 360) % 360,
         speed:                  state.forwardSpeed || 0,
@@ -1193,6 +1248,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         impulse_charge_progress: state.impulseChargeProgress || 0,
         on_screen:              state.currentView === 'Radar',
         lock_id:                state.weaponsTarget || null,
+        blips,
       });
     }
 
@@ -1465,6 +1521,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         case 'WorldSetup': {
           state.asteroids = (msg.data.world && msg.data.world.entities) || [];
           pushWeaponsConsoleState();
+          pushHelmConsoleState();
           return;
         }
         case 'TargetLock': {
@@ -1530,6 +1587,19 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             state.weaponsFireReady = false;
           }
           pushWeaponsConsoleState();
+          pushHelmConsoleState();
+          return;
+        }
+        case 'EntityDespawned': {
+          const { uuid } = msg.data;
+          state.asteroids = state.asteroids.filter(a => a.uuid !== uuid);
+          if (state.weaponsTarget === uuid) {
+            state.weaponsTarget = null;
+            state.weaponsLocked = false;
+            state.weaponsFireReady = false;
+          }
+          pushWeaponsConsoleState();
+          pushHelmConsoleState();
           return;
         }
         case 'DamageTaken': {

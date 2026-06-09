@@ -654,6 +654,11 @@
       if (!bezel) return;
 
       function down(e) {
+        // Don't start a joystick drag when the pointer originated inside the
+        // impulse overlay (e.g. the Cancel Impulse button). Without this guard,
+        // setPointerCapture() steals all subsequent pointer events from the
+        // button so its click listener never fires.
+        if (e.target && e.target.closest && e.target.closest('#impulse-overlay')) return;
         _dragging = true;
         if (bezel.setPointerCapture) bezel.setPointerCapture(e.pointerId);
         cancelAnimationFrame(_stickRaf);

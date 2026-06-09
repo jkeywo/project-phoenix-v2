@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::client::console_shell::ConsoleShell;
-use crate::client_app::{CaptainPanel, ClientSet, OutboundClientMessage};
+use crate::client_app::{CaptainPanel, OutboundClientMessage};
 use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::gui::{
     on_radio_member_pressed, spawn_gui_button, ButtonPressed, ButtonSize, RadioGroupMarker,
@@ -87,7 +87,7 @@ impl Plugin for CaptainPanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, (
             spawn_captain_ui.run_if(not(resource_exists::<CaptainPanelSpawned>)),
-            toggle_captain_panel_visibility.in_set(ClientSet::ConsoleUpdate),
+            toggle_captain_panel_visibility,
             refresh_red_alert_ui,
             sync_dir_radio_active_state,
             rotate_needle_by_direction,
@@ -179,8 +179,7 @@ fn spawn_captain_ui(
         &assets,
     );
 
-    // Start hidden; toggle_captain_panel_visibility reveals it when appropriate.
-    commands.entity(shell.root).insert((CaptainPanel, Visibility::Hidden));
+    commands.entity(shell.root).insert(CaptainPanel);
 }
 
 // ── Fill helpers ──

@@ -1105,59 +1105,53 @@ pub struct RadarBlip {
     /// `"station"`, or `"unknown"`. Drives blip colour / icon in the HTML
     /// radar renderer.
     pub kind: String,
-    /// PNG icon name resolved from `EntitySnapshot::radar_icon` or from entity
-    /// tags.  One of `"ship"`, `"player"`, `"asteroid"`, `"station"`,
-    /// `"planet"`, `"star"`, `"torpedo"`, `"unknown"`.
-    /// Introduced in issue #445 — `#[serde(default)]` for backwards compat.
+    /// Icon name for radar display (matches CSS class in `radar-widget.js`).
+    /// Derived from entity tags or explicit `radar_icon` from snapshot.
     #[serde(default)]
     pub icon: String,
-    /// RGB colour tint in `[0.0, 1.0]` range, sourced from
-    /// `EntitySnapshot::colour` or per-icon default.
+    /// RGB colour tint for the blip, normalised 0.0–1.0.  Defaults to a
+    /// per-kind palette when the snapshot carries no explicit colour.
     #[serde(default)]
     pub color: [f32; 3],
-    /// True when this entity is referenced by an active mission objective.
-    /// The radar draws a gold ring around such blips.
+    /// `true` when this entity is referenced by an active mission objective.
+    /// The HTML radar widget uses this to draw an objective ring.
     #[serde(default)]
     pub objective_target: bool,
-    /// Display name from the entity TOML (`EntitySnapshot::name`).
-    /// `None` for unnamed entities such as asteroids.
+    /// Display name from the entity snapshot, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 
-/// Region shape descriptor for the HTML tactical radar.
-///
-/// Built server-side from `WorldResource` entities that carry a `shape` field
-/// (sphere, box, or torus).  Used by `RadarWidget` to draw coloured overlays
-/// for gameplay zones.  Introduced in issue #445.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+/// A radar overlay region drawn as a coloured shape on the Tactical radar.
+/// Produced server-side from world entities that carry a `shape` field.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RadarRegion {
     pub uuid: String,
-    /// World-space X of the region centre.
+    /// World-space centre X.
     pub x: f32,
-    /// World-space Z of the region centre.
+    /// World-space centre Z.
     pub z: f32,
-    /// Shape type: `"sphere"` | `"box"` | `"torus"`.
+    /// Shape type: `"sphere"`, `"box"`, or `"torus"`.
     pub shape: String,
-    /// Sphere / torus outer radius in world units.
+    /// Radius in world units (sphere radius, box circumradius, torus outer).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radius: Option<f32>,
-    /// Torus inner radius (hole).
+    /// Inner radius for torus shapes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inner_radius: Option<f32>,
-    /// Torus outer radius (alias, same as `radius` for torus shapes).
+    /// Outer radius for torus shapes (same as `radius` for box/sphere).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outer_radius: Option<f32>,
-    /// Box half-extents `[x, z]` in world units (Y is ignored on the radar).
+    /// Half-extents `[half_x, half_z]` for box shapes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub half_extents: Option<[f32; 2]>,
-    /// Rotation around the world-up axis in radians (for box regions).
+    /// Yaw in radians.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yaw: Option<f32>,
-    /// RGB colour tint in `[0.0, 1.0]` range.
+    /// RGB colour tint, normalised 0.0–1.0.
     #[serde(default)]
     pub color: [f32; 3],
-    /// Optional display name shown as a label on the radar.
+    /// Display name from the entity snapshot, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
@@ -1184,11 +1178,31 @@ pub struct WeaponsConsoleState {
     /// ±1.0 = effective range boundary.
     #[serde(default)]
     pub blips: Vec<RadarBlip>,
-    /// Region shape descriptors for all world entities that carry a `shape`
-    /// field.  Used by `RadarWidget` to draw zone overlays.
-    /// Introduced in issue #445 — `#[serde(default)]` for backwards compat.
+    /// Region shapes for zone overlays on the HTML radar widget.
+    /// Sourced from world entities that carry a `shape` field.
     #[serde(default)]
     pub regions: Vec<RadarRegion>,
+}
+
+/// Serialised Captain console state pushed to the HTML captain panel.
+///
+/// Mirrors `WeaponsConsoleState` — written into a single
+/// `CaptainConsoleStateComp` component and pushed on change via
+/// `ConsoleStateChanged { name: "Captain", json }`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct CaptainConsoleState {
+    /// Whether the ship is at red alert.
+    pub red_alert: bool,
+    /// Current captain-chosen view mode.
+    pub view_mode: ViewMode,
+    /// Mission objectives. Updated when `ObjectiveManager` is dirty.
+    #[serde(default)]
+    pub objectives: Vec<ObjectiveSnapshot>,
+    /// Overall ship hull integrity as a percentage (0–100).
+    pub hull_integrity_pct: f32,
+    /// Computed game status string shown in the captain panel.
+    #[serde(default)]
+    pub game_status: String,
 }
 
 /// A console action decoded from the `window.__sendAction` envelope
@@ -1206,6 +1220,13 @@ pub enum UiAction {
     FirePhaser {
         bank: String,
     },
+    /// Toggle the ship's red-alert state (captain only).
+    ToggleRedAlert,
+    /// Set the camera view direction (captain console).
+    /// The HTML captain panel sends `{ action: "set_view", direction: "Fore" }`.
+    SetView {
+        direction: ViewDirection,
+    },
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
@@ -1217,6 +1238,10 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             target_uuid: target_uuid.clone(),
         },
         UiAction::FirePhaser { bank } => ClientMessage::FirePhaser { bank: bank.clone() },
+        UiAction::ToggleRedAlert => ClientMessage::ToggleRedAlert,
+        UiAction::SetView { direction } => ClientMessage::SetView {
+            mode: ViewMode::Camera(direction.clone()),
+        },
     }
 }
 
@@ -1260,6 +1285,27 @@ mod ui_action_tests {
         assert_eq!(
             ui_action_to_client_message(&action),
             ClientMessage::FirePhaser { bank: "port".into() }
+        );
+    }
+
+    #[test]
+    fn toggle_red_alert_maps_to_client_message() {
+        assert_eq!(
+            ui_action_to_client_message(&UiAction::ToggleRedAlert),
+            ClientMessage::ToggleRedAlert
+        );
+    }
+
+    #[test]
+    fn set_view_direction_maps_to_client_message() {
+        let action = UiAction::SetView {
+            direction: ViewDirection::Aft,
+        };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::SetView {
+                mode: ViewMode::Camera(ViewDirection::Aft)
+            }
         );
     }
 }

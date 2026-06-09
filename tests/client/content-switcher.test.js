@@ -13,8 +13,8 @@ describe('CONSOLE_SECTION map', () => {
       .toEqual(['CaptainChair', 'Repair', 'Tactical']);
   });
 
-  it('maps CaptainChair to game-ui', () => {
-    expect(CONSOLE_SECTION.CaptainChair).toBe('game-ui');
+  it('maps CaptainChair to captain-ui', () => {
+    expect(CONSOLE_SECTION.CaptainChair).toBe('captain-ui');
   });
 
   it('maps Tactical to weapons-ui', () => {
@@ -40,13 +40,13 @@ describe('CONSOLE_SECTION map', () => {
   });
 
   it('HTML_SECTION_IDS lists all three section ids', () => {
-    expect([...HTML_SECTION_IDS].sort()).toEqual(['game-ui', 'repair-ui', 'weapons-ui']);
+    expect([...HTML_SECTION_IDS].sort()).toEqual(['captain-ui', 'repair-ui', 'weapons-ui']);
   });
 });
 
 describe('sectionForConsole', () => {
   it('returns the right id for CaptainChair / Tactical / Repair', () => {
-    expect(sectionForConsole('CaptainChair')).toBe('game-ui');
+    expect(sectionForConsole('CaptainChair')).toBe('captain-ui');
     expect(sectionForConsole('Tactical')).toBe('weapons-ui');
     expect(sectionForConsole('Repair')).toBe('repair-ui');
   });
@@ -71,33 +71,33 @@ describe('sectionForConsole', () => {
 describe('consoleSections', () => {
   it('returns all-false when not in-game (lobby)', () => {
     const out = consoleSections('CaptainChair', false);
-    expect(out).toEqual({ 'game-ui': false, 'weapons-ui': false, 'repair-ui': false });
+    expect(out).toEqual({ 'captain-ui': false, 'weapons-ui': false, 'repair-ui': false });
   });
 
   it('returns all-false when active console is null', () => {
     const out = consoleSections(null, true);
-    expect(out).toEqual({ 'game-ui': false, 'weapons-ui': false, 'repair-ui': false });
+    expect(out).toEqual({ 'captain-ui': false, 'weapons-ui': false, 'repair-ui': false });
   });
 
-  it('shows only game-ui for CaptainChair', () => {
+  it('shows only captain-ui for CaptainChair', () => {
     const out = consoleSections('CaptainChair', true);
-    expect(out).toEqual({ 'game-ui': true, 'weapons-ui': false, 'repair-ui': false });
+    expect(out).toEqual({ 'captain-ui': true, 'weapons-ui': false, 'repair-ui': false });
   });
 
   it('shows only weapons-ui for Tactical', () => {
     const out = consoleSections('Tactical', true);
-    expect(out).toEqual({ 'game-ui': false, 'weapons-ui': true, 'repair-ui': false });
+    expect(out).toEqual({ 'captain-ui': false, 'weapons-ui': true, 'repair-ui': false });
   });
 
   it('shows only repair-ui for Repair', () => {
     const out = consoleSections('Repair', true);
-    expect(out).toEqual({ 'game-ui': false, 'weapons-ui': false, 'repair-ui': true });
+    expect(out).toEqual({ 'captain-ui': false, 'weapons-ui': false, 'repair-ui': true });
   });
 
   it('returns all-false for Bevy-rendered consoles (canvas takes the content area)', () => {
     for (const c of ['Helm', 'Sensors', 'Shields', 'Navigation', 'Power', 'Comms']) {
       const out = consoleSections(c, true);
-      expect(out).toEqual({ 'game-ui': false, 'weapons-ui': false, 'repair-ui': false });
+      expect(out).toEqual({ 'captain-ui': false, 'weapons-ui': false, 'repair-ui': false });
     }
   });
 });

@@ -2269,7 +2269,6 @@ mod tests {
 
     #[test]
     fn radar_blip_with_new_fields_round_trips() {
-        use crate::messages::RadarBlip;
         let blip = RadarBlip {
             uuid: "abc-123".into(),
             radar_x: 0.5,
@@ -2291,7 +2290,6 @@ mod tests {
 
     #[test]
     fn radar_blip_new_fields_default_when_absent() {
-        use crate::messages::RadarBlip;
         // JSON without the new fields (as emitted by pre-#445 server)
         let json = r#"{"uuid":"old-uuid","radar_x":0.1,"radar_y":0.2,"scaled_radius":0.01,"kind":"asteroid"}"#;
         let blip: RadarBlip = serde_json::from_str(json).unwrap();
@@ -2303,7 +2301,6 @@ mod tests {
 
     #[test]
     fn radar_region_round_trips() {
-        use crate::messages::RadarRegion;
         let region = RadarRegion {
             uuid: "region-1".into(),
             x: 100.0,
@@ -2324,7 +2321,6 @@ mod tests {
 
     #[test]
     fn radar_region_box_round_trips() {
-        use crate::messages::RadarRegion;
         let region = RadarRegion {
             uuid: "region-box".into(),
             x: 0.0,
@@ -2345,7 +2341,6 @@ mod tests {
 
     #[test]
     fn weapons_console_state_with_regions_round_trips() {
-        use crate::messages::{RadarBlip, RadarRegion, WeaponsConsoleState};
         let state = WeaponsConsoleState {
             target_uuid: None,
             banks: Vec::new(),

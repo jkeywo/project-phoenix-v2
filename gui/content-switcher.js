@@ -2,7 +2,7 @@
 //
 // Maps the currently-active console to which HTML <section> should be
 // visible. Three consoles have HTML sections in client.html
-// (CaptainChair -> #game-ui, Tactical -> #weapons-ui, Repair -> #repair-ui);
+// (CaptainChair -> #captain-ui, Tactical -> #weapons-ui, Repair -> #repair-ui);
 // the other six are rendered by the Bevy WASM canvas, so when one of those
 // is active no HTML section is shown — the canvas takes the whole bezel
 // content area.
@@ -19,13 +19,13 @@
 // Other consoles (Helm, Sensors, Shields, Navigation, Power, Comms) are
 // rendered by Bevy and have no section in the map.
 export const CONSOLE_SECTION = Object.freeze({
-  CaptainChair: 'game-ui',
+  CaptainChair: 'captain-ui',
   Tactical: 'weapons-ui',
   Repair: 'repair-ui',
 });
 
 // Set of all known section ids that the switcher will reset.
-export const HTML_SECTION_IDS = Object.freeze(['game-ui', 'weapons-ui', 'repair-ui']);
+export const HTML_SECTION_IDS = Object.freeze(['captain-ui', 'weapons-ui', 'repair-ui']);
 
 // Returns the section id that should be visible for `activeConsole`, or null
 // if no HTML section maps to this console (Bevy renders it).

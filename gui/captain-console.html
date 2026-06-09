@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Phoenix — Captain's Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; }
+    .panel-inner {
+      padding: 24px 60px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .panel-mid {
+      flex: 1;
+      display: flex;
+      flex-direction: row;
+      gap: 36px;
+      min-height: 0;
+    }
+    .panel-mid > .strat-col { flex: 1; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+    .panel-mid > .cmd-col   { width: 420px; flex-shrink: 0; display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+    .hero h1 { font-size: 48px; letter-spacing: 0.30em; }
+    .hero h1 .sub { font-size: 14px; margin-top: 2px; }
+    .hero .bar { width: 6px; }
+    .hero { gap: 18px; }
+
+    .strat-col .inset { flex: 1; min-height: 0; }
+    .strat-col .inset .inset-body { padding: 14px 26px; }
+    .strat-col .section-header { margin-bottom: 8px; font-size: 18px; }
+    .strat-col .section-header .tag { font-size: 10px; }
+
+    .cmd-col .cmd-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 24px; }
+    .cmd-col .dir-group { display: grid; grid-template-columns: 88px 88px 88px; grid-template-rows: 88px 88px 88px; gap: 6px; }
+    .cmd-col .dir-btn {
+      --cham: 10px;
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      font-family: "Chakra Petch", sans-serif;
+      font-weight: 600;
+      font-size: 22px;
+      letter-spacing: 0.22em;
+      color: var(--ink-dim);
+      background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
+      clip-path: polygon(var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham), 100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%, var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham));
+      border: none; cursor: pointer;
+      text-transform: uppercase;
+    }
+    .cmd-col .dir-btn > .btn-bg {
+      position: absolute; inset: 1.5px;
+      --cham: 9px;
+      background: linear-gradient(180deg, #1a2148 0%, #0e1432 50%, #070b22 100%);
+      clip-path: polygon(var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham), 100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%, var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham));
+      z-index: 0;
+    }
+    .cmd-col .dir-btn > .lbl { position: relative; z-index: 1; }
+    .cmd-col .dir-btn.active {
+      color: #cde6ff;
+      background: linear-gradient(180deg, #6cb6d0 0%, #1a3848 60%, #0a1c24 100%);
+    }
+    .cmd-col .dir-btn.active > .btn-bg { background: linear-gradient(180deg, #1a3848 0%, #0a1c24 100%); border: 1px solid var(--cyan); }
+    .cmd-col .dir-btn#dir-fore { grid-column: 2; grid-row: 1; }
+    .cmd-col .dir-btn#dir-port { grid-column: 1; grid-row: 2; }
+    .cmd-col .dir-btn#dir-stbd { grid-column: 3; grid-row: 2; }
+    .cmd-col .dir-btn#dir-aft  { grid-column: 2; grid-row: 3; }
+
+    .cmd-col #red-alert-btn {
+      width: 100%;
+      max-width: 280px;
+    }
+
+    .side-rail {
+      position: absolute;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--ink-faint);
+      letter-spacing: 0.4em;
+    }
+    .side-rail.top    { top: 16px;    left: 50%; transform: translateX(-50%); }
+    .side-rail.bottom { bottom: 14px; left: 50%; transform: translateX(-50%); }
+
+    .readout { padding: 8px 18px; }
+    .readout .v { font-size: 36px; }
+    .readout .k { font-size: 12px; }
+    .readout .u { font-size: 12px; }
+    .readout .sub { font-size: 11px; }
+
+    .objective-item {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--line-faint);
+    }
+    .objective-item:last-child { border-bottom: none; }
+    .objective-item .icon {
+      width: 16px; height: 16px; flex-shrink: 0;
+      border-radius: 50%; margin-top: 3px;
+    }
+    .objective-item .icon.active   { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+    .objective-item .icon.completed { background: var(--loaded); box-shadow: 0 0 8px var(--loaded); }
+    .objective-item .icon.failed   { background: var(--fire); box-shadow: 0 0 8px var(--fire); }
+    .objective-item .text { flex: 1; font-size: 18px; line-height: 1.4; color: var(--ink); }
+    .objective-item .mandatory-tag {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--ink-faint);
+      border: 1px solid var(--line-faint);
+      padding: 1px 6px;
+    }
+    .objective-item .status-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+    }
+    .objective-item .status-label.active   { color: var(--cyan); }
+    .objective-item .status-label.completed { color: var(--loaded); }
+    .objective-item .status-label.failed   { color: var(--fire); }
+
+    .status-grid {
+      display: flex; gap: 18px;
+    }
+    .status-grid .stat {
+      flex: 1;
+      padding: 12px 16px;
+      background: linear-gradient(180deg, rgba(20,28,60,0.6), rgba(8,12,28,0.4));
+      border-top: 1px solid var(--line-faint);
+      text-align: center;
+    }
+    .status-grid .stat .label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      color: var(--ink-faint);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+    .status-grid .stat .value {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--ink);
+      margin-top: 4px;
+    }
+    .status-grid .stat .value.alert-on  { color: var(--fire); }
+    .status-grid .stat .value.alert-off { color: var(--loaded); }
+
+    .objectives-scroll {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    #objectives, #dir, #alert {
+      position: absolute;
+      left: -9999px;
+      visibility: hidden;
+    }
+  </style>
+</head>
+<body style="background:#000; overflow:hidden;">
+
+  <!-- ── HTML bridge transport shim (ADR-0001 §3) ───────────── -->
+  <script>
+    window.__sendAction = function(json) {
+      if (window !== window.parent) {
+        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
+      } else if (window.ipc) {
+        window.ipc.postMessage(json);
+      } else {
+        window.wasmBindings.wasm_ui_action(json);
+      }
+    };
+  </script>
+
+  <!-- Hidden data containers for smoke tests -->
+  <div id="objectives" aria-hidden="true"></div>
+  <div id="dir" aria-hidden="true"></div>
+  <div id="alert" aria-hidden="true"></div>
+
+  <div id="fit-wrap" style="position:fixed; top:0; left:0; transform-origin: top left;">
+  <div class="frame landscape" data-screen-label="Captain's Console">
+    <div class="panel">
+      <div class="panel-inner">
+
+        <div class="side-rail top">PROJECT PHOENIX · CAPTAIN'S CONSOLE</div>
+        <div class="side-rail bottom" id="footer-ticker">CAPTAIN · STRATEGIC OVERVIEW</div>
+
+        <!-- ── Hero header ───────────────────────────────────────────── -->
+        <header class="hero">
+          <div class="bar"></div>
+          <h1>CAPTAIN
+            <span class="sub" id="hero-sub">STRATEGIC · OVERVIEW</span>
+          </h1>
+          <div class="spacer"></div>
+          <div class="complexity" id="cpx-display">CAPTAIN</div>
+        </header>
+
+        <!-- ── Main split: strategy (left) + commands (right) ───────── -->
+        <div class="panel-mid">
+
+          <!-- ── LEFT: Strategic overview ───────────────────────────── -->
+          <section class="strat-col">
+            <div class="inset">
+              <div class="inset-body" style="display:flex; flex-direction:column; min-height:0;">
+                <div class="section-header">
+                  <span>MISSION OBJECTIVES</span>
+                  <span class="tag" id="obj-count-tag">0</span>
+                </div>
+                <div class="objectives-scroll" id="objective-list">
+                  <div style="padding:20px;text-align:center;color:var(--ink-faint);font-family:'JetBrains Mono',monospace;letter-spacing:0.15em;font-size:16px;">— NO OBJECTIVES —</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="status-grid" id="status-strip">
+              <div class="stat">
+                <div class="label">ALERT STATUS</div>
+                <div class="value alert-off" id="alert-status">STANDARD</div>
+              </div>
+              <div class="stat">
+                <div class="label">VIEW</div>
+                <div class="value" id="view-status">FORE</div>
+              </div>
+              <div class="stat">
+                <div class="label">CONTACTS</div>
+                <div class="value" id="contacts-status">—</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── RIGHT: Direction pad + Red Alert ──────────────────── -->
+          <section class="cmd-col">
+            <div class="cmd-panel">
+              <div class="dir-group" id="dir-pad">
+                <button id="dir-fore" class="dir-btn active" type="button"><span class="btn-bg"></span><span class="lbl">FWD</span></button>
+                <button id="dir-port" class="dir-btn" type="button"><span class="btn-bg"></span><span class="lbl">PORT</span></button>
+                <button id="dir-stbd" class="dir-btn" type="button"><span class="btn-bg"></span><span class="lbl">STBD</span></button>
+                <button id="dir-aft" class="dir-btn" type="button"><span class="btn-bg"></span><span class="lbl">AFT</span></button>
+              </div>
+
+              <button id="red-alert-btn" class="btn" type="button">
+                <span class="btn-bg"></span>
+                <span class="led" id="alert-led"></span>
+                <span class="label" id="alert-label">RED ALERT</span>
+              </button>
+            </div>
+          </section>
+
+        </div>
+        <!-- /panel-mid -->
+
+        <footer class="console-footer footer-bar">
+          <span class="dot"></span>
+          <span id="footer-status">CAPTAIN ONLINE</span>
+          <span class="sep">·</span>
+          <span id="footer-alert" style="color:var(--ink-faint);">STANDARD</span>
+          <span style="flex:1"></span>
+          <span id="footer-right" style="color:var(--ink-faint);">—</span>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <script>
+    // ── State ────────────────────────────────────────────────────────────
+    var _lastName      = null;
+    var _lastStateJson = null;
+    var _state         = null;
+
+    // Direction names for the dir pad
+    var DIR_FORE = 'Fore';
+    var DIR_PORT = 'Port';
+    var DIR_STBD = 'Starboard';
+    var DIR_AFT  = 'Aft';
+
+    // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
+    window.__updateConsole = function(name, stateJson) {
+      _lastName      = name;
+      _lastStateJson = stateJson;
+      _renderConsole(name, stateJson);
+    };
+
+    function _renderConsole(name, stateJson) {
+      var s;
+      try { s = JSON.parse(stateJson); } catch (e) { console.warn('[Captain] bad state json', e); return; }
+      _state = s;
+
+      // ── Hidden data-attr containers (smoke-test targets) ────────────────
+      var objectivesEl = document.getElementById('objectives');
+      objectivesEl.innerHTML = '';
+      (s.objectives || []).forEach(function(o) {
+        var row = document.createElement('div');
+        row.className = 'objective-data';
+        row.dataset.id       = o.id;
+        row.dataset.text     = o.text;
+        row.dataset.mandatory = String(!!o.mandatory);
+        row.dataset.status   = o.status;
+        objectivesEl.appendChild(row);
+      });
+
+      var dirEl = document.getElementById('dir');
+      dirEl.dataset.direction = s.view_direction || 'Fore';
+
+      var alertEl = document.getElementById('alert');
+      alertEl.dataset.redAlert = String(!!s.red_alert);
+
+      // ── Objectives list ─────────────────────────────────────────────────
+      var listEl = document.getElementById('objective-list');
+      listEl.innerHTML = '';
+      var objs = s.objectives || [];
+      var countTag = document.getElementById('obj-count-tag');
+      if (countTag) countTag.textContent = String(objs.length);
+
+      if (objs.length === 0) {
+        listEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--ink-faint);font-family:\'JetBrains Mono\',monospace;letter-spacing:0.15em;font-size:16px;">— NO OBJECTIVES —</div>';
+      } else {
+        objs.forEach(function(o) {
+          var item = document.createElement('div');
+          item.className = 'objective-item';
+          var status = (o.status || 'Active').toLowerCase();
+          var icon = document.createElement('div');
+          icon.className = 'icon ' + status;
+
+          var text = document.createElement('span');
+          text.className = 'text';
+          text.textContent = o.text;
+
+          item.appendChild(icon);
+          item.appendChild(text);
+
+          if (o.mandatory) {
+            var tag = document.createElement('span');
+            tag.className = 'mandatory-tag';
+            tag.textContent = 'REQ';
+            item.appendChild(tag);
+          }
+
+          var label = document.createElement('span');
+          label.className = 'status-label ' + status;
+          label.textContent = status;
+          item.appendChild(label);
+
+          listEl.appendChild(item);
+        });
+      }
+
+      // ── Status strip ────────────────────────────────────────────────────
+      var alertStatusEl = document.getElementById('alert-status');
+      var footerAlertEl = document.getElementById('footer-alert');
+      if (s.red_alert) {
+        if (alertStatusEl) { alertStatusEl.textContent = 'RED ALERT'; alertStatusEl.className = 'value alert-on'; }
+        if (footerAlertEl) { footerAlertEl.textContent = '◉ RED ALERT'; footerAlertEl.style.color = 'var(--fire)'; }
+      } else {
+        if (alertStatusEl) { alertStatusEl.textContent = 'STANDARD'; alertStatusEl.className = 'value alert-off'; }
+        if (footerAlertEl) { footerAlertEl.textContent = 'STANDARD'; footerAlertEl.style.color = 'var(--ink-faint)'; }
+      }
+
+      // ── Direction pad active state ──────────────────────────────────────
+      var dir = s.view_direction || 'Fore';
+      var btnIds = { Fore: 'dir-fore', Port: 'dir-port', Starboard: 'dir-stbd', Aft: 'dir-aft' };
+      Object.keys(btnIds).forEach(function(k) {
+        var el = document.getElementById(btnIds[k]);
+        if (el) {
+          el.className = 'dir-btn' + (k === dir ? ' active' : '');
+        }
+      });
+
+      var viewStatusEl = document.getElementById('view-status');
+      if (viewStatusEl) {
+        var dirLabels = { Fore: 'FORE', Port: 'PORT', Starboard: 'STBD', Aft: 'AFT' };
+        viewStatusEl.textContent = dirLabels[dir] || dir.toUpperCase();
+      }
+
+      // ── Contacts count ──────────────────────────────────────────────────
+      var contactsEl = document.getElementById('contacts-status');
+      var blips = s.blips || [];
+      if (contactsEl) contactsEl.textContent = String(blips.length);
+
+      // ── Red Alert LED ───────────────────────────────────────────────────
+      var ledEl = document.getElementById('alert-led');
+      if (ledEl) {
+        ledEl.className = 'led' + (s.red_alert ? ' fire' : '');
+      }
+
+      // ── Red Alert button styling ────────────────────────────────────────
+      var raBtn = document.getElementById('red-alert-btn');
+      if (raBtn) {
+        raBtn.className = 'btn' + (s.red_alert ? ' danger' : '');
+      }
+      var raLabel = document.getElementById('alert-label');
+      if (raLabel) raLabel.textContent = s.red_alert ? 'ALERT ACTIVE' : 'RED ALERT';
+
+      // ── Footer ticker ───────────────────────────────────────────────────
+      var footerEl = document.getElementById('footer-ticker');
+      if (footerEl) {
+        var dirLabel = dirLabels[dir] || 'FORE';
+        footerEl.textContent = 'CAPTAIN · ' + dirLabel + ' · ' + (s.red_alert ? 'RED ALERT' : 'STANDARD');
+      }
+    }
+
+    var dirLabels = { Fore: 'FORE', Port: 'PORT', Starboard: 'STBD', Aft: 'AFT' };
+
+    // ── Outbound actions ──────────────────────────────────────────────────
+    document.getElementById('dir-fore').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'set_view', console: 'CaptainChair', direction: 'Fore' }));
+    });
+    document.getElementById('dir-port').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'set_view', console: 'CaptainChair', direction: 'Port' }));
+    });
+    document.getElementById('dir-stbd').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'set_view', console: 'CaptainChair', direction: 'Starboard' }));
+    });
+    document.getElementById('dir-aft').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'set_view', console: 'CaptainChair', direction: 'Aft' }));
+    });
+    document.getElementById('red-alert-btn').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'toggle_red_alert', console: 'CaptainChair' }));
+    });
+  </script>
+
+  <script>
+    // ── Fit-to-screen (scales the 2160×1080 frame to fill any viewport) ──
+    (function fit() {
+      var wrap = document.getElementById('fit-wrap');
+      var W = 2160, H = 1080;
+      function apply() {
+        var s = Math.min(window.innerWidth / W, window.innerHeight / H);
+        wrap.style.transform = 'scale(' + s + ')';
+        wrap.style.left = ((window.innerWidth  - W * s) / 2) + 'px';
+        wrap.style.top  = ((window.innerHeight - H * s) / 2) + 'px';
+      }
+      window.addEventListener('resize', apply);
+      apply();
+    })();
+  </script>
+</body>
+</html>

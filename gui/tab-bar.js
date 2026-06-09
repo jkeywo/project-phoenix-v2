@@ -123,7 +123,8 @@ export function renderTabBar(root, layout, options) {
     el.setAttribute('role', 'tab');
     el.setAttribute('aria-selected', btn.active ? 'true' : 'false');
     if (typeof opts.onPress === 'function') {
-      el.addEventListener('click', () => opts.onPress(btn.console));
+      // pointerdown fires immediately on touch (no 300 ms click-delay).
+      el.addEventListener('pointerdown', (e) => { e.preventDefault(); opts.onPress(btn.console); });
     }
     root.appendChild(el);
   }

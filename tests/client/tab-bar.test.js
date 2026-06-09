@@ -41,7 +41,10 @@ function fakeDoc() {
         (this.listeners[ev] = this.listeners[ev] || []).push(fn);
       },
       click() {
-        for (const fn of (this.listeners.click || [])) fn();
+        for (const fn of (this.listeners.click || [])) fn({ preventDefault: () => {} });
+      },
+      pointerdown() {
+        for (const fn of (this.listeners.pointerdown || [])) fn({ preventDefault: () => {} });
       },
     };
     return el;
@@ -270,12 +273,12 @@ describe('renderTabBar — DOM mutations', () => {
       .toEqual(['CaptainChair', 'Tactical', 'Repair']);
   });
 
-  it('wires onPress click handlers that fire with the console name', () => {
+  it('wires onPress pointerdown handlers that fire with the console name', () => {
     const root = fakeRoot();
     const onPress = vi.fn();
     const layout = tabBarLayout(['CaptainChair', 'Tactical'], 'CaptainChair', 'portrait', true);
     renderTabBar(root, layout, { onPress });
-    root.children[1].click();
+    root.children[1].pointerdown();
     expect(onPress).toHaveBeenCalledExactlyOnceWith('Tactical');
   });
 
@@ -283,7 +286,7 @@ describe('renderTabBar — DOM mutations', () => {
     const root = fakeRoot();
     const layout = tabBarLayout(['CaptainChair', 'Tactical'], 'CaptainChair', 'portrait', true);
     renderTabBar(root, layout);
-    expect(() => root.children[0].click()).not.toThrow();
+    expect(() => root.children[0].pointerdown()).not.toThrow();
   });
 
   it('rebuilds from scratch on each call (no stale buttons)', () => {

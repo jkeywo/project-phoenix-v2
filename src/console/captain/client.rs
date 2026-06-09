@@ -455,12 +455,15 @@ fn fill_captain_alert(commands: &mut Commands, container: Entity, assets: &Phone
 
     let glow = commands.spawn((
         ArmedGlow,
+        ImageNode {
+            image: assets.red_alert_armed.clone(),
+            color: Color::srgba(1.0, 1.0, 1.0, 0.0).into(),
+        },
         Node {
-            width: Val::Px(10.0),
-            height: Val::Px(10.0),
+            width: Val::Px(16.0),
+            height: Val::Px(16.0),
             ..default()
         },
-        BackgroundColor(Color::srgba(1.0, 0.2, 0.2, 0.0)),
     )).id();
     let text = commands.spawn((
         Text::new("RED ALERT"),
@@ -551,7 +554,7 @@ fn refresh_red_alert_ui(
     ship_view: Option<Res<ShipView>>,
     time: Res<Time>,
     mut ra_states: Query<&mut WidgetState, With<crate::gui::GuiButtonMarker>>,
-    mut glow_q: Query<(&mut BackgroundColor, &ChildOf), With<ArmedGlow>>,
+    mut glow_q: Query<(&mut ImageNode, &ChildOf), With<ArmedGlow>>,
 ) {
     let Some(ship_view) = ship_view else { return };
     if !ship_view.is_changed() && !ship_view.red_alert {
@@ -560,18 +563,18 @@ fn refresh_red_alert_ui(
 
     // Update WidgetState only for the button that has ArmedGlow as a child.
     // We identify the RA button by querying ArmedGlow and walking up to the parent.
-    for (mut glow_bg, parent) in glow_q.iter_mut() {
+    for (mut glow_img, parent) in glow_q.iter_mut() {
         let ra_entity = parent.0;
         if let Ok(mut state) = ra_states.get_mut(ra_entity) {
             state.active = ship_view.red_alert;
         }
 
-        // Pulsing armed glow — unchanged from pre-migration.
+        // Pulsing armed glow — fade the texture alpha.
         if ship_view.red_alert {
             let pulse = ((time.elapsed_secs() * 3.0).sin() + 1.0) * 0.3 + 0.2;
-            glow_bg.0 = Color::srgba(1.0, 0.2, 0.2, pulse);
+            glow_img.color = Color::srgba(1.0, 1.0, 1.0, pulse).into();
         } else {
-            glow_bg.0 = Color::srgba(1.0, 0.2, 0.2, 0.0);
+            glow_img.color = Color::srgba(1.0, 1.0, 1.0, 0.0).into();
         }
     }
 }

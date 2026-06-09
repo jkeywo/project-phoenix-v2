@@ -1092,6 +1092,26 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 }
             };
 
+            // Look up the display name for the locked target.
+            let target_name: Option<String> = match &target_uuid {
+                None => None,
+                Some(uuid) => {
+                    let uuid = uuid.clone();
+                    let mut name = None;
+                    let mut name_qs = world.query::<(
+                        &crate::entity_spawner::EntityUuid,
+                        &crate::entities::spawner::EntityName,
+                    )>();
+                    for (u, n) in name_qs.iter(world) {
+                        if u.0 == uuid {
+                            name = Some(n.0.clone());
+                            break;
+                        }
+                    }
+                    name
+                }
+            };
+
             let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
                 let effective_phaser_range = phaser_range * radar_range_mult;
                 let fire_ready = match target_live_pos {
@@ -1131,6 +1151,7 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
 
             vec![ServerMessage::WeaponsUpdate {
                 target_uuid,
+                target_name,
                 banks,
                 tubes,
                 torpedo_count,
@@ -1157,6 +1178,7 @@ pub struct WeaponsConsoleStateComp(pub WeaponsConsoleState);
 fn spawn_weapons_console_state_entity(mut commands: Commands) {
     commands.spawn(WeaponsConsoleStateComp(WeaponsConsoleState {
         target_uuid: None,
+        target_name: None,
         banks: Vec::new(),
         tubes: Vec::new(),
         torpedo_count: 0,
@@ -1294,6 +1316,7 @@ fn recompute_weapons_console_state(
     world_res: Res<WorldResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    entity_name_q: Query<(&crate::entity_spawner::EntityUuid, &crate::entities::spawner::EntityName)>,
     mut comp_q: Query<&mut WeaponsConsoleStateComp>,
 ) {
     let target_uuid = weapons_target.0.clone();
@@ -1304,6 +1327,10 @@ fn recompute_weapons_console_state(
     let target_live_pos: Option<(f32, f32)> = target_uuid
         .as_deref()
         .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
+
+    let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
+        entity_name_q.iter().find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
+    });
 
     let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
         let effective_phaser_range = combat_config.0.phaser_range * radar_range_mult;
@@ -1460,6 +1487,7 @@ fn recompute_weapons_console_state(
 
     let next = WeaponsConsoleState {
         target_uuid,
+        target_name,
         banks,
         tubes,
         torpedo_count: torpedo_sys.0.torpedoes_remaining,

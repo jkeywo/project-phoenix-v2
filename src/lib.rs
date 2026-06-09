@@ -90,6 +90,7 @@ pub mod console;
 
 // Backwards-compat aliases so old paths still resolve.
 pub use console::captain::server as captain_plugin;
+pub use console::helm::server as helm_plugin;
 pub use console::weapons::server as weapons_plugin;
 pub use console::repair::server as repair_plugin;
 pub use console::power::server as power_plugin;

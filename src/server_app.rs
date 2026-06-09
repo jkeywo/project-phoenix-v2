@@ -151,6 +151,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::console_ai_plugin::ConsoleAiPlugin)
     .add_plugins(crate::ai_plugin::AiPlugin)
     .add_plugins(crate::captain_plugin::CaptainPlugin)
+    .add_plugins(crate::helm_plugin::HelmPlugin)
     .add_plugins(crate::ship_plugin::ShipPlugin)
     .add_plugins(crate::weapons_plugin::WeaponsPlugin)
     .add_plugins(crate::repair_plugin::RepairPlugin)

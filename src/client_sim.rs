@@ -288,6 +288,7 @@ impl ClientSimState {
                 tubes,
                 torpedo_count,
                 phaser_mode,
+                ..
             } => {
                 crate::wasm_log!(
                     "[radar-instr 8] WeaponsUpdate received: target_uuid={:?} prev={:?}",
@@ -1766,6 +1767,7 @@ mod tests {
     ) -> ServerMessage {
         ServerMessage::WeaponsUpdate {
             target_uuid: None,
+            target_name: None,
             banks: vec![PhaserBankState {
                 id: "port".to_string(),
                 fire_ready,

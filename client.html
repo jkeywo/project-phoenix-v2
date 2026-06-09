@@ -463,6 +463,14 @@
         title="Tactical Console" allowfullscreen></iframe>
     </section>
 
+    <!-- Helm console: full-viewport polished HTML UI (issue #423).
+         Driven by __updateConsole via postMessage bridge.
+         Joystick, impulse, and ON SCREEN actions forwarded to server via PeerJS. -->
+    <section id="helm-ui">
+      <iframe id="helm-iframe" src="gui/helm-console.html"
+        title="Helm Console" allowfullscreen></iframe>
+    </section>
+
     <section id="repair-ui">
       <h2 style="margin:0 0 1rem;font-size:1.1rem;letter-spacing:.1em;color:#8af">REPAIR</h2>
       <p style="margin:0 0 0.5rem;font-size:0.85rem;color:#aaa">HULL INTEGRITY</p>
@@ -642,7 +650,7 @@
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
+      shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
       stations: [], maxPlayers: 0, complexity: {}, allFilled: false,
       // Weapons console iframe state (issue #422)
@@ -1116,6 +1124,9 @@
       if (activeConsole === 'CaptainChair') {
         pushCaptainConsoleState();
       }
+      if (activeConsole === 'Helm') {
+        pushHelmConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1150,6 +1161,40 @@
       iframe.addEventListener('load', () => { pushCaptainConsoleState(); });
     })();
 
+    // ── Helm console iframe bridge (issue #423) ──────────────────────────────
+    // Builds a HelmConsoleState JSON from client state and pushes it to the
+    // gui/helm-console.html iframe via its window.__updateConsole function.
+
+    function buildHelmConsoleState() {
+      return JSON.stringify({
+        heading:                ((state.shipYaw * -180 / Math.PI) % 360 + 360) % 360,
+        speed:                  state.forwardSpeed || 0,
+        x:                      state.shipX || 0,
+        z:                      state.shipZ || 0,
+        yaw:                    state.shipYaw || 0,
+        impulse_charge_progress: state.impulseChargeProgress || 0,
+        on_screen:              state.currentView === 'Radar',
+        lock_id:                state.weaponsTarget || null,
+      });
+    }
+
+    function pushHelmConsoleState() {
+      if (activeConsole !== 'Helm') return;
+      const iframe = $('helm-iframe');
+      if (!iframe || !iframe.contentWindow) return;
+      try {
+        const fn = iframe.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn('Helm', buildHelmConsoleState());
+      } catch (_) {}
+    }
+
+    // Re-push when the iframe finishes loading so it receives current state.
+    (function wireHelmIframe() {
+      const iframe = $('helm-iframe');
+      if (!iframe) return;
+      iframe.addEventListener('load', () => { pushHelmConsoleState(); });
+    })();
+
     // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
     // The weapons-console.html iframe sends {type:'console_action', payload:json}
     // via postMessage when the player fires or taps a target. We translate
@@ -1179,6 +1224,18 @@
           break;
         case 'toggle_red_alert':
           send('ToggleRedAlert');
+          break;
+        case 'helm_input':
+          send('HelmInput', { thrust: action.thrust || 0, steering: action.steering || 0 });
+          break;
+        case 'start_impulse_charge':
+          send('StartImpulseCharge');
+          break;
+        case 'cancel_impulse':
+          send('CancelImpulse');
+          break;
+        case 'set_radar_view':
+          send('SetView', { mode: { kind: 'Radar' } });
           break;
         default:
           break;
@@ -1356,6 +1413,8 @@
           state.shipX = snap.ship_x || 0;
           state.shipZ = snap.ship_z || 0;
           state.shipYaw = snap.ship_yaw || 0;
+          state.forwardSpeed = snap.forward_speed || 0;
+          state.impulseChargeProgress = snap.impulse_charge_progress || 0;
           if (vd) state.currentView = vd;
           // Red alert visual (issue #439): drives the phone bezel image swap.
           // `snap.red_alert` is a snake-cased serde field on SimSnapshot.

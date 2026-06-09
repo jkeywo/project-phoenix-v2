@@ -891,6 +891,9 @@ pub enum ServerMessage {
     /// load state in TOML order. `torpedo_count` is the shared magazine.
     WeaponsUpdate {
         target_uuid: Option<String>,
+        /// Display name of the locked target entity, if known.
+        #[serde(default)]
+        target_name: Option<String>,
         banks: Vec<PhaserBankState>,
         tubes: Vec<TorpedoTubeState>,
         /// Remaining torpedoes in the shared magazine.
@@ -1161,6 +1164,8 @@ pub struct RadarRegion {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct WeaponsConsoleState {
     pub target_uuid: Option<String>,
+    #[serde(default)]
+    pub target_name: Option<String>,
     pub banks: Vec<PhaserBankState>,
     pub tubes: Vec<TorpedoTubeState>,
     pub torpedo_count: u32,
@@ -1205,10 +1210,29 @@ pub struct CaptainConsoleState {
     pub game_status: String,
 }
 
+/// Serialised Helm console state pushed to the HTML helm panel (issue #423).
+///
+/// Mirrors `WeaponsConsoleState` — written into a single `HelmConsoleStateComp`
+/// component and pushed on change via `ConsoleStateChanged { name: "Helm", json }`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct HelmConsoleState {
+    pub heading: f32,
+    pub speed: f32,
+    pub x: f32,
+    pub z: f32,
+    pub yaw: f32,
+    #[serde(default)]
+    pub impulse_charge_progress: f32,
+    #[serde(default)]
+    pub on_screen: bool,
+    #[serde(default)]
+    pub lock_id: Option<String>,
+}
+
 /// A console action decoded from the `window.__sendAction` envelope
 /// (ADR-0001 §1). The envelope's extra `console` field is ignored by serde.
 ///
-/// Only the Tactical actions demonstrated by issue #422 are modelled here.
+/// Modelled after Tactical actions (issue #422) and Captain actions (issue #428).
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum UiAction {
@@ -1227,10 +1251,21 @@ pub enum UiAction {
     SetView {
         direction: ViewDirection,
     },
+    /// Helm joystick input (helm console).
+    HelmInput {
+        thrust: f32,
+        steering: f32,
+    },
+    /// Start charging the impulse drive (helm console).
+    StartImpulseCharge,
+    /// Cancel the impulse drive charge (helm console).
+    CancelImpulse,
+    /// Switch the viewscreen to radar mode (helm ON SCREEN button).
+    SetRadarView,
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
-/// weapons handlers already process. Pure — covered by a native unit test.
+/// handlers already process. Pure — covered by a native unit test.
 pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
     match a {
         UiAction::FireTorpedo { tube, target_uuid } => ClientMessage::FireTorpedo {
@@ -1241,6 +1276,15 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::ToggleRedAlert => ClientMessage::ToggleRedAlert,
         UiAction::SetView { direction } => ClientMessage::SetView {
             mode: ViewMode::Camera(direction.clone()),
+        },
+        UiAction::HelmInput { thrust, steering } => ClientMessage::HelmInput {
+            thrust: *thrust,
+            steering: *steering,
+        },
+        UiAction::StartImpulseCharge => ClientMessage::StartImpulseCharge,
+        UiAction::CancelImpulse => ClientMessage::CancelImpulse,
+        UiAction::SetRadarView => ClientMessage::SetView {
+            mode: ViewMode::Radar,
         },
     }
 }
@@ -1305,6 +1349,47 @@ mod ui_action_tests {
             ui_action_to_client_message(&action),
             ClientMessage::SetView {
                 mode: ViewMode::Camera(ViewDirection::Aft)
+            }
+        );
+    }
+
+    #[test]
+    fn helm_input_maps_to_client_message() {
+        let action = UiAction::HelmInput {
+            thrust: 0.75,
+            steering: -0.5,
+        };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::HelmInput {
+                thrust: 0.75,
+                steering: -0.5
+            }
+        );
+    }
+
+    #[test]
+    fn start_impulse_charge_maps_to_client_message() {
+        assert_eq!(
+            ui_action_to_client_message(&UiAction::StartImpulseCharge),
+            ClientMessage::StartImpulseCharge
+        );
+    }
+
+    #[test]
+    fn cancel_impulse_maps_to_client_message() {
+        assert_eq!(
+            ui_action_to_client_message(&UiAction::CancelImpulse),
+            ClientMessage::CancelImpulse
+        );
+    }
+
+    #[test]
+    fn set_radar_view_maps_to_client_message() {
+        assert_eq!(
+            ui_action_to_client_message(&UiAction::SetRadarView),
+            ClientMessage::SetView {
+                mode: ViewMode::Radar
             }
         );
     }

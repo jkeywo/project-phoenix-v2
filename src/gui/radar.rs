@@ -767,6 +767,12 @@ pub fn bridge_sim_to_radar(
         if snapshot.tags.is_empty() {
             continue;
         }
+        // The player ship is already rendered as the RadarCenter blip with the
+        // correct PlayerShip icon. Skip it from the world entity list to avoid
+        // a duplicate red "ship" blip appearing at the same position.
+        if snapshot.tags.iter().any(|t| t == "player") {
+            continue;
+        }
 
         let entity_yaw = snapshot.yaw.unwrap_or(0.0);
         let tag_colour = snapshot.colour.map(|c| Color::srgb(c[0], c[1], c[2]));

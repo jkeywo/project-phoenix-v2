@@ -426,7 +426,7 @@
       var nameEl  = document.getElementById('target-name');
       var subEl   = document.getElementById('target-sub');
       var hasLock = !!s.target_uuid;
-      if (nameEl) nameEl.textContent = hasLock ? s.target_uuid.substring(0, 20) + '…' : '—';
+      if (nameEl) nameEl.textContent = hasLock ? (s.target_name || s.target_uuid.substring(0, 20) + '…') : '—';
       if (subEl)  subEl.textContent  = hasLock ? '◉ LOCK ACTIVE' : 'NO LOCK';
 
       var footerLock = document.getElementById('footer-lock');

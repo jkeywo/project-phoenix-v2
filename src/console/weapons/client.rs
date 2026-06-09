@@ -27,7 +27,7 @@ use crate::gui::{
     bridge_sim_to_radar, spawn_gui_button, ButtonPressed,
     ButtonSize, ConsoleRadar, GenericRadar, OrientationMode, RadarArc,
     RadarArcKind, RadarArcs, RadarBlipClicked, RadarBlipMap, RadarCenterPose, RadarClipMode,
-    RadarEntityUuid, RadarFilter, RadarTargetHighlight, RadarTargetRing, RadioButtonConfig, RadioGroup,
+    OnRadar, RadarEntityUuid, RadarFilter, RadarTargetHighlight, RadarTargetRing, RadioButtonConfig, RadioGroup,
     RadioSelected, StateVisuals, Disabled,
 };
 use crate::messages::{Console, GamePhase, PhaserBankClientConfig, TorpedoTube, TorpedoTubeClientConfig};
@@ -384,7 +384,7 @@ fn fill_tactical_radar(
 /// event.
 fn on_tactical_radar_blip_clicked(
     trigger: On<RadarBlipClicked>,
-    sources: Query<&RadarEntityUuid>,
+    sources: Query<(&RadarEntityUuid, &crate::gui::OnRadar)>,
     mut outbound: MessageWriter<OutboundClientMessage>,
 ) {
     let source = trigger.event().source;
@@ -392,9 +392,12 @@ fn on_tactical_radar_blip_clicked(
     crate::wasm_log!(
         "[radar-instr 4] on_tactical_radar_blip_clicked: radar={:?} source={:?} uuid_lookup={}",
         trigger.event().radar, source,
-        match &lookup { Ok(u) => format!("Some({})", u.0), Err(_) => "None".into() }
+        match &lookup { Ok((u, _)) => format!("Some({})", u.0), Err(_) => "None".into() }
     );
-    if let Ok(uuid) = lookup {
+    if let Ok((uuid, on_radar)) = lookup {
+        if !on_radar.0.iter().any(|t| t == "enemy") {
+            return;
+        }
         crate::wasm_log!("[radar-instr 5] writing SetTarget uuid={}", uuid.0);
         outbound.write(OutboundClientMessage(set_target_message(uuid.0.clone())));
     }

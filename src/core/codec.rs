@@ -575,6 +575,7 @@ mod tests {
         use crate::messages::{PhaserBankState, TorpedoTubeState};
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+            target_name: Some("Klingon Raider".into()),
             banks: vec![PhaserBankState {
                 id: "port".to_string(),
                 fire_ready: true,
@@ -598,6 +599,7 @@ mod tests {
         use crate::messages::{PhaserBankState, TorpedoTubeState};
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: None,
+            target_name: None,
             banks: vec![PhaserBankState {
                 id: "port".to_string(),
                 fire_ready: false,
@@ -621,6 +623,7 @@ mod tests {
         use crate::messages::{PhaserBankState, TorpedoTubeState};
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+            target_name: None,
             banks: vec![PhaserBankState {
                 id: "port".to_string(),
                 fire_ready: false,
@@ -2238,6 +2241,23 @@ mod tests {
         assert!(json.contains("\"hull_pct\":100"), "got: {json}");
         assert!(json.contains("\"condition\":\"NOMINAL\""), "got: {json}");
         assert!(json.contains("\"red_alert\":false"), "got: {json}");
+    }
+
+    #[test]
+    fn encode_console_state_round_trips_helm() {
+        let state = HelmConsoleState {
+            heading: 045.0,
+            speed: 75.0,
+            x: 1200.5,
+            z: -800.3,
+            yaw: 0.785,
+            impulse_charge_progress: 0.0,
+            on_screen: false,
+            lock_id: Some("A-014".into()),
+        };
+        let json = encode_console_state(&state).expect("encode helm console");
+        let decoded: HelmConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
     }
 
     #[test]

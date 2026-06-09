@@ -1244,6 +1244,56 @@ pub struct HelmConsoleState {
     pub lock_id: Option<String>,
 }
 
+/// Serialised Power console state pushed to the HTML power panel (issue #425).
+///
+/// Data-driven: `consoles` is derived from `PowerMultiplierResource` so adding
+/// new powered consoles in the ship TOML automatically extends the panel without
+/// any HTML changes.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PowerConsoleState {
+    /// Per-console power allocation entries. One entry per powered console.
+    pub consoles: Vec<PowerConsoleEntry>,
+    /// Sum of current allocations across all powered consoles.
+    pub total: u8,
+    /// Maximum total allocation (pool cap).
+    pub total_max: u8,
+    /// Current battery charge (0 – `battery_max`).
+    pub battery_charge: f32,
+    /// Maximum battery capacity (from `PowerConfig::capacity`).
+    pub battery_max: f32,
+    /// Whether the power system is locked (battery exhausted).
+    pub locked: bool,
+}
+
+/// A single entry in [`PowerConsoleState::consoles`].
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PowerConsoleEntry {
+    /// Console identifier — the `Console` enum variant name (e.g. `"Helm"`).
+    pub id: String,
+    /// Display label shown in the HTML panel (e.g. `"HELM"`, `"WEAPONS"`).
+    pub label: String,
+    /// Current power level (1 – `max_level`).
+    pub level: u8,
+    /// Maximum power level for this console.
+    pub max_level: u8,
+}
+
+/// Serialised Repair console state pushed to the HTML repair panel (issue #425).
+///
+/// Carries everything the HTML panel needs: team state machine slots, per-console
+/// hull status, travel timing, and the ordered list of dispatchable consoles.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct RepairConsoleState {
+    /// Current team slot states (one entry per repair team).
+    pub teams: Vec<TeamSlot>,
+    /// Per-console hull status. Drives the hull bar and team-destination labels.
+    pub console_hull: Vec<ConsoleHullStatus>,
+    /// Travel duration in seconds (from ship TOML `[repair]` block).
+    pub travel_duration_secs: f32,
+    /// Consoles that can be targeted for repair dispatch (in display order).
+    pub damageable_consoles: Vec<Console>,
+}
+
 /// A console action decoded from the `window.__sendAction` envelope
 /// (ADR-0001 §1). The envelope's extra `console` field is ignored by serde.
 ///
@@ -1277,6 +1327,28 @@ pub enum UiAction {
     CancelImpulse,
     /// Switch the viewscreen to radar mode (helm ON SCREEN button).
     SetRadarView,
+    /// Increase power for the named powered console (power console).
+    ///
+    /// The HTML power panel sends
+    /// `{ action: "increase_power", console: "Power", target: "Helm" }`.
+    IncreasePower {
+        target: Console,
+    },
+    /// Decrease power for the named powered console (power console).
+    ///
+    /// The HTML power panel sends
+    /// `{ action: "decrease_power", console: "Power", target: "Tactical" }`.
+    DecreasePower {
+        target: Console,
+    },
+    /// Dispatch a repair team to a console (repair console).
+    ///
+    /// The HTML repair panel sends
+    /// `{ action: "dispatch_repair_team", console: "Repair", team_idx: 0, target: "Helm" }`.
+    DispatchRepairTeam {
+        team_idx: u8,
+        target: Console,
+    },
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
@@ -1300,6 +1372,16 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::CancelImpulse => ClientMessage::CancelImpulse,
         UiAction::SetRadarView => ClientMessage::SetView {
             mode: ViewMode::Radar,
+        },
+        UiAction::IncreasePower { target } => ClientMessage::IncreasePower {
+            console: target.clone(),
+        },
+        UiAction::DecreasePower { target } => ClientMessage::DecreasePower {
+            console: target.clone(),
+        },
+        UiAction::DispatchRepairTeam { team_idx, target } => ClientMessage::DispatchRepairTeam {
+            team_idx: *team_idx,
+            console: target.clone(),
         },
     }
 }
@@ -1406,6 +1488,33 @@ mod ui_action_tests {
             ClientMessage::SetView {
                 mode: ViewMode::Radar
             }
+        );
+    }
+
+    #[test]
+    fn increase_power_maps_to_client_message() {
+        let action = UiAction::IncreasePower { target: Console::Helm };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::IncreasePower { console: Console::Helm }
+        );
+    }
+
+    #[test]
+    fn decrease_power_maps_to_client_message() {
+        let action = UiAction::DecreasePower { target: Console::Tactical };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::DecreasePower { console: Console::Tactical }
+        );
+    }
+
+    #[test]
+    fn dispatch_repair_team_maps_to_client_message() {
+        let action = UiAction::DispatchRepairTeam { team_idx: 1, target: Console::Power };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::DispatchRepairTeam { team_idx: 1, console: Console::Power }
         );
     }
 }

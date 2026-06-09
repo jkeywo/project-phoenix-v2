@@ -1,8 +1,11 @@
 use bevy::prelude::*;
 
 use crate::lobby::{InboundMessage, Sessions};
+use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::messages::{ClientMessage, Console, ServerMessage};
+use crate::messages::{
+    ClientMessage, Console, ConsoleHullStatus, RepairConsoleState, ServerMessage, TeamSlot,
+};
 use crate::repair_teams::RepairTeams;
 use crate::simulation::ShipHullIntegrity;
 use crate::modifiers::ShipModifiers;
@@ -14,16 +17,30 @@ use crate::messages::ModifierSlot;
 #[derive(Resource)]
 pub struct ShipRepairTeams(pub RepairTeams);
 
+// ── Console state component ────────────────────────────────────────────────────
+
+/// Bevy component that caches the current `RepairConsoleState` for the HTML panel.
+///
+/// Spawned once at `Startup`, recomputed each broadcast frame, and pushed via
+/// `ConsoleStateChanged` whenever the value changes.
+#[derive(Component, Clone, PartialEq)]
+pub struct RepairConsoleStateComp(pub RepairConsoleState);
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 pub struct RepairPlugin;
 
 impl Plugin for RepairPlugin {
     fn build(&self, app: &mut App) {
+        app.add_message::<ConsoleStateChanged>();
         app.insert_resource(ShipRepairTeams(RepairTeams::default()))
+            .add_systems(Startup, spawn_repair_console_state_entity)
             .add_systems(Update, (
                 handle_dispatch_repair_team.in_set(crate::sim_sets::SimSet::Input),
                 tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
+                recompute_repair_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                push_repair_console_state.in_set(crate::sim_sets::SimSet::Broadcast)
+                    .after(recompute_repair_console_state),
             ))
             .add_plugins(repair_state_broadcaster());
     }
@@ -85,6 +102,65 @@ pub fn tick_repair_teams(
     let dt = time.delta_secs();
     let repair_mult = modifiers.get(&ModifierSlot::RepairRate);
     teams.0.tick(dt * repair_mult, &mut hull.0);
+}
+
+// ── HTML console state push ────────────────────────────────────────────────────
+
+pub fn spawn_repair_console_state_entity(mut commands: Commands) {
+    commands.spawn(RepairConsoleStateComp(RepairConsoleState::default()));
+}
+
+/// Recompute `RepairConsoleStateComp` from live resources each broadcast frame.
+pub fn recompute_repair_console_state(
+    teams: Res<ShipRepairTeams>,
+    hull: Res<ShipHullIntegrity>,
+    mut q: Query<&mut RepairConsoleStateComp>,
+) {
+    let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
+
+    let console_hull: Vec<ConsoleHullStatus> = hull.0
+        .entries()
+        .iter()
+        .map(|(c, cur, max)| ConsoleHullStatus {
+            console:  c.clone(),
+            current:  *cur,
+            max_hp:   *max,
+        })
+        .collect();
+
+    let damageable_consoles: Vec<Console> = hull.0
+        .entries()
+        .iter()
+        .map(|(c, _, _)| c.clone())
+        .collect();
+
+    let next = RepairConsoleState {
+        teams:               team_slots,
+        console_hull,
+        travel_duration_secs: teams.0.timings().travel_duration,
+        damageable_consoles,
+    };
+
+    for mut comp in q.iter_mut() {
+        if comp.0 != next {
+            comp.0 = next.clone();
+        }
+    }
+}
+
+/// Push `RepairConsoleState` as a `ConsoleStateChanged` whenever it changes.
+pub fn push_repair_console_state(
+    q: Query<&RepairConsoleStateComp, Changed<RepairConsoleStateComp>>,
+    mut writer: MessageWriter<ConsoleStateChanged>,
+) {
+    for comp in q.iter() {
+        if let Ok(json) = crate::core::codec::encode_console_state(&comp.0) {
+            writer.write(ConsoleStateChanged {
+                name: "Repair".into(),
+                json,
+            });
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -260,5 +336,86 @@ mod tests {
         let baseline = crate::repair_teams::RepairTimings::default();
         assert_eq!(teams.timings().travel_duration, baseline.travel_duration);
         assert_eq!(teams.timings().repair_rate_hp_per_sec, baseline.repair_rate_hp_per_sec);
+    }
+
+    // ── HTML push tests ─────────────────────────────────────────────────────
+
+    #[derive(Resource, Default)]
+    struct PushOutbox(Vec<ConsoleStateChanged>);
+
+    fn collect_pushes(
+        mut reader: MessageReader<ConsoleStateChanged>,
+        mut box_: ResMut<PushOutbox>,
+    ) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    fn push_test_app() -> App {
+        let mut app = App::new();
+        app.add_message::<ConsoleStateChanged>()
+            .insert_resource(ShipRepairTeams(RepairTeams::default()))
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+                (Console::Helm,     25.0),
+                (Console::Tactical, 25.0),
+                (Console::Power,    25.0),
+            ])))
+            .insert_resource(crate::modifiers::ShipModifiers::new())
+            .init_resource::<PushOutbox>()
+            .add_systems(Startup, spawn_repair_console_state_entity)
+            .add_systems(Update, (
+                recompute_repair_console_state,
+                push_repair_console_state.after(recompute_repair_console_state),
+                collect_pushes.after(push_repair_console_state),
+            ));
+        app
+    }
+
+    #[test]
+    fn push_emits_repair_console_state_on_first_update() {
+        let mut app = push_test_app();
+        app.update();
+
+        let pushes = &app.world().resource::<PushOutbox>().0;
+        assert!(!pushes.is_empty(), "expected at least one ConsoleStateChanged on startup");
+        let push = pushes.iter().find(|p| p.name == "Repair").expect("expected push named 'Repair'");
+        assert!(push.json.contains("\"teams\""),               "json should contain teams: {}", push.json);
+        assert!(push.json.contains("\"console_hull\""),        "json should contain console_hull: {}", push.json);
+        assert!(push.json.contains("\"travel_duration_secs\""),"json should contain travel_duration_secs: {}", push.json);
+    }
+
+    #[test]
+    fn push_emits_on_dispatch_and_not_without_change() {
+        let mut app = push_test_app();
+        // First update: spawned component is Changed → push fires.
+        app.update();
+        app.world_mut().resource_mut::<PushOutbox>().0.clear();
+
+        // No state change → no push.
+        app.update();
+        assert!(app.world().resource::<PushOutbox>().0.is_empty(),
+            "no push expected when state has not changed");
+
+        // Dispatch team 0 → state changes → push fires.
+        app.world_mut().resource_mut::<ShipRepairTeams>()
+            .0.dispatch(0, Console::Helm);
+        app.update();
+        let pushes = &app.world().resource::<PushOutbox>().0;
+        assert!(!pushes.is_empty(), "expected push after dispatch");
+        let push = pushes.iter().find(|p| p.name == "Repair").unwrap();
+        assert!(push.json.contains("Travelling"), "Travelling state should appear in json: {}", push.json);
+    }
+
+    #[test]
+    fn push_json_contains_damageable_consoles() {
+        let mut app = push_test_app();
+        app.update();
+
+        let pushes = &app.world().resource::<PushOutbox>().0;
+        let push = pushes.iter().find(|p| p.name == "Repair").unwrap();
+        assert!(push.json.contains("\"damageable_consoles\""), "json should contain damageable_consoles: {}", push.json);
+        assert!(push.json.contains("\"Helm\""),    "Helm should appear in damageable_consoles: {}", push.json);
+        assert!(push.json.contains("\"Tactical\""),"Tactical should appear in damageable_consoles: {}", push.json);
     }
 }

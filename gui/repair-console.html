@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Phoenix — Repair Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; }
+
+    .panel-inner {
+      padding: 24px 60px 22px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .panel-mid {
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: row; gap: 28px;
+    }
+
+    /* ── Hero ─────────────────────────────────────────────── */
+    .hero { gap: 18px; padding: 4px 0; }
+    .hero h1 { font-size: 48px; letter-spacing: 0.30em; }
+    .hero h1 .sub { font-size: 14px; margin-top: 2px; }
+    .hero .bar { width: 6px; }
+
+    .hero-hull-wrap { display: flex; align-items: center; gap: 10px; }
+    .hero-hull-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.22em;
+    }
+    .hero-hull-bar {
+      width: 120px; height: 8px;
+      background: var(--bg-deep); border: 1px solid var(--line-faint);
+      position: relative; overflow: hidden;
+    }
+    .hero-hull-bar > .fill {
+      position: absolute; top: 0; bottom: 0; left: 0;
+      background: linear-gradient(90deg, var(--loaded-dim), var(--loaded));
+      transition: width .4s ease;
+    }
+    .hero-hull-bar > .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    .hero-hull-bar > .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire-bright)); }
+    .hero-hull-val {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 20px; font-weight: 600; letter-spacing: 0.08em; color: var(--ink);
+    }
+    .hero-hull-val.warn { color: var(--reloading); }
+    .hero-hull-val.crit { color: var(--fire-bright); }
+
+    /* ── Side rails ───────────────────────────────────────── */
+    .side-rail {
+      position: absolute;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.4em;
+    }
+    .side-rail.top    { top: 16px;    left: 50%; transform: translateX(-50%); }
+    .side-rail.bottom { bottom: 14px; left: 50%; transform: translateX(-50%); }
+
+    /* ── Hull strip ────────────────────────────────────────── */
+    .hull-strip { flex-shrink: 0; }
+    .hull-strip > .inset-body {
+      padding: 10px 20px; height: auto;
+      flex-direction: row; align-items: center; gap: 14px;
+    }
+    .hull-strip-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-dim); letter-spacing: 0.28em;
+      text-transform: uppercase; flex-shrink: 0;
+    }
+    .hull-total-bar {
+      flex: 1; height: 12px;
+      background: var(--bg-deep); border: 1px solid var(--line-faint);
+      position: relative; overflow: hidden;
+    }
+    .hull-total-bar > .fill {
+      position: absolute; top: 0; bottom: 0; left: 0;
+      background: linear-gradient(90deg, var(--loaded-dim), var(--loaded));
+      box-shadow: 0 0 8px rgba(78,200,112,.22); transition: width .4s ease;
+    }
+    .hull-total-bar > .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); box-shadow: 0 0 8px rgba(216,160,64,.22); }
+    .hull-total-bar > .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire-bright)); box-shadow: 0 0 8px rgba(224,64,44,.22); }
+    .hull-total-val {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 18px; font-weight: 600; color: var(--ink); letter-spacing: 0.08em;
+      min-width: 72px; text-align: right; flex-shrink: 0; white-space: nowrap;
+    }
+    .hull-total-val.warn { color: var(--reloading); }
+    .hull-total-val.crit { color: var(--fire-bright); }
+
+
+
+    /* ── Status line ────────────────────────────────────────── */
+    .status-line {
+      display: flex; align-items: center; gap: 0.875rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.22em;
+      flex-shrink: 0; padding: 0 4px;
+    }
+    .status-line .dot {
+      width: 0.5rem; height: 0.5rem; border-radius: 50%;
+      background: var(--loaded); box-shadow: 0 0 8px var(--loaded);
+    }
+    .status-line .sep { color: var(--line-soft); }
+
+    /* ── Teams column ─────────────────────────────────────── */
+    .teams-col {
+      flex: 1; min-height: 0; min-width: 0;
+      display: flex; flex-direction: column; gap: 10px;
+      overflow-y: auto;
+    }
+
+    /* Individual team card */
+    .team-card { flex-shrink: 0; }
+    .team-card > .inset-body {
+      padding: 12px 18px; height: auto;
+      display: flex; flex-direction: column;
+    }
+
+    /* Team header row */
+    .team-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    }
+    .team-badge {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.28em;
+      text-transform: uppercase; padding: 2px 8px;
+      border: 1px solid var(--line-faint);
+      background: linear-gradient(180deg, rgba(26,33,72,.5), rgba(8,12,28,.3));
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .team-status-text {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 15px; font-weight: 600; letter-spacing: 0.2em;
+      flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      text-transform: uppercase;
+    }
+    .team-status-text.s-idle      { color: var(--ink-faint); }
+    .team-status-text.s-travel    { color: var(--reloading); text-shadow: 0 0 10px rgba(216,160,64,.35); }
+    .team-status-text.s-repair    { color: var(--loaded);    text-shadow: 0 0 10px rgba(78,200,112,.35); }
+    .team-status-text.s-returning { color: var(--cyan);      text-shadow: 0 0 10px rgba(108,182,208,.35); }
+
+    .team-timer {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 14px; letter-spacing: 0.12em;
+      min-width: 44px; text-align: right; flex-shrink: 0;
+    }
+    .team-timer.s-idle      { color: var(--ink-faint); }
+    .team-timer.s-travel    { color: var(--reloading); }
+    .team-timer.s-repair    { color: var(--loaded); }
+    .team-timer.s-returning { color: var(--cyan); }
+
+    /* Team progress bar */
+    .team-bar-wrap { margin-bottom: 10px; }
+    .team-bar {
+      height: 10px;
+      background: var(--bg-deep); border: 1px solid var(--line-faint);
+      position: relative; overflow: hidden;
+    }
+    .team-bar > .fill {
+      position: absolute; top: 0; bottom: 0; left: 0;
+      width: 0%; transition: width .15s linear;
+    }
+    .team-bar > .fill.s-idle      { width: 0% !important; background: transparent; }
+    .team-bar > .fill.s-travel    { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); box-shadow: 0 0 6px rgba(216,160,64,.35); }
+    .team-bar > .fill.s-repair    { background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); box-shadow: 0 0 6px rgba(78,200,112,.35); animation: rpulse 2s ease-in-out infinite; }
+    .team-bar > .fill.s-returning { background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); box-shadow: 0 0 6px rgba(108,182,208,.35); }
+    .team-bar > .ticks {
+      position: absolute; inset: 0; pointer-events: none;
+      background: repeating-linear-gradient(90deg, transparent 0, transparent 19px, rgba(0,0,0,.35) 19px, rgba(0,0,0,.35) 20px);
+    }
+    @keyframes rpulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+    @media (prefers-reduced-motion: reduce) { .team-bar > .fill.s-repair { animation: none; } }
+
+    /* Dispatch buttons */
+    .dispatch-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .dispatch-btn {
+      --ch: 0.625rem;
+      height: 2.75rem; flex: 1 1 0; min-width: 0; padding: 0 0.75rem;
+      display: flex; align-items: center; justify-content: center;
+      font-family: "Chakra Petch", sans-serif;
+      font-weight: 600; font-size: 0.9375rem; letter-spacing: 0.22em; text-transform: uppercase;
+      color: var(--ink-faint);
+      background: linear-gradient(180deg, #2a3560 0%, #16213c 50%, #0c1428 100%);
+      clip-path: polygon(
+        var(--ch) 0, calc(100% - var(--ch)) 0, 100% var(--ch),
+        100% calc(100% - var(--ch)), calc(100% - var(--ch)) 100%,
+        var(--ch) 100%, 0 calc(100% - var(--ch)), 0 var(--ch)
+      );
+      position: relative; border: none; cursor: default;
+      touch-action: manipulation; user-select: none;
+    }
+    .dispatch-btn > .bg {
+      position: absolute; inset: 1.5px; --ch: 0.5rem;
+      background: linear-gradient(180deg, #0d1428 0%, #050d1c 100%);
+      clip-path: polygon(
+        var(--ch) 0, calc(100% - var(--ch)) 0, 100% var(--ch),
+        100% calc(100% - var(--ch)), calc(100% - var(--ch)) 100%,
+        var(--ch) 100%, 0 calc(100% - var(--ch)), 0 var(--ch)
+      );
+      z-index: 0;
+    }
+    .dispatch-btn > .lbl { position: relative; z-index: 1; }
+    .dispatch-btn.active {
+      color: var(--loaded);
+      background: linear-gradient(180deg, #3ec860 0%, #1a4820 50%, #0a2410 100%);
+    }
+    .dispatch-btn.active > .bg { background: linear-gradient(180deg, #0e2a14 0%, #05140a 100%); }
+
+    /* ── Portrait reflow ──────────────────────────────────── */
+    @media (orientation: portrait) {
+      body { overflow-y: auto; overflow-x: hidden; }
+      .panel-inner { padding: 0.75rem 0.5rem; gap: 0.5rem; }
+      .panel-mid   { flex-direction: column; gap: 0.5rem; }
+
+      .hull-col { width: 100%; }
+      .hull-col > .inset > .inset-body { padding: 0.5rem 0.875rem; }
+      .hull-col .section-header { font-size: 0.8rem; margin-bottom: 0.25rem; }
+      .hull-total-strip { padding: 4px 0; }
+      .hull-total-k  { font-size: 0.6rem; }
+      .hull-total-val { font-size: 0.75rem; min-width: 48px; }
+      .hull-total-bar { height: 8px; }
+      .hull-strip > .inset-body { padding: 6px 12px; gap: 10px; }
+      .hull-strip-label { font-size: 0.6rem; }
+
+      .teams-col { overflow-y: visible; }
+      .team-card > .inset-body { padding: 0.5rem 0.75rem; }
+      .team-header { gap: 0.5rem; margin-bottom: 0.5rem; }
+      .team-badge { font-size: 0.6rem; padding: 1px 6px; }
+      .team-status-text { font-size: 0.8rem; letter-spacing: 0.15em; }
+      .team-timer { font-size: 0.7rem; min-width: 36px; }
+      .team-bar { height: 7px; }
+      .team-bar-wrap { margin-bottom: 0.5rem; }
+      .dispatch-row { gap: 5px; }
+      .dispatch-btn { height: 2.25rem; font-size: 0.75rem; padding: 0 0.4rem; --ch: 0.5rem; }
+
+      .hero { padding: 0.25rem 0; gap: 0.5rem; }
+      .hero h1 { font-size: 1.375rem; letter-spacing: 0.15em; }
+      .hero h1 .sub { display: none; }
+      .hero .bar, .hero .spacer { display: none; }
+      .hero-hull-val { font-size: 0.9rem; }
+
+      .side-rail { display: none; }
+      .console-footer { font-size: 0.65rem; gap: 0.5rem; }
+    }
+
+    /* ── Compact landscape (phone) ────────────────────────── */
+    @media (orientation: landscape) and (max-width: 900px) {
+      .panel-inner { padding: 12px 20px 14px; gap: 8px; }
+      .panel-mid { gap: 16px; }
+      .hull-col { width: 220px; }
+      .hull-col > .inset > .inset-body { padding: 8px 12px; }
+      .hull-col .section-header { font-size: 12px; margin-bottom: 4px; }
+      .hero h1 { font-size: 28px; }
+      .hero h1 .sub { font-size: 11px; }
+      .hero-hull-bar { width: 80px; }
+      .hero-hull-val { font-size: 14px; }
+      .team-badge { font-size: 10px; }
+      .team-status-text { font-size: 12px; }
+      .team-timer { font-size: 12px; }
+      .dispatch-btn { height: 2.25rem; font-size: 0.75rem; --ch: 0.5rem; }
+      .side-rail { font-size: 9px; }
+    }
+  </style>
+</head>
+<body style="background:#000; margin:0; overflow:hidden;">
+
+  <script>
+    /* ── Bridge transport shim (ADR-0001 §3) ─────────────────────── */
+    var _bc = ('BroadcastChannel' in window) ? new BroadcastChannel('phoenix-console-state') : null;
+    window.__sendAction = function(json) {
+      if (window !== window.parent) {
+        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
+      } else if (window.ipc) {
+        window.ipc.postMessage(json);
+      } else if (window.wasmBindings && typeof window.wasmBindings.wasm_ui_action === 'function') {
+        window.wasmBindings.wasm_ui_action(json);
+      } else if (_bc) {
+        _bc.postMessage({ type: 'console_action', payload: json });
+      }
+    };
+    if (_bc) {
+      _bc.onmessage = function(e) {
+        if (e.data && e.data.type === 'console_state' && e.data.name === 'Repair') {
+          if (typeof window.__updateConsole === 'function') window.__updateConsole(e.data.name, e.data.json);
+        }
+      };
+    }
+  </script>
+
+  <!-- Hidden data container (smoke-test targets) -->
+  <div id="teams-data" aria-hidden="true" style="position:absolute;left:-9999px;visibility:hidden;"></div>
+
+  <div class="frame" data-screen-label="Repair Console">
+    <div class="panel">
+      <div class="panel-inner">
+
+        <div class="side-rail top">PROJECT PHOENIX · REPAIR CONSOLE · ENGINEERING STATION</div>
+        <div class="side-rail bottom" id="footer-ticker">REPAIR · ENGINEERING · STANDING BY</div>
+
+        <!-- Hero header -->
+        <header class="hero">
+          <div class="bar"></div>
+          <h1>REPAIR
+            <span class="sub" id="hero-sub">ENGINEERING · STATION</span>
+          </h1>
+          <div class="spacer"></div>
+
+        </header>
+
+        <!-- Hull integrity bar -->
+        <div class="hull-strip inset">
+          <div class="inset-body">
+            <span class="hull-strip-label">HULL INTEGRITY</span>
+            <div class="hull-total-bar">
+              <div class="fill" id="htot-fill" style="width:100%;"></div>
+            </div>
+            <span class="hull-total-val" id="htot-val">—</span>
+          </div>
+        </div>
+
+        <!-- Active team status -->
+        <div class="status-line">
+          <span class="dot"></span>
+          <span>REPAIR ONLINE</span>
+          <span class="sep">·</span>
+          <span id="status-active">— TEAMS</span>
+        </div>
+
+        <!-- Repair teams -->
+        <div class="panel-mid">
+          <section class="teams-col" id="teams-col">
+            <!-- Team cards built dynamically from state.teams -->
+          </section>
+        </div>
+
+        <footer class="console-footer footer-bar">
+          <span class="dot"></span>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ── Constants ─────────────────────────────────────────────── */
+    var NAMES    = ['ALPHA', 'BETA', 'GAMMA', 'DELTA', 'EPSILON', 'ZETA'];
+    var DEF_DUR  = 5.0;
+    var DEF_CONS = ['Helm', 'Tactical', 'Power', 'Shields'];
+
+    /* ── Runtime state ─────────────────────────────────────────── */
+    var _state     = null;
+    var _demoMode  = true;
+    var _demoState = null;
+    var _elapsed   = {};  /* local-interpolated elapsed per team  */
+    var _remaining = {};  /* local-interpolated remaining per team */
+    var _rafId     = null;
+    var _rafLast   = null;
+
+    /* ── Inbound state push (ADR-0001 §2) ──────────────────────── */
+    window.__updateConsole = function(name, json) {
+      _demoMode = false;
+      var s; try { s = JSON.parse(json); } catch(e) { console.warn('[Repair] bad json', e); return; }
+      _apply(s);
+    };
+
+    function _apply(s) {
+      _state = s;
+      var dur = s.travel_duration_secs || DEF_DUR;
+      (s.teams || []).forEach(function(slot, i) {
+        if      (slot === 'Idle')     { _elapsed[i] = 0; _remaining[i] = 0; }
+        else if (slot.Travelling)     { _elapsed[i]   = slot.Travelling.elapsed; }
+        else if (slot.Returning)      { _remaining[i] = slot.Returning.remaining; }
+      });
+      _render(s);
+      _startRaf();
+    }
+
+    /* ── RAF: smooth timer interpolation between server pushes ─── */
+    function _startRaf() {
+      if (_rafId !== null) return;
+      _rafLast = performance.now();
+      (function tick(now) {
+        var dt = Math.min((now - _rafLast) / 1000, 0.1);
+        _rafLast = now;
+        if (_state) {
+          var dur = _state.travel_duration_secs || DEF_DUR;
+          var dirty = false;
+          (_state.teams || []).forEach(function(slot, i) {
+            if (slot.Travelling) {
+              _elapsed[i] = Math.min((_elapsed[i] !== undefined ? _elapsed[i] : slot.Travelling.elapsed) + dt, dur);
+              dirty = true;
+            } else if (slot.Returning) {
+              _remaining[i] = Math.max((_remaining[i] !== undefined ? _remaining[i] : slot.Returning.remaining) - dt, 0);
+              dirty = true;
+            }
+          });
+          if (dirty) _renderTimers(_state.teams, dur);
+        }
+        _rafId = requestAnimationFrame(tick);
+      })(_rafLast);
+    }
+
+    /* ── Helpers ────────────────────────────────────────────────── */
+    function _hcls(p) { return p <= .33 ? 'crit' : p <= .60 ? 'warn' : ''; }
+
+    function _setFill(id, pct, cls) {
+      var el = document.getElementById(id); if (!el) return;
+      el.style.width = (pct * 100).toFixed(1) + '%';
+      el.className   = 'fill' + (cls ? ' ' + cls : '');
+    }
+    function _setTxt(id, txt, cls, color) {
+      var el = document.getElementById(id); if (!el) return;
+      if (txt   !== undefined) el.textContent = txt;
+      if (cls   !== undefined && cls !== null) el.className = cls;
+      if (color !== undefined) el.style.color = color;
+    }
+
+    /* ── Full render ────────────────────────────────────────────── */
+    function _render(s) {
+      var dur   = s.travel_duration_secs || DEF_DUR;
+      var hull  = s.console_hull || [];
+      var teams = s.teams || [];
+      var tgts  = s.damageable_consoles ||
+        (hull.length ? hull.map(function(h) { return h.console; }) : DEF_CONS);
+
+      /* ─ Hull aggregate ─────────────────────────────────────── */
+      var totC = 0, totM = 0;
+      hull.forEach(function(h) { totC += h.current; totM += h.max_hp; });
+      var pct = totM > 0 ? totC / totM : 1;
+      var cls = _hcls(pct);
+
+      _setFill('htot-fill', pct, cls);
+      _setTxt('htot-val', Math.round(totC) + '/' + Math.round(totM), 'hull-total-val' + (cls ? ' ' + cls : ''));
+
+
+
+      /* ─ Team cards: rebuild when count or targets change ───── */
+      var col = document.getElementById('teams-col');
+      if (col) {
+        var newTK = teams.length + ':' + tgts.join(',');
+        if ((col.dataset.k || '') !== newTK) {
+          col.innerHTML = ''; col.dataset.k = newTK;
+          teams.forEach(function(_, i) { col.appendChild(_buildCard(i, tgts)); });
+        }
+        teams.forEach(function(slot, i) { _renderCard(i, slot, dur); });
+      }
+
+      /* ─ Teams smoke-test container ─────────────────────────── */
+      var td = document.getElementById('teams-data');
+      if (td) {
+        td.innerHTML = '';
+        teams.forEach(function(slot, i) {
+          var d = document.createElement('div'); d.className = 'team-slot';
+          d.dataset.idx   = i;
+          d.dataset.state = typeof slot === 'string' ? slot : Object.keys(slot)[0];
+          if (slot.Travelling) d.dataset.console = slot.Travelling.console;
+          if (slot.Repairing)  d.dataset.console = slot.Repairing.console;
+          if (slot.Returning && slot.Returning.queued) d.dataset.queued = slot.Returning.queued;
+          td.appendChild(d);
+        });
+      }
+
+      /* ─ Footer ─────────────────────────────────────────────── */
+      var active = teams.filter(function(t) { return t !== 'Idle'; }).length;
+      _setTxt('status-active', active + '/' + teams.length + ' ACTIVE', null,
+              active > 0 ? 'var(--ink)' : 'var(--ink-faint)');
+      _setTxt('footer-ticker-right', Math.round(pct * 100) + '% HULL · ' + active + '/' + teams.length + ' ACTIVE');
+      _setTxt('footer-ticker',
+        'REPAIR · ' + active + ' TEAM' + (active !== 1 ? 'S' : '') + ' ACTIVE · ' + Math.round(pct * 100) + '% HULL');
+    }
+
+    /* ── Build a team card DOM element ──────────────────────────── */
+    function _buildCard(idx, tgts) {
+      var name  = idx < NAMES.length ? NAMES[idx] : ('TEAM ' + (idx + 1));
+      var outer = document.createElement('div');
+      outer.className = 'team-card inset'; outer.dataset.teamIdx = idx;
+
+      var body = document.createElement('div');
+      body.className = 'inset-body';
+      body.innerHTML =
+        '<div class="team-header">' +
+          '<span class="team-badge">TEAM ' + name + '</span>' +
+          '<span class="led" id="tled-'  + idx + '"></span>' +
+          '<span class="team-status-text s-idle" id="tst-'  + idx + '">IDLE</span>' +
+          '<span class="team-timer s-idle"        id="ttim-' + idx + '">—</span>' +
+        '</div>' +
+        '<div class="team-bar-wrap">' +
+          '<div class="team-bar">' +
+            '<div class="fill s-idle" id="tbar-' + idx + '" style="width:0%;"></div>' +
+            '<div class="ticks"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="dispatch-row" id="drow-' + idx + '"></div>';
+
+      /* Dispatch buttons */
+      var drow = body.querySelector('#drow-' + idx);
+      tgts.forEach(function(cn) {
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'dispatch-btn';
+        btn.dataset.console = cn; btn.dataset.team = idx;
+        btn.innerHTML = '<span class="bg"></span><span class="lbl">' + cn.toUpperCase() + '</span>';
+        btn.addEventListener('pointerdown', (function(teamIdx, consoleName) {
+          return function(e) {
+            e.preventDefault();
+            window.__sendAction(JSON.stringify({
+              action: 'dispatch_repair_team',
+              console: 'Repair',
+              team_idx: teamIdx,
+              target: consoleName
+            }));
+            if (_demoMode) _demoDispatch(teamIdx, consoleName);
+          };
+        })(idx, cn));
+        drow.appendChild(btn);
+      });
+
+      outer.appendChild(body);
+      return outer;
+    }
+
+    /* ── Render one team card's live state ──────────────────────── */
+    function _renderCard(i, slot, dur) {
+      var led  = document.getElementById('tled-'  + i);
+      var st   = document.getElementById('tst-'   + i);
+      var tim  = document.getElementById('ttim-'  + i);
+      var bar  = document.getElementById('tbar-'  + i);
+      var drow = document.getElementById('drow-'  + i);
+      if (!led || !st || !tim || !bar) return;
+      var active = null;
+
+      if (slot === 'Idle') {
+        led.className = 'led';
+        st.textContent  = 'IDLE'; st.className  = 'team-status-text s-idle';
+        tim.textContent = '—';    tim.className = 'team-timer s-idle';
+        bar.className   = 'fill s-idle'; bar.style.width = '0%';
+
+      } else if (slot.Travelling) {
+        var el  = _elapsed[i] !== undefined ? _elapsed[i] : slot.Travelling.elapsed;
+        var p   = dur > 0 ? Math.min(el / dur * 100, 100) : 0;
+        var rem = Math.max(dur - el, 0);
+        active = slot.Travelling.console;
+        led.className = 'led amber';
+        st.textContent  = '→ ' + slot.Travelling.console.toUpperCase(); st.className  = 'team-status-text s-travel';
+        tim.textContent = rem.toFixed(1) + 's';                         tim.className = 'team-timer s-travel';
+        bar.className   = 'fill s-travel'; bar.style.width = p.toFixed(1) + '%';
+
+      } else if (slot.Repairing) {
+        active = slot.Repairing.console;
+        led.className = 'led on';
+        st.textContent  = 'REPAIRING ' + slot.Repairing.console.toUpperCase(); st.className  = 'team-status-text s-repair';
+        tim.textContent = '●';                                                  tim.className = 'team-timer s-repair';
+        bar.className   = 'fill s-repair'; bar.style.width = '100%';
+
+      } else if (slot.Returning) {
+        var remaining = _remaining[i] !== undefined ? _remaining[i] : slot.Returning.remaining;
+        var rp  = dur > 0 ? Math.min(remaining / dur * 100, 100) : 0;
+        active  = slot.Returning.queued || null;
+        var qs  = slot.Returning.queued ? ' → ' + slot.Returning.queued.toUpperCase() : '';
+        led.className = 'led cyan';
+        st.textContent  = 'RETURNING' + qs;        st.className  = 'team-status-text s-returning';
+        tim.textContent = remaining.toFixed(1) + 's'; tim.className = 'team-timer s-returning';
+        bar.className   = 'fill s-returning'; bar.style.width = rp.toFixed(1) + '%';
+      }
+
+      /* Highlight active dispatch button */
+      if (drow) {
+        drow.querySelectorAll('.dispatch-btn').forEach(function(btn) {
+          btn.className = 'dispatch-btn' + (btn.dataset.console === active ? ' active' : '');
+        });
+      }
+    }
+
+    /* ── RAF-only timer update (called every frame) ─────────────── */
+    function _renderTimers(teams, dur) {
+      teams.forEach(function(slot, i) {
+        var tim = document.getElementById('ttim-' + i);
+        var bar = document.getElementById('tbar-' + i);
+        if (!tim || !bar) return;
+        if (slot.Travelling) {
+          var el  = _elapsed[i] !== undefined ? _elapsed[i] : slot.Travelling.elapsed;
+          tim.textContent = Math.max(dur - el, 0).toFixed(1) + 's';
+          bar.style.width = (Math.min(el / dur * 100, 100)).toFixed(1) + '%';
+        } else if (slot.Returning) {
+          var rem = _remaining[i] !== undefined ? _remaining[i] : slot.Returning.remaining;
+          tim.textContent = Math.max(rem, 0).toFixed(1) + 's';
+          bar.style.width = (Math.min(rem / dur * 100, 100)).toFixed(1) + '%';
+        }
+      });
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       Demo mode — interactive sim that runs when no server present
+       ════════════════════════════════════════════════════════════ */
+    function _demoDispatch(teamIdx, cn) {
+      var teams = _demoState.teams.slice();
+      var slot  = teams[teamIdx];
+      var dur   = _demoState.travel_duration_secs;
+
+      if (slot === 'Idle') {
+        teams[teamIdx] = { Travelling: { console: cn, elapsed: 0 } };
+        _elapsed[teamIdx] = 0;
+      } else if (slot.Travelling && slot.Travelling.console !== cn) {
+        var el = _elapsed[teamIdx] !== undefined ? _elapsed[teamIdx] : slot.Travelling.elapsed;
+        teams[teamIdx] = { Returning: { remaining: el, queued: cn } };
+        _remaining[teamIdx] = el;
+      } else if (slot.Repairing && slot.Repairing.console !== cn) {
+        teams[teamIdx] = { Returning: { remaining: dur, queued: cn } };
+        _remaining[teamIdx] = dur;
+      } else if (slot.Returning) {
+        teams[teamIdx] = { Returning: { remaining: slot.Returning.remaining, queued: cn } };
+      }
+
+      _demoState = Object.assign({}, _demoState, { teams: teams });
+      _state = _demoState;
+      _render(_state);
+    }
+
+    /* Advance demo state machine (called at 400ms interval) */
+    function _demoTick() {
+      if (!_demoMode || !_demoState) return;
+      var dur   = _demoState.travel_duration_secs;
+      var teams = _demoState.teams.slice();
+      var hull  = _demoState.console_hull.map(function(h) { return Object.assign({}, h); });
+      var dirty = false;
+
+      teams.forEach(function(slot, i) {
+        if (slot.Travelling) {
+          var el = _elapsed[i] !== undefined ? _elapsed[i] : slot.Travelling.elapsed;
+          if (el >= dur) {
+            teams[i] = { Repairing: { console: slot.Travelling.console } }; dirty = true;
+          }
+        } else if (slot.Repairing) {
+          var h = hull.find(function(x) { return x.console === slot.Repairing.console; });
+          if (h) {
+            h.current = Math.min(h.current + 0.28, h.max_hp);
+            if (Math.round(h.current * 10) >= Math.round(h.max_hp * 10)) {
+              teams[i] = { Returning: { remaining: dur, queued: null } };
+              _remaining[i] = dur; dirty = true;
+            }
+          }
+        } else if (slot.Returning) {
+          var rem = _remaining[i] !== undefined ? _remaining[i] : slot.Returning.remaining;
+          if (rem <= 0) {
+            teams[i] = slot.Returning.queued
+              ? { Travelling: { console: slot.Returning.queued, elapsed: 0 } }
+              : 'Idle';
+            if (slot.Returning.queued) _elapsed[i] = 0;
+            dirty = true;
+          }
+        }
+      });
+
+      _demoState = Object.assign({}, _demoState, { teams: teams, console_hull: hull });
+      _state = _demoState;
+      /* Always re-render so hull bars animate smoothly during Repairing */
+      _render(_state);
+    }
+
+    function _initDemo() {
+      _demoState = {
+        console_hull: [
+          { console: 'Helm',     current: 14.0, max_hp: 25.0 },
+          { console: 'Tactical', current: 25.0, max_hp: 25.0 },
+          { console: 'Power',    current:  6.0, max_hp: 25.0 },
+          { console: 'Shields',  current: 19.0, max_hp: 25.0 }
+        ],
+        teams: [
+          { Travelling: { console: 'Power', elapsed: 1.4 } },
+          'Idle'
+        ],
+        travel_duration_secs: 5.0,
+        damageable_consoles: ['Helm', 'Tactical', 'Power', 'Shields']
+      };
+      _apply(_demoState);
+      setInterval(_demoTick, 400);
+    }
+
+    _initDemo();
+  </script>
+
+</body>
+</html>

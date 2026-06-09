@@ -1,8 +1,11 @@
 use bevy::prelude::*;
 
+use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{ClientMessage, Console, ServerMessage};
+use crate::messages::{
+    ClientMessage, Console, PowerConsoleEntry, PowerConsoleState, ServerMessage,
+};
 use crate::power_system::{PowerConfig, PowerSystem};
 
 // ── Resources ──────────────────────────────────────────────────────────────────
@@ -42,18 +45,75 @@ impl Default for PowerConfigResource {
     }
 }
 
+// ── Console state component ────────────────────────────────────────────────────
+
+/// Bevy component that caches the current `PowerConsoleState` for the HTML panel.
+///
+/// Spawned once at `Startup`, recomputed each broadcast frame, and pushed via
+/// `ConsoleStateChanged` whenever the value changes (Bevy `Changed<T>` filter).
+#[derive(Component, Clone, PartialEq)]
+pub struct PowerConsoleStateComp(pub PowerConsoleState);
+
+/// Canonical display order for powered consoles in the HTML panel.
+///
+/// Consoles absent from `PowerMultiplierResource.multipliers` are skipped,
+/// so adding or removing a powered console in the ship TOML automatically
+/// adjusts the list without any code change.
+const POWER_CONSOLE_ORDER: &[Console] = &[
+    Console::Helm,
+    Console::Tactical,
+    Console::Sensors,
+    Console::Shields,
+    Console::Navigation,
+    Console::Comms,
+];
+
+/// Maps a powered `Console` to its display label in the HTML power panel.
+///
+/// `Tactical` is labeled `"WEAPONS"` to match the in-universe terminology;
+/// all others use the uppercased display name.
+pub fn power_console_label(console: &Console) -> &'static str {
+    match console {
+        Console::Helm       => "HELM",
+        Console::Tactical   => "WEAPONS",
+        Console::Sensors    => "SENSORS",
+        Console::Shields    => "SHIELDS",
+        Console::Navigation => "NAVIGATION",
+        Console::Comms      => "COMMS",
+        _ => "UNKNOWN",
+    }
+}
+
+/// Returns the current power level for `console` from the `PowerSystem`.
+///
+/// Only `Helm`, `Tactical`, and `Sensors` have first-class fields; any other
+/// console silently returns `0` (it should not appear in multipliers).
+fn power_level_for(ps: &PowerSystem, console: &Console) -> u8 {
+    match console {
+        Console::Helm     => ps.helm,
+        Console::Tactical => ps.weapons,
+        Console::Sensors  => ps.sensors,
+        _ => 0,
+    }
+}
+
 // ── Plugin ─────────────────────────────────────────────────────────────────────
 
 pub struct PowerPlugin;
 
 impl Plugin for PowerPlugin {
     fn build(&self, app: &mut App) {
+        app.add_message::<ConsoleStateChanged>();
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
+            .add_systems(Startup, spawn_power_console_state_entity)
             .add_systems(Update, (
                 handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
                 tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
+                recompute_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                push_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast)
+                    .after(recompute_power_console_state),
             ))
             .add_plugins(power_state_broadcaster());
     }
@@ -121,6 +181,68 @@ pub fn tick_power_system(
 ) {
     let dt = time.delta_secs();
     power.0.tick(dt, &config.0);
+}
+
+// ── HTML console state push ────────────────────────────────────────────────────
+
+pub fn spawn_power_console_state_entity(mut commands: Commands) {
+    commands.spawn(PowerConsoleStateComp(PowerConsoleState::default()));
+}
+
+/// Recompute `PowerConsoleStateComp` from live resources each broadcast frame.
+///
+/// The component is only mutated when the computed value differs from the stored
+/// one, so `Changed<PowerConsoleStateComp>` will only fire when something actually
+/// changed — preventing spurious HTML pushes.
+pub fn recompute_power_console_state(
+    power: Res<ShipPowerSystem>,
+    config: Res<PowerConfigResource>,
+    multipliers: Res<PowerMultiplierResource>,
+    mut q: Query<&mut PowerConsoleStateComp>,
+) {
+    let entries: Vec<PowerConsoleEntry> = POWER_CONSOLE_ORDER
+        .iter()
+        .filter(|c| multipliers.multipliers.contains_key(c))
+        .map(|c| {
+            let max_level = multipliers.multipliers[c].len() as u8;
+            PowerConsoleEntry {
+                id:        format!("{:?}", c),
+                label:     power_console_label(c).into(),
+                level:     power_level_for(&power.0, c),
+                max_level,
+            }
+        })
+        .collect();
+
+    let next = PowerConsoleState {
+        total:          power.0.total(),
+        total_max:      8,
+        battery_charge: power.0.battery_charge,
+        battery_max:    config.0.capacity,
+        locked:         power.0.locked,
+        consoles:       entries,
+    };
+
+    for mut comp in q.iter_mut() {
+        if comp.0 != next {
+            comp.0 = next.clone();
+        }
+    }
+}
+
+/// Push `PowerConsoleState` as a `ConsoleStateChanged` whenever it changes.
+pub fn push_power_console_state(
+    q: Query<&PowerConsoleStateComp, Changed<PowerConsoleStateComp>>,
+    mut writer: MessageWriter<ConsoleStateChanged>,
+) {
+    for comp in q.iter() {
+        if let Ok(json) = crate::core::codec::encode_console_state(&comp.0) {
+            writer.write(ConsoleStateChanged {
+                name: "Power".into(),
+                json,
+            });
+        }
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -422,5 +544,83 @@ mod tests {
         assert_eq!(power_state, 2, "sensors should stay at 2 when total is already at the cap of 8");
         assert_eq!(app.world().resource::<ShipPowerSystem>().0.total(), 8,
             "total should remain 8");
+    }
+
+    // ── HTML push tests ─────────────────────────────────────────────────────
+
+    #[derive(Resource, Default)]
+    struct PushOutbox(Vec<ConsoleStateChanged>);
+
+    fn collect_pushes(
+        mut reader: MessageReader<ConsoleStateChanged>,
+        mut box_: ResMut<PushOutbox>,
+    ) {
+        for m in reader.read() {
+            box_.0.push(m.clone());
+        }
+    }
+
+    fn push_test_app() -> App {
+        let mut app = App::new();
+        app.add_message::<ConsoleStateChanged>()
+            .insert_resource(ShipPowerSystem(PowerSystem::default()))
+            .init_resource::<PowerConfigResource>()
+            .init_resource::<PowerMultiplierResource>()
+            .init_resource::<PushOutbox>()
+            .add_systems(Startup, spawn_power_console_state_entity)
+            .add_systems(Update, (
+                recompute_power_console_state,
+                push_power_console_state.after(recompute_power_console_state),
+                collect_pushes.after(push_power_console_state),
+            ));
+        app
+    }
+
+    #[test]
+    fn push_emits_power_console_state_on_first_update() {
+        let mut app = push_test_app();
+        app.update();
+
+        let pushes = &app.world().resource::<PushOutbox>().0;
+        assert!(!pushes.is_empty(), "expected at least one ConsoleStateChanged on startup");
+        let push = pushes.iter().find(|p| p.name == "Power").expect("expected push named 'Power'");
+        assert!(push.json.contains("\"consoles\""), "json should contain consoles array: {}", push.json);
+        assert!(push.json.contains("\"HELM\""),    "json should contain HELM label: {}", push.json);
+        assert!(push.json.contains("\"total\""),   "json should contain total field: {}", push.json);
+        assert!(push.json.contains("\"locked\""),  "json should contain locked field: {}", push.json);
+    }
+
+    #[test]
+    fn push_emits_on_power_change_and_not_without_change() {
+        let mut app = push_test_app();
+        // First update: spawned component is Changed → push fires.
+        app.update();
+        app.world_mut().resource_mut::<PushOutbox>().0.clear();
+
+        // No state change → no push.
+        app.update();
+        assert!(app.world().resource::<PushOutbox>().0.is_empty(),
+            "no push expected when state has not changed");
+
+        // Mutate helm power → recompute detects change → push fires.
+        app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 3;
+        app.update();
+        let pushes = &app.world().resource::<PushOutbox>().0;
+        assert!(!pushes.is_empty(), "expected push after helm power change");
+        let push = pushes.iter().find(|p| p.name == "Power").unwrap();
+        assert!(push.json.contains("3"), "new level 3 should appear in json: {}", push.json);
+    }
+
+    #[test]
+    fn push_json_contains_correct_labels_and_ids() {
+        let mut app = push_test_app();
+        app.update();
+
+        let pushes = &app.world().resource::<PushOutbox>().0;
+        let push = pushes.iter().find(|p| p.name == "Power").unwrap();
+        assert!(push.json.contains("\"Helm\""),    "id should be Helm variant name: {}", push.json);
+        assert!(push.json.contains("\"HELM\""),    "label should be HELM: {}", push.json);
+        assert!(push.json.contains("\"WEAPONS\""), "Tactical label should be WEAPONS: {}", push.json);
+        assert!(push.json.contains("\"SENSORS\""), "Sensors label should be SENSORS: {}", push.json);
     }
 }

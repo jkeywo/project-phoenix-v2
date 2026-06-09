@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Phoenix — Power Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; }
+
+    .panel-inner {
+      padding: 24px 60px 22px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .panel-mid {
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+
+    /* ── Hero ──────────────────────────────────────────────── */
+    .hero { gap: 18px; padding: 4px 0; }
+    .hero h1 { font-size: 48px; letter-spacing: 0.30em; }
+    .hero h1 .sub { font-size: 14px; margin-top: 2px; }
+    .hero .bar { width: 6px; }
+
+    /* ── Side rails ────────────────────────────────────────── */
+    .side-rail {
+      position: absolute;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.4em;
+    }
+    .side-rail.top    { top: 16px;    left: 50%; transform: translateX(-50%); }
+    .side-rail.bottom { bottom: 14px; left: 50%; transform: translateX(-50%); }
+
+    /* ── Status line ───────────────────────────────────────── */
+    .status-line {
+      display: flex; align-items: center; gap: 0.875rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.22em;
+      flex-shrink: 0; padding: 0 4px;
+    }
+    .status-line .dot {
+      width: 0.5rem; height: 0.5rem; border-radius: 50%;
+      background: var(--loaded); box-shadow: 0 0 8px var(--loaded);
+    }
+    .status-line .sep { color: var(--line-soft); }
+
+    /* ── Power allocation inset ────────────────────────────── */
+    .power-alloc { flex: 1; min-height: 0; }
+    .power-alloc > .inset-body {
+      padding: 14px 20px; height: auto; min-height: 0;
+      display: flex; flex-direction: column;
+    }
+    .power-alloc .section-header { margin-bottom: 10px; font-size: 16px; }
+    .power-alloc .section-header .tag { font-size: 10px; }
+    .power-alloc .section-header .tag.at-cap  { color: var(--reloading); border-color: var(--reloading-dim); }
+    .power-alloc .section-header .tag.locked  { color: var(--fire-bright); border-color: var(--fire-dim); }
+
+    #power-rows { display: flex; flex-direction: column; }
+
+    /* Individual power row */
+    .power-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 4px;
+      border-bottom: 1px solid var(--line-faint);
+    }
+    .power-row:last-child { border-bottom: none; }
+
+    .power-row-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px; color: var(--ink-dim); letter-spacing: 0.22em;
+      text-transform: uppercase; width: 76px; flex-shrink: 0;
+    }
+
+    /* Pip track */
+    .pip-track { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: center; }
+
+    /* Single pip — double-layer chamfered square */
+    .pip {
+      --ch: 0.375rem;
+      width: 2.75rem; height: 2.75rem; flex-shrink: 0;
+      background: linear-gradient(180deg, var(--line-soft) 0%, var(--line-faint) 100%);
+      clip-path: polygon(
+        var(--ch) 0, calc(100% - var(--ch)) 0, 100% var(--ch),
+        100% calc(100% - var(--ch)), calc(100% - var(--ch)) 100%,
+        var(--ch) 100%, 0 calc(100% - var(--ch)), 0 var(--ch)
+      );
+      padding: 1.5px;
+    }
+    .pip > .pi {
+      width: 100%; height: 100%;
+      --ch: 0.3125rem;
+      background: linear-gradient(180deg, #0d1428 0%, #050d1c 100%);
+      clip-path: polygon(
+        var(--ch) 0, calc(100% - var(--ch)) 0, 100% var(--ch),
+        100% calc(100% - var(--ch)), calc(100% - var(--ch)) 100%,
+        var(--ch) 100%, 0 calc(100% - var(--ch)), 0 var(--ch)
+      );
+    }
+    /* Filled pip colors by position */
+    .pip.p1, .pip.p2 {
+      background: linear-gradient(180deg, var(--cyan) 0%, var(--cyan-dim) 100%);
+    }
+    .pip.p1 > .pi, .pip.p2 > .pi {
+      background: linear-gradient(180deg, rgba(108,182,208,.28) 0%, rgba(108,182,208,.06) 100%);
+    }
+    .pip.p3 {
+      background: linear-gradient(180deg, #b4e8ff 0%, var(--cyan) 100%);
+    }
+    .pip.p3 > .pi {
+      background: linear-gradient(180deg, rgba(108,182,208,.42) 0%, rgba(108,182,208,.12) 100%);
+    }
+    .pip.p4 {
+      background: linear-gradient(180deg, var(--tactical) 0%, var(--tactical-dim) 100%);
+    }
+    .pip.p4 > .pi {
+      background: linear-gradient(180deg, rgba(240,132,56,.38) 0%, rgba(240,132,56,.08) 100%);
+    }
+
+    /* +/- buttons */
+    .pwr-btn {
+      --ch: 0.5rem;
+      width: 3.25rem; height: 3.25rem; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-family: "Chakra Petch", sans-serif;
+      font-weight: 600; font-size: 1.625rem; letter-spacing: 0;
+      clip-path: polygon(
+        var(--ch) 0, calc(100% - var(--ch)) 0, 100% var(--ch),
+        100% calc(100% - var(--ch)), calc(100% - var(--ch)) 100%,
+        var(--ch) 100%, 0 calc(100% - var(--ch)), 0 var(--ch)
+      );
+      position: relative; border: none;
+      cursor: default; touch-action: manipulation; user-select: none;
+    }
+    .pwr-btn > .bg {
+      position: absolute; inset: 1.5px; --ch: 0.4375rem;
+      clip-path: polygon(
+        var(--ch) 0, calc(100% - var(--ch)) 0, 100% var(--ch),
+        100% calc(100% - var(--ch)), calc(100% - var(--ch)) 100%,
+        var(--ch) 100%, 0 calc(100% - var(--ch)), 0 var(--ch)
+      );
+      z-index: 0;
+    }
+    .pwr-btn > .lbl { position: relative; z-index: 1; }
+
+    /* Increment — green */
+    .pwr-btn.inc { color: var(--loaded); background: linear-gradient(180deg, #4ec870 0%, #1e5028 60%, #0e2818 100%); }
+    .pwr-btn.inc > .bg { background: linear-gradient(180deg, #0e3422 0%, #082014 50%, #04120a 100%); }
+
+    /* Decrement — red */
+    .pwr-btn.dec { color: var(--fire-bright); background: linear-gradient(180deg, #ff5a3a 0%, #6c1a14 60%, #2c0a08 100%); }
+    .pwr-btn.dec > .bg { background: linear-gradient(180deg, #3a0e0e 0%, #200808 50%, #100404 100%); }
+
+    /* Disabled (off) — dim */
+    .pwr-btn.off { color: var(--ink-faint); background: linear-gradient(180deg, #2a3050 0%, #14182c 100%); }
+    .pwr-btn.off > .bg { background: linear-gradient(180deg, #0a0f28 0%, #050918 100%); }
+
+    /* ── Battery inset ─────────────────────────────────────── */
+    .battery-wrap { flex-shrink: 0; }
+    .battery-wrap > .inset-body {
+      padding: 14px 20px; height: auto;
+      display: flex; flex-direction: column;
+    }
+    .battery-wrap .section-header { margin-bottom: 10px; font-size: 16px; }
+    .battery-wrap .section-header .tag { font-size: 10px; }
+
+    .bat-bar-row { display: flex; align-items: center; gap: 1.125rem; }
+    .bat-bar {
+      flex: 1; height: 1.75rem;
+      background: var(--bg-deep); border: 1px solid var(--line-faint);
+      position: relative; overflow: hidden;
+    }
+    .bat-bar > .fill {
+      position: absolute; top: 0; left: 0; bottom: 0;
+      background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+      box-shadow: 0 0 12px rgba(108,182,208,.4); transition: width .4s ease;
+    }
+    .bat-bar > .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); box-shadow: 0 0 12px rgba(216,160,64,.4); }
+    .bat-bar > .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire-bright)); box-shadow: 0 0 12px rgba(224,64,44,.4); animation: batcrit 1.2s ease-in-out infinite; }
+    .bat-bar > .ticks {
+      position: absolute; inset: 0; pointer-events: none;
+      background: repeating-linear-gradient(90deg, transparent 0, transparent 19px, rgba(0,0,0,.35) 19px, rgba(0,0,0,.35) 20px);
+    }
+    @keyframes batcrit { 0%,100%{opacity:1} 50%{opacity:.5} }
+    @media (prefers-reduced-motion: reduce) { .bat-bar > .fill.crit { animation: none; } }
+
+    .bat-val {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 1.75rem; font-weight: 600; color: var(--cyan);
+      letter-spacing: 0.06em; min-width: 72px; text-align: right; flex-shrink: 0;
+    }
+    .bat-val.warn { color: var(--reloading); }
+    .bat-val.crit { color: var(--fire-bright); }
+
+    /* ── Portrait ──────────────────────────────────────────── */
+    @media (orientation: portrait) {
+      body { overflow-y: auto; overflow-x: hidden; }
+      .panel-inner { padding: 0.75rem 0.5rem; gap: 0.5rem; }
+      .panel-mid   { gap: 0.5rem; }
+
+      .hero { padding: 0.25rem 0; gap: 0.5rem; }
+      .hero h1 { font-size: 1.375rem; letter-spacing: 0.15em; }
+      .hero h1 .sub { display: none; }
+      .hero .bar, .hero .spacer { display: none; }
+      .side-rail { display: none; }
+
+      .power-alloc > .inset-body { padding: 0.5rem 0.875rem; }
+      .power-alloc .section-header { font-size: 0.8rem; margin-bottom: 0.5rem; }
+
+      .power-row { padding: 6px 2px; gap: 8px; }
+      .power-row-label { font-size: 0.6rem; width: 58px; }
+      .pip { width: 2.25rem; height: 2.25rem; --ch: 0.3rem; }
+      .pip > .pi { --ch: 0.25rem; }
+      .pip-track { gap: 4px; }
+      .pwr-btn { width: 2.75rem; height: 2.75rem; font-size: 1.375rem; --ch: 0.4375rem; }
+
+      .battery-wrap > .inset-body { padding: 0.5rem 0.875rem; }
+      .battery-wrap .section-header { font-size: 0.8rem; margin-bottom: 0.5rem; }
+      .bat-bar { height: 1.25rem; }
+      .bat-val { font-size: 1.25rem; min-width: 54px; }
+
+      .status-line { font-size: 0.6rem; gap: 0.5rem; }
+      .console-footer { font-size: 0.65rem; gap: 0.5rem; }
+    }
+
+    /* ── Compact landscape (phone) ─────────────────────────── */
+    @media (orientation: landscape) and (max-width: 900px) {
+      .panel-inner { padding: 12px 20px 14px; gap: 8px; }
+      .panel-mid { gap: 8px; }
+      .hero h1 { font-size: 28px; }
+      .hero h1 .sub { font-size: 11px; }
+      .power-alloc > .inset-body { padding: 8px 14px; }
+      .power-alloc .section-header { font-size: 12px; margin-bottom: 6px; }
+      .power-row { padding: 6px 2px; gap: 8px; }
+      .power-row-label { font-size: 10px; width: 60px; }
+      .pip { width: 2.25rem; height: 2.25rem; }
+      .pwr-btn { width: 2.75rem; height: 2.75rem; font-size: 1.375rem; }
+      .battery-wrap > .inset-body { padding: 8px 14px; }
+      .bat-bar { height: 1.25rem; }
+      .bat-val { font-size: 1.375rem; }
+      .side-rail { font-size: 9px; }
+    }
+  </style>
+</head>
+<body style="background:#000; margin:0; overflow:hidden;">
+
+  <script>
+    /* ── Bridge transport shim (ADR-0001 §3) ──────────────────── */
+    var _bc = ('BroadcastChannel' in window) ? new BroadcastChannel('phoenix-console-state') : null;
+    window.__sendAction = function(json) {
+      if (window !== window.parent) {
+        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
+      } else if (window.ipc) {
+        window.ipc.postMessage(json);
+      } else if (window.wasmBindings && typeof window.wasmBindings.wasm_ui_action === 'function') {
+        window.wasmBindings.wasm_ui_action(json);
+      } else if (_bc) {
+        _bc.postMessage({ type: 'console_action', payload: json });
+      }
+    };
+    if (_bc) {
+      _bc.onmessage = function(e) {
+        if (e.data && e.data.type === 'console_state' && e.data.name === 'Power') {
+          if (typeof window.__updateConsole === 'function') window.__updateConsole(e.data.name, e.data.json);
+        }
+      };
+    }
+  </script>
+
+  <!-- Hidden smoke-test containers -->
+  <div id="power-data" aria-hidden="true" style="position:absolute;left:-9999px;visibility:hidden;"></div>
+
+  <div class="frame" data-screen-label="Power Console">
+    <div class="panel">
+      <div class="panel-inner">
+
+        <div class="side-rail top">PROJECT PHOENIX · POWER CONSOLE · ENGINEERING STATION</div>
+        <div class="side-rail bottom" id="footer-ticker">POWER · STANDING BY</div>
+
+        <!-- Hero -->
+        <header class="hero">
+          <div class="bar"></div>
+          <h1>POWER
+            <span class="sub">ENGINEERING · STATION</span>
+          </h1>
+          <div class="spacer"></div>
+        </header>
+
+        <!-- Status line -->
+        <div class="status-line">
+          <span class="dot"></span>
+          <span>POWER ONLINE</span>
+          <span class="sep">·</span>
+          <span id="status-pool">— POOL</span>
+          <span class="sep" id="status-locked-sep" style="display:none;">·</span>
+          <span id="status-locked" style="display:none; color:var(--fire-bright);">LOCKED</span>
+        </div>
+
+        <!-- Main content -->
+        <div class="panel-mid">
+
+          <!-- ── Power allocation ──────────────────────────────── -->
+          <div class="inset power-alloc">
+            <div class="inset-body">
+              <div class="section-header">
+                <span>POWER ALLOCATION</span>
+                <span class="tag" id="pool-tag">—</span>
+              </div>
+              <div id="power-rows">
+                <!-- Rows built dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Battery charge ────────────────────────────────── -->
+          <div class="inset battery-wrap">
+            <div class="inset-body">
+              <div class="section-header">
+                <span>BATTERY CHARGE</span>
+                <span class="tag" id="bat-tag">—</span>
+              </div>
+              <div class="bat-bar-row">
+                <div class="bat-bar">
+                  <div class="fill" id="bat-fill" style="width:100%;"></div>
+                  <div class="ticks"></div>
+                </div>
+                <span class="bat-val" id="bat-val">—</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <!-- /panel-mid -->
+
+        <footer class="console-footer footer-bar">
+          <span class="dot"></span>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ── Constants ─────────────────────────────────────────────── */
+    var MIN_LEVEL  = 1;
+    var MAX_LEVEL  = 4;     /* per-console max — overridden per entry */
+    var TOTAL_MAX  = 8;     /* pool cap */
+    var BAT_MAX    = 100.0;
+
+    /* ── State ─────────────────────────────────────────────────── */
+    var _state     = null;
+    var _demoMode  = true;
+    var _demoState = null;
+
+    /* ── Inbound (ADR-0001 §2) ─────────────────────────────────── */
+    window.__updateConsole = function(name, json) {
+      _demoMode = false;
+      var s; try { s = JSON.parse(json); } catch(e) { console.warn('[Power] bad json', e); return; }
+      _apply(s);
+    };
+
+    /* Normalise either data-driven format or legacy PowerState format */
+    function _normalise(s) {
+      /* data-driven format: { consoles:[{id,label,level,max_level}], total, total_max, battery_charge, battery_max, locked } */
+      if (s.consoles) return s;
+      /* Legacy PowerState: { helm, weapons, sensors, battery_charge, locked } */
+      var cons = [];
+      if (s.helm     !== undefined) cons.push({ id: 'Helm',     label: 'HELM',    level: s.helm,    max_level: 4 });
+      if (s.weapons  !== undefined) cons.push({ id: 'Tactical', label: 'WEAPONS', level: s.weapons, max_level: 4 });
+      if (s.sensors  !== undefined) cons.push({ id: 'Sensors',  label: 'SENSORS', level: s.sensors, max_level: 4 });
+      var tot = cons.reduce(function(a, c) { return a + c.level; }, 0);
+      return {
+        consoles:       cons,
+        total:          tot,
+        total_max:      8,
+        battery_charge: s.battery_charge || 0,
+        battery_max:    BAT_MAX,
+        locked:         !!s.locked
+      };
+    }
+
+    function _apply(s) {
+      _state = _normalise(s);
+      _render(_state);
+    }
+
+    /* ── Helpers ───────────────────────────────────────────────── */
+    function _batCls(pct) { return pct <= 0.20 ? 'crit' : pct <= 0.40 ? 'warn' : ''; }
+    function _canInc(con, total, totalMax, locked) {
+      return !locked && con.level < (con.max_level || MAX_LEVEL) && total < totalMax;
+    }
+    function _canDec(con, locked) {
+      return !locked && con.level > MIN_LEVEL;
+    }
+
+    /* ── Full render ───────────────────────────────────────────── */
+    function _render(s) {
+      var total    = s.total    !== undefined ? s.total    : s.consoles.reduce(function(a,c){return a+c.level;}, 0);
+      var totalMax = s.total_max !== undefined ? s.total_max : TOTAL_MAX;
+      var locked   = !!s.locked;
+      var batCharge = s.battery_charge || 0;
+      var batMax    = s.battery_max    || BAT_MAX;
+      var batPct   = batMax > 0 ? batCharge / batMax : 0;
+      var batCls   = _batCls(batPct);
+
+      /* ─ Pool tag ──────────────────────────────────────────── */
+      var poolTag  = document.getElementById('pool-tag');
+      var atCap    = total >= totalMax;
+      if (poolTag) {
+        poolTag.textContent = total + '/' + totalMax;
+        poolTag.className   = 'tag' + (locked ? ' locked' : atCap ? ' at-cap' : '');
+      }
+      var sp = document.getElementById('status-pool');
+      if (sp) sp.textContent = total + '/' + totalMax + ' POOL';
+
+      var lockedSep = document.getElementById('status-locked-sep');
+      var lockedEl  = document.getElementById('status-locked');
+      if (lockedSep) lockedSep.style.display = locked ? '' : 'none';
+      if (lockedEl)  lockedEl.style.display  = locked ? '' : 'none';
+
+      /* ─ Power rows ─────────────────────────────────────────── */
+      var rows = document.getElementById('power-rows');
+      if (rows) {
+        var newKey = s.consoles.map(function(c){ return c.id + ':' + (c.max_level || MAX_LEVEL); }).join(',');
+        if ((rows.dataset.k || '') !== newKey) {
+          rows.innerHTML = ''; rows.dataset.k = newKey;
+          s.consoles.forEach(function(con) { rows.appendChild(_buildRow(con)); });
+        }
+        s.consoles.forEach(function(con) { _renderRow(con, total, totalMax, locked); });
+      }
+
+      /* ─ Smoke-test data ────────────────────────────────────── */
+      var pd = document.getElementById('power-data');
+      if (pd) {
+        pd.innerHTML = '';
+        s.consoles.forEach(function(con) {
+          var d = document.createElement('div'); d.className = 'power-entry';
+          d.dataset.id = con.id; d.dataset.level = con.level; d.dataset.maxLevel = con.max_level || MAX_LEVEL;
+          pd.appendChild(d);
+        });
+        pd.dataset.total    = String(total);
+        pd.dataset.totalMax = String(totalMax);
+        pd.dataset.locked   = String(locked);
+      }
+
+      /* ─ Battery ────────────────────────────────────────────── */
+      var batFill = document.getElementById('bat-fill');
+      if (batFill) {
+        batFill.style.width = (batPct * 100).toFixed(1) + '%';
+        batFill.className   = 'fill' + (batCls ? ' ' + batCls : '');
+      }
+      var batVal = document.getElementById('bat-val');
+      if (batVal) {
+        batVal.textContent = Math.round(batPct * 100) + '%';
+        batVal.className   = 'bat-val' + (batCls ? ' ' + batCls : '');
+      }
+      var batTag = document.getElementById('bat-tag');
+      if (batTag) {
+        batTag.textContent = Math.round(batCharge).toFixed(0) + '/' + Math.round(batMax);
+      }
+
+      /* ─ Footer ticker ──────────────────────────────────────── */
+      var ft = document.getElementById('footer-ticker');
+      if (ft) ft.textContent = 'POWER · ' + total + '/' + totalMax + ' POOL · BAT ' + Math.round(batPct * 100) + '%' + (locked ? ' · LOCKED' : '');
+    }
+
+    /* Build a power row DOM element for a console */
+    function _buildRow(con) {
+      var maxLvl = con.max_level || MAX_LEVEL;
+      var row = document.createElement('div');
+      row.className = 'power-row'; row.dataset.id = con.id;
+
+      /* Label */
+      var lbl = document.createElement('span');
+      lbl.className = 'power-row-label'; lbl.textContent = con.label || con.id.toUpperCase();
+      row.appendChild(lbl);
+
+      /* Pip track */
+      var track = document.createElement('div');
+      track.className = 'pip-track'; track.id = 'pips-' + con.id;
+      for (var i = 1; i <= maxLvl; i++) {
+        var pip = document.createElement('span');
+        pip.className = 'pip'; pip.dataset.pos = i;
+        var pi = document.createElement('span'); pi.className = 'pi';
+        pip.appendChild(pi);
+        track.appendChild(pip);
+      }
+      row.appendChild(track);
+
+      /* Decrement button */
+      var dec = document.createElement('button');
+      dec.type = 'button'; dec.id = 'dec-' + con.id;
+      dec.className = 'pwr-btn dec'; dec.dataset.console = con.id;
+      dec.innerHTML = '<span class="bg"></span><span class="lbl">−</span>';
+      dec.addEventListener('pointerdown', (function(id) {
+        return function(e) {
+          e.preventDefault();
+          window.__sendAction(JSON.stringify({ action: 'decrease_power', console: 'Power', target: id }));
+          if (_demoMode) _demoAdjust(id, -1);
+        };
+      })(con.id));
+      row.appendChild(dec);
+
+      /* Increment button */
+      var inc = document.createElement('button');
+      inc.type = 'button'; inc.id = 'inc-' + con.id;
+      inc.className = 'pwr-btn inc'; inc.dataset.console = con.id;
+      inc.innerHTML = '<span class="bg"></span><span class="lbl">+</span>';
+      inc.addEventListener('pointerdown', (function(id) {
+        return function(e) {
+          e.preventDefault();
+          window.__sendAction(JSON.stringify({ action: 'increase_power', console: 'Power', target: id }));
+          if (_demoMode) _demoAdjust(id, +1);
+        };
+      })(con.id));
+      row.appendChild(inc);
+
+      return row;
+    }
+
+    /* Update pips and button states for one console row */
+    function _renderRow(con, total, totalMax, locked) {
+      var maxLvl  = con.max_level || MAX_LEVEL;
+      var track   = document.getElementById('pips-' + con.id);
+      var decBtn  = document.getElementById('dec-' + con.id);
+      var incBtn  = document.getElementById('inc-' + con.id);
+      if (!track || !decBtn || !incBtn) return;
+
+      /* Pips */
+      track.querySelectorAll('.pip').forEach(function(pip) {
+        var pos = parseInt(pip.dataset.pos, 10);
+        /* Remove all filled class variants */
+        pip.className = 'pip';
+        if (pos <= con.level) {
+          pip.classList.add('p' + pos);
+        }
+      });
+
+      /* Buttons */
+      var ci  = _canInc(con, total, totalMax, locked);
+      var cd  = _canDec(con, locked);
+      incBtn.className = 'pwr-btn ' + (ci ? 'inc' : 'off');
+      decBtn.className = 'pwr-btn ' + (cd ? 'dec' : 'off');
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       Demo mode
+       ════════════════════════════════════════════════════════════ */
+    function _demoAdjust(consoleId, delta) {
+      var cons = _demoState.consoles.map(function(c) { return Object.assign({}, c); });
+      var con  = cons.find(function(c) { return c.id === consoleId; });
+      if (!con) return;
+      var total    = cons.reduce(function(a,c){return a+c.level;}, 0);
+      var totalMax = _demoState.total_max;
+      var locked   = _demoState.locked;
+      if (delta > 0 && !_canInc(con, total, totalMax, locked)) return;
+      if (delta < 0 && !_canDec(con, locked)) return;
+      con.level += delta;
+      var newTotal = cons.reduce(function(a,c){return a+c.level;}, 0);
+      _demoState = Object.assign({}, _demoState, { consoles: cons, total: newTotal });
+      _state = _demoState;
+      _render(_state);
+    }
+
+    /* Slowly drain battery in demo to show the bar */
+    function _demoTick() {
+      if (!_demoMode || !_demoState) return;
+      var total    = _demoState.consoles.reduce(function(a,c){return a+c.level;}, 0);
+      var totalMax = _demoState.total_max;
+      /* Charge rate scales with power level (high total = drain, low = recharge) */
+      var rate     = total > totalMax / 2 ? -0.4 : 0.6;
+      var newCharge = Math.max(0, Math.min(_demoState.battery_max,
+        _demoState.battery_charge + rate));
+      _demoState = Object.assign({}, _demoState, { battery_charge: newCharge });
+      _state = _demoState;
+      _render(_state);
+    }
+
+    function _initDemo() {
+      _demoState = {
+        consoles: [
+          { id: 'Helm',     label: 'HELM',    level: 2, max_level: 4 },
+          { id: 'Tactical', label: 'WEAPONS', level: 2, max_level: 4 },
+          { id: 'Sensors',  label: 'SENSORS', level: 2, max_level: 4 }
+        ],
+        total:          6,
+        total_max:      8,
+        battery_charge: 80.0,
+        battery_max:    100.0,
+        locked:         false
+      };
+      _apply(_demoState);
+      setInterval(_demoTick, 400);
+    }
+
+    _initDemo();
+  </script>
+
+</body>
+</html>

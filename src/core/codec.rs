@@ -2386,6 +2386,106 @@ mod tests {
     }
 
     #[test]
+    fn decode_ui_action_increase_power() {
+        let json = r#"{"action":"increase_power","console":"Power","target":"Helm"}"#;
+        let action = decode_ui_action(json).expect("decode increase_power");
+        assert_eq!(action, UiAction::IncreasePower { target: Console::Helm });
+    }
+
+    #[test]
+    fn decode_ui_action_decrease_power() {
+        let json = r#"{"action":"decrease_power","console":"Power","target":"Tactical"}"#;
+        let action = decode_ui_action(json).expect("decode decrease_power");
+        assert_eq!(action, UiAction::DecreasePower { target: Console::Tactical });
+    }
+
+    #[test]
+    fn decode_ui_action_dispatch_repair_team() {
+        let json = r#"{"action":"dispatch_repair_team","console":"Repair","team_idx":1,"target":"Helm"}"#;
+        let action = decode_ui_action(json).expect("decode dispatch_repair_team");
+        assert_eq!(action, UiAction::DispatchRepairTeam { team_idx: 1, target: Console::Helm });
+    }
+
+    #[test]
+    fn power_console_state_round_trips() {
+        use crate::messages::{PowerConsoleEntry, PowerConsoleState};
+        let state = PowerConsoleState {
+            consoles: vec![
+                PowerConsoleEntry { id: "Helm".into(),     label: "HELM".into(),    level: 3, max_level: 4 },
+                PowerConsoleEntry { id: "Tactical".into(), label: "WEAPONS".into(), level: 2, max_level: 4 },
+                PowerConsoleEntry { id: "Sensors".into(),  label: "SENSORS".into(), level: 2, max_level: 4 },
+            ],
+            total: 7,
+            total_max: 8,
+            battery_charge: 80.0,
+            battery_max: 100.0,
+            locked: false,
+        };
+        let json = encode_console_state(&state).expect("encode power console state");
+        let decoded: PowerConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn power_console_state_locked_round_trips() {
+        use crate::messages::{PowerConsoleEntry, PowerConsoleState};
+        let state = PowerConsoleState {
+            consoles: vec![
+                PowerConsoleEntry { id: "Helm".into(),     label: "HELM".into(),    level: 1, max_level: 4 },
+                PowerConsoleEntry { id: "Tactical".into(), label: "WEAPONS".into(), level: 1, max_level: 4 },
+                PowerConsoleEntry { id: "Sensors".into(),  label: "SENSORS".into(), level: 1, max_level: 4 },
+            ],
+            total: 3,
+            total_max: 8,
+            battery_charge: 0.0,
+            battery_max: 100.0,
+            locked: true,
+        };
+        let json = encode_console_state(&state).expect("encode locked power console state");
+        let decoded: PowerConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn repair_console_state_round_trips() {
+        use crate::messages::{ConsoleHullStatus, RepairConsoleState, TeamSlot};
+        let state = RepairConsoleState {
+            teams: vec![
+                TeamSlot::Idle,
+                TeamSlot::Travelling { console: Console::Helm, elapsed: 1.5 },
+            ],
+            console_hull: vec![
+                ConsoleHullStatus { console: Console::Helm,     current: 20.0, max_hp: 25.0 },
+                ConsoleHullStatus { console: Console::Tactical, current: 25.0, max_hp: 25.0 },
+            ],
+            travel_duration_secs: 5.0,
+            damageable_consoles: vec![Console::Helm, Console::Tactical],
+        };
+        let json = encode_console_state(&state).expect("encode repair console state");
+        let decoded: RepairConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn repair_console_state_all_team_slots_round_trip() {
+        use crate::messages::{RepairConsoleState, TeamSlot};
+        let state = RepairConsoleState {
+            teams: vec![
+                TeamSlot::Idle,
+                TeamSlot::Travelling { console: Console::Helm, elapsed: 2.0 },
+                TeamSlot::Repairing  { console: Console::Tactical },
+                TeamSlot::Returning  { remaining: 3.0, queued: Some(Console::Power) },
+            ],
+            console_hull: vec![],
+            travel_duration_secs: 5.0,
+            damageable_consoles: vec![Console::Helm, Console::Tactical, Console::Power],
+        };
+        let json = encode_console_state(&state).expect("encode repair console state all slots");
+        let decoded: RepairConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
     fn weapons_console_state_with_regions_round_trips() {
         let state = WeaponsConsoleState {
             target_uuid: None,

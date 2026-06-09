@@ -137,6 +137,7 @@ pub fn resolve_visuals_system(
             if let Some(handle) = &visual.image {
                 img.image = handle.clone();
             }
+            img.color = visual.color.into();
         }
     }
 }

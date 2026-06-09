@@ -76,6 +76,14 @@
       letter-spacing: 0.08em;
       pointer-events: none;
       z-index: 3;
+      background: linear-gradient(180deg, rgba(20,28,60,0.75), rgba(8,12,28,0.55));
+      border-top: 1px solid var(--line-faint);
+      border-bottom: 1px solid var(--line-faint);
+      padding: 4px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
     }
     .helm-readout-overlay .k {
       font-family: "Chakra Petch", sans-serif;
@@ -88,10 +96,10 @@
       font-size: 14px;
       font-variant-numeric: tabular-nums;
     }
-    .readout-hdg { top: 12px; left: 18%; }
-    .readout-spd { top: 12px; right: 18%; }
-    .readout-x   { bottom: 12px; left: 18%; }
-    .readout-z   { bottom: 12px; right: 18%; }
+    .readout-hdg { top: 14px; left: 14px; }
+    .readout-spd { top: 14px; right: 14px; }
+    .readout-x   { bottom: 14px; left: 14px; }
+    .readout-z   { bottom: 14px; right: 14px; }
 
     .lock-tag {
       position: absolute;
@@ -248,6 +256,42 @@
       font-size: 14px;
       color: var(--ink);
     }
+  /* ── Landscape: compact for phone screens ──────────────────── */
+  @media (orientation: landscape) and (max-width: 900px) {
+    .panel-inner { padding: 14px 20px 16px; gap: 8px; }
+    .panel-mid { gap: 16px; }
+    .panel-mid > .ctrl-col { width: 300px; gap: 10px; }
+    .hero h1 { font-size: 28px; letter-spacing: 0.18em; }
+    .hero { gap: 10px; }
+    .hero .sub { font-size: 11px; }
+    .hero .complexity { display: none; }
+    .stick-container { width: 200px; height: 200px; }
+    .ctrl-col .btn-row .btn { --h: 44px; font-size: 14px; padding: 0 10px 0 36px; }
+    .ctrl-col .btn-row .btn .led { width: 14px; height: 14px; left: 10px; }
+    .stick-nub { width: 40px; height: 40px; }
+    .stick-nub::after { inset: 12px; }
+    .stick-readout { font-size: 11px; }
+    .stick-directions { font-size: 9px; }
+    .readout .v { font-size: 24px; }
+    .radar-col > .readout { padding: 6px 14px; }
+    .radar-col > .readout .v { font-size: 18px; }
+    .radar-col .radar { max-height: 50vh; max-width: 50vh; }
+    .helm-readout-overlay { font-size: 10px; }
+    .helm-readout-overlay .v { font-size: 11px; }
+    .readout-hdg { top: 8px; left: 12%; }
+    .readout-spd { top: 8px; right: 12%; }
+    .readout-x { bottom: 8px; left: 12%; }
+    .readout-z { bottom: 8px; right: 12%; }
+    .side-rail { font-size: 9px; }
+    .side-rail.top { top: 10px; }
+    .side-rail.bottom { bottom: 10px; }
+    .lock-tag { right: 5%; }
+    .lock-tag .k { font-size: 7px; }
+    .lock-tag .id { font-size: 8px; }
+    .impulse-bar-wrap { width: 140px; }
+    .impulse-status { font-size: 12px; }
+  }
+
   /* ── Portrait reflow ───────────────────────────────────────── */
   @media (orientation: portrait) {
     body { overflow-y: auto; overflow-x: hidden; }

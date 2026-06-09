@@ -533,7 +533,7 @@
     }
     #hud-overlay.alert-on .vs-slot-value { color: var(--vs-alert); }
   </style>
-<link rel="modulepreload" href="./project-phoenix-e8fcba7f45fc6446.js" crossorigin="anonymous" integrity="sha384-zez+tDtRUSpGEz9kn4lQS4l7yoaqvCTzRslYC9Ow1Zt+PicBi7ZxGJplJQcwRB5T"><link rel="preload" href="./project-phoenix-e8fcba7f45fc6446_bg.wasm" crossorigin="anonymous" integrity="sha384-FO2IgBOhj/R1GP1FNDdns62pZbg0f144qdaeQ2eMdNUkbxKAG9gomm5GCb9HXpjK" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-8cecdaa26014fb1a.js" crossorigin="anonymous" integrity="sha384-5Z5xMxQvkz3XRCaKGoKtUtIBf4f+7dDJU6rwACCKnbL7WqVO2hnFR5BYZ44Kw+Ia"><link rel="preload" href="./project-phoenix-8cecdaa26014fb1a_bg.wasm" crossorigin="anonymous" integrity="sha384-YMEwsL3akaXGeIJ9FXawK47yMj05UqEVB0APrCtN4Jra2ZqvlX6T9Ap30a9je9vk" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────────── -->
   <script>
@@ -686,8 +686,8 @@
        TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-e8fcba7f45fc6446.js';
-const wasm = await init({ module_or_path: './project-phoenix-e8fcba7f45fc6446_bg.wasm' });
+import init, * as bindings from './project-phoenix-8cecdaa26014fb1a.js';
+const wasm = await init({ module_or_path: './project-phoenix-8cecdaa26014fb1a_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1290,6 +1290,30 @@ function finishInit() {
   }
   if (typeof set_lobby_state_callback === 'function') {
     set_lobby_state_callback(window.__updateLobby);
+  }
+
+  // ── HTML console state relay (issue #428) ────────────────────────────────
+  // WASM pushes console state via flush_console_state → set_console_state_callback.
+  // We relay it to HTML console pages (gui/*.html) open in the same browser
+  // origin via BroadcastChannel ('phoenix-console-state').  Those pages send
+  // their actions back on the same channel and we forward them to wasm_ui_action.
+  var _consoleBroadcast = ('BroadcastChannel' in window)
+      ? new BroadcastChannel('phoenix-console-state')
+      : null;
+  window.__updateConsole = function(name, json) {
+    if (_consoleBroadcast) {
+      _consoleBroadcast.postMessage({ type: 'console_state', name: name, json: json });
+    }
+  };
+  if (_consoleBroadcast) {
+    _consoleBroadcast.onmessage = function(e) {
+      if (e.data && e.data.type === 'console_action' && typeof wasm_ui_action === 'function') {
+        wasm_ui_action(e.data.payload);
+      }
+    };
+  }
+  if (typeof set_console_state_callback === 'function') {
+    set_console_state_callback(window.__updateConsole);
   }
 
   // Validate station config before starting PeerJS or the Bevy app.

@@ -515,7 +515,12 @@ fn on_dir_selected(
     let Ok(choice) = dir_choices.get(member) else { return };
     let dir = choice.0.clone();
     outbound.write(OutboundClientMessage(direction_press_message(dir.clone())));
-    ship_view.view_mode = ViewMode::Camera(dir);
+    // Optimistic update: reflect the new direction immediately in the UI.
+    // `pending_view_mode` tells `apply_ship_view_messages` not to overwrite
+    // this with a stale SimState until the server confirms the change.
+    let new_mode = ViewMode::Camera(dir);
+    ship_view.pending_view_mode = Some(new_mode.clone());
+    ship_view.view_mode = new_mode;
 }
 
 // ── Observer: Red Alert button pressed ──

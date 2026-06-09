@@ -23,6 +23,14 @@ pub struct ShipView {
     /// Per-console hull status, populated from `SimSnapshot`. Empty when the
     /// ship config has no per-console hull entries.
     pub console_hull: Vec<ConsoleHullStatus>,
+    /// Optimistic camera direction written by `on_dir_selected` when the
+    /// captain presses a direction button.  While `Some`, `ShipView::apply`
+    /// will not overwrite `view_mode` from a `SimState` unless the server
+    /// confirms the same direction (or a non-camera mode arrives).  This
+    /// prevents a stale in-flight `SimState` (generated before the server
+    /// processed `SetView`) from reverting the button highlight one frame
+    /// after the captain pressed it.
+    pub pending_view_mode: Option<ViewMode>,
 }
 
 impl Default for ShipView {
@@ -38,6 +46,7 @@ impl Default for ShipView {
             power_levels: (2, 2, 2),
             impulse_charge_progress: 0.0,
             console_hull: vec![],
+            pending_view_mode: None,
         }
     }
 }
@@ -65,7 +74,30 @@ impl ShipView {
         match msg {
             ServerMessage::SimState { snapshot } => {
                 self.red_alert = snapshot.red_alert;
-                self.view_mode = snapshot.view_mode.clone();
+                // Reconcile view_mode against any pending optimistic selection.
+                //
+                // If the captain pressed a direction button before the server
+                // had a chance to confirm it, `pending_view_mode` holds the
+                // desired direction.  We skip overwriting `view_mode` until
+                // either:
+                //   (a) the server confirms the same direction, or
+                //   (b) a non-camera mode arrives (e.g. Helm sets Radar) —
+                //       external mode changes always win.
+                let server_is_camera = matches!(snapshot.view_mode, ViewMode::Camera(_));
+                match &self.pending_view_mode {
+                    None => {
+                        self.view_mode = snapshot.view_mode.clone();
+                    }
+                    Some(pending) => {
+                        if !server_is_camera || snapshot.view_mode == *pending {
+                            // Confirmed or superseded — clear pending and accept.
+                            self.pending_view_mode = None;
+                            self.view_mode = snapshot.view_mode.clone();
+                        }
+                        // else: stale SimState still showing old camera direction;
+                        // keep the optimistic view_mode until the server catches up.
+                    }
+                }
                 self.ship_x = snapshot.ship_x;
                 self.ship_z = snapshot.ship_z;
                 self.ship_yaw = snapshot.ship_yaw;
@@ -272,7 +304,7 @@ fn update_console_hull_bar(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{RadarStateSnapshot, ShipClientConfig, SimSnapshot};
+    use crate::messages::{RadarStateSnapshot, ShipClientConfig, SimSnapshot, ViewDirection};
 
     fn base_snapshot() -> SimSnapshot {
         SimSnapshot {
@@ -357,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn sim_state_negative_forward_speed_propagates() {
+    fn sim_state_updates_forward_speed_negative_propagates() {
         let mut view = ShipView::default();
         view.apply(&ServerMessage::SimState {
             snapshot: SimSnapshot {
@@ -366,6 +398,79 @@ mod tests {
             },
         });
         assert!((view.forward_speed - (-5.0)).abs() < 1e-6);
+    }
+
+    // ── pending_view_mode reconciliation ────────────────────────────────────
+
+    #[test]
+    fn sim_state_does_not_overwrite_pending_camera_direction() {
+        // Simulate: user pressed Port (optimistic), stale SimState still says Fore.
+        let mut view = ShipView {
+            view_mode: ViewMode::Camera(ViewDirection::Port),
+            pending_view_mode: Some(ViewMode::Camera(ViewDirection::Port)),
+            ..Default::default()
+        };
+        view.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                view_mode: ViewMode::Camera(ViewDirection::Fore),
+                ..base_snapshot()
+            },
+        });
+        assert_eq!(
+            view.view_mode,
+            ViewMode::Camera(ViewDirection::Port),
+            "stale SimState must not overwrite pending optimistic direction"
+        );
+        assert!(view.pending_view_mode.is_some(), "pending should still be set");
+    }
+
+    #[test]
+    fn sim_state_clears_pending_when_server_confirms_direction() {
+        let mut view = ShipView {
+            view_mode: ViewMode::Camera(ViewDirection::Port),
+            pending_view_mode: Some(ViewMode::Camera(ViewDirection::Port)),
+            ..Default::default()
+        };
+        // Server confirms Port.
+        view.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                view_mode: ViewMode::Camera(ViewDirection::Port),
+                ..base_snapshot()
+            },
+        });
+        assert_eq!(view.view_mode, ViewMode::Camera(ViewDirection::Port));
+        assert!(view.pending_view_mode.is_none(), "pending should be cleared after confirmation");
+    }
+
+    #[test]
+    fn non_camera_sim_state_overrides_pending_camera() {
+        // Helm sets Radar while a pending Camera(Port) is outstanding.
+        let mut view = ShipView {
+            view_mode: ViewMode::Camera(ViewDirection::Port),
+            pending_view_mode: Some(ViewMode::Camera(ViewDirection::Port)),
+            ..Default::default()
+        };
+        view.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                view_mode: ViewMode::Radar,
+                ..base_snapshot()
+            },
+        });
+        assert_eq!(view.view_mode, ViewMode::Radar, "Radar from Helm must win over pending Camera");
+        assert!(view.pending_view_mode.is_none(), "pending cleared when non-camera mode arrives");
+    }
+
+    #[test]
+    fn sim_state_updates_view_mode_normally_when_no_pending() {
+        let mut view = ShipView::default(); // pending_view_mode is None
+        view.apply(&ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                view_mode: ViewMode::Camera(ViewDirection::Aft),
+                ..base_snapshot()
+            },
+        });
+        assert_eq!(view.view_mode, ViewMode::Camera(ViewDirection::Aft));
+        assert!(view.pending_view_mode.is_none());
     }
 
     #[test]

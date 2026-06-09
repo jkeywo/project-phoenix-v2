@@ -1446,7 +1446,10 @@
           }
           pushWeaponsConsoleState();
           // View-direction highlighting is handled by the Bevy WASM UI (#48).
-          return;
+          // Fall through to scheduleRender() so the helm + captain iframes
+          // receive updated state (the weapons console is pushed above so
+          // it doesn't need renderGame dispatch).
+          break;
         }
         case 'WorldSetup': {
           state.asteroids = (msg.data.world && msg.data.world.entities) || [];

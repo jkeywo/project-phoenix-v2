@@ -121,6 +121,14 @@ struct HelmImpulseProgressFill;
 #[derive(Component)]
 struct HelmImpulseStatusText;
 
+/// Marks the "IMPULSE" button in the radar column (visible when idle).
+#[derive(Component)]
+struct HelmRadarImpulseButton;
+
+/// Marks the "CANCEL IMPULSE" button in the radar column (visible when charging/active).
+#[derive(Component)]
+struct HelmRadarCancelButton;
+
 // â”€â”€ Plugin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 pub struct HelmPanelPlugin;
@@ -265,6 +273,20 @@ fn refresh_helm_impulse_state(
         ),
     >,
     mut status: Query<&mut Text, With<HelmImpulseStatusText>>,
+    mut radar_impulse_btn: Query<
+        &mut Visibility,
+        (
+            With<HelmRadarImpulseButton>,
+            Without<HelmRadarCancelButton>,
+        ),
+    >,
+    mut radar_cancel_btn: Query<
+        &mut Visibility,
+        (
+            With<HelmRadarCancelButton>,
+            Without<HelmRadarImpulseButton>,
+        ),
+    >,
     mut pad_state: Query<
         (&mut JoystickDragState, &mut JoystickResendTimer),
         With<HelmJoystickPadEntity>,
@@ -291,6 +313,21 @@ fn refresh_helm_impulse_state(
     for mut v in overlay.iter_mut() {
         if *v != want_overlay {
             *v = want_overlay;
+        }
+    }
+
+    // Radar column impulse/cancel button visibility:
+    // impulse button visible when idle, cancel visible when charging/active.
+    let want_impulse_btn = to_vis(joystick_visible);
+    for mut v in radar_impulse_btn.iter_mut() {
+        if *v != want_impulse_btn {
+            *v = want_impulse_btn;
+        }
+    }
+    let want_radar_cancel = to_vis(cancel_visible);
+    for mut v in radar_cancel_btn.iter_mut() {
+        if *v != want_radar_cancel {
+            *v = want_radar_cancel;
         }
     }
 
@@ -623,6 +660,7 @@ fn fill_helm_radar(
     commands.entity(buttons_row).add_child(on_screen_btn);
 
     // IMPULSE button with impulse PNG visuals
+    // IMPULSE button (visible when idle)
     let impulse_btn = spawn_gui_button(
         commands,
         ButtonSize::Rect {
@@ -652,17 +690,61 @@ fn fill_helm_radar(
             },
         },
     );
-    commands.entity(impulse_btn).with_children(|btn| {
-        btn.spawn((
-            Text::new("IMPULSE"),
-            display(12.0),
-            TextColor(Color::srgb(0.5, 0.8, 1.0)),
-        ));
-    });
     commands
         .entity(impulse_btn)
+        .insert(HelmRadarImpulseButton)
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("IMPULSE"),
+                display(12.0),
+                TextColor(Color::srgb(0.5, 0.8, 1.0)),
+            ));
+        })
         .observe(on_impulse_button_pressed);
     commands.entity(buttons_row).add_child(impulse_btn);
+
+    // CANCEL IMPULSE button (visible when charging/active, replaces IMPULSE)
+    let cancel_impulse_btn = spawn_gui_button(
+        commands,
+        ButtonSize::Rect {
+            width: 120.0,
+            height: 32.0,
+        },
+        StateVisuals {
+            idle: Visual {
+                image: None,
+                color: Color::srgba(0.45, 0.05, 0.05, 0.85),
+            },
+            hover: Visual {
+                image: None,
+                color: Color::srgba(0.65, 0.10, 0.10, 0.95),
+            },
+            active: Visual {
+                image: None,
+                color: Color::srgba(0.65, 0.10, 0.10, 0.95),
+            },
+            press: Visual {
+                image: None,
+                color: Color::srgba(0.85, 0.15, 0.15, 1.0),
+            },
+            disabled: Visual {
+                image: None,
+                color: Color::srgba(0.20, 0.05, 0.05, 0.5),
+            },
+        },
+    );
+    commands
+        .entity(cancel_impulse_btn)
+        .insert(HelmRadarCancelButton)
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new("CANCEL\nIMPULSE"),
+                display(10.0),
+                TextColor(Color::srgb(1.0, 0.85, 0.85)),
+            ));
+        })
+        .observe(on_cancel_impulse_pressed);
+    commands.entity(buttons_row).add_child(cancel_impulse_btn);
 
     commands.entity(col).add_child(buttons_row);
 }

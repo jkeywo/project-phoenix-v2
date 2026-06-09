@@ -214,9 +214,6 @@ fn sync_radar_widgets_from_lobby(
     lobby: Res<LobbyState>,
     mut widgets: Query<(&ConsoleRadar, &mut GenericRadarWidget)>,
 ) {
-    if !lobby.is_changed() {
-        return;
-    }
     let cfg = &lobby.ship_config;
     for (console, mut widget) in widgets.iter_mut() {
         let shows: &[String] = match console {

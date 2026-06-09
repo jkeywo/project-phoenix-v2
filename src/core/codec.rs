@@ -2264,6 +2264,7 @@ mod tests {
     fn encode_console_state_round_trips_weapons() {
         let state = WeaponsConsoleState {
             target_uuid: Some("tgt-1".into()),
+            target_name: None,
             banks: vec![PhaserBankState {
                 id: "port".into(),
                 fire_ready: true,
@@ -2363,6 +2364,7 @@ mod tests {
     fn weapons_console_state_with_regions_round_trips() {
         let state = WeaponsConsoleState {
             target_uuid: None,
+            target_name: None,
             banks: Vec::new(),
             tubes: Vec::new(),
             torpedo_count: 0,

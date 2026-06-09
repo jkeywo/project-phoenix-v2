@@ -2862,6 +2862,7 @@ mod tests {
             let mut comp = q.single_mut(app.world_mut()).unwrap();
             comp.0 = WeaponsConsoleState {
                 target_uuid: Some("tgt-42".into()),
+                target_name: None,
                 banks: vec![PhaserBankState {
                     id: "port".into(),
                     fire_ready: true,

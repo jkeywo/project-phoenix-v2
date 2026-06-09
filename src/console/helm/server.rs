@@ -86,7 +86,7 @@ fn push_helm_console_state(
 mod tests {
     use super::*;
     use crate::impulse::ImpulseState;
-    use crate::messages::ViewDirection;
+
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<ConsoleStateChanged>);

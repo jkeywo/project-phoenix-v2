@@ -1138,7 +1138,7 @@ mod tests {
 
     #[test]
     fn yaw_zero_is_heading_000() {
-        assert_eq!(yaw_to_heading(0.0), "000Â°");
+        assert_eq!(yaw_to_heading(0.0), "000°");
     }
 
     #[test]
@@ -1167,13 +1167,13 @@ mod tests {
 
     #[test]
     fn yaw_2pi_wraps_to_000() {
-        assert_eq!(yaw_to_heading(TAU), "000Â°");
+        assert_eq!(yaw_to_heading(TAU), "000°");
     }
 
     #[test]
     fn yaw_negative_angle_always_positive_heading() {
         let h = yaw_to_heading(-TAU);
-        assert_eq!(h, "000Â°");
+        assert_eq!(h, "000°");
         let h2 = yaw_to_heading(-0.1);
         assert!(!h2.starts_with('-'));
     }

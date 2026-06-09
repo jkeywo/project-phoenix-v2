@@ -278,6 +278,8 @@ fn refresh_helm_impulse_state(
         (
             With<HelmRadarImpulseButton>,
             Without<HelmRadarCancelButton>,
+            Without<HelmJoystickPad>,
+            Without<HelmImpulseOverlay>,
         ),
     >,
     mut radar_cancel_btn: Query<
@@ -285,6 +287,8 @@ fn refresh_helm_impulse_state(
         (
             With<HelmRadarCancelButton>,
             Without<HelmRadarImpulseButton>,
+            Without<HelmJoystickPad>,
+            Without<HelmImpulseOverlay>,
         ),
     >,
     mut pad_state: Query<

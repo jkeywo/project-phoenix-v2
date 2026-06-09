@@ -1142,19 +1142,27 @@ mod tests {
     }
 
     #[test]
-    fn yaw_negative_quarter_turn_is_heading_045() {
-        assert_eq!(yaw_to_heading(-FRAC_PI_4), "045Â°");
+    fn yaw_negative_quarter_turn_is_heading_315() {
+        // yaw = -π/4 is a left (port) turn of 45° → heading 315° (NW)
+        assert_eq!(yaw_to_heading(-FRAC_PI_4), "315°");
+    }
+
+    #[test]
+    fn yaw_positive_quarter_turn_is_heading_090() {
+        // yaw = +π/2 is a right (starboard) turn of 90° → heading 090° (East)
+        assert_eq!(yaw_to_heading(std::f32::consts::FRAC_PI_2), "090°");
     }
 
     #[test]
     fn yaw_pi_is_heading_180() {
-        assert_eq!(yaw_to_heading(std::f32::consts::PI), "180Â°");
+        assert_eq!(yaw_to_heading(std::f32::consts::PI), "180°");
     }
 
     #[test]
     fn yaw_negative_yaw_wraps_correctly() {
+        // -0.5 rad ≈ -28.6° → 331°
         let h = yaw_to_heading(-0.5);
-        assert_eq!(h, "029Â°");
+        assert_eq!(h, "331°");
     }
 
     #[test]

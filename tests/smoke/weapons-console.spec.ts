@@ -46,6 +46,10 @@ test('weapons console: __updateConsole renders banks, tubes and torpedo count', 
 });
 
 test('weapons console: FIRE buttons call __sendAction with correct envelopes', async ({ page }) => {
+  // The landscape layout targets 2160×1080; at the default 1280×720 viewport
+  // the fixed-width radar-col crowds out the ctrl-col, causing the fire buttons
+  // to overflow their clip-path'd inset-body and become unreachable for clicks.
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(CONSOLE_URL);
 
   // Stub __sendAction to capture every call's argument.

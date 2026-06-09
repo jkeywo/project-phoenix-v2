@@ -365,7 +365,7 @@
     }
     #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-485710cd0091e5a.js" crossorigin="anonymous" integrity="sha384-IUzZ6qtscKwTIXhH4QwKMDWdFWJp82i8S4XmnSFDl8vh/gzPhTFiwsj1a/E/9U0f"><link rel="preload" href="./project-phoenix-485710cd0091e5a_bg.wasm" crossorigin="anonymous" integrity="sha384-jIvrEz31lbTPlZJRPKjcPpv7fcUHjrh6fhyKNdGsL+D3zklkNDnZyzRjErW2aCFU" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-155896fc53f01ec0.js" crossorigin="anonymous" integrity="sha384-iKlN4JjSkheHRJcFLbn4SJVxMOZ1Md3k3s9aVzj9UgEj+Tk3MAtvdnNngcAvWGb7"><link rel="preload" href="./project-phoenix-155896fc53f01ec0_bg.wasm" crossorigin="anonymous" integrity="sha384-FuLKiY42yPasvsFyYg1Xe8SK3XME96nQ7ENYZBUd4V/2XtUPQaro0rFjyec5gLh4" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -374,8 +374,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-485710cd0091e5a.js';
-const wasm = await init({ module_or_path: './project-phoenix-485710cd0091e5a_bg.wasm' });
+import init, * as bindings from './project-phoenix-155896fc53f01ec0.js';
+const wasm = await init({ module_or_path: './project-phoenix-155896fc53f01ec0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -472,6 +472,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     <section id="weapons-ui">
       <iframe id="weapons-iframe" src="gui/weapons-console.html"
         title="Tactical Console" allowfullscreen></iframe>
+    </section>
+
+    <!-- Helm console: full-viewport polished HTML UI (issue #423).
+         Driven by __updateConsole via postMessage bridge.
+         Joystick, impulse, and ON SCREEN actions forwarded to server via PeerJS. -->
+    <section id="helm-ui">
+      <iframe id="helm-iframe" src="gui/helm-console.html"
+        title="Helm Console" allowfullscreen></iframe>
     </section>
 
     <section id="repair-ui">
@@ -653,7 +661,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── State ───────────────────────────────────────────────────
 
     const state = { players: [], phase: 'Lobby', redAlert: false, currentView: 'Fore', hullIntegrity: 100,
-      shipX: 0, shipZ: 0, shipYaw: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
+      shipX: 0, shipZ: 0, shipYaw: 0, forwardSpeed: 0, impulseChargeProgress: 0, asteroids: [], weaponsTarget: null, weaponsLocked: false, weaponsFireReady: false, weaponsOnCooldown: false, weaponsFiring: false, weaponsReadyBankId: null,
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
       stations: [], maxPlayers: 0, complexity: {}, allFilled: false,
       // Weapons console iframe state (issue #422)
@@ -1127,6 +1135,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (activeConsole === 'CaptainChair') {
         pushCaptainConsoleState();
       }
+      if (activeConsole === 'Helm') {
+        pushHelmConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1161,6 +1172,40 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       iframe.addEventListener('load', () => { pushCaptainConsoleState(); });
     })();
 
+    // ── Helm console iframe bridge (issue #423) ──────────────────────────────
+    // Builds a HelmConsoleState JSON from client state and pushes it to the
+    // gui/helm-console.html iframe via its window.__updateConsole function.
+
+    function buildHelmConsoleState() {
+      return JSON.stringify({
+        heading:                ((state.shipYaw * -180 / Math.PI) % 360 + 360) % 360,
+        speed:                  state.forwardSpeed || 0,
+        x:                      state.shipX || 0,
+        z:                      state.shipZ || 0,
+        yaw:                    state.shipYaw || 0,
+        impulse_charge_progress: state.impulseChargeProgress || 0,
+        on_screen:              state.currentView === 'Radar',
+        lock_id:                state.weaponsTarget || null,
+      });
+    }
+
+    function pushHelmConsoleState() {
+      if (activeConsole !== 'Helm') return;
+      const iframe = $('helm-iframe');
+      if (!iframe || !iframe.contentWindow) return;
+      try {
+        const fn = iframe.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn('Helm', buildHelmConsoleState());
+      } catch (_) {}
+    }
+
+    // Re-push when the iframe finishes loading so it receives current state.
+    (function wireHelmIframe() {
+      const iframe = $('helm-iframe');
+      if (!iframe) return;
+      iframe.addEventListener('load', () => { pushHelmConsoleState(); });
+    })();
+
     // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
     // The weapons-console.html iframe sends {type:'console_action', payload:json}
     // via postMessage when the player fires or taps a target. We translate
@@ -1190,6 +1235,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           break;
         case 'toggle_red_alert':
           send('ToggleRedAlert');
+          break;
+        case 'helm_input':
+          send('HelmInput', { thrust: action.thrust || 0, steering: action.steering || 0 });
+          break;
+        case 'start_impulse_charge':
+          send('StartImpulseCharge');
+          break;
+        case 'cancel_impulse':
+          send('CancelImpulse');
+          break;
+        case 'set_radar_view':
+          send('SetView', { mode: { kind: 'Radar' } });
           break;
         default:
           break;
@@ -1367,6 +1424,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           state.shipX = snap.ship_x || 0;
           state.shipZ = snap.ship_z || 0;
           state.shipYaw = snap.ship_yaw || 0;
+          state.forwardSpeed = snap.forward_speed || 0;
+          state.impulseChargeProgress = snap.impulse_charge_progress || 0;
           if (vd) state.currentView = vd;
           // Red alert visual (issue #439): drives the phone bezel image swap.
           // `snap.red_alert` is a snake-cased serde field on SimSnapshot.

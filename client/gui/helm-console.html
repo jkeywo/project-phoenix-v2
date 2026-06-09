@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Phoenix — Helm Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; }
+    .panel-inner {
+      padding: 24px 60px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .panel-mid {
+      flex: 1;
+      display: flex;
+      flex-direction: row;
+      gap: 36px;
+      min-height: 0;
+    }
+    .panel-mid > .radar-col   { flex: 1; display: flex; flex-direction: column; gap: 14px; min-height: 0; min-width: 0; }
+    .panel-mid > .ctrl-col    { width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+    .hero h1 { font-size: 48px; letter-spacing: 0.30em; }
+    .hero h1 .sub { font-size: 14px; margin-top: 2px; }
+    .hero .bar { width: 6px; }
+    .hero { gap: 18px; }
+
+    .radar-col .radar-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+    .radar-col .radar { aspect-ratio: 1/1; width: auto; height: 100%; max-height: 720px; max-width: 720px; }
+
+    .ctrl-col .stick-area { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+    .ctrl-col .btn-row { display: flex; gap: 12px; width: 100%; }
+    .ctrl-col .btn-row .btn { flex: 1; --h: 68px; font-size: 22px; padding: 0 16px 0 52px; }
+    .ctrl-col .btn-row .btn .led { width: 18px; height: 18px; left: 16px; }
+
+    .side-rail {
+      position: absolute;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--ink-faint);
+      letter-spacing: 0.4em;
+    }
+    .side-rail.top    { top: 16px;    left: 50%; transform: translateX(-50%); }
+    .side-rail.bottom { bottom: 14px; left: 50%; transform: translateX(-50%); }
+
+    .readout { padding: 8px 18px; }
+    .readout .v { font-size: 36px; }
+    .readout .k { font-size: 12px; }
+    .readout .u { font-size: 12px; }
+    .readout .sub { font-size: 11px; }
+    .radar-col > .readout { padding: 10px 22px; }
+    .radar-col > .readout .v { font-size: 28px; }
+
+    .radar canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    #hdg, #spd, #pos-x, #pos-z {
+      position: absolute;
+      left: -9999px;
+      visibility: hidden;
+    }
+
+    .helm-readout-overlay {
+      position: absolute;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      color: var(--cyan);
+      letter-spacing: 0.08em;
+      pointer-events: none;
+      z-index: 3;
+    }
+    .helm-readout-overlay .k {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 9px;
+      color: var(--ink-faint);
+      letter-spacing: 0.3em;
+      display: block;
+    }
+    .helm-readout-overlay .v {
+      font-size: 14px;
+      font-variant-numeric: tabular-nums;
+    }
+    .readout-hdg { top: 12px; left: 18%; }
+    .readout-spd { top: 12px; right: 18%; }
+    .readout-x   { bottom: 12px; left: 18%; }
+    .readout-z   { bottom: 12px; right: 18%; }
+
+    .lock-tag {
+      position: absolute;
+      top: 50%; right: 10%;
+      transform: translateY(-50%);
+      z-index: 3;
+      background: rgba(10, 8, 20, 0.85);
+      border: 1px solid var(--fire);
+      padding: 4px 8px;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      clip-path: polygon(6px 0, calc(100% - 6px) 0, 100% 6px, 100% calc(100% - 6px), calc(100% - 6px) 100%, 6px 100%, 0 calc(100% - 6px), 0 6px);
+    }
+    .lock-tag.show { display: flex; }
+    .lock-tag .k {
+      font-family: "Chakra Petch", sans-serif;
+      font-weight: 600;
+      font-size: 8px;
+      letter-spacing: 0.3em;
+      color: var(--ink-faint);
+    }
+    .lock-tag .id {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px;
+      color: var(--fire);
+    }
+
+    .stick-container {
+      width: 280px;
+      height: 280px;
+    }
+    .stick-bezel {
+      position: relative;
+      width: 100%; height: 100%;
+      border-radius: 50%;
+      background: radial-gradient(circle at center, #0a0d11 0%, #14171c 75%, #050608 100%);
+      border: 1px solid var(--line);
+      box-shadow: inset 0 0 0 4px #0a0d11, inset 0 0 0 5px var(--cyan-dim);
+      cursor: grab;
+      touch-action: none;
+    }
+    .stick-bezel:active { cursor: grabbing; }
+
+    .stick-ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid rgba(108, 182, 208, 0.18);
+      pointer-events: none;
+    }
+    .stick-ring.outer { inset: 16px; }
+    .stick-ring.mid   { inset: 52px; }
+
+    .stick-cross-h, .stick-cross-v {
+      position: absolute;
+      background: rgba(108, 182, 208, 0.14);
+      pointer-events: none;
+    }
+    .stick-cross-h { left: 18px; right: 18px; top: 50%; height: 1px; }
+    .stick-cross-v { top: 18px; bottom: 18px; left: 50%; width: 1px; }
+
+    .stick-arrow {
+      position: absolute;
+      width: 0; height: 0;
+      pointer-events: none;
+      opacity: 0.5;
+    }
+    .stick-arrow.up    { top: 8px;    left: 50%; transform: translateX(-50%); border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 8px solid var(--cyan-dim); }
+    .stick-arrow.down  { bottom: 8px; left: 50%; transform: translateX(-50%); border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid var(--cyan-dim); }
+    .stick-arrow.left  { left: 8px;   top: 50%;  transform: translateY(-50%); border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-right: 8px solid var(--cyan-dim); }
+    .stick-arrow.right { right: 8px;  top: 50%;  transform: translateY(-50%); border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-left: 8px solid var(--cyan-dim); }
+
+    .stick-axis-label {
+      position: absolute;
+      font-family: "Chakra Petch", sans-serif;
+      font-weight: 600;
+      font-size: 10px;
+      color: var(--ink-faint);
+      letter-spacing: 0.22em;
+      pointer-events: none;
+    }
+    .stick-axis-label.top    { top: 20px;    left: 50%; transform: translateX(-50%); }
+    .stick-axis-label.bottom { bottom: 20px; left: 50%; transform: translateX(-50%); }
+    .stick-axis-label.left   { left: 18px;   top: 50%;  transform: translateY(-50%) rotate(-90deg); }
+    .stick-axis-label.right  { right: 18px;  top: 50%;  transform: translateY(-50%) rotate(90deg); }
+
+    .stick-nub {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #3a4049 0%, #22262d 50%, #14171c 100%);
+      border: 1.5px solid var(--cyan);
+      box-shadow: 0 0 20px rgba(108, 182, 208, 0.35), inset 0 0 0 2px #14171c;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    .stick-nub::after {
+      content: "";
+      position: absolute; inset: 18px;
+      border-radius: 50%;
+      background: #14171c;
+      border: 1px solid var(--cyan-dim);
+    }
+
+    .stick-readout {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      color: var(--cyan);
+      letter-spacing: 0.1em;
+      text-align: center;
+    }
+    .stick-readout .sep { color: var(--ink-faint); }
+
+    .stick-directions {
+      display: flex;
+      width: 100%;
+      justify-content: space-between;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px;
+      color: var(--ink-faint);
+      letter-spacing: 0.18em;
+      padding: 0 8px;
+    }
+
+    .impulse-overlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: rgba(5, 8, 24, 0.7);
+      z-index: 5;
+    }
+    .impulse-overlay.show { display: flex; }
+    .impulse-bar-wrap {
+      width: 200px;
+      height: 12px;
+      background: var(--bg-deep);
+      border: 1px solid var(--line-faint);
+    }
+    .impulse-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+      box-shadow: 0 0 10px rgba(108, 182, 208, 0.4);
+      transition: width 0.1s ease;
+    }
+    .impulse-status {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 14px;
+      color: var(--ink);
+    }
+  </style>
+</head>
+<body style="background:#000; overflow:hidden;">
+
+  <script>
+    window.__sendAction = function(json) {
+      if (window !== window.parent) {
+        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
+      } else if (window.ipc) {
+        window.ipc.postMessage(json);
+      } else {
+        window.wasmBindings.wasm_ui_action(json);
+      }
+    };
+  </script>
+
+  <div id="hdg" aria-hidden="true"></div>
+  <div id="spd" aria-hidden="true"></div>
+  <div id="pos-x" aria-hidden="true"></div>
+  <div id="pos-z" aria-hidden="true"></div>
+
+  <div id="fit-wrap" style="position:fixed; top:0; left:0; transform-origin: top left;">
+  <div class="frame landscape" data-screen-label="Helm Console">
+    <div class="panel">
+      <div class="panel-inner">
+
+        <div class="side-rail top">PROJECT PHOENIX · HELM CONSOLE · NAVIGATION STATION</div>
+        <div class="side-rail bottom" id="footer-ticker">HELM · STANDING BY</div>
+
+        <header class="hero">
+          <div class="bar"></div>
+          <h1>HELM
+            <span class="sub" id="hero-sub">NAVIGATION · STATION</span>
+          </h1>
+          <div class="spacer"></div>
+          <div class="complexity">CPX: STD ▾</div>
+        </header>
+
+        <div class="panel-mid">
+
+          <section class="radar-col">
+            <div class="radar-wrap">
+              <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
+                <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
+                <div class="radar-bracket tl"><div class="nub"></div></div>
+                <div class="radar-bracket tr"><div class="nub"></div></div>
+                <div class="radar-bracket bl"><div class="nub"></div></div>
+                <div class="radar-bracket br"><div class="nub"></div></div>
+                <div class="scan"></div>
+                <div class="crosshair-h"></div>
+                <div class="crosshair-v"></div>
+                <div class="range-label" id="rl-33" style="top:50%; left:8%;  transform:translateY(-50%);">&mdash;</div>
+                <div class="range-label" id="rl-66" style="top:50%; left:20%; transform:translateY(-50%);">&mdash;</div>
+                <div class="range-label" id="rl-100" style="top:50%; left:33%; transform:translateY(-50%);">&mdash;</div>
+                <canvas id="radar" width="720" height="720"></canvas>
+
+                <div class="helm-readout-overlay readout-hdg">
+                  <span class="k">HDG</span>
+                  <span class="v" id="hdg-val">000.0</span>
+                </div>
+                <div class="helm-readout-overlay readout-spd">
+                  <span class="k">SPD</span>
+                  <span class="v" id="spd-val">00.0</span>
+                </div>
+                <div class="helm-readout-overlay readout-x">
+                  <span class="k">X</span>
+                  <span class="v" id="x-val">+0000.0</span>
+                </div>
+                <div class="helm-readout-overlay readout-z">
+                  <span class="k">Z</span>
+                  <span class="v" id="z-val">+0000.0</span>
+                </div>
+
+                <div class="lock-tag" id="lock-tag">
+                  <span class="k">LOCK</span>
+                  <span class="id" id="lock-id">A-014</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="readout">
+              <div>
+                <div class="k">HEADING</div>
+                <div class="v" id="heading-readout" style="font-size:32px;">000&deg;</div>
+              </div>
+              <div class="spacer"></div>
+              <div class="sub" id="heading-sub">STBD 3&deg;</div>
+            </div>
+          </section>
+
+          <section class="ctrl-col">
+            <div class="stick-area">
+              <div class="stick-container" id="stick-container">
+                <div class="stick-bezel" id="stick-bezel">
+                  <div class="stick-ring outer"></div>
+                  <div class="stick-ring mid"></div>
+                  <div class="stick-cross-h"></div>
+                  <div class="stick-cross-v"></div>
+                  <div class="stick-arrow up"></div>
+                  <div class="stick-arrow down"></div>
+                  <div class="stick-arrow left"></div>
+                  <div class="stick-arrow right"></div>
+                  <div class="stick-axis-label top">FWD</div>
+                  <div class="stick-axis-label bottom">REV</div>
+                  <div class="stick-axis-label left">PORT</div>
+                  <div class="stick-axis-label right">STBD</div>
+                  <div class="stick-nub" id="stick-nub"></div>
+
+                  <div class="impulse-overlay" id="impulse-overlay">
+                    <div class="impulse-bar-wrap">
+                      <div class="impulse-bar-fill" id="impulse-fill"></div>
+                    </div>
+                    <div class="impulse-status" id="impulse-status">CHARGING</div>
+                    <button class="btn danger" id="cancel-impulse-btn" style="--h:48px; font-size:16px; padding:0 16px 0 44px; width:auto;" type="button">
+                      <span class="btn-bg"></span>
+                      <span class="led fire"></span>
+                      <span class="label">CANCEL</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="stick-readout">
+                <span id="thrust-val">+0.00</span>
+                <span class="sep">/</span>
+                <span id="steering-val">+0.00</span>
+              </div>
+
+              <div class="stick-directions">
+                <span>PORT</span>
+                <span>STBD</span>
+              </div>
+            </div>
+
+            <div class="btn-row">
+              <button id="on-screen-btn" class="btn" type="button">
+                <span class="btn-bg"></span>
+                <span class="led" id="screen-led"></span>
+                <span class="label">ON SCREEN</span>
+              </button>
+              <button id="impulse-btn" class="btn" type="button">
+                <span class="btn-bg"></span>
+                <span class="led" id="impulse-led"></span>
+                <span class="label">IMPULSE</span>
+              </button>
+            </div>
+          </section>
+
+        </div>
+
+        <footer class="console-footer footer-bar">
+          <span class="dot"></span>
+          <span id="footer-status">HELM ONLINE</span>
+          <span class="sep">&middot;</span>
+          <span id="footer-mode" style="color:var(--ink-faint);">THRUST</span>
+          <span style="flex:1"></span>
+          <span id="footer-right" style="color:var(--ink-faint);">&mdash;</span>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <script src="radar-widget.js"></script>
+
+  <script>
+    var _lastName      = null;
+    var _lastStateJson = null;
+    var _state         = null;
+    var _radarWidget   = null;
+
+    function padHeading(d) {
+      d = ((d % 360) + 360) % 360;
+      return d.toFixed(1).padStart(5, '0');
+    }
+    function signed(n) {
+      var s = n >= 0 ? '+' : '-';
+      return s + Math.abs(n).toFixed(1).padStart(6, '0');
+    }
+
+    window.__updateConsole = function(name, stateJson) {
+      _lastName      = name;
+      _lastStateJson = stateJson;
+      _renderConsole(name, stateJson);
+    };
+
+    function _renderConsole(name, stateJson) {
+      var s;
+      try { s = JSON.parse(stateJson); } catch (e) { console.warn('[Helm] bad state json', e); return; }
+      _state = s;
+
+      document.getElementById('hdg').dataset.heading = String(s.heading || 0);
+      document.getElementById('spd').dataset.speed   = String(s.speed || 0);
+      document.getElementById('pos-x').dataset.x     = String(s.x || 0);
+      document.getElementById('pos-z').dataset.z     = String(s.z || 0);
+
+      var hdg = s.heading || 0;
+      document.getElementById('hdg-val').textContent = padHeading(hdg);
+      document.getElementById('heading-readout').textContent = Math.round(hdg) + '\u00B0';
+      document.getElementById('spd-val').textContent = (s.speed || 0).toFixed(1).padStart(4, '0');
+      document.getElementById('x-val').textContent   = signed(s.x || 0);
+      document.getElementById('z-val').textContent   = signed(s.z || 0);
+
+      var lockTag = document.getElementById('lock-tag');
+      if (s.lock_id) {
+        lockTag.classList.add('show');
+        document.getElementById('lock-id').textContent = s.lock_id;
+      } else {
+        lockTag.classList.remove('show');
+      }
+
+      var screenLed = document.getElementById('screen-led');
+      if (s.on_screen) {
+        screenLed.className = 'led on';
+      } else {
+        screenLed.className = 'led';
+      }
+
+      var ip = s.impulse_charge_progress || 0;
+      var impulseOverlay = document.getElementById('impulse-overlay');
+      var impulseFill = document.getElementById('impulse-fill');
+      var impulseStatus = document.getElementById('impulse-status');
+      var impulseLed = document.getElementById('impulse-led');
+      var impulseBtn = document.getElementById('impulse-btn');
+
+      if (ip > 0) {
+        impulseOverlay.classList.add('show');
+        impulseFill.style.width = (ip * 100) + '%';
+        if (ip >= 1.0) {
+          impulseStatus.textContent = 'ENGAGED';
+        } else {
+          impulseStatus.textContent = (ip * 100).toFixed(0) + '%';
+        }
+        impulseLed.className = 'led on';
+        impulseBtn.className = 'btn disabled';
+      } else {
+        impulseOverlay.classList.remove('show');
+        impulseLed.className = 'led';
+        impulseBtn.className = 'btn';
+      }
+
+      var footerMode = document.getElementById('footer-mode');
+      if (s.on_screen) {
+        footerMode.textContent = 'ON SCREEN';
+        footerMode.style.color = 'var(--cyan)';
+      } else {
+        footerMode.textContent = 'THRUST';
+        footerMode.style.color = 'var(--ink-faint)';
+      }
+
+      if (_radarWidget) {
+        _radarWidget.update({ mode: 'pre-projected', blips: s.blips || [], regions: s.regions || [] });
+      }
+    }
+
+    var _stickValue = { x: 0, y: 0 };
+    var _dragging = false;
+    var _stickRaf;
+
+    function _stickFmt(v) {
+      return (v >= 0 ? '+' : '-') + Math.abs(v).toFixed(2);
+    }
+    function _stickUpdateNub() {
+      var bezel = document.getElementById('stick-bezel');
+      var r = bezel.getBoundingClientRect();
+      var radius = Math.min(r.width, r.height) / 2 - 28;
+      var nub = document.getElementById('stick-nub');
+      nub.style.marginLeft = (_stickValue.x * radius) + 'px';
+      nub.style.marginTop  = (_stickValue.y * radius) + 'px';
+      document.getElementById('thrust-val').textContent = _stickFmt(-_stickValue.y);
+      document.getElementById('steering-val').textContent = _stickFmt(_stickValue.x);
+      window.__sendAction(JSON.stringify({ action: 'helm_input', console: 'Helm', thrust: -_stickValue.y, steering: _stickValue.x }));
+    }
+    function _stickSetFromPointer(clientX, clientY) {
+      var bezel = document.getElementById('stick-bezel');
+      var r = bezel.getBoundingClientRect();
+      var cx = r.left + r.width / 2;
+      var cy = r.top + r.height / 2;
+      var radius = Math.min(r.width, r.height) / 2 - 28;
+      var dx = (clientX - cx) / radius;
+      var dy = (clientY - cy) / radius;
+      var d = Math.hypot(dx, dy);
+      if (d > 1) { dx /= d; dy /= d; }
+      _stickValue = { x: dx, y: dy };
+      _stickUpdateNub();
+    }
+    function _stickDecay() {
+      if (_dragging) return;
+      var k = 0.15;
+      _stickValue.x *= (1 - k);
+      _stickValue.y *= (1 - k);
+      if (Math.abs(_stickValue.x) < 0.005 && Math.abs(_stickValue.y) < 0.005) {
+        _stickValue = { x: 0, y: 0 };
+        _stickUpdateNub();
+        return;
+      }
+      _stickUpdateNub();
+      _stickRaf = requestAnimationFrame(_stickDecay);
+    }
+
+    (function initStick() {
+      var bezel = document.getElementById('stick-bezel');
+      if (!bezel) return;
+
+      function down(e) {
+        _dragging = true;
+        if (bezel.setPointerCapture) bezel.setPointerCapture(e.pointerId);
+        cancelAnimationFrame(_stickRaf);
+        _stickSetFromPointer(e.clientX, e.clientY);
+        e.preventDefault();
+      }
+      function move(e) {
+        if (!_dragging) return;
+        _stickSetFromPointer(e.clientX, e.clientY);
+      }
+      function up(e) {
+        if (!_dragging) return;
+        _dragging = false;
+        try { if (bezel.releasePointerCapture) bezel.releasePointerCapture(e.pointerId); } catch(_) {}
+        _stickRaf = requestAnimationFrame(_stickDecay);
+      }
+      bezel.addEventListener('pointerdown', down);
+      bezel.addEventListener('pointermove', move);
+      bezel.addEventListener('pointerup', up);
+      bezel.addEventListener('pointercancel', up);
+    })();
+
+    document.getElementById('on-screen-btn').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'set_radar_view', console: 'Helm' }));
+    });
+
+    document.getElementById('impulse-btn').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'start_impulse_charge', console: 'Helm' }));
+    });
+
+    document.getElementById('cancel-impulse-btn').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({ action: 'cancel_impulse', console: 'Helm' }));
+    });
+
+    _radarWidget = (function() {
+      var canvas = document.getElementById('radar');
+      if (!canvas || typeof RadarWidget === 'undefined') return null;
+      return new RadarWidget(canvas, {
+        consoleId:   'helm',
+        orientation: 'ship_up',
+        onBlipTap:   function(uuid) {
+          window.__sendAction(JSON.stringify({ action: 'set_target', console: 'Helm', uuid: uuid }));
+        },
+      });
+    })();
+  </script>
+
+  <script>
+    (function fit() {
+      var wrap = document.getElementById('fit-wrap');
+      var W = 2160, H = 1080;
+      function apply() {
+        var s = Math.min(window.innerWidth / W, window.innerHeight / H);
+        wrap.style.transform = 'scale(' + s + ')';
+        wrap.style.left = ((window.innerWidth  - W * s) / 2) + 'px';
+        wrap.style.top  = ((window.innerHeight - H * s) / 2) + 'px';
+      }
+      window.addEventListener('resize', apply);
+      apply();
+    })();
+  </script>
+</body>
+</html>

@@ -1194,12 +1194,15 @@ pub struct WeaponsConsoleState {
 /// Mirrors `WeaponsConsoleState` — written into a single
 /// `CaptainConsoleStateComp` component and pushed on change via
 /// `ConsoleStateChanged { name: "Captain", json }`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CaptainConsoleState {
     /// Whether the ship is at red alert.
     pub red_alert: bool,
-    /// Current captain-chosen view mode.
-    pub view_mode: ViewMode,
+    /// Current camera direction as a plain string: `"Fore"`, `"Port"`,
+    /// `"Starboard"`, or `"Aft"`. Non-camera view modes (Radar, etc.) fall
+    /// back to `"Fore"`. Serialised directly so the HTML console JS can read
+    /// `s.view_direction` without parsing the tagged `ViewMode` enum shape.
+    pub view_direction: String,
     /// Mission objectives. Updated when `ObjectiveManager` is dirty.
     #[serde(default)]
     pub objectives: Vec<ObjectiveSnapshot>,
@@ -1208,6 +1211,18 @@ pub struct CaptainConsoleState {
     /// Computed game status string shown in the captain panel.
     #[serde(default)]
     pub game_status: String,
+}
+
+impl Default for CaptainConsoleState {
+    fn default() -> Self {
+        Self {
+            red_alert: false,
+            view_direction: "Fore".into(),
+            objectives: Vec::new(),
+            hull_integrity_pct: 100.0,
+            game_status: String::new(),
+        }
+    }
 }
 
 /// Serialised Helm console state pushed to the HTML helm panel (issue #423).

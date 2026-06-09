@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::console_bridge::ConsoleStateChanged;
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, ViewMode};
+use crate::messages::{CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, ViewDirection, ViewMode};
 use crate::ship_state::ShipState;
 use crate::world::server::ObjectiveManagerRes;
 
@@ -92,7 +92,7 @@ pub struct CaptainConsoleStateComp(pub CaptainConsoleState);
 fn spawn_captain_console_state_entity(mut commands: Commands) {
     commands.spawn(CaptainConsoleStateComp(CaptainConsoleState {
         red_alert: false,
-        view_mode: ViewMode::Camera(crate::messages::ViewDirection::Fore),
+        view_direction: "Fore".into(),
         objectives: Vec::new(),
         hull_integrity_pct: 100.0,
         game_status: String::new(),
@@ -109,7 +109,13 @@ fn recompute_captain_console_state(
     mut comp_q: Query<&mut CaptainConsoleStateComp>,
 ) {
     let red_alert = ship.red_alert();
-    let view_mode = ship.view_mode.clone();
+    let view_direction = match &ship.view_mode {
+        ViewMode::Camera(ViewDirection::Fore)      => "Fore",
+        ViewMode::Camera(ViewDirection::Port)      => "Port",
+        ViewMode::Camera(ViewDirection::Starboard) => "Starboard",
+        ViewMode::Camera(ViewDirection::Aft)       => "Aft",
+        _                                          => "Fore",
+    }.to_string();
 
     let objectives_snap: Vec<ObjectiveSnapshot> = objectives
         .as_ref()
@@ -140,7 +146,7 @@ fn recompute_captain_console_state(
 
     let next = CaptainConsoleState {
         red_alert,
-        view_mode,
+        view_direction,
         objectives: objectives_snap,
         hull_integrity_pct,
         game_status,
@@ -365,7 +371,7 @@ mod tests {
         // so that the first update sees it as Changed (spawn → new).
         app.world_mut().spawn(CaptainConsoleStateComp(CaptainConsoleState {
             red_alert: false,
-            view_mode: ViewMode::Camera(crate::messages::ViewDirection::Fore),
+            view_direction: "Fore".into(),
             objectives: Vec::new(),
             hull_integrity_pct: 100.0,
             game_status: String::new(),
@@ -457,7 +463,7 @@ mod tests {
             let mut comp = q.single_mut(app.world_mut()).unwrap();
             comp.0 = CaptainConsoleState {
                 red_alert: true,
-                view_mode: ViewMode::Camera(crate::messages::ViewDirection::Aft),
+                view_direction: "Aft".into(),
                 objectives: Vec::new(),
                 hull_integrity_pct: 75.0,
                 game_status: "RED ALERT".into(),
@@ -472,7 +478,7 @@ mod tests {
         assert!(push.json.contains("\"red_alert\":true"), "json: {}", push.json);
         assert!(push.json.contains("\"hull_integrity_pct\":75.0"), "json: {}", push.json);
         assert!(push.json.contains("\"RED ALERT\""), "json: {}", push.json);
-        assert!(push.json.contains("\"Aft\""), "json: {}", push.json);
+        assert!(push.json.contains("\"view_direction\":\"Aft\""), "json: {}", push.json);
 
         // No further change → no further pushes.
         app.world_mut().resource_mut::<ConsolePushes>().0.clear();

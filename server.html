@@ -1281,6 +1281,30 @@ function finishInit() {
     set_lobby_state_callback(window.__updateLobby);
   }
 
+  // ── HTML console state relay (issue #428) ────────────────────────────────
+  // WASM pushes console state via flush_console_state → set_console_state_callback.
+  // We relay it to HTML console pages (gui/*.html) open in the same browser
+  // origin via BroadcastChannel ('phoenix-console-state').  Those pages send
+  // their actions back on the same channel and we forward them to wasm_ui_action.
+  var _consoleBroadcast = ('BroadcastChannel' in window)
+      ? new BroadcastChannel('phoenix-console-state')
+      : null;
+  window.__updateConsole = function(name, json) {
+    if (_consoleBroadcast) {
+      _consoleBroadcast.postMessage({ type: 'console_state', name: name, json: json });
+    }
+  };
+  if (_consoleBroadcast) {
+    _consoleBroadcast.onmessage = function(e) {
+      if (e.data && e.data.type === 'console_action' && typeof wasm_ui_action === 'function') {
+        wasm_ui_action(e.data.payload);
+      }
+    };
+  }
+  if (typeof set_console_state_callback === 'function') {
+    set_console_state_callback(window.__updateConsole);
+  }
+
   // Validate station config before starting PeerJS or the Bevy app.
   // A malformed [stations] section must refuse to boot.
   fetch('assets/entities/player_ship.toml')

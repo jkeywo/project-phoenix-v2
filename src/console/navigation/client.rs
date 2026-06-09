@@ -138,7 +138,7 @@ impl Plugin for NavigationPanelPlugin {
             (
                 spawn_navigation_ui.run_if(not(resource_exists::<NavigationPanelSpawned>)),
                 toggle_navigation_panel_visibility.in_set(ClientSet::ConsoleUpdate),
-                refresh_navigation_panel,
+                refresh_navigation_panel.in_set(ClientSet::ConsoleUpdate),
                 respawn_navigation_on_orientation_change,
                 bridge_client_sim_to_nav_radar,
                 nav_radar_pinch_zoom,

@@ -77,11 +77,11 @@ pub const HELM_PAD_SIZE: f32 = 200.0;
 /// sourced from `[helm_console.radar] range` in `player_ship.toml`.
 pub const HELM_RADAR_RANGE_FALLBACK: f32 = 250.0;
 
-/// Convert ship yaw (radians, CCW from +Z) to a 3-digit heading string
-/// (degrees, 0â€“360, 0 = ship-forward = "north" on the compass).
+/// Convert ship yaw (radians, CW from -Z) to a 3-digit heading string
+/// (degrees, 0–359, 0 = North / ship-forward; positive yaw → East / 090°).
 pub fn yaw_to_heading(yaw_rad: f32) -> String {
-    let heading = ((-yaw_rad).to_degrees()).rem_euclid(360.0);
-    format!("{:03}Â°", heading.round() as u32)
+    let heading = yaw_rad.to_degrees().rem_euclid(360.0);
+    format!("{:03}°", heading.round() as u32)
 }
 
 // â”€â”€ Impulse UI markers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -144,10 +144,12 @@ impl Plugin for HelmPanelPlugin {
             (
                 spawn_phone_helm_ui.run_if(not(resource_exists::<PhoneHelmSpawned>)),
                 respawn_helm_on_orientation_change,
+                // ConsoleUpdate runs after MessageProcessing, so ShipView
+                // is already current when these systems execute.
                 toggle_helm_panel_visibility.in_set(ClientSet::ConsoleUpdate),
-                update_helm_readouts,
+                update_helm_readouts.in_set(ClientSet::ConsoleUpdate),
                 bridge_helm_radar,
-                refresh_helm_impulse_state,
+                refresh_helm_impulse_state.in_set(ClientSet::ConsoleUpdate),
             ),
         );
     }
@@ -358,15 +360,21 @@ fn refresh_helm_impulse_state(
         }
     }
 
-    // Joystick gate: pause the 10 Hz resend whenever impulse is non-zero,
-    // and on the rising edge zero the cached drag so the gate's plug
-    // doesn't merely freeze a stale value in place.
+    // Joystick gate: the WASM joystick's 10 Hz resend is always paused because
+    // the HTML iframe intercepts every pointer event for the helm panel — the
+    // WASM widget is never dragged and its `last_dx`/`last_dy` default to 0.
+    // Without this gate, the 10 Hz zero-heartbeat overwrites real thrust values
+    // sent by the HTML joystick and the ship stops moving.
+    //
+    // On the rising edge of impulse (Idle → Charging/Active) we also zero the
+    // cached drag state so any stale knob value cannot leak through once the
+    // drive disengages.  Immediate drag events still fire normally; only the
+    // periodic heartbeat resend is suppressed.
     let now_active = progress > 0.0;
     let was_active = *prev_progress > 0.0;
-    let want_pause = now_active;
     for (mut drag, mut timer) in pad_state.iter_mut() {
-        if timer.paused != want_pause {
-            timer.paused = want_pause;
+        if !timer.paused {
+            timer.paused = true;
         }
         if now_active && !was_active {
             reset_joystick_drag(&mut drag);

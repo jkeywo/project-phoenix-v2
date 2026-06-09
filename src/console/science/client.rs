@@ -99,7 +99,7 @@ impl Plugin for SensorsPanelPlugin {
             (
                 spawn_sensors_ui.run_if(not(resource_exists::<SensorsPanelSpawned>)),
                 toggle_sensors_panel_visibility.in_set(ClientSet::ConsoleUpdate),
-                refresh_cancel_impulse_visibility,
+                refresh_cancel_impulse_visibility.in_set(ClientSet::ConsoleUpdate),
                 bridge_client_sim_to_science_radar,
                 respawn_sensors_on_orientation_change,
             ),

@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 use crate::messages::{Console, ConsoleHullStatus, ServerMessage, ViewMode};
+#[cfg(feature = "client")]
+use crate::client_app::ClientSet;
 
 /// Shared ship state broadcast to all consoles every 10Hz via `SimState`.
 ///
@@ -102,7 +104,16 @@ impl Plugin for ShipViewPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ShipView>()
             .add_systems(Startup, spawn_console_hull_bar)
-            .add_systems(Update, (apply_ship_view_messages, update_console_hull_bar));
+            .add_systems(
+                Update,
+                (
+                    // Must run in MessageProcessing so ShipView is written
+                    // before ConsoleUpdate systems (refresh_*_impulse_state,
+                    // refresh_navigation_panel, etc.) read it.
+                    apply_ship_view_messages.in_set(ClientSet::MessageProcessing),
+                    update_console_hull_bar,
+                ),
+            );
     }
 }
 

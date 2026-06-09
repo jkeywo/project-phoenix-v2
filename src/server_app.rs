@@ -513,13 +513,14 @@ fn handle_collisions(
         .flatten();
 
     if contact.is_some() {
+        let speed_at_impact = ship.forward_speed;
         ship.forward_speed = 0.0;
 
         if cooldown.remaining_secs > 0.0 {
             return;
         }
         let max_speed = ShipPhysicsConfig::new().max_speed;
-        let damage = collision_damage(ship.forward_speed, max_speed) as f32
+        let damage = collision_damage(speed_at_impact, max_speed) as f32
             * modifiers.get(&ModifierSlot::HullDamageTaken);
 
         let bearing = contact

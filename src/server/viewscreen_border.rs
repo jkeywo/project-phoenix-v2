@@ -618,13 +618,13 @@ fn drive_vignette_intensity(
 
 /// Convert a ship yaw in radians to a 0–359 integer compass bearing.
 ///
-/// `yaw == 0` means the ship faces forward; the bearing increases
-/// clockwise as viewed from above (equivalent to `360 − yaw°`).
+/// `yaw == 0` means the ship faces North (−Z); positive yaw is a
+/// clockwise (starboard) turn — a quarter-turn right gives 090° (East).
 /// Negative yaw and multi-turn yaw wrap correctly. The rounding
 /// boundary at 359.5° rounds up to 360 then wraps back to 0 (never
 /// returns 360).
 pub fn yaw_to_compass_bearing(yaw_radians: f32) -> u32 {
-    let degrees = (-yaw_radians).to_degrees().rem_euclid(360.0);
+    let degrees = yaw_radians.to_degrees().rem_euclid(360.0);
     (degrees.round() as u32) % 360
 }
 
@@ -874,10 +874,10 @@ mod tests {
     fn compute_hud_state_alert_and_partial_hull() {
         let mut ship = ShipState::new();
         ship.toggle_red_alert();
-        ship.yaw = std::f32::consts::FRAC_PI_2; // → bearing 270
+        ship.yaw = std::f32::consts::FRAC_PI_2; // right turn (clockwise) → East → bearing 090
         let hull = hull_at(50.0, 100.0);
         let state = compute_hud_state(&ship, &hull);
-        assert_eq!(state.heading, 270);
+        assert_eq!(state.heading, 90);
         assert_eq!(state.hull_pct, 50);
         assert_eq!(state.condition, "ALERT");
         assert!(state.red_alert);
@@ -891,8 +891,9 @@ mod tests {
     }
 
     #[test]
-    fn bearing_quarter_turn_is_two_seventy() {
-        assert_eq!(yaw_to_compass_bearing(std::f32::consts::FRAC_PI_2), 270);
+    fn bearing_quarter_turn_is_ninety() {
+        // +π/2 = right turn (clockwise) → ship faces East → 090°
+        assert_eq!(yaw_to_compass_bearing(std::f32::consts::FRAC_PI_2), 90);
     }
 
     #[test]
@@ -901,8 +902,9 @@ mod tests {
     }
 
     #[test]
-    fn bearing_three_quarter_turn_is_ninety() {
-        assert_eq!(yaw_to_compass_bearing(3.0 * std::f32::consts::FRAC_PI_2), 90);
+    fn bearing_three_quarter_turn_is_two_seventy() {
+        // 3*π/2 = three-quarter clockwise turn → ship faces West → 270°
+        assert_eq!(yaw_to_compass_bearing(3.0 * std::f32::consts::FRAC_PI_2), 270);
     }
 
     #[test]
@@ -912,21 +914,21 @@ mod tests {
 
     #[test]
     fn bearing_negative_yaw_wraps_positive() {
-        // -π/2 rad = -90° → 90°
-        assert_eq!(yaw_to_compass_bearing(-std::f32::consts::FRAC_PI_2), 90);
+        // -π/2 = left turn (counter-clockwise) → ship faces West → 270°
+        assert_eq!(yaw_to_compass_bearing(-std::f32::consts::FRAC_PI_2), 270);
     }
 
     #[test]
     fn bearing_multi_turn_yaw_wraps() {
-        // 2.5 turns: 2τ + π/2 → 270°
+        // 2.5 turns clockwise: 2τ + π/2 → same as π/2 → 090°
         let yaw = 2.0 * std::f32::consts::TAU + std::f32::consts::FRAC_PI_2;
-        assert_eq!(yaw_to_compass_bearing(yaw), 270);
+        assert_eq!(yaw_to_compass_bearing(yaw), 90);
     }
 
     #[test]
     fn bearing_rounds_359_5_to_zero_not_360() {
-        // -0.5° → 359.5°, rounds to 360 then wraps to 0.
-        let yaw = 0.5_f32.to_radians();
+        // -0.5° (tiny left turn) → 359.5°, rounds to 360 then wraps to 0.
+        let yaw = (-0.5_f32).to_radians();
         assert_eq!(yaw_to_compass_bearing(yaw), 0);
     }
 

@@ -551,6 +551,13 @@ fn on_red_alert_pressed(
 /// server-confirmed `ShipView.red_alert`.
 ///
 /// The armed-glow pulse preserves the pre-migration visual effect.
+///
+/// Note: no `is_changed()` guard here.  The guard was removed because Bevy's
+/// tick-based change detection can permanently mask a ShipView update when this
+/// system and `apply_ship_view_messages` (in `ShipViewPlugin`) happen to run in
+/// the same frame with this system first.  The cost of running every frame is
+/// negligible — the glow alpha update is already needed every frame for the
+/// pulse animation when red_alert is active.
 fn refresh_red_alert_ui(
     ship_view: Option<Res<ShipView>>,
     time: Res<Time>,
@@ -558,16 +565,17 @@ fn refresh_red_alert_ui(
     mut glow_q: Query<(&mut ImageNode, &ChildOf), With<ArmedGlow>>,
 ) {
     let Some(ship_view) = ship_view else { return };
-    if !ship_view.is_changed() && !ship_view.red_alert {
-        return;
-    }
 
     // Update WidgetState only for the button that has ArmedGlow as a child.
     // We identify the RA button by querying ArmedGlow and walking up to the parent.
     for (mut glow_img, parent) in glow_q.iter_mut() {
         let ra_entity = parent.0;
         if let Ok(mut state) = ra_states.get_mut(ra_entity) {
-            state.active = ship_view.red_alert;
+            // Conditional write avoids spurious Bevy change-detection notifications
+            // on every frame when the value has not actually changed.
+            if state.active != ship_view.red_alert {
+                state.active = ship_view.red_alert;
+            }
         }
 
         // Pulsing armed glow — fade the texture alpha.
@@ -583,27 +591,37 @@ fn refresh_red_alert_ui(
 // ── System: sync direction pad active states + LEDs from ShipView ──
 
 /// Drives `WidgetState.active` and the `DirLed` child color on direction-pad
-/// buttons from `ShipView.view_mode`.  Runs whenever `ShipView` changes.
+/// buttons from `ShipView.view_mode`.
+///
+/// Note: no `is_changed()` guard here.  The guard was removed because Bevy's
+/// tick-based change detection can permanently mask a ShipView update when this
+/// system and `apply_ship_view_messages` (in `ShipViewPlugin`) happen to run in
+/// the same frame with this system first.  Conditional writes are used instead
+/// so Bevy's own change-detection on `WidgetState` and `BackgroundColor` is
+/// only triggered when values actually differ.
 fn sync_dir_radio_active_state(
     ship_view: Res<ShipView>,
     mut buttons: Query<(&DirChoice, &mut WidgetState, &Children)>,
     mut leds: Query<&mut BackgroundColor, With<DirLed>>,
 ) {
-    if !ship_view.is_changed() {
-        return;
-    }
     let active_dir = match &ship_view.view_mode {
         ViewMode::Camera(d) => Some(d.clone()),
         _ => None,
     };
     for (choice, mut state, children) in buttons.iter_mut() {
         let is_active = active_dir.as_ref().map(|d| *d == choice.0).unwrap_or(false);
-        state.active = is_active;
+        // Conditional write avoids spurious Bevy change-detection notifications.
+        if state.active != is_active {
+            state.active = is_active;
+        }
 
         // Update the LED child.
+        let new_led_color = if is_active { LED_ON } else { LED_OFF };
         for child in children.iter() {
             if let Ok(mut led_bg) = leds.get_mut(child) {
-                led_bg.0 = if is_active { LED_ON } else { LED_OFF };
+                if led_bg.0 != new_led_color {
+                    led_bg.0 = new_led_color;
+                }
             }
         }
     }
@@ -611,20 +629,24 @@ fn sync_dir_radio_active_state(
 
 // ── System: rotate compass needle ──
 
+/// Rotates the compass needle to match `ShipView.view_mode`.
+///
+/// Note: no `is_changed()` guard — same reason as `sync_dir_radio_active_state`.
+/// Conditional write keeps Bevy's transform-change-detection quiet on frames
+/// where the direction has not actually changed.
 fn rotate_needle_by_direction(
     ship_view: Res<ShipView>,
     mut needles: Query<&mut Transform, With<CompassNeedle>>,
 ) {
-    if !ship_view.is_changed() {
-        return;
-    }
     let dir = match &ship_view.view_mode {
         ViewMode::Camera(d) => d,
         _ => return,
     };
     let rotation = needle_rotation(dir);
     for mut tf in needles.iter_mut() {
-        tf.rotation = rotation;
+        if tf.rotation != rotation {
+            tf.rotation = rotation;
+        }
     }
 }
 

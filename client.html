@@ -770,14 +770,18 @@
 
       // Console sections (issue #441): map activeConsole → HTML section id
       // via gui/content-switcher.js. Only the matching section gets `.active`;
-      // Bevy-rendered consoles (Helm, Sensors, etc.) leave all sections off
-      // and the WASM canvas takes the bezel content area.
+      // Bevy-rendered consoles (Sensors, etc.) leave all sections off and the
+      // WASM canvas takes the bezel content area. Helm is HTML-rendered via
+      // iframe, so it gets a section entry like weapons-ui.
+      // so it must be listed in the section map like weapons-ui.
       const sections = (typeof window.consoleSections === 'function')
         ? window.consoleSections(activeConsole, inGame)
         : { 'captain-ui': inGame && activeConsole === 'CaptainChair',
+            'helm-ui':   inGame && activeConsole === 'Helm',
             'weapons-ui': inGame && activeConsole === 'Tactical',
             'repair-ui': inGame && activeConsole === 'Repair' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
+      $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
       $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
 

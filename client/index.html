@@ -396,7 +396,7 @@
     }
     #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-6557e3f821bfa5b9.js" crossorigin="anonymous" integrity="sha384-GiVqHXAoyp9W7asT2rfYoH6tmj/tA2G8oWWiU8V9rK8wDnEQJXvSPZzh0LXTIeiE"><link rel="preload" href="./project-phoenix-6557e3f821bfa5b9_bg.wasm" crossorigin="anonymous" integrity="sha384-DxTZjzr2ZTgQMoUE5O1AbZt1HweGZvtmYwYkv/QbsQjIqJrUPxEVx1+0+khnFj36" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-370006e5a53e82ce.js" crossorigin="anonymous" integrity="sha384-+wDa9RskvA8Jx83D+KTuF3MzmyUWUN7yBdTDmRS4JGYUmDAfSQA0UXhkSBZ6srCP"><link rel="preload" href="./project-phoenix-370006e5a53e82ce_bg.wasm" crossorigin="anonymous" integrity="sha384-bnygPG8+uE8mxHlcRcrMv0Zd5+9BjEZwnj4TtINvGxeGv4kHdJ2sxht1JkSs5y71" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -405,8 +405,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-6557e3f821bfa5b9.js';
-const wasm = await init({ module_or_path: './project-phoenix-6557e3f821bfa5b9_bg.wasm' });
+import init, * as bindings from './project-phoenix-370006e5a53e82ce.js';
+const wasm = await init({ module_or_path: './project-phoenix-370006e5a53e82ce_bg.wasm' });
 
 
 window.wasmBindings = bindings;

@@ -115,6 +115,11 @@ fn update_session_with_config(
         // Repair panel can derive its progress-bar durations without knowing
         // server-side constants. Absent block keeps defaults that match the
         // historical hardcoded constants.
+        if let Some(hc) = &ship_config.hull {
+            if hc.repair_team_count > 0 {
+                next.repair_team_count = hc.repair_team_count as u8;
+            }
+        }
         if let Some(rc) = &ship_config.repair {
             next.repair_travel_secs = rc.travel_duration_secs;
             next.repair_rate_hp_per_sec = rc.repair_rate_hp_per_sec;

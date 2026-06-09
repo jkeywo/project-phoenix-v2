@@ -373,6 +373,12 @@ pub struct ShipClientConfig {
     /// from `[helm_console.radar] range` in the ship TOML.
     #[serde(default = "default_helm_radar_range")]
     pub helm_radar_range: f32,
+    /// Number of repair teams on this ship. Sourced from `[hull]
+    /// repair_team_count` in the ship TOML. Used by the client Repair panel to
+    /// pre-seed team rows on `Welcome` before the first `RepairState` broadcast
+    /// arrives.
+    #[serde(default = "default_repair_team_count")]
+    pub repair_team_count: u8,
     /// Seconds a repair team spends travelling to a console (and returning).
     /// Sourced from `[repair] travel_duration_secs` in the ship TOML. Used by
     /// the client Repair panel to render travel/return progress bars.
@@ -443,6 +449,10 @@ fn default_sensors_radar_range() -> f32 {
     500.0
 }
 
+fn default_repair_team_count() -> u8 {
+    2
+}
+
 fn default_repair_travel_secs() -> f32 {
     5.0
 }
@@ -467,6 +477,7 @@ impl Default for ShipClientConfig {
     fn default() -> Self {
         Self {
             helm_radar_range: default_helm_radar_range(),
+            repair_team_count: default_repair_team_count(),
             repair_travel_secs: default_repair_travel_secs(),
             repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
             impulse_charge_duration: default_impulse_charge_duration(),

@@ -270,11 +270,18 @@ impl ClientSimState {
             ServerMessage::WorldSetup { world } => {
                 self.world = world.clone();
             }
-            ServerMessage::Welcome { state, .. } => {
+            ServerMessage::Welcome { state, ship_config, .. } => {
                 let preserved_world = state.world.clone().unwrap_or_default();
                 *self = Self::default();
                 self.world = preserved_world;
-                // frequency_hint is reset to None by Default.
+                // Pre-seed repair_teams with idle slots so the Repair panel
+                // can spawn its rows immediately on Welcome, before the first
+                // 10 Hz RepairState broadcast arrives. RepairState overwrites
+                // this when it lands.
+                let count = ship_config.repair_team_count as usize;
+                if count > 0 {
+                    self.repair_teams = vec![TeamSlot::Idle; count];
+                }
             }
             ServerMessage::RepairState { teams } => {
                 self.repair_teams = teams.clone();
@@ -2246,9 +2253,12 @@ mod tests {
             ship_stations: crate::stations_config::ShipStations::default(),
             ship_config: ShipClientConfig::default(),
         });
+        // Welcome resets active team states and pre-seeds idle slots from
+        // ship_config.repair_team_count (default = 2).
+        assert_eq!(s.repair_teams.len(), 2, "Welcome should seed repair_teams from ship_config");
         assert!(
-            s.repair_teams.is_empty(),
-            "Welcome should reset repair_teams to empty"
+            s.repair_teams.iter().all(|t| matches!(t, TeamSlot::Idle)),
+            "Welcome should reset all teams to Idle"
         );
     }
 

@@ -778,6 +778,7 @@ fn tick_torpedo_system(
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut weapons_target: ResMut<WeaponsTarget>,
 ) {
     let dt = time.delta_secs();
 
@@ -868,11 +869,17 @@ fn tick_torpedo_system(
         if asteroid_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
             vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
-            outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid }));
+            outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
+            if weapons_target.0.as_deref() == Some(target_uuid.as_str()) {
+                weapons_target.0 = None;
+            }
         } else if npc_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
             destroyed_events.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: target_uuid.clone() });
-            outbox.0.push((Target::All, ServerMessage::EntityDespawned { uuid: target_uuid }));
+            outbox.0.push((Target::All, ServerMessage::EntityDespawned { uuid: target_uuid.clone() }));
+            if weapons_target.0.as_deref() == Some(target_uuid.as_str()) {
+                weapons_target.0 = None;
+            }
         }
     }
 }
@@ -895,6 +902,7 @@ fn tick_active_beam(
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    mut weapons_target: ResMut<WeaponsTarget>,
 ) {
 
     let dt = time.delta_secs();
@@ -988,6 +996,7 @@ fn tick_active_beam(
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
             cooldown.start_bank(&active_bank, &combat_config.0);
+            weapons_target.0 = None;
 
             outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
             commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
@@ -1004,6 +1013,7 @@ fn tick_active_beam(
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
             cooldown.start_bank(&active_bank, &combat_config.0);
+            weapons_target.0 = None;
 
             commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
             return;

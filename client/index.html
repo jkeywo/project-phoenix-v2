@@ -80,7 +80,8 @@
        Padding leaves room for the phone bezel (issue #439); see --bezel-inset
        further down. */
     #weapons-ui.active,
-    #captain-ui.active {
+    #captain-ui.active,
+    #helm-ui.active {
       display: block;
       position: fixed;
       inset: 0;
@@ -88,7 +89,8 @@
       margin: 0;
     }
     #weapons-ui iframe,
-    #captain-ui iframe {
+    #captain-ui iframe,
+    #helm-ui iframe {
       width: 100%;
       height: 100%;
       border: none;
@@ -148,34 +150,34 @@
       pointer-events: none;
       image-rendering: pixelated;
     }
-    .bezel-corner { width: 120px; height: 72px; display: block; }
+    .bezel-corner { width: clamp(50px, 20vw, 120px); height: clamp(32px, 12vw, 72px); display: block; }
     .bezel-corner.tl { top: 0;    left: 0; }
     .bezel-corner.tr { top: 0;    right: 0; }
     .bezel-corner.bl { bottom: 0; left: 0; }
     .bezel-corner.br { bottom: 0; right: 0; }
     .bezel-edge.top {
-      top: 0; left: 120px; right: 120px;
+      top: 0; left: clamp(50px, 20vw, 120px); right: clamp(50px, 20vw, 120px);
       height: var(--bezel-inset);
       background-image: url("gui/borders/phone-edge-top.png");
       background-size: 48px 22px;
       background-repeat: repeat-x;
     }
     .bezel-edge.bottom {
-      bottom: 0; left: 120px; right: 120px;
+      bottom: 0; left: clamp(50px, 20vw, 120px); right: clamp(50px, 20vw, 120px);
       height: var(--bezel-inset);
       background-image: url("gui/borders/phone-edge-bottom.png");
       background-size: 48px 22px;
       background-repeat: repeat-x;
     }
     .bezel-edge.left {
-      left: 0; top: 72px; bottom: 72px;
+      left: 0; top: clamp(32px, 12vw, 72px); bottom: clamp(32px, 12vw, 72px);
       width: var(--bezel-inset);
       background-image: url("gui/borders/phone-edge-left.png");
       background-size: 22px 48px;
       background-repeat: repeat-y;
     }
     .bezel-edge.right {
-      right: 0; top: 72px; bottom: 72px;
+      right: 0; top: clamp(32px, 12vw, 72px); bottom: clamp(32px, 12vw, 72px);
       width: var(--bezel-inset);
       background-image: url("gui/borders/phone-edge-right.png");
       background-size: 22px 48px;
@@ -188,7 +190,8 @@
 
     /* Iframe content sits inside the bezel safe zone. */
     #weapons-ui.active,
-    #captain-ui.active { padding: var(--bezel-inset); }
+    #captain-ui.active,
+    #helm-ui.active { padding: var(--bezel-inset); }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────
        Sits inside the bezel safe zone so it doesn't overlap the corner
@@ -214,14 +217,14 @@
     #console-tab-bar[aria-hidden="true"] { display: none; }
     #console-tab-bar[data-orientation="portrait"] {
       top: var(--bezel-inset);
-      left: 120px; right: 120px;
+      left: clamp(50px, 20vw, 120px); right: clamp(50px, 20vw, 120px);
       flex-direction: row;
       flex-wrap: wrap;
       padding: 0.25rem 0;
     }
     #console-tab-bar[data-orientation="landscape"] {
       left: var(--bezel-inset);
-      top: 72px; bottom: 72px;
+      top: clamp(32px, 12vw, 72px); bottom: clamp(32px, 12vw, 72px);
       flex-direction: column;
       padding: 0 0.25rem;
       width: 84px;
@@ -365,7 +368,7 @@
     }
     #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-155896fc53f01ec0.js" crossorigin="anonymous" integrity="sha384-iKlN4JjSkheHRJcFLbn4SJVxMOZ1Md3k3s9aVzj9UgEj+Tk3MAtvdnNngcAvWGb7"><link rel="preload" href="./project-phoenix-155896fc53f01ec0_bg.wasm" crossorigin="anonymous" integrity="sha384-FuLKiY42yPasvsFyYg1Xe8SK3XME96nQ7ENYZBUd4V/2XtUPQaro0rFjyec5gLh4" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-18a64b6ebcda5270.js" crossorigin="anonymous" integrity="sha384-IDNnHHDsuzI+5CKJ48yKL66pqrgJ5OpoVgorpFcN5STDys7QRJ7EvunUyGc/LJHd"><link rel="preload" href="./project-phoenix-18a64b6ebcda5270_bg.wasm" crossorigin="anonymous" integrity="sha384-BpIdeEvqE9WR8w2aDzPnYBO4Fqihrzbgd+Pxe28AFtolR7X/tT5AAM9700hMqJzf" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -374,8 +377,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-155896fc53f01ec0.js';
-const wasm = await init({ module_or_path: './project-phoenix-155896fc53f01ec0_bg.wasm' });
+import init, * as bindings from './project-phoenix-18a64b6ebcda5270.js';
+const wasm = await init({ module_or_path: './project-phoenix-18a64b6ebcda5270_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -781,14 +784,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
       // Console sections (issue #441): map activeConsole → HTML section id
       // via gui/content-switcher.js. Only the matching section gets `.active`;
-      // Bevy-rendered consoles (Helm, Sensors, etc.) leave all sections off
-      // and the WASM canvas takes the bezel content area.
+      // Bevy-rendered consoles (Sensors, etc.) leave all sections off and the
+      // WASM canvas takes the bezel content area. Helm is HTML-rendered via
+      // iframe, so it gets a section entry like weapons-ui.
+      // so it must be listed in the section map like weapons-ui.
       const sections = (typeof window.consoleSections === 'function')
         ? window.consoleSections(activeConsole, inGame)
         : { 'captain-ui': inGame && activeConsole === 'CaptainChair',
+            'helm-ui':   inGame && activeConsole === 'Helm',
             'weapons-ui': inGame && activeConsole === 'Tactical',
             'repair-ui': inGame && activeConsole === 'Repair' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
+      $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
       $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
 

@@ -64,21 +64,29 @@ html, body {
 
 .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
 
+@media (orientation: portrait) {
+  :root { font-size: clamp(10px, 2.5vw, 14px); }
+}
+@media (orientation: landscape) {
+  :root { font-size: clamp(12px, 1.5vw, 16px); }
+}
+
 /* ── Frame ──────────────────────────────────────────────────── */
 .frame {
   position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100dvh;
   background:
     radial-gradient(ellipse at 50% 30%, #0a0e22 0%, #03050e 70%, #000 100%);
   overflow: hidden;
 }
-.frame.portrait  { width: 1080px; height: 2400px; }
-.frame.landscape { width: 2160px; height: 1080px; }
 
 /* ── Chamfered panel — outer thin light stroke + inner dark fill ── */
 .panel {
   position: absolute;
   inset: 0;
-  --cham: 28px;
+  --cham: 1.75rem;
   background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
   clip-path: polygon(
     var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
@@ -89,7 +97,7 @@ html, body {
 .panel-inner {
   position: absolute;
   inset: 1.5px;
-  --cham: 27px;
+  --cham: 1.6875rem;
   background:
     radial-gradient(ellipse at 50% 0%, rgba(80,110,170,0.18) 0%, transparent 55%),
     linear-gradient(180deg, #131a3a 0%, #0a0f28 45%, #050918 100%);
@@ -129,8 +137,8 @@ html, body {
 /* the title arrow indent that captain panel has */
 .panel-arrow {
   position: absolute;
-  top: 24px; left: 50%;
-  width: 28px; height: 14px;
+  top: 1.5rem; left: 50%;
+  width: 1.75rem; height: 0.875rem;
   transform: translateX(-50%);
   border-left: 1.5px solid var(--line);
   border-bottom: 1.5px solid var(--line);
@@ -139,7 +147,7 @@ html, body {
 }
 .panel-arrow-line {
   position: absolute;
-  top: 38px; left: 32px; right: 32px;
+  top: 2.375rem; left: 2rem; right: 2rem;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--line) 12%, var(--line) 88%, transparent);
 }
@@ -153,13 +161,13 @@ html, body {
 .console-header .meta,
 .console-header .complexity {
   font-family: "JetBrains Mono", monospace;
-  font-size: 18px;
+  font-size: 1.125rem;
   color: var(--ink-dim);
   letter-spacing: 0.18em;
 }
 .console-header .complexity { color: var(--cyan); }
 .console-header h1 {
-  font-size: 42px;
+  font-size: 2.625rem;
   font-weight: 600;
   letter-spacing: 0.32em;
   color: var(--tactical);
@@ -168,15 +176,15 @@ html, body {
 
 .console-footer {
   font-family: "JetBrains Mono", monospace;
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--ink-faint);
   letter-spacing: 0.22em;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 0.875rem;
 }
 .console-footer .dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 0.5rem; height: 0.5rem; border-radius: 50%;
   background: var(--loaded);
   box-shadow: 0 0 8px var(--loaded);
 }
@@ -185,7 +193,7 @@ html, body {
 /* ── Inset card (chamfered, smaller chamfer) ───────────────── */
 .inset {
   position: relative;
-  --cham: 18px;
+  --cham: 1.125rem;
   background: linear-gradient(180deg, #1a2148 0%, #2a3568 100%);
   clip-path: polygon(
     var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
@@ -195,7 +203,7 @@ html, body {
   padding: 1.5px;
 }
 .inset > .inset-body {
-  --cham: 17px;
+  --cham: 1.0625rem;
   background:
     linear-gradient(180deg, #0e1633 0%, #060b1f 100%);
   clip-path: polygon(
@@ -204,17 +212,17 @@ html, body {
     var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham)
   );
   width: 100%; height: 100%;
-  padding: 28px 36px;
+  padding: 1.75rem 2.25rem;
   display: flex; flex-direction: column;
 }
 
 .section-header {
-  display: flex; align-items: center; gap: 14px;
-  font-size: 22px;
+  display: flex; align-items: center; gap: 0.875rem;
+  font-size: 1.375rem;
   font-weight: 600;
   letter-spacing: 0.32em;
   color: var(--ink-dim);
-  margin-bottom: 18px;
+  margin-bottom: 1.125rem;
 }
 .section-header::before,
 .section-header::after {
@@ -226,24 +234,24 @@ html, body {
 .section-header .tag {
   flex: 0;
   font-family: "JetBrains Mono", monospace;
-  font-size: 12px;
+  font-size: 0.75rem;
   letter-spacing: 0.2em;
   color: var(--ink-faint);
-  padding: 2px 8px;
+  padding: 0.125rem 0.5rem;
   border: 1px solid var(--line-faint);
 }
 
 /* ── Pill button (chamfered like gui/button-normal) ─────────── */
 .btn {
-  --h: 88px;
-  --cham: 14px;
+  --h: 5.5rem;
+  --cham: 0.875rem;
   position: relative;
   height: var(--h);
-  padding: 0 28px 0 64px;
+  padding: 0 1.75rem 0 4rem;
   display: flex; align-items: center;
   font-family: "Chakra Petch", sans-serif;
   font-weight: 600;
-  font-size: 28px;
+  font-size: 1.75rem;
   letter-spacing: 0.24em;
   text-transform: uppercase;
   color: var(--ink-dim);
@@ -260,7 +268,7 @@ html, body {
 }
 .btn > .btn-bg {
   position: absolute; inset: 1.5px;
-  --cham: 13px;
+  --cham: 0.8125rem;
   background: linear-gradient(180deg, #1a2148 0%, #0e1432 50%, #070b22 100%);
   clip-path: polygon(
     var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
@@ -275,9 +283,9 @@ html, body {
 }
 .btn .led {
   position: absolute;
-  left: 22px; top: 50%;
+  left: 1.375rem; top: 50%;
   transform: translateY(-50%);
-  width: 22px; height: 22px;
+  width: 1.375rem; height: 1.375rem;
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #34406a 0%, #0a1028 70%);
   box-shadow: inset 0 0 4px rgba(0,0,0,0.6);
@@ -287,8 +295,8 @@ html, body {
 .btn .led.amber         { background: radial-gradient(circle at 35% 30%, #ffd896 0%, var(--reloading) 35%, var(--reloading-dim) 80%); box-shadow: 0 0 14px var(--reloading), inset 0 0 3px rgba(255,255,255,0.5); }
 .btn .led.cyan          { background: radial-gradient(circle at 35% 30%, #d0f0ff 0%, var(--cyan) 35%, var(--cyan-dim) 80%); box-shadow: 0 0 14px var(--cyan), inset 0 0 3px rgba(255,255,255,0.5); }
 
-.btn.large { --h: 120px; padding: 0 36px 0 84px; font-size: 36px; }
-.btn.large .led { left: 28px; width: 30px; height: 30px; }
+.btn.large { --h: 7.5rem; padding: 0 2.25rem 0 5.25rem; font-size: 2.25rem; }
+.btn.large .led { left: 1.75rem; width: 1.875rem; height: 1.875rem; }
 
 /* Variant colors */
 .btn.armed         { color: var(--loaded); }
@@ -309,14 +317,14 @@ html, body {
 
 /* small chip button (tube selector) */
 .chip {
-  --h: 68px;
-  --cham: 10px;
+  --h: 4.25rem;
+  --cham: 0.625rem;
   height: var(--h);
-  padding: 0 22px 0 22px;
+  padding: 0 1.375rem;
   display: flex; align-items: center; justify-content: center;
   font-family: "Chakra Petch", sans-serif;
   font-weight: 600;
-  font-size: 20px;
+  font-size: 1.25rem;
   letter-spacing: 0.22em;
   color: var(--ink-dim);
   background: linear-gradient(180deg, #5e6f96 0%, #3a4674 50%, #1a2148 100%);
@@ -332,7 +340,7 @@ html, body {
 }
 .chip > .chip-bg {
   position: absolute; inset: 1.5px;
-  --cham: 9px;
+  --cham: 0.5625rem;
   background: linear-gradient(180deg, #0e1432 0%, #060b1f 100%);
   clip-path: polygon(
     var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham),
@@ -352,22 +360,22 @@ html, body {
 
 /* ── Readout pill ────────────────────────────────────────────── */
 .readout {
-  display: flex; align-items: baseline; gap: 14px;
-  padding: 18px 28px;
+  display: flex; align-items: baseline; gap: 0.875rem;
+  padding: 1.125rem 1.75rem;
   background: linear-gradient(180deg, rgba(20,28,60,0.6), rgba(8,12,28,0.4));
   border-top: 1px solid var(--line-faint);
   border-bottom: 1px solid var(--line-faint);
 }
 .readout .k {
   font-family: "JetBrains Mono", monospace;
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--ink-faint);
   letter-spacing: 0.22em;
   text-transform: uppercase;
 }
 .readout .v {
   font-family: "Chakra Petch", sans-serif;
-  font-size: 56px;
+  font-size: 3.5rem;
   font-weight: 600;
   color: var(--ink);
   letter-spacing: 0.06em;
@@ -376,14 +384,14 @@ html, body {
 .readout .v.tactical { color: var(--tactical); }
 .readout .u {
   font-family: "JetBrains Mono", monospace;
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--ink-faint);
   letter-spacing: 0.2em;
 }
 .readout .spacer { flex: 1; }
 .readout .sub {
   font-family: "JetBrains Mono", monospace;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink-faint);
   letter-spacing: 0.18em;
   line-height: 1.6;
@@ -394,40 +402,40 @@ html, body {
 
 /* ── Tube status row ───────────────────────────────────────── */
 .tube-status-row {
-  display: flex; gap: 16px; margin-top: 12px;
+  display: flex; gap: 1rem; margin-top: 0.75rem;
 }
 .tube-status {
   flex: 1 1 0;
   display: flex; align-items: center; justify-content: center;
-  gap: 10px;
-  height: 44px;
+  gap: 0.625rem;
+  height: 2.75rem;
   font-family: "JetBrains Mono", monospace;
-  font-size: 18px;
+  font-size: 1.125rem;
   letter-spacing: 0.22em;
   border-top: 1px solid var(--line-faint);
 }
 .tube-status.loaded   { color: var(--loaded); }
 .tube-status.loading  { color: var(--reloading); }
 .tube-status .dot {
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 0.625rem; height: 0.625rem; border-radius: 50%;
   background: currentColor;
-  box-shadow: 0 0 10px currentColor;
+  box-shadow: 0 0 0.625rem currentColor;
 }
 
 /* ── Cooldown meter ─────────────────────────────────────────── */
 .cooldown {
-  display: flex; align-items: center; gap: 18px;
-  padding: 14px 0;
+  display: flex; align-items: center; gap: 1.125rem;
+  padding: 0.875rem 0;
 }
 .cooldown .label {
   font-family: "JetBrains Mono", monospace;
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--ink-faint);
   letter-spacing: 0.22em;
 }
 .cooldown .bar {
   flex: 1;
-  height: 16px;
+  height: 1rem;
   background: var(--bg-deep);
   border: 1px solid var(--line-faint);
   position: relative;
@@ -445,20 +453,20 @@ html, body {
 }
 .cooldown .value {
   font-family: "JetBrains Mono", monospace;
-  font-size: 22px;
+  font-size: 1.375rem;
   color: var(--loaded);
   letter-spacing: 0.18em;
-  min-width: 70px; text-align: right;
+  min-width: 4.375rem; text-align: right;
 }
 
 /* ── Phaser frequency ───────────────────────────────────────── */
 .frequency {
-  display: flex; gap: 6px;
-  padding: 18px 0 6px;
+  display: flex; gap: 0.375rem;
+  padding: 1.125rem 0 0.375rem;
 }
 .frequency .freq-bar {
   flex: 1;
-  height: 36px;
+  height: 2.25rem;
   background: var(--bg-deep);
   border: 1px solid var(--line-faint);
   position: relative;
@@ -475,10 +483,10 @@ html, body {
 .freq-row {
   display: flex; justify-content: space-between;
   font-family: "JetBrains Mono", monospace;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink-faint);
   letter-spacing: 0.2em;
-  margin-top: 4px;
+  margin-top: 0.25rem;
 }
 
 /* ── Radar ──────────────────────────────────────────────────── */
@@ -524,10 +532,10 @@ html, body {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   filter: drop-shadow(0 0 6px currentColor);
 }
-.radar .blip img { width: 28px; height: 28px; display: block; image-rendering: pixelated; }
+.radar .blip img { width: 1.75rem; height: 1.75rem; display: block; image-rendering: pixelated; }
 .radar .blip .tag {
   font-family: "JetBrains Mono", monospace;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: currentColor;
   letter-spacing: 0.15em;
   white-space: nowrap;
@@ -539,7 +547,7 @@ html, body {
 
 .radar .lock-ring {
   position: absolute;
-  width: 80px; height: 80px;
+  width: 5rem; height: 5rem;
   border: 2px solid var(--tactical);
   transform: translate(-50%,-50%);
   filter: drop-shadow(0 0 8px var(--tactical));
@@ -550,7 +558,7 @@ html, body {
 .radar .lock-ring .b2 {
   content: "";
   position: absolute;
-  width: 16px; height: 16px;
+  width: 1rem; height: 1rem;
   border: 2px solid var(--tactical);
 }
 .radar .lock-ring::before { top: -6px; left: -6px; border-right: none; border-bottom: none; }
@@ -561,7 +569,7 @@ html, body {
 .radar .range-label {
   position: absolute;
   font-family: "JetBrains Mono", monospace;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink-faint);
   letter-spacing: 0.18em;
 }
@@ -569,7 +577,7 @@ html, body {
 /* corner brackets around the radar that echo radar-surround.png */
 .radar-bracket {
   position: absolute;
-  width: 56px; height: 56px;
+  width: 3.5rem; height: 3.5rem;
   border: 2px solid var(--line);
   pointer-events: none;
 }
@@ -581,25 +589,25 @@ html, body {
   position: absolute;
   background: linear-gradient(180deg, #2a3568, #0e1432);
   border: 1px solid var(--line);
-  width: 64px; height: 18px;
+  width: 4rem; height: 1.125rem;
 }
-.radar-bracket.tl .nub { top: 14px; left: 14px; }
-.radar-bracket.tr .nub { top: 14px; right: 14px; }
-.radar-bracket.bl .nub { bottom: 14px; left: 14px; }
-.radar-bracket.br .nub { bottom: 14px; right: 14px; }
+.radar-bracket.tl .nub { top: 0.875rem; left: 0.875rem; }
+.radar-bracket.tr .nub { top: 0.875rem; right: 0.875rem; }
+.radar-bracket.bl .nub { bottom: 0.875rem; left: 0.875rem; }
+.radar-bracket.br .nub { bottom: 0.875rem; right: 0.875rem; }
 
 /* ── Title block / hero (orange bar) ─────────────────────────── */
 .hero {
-  display: flex; align-items: center; gap: 24px;
-  padding: 20px 0 24px;
+  display: flex; align-items: center; gap: 1.5rem;
+  padding: 1.25rem 0 1.5rem;
 }
 .hero .bar {
-  width: 8px; align-self: stretch;
+  width: 0.5rem; align-self: stretch;
   background: var(--tactical);
   box-shadow: 0 0 14px var(--tactical);
 }
 .hero h1 {
-  font-size: 64px;
+  font-size: 4rem;
   font-weight: 600;
   letter-spacing: 0.36em;
   color: var(--tactical);
@@ -607,20 +615,20 @@ html, body {
 }
 .hero h1 .sub {
   display: block;
-  font-size: 18px;
+  font-size: 1.125rem;
   letter-spacing: 0.32em;
   color: var(--ink-dim);
-  margin-top: 4px;
+  margin-top: 0.25rem;
   text-shadow: none;
 }
 .hero .spacer { flex: 1; }
 .hero .complexity {
   font-family: "JetBrains Mono", monospace;
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--cyan);
   letter-spacing: 0.22em;
   border: 1px solid var(--cyan-dim);
-  padding: 8px 14px;
+  padding: 0.5rem 0.875rem;
 }
 
 /* ── Toggle / segmented mini ─────────────────────────────────── */
@@ -630,11 +638,11 @@ html, body {
   background: var(--bg-deep);
   border: 1px solid var(--line-faint);
   font-family: "JetBrains Mono", monospace;
-  font-size: 16px;
+  font-size: 1rem;
   letter-spacing: 0.2em;
 }
 .mini-toggle .opt {
-  padding: 10px 18px;
+  padding: 0.625rem 1.125rem;
   color: var(--ink-faint);
 }
 .mini-toggle .opt.active {
@@ -644,28 +652,28 @@ html, body {
 
 /* ── Damage indicator chip (red dot from REQ) ───────────────── */
 .damage-chip {
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; gap: 0.5rem;
   font-family: "JetBrains Mono", monospace;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink-dim);
   letter-spacing: 0.2em;
 }
 .damage-chip .dot {
-  width: 10px; height: 10px; border-radius: 50%;
+  width: 0.625rem; height: 0.625rem; border-radius: 50%;
   background: var(--loaded);
   box-shadow: 0 0 8px var(--loaded);
 }
 
 /* ── Hull HP mini bar ───────────────────────────────────────── */
 .hull {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 0.75rem;
   font-family: "JetBrains Mono", monospace;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink-faint);
   letter-spacing: 0.22em;
 }
 .hull .bar {
-  width: 140px; height: 8px;
+  width: 8.75rem; height: 0.5rem;
   background: var(--bg-deep);
   border: 1px solid var(--line-faint);
   position: relative;

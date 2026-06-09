@@ -248,9 +248,67 @@
       font-size: 14px;
       color: var(--ink);
     }
+  /* ── Portrait reflow ───────────────────────────────────────── */
+  @media (orientation: portrait) {
+    body { overflow-y: auto; overflow-x: hidden; }
+
+    .panel-inner {
+      padding: 0.75rem 0.5rem;
+      gap: 0.5rem;
+    }
+
+    .panel-mid {
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .panel-mid > .radar-col { width: 100%; }
+    .panel-mid > .ctrl-col  { width: 100%; }
+
+    .hero {
+      padding: 0.25rem 0;
+      gap: 0.5rem;
+    }
+    .hero h1 { font-size: 1.25rem; letter-spacing: 0.15em; }
+    .hero h1 .sub { display: none; }
+    .hero .bar { display: none; }
+    .hero .complexity { display: none; }
+    .hero .spacer { display: none; }
+
+    .side-rail { display: none; }
+
+    .radar-col .radar-wrap { min-height: 35vh; }
+    .radar-col .radar { max-height: none; max-width: none; }
+    .radar-col > .readout { padding: 0.4rem 0.6rem; }
+    .radar-col > .readout .v { font-size: 1.25rem; }
+
+    .ctrl-col .stick-area { gap: 0.25rem; }
+    .stick-container { width: min(75vw, 240px); height: min(75vw, 240px); }
+
+    .ctrl-col .btn-row .btn { --h: 3rem; font-size: 0.9rem; padding: 0 0.5rem 0 2.5rem; }
+    .ctrl-col .btn-row .btn .led { width: 12px; height: 12px; left: 10px; }
+
+    .side-rail.top,
+    .side-rail.bottom { display: none; }
+
+    .readout { padding: 0.3rem 0.6rem; }
+    .readout .v { font-size: 1.5rem; }
+    .readout .k { font-size: 0.6rem; }
+    .readout .u { font-size: 0.6rem; }
+
+    .console-footer { font-size: 0.65rem; gap: 0.5rem; }
+
+    .helm-readout-overlay { display: none; }
+    .lock-tag { top: auto; bottom: 0.5rem; right: 0.5rem; transform: none; font-size: 0.6rem; }
+    .lock-tag .k { font-size: 0.5rem; }
+    .lock-tag .id { font-size: 0.6rem; }
+
+    .impulse-overlay { gap: 0.5rem; }
+    .impulse-bar-wrap { width: 70vw; }
+  }
   </style>
 </head>
-<body style="background:#000; overflow:hidden;">
+<body style="background:#000; margin:0; overflow:hidden;">
 
   <script>
     window.__sendAction = function(json) {
@@ -269,7 +327,6 @@
   <div id="pos-x" aria-hidden="true"></div>
   <div id="pos-z" aria-hidden="true"></div>
 
-  <div id="fit-wrap" style="position:fixed; top:0; left:0; transform-origin: top left;">
   <div class="frame landscape" data-screen-label="Helm Console">
     <div class="panel">
       <div class="panel-inner">
@@ -302,7 +359,7 @@
                 <div class="range-label" id="rl-33" style="top:50%; left:8%;  transform:translateY(-50%);">&mdash;</div>
                 <div class="range-label" id="rl-66" style="top:50%; left:20%; transform:translateY(-50%);">&mdash;</div>
                 <div class="range-label" id="rl-100" style="top:50%; left:33%; transform:translateY(-50%);">&mdash;</div>
-                <canvas id="radar" width="720" height="720"></canvas>
+                <canvas id="radar"></canvas>
 
                 <div class="helm-readout-overlay readout-hdg">
                   <span class="k">HDG</span>
@@ -409,7 +466,6 @@
 
       </div>
     </div>
-  </div>
   </div>
 
   <script src="radar-widget.js"></script>
@@ -598,21 +654,6 @@
           window.__sendAction(JSON.stringify({ action: 'set_target', console: 'Helm', uuid: uuid }));
         },
       });
-    })();
-  </script>
-
-  <script>
-    (function fit() {
-      var wrap = document.getElementById('fit-wrap');
-      var W = 2160, H = 1080;
-      function apply() {
-        var s = Math.min(window.innerWidth / W, window.innerHeight / H);
-        wrap.style.transform = 'scale(' + s + ')';
-        wrap.style.left = ((window.innerWidth  - W * s) / 2) + 'px';
-        wrap.style.top  = ((window.innerHeight - H * s) / 2) + 'px';
-      }
-      window.addEventListener('resize', apply);
-      apply();
     })();
   </script>
 </body>

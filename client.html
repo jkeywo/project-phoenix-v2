@@ -1172,7 +1172,23 @@
     // Builds a HelmConsoleState JSON from client state and pushes it to the
     // gui/helm-console.html iframe via its window.__updateConsole function.
 
+    const HELM_RADAR_RANGE = 250.0;
+
     function buildHelmConsoleState() {
+      const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
+      const blips = (state.asteroids || []).map(a => {
+        const ax = entityX(a), az = entityZ(a);
+        const dx = ax - state.shipX, dz = az - state.shipZ;
+        if (dx * dx + dz * dz > HELM_RADAR_RANGE * HELM_RADAR_RANGE) return null;
+        const radar_x = (dx * cosY + dz * sinY) / HELM_RADAR_RANGE;
+        const radar_y = (dx * sinY - dz * cosY) / HELM_RADAR_RANGE;
+        const radius   = entityRadius(a);
+        const tags     = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
+        const kind     = tags.includes('ship') ? 'ship'
+                       : tags.includes('station') ? 'station' : 'asteroid';
+        return { uuid: a.uuid, radar_x, radar_y, scaled_radius: radius / HELM_RADAR_RANGE, kind };
+      }).filter(Boolean);
+
       return JSON.stringify({
         heading:                ((state.shipYaw * -180 / Math.PI) % 360 + 360) % 360,
         speed:                  state.forwardSpeed || 0,
@@ -1182,6 +1198,7 @@
         impulse_charge_progress: state.impulseChargeProgress || 0,
         on_screen:              state.currentView === 'Radar',
         lock_id:                state.weaponsTarget || null,
+        blips,
       });
     }
 
@@ -1454,6 +1471,7 @@
         case 'WorldSetup': {
           state.asteroids = (msg.data.world && msg.data.world.entities) || [];
           pushWeaponsConsoleState();
+          pushHelmConsoleState();
           return;
         }
         case 'TargetLock': {
@@ -1519,6 +1537,7 @@
             state.weaponsFireReady = false;
           }
           pushWeaponsConsoleState();
+          pushHelmConsoleState();
           return;
         }
         case 'DamageTaken': {

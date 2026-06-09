@@ -458,6 +458,7 @@ fn fill_captain_alert(commands: &mut Commands, container: Entity, assets: &Phone
         ImageNode {
             image: assets.red_alert_armed.clone(),
             color: Color::srgba(1.0, 1.0, 1.0, 0.0).into(),
+            ..default()
         },
         Node {
             width: Val::Px(16.0),

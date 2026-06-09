@@ -27,7 +27,7 @@ use crate::gui::{
     bridge_sim_to_radar, spawn_gui_button, ButtonPressed,
     ButtonSize, ConsoleRadar, GenericRadar, OrientationMode, RadarArc,
     RadarArcKind, RadarArcs, RadarBlipClicked, RadarBlipMap, RadarCenterPose, RadarClipMode,
-    OnRadar, RadarEntityUuid, RadarFilter, RadarTargetHighlight, RadarTargetRing, RadioButtonConfig, RadioGroup,
+    RadarEntityUuid, RadarFilter, RadarTargetHighlight, RadarTargetRing, RadioButtonConfig, RadioGroup,
     RadioSelected, StateVisuals, Disabled,
 };
 use crate::messages::{Console, GamePhase, PhaserBankClientConfig, TorpedoTube, TorpedoTubeClientConfig};

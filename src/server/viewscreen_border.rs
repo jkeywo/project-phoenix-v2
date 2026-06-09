@@ -52,8 +52,7 @@
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
-use bevy::ui::widget::NodeImageMode;
-use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
+use bevy::ui_render::prelude::{UiMaterial, UiMaterialPlugin};
 #[cfg(target_arch = "wasm32")]
 use js_sys::Date;
 

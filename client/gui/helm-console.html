@@ -674,6 +674,11 @@
       bezel.addEventListener('pointermove', move);
       bezel.addEventListener('pointerup', up);
       bezel.addEventListener('pointercancel', up);
+      // Heartbeat: resend the current position at ~10 Hz while the finger is held
+      // still. Without this the server only receives an update when the pointer
+      // actually moves, leaving the last-received value stale if the connection
+      // drops a packet while dragging.
+      setInterval(function() { if (_dragging) _stickUpdateNub(); }, 100);
     })();
 
     document.getElementById('on-screen-btn').addEventListener('click', function() {

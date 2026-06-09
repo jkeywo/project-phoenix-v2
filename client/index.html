@@ -79,9 +79,9 @@
     }
     #console-container[data-orientation="landscape"] {
       flex-direction: row;
-      /* Top/bottom padding clears the corner art height. */
-      padding-top: clamp(32px, 12vw, 72px);
-      padding-bottom: clamp(32px, 12vw, 72px);
+      /* Only the bezel edge strip height; corner art floats at z-index 15. */
+      padding-top: var(--bezel-inset);
+      padding-bottom: var(--bezel-inset);
     }
     #console-container > *, #console-container section.active > * {
       pointer-events: auto;
@@ -97,7 +97,9 @@
     /* Active HTML console sections fill the space below the tab bar. */
     #weapons-ui.active,
     #captain-ui.active,
-    #helm-ui.active {
+    #helm-ui.active,
+    #power-ui.active,
+    #repair-ui.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -107,7 +109,9 @@
     }
     #weapons-ui iframe,
     #captain-ui iframe,
-    #helm-ui iframe {
+    #helm-ui iframe,
+    #power-ui iframe,
+    #repair-ui iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -211,15 +215,9 @@
        clear the top bezel edge. Side + bottom still needed. */
     #weapons-ui.active,
     #captain-ui.active,
-    #helm-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
-
-    /* Repair console: scrollable flex item below the tab bar. */
-    #repair-ui.active {
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
-      padding: 0.5rem var(--bezel-inset) var(--bezel-inset);
-    }
+    #helm-ui.active,
+    #power-ui.active,
+    #repair-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────
        First flex child of #console-container. In-flow so it takes up
@@ -250,8 +248,9 @@
     }
     #console-tab-bar[data-orientation="landscape"] {
       flex-direction: column;
-      /* Left padding clears the left bezel edge. */
-      padding: 0 0.25rem 0 var(--bezel-inset);
+      /* Left padding clears the left bezel edge; top/bottom padding pushes
+         tab buttons clear of the corner art (clamp matches corner height). */
+      padding: clamp(32px, 12vw, 72px) 0.25rem clamp(32px, 12vw, 72px) var(--bezel-inset);
       width: 84px;
     }
     #console-tab-bar .tab-button {
@@ -518,20 +517,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         title="Helm Console" allowfullscreen></iframe>
     </section>
 
+    <section id="power-ui">
+      <iframe id="power-iframe" src="gui/power-console.html"
+        title="Power Console" allowfullscreen></iframe>
+    </section>
+
     <section id="repair-ui">
-      <h2 style="margin:0 0 1rem;font-size:1.1rem;letter-spacing:.1em;color:#8af">REPAIR</h2>
-      <p style="margin:0 0 0.5rem;font-size:0.85rem;color:#aaa">HULL INTEGRITY</p>
-      <p id="eng-hp-text" style="font-size:2.5rem;font-weight:bold;margin:0 0 1rem;color:#4cf">100 / 100</p>
-      <div id="eng-hp-bar" style="display:flex;gap:4px" aria-label="Hull integrity bar"></div>
-      <div id="eng-repair-target" style="margin-top:1.5rem;padding:0.75rem 1rem;border-radius:6px;background:#111;display:none">
-        <p style="margin:0 0 0.25rem;font-size:0.8rem;color:#aaa;letter-spacing:.05em">ACTIVE REPAIR TARGET</p>
-        <p id="eng-repair-console" style="margin:0;font-size:1.4rem;font-weight:bold;color:#fa0;letter-spacing:.08em"></p>
-      </div>
-      <button id="eng-repair-btn"
-        style="margin-top:1.5rem;padding:0.75rem 2rem;font-size:1.1rem;font-weight:bold;
-               letter-spacing:.15em;background:#063;color:#5f5;border:2px solid #5f5;border-radius:6px;
-               cursor:pointer;width:100%"
-        onclick="send('Repair', { console: 'Repair' })">REPAIR</button>
+      <iframe id="repair-iframe" src="gui/repair-console.html"
+        title="Repair Console" allowfullscreen></iframe>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -701,7 +694,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       repairCooldownSecs: 0, repairInProgress: false, repairPenalty: false,
       stations: [], maxPlayers: 0, complexity: {}, allFilled: false,
       // Weapons console iframe state (issue #422)
-      weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto' };
+      weaponsBanks: [], weaponsTubes: [], weaponsTorpedoCount: 0, weaponsPhaserMode: 'Auto',
+      // Repair console iframe state (issue #425)
+      repairTeams: [], consoleHull: [],
+      // Power console iframe state (issue #425)
+      powerHelm: 2, powerWeapons: 2, powerSensors: 2, powerBattery: 100, powerLocked: false };
     let conn = null;
     // Station configs from server Welcome message (keyed by player count).
     let stationConfigs = {};
@@ -826,11 +823,13 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         : { 'captain-ui': inGame && activeConsole === 'CaptainChair',
             'helm-ui':   inGame && activeConsole === 'Helm',
             'weapons-ui': inGame && activeConsole === 'Tactical',
-            'repair-ui': inGame && activeConsole === 'Repair' };
+            'repair-ui': inGame && activeConsole === 'Repair',
+            'power-ui':  inGame && activeConsole === 'Power' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
       $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
+      $('power-ui').className  = sections['power-ui']  ? 'active' : '';
 
       // Orientation drives both the tab-bar layout and the container's
       // flex-direction (portrait = column, landscape = row). Computed once
@@ -1184,6 +1183,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (activeConsole === 'Helm') {
         pushHelmConsoleState();
       }
+      if (activeConsole === 'Repair') {
+        pushRepairConsoleState();
+      }
+      if (activeConsole === 'Power') {
+        pushPowerConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1269,6 +1274,59 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       iframe.addEventListener('load', () => { pushHelmConsoleState(); });
     })();
 
+    // ── Repair console iframe bridge (issue #425) ────────────────────────────
+    function buildRepairConsoleState() {
+      return JSON.stringify({
+        teams:                state.repairTeams || [],
+        console_hull:         state.consoleHull || [],
+        travel_duration_secs: 5.0,
+        damageable_consoles:  [],
+      });
+    }
+
+    function pushRepairConsoleState() {
+      if (activeConsole !== 'Repair') return;
+      const iframe = $('repair-iframe');
+      if (!iframe || !iframe.contentWindow) return;
+      try {
+        const fn = iframe.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn('Repair', buildRepairConsoleState());
+      } catch (_) {}
+    }
+
+    (function wireRepairIframe() {
+      const iframe = $('repair-iframe');
+      if (!iframe) return;
+      iframe.addEventListener('load', () => { pushRepairConsoleState(); });
+    })();
+
+    // ── Power console iframe bridge (issue #425) ─────────────────────────────
+    function buildPowerConsoleState() {
+      return JSON.stringify({
+        helm:           state.powerHelm    || 0,
+        weapons:        state.powerWeapons || 0,
+        sensors:        state.powerSensors || 0,
+        battery_charge: state.powerBattery || 0,
+        locked:         state.powerLocked  || false,
+      });
+    }
+
+    function pushPowerConsoleState() {
+      if (activeConsole !== 'Power') return;
+      const iframe = $('power-iframe');
+      if (!iframe || !iframe.contentWindow) return;
+      try {
+        const fn = iframe.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn('Power', buildPowerConsoleState());
+      } catch (_) {}
+    }
+
+    (function wirePowerIframe() {
+      const iframe = $('power-iframe');
+      if (!iframe) return;
+      iframe.addEventListener('load', () => { pushPowerConsoleState(); });
+    })();
+
     // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
     // The weapons-console.html iframe sends {type:'console_action', payload:json}
     // via postMessage when the player fires or taps a target. We translate
@@ -1310,6 +1368,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           break;
         case 'set_radar_view':
           send('SetView', { mode: { kind: 'Radar' } });
+          break;
+        case 'dispatch_repair_team':
+          send('DispatchRepairTeam', { team_idx: action.team_idx, console: action.target });
+          break;
+        case 'increase_power':
+          if (action.target) send('IncreasePower', { console: action.target });
+          break;
+        case 'decrease_power':
+          if (action.target) send('DecreasePower', { console: action.target });
           break;
         default:
           break;
@@ -1511,7 +1578,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             state.repairTarget = repairTarget;
             renderRepair(hp, repairTarget);
           }
+          if (snap.console_hull) state.consoleHull = snap.console_hull;
           pushWeaponsConsoleState();
+          pushRepairConsoleState();
           // View-direction highlighting is handled by the Bevy WASM UI (#48).
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state (the weapons console is pushed above so
@@ -1571,11 +1640,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           return;
         }
         case 'RepairState': {
-          const { remaining_cooldown_secs, in_progress, penalty } = msg.data;
-          state.repairCooldownSecs = remaining_cooldown_secs || 0;
-          state.repairInProgress = !!in_progress;
-          state.repairPenalty = !!penalty;
-          renderRepairButtons(state);
+          state.repairTeams = msg.data.teams || [];
+          pushRepairConsoleState();
+          return;
+        }
+        case 'PowerState': {
+          const { helm, weapons, sensors, battery_charge, locked } = msg.data;
+          if (typeof helm           === 'number') state.powerHelm    = helm;
+          if (typeof weapons        === 'number') state.powerWeapons = weapons;
+          if (typeof sensors        === 'number') state.powerSensors = sensors;
+          if (typeof battery_charge === 'number') state.powerBattery = battery_charge;
+          state.powerLocked = !!locked;
+          pushPowerConsoleState();
           return;
         }
         case 'AsteroidDestroyed': {

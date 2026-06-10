@@ -131,7 +131,7 @@ mod tests {
     use super::*;
     use crate::client_lobby::{ActiveConsole, LobbyState};
     use crate::gui::resolve_visual;
-    use crate::messages::{Console, GamePhase, GameState, Player, ServerMessage, ShipClientConfig};
+    use crate::messages::{ClientMessage, Console, GamePhase, GameState, Player, ServerMessage, ShipClientConfig};
     use crate::stations_config::ShipStations;
     use std::collections::HashMap;
 

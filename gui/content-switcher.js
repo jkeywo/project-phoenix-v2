@@ -16,18 +16,19 @@
 // at z-index 10.
 
 // Console name -> HTML section id. Only consoles with HTML panels are keyed.
-// Other consoles (Sensors, Shields, Navigation, Comms) are
-// rendered by Bevy and have no section in the map.
+// Bevy-rendered consoles (Navigation, Comms) are absent from this map.
 export const CONSOLE_SECTION = Object.freeze({
   CaptainChair: 'captain-ui',
   Helm: 'helm-ui',
   Tactical: 'weapons-ui',
   Repair: 'repair-ui',
   Power: 'power-ui',
+  Shields: 'shields-ui',
+  Sensors: 'sensors-ui',
 });
 
 // Set of all known section ids that the switcher will reset.
-export const HTML_SECTION_IDS = Object.freeze(['captain-ui', 'helm-ui', 'weapons-ui', 'repair-ui', 'power-ui']);
+export const HTML_SECTION_IDS = Object.freeze(['captain-ui', 'helm-ui', 'weapons-ui', 'repair-ui', 'power-ui', 'shields-ui', 'sensors-ui']);
 
 // Returns the section id that should be visible for `activeConsole`, or null
 // if no HTML section maps to this console (Bevy renders it).

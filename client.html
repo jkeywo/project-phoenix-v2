@@ -100,7 +100,8 @@
     #helm-ui.active,
     #power-ui.active,
     #repair-ui.active,
-    #shields-ui.active {
+    #shields-ui.active,
+    #sensors-ui.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -113,7 +114,8 @@
     #helm-ui iframe,
     #power-ui iframe,
     #repair-ui iframe,
-    #shields-ui iframe {
+    #shields-ui iframe,
+    #sensors-ui iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -220,7 +222,8 @@
     #helm-ui.active,
     #power-ui.active,
     #repair-ui.active,
-    #shields-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
+    #shields-ui.active,
+    #sensors-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────
        First flex child of #console-container. In-flow so it takes up
@@ -524,6 +527,11 @@
         title="Shield Console" allowfullscreen></iframe>
     </section>
 
+    <section id="sensors-ui">
+      <iframe id="sensors-iframe" src="gui/sensors-console.html"
+        title="Sensors Console" allowfullscreen></iframe>
+    </section>
+
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
          src/client_app.rs (#49). -->
   </div>
@@ -697,7 +705,9 @@
       // Power console iframe state (issue #425)
       powerHelm: 2, powerWeapons: 2, powerSensors: 2, powerBattery: 100, powerLocked: false,
       // Shields console iframe state (issue #423)
-      shieldFacings: [], shieldFocusedFacing: null };
+      shieldFacings: [], shieldFocusedFacing: null,
+      // Sensors console iframe state
+      sensorsTarget: null };
     let conn = null;
     // Station configs from server Welcome message (keyed by player count).
     let stationConfigs = {};
@@ -813,7 +823,7 @@
 
       // Console sections (issue #441): map activeConsole → HTML section id
       // via gui/content-switcher.js. Only the matching section gets `.active`;
-      // Bevy-rendered consoles (Sensors, etc.) leave all sections off and the
+      // Bevy-rendered consoles (Navigation, Comms) leave all sections off and the
       // WASM canvas takes the bezel content area. Helm is HTML-rendered via
       // iframe, so it gets a section entry like weapons-ui.
       // so it must be listed in the section map like weapons-ui.
@@ -824,13 +834,15 @@
             'weapons-ui': inGame && activeConsole === 'Tactical',
             'repair-ui': inGame && activeConsole === 'Repair',
             'power-ui':  inGame && activeConsole === 'Power',
-            'shields-ui': inGame && activeConsole === 'Shields' };
+            'shields-ui': inGame && activeConsole === 'Shields',
+            'sensors-ui': inGame && activeConsole === 'Sensors' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
       $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
       $('power-ui').className  = sections['power-ui']  ? 'active' : '';
       $('shields-ui').className = sections['shields-ui'] ? 'active' : '';
+      $('sensors-ui').className = sections['sensors-ui'] ? 'active' : '';
 
       // Orientation drives both the tab-bar layout and the container's
       // flex-direction (portrait = column, landscape = row). Computed once
@@ -1193,6 +1205,9 @@
       if (activeConsole === 'Shields') {
         pushShieldsConsoleState();
       }
+      if (activeConsole === 'Sensors') {
+        pushSensorsConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1367,6 +1382,97 @@
       iframe.addEventListener('load', () => { pushShieldsConsoleState(); });
     })();
 
+    // ── Sensors console iframe bridge ─────────────────────────────────────────
+    const SENSORS_RADAR_RANGE = 2000.0;
+
+    function buildSensorsConsoleState() {
+      const blips = (state.asteroids || []).map(a => {
+        const ax = entityX(a), az = entityZ(a);
+        const dx = ax - state.shipX, dz = az - state.shipZ;
+        if (dx * dx + dz * dz > SENSORS_RADAR_RANGE * SENSORS_RADAR_RANGE) return null;
+        const radar_x = dx / SENSORS_RADAR_RANGE;
+        const radar_y = dz / SENSORS_RADAR_RANGE;
+        const radius = entityRadius(a);
+        const tags = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
+        const kind = tags.includes('ship') ? 'ship'
+                   : tags.includes('station') ? 'station' : 'asteroid';
+        return {
+          uuid: a.uuid, radar_x, radar_y,
+          scaled_radius: radius / SENSORS_RADAR_RANGE,
+          kind, color: null,
+          name: a.name || null,
+          stance: a.stance || 'neutral',
+          faction: a.faction || null,
+        };
+      }).filter(Boolean);
+
+      let targetBearing = null, targetRange = null;
+      let targetName = null, targetKind = null, targetStance = null, targetFaction = null;
+      let targetClass = null, targetHullPct = null, targetHeading = null, targetSpeed = null;
+      let targetThreat = null, targetShieldFreq = null, targetShields = [];
+
+      if (state.sensorsTarget && state.asteroids) {
+        const tgt = state.asteroids.find(a => a.uuid === state.sensorsTarget);
+        if (tgt) {
+          const dx = entityX(tgt) - state.shipX;
+          const dz = entityZ(tgt) - state.shipZ;
+          targetBearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+          targetRange = Math.sqrt(dx * dx + dz * dz);
+          targetName = tgt.name || state.sensorsTarget;
+          const tags = (tgt.tags || tgt.entity_tags || []).map(t => String(t).toLowerCase());
+          targetKind = tags.includes('ship') ? 'ship'
+                     : tags.includes('station') ? 'station' : 'asteroid';
+          targetStance = tgt.stance || 'neutral';
+          targetFaction = tgt.faction || null;
+          targetClass = tgt.shipClass || null;
+          targetHullPct = tgt.hull_pct !== undefined ? tgt.hull_pct : null;
+          targetHeading = tgt.heading !== undefined ? tgt.heading : null;
+          targetSpeed = tgt.speed !== undefined ? tgt.speed : null;
+          targetThreat = tgt.threat || (targetStance === 'hostile' ? 'high' : 'low');
+          targetShieldFreq = tgt.shield_freq || null;
+          targetShields = tgt.shields || [];
+        }
+      }
+
+      return JSON.stringify({
+        scan_range: SENSORS_RADAR_RANGE,
+        complexity: state.complexity?.Sensors || 'full',
+        impulse_charge_progress: state.impulseChargeProgress || 0,
+        regions: state.regions || [],
+        blips,
+        target_uuid: state.sensorsTarget || null,
+        target_name: targetName,
+        target_kind: targetKind,
+        target_stance: targetStance,
+        target_faction: targetFaction,
+        target_bearing: targetBearing,
+        target_range: targetRange,
+        target_class: targetClass,
+        target_hull_pct: targetHullPct,
+        target_heading: targetHeading,
+        target_speed: targetSpeed,
+        target_threat: targetThreat,
+        target_shield_freq: targetShieldFreq,
+        target_shields: targetShields,
+      });
+    }
+
+    function pushSensorsConsoleState() {
+      if (activeConsole !== 'Sensors') return;
+      const iframe = $('sensors-iframe');
+      if (!iframe || !iframe.contentWindow) return;
+      try {
+        const fn = iframe.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn('Sensors', buildSensorsConsoleState());
+      } catch (_) {}
+    }
+
+    (function wireSensorsIframe() {
+      const iframe = $('sensors-iframe');
+      if (!iframe) return;
+      iframe.addEventListener('load', () => { pushSensorsConsoleState(); });
+    })();
+
     // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
     // The weapons-console.html iframe sends {type:'console_action', payload:json}
     // via postMessage when the player fires or taps a target. We translate
@@ -1420,6 +1526,12 @@
           break;
         case 'set_shield_focus':
           send('SetShieldFocus', { facing: action.facing || null });
+          break;
+        case 'set_sensors_target':
+          if (action.uuid) {
+            state.sensorsTarget = action.uuid;
+            send('SetScienceTarget', { uuid: action.uuid });
+          }
           break;
         default:
           break;
@@ -1624,6 +1736,7 @@
           if (snap.console_hull) state.consoleHull = snap.console_hull;
           pushWeaponsConsoleState();
           pushRepairConsoleState();
+          pushSensorsConsoleState();
           // View-direction highlighting is handled by the Bevy WASM UI (#48).
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state (the weapons console is pushed above so
@@ -1634,6 +1747,7 @@
           state.asteroids = (msg.data.world && msg.data.world.entities) || [];
           pushWeaponsConsoleState();
           pushHelmConsoleState();
+          pushSensorsConsoleState();
           return;
         }
         case 'TargetLock': {
@@ -1720,8 +1834,10 @@
             state.weaponsLocked = false;
             state.weaponsFireReady = false;
           }
+          if (state.sensorsTarget === uuid) state.sensorsTarget = null;
           pushWeaponsConsoleState();
           pushHelmConsoleState();
+          pushSensorsConsoleState();
           return;
         }
         case 'EntityDespawned': {
@@ -1732,8 +1848,10 @@
             state.weaponsLocked = false;
             state.weaponsFireReady = false;
           }
+          if (state.sensorsTarget === uuid) state.sensorsTarget = null;
           pushWeaponsConsoleState();
           pushHelmConsoleState();
+          pushSensorsConsoleState();
           return;
         }
         case 'DamageTaken': {

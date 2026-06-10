@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Sensors Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; }
+
+    .panel-inner {
+      padding: 22px 52px 20px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    .panel-mid {
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: row; gap: 28px;
+    }
+
+    .radar-col {
+      flex: 1 1 0; min-width: 0;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    .ctrl-col {
+      flex: 0 0 390px;
+      display: flex; flex-direction: column; gap: 9px;
+      min-height: 0;
+      overflow-y: auto; overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line-soft) transparent;
+    }
+
+    .hero          { gap: 16px; padding: 2px 0 2px; }
+    .hero h1       { font-size: 44px; letter-spacing: .30em; }
+    .hero h1 .sub  { font-size: 13px; margin-top: 2px; }
+    .hero .bar     { width: 6px; }
+
+    .radar-col .radar-wrap {
+      flex: 1; min-height: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .radar-col .radar {
+      aspect-ratio: 1/1; height: 100%; width: auto;
+      max-height: 680px; max-width: 680px;
+    }
+    .radar canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      z-index: 2; pointer-events: none;
+    }
+
+    .radar-col > .readout         { flex-shrink: 0; padding: 9px 20px; }
+    .radar-col > .readout .v      { font-size: 26px; }
+    .radar-col > .readout .k,
+    .radar-col > .readout .u      { font-size: 11px; }
+
+    .side-rail {
+      position: absolute;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: .38em;
+    }
+    .side-rail.top    { top: 15px;    left: 50%; transform: translateX(-50%); }
+    .side-rail.bottom { bottom: 13px; left: 50%; transform: translateX(-50%); }
+
+    #desig-card   { flex: 0 0 auto; }
+    #shields-card { flex: 1 1 0; min-height: 0; }
+    #scan-card    { flex: 1 1 0; min-height: 0; }
+
+    .ctrl-col .inset .inset-body {
+      padding: 10px 15px !important;
+      overflow: hidden;
+    }
+    .ctrl-col .section-header        { font-size: 13px; margin-bottom: 5px; }
+    .ctrl-col .section-header .tag   { font-size: 9px; }
+
+    .tgt-name {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 21px; font-weight: 600;
+      color: var(--ink); letter-spacing: .07em; line-height: 1.2;
+    }
+    .tgt-name.empty {
+      font-size: 14px; letter-spacing: .28em;
+      color: var(--ink-faint);
+    }
+
+    .badges {
+      display: flex; gap: 5px; flex-wrap: wrap;
+      margin-top: 5px; align-items: center;
+    }
+    .badge {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; letter-spacing: .18em;
+      padding: 2px 6px; border: 1px solid;
+    }
+    .badge.hostile  { color: var(--fire-bright); border-color: var(--fire-dim);   background: rgba(224,64,44,.09); }
+    .badge.friendly { color: var(--loaded);      border-color: var(--loaded-dim); background: rgba(78,200,112,.09); }
+    .badge.neutral  { color: var(--cyan);        border-color: var(--cyan-dim);   background: rgba(108,182,208,.09); }
+    .badge.type     { color: var(--ink-dim);     border-color: var(--line-faint); }
+
+    .pos-strip {
+      display: flex; gap: 16px; margin-top: 7px;
+      padding-top: 7px; border-top: 1px solid var(--line-faint);
+      align-items: baseline;
+    }
+    .ps-item { display: flex; align-items: baseline; gap: 5px; }
+    .ps-k {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; letter-spacing: .2em; color: var(--ink-faint);
+    }
+    .ps-v {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 22px; font-weight: 600;
+      color: var(--ink); letter-spacing: .05em;
+    }
+    .ps-u {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; color: var(--ink-faint); letter-spacing: .14em;
+    }
+
+    .shield-facings { display: flex; flex-direction: column; gap: 4px; }
+    .s-facing       { display: flex; align-items: center; gap: 6px; }
+    .s-facing .lbl  {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; letter-spacing: .18em; color: var(--ink-faint);
+      min-width: 28px; flex-shrink: 0;
+    }
+    .s-facing .bar-w {
+      flex: 1; height: 7px;
+      background: var(--bg-deep);
+      border: 1px solid var(--line-faint);
+      overflow: hidden; position: relative;
+    }
+    .s-facing .bar-f {
+      position: absolute; top: 0; left: 0; bottom: 0;
+      transition: width .5s ease;
+    }
+    .bar-f.ok   { background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); }
+    .bar-f.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
+    .bar-f.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
+    .bar-f.off  { background: var(--line-soft); opacity: .4; }
+    .s-facing .pct {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; color: var(--ink-dim); letter-spacing: .08em;
+      min-width: 28px; text-align: right; flex-shrink: 0;
+    }
+
+    .freq-row {
+      display: flex; align-items: center; gap: 8px;
+      margin-top: 6px;
+    }
+    .freq-row .lbl {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 9px; letter-spacing: .2em; color: var(--ink-faint);
+      flex-shrink: 0;
+    }
+    .freq-chips { display: flex; gap: 4px; flex: 1; }
+    .freq-chip {
+      flex: 1; height: 25px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 13px; font-weight: 600; letter-spacing: .15em;
+      background: var(--bg-deep);
+      border: 1px solid var(--line-faint);
+      color: var(--ink-faint);
+    }
+    .freq-chip.active {
+      color: var(--loaded);
+      border-color: var(--loaded);
+      background: rgba(78,200,112,.08);
+      box-shadow: 0 0 10px rgba(78,200,112,.2), inset 0 0 4px rgba(78,200,112,.07);
+    }
+
+    .scan-rows { display: flex; flex-direction: column; }
+    .scan-row {
+      display: flex; align-items: baseline; gap: 6px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; letter-spacing: .13em;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--line-faint);
+    }
+    .scan-row:last-child { border-bottom: none; }
+    .scan-row .k {
+      color: var(--ink-faint); flex-shrink: 0;
+      min-width: 66px; font-size: 9px; letter-spacing: .18em;
+    }
+    .scan-row .v           { color: var(--ink); flex: 1; }
+    .scan-row .v.hostile   { color: var(--fire-bright); }
+    .scan-row .v.warn      { color: var(--reloading); }
+    .scan-row .v.ok        { color: var(--loaded); }
+    .scan-row .v.dim       { color: var(--ink-faint); }
+
+    .action-row { display: flex; gap: 8px; flex-shrink: 0; }
+    .action-row .btn {
+      flex: 1; --h: 54px;
+      font-size: 14px; letter-spacing: .2em;
+      padding: 0 10px 0 38px;
+    }
+    .action-row .btn .led { width: 12px; height: 12px; left: 12px; }
+
+    .btn.sensors            { color: var(--cyan); }
+    .btn.sensors > .btn-bg  { background: linear-gradient(180deg, #0b1d2b 0%, #060e16 100%); }
+    .btn.sensors            { background: linear-gradient(180deg, #4d9fbe 0%, #1a4858 55%, #091620 100%); }
+
+    .panel-dim { opacity: .3; pointer-events: none; }
+
+    @media (orientation: portrait) {
+      body { overflow-y: auto; overflow-x: hidden; }
+
+      .panel-inner { padding: .5rem .45rem .7rem; gap: .45rem; }
+
+      .panel-mid  { flex-direction: column; gap: .45rem; }
+      .radar-col,
+      .ctrl-col   { width: 100%; flex: 0 0 auto; }
+
+      .hero        { padding: .2rem 0 .25rem; gap: .4rem; }
+      .hero h1     { font-size: 1.5rem; letter-spacing: .14em; }
+      .hero h1 .sub{ display: none; }
+      .hero .bar   { display: none; }
+      .hero .spacer{ display: none; }
+      .hero .complexity { font-size: .7rem; padding: .22rem .5rem; }
+
+      .side-rail { display: none; }
+
+      .radar-col .radar-wrap { min-height: 0; }
+      .radar-col .radar      { width: 100%; height: auto; max-height: none; max-width: none; }
+
+      .radar-col > .readout    { padding: .4rem .55rem; }
+      .radar-col > .readout .v { font-size: 1.2rem; }
+
+      #shields-card,
+      #scan-card   { flex: 0 0 auto; min-height: 0; }
+
+      .ctrl-col .inset .inset-body  { padding: .45rem .65rem !important; }
+      .ctrl-col .section-header     { font-size: .7rem; margin-bottom: .25rem; }
+
+      .tgt-name       { font-size: 1.2rem; }
+      .tgt-name.empty { font-size: .8rem; }
+
+      .ps-v        { font-size: 1.2rem; }
+      .pos-strip   { gap: 12px; margin-top: 5px; padding-top: 5px; }
+
+      .action-row .btn { --h: 2.7rem; font-size: .75rem; padding: 0 6px 0 28px; }
+      .action-row .btn .led { width: 9px; height: 9px; left: 9px; }
+
+      .console-footer { font-size: .65rem; gap: .38rem; }
+    }
+  </style>
+</head>
+<body style="background:#000; margin:0; overflow:hidden;">
+
+  <div class="frame" data-screen-label="Sensors Console">
+    <div class="panel"></div>
+    <div class="panel-inner">
+
+      <div class="side-rail top">PROJECT PHOENIX · SENSORS CONSOLE · SCIENCE STATION</div>
+      <div class="side-rail bottom" id="footer-ticker">TICK — · LATENCY — · LINK OK</div>
+
+      <header class="hero">
+        <div class="bar"></div>
+        <h1>SENSORS<span class="sub">LONG RANGE · SCIENCE STATION</span></h1>
+        <div class="spacer"></div>
+        <div class="complexity" id="cpx-badge"
+             style="cursor:pointer" title="Click to cycle complexity">CPX: FULL ▾</div>
+      </header>
+
+      <div class="panel-mid">
+
+        <section class="radar-col">
+          <div class="radar-wrap">
+            <div class="radar" style="aspect-ratio:1/1; margin:0 auto;">
+              <img class="bg" src="src_assets/helm_console/radar-bg.png" alt="">
+              <div class="radar-bracket tl"><div class="nub"></div></div>
+              <div class="radar-bracket tr"><div class="nub"></div></div>
+              <div class="radar-bracket bl"><div class="nub"></div></div>
+              <div class="radar-bracket br"><div class="nub"></div></div>
+              <div class="scan"></div>
+              <div class="crosshair-h"></div>
+              <div class="crosshair-v"></div>
+              <div class="range-label" id="rl-33"
+                   style="top:50%;left:8%;transform:translateY(-50%)">400</div>
+              <div class="range-label" id="rl-66"
+                   style="top:50%;left:21%;transform:translateY(-50%)">800</div>
+              <div class="range-label" id="rl-100"
+                   style="top:50%;left:34%;transform:translateY(-50%)">1200</div>
+              <canvas id="radar-canvas"></canvas>
+            </div>
+          </div>
+
+          <div class="readout">
+            <div class="k">SCAN RANGE</div>
+            <div class="v" id="scan-range-val">1200</div>
+            <div class="u">AU</div>
+            <div class="spacer"></div>
+            <div class="sub" id="contact-sub">
+              8 CONTACTS<br>
+              <span style="color:var(--cyan)">WORLD FIXED</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="ctrl-col">
+
+          <div class="inset" id="desig-card">
+            <div class="inset-body">
+              <div class="section-header">
+                <span>DESIGNATION</span>
+                <span class="tag" id="tgt-kind-tag">NO CONTACT</span>
+              </div>
+              <div class="tgt-name empty" id="tgt-name">NO TARGET</div>
+              <div class="badges" id="tgt-badges"></div>
+              <div class="pos-strip">
+                <div class="ps-item">
+                  <span class="ps-k">BRG</span>
+                  <span class="ps-v" id="tgt-bearing">—</span>
+                  <span class="ps-u">°</span>
+                </div>
+                <div style="color:var(--line-soft)">·</div>
+                <div class="ps-item">
+                  <span class="ps-k">RNG</span>
+                  <span class="ps-v" id="tgt-range">—</span>
+                  <span class="ps-u">AU</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="inset panel-dim" id="shields-card">
+            <div class="inset-body">
+              <div class="section-header">
+                <span>SHIELDS</span>
+                <span class="tag" id="shields-tag">—</span>
+              </div>
+
+              <div class="shield-facings" id="shield-facings">
+              </div>
+
+              <div id="freq-section" style="display:none">
+                <div class="freq-row">
+                  <span class="lbl">SHIELD FREQ</span>
+                  <div class="freq-chips">
+                    <div class="freq-chip" id="fc-alpha">α</div>
+                    <div class="freq-chip" id="fc-beta">β</div>
+                    <div class="freq-chip" id="fc-gamma">γ</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="inset panel-dim" id="scan-card">
+            <div class="inset-body">
+              <div class="section-header">
+                <span>SCAN DATA</span>
+                <span class="tag">PASSIVE</span>
+              </div>
+              <div class="scan-rows" id="scan-rows">
+                <div class="scan-row">
+                  <span class="k">STATUS</span>
+                  <span class="v dim">AWAITING TARGET</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="action-row">
+            <button class="btn sensors" id="btn-on-screen" type="button">
+              <span class="btn-bg"></span>
+              <span class="led cyan"></span>
+              <span class="label">ON SCREEN</span>
+            </button>
+            <button class="btn danger" id="btn-cancel-impulse"
+                    type="button" style="display:none">
+              <span class="btn-bg"></span>
+              <span class="led fire"></span>
+              <span class="label">CANCEL IMPULSE</span>
+            </button>
+          </div>
+
+        </section>
+      </div>
+
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status">SENSORS ONLINE</span>
+        <span class="sep">·</span>
+        <span id="footer-target" style="color:var(--ink-faint)">NO TARGET</span>
+        <span style="flex:1"></span>
+        <span id="footer-right" style="color:var(--ink-faint)">—</span>
+      </footer>
+
+    </div>
+  </div>
+
+  <script src="radar-widget.js"></script>
+  <script>
+    var _state      = null;
+    var _radarWidget = null;
+    var _complexity = 'full';
+    var _CPXCYCLE   = ['full', 'std', 'low'];
+
+    window.__updateConsole = function(name, stateJson) {
+      var s;
+      try { s = JSON.parse(stateJson); } catch(_) { return; }
+      _apply(s);
+    };
+
+    function _apply(s) {
+      if (!_state) { _state = {}; }
+      if (s.scan_range != null)         _state.scan_range = s.scan_range;
+      if (s.complexity)                 _state.complexity = s.complexity;
+      if (s.impulse_charge_progress !== undefined) _state.impulse_charge_progress = s.impulse_charge_progress;
+      if (s.blips)                      _state.blips = s.blips;
+      if (s.regions)                    _state.regions = s.regions;
+      if (s.target_uuid !== undefined)  _state.target_uuid = s.target_uuid;
+      if (s.target_name)                _state.target_name = s.target_name;
+      if (s.target_kind)                _state.target_kind = s.target_kind;
+      if (s.target_stance)              _state.target_stance = s.target_stance;
+      if (s.target_faction !== undefined) _state.target_faction = s.target_faction;
+      if (s.target_bearing !== undefined) _state.target_bearing = s.target_bearing;
+      if (s.target_range !== undefined)   _state.target_range = s.target_range;
+      if (s.target_class)               _state.target_class = s.target_class;
+      if (s.target_hull_pct !== undefined) _state.target_hull_pct = s.target_hull_pct;
+      if (s.target_heading !== undefined)  _state.target_heading = s.target_heading;
+      if (s.target_speed !== undefined)    _state.target_speed = s.target_speed;
+      if (s.target_threat)              _state.target_threat = s.target_threat;
+      if (s.target_shield_freq !== undefined) _state.target_shield_freq = s.target_shield_freq;
+      if (s.target_shields)             _state.target_shields = s.target_shields;
+      _render(_state);
+    }
+
+    function _render(s) {
+      if (!s) return;
+      if (s.complexity) _complexity = s.complexity;
+
+      var range = s.scan_range || 1200;
+      document.getElementById('scan-range-val').textContent = range;
+      document.getElementById('rl-33').textContent  = Math.round(range * .33);
+      document.getElementById('rl-66').textContent  = Math.round(range * .66);
+      document.getElementById('rl-100').textContent = range;
+
+      var blips = s.blips || [];
+      document.getElementById('contact-sub').innerHTML =
+        blips.length + ' CONTACT' + (blips.length !== 1 ? 'S' : '') +
+        '<br><span style="color:var(--cyan)">WORLD FIXED</span>';
+
+      if (_radarWidget) {
+        _radarWidget.update({
+          mode:        'pre-projected',
+          blips:       blips,
+          target_uuid: s.target_uuid || null,
+          regions:     s.regions || [],
+        });
+      }
+
+      _renderTargetPanel(s, blips);
+
+      document.getElementById('btn-cancel-impulse').style.display =
+        (s.impulse_charge_progress || 0) > 0 ? '' : 'none';
+
+      document.getElementById('cpx-badge').textContent =
+        'CPX: ' + _complexity.toUpperCase() + ' ▾';
+
+      var ftgt = document.getElementById('footer-target');
+      if (s.target_uuid) {
+        ftgt.textContent = '\u25C9 ' + (s.target_name || s.target_uuid.substring(0, 18));
+        ftgt.style.color = 'var(--tactical)';
+      } else {
+        ftgt.textContent  = 'NO TARGET';
+        ftgt.style.color  = 'var(--ink-faint)';
+      }
+    }
+
+    function _renderTargetPanel(s, blips) {
+      var hasTarget  = !!s.target_uuid;
+      var nameEl     = document.getElementById('tgt-name');
+      var kindTag    = document.getElementById('tgt-kind-tag');
+      var badgesEl   = document.getElementById('tgt-badges');
+      var bearEl     = document.getElementById('tgt-bearing');
+      var rangeEl    = document.getElementById('tgt-range');
+      var shieldsCard = document.getElementById('shields-card');
+      var scanCard    = document.getElementById('scan-card');
+
+      if (!hasTarget) {
+        nameEl.textContent  = 'NO TARGET';
+        nameEl.className    = 'tgt-name empty';
+        kindTag.textContent = 'NO CONTACT';
+        badgesEl.innerHTML  = '';
+        bearEl.textContent  = '\u2014';
+        rangeEl.textContent = '\u2014';
+        shieldsCard.classList.add('panel-dim');
+        scanCard.classList.add('panel-dim');
+        document.getElementById('shield-facings').innerHTML = '';
+        document.getElementById('freq-section').style.display = 'none';
+        document.getElementById('scan-rows').innerHTML =
+          '<div class="scan-row"><span class="k">STATUS</span>' +
+          '<span class="v dim">AWAITING TARGET</span></div>';
+        return;
+      }
+
+      var kind    = s.target_kind   || 'unknown';
+      var stance  = s.target_stance || 'neutral';
+      var faction = s.target_faction || null;
+
+      nameEl.textContent = s.target_name || s.target_uuid;
+      nameEl.className   = 'tgt-name';
+      kindTag.textContent = kind.toUpperCase();
+
+      var SC = { hostile:'hostile', friendly:'friendly', allied:'friendly', neutral:'neutral' };
+      var SL = { hostile:'HOSTILE', friendly:'ALLIED',   allied:'ALLIED',   neutral:'NEUTRAL' };
+      var TL = { ship:'WARSHIP', asteroid:'ASTEROID', station:'STARBASE',
+                 planet:'PLANET', star:'STAR', torpedo:'TORPEDO' };
+      var html = '<span class="badge ' + (SC[stance]||'neutral') + '">' +
+                 (SL[stance]||'UNKNOWN') + '</span>';
+      html += '<span class="badge type">' + (TL[kind]||kind.toUpperCase()) + '</span>';
+      if (faction) html += '<span class="badge neutral">' + faction.toUpperCase() + '</span>';
+      badgesEl.innerHTML = html;
+
+      bearEl.textContent  = s.target_bearing != null
+        ? s.target_bearing.toFixed(1) : '\u2014';
+      rangeEl.textContent = s.target_range   != null
+        ? Math.round(s.target_range) : '\u2014';
+
+      var shields = s.target_shields || [];
+      if (shields.length > 0) {
+        shieldsCard.classList.remove('panel-dim');
+        _renderShields(shields, s.target_shield_freq);
+      } else {
+        shieldsCard.classList.add('panel-dim');
+        document.getElementById('shield-facings').innerHTML =
+          '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;' +
+          'color:var(--ink-faint);letter-spacing:.2em;padding:6px 0">NO SHIELD DATA</div>';
+        document.getElementById('freq-section').style.display = 'none';
+      }
+
+      scanCard.classList.remove('panel-dim');
+      _renderScanData(s);
+    }
+
+    function _renderShields(shields, shieldFreq) {
+      var anyOn = shields.some(function(f){ return f.online !== false; });
+      document.getElementById('shields-tag').textContent = anyOn ? 'ONLINE' : 'OFFLINE';
+
+      var html = '';
+      shields.forEach(function(f) {
+        var pct = f.max_hp > 0 ? Math.round(f.hp / f.max_hp * 100) : 0;
+        var cls = f.online === false ? 'off'
+                : pct > 60 ? 'ok' : pct > 25 ? 'warn' : 'crit';
+        var pctStr = f.online === false ? 'OFF' : pct + '%';
+        html += '<div class="s-facing">' +
+                '<span class="lbl">' + (f.label||'?').substring(0,4).toUpperCase() + '</span>' +
+                '<div class="bar-w"><div class="bar-f ' + cls + '" style="width:' + pct + '%"></div></div>' +
+                '<span class="pct">' + pctStr + '</span>' +
+                '</div>';
+      });
+      document.getElementById('shield-facings').innerHTML = html;
+
+      var showFreq = _complexity === 'full' && shieldFreq;
+      document.getElementById('freq-section').style.display = showFreq ? '' : 'none';
+      if (showFreq) {
+        ['alpha','beta','gamma'].forEach(function(f) {
+          var el = document.getElementById('fc-' + f);
+          if (el) el.className = 'freq-chip' + (shieldFreq === f ? ' active' : '');
+        });
+      }
+    }
+
+    function _renderScanData(s) {
+      var rows = [];
+      if (s.target_class)
+        rows.push({ k: 'CLASS',    v: s.target_class });
+      if (s.target_hull_pct != null) {
+        var hp  = Math.round(s.target_hull_pct);
+        var cls = hp > 70 ? 'ok' : hp > 30 ? 'warn' : 'hostile';
+        rows.push({ k: 'HULL EST', v: hp + '%', cls: cls });
+      }
+      if (s.target_heading != null)
+        rows.push({ k: 'HEADING',  v: s.target_heading.toFixed(0) + '\u00B0' });
+      if (s.target_speed != null)
+        rows.push({ k: 'SPEED',    v: s.target_speed.toFixed(1) + ' kn' });
+      if (s.target_threat) {
+        var tc = s.target_threat === 'high'   ? 'hostile'
+               : s.target_threat === 'medium' ? 'warn' : 'ok';
+        rows.push({ k: 'THREAT',   v: s.target_threat.toUpperCase(), cls: tc });
+      }
+      if (!rows.length)
+        rows.push({ k: 'STATUS',   v: 'SCANNING...', cls: 'dim' });
+
+      document.getElementById('scan-rows').innerHTML = rows.map(function(r) {
+        return '<div class="scan-row"><span class="k">' + r.k + '</span>' +
+               '<span class="v' + (r.cls ? ' '+r.cls : '') + '">' + r.v + '</span></div>';
+      }).join('');
+    }
+
+    document.getElementById('btn-on-screen').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({
+        action: 'set_view', console: 'Sensors', mode: 'SensorsRadar'
+      }));
+    });
+    document.getElementById('btn-cancel-impulse').addEventListener('click', function() {
+      window.__sendAction(JSON.stringify({
+        action: 'cancel_impulse', console: 'Sensors'
+      }));
+    });
+
+    document.getElementById('cpx-badge').addEventListener('click', function() {
+      var i = _CPXCYCLE.indexOf(_complexity);
+      _complexity = _CPXCYCLE[(i + 1) % _CPXCYCLE.length];
+      if (_state) { _state.complexity = _complexity; _render(_state); }
+    });
+
+    _radarWidget = (function() {
+      var canvas = document.getElementById('radar-canvas');
+      if (!canvas || typeof RadarWidget === 'undefined') return null;
+      return new RadarWidget(canvas, {
+        consoleId:    'sensors',
+        orientation:  'world_fixed',
+        iconBasePath: 'src_assets/radar_icons/Icon-',
+        onBlipTap: function(uuid) {
+          window.__sendAction(JSON.stringify({
+            action: 'set_sensors_target', console: 'Sensors', uuid: uuid
+          }));
+          if (!_state) return;
+          var blip = (_state.blips || []).find(function(b){ return b.uuid === uuid; });
+          if (!blip) return;
+
+          _state.target_uuid    = uuid;
+          _state.target_name    = blip.name || uuid;
+          _state.target_kind    = blip.kind || 'unknown';
+          _state.target_stance  = blip.stance  || 'neutral';
+          _state.target_faction = blip.faction || null;
+
+          var rx = blip.radar_x || 0, ry = blip.radar_y || 0;
+          _state.target_bearing =
+            ((Math.atan2(rx, -ry) * 180 / Math.PI) + 360) % 360;
+          _state.target_range =
+            Math.sqrt(rx*rx + ry*ry) * (_state.scan_range || 1200);
+
+          _state.target_class       = blip.shipClass   || null;
+          _state.target_hull_pct    = blip.hullPct     || null;
+          _state.target_heading     = blip.heading     || null;
+          _state.target_speed       = blip.speed       || null;
+          _state.target_threat      = blip.threat      || (blip.stance === 'hostile' ? 'high' : 'low');
+          _state.target_shield_freq = blip.shieldFreq  || null;
+          _state.target_shields     = blip.shields     || [];
+          if (blip.kind === 'asteroid') {
+            _state.target_class = 'TYPE-M ASTEROID';
+            _state.target_shields = [];
+          }
+
+          _render(_state);
+        },
+      });
+    })();
+
+    // ── Bridge transport shim (ADR-0001 §3) ──────────────────────
+    var _bc = ('BroadcastChannel' in window) ? new BroadcastChannel('phoenix-console-state') : null;
+    window.__sendAction = function(json) {
+      if (window !== window.parent) {
+        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
+      } else if (window.ipc) {
+        window.ipc.postMessage(json);
+      } else if (window.wasmBindings && typeof window.wasmBindings.wasm_ui_action === 'function') {
+        window.wasmBindings.wasm_ui_action(json);
+      } else if (_bc) {
+        _bc.postMessage({ type: 'console_action', payload: json });
+      }
+    };
+    if (_bc) {
+      _bc.onmessage = function(e) {
+        if (e.data && e.data.type === 'console_state' && e.data.name === 'Sensors') {
+          if (typeof window.__updateConsole === 'function') window.__updateConsole(e.data.name, e.data.json);
+        }
+      };
+    }
+
+    // ── Demo state ──────────────────────────────────────────────
+    var _DEMO = {
+      scan_range: 1200,
+      complexity: 'full',
+      impulse_charge_progress: 0,
+      regions: [],
+      blips: [
+        {
+          uuid: 'ksv-nemesis', name: "KSV NEMESIS", kind: 'ship',
+          radar_x: -0.24, radar_y: -0.12, scaled_radius: 0.03,
+          color: [1.0, 0.50, 0.376],
+          stance: 'hostile', faction: 'Klingon',
+          shipClass: "B'REL-CLASS", hullPct: 78,
+          heading: 124, speed: 18.2, threat: 'high',
+          shieldFreq: 'alpha',
+          shields: [
+            { label:'FORE', hp: 72, max_hp:100, online:true  },
+            { label:'PORT', hp: 31, max_hp:100, online:true  },
+            { label:'AFT',  hp: 88, max_hp:100, online:true  },
+            { label:'STB',  hp: 64, max_hp:100, online:true  },
+          ],
+        },
+        {
+          uuid: 'ksv-ravager', name: "KSV RAVAGER", kind: 'ship',
+          radar_x:  0.47, radar_y:  0.31, scaled_radius: 0.03,
+          color: [1.0, 0.50, 0.376],
+          stance: 'hostile', faction: 'Klingon',
+          shipClass: 'D7-CLASS', hullPct: 94,
+          heading: 318, speed: 14.6, threat: 'high',
+          shieldFreq: 'gamma',
+          shields: [
+            { label:'FORE', hp:100, max_hp:100, online:true },
+            { label:'PORT', hp:100, max_hp:100, online:true },
+            { label:'AFT',  hp: 96, max_hp:100, online:true },
+            { label:'STB',  hp: 88, max_hp:100, online:true },
+          ],
+        },
+        {
+          uuid: 'rws-phantom', name: "RWS PHANTOM", kind: 'ship',
+          radar_x: -0.56, radar_y:  0.38, scaled_radius: 0.02,
+          color: [1.0, 0.40, 0.40],
+          stance: 'hostile', faction: 'Romulan',
+          shipClass: 'WARBIRD-CLASS', hullPct: 61,
+          heading: 87, speed: 22.0, threat: 'high',
+          shieldFreq: 'beta',
+          shields: [
+            { label:'FORE', hp: 45, max_hp:100, online:true  },
+            { label:'PORT', hp: 12, max_hp:100, online:true  },
+            { label:'AFT',  hp: 78, max_hp:100, online:true  },
+            { label:'STB',  hp:  0, max_hp:100, online:false },
+          ],
+        },
+        {
+          uuid: 'uss-endeavour', name: "USS ENDEAVOUR", kind: 'ship',
+          radar_x:  0.12, radar_y:  0.57, scaled_radius: 0.03,
+          color: [0.30, 0.90, 1.0],
+          stance: 'friendly', faction: 'Starfleet',
+          shipClass: 'EXCELSIOR-CLASS', hullPct: 100,
+          heading: 210, speed: 8.1, threat: 'low',
+          shieldFreq: null,
+          shields: [
+            { label:'FORE', hp:100, max_hp:100, online:true },
+            { label:'PORT', hp:100, max_hp:100, online:true },
+            { label:'AFT',  hp:100, max_hp:100, online:true },
+            { label:'STB',  hp:100, max_hp:100, online:true },
+          ],
+        },
+        { uuid:'ast-001', kind:'asteroid', radar_x:-0.65, radar_y: 0.21,
+          scaled_radius:0.025, color:[0.48,0.75,1.0] },
+        { uuid:'ast-002', kind:'asteroid', radar_x: 0.31, radar_y:-0.60,
+          scaled_radius:0.020, color:[0.48,0.75,1.0] },
+        { uuid:'ast-003', kind:'asteroid', radar_x:-0.14, radar_y: 0.74,
+          scaled_radius:0.030, color:[0.48,0.75,1.0] },
+        {
+          uuid: 'sb-7', name: "STARBASE 7", kind: 'station',
+          radar_x:  0.62, radar_y: -0.22, scaled_radius: 0.04,
+          color: [1.0, 0.88, 0.25],
+          stance: 'friendly', faction: 'Starfleet',
+          shipClass: 'SPACEDOCK-CLASS', hullPct: 100,
+          threat: 'low', shieldFreq: null, shields: [],
+        },
+      ],
+      target_uuid:        'ksv-nemesis',
+      target_name:        "KSV NEMESIS",
+      target_kind:        'ship',
+      target_stance:      'hostile',
+      target_faction:     'Klingon',
+      target_bearing:     243.4,
+      target_range:       321,
+      target_class:       "B'REL-CLASS",
+      target_hull_pct:    78,
+      target_heading:     124,
+      target_speed:       18.2,
+      target_threat:      'high',
+      target_shield_freq: 'alpha',
+      target_shields: [
+        { label:'FORE', hp: 72, max_hp:100, online:true  },
+        { label:'PORT', hp: 31, max_hp:100, online:true  },
+        { label:'AFT',  hp: 88, max_hp:100, online:true  },
+        { label:'STB',  hp: 64, max_hp:100, online:true  },
+      ],
+    };
+
+    _state = JSON.parse(JSON.stringify(_DEMO));
+    _render(_state);
+
+    setInterval(function() {
+      if (!_state) return;
+      var changed = false;
+      _state.blips.forEach(function(b) {
+        if (b.kind !== 'asteroid' && b.kind !== 'station') {
+          b.radar_x = Math.max(-0.90, Math.min(0.90,
+            b.radar_x + (Math.random() - 0.5) * 0.006));
+          b.radar_y = Math.max(-0.90, Math.min(0.90,
+            b.radar_y + (Math.random() - 0.5) * 0.006));
+          changed = true;
+        }
+      });
+      if (changed && _radarWidget) {
+        _radarWidget.update({
+          mode:        'pre-projected',
+          blips:       _state.blips,
+          target_uuid: _state.target_uuid,
+          regions:     [],
+        });
+      }
+    }, 900);
+  </script>
+
+</body>
+</html>

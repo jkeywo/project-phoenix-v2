@@ -1204,7 +1204,7 @@ pub struct WeaponsConsoleState {
 ///
 /// Mirrors `WeaponsConsoleState` — written into a single
 /// `CaptainConsoleStateComp` component and pushed on change via
-/// `ConsoleStateChanged { name: "Captain", json }`.
+/// `ConsoleStateChanged { name: "CaptainChair", json }`.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CaptainConsoleState {
     /// Whether the ship is at red alert.

@@ -160,7 +160,7 @@ fn recompute_captain_console_state(
 }
 
 /// `Changed<CaptainConsoleStateComp>` system: encode the state and emit a
-/// `ConsoleStateChanged { name: "Captain", json }` message for the wasm bridge
+/// `ConsoleStateChanged { name: "CaptainChair", json }` message for the wasm bridge
 /// to forward to the JS `__updateConsole` callback.
 fn push_captain_console_state(
     comp_q: Query<&CaptainConsoleStateComp, Changed<CaptainConsoleStateComp>>,
@@ -169,7 +169,7 @@ fn push_captain_console_state(
     for comp in comp_q.iter() {
         if let Ok(json) = crate::core::codec::encode_console_state(&comp.0) {
             writer.write(ConsoleStateChanged {
-                name: "Captain".into(),
+                name: "CaptainChair".into(),
                 json,
             });
         }
@@ -474,7 +474,7 @@ mod tests {
         let pushes = &app.world().resource::<ConsolePushes>().0;
         assert_eq!(pushes.len(), 1, "expected exactly one push after a change");
         let push = &pushes[0];
-        assert_eq!(push.name, "Captain");
+        assert_eq!(push.name, "CaptainChair");
         assert!(push.json.contains("\"red_alert\":true"), "json: {}", push.json);
         assert!(push.json.contains("\"hull_integrity_pct\":75.0"), "json: {}", push.json);
         assert!(push.json.contains("\"RED ALERT\""), "json: {}", push.json);

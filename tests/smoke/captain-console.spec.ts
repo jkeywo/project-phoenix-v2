@@ -25,7 +25,7 @@ test('captain console: __updateConsole renders objectives, alert status, contact
     blips: [{ uuid: 'e1' }, { uuid: 'e2' }, { uuid: 'e3' }],
   };
 
-  await page.evaluate((s) => (window as any).__updateConsole('Captain', JSON.stringify(s)), state);
+  await page.evaluate((s) => (window as any).__updateConsole('CaptainChair', JSON.stringify(s)), state);
 
   // Hidden data-attr containers.
   await expect(page.locator('#objectives .objective-data')).toHaveCount(2);
@@ -68,7 +68,7 @@ test('captain console: standard alert state renders correctly', async ({ page })
     blips: [],
   };
 
-  await page.evaluate((s) => (window as any).__updateConsole('Captain', JSON.stringify(s)), state);
+  await page.evaluate((s) => (window as any).__updateConsole('CaptainChair', JSON.stringify(s)), state);
 
   await expect(page.locator('#alert-status')).toHaveText('STANDARD');
   await expect(page.locator('#alert-led')).not.toHaveClass(/fire/);

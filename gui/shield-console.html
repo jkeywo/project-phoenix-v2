@@ -504,23 +504,23 @@
       _rerender();
     }
 
-    // ── Host bridge ─────────────────────────────────────────────
+    // ── Bridge transport shim (ADR-0001 §3) ──────────────────────
+    var _bc = ('BroadcastChannel' in window) ? new BroadcastChannel('phoenix-console-state') : null;
     window.__sendAction = function(json) {
-      try {
+      if (window !== window.parent) {
         window.parent.postMessage({ type: 'console_action', payload: json }, '*');
-      } catch(e) {}
+      } else if (window.ipc) {
+        window.ipc.postMessage(json);
+      } else if (window.wasmBindings && typeof window.wasmBindings.wasm_ui_action === 'function') {
+        window.wasmBindings.wasm_ui_action(json);
+      } else if (_bc) {
+        _bc.postMessage({ type: 'console_action', payload: json });
+      }
     };
-
-    var _bc = null;
-    try { _bc = new BroadcastChannel('console_state'); } catch(e) {}
     if (_bc) {
       _bc.onmessage = function(e) {
-        if (e.data && e.data.type === 'console_action' && e.data.payload) {
-          var action;
-          try { action = JSON.parse(e.data.payload); } catch(_) { return; }
-          if (action.action === 'set_shield_focus') {
-            onFocus(action.facing || null);
-          }
+        if (e.data && e.data.type === 'console_state' && e.data.name === 'Shields') {
+          if (typeof window.__updateConsole === 'function') window.__updateConsole(e.data.name, e.data.json);
         }
       };
     }

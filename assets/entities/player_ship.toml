@@ -113,7 +113,7 @@ impulse_acceleration_multiplier = 5.0
 
 [helm_console.radar]
 range = 250.0
-shows = ["player", "asteroid", "ship", "station", "planet", "star"]
+shows = ["player", "asteroid", "asteroid_field", "ship", "station", "planet", "star"]
 
 [navigation_console]
 

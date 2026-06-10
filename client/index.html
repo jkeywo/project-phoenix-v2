@@ -395,7 +395,7 @@
     }
     #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-370006e5a53e82ce.js" crossorigin="anonymous" integrity="sha384-+wDa9RskvA8Jx83D+KTuF3MzmyUWUN7yBdTDmRS4JGYUmDAfSQA0UXhkSBZ6srCP"><link rel="preload" href="./project-phoenix-370006e5a53e82ce_bg.wasm" crossorigin="anonymous" integrity="sha384-bnygPG8+uE8mxHlcRcrMv0Zd5+9BjEZwnj4TtINvGxeGv4kHdJ2sxht1JkSs5y71" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-2c4c0ec03c221a91.js" crossorigin="anonymous" integrity="sha384-DbLFYfFBuuS/JP2rE2g4N4QIz4Q1SR4b9f3s0dLof3o2+fpF1xwzIEb8RbcpyUdg"><link rel="preload" href="./project-phoenix-2c4c0ec03c221a91_bg.wasm" crossorigin="anonymous" integrity="sha384-4w/HKGFt9KLas8n/ulvgPBdyllcVZpRaYOPxSwfwabqnT9zNlskUqOSrxQbm5Z2T" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -404,8 +404,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-370006e5a53e82ce.js';
-const wasm = await init({ module_or_path: './project-phoenix-370006e5a53e82ce_bg.wasm' });
+import init, * as bindings from './project-phoenix-2c4c0ec03c221a91.js';
+const wasm = await init({ module_or_path: './project-phoenix-2c4c0ec03c221a91_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1198,7 +1198,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     function buildCaptainConsoleState() {
       return JSON.stringify({
         red_alert:           state.redAlert || false,
-        view_direction:      state.viewDirection || 'Fore',
+        view_direction:      state.currentView || 'Fore',
         view_mode:           'Camera',
         objectives:          state.objectives || [],
         hull_integrity_pct:  state.hullPct || 100,

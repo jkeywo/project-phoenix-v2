@@ -495,7 +495,7 @@ fn sync_complexity_hiding(
 /// - `ClientAppPlugin`         — message routing + complexity UI + radar widget sync
 /// - `PhoneBorderPlugin`       — loads `PhoneAssets` and drives `DeviceOrientation`
 ///                                (the Bevy bezel frame and tab bar moved to HTML in #442)
-/// - `SensorsPanelPlugin`      — long-range radar + science target designation (Bevy)
+/// - `SensorsPanelPlugin`      — no-op stub; HTML panel active (#457)
 /// - `ShieldsPanelPlugin`      — no-op stub; HTML panel active (#424)
 /// - `NavigationPanelPlugin`   — system chart + impulse status + cancel (Bevy)
 pub fn add_client_plugins(app: &mut App) {

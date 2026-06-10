@@ -44,7 +44,7 @@ impl Plugin for ShipViewPlugin {
 }
 ```
 
-The `apply_ship_view_messages` system reads every `InboundServerMessage` event and calls `ShipView::apply`. Because Bevy's pull-based message system fans out to all readers independently, this does not interfere with `ClientAppPlugin`'s own `apply_inbound_messages` system.
+The `apply_ship_view_messages` system reads every `InboundServerMessage` event and calls `ShipView::apply`. (It was previously one of two readers alongside `ClientAppPlugin`'s `apply_inbound_messages`; that drain was deleted in #460 when lobby/sim/comms/complexity state moved to pure JS modules in `gui/`, leaving this as the sole Bevy-side consumer.)
 
 ## Registration
 

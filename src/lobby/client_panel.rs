@@ -434,8 +434,10 @@ pub fn message_for_station_slot_click(slot: &StationSlot) -> Option<ClientMessag
 /// Decides which console to land on after a `StationAssigned` update.
 ///
 /// Returns `current` if it is present in `new_consoles`; otherwise returns
-/// `new_consoles[0]`. Called by `apply_inbound_messages` when a
-/// `StationAssigned` targets the local player.
+/// `new_consoles[0]`. The Bevy caller (`apply_inbound_messages`) was deleted
+/// in #460 — the live implementation is the JS port in `gui/lobby-state.js`
+/// (`reconcileActiveConsole`); this Rust original remains as the tested
+/// reference until the client crate teardown (#461/#462).
 ///
 /// # Panics
 /// Panics if `new_consoles` is empty (caller must guard against spectator

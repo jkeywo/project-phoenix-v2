@@ -1,11 +1,15 @@
 ﻿//! Client-side Bevy app — in-game console UI and message routing.
 //!
-//! This plugin owns the `LobbyState` and `LocalPlayerToken` resources,
-//! drains inbound `ServerMessage` events, and emits outbound
-//! `ClientMessage` events when in-game UI elements (repair button,
-//! complexity popup) are pressed.  Outbound emission is the only side
-//! effect that escapes the plugin; the bridge layer (`client_bridge`) is
-//! responsible for marshalling those events to/from JS.
+//! This plugin owns the `LobbyState` and `LocalPlayerToken` resources and
+//! emits outbound `ClientMessage` events when in-game UI elements (repair
+//! button, complexity popup) are pressed.  Outbound emission is the only
+//! side effect that escapes the plugin; the bridge layer (`client_bridge`)
+//! is responsible for marshalling those events to/from JS.
+//!
+//! Inbound `ServerMessage` draining moved to pure JS in #460 — the gui/
+//! state modules (lobby-state.js, sim-state.js, comms-state.js,
+//! complexity-store.js) apply every inbound message in client.html. The
+//! Bevy resources here no longer receive message-driven updates.
 //!
 //! Pre-#442 this module also rendered the Bevy lobby UI (`LobbyRoot`,
 //! game-over overlay, station-detail panel, complexity segmented
@@ -20,9 +24,7 @@
 
 use bevy::prelude::*;
 
-use crate::client_lobby::{
-    reconcile_active_console, ActiveConsole, LobbyState, LobbyView, LocalPlayerToken,
-};
+use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::client_comms::ClientCommsState;
 use crate::client_complexity::{self, ComplexityStore};
@@ -126,9 +128,8 @@ pub struct HideableElement(pub String);
 /// Ordering labels for client-side `Update` systems.
 ///
 /// `MessageProcessing` must run before `ConsoleUpdate` so that
-/// `apply_inbound_messages` (and `forward_inbound_messages` in the bridge)
-/// have committed their results to `LobbyState` / `ActiveConsole` before any
-/// `toggle_*_panel_visibility` system reads them.
+/// `forward_inbound_messages` (in the bridge) has committed its results
+/// before any system that reads the decoded messages runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub enum ClientSet {
     /// Drain inbound server messages and update lobby/sim state resources.
@@ -165,7 +166,6 @@ impl Plugin for ClientAppPlugin {
         .add_systems(
             Update,
             (
-                apply_inbound_messages.in_set(ClientSet::MessageProcessing),
                 (handle_repair_button_press, refresh_repair_button),
                 (
                     refresh_complexity_ui,
@@ -241,39 +241,15 @@ fn sync_radar_widgets_from_lobby(
 }
 
 // ── Message draining ───────────────────────────────────────────────
-
-fn apply_inbound_messages(
-    mut reader: MessageReader<InboundServerMessage>,
-    mut lobby: ResMut<LobbyState>,
-    mut sim: ResMut<ClientSimState>,
-    mut comms: ResMut<ClientCommsState>,
-    mut complexity: ResMut<ComplexityStore>,
-    token: Res<LocalPlayerToken>,
-    mut active: ResMut<ActiveConsole>,
-) {
-    for ev in reader.read() {
-        // Before updating lobby state, intercept StationAssigned for the
-        // local player to reconcile the active-console tab.
-        if let ServerMessage::StationAssigned { token: t, consoles, .. } = &ev.0 {
-            if t == &token.0 && !consoles.is_empty() {
-                active.0 = Some(reconcile_active_console(active.0.clone(), consoles));
-            } else if t == &token.0 && consoles.is_empty() {
-                // Spectator — clear active console.
-                active.0 = None;
-            }
-        }
-        // Sync ComplexityStore when server confirms a preset change.
-        if let ServerMessage::ComplexityChanged { console, preset_name } = &ev.0 {
-            if let Some(choice) = complexity.choices.get_mut(console) {
-                let _ = choice.select(preset_name);
-            }
-        }
-        lobby.apply(&ev.0);
-        sim.apply(&ev.0);
-        comms.apply(&ev.0);
-        // ShipView is updated by ShipViewPlugin's own system.
-    }
-}
+//
+// `apply_inbound_messages` was deleted in #460: the JS state modules in
+// gui/ (lobby-state.js, sim-state.js, comms-state.js, complexity-store.js)
+// now apply every inbound ServerMessage in client.html's handleMessage(),
+// including the StationAssigned active-console reconciliation and the
+// ComplexityChanged store sync this drain used to perform. The
+// `LobbyState` / `ClientSimState` / `ClientCommsState` resources remain
+// registered for the Bevy systems below but no longer receive updates;
+// those systems are removed in later slices (#461/#462).
 
 // ── Repair button ──────────────────────────────────────────────────
 

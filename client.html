@@ -22,6 +22,14 @@
   <script type="module" src="gui/iframe-bridge.js"></script>
   <script type="module" src="gui/console-state.js"></script>
   <script type="module" src="gui/action-map.js"></script>
+  <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
+       (window.lobbyState / simState / commsState / complexityStore) with an
+       apply(serverMessage) method; handleMessage() feeds every inbound
+       message through them, replacing the deleted Bevy message drain. -->
+  <script type="module" src="gui/lobby-state.js"></script>
+  <script type="module" src="gui/sim-state.js"></script>
+  <script type="module" src="gui/comms-state.js"></script>
+  <script type="module" src="gui/complexity-store.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -831,12 +839,14 @@
       const bezel = $('phone-bezel');
       if (bezel) bezel.setAttribute('aria-hidden', vis.bezel ? 'false' : 'true');
 
-      // Reconcile activeConsole with current consoles list.
+      // Reconcile activeConsole with current consoles list (port of the
+      // deleted Bevy reconcile_active_console — see gui/lobby-state.js).
       const mine = myConsoles(s);
       if (inGame) {
-        if (!activeConsole || !mine.includes(activeConsole)) {
-          setActiveConsole(mine[0] || null);
-        }
+        const next = (typeof window.reconcileActiveConsole === 'function')
+          ? window.reconcileActiveConsole(activeConsole, mine)
+          : ((activeConsole && mine.includes(activeConsole)) ? activeConsole : (mine[0] || null));
+        if (next !== activeConsole) setActiveConsole(next);
       } else {
         setActiveConsole(null);
       }
@@ -1444,14 +1454,35 @@
     // ── Incoming message handler ────────────────────────────────
 
     function handleMessage(msg) {
+      // JS state modules (issue #460) — every inbound ServerMessage is applied
+      // to the pure state modules first; they are the source of truth that the
+      // inline `state` object mirrors below. Guards cover the brief window
+      // before the module scripts have executed.
+      if (window.lobbyState)      window.lobbyState.apply(msg);
+      if (window.simState)        window.simState.apply(msg);
+      if (window.commsState)      window.commsState.apply(msg);
+      if (window.complexityStore) window.complexityStore.apply(msg);
       switch (msg.type) {
         case 'Welcome':
-          state.phase   = msg.data.state.phase;
-          state.players = msg.data.state.players.map(p => ({
-            ...p,
-            consoles: consolesOf(p),
-          }));
-          state.complexity = msg.data.state.complexity || {};
+          if (window.lobbyState) {
+            state.phase      = window.lobbyState.phase;
+            state.players    = window.lobbyState.players;
+            state.complexity = window.lobbyState.complexity;
+          } else {
+            state.phase   = msg.data.state.phase;
+            state.players = msg.data.state.players.map(p => ({
+              ...p,
+              consoles: consolesOf(p),
+            }));
+            state.complexity = msg.data.state.complexity || {};
+          }
+          if (window.simState) {
+            // Share the module's entity array so in-place SimState position
+            // updates and Entity/AsteroidSpawned appends flow through, and
+            // pick up the Welcome repair-team pre-seed.
+            state.asteroids   = window.simState.world.entities;
+            state.repairTeams = window.simState.repairTeams;
+          }
           if (msg.data.ship_stations) {
             state.maxPlayers = msg.data.ship_stations.max_players || 0;
             stationConfigs = msg.data.ship_stations.configs || {};
@@ -1479,35 +1510,51 @@
           rebuildStations();
           break;
         case 'PlayerJoined': {
-          const p = msg.data.player;
-          const existing = state.players.findIndex(x => x.token === p.token);
-          if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p) };
-          else state.players.push({ ...p, consoles: consolesOf(p) });
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            const p = msg.data.player;
+            const existing = state.players.findIndex(x => x.token === p.token);
+            if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p) };
+            else state.players.push({ ...p, consoles: consolesOf(p) });
+          }
           rebuildStations();
           break;
         }
         case 'PlayerLeft':
-          state.players = state.players.filter(p => p.token !== msg.data.token);
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            state.players = state.players.filter(p => p.token !== msg.data.token);
+          }
           rebuildStations();
           break;
         case 'StationAssigned': {
-          const { token, consoles } = msg.data;
-          // Clear these consoles from any other player who held them.
-          for (const c of (consoles || [])) {
-            for (const p of state.players) {
-              if (p.token !== token && p.consoles) {
-                p.consoles = p.consoles.filter(x => x !== c);
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            const { token, consoles } = msg.data;
+            // Clear these consoles from any other player who held them.
+            for (const c of (consoles || [])) {
+              for (const p of state.players) {
+                if (p.token !== token && p.consoles) {
+                  p.consoles = p.consoles.filter(x => x !== c);
+                }
               }
             }
+            const target = state.players.find(p => p.token === token);
+            if (target) target.consoles = consoles || [];
           }
-          const target = state.players.find(p => p.token === token);
-          if (target) target.consoles = consoles || [];
           rebuildStations();
           break;
         }
         case 'NameChanged': {
-          const p = state.players.find(p => p.token === msg.data.token);
-          if (p) p.name = msg.data.name;
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            const p = state.players.find(p => p.token === msg.data.token);
+            if (p) p.name = msg.data.name;
+          }
           if (msg.data.token === myToken) myName = msg.data.name;
           rebuildStations();
           break;
@@ -1558,10 +1605,26 @@
           break;
         }
         case 'WorldSetup': {
-          state.asteroids = (msg.data.world && msg.data.world.entities) || [];
+          // Share the sim-state module's entity array (in-place updates and
+          // spawn/despawn flow through automatically).
+          state.asteroids = window.simState
+            ? window.simState.world.entities
+            : ((msg.data.world && msg.data.world.entities) || []);
           pushWeaponsConsoleState();
           pushHelmConsoleState();
           pushSensorsConsoleState();
+          return;
+        }
+        case 'EntitySpawned':
+        case 'AsteroidSpawned': {
+          // Handled by the sim-state module (idempotent append); re-mirror the
+          // entity array and refresh the radar-bearing consoles.
+          if (!window.simState) return;
+          state.asteroids = window.simState.world.entities;
+          pushWeaponsConsoleState();
+          pushHelmConsoleState();
+          pushSensorsConsoleState();
+          pushNavigationConsoleState();
           return;
         }
         case 'TargetLock': {
@@ -1611,7 +1674,9 @@
           return;
         }
         case 'RepairState': {
-          state.repairTeams = msg.data.teams || [];
+          state.repairTeams = window.simState
+            ? window.simState.repairTeams
+            : (msg.data.teams || []);
           pushRepairConsoleState();
           return;
         }
@@ -1642,7 +1707,10 @@
         }
         case 'AsteroidDestroyed': {
           const { uuid } = msg.data;
-          state.asteroids = state.asteroids.filter(a => a.uuid !== uuid);
+          // Removal already done in place by the sim-state module when loaded.
+          state.asteroids = window.simState
+            ? window.simState.world.entities
+            : state.asteroids.filter(a => a.uuid !== uuid);
           if (state.weaponsTarget === uuid) {
             state.weaponsTarget = null;
             state.weaponsLocked = false;
@@ -1656,7 +1724,10 @@
         }
         case 'EntityDespawned': {
           const { uuid } = msg.data;
-          state.asteroids = state.asteroids.filter(a => a.uuid !== uuid);
+          // Removal already done in place by the sim-state module when loaded.
+          state.asteroids = window.simState
+            ? window.simState.world.entities
+            : state.asteroids.filter(a => a.uuid !== uuid);
           if (state.weaponsTarget === uuid) {
             state.weaponsTarget = null;
             state.weaponsLocked = false;
@@ -1678,13 +1749,38 @@
           return;
         }
         case 'ComplexityChanged': {
+          // window.complexityStore (gui/complexity-store.js) was already
+          // updated + persisted by the apply() pass above (own consoles
+          // only); mirror server truth for the lobby segmented buttons.
+          // Persist only consoles the local player holds — recording another
+          // player's broadcast as a local preference would suppress that
+          // console's first-use popup on this device.
           const { console: consoleName, preset_name } = msg.data;
           state.complexity[consoleName] = preset_name;
-          savedComplexity[consoleName] = preset_name;
-          localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
+          if (myConsoles(state).includes(consoleName)) {
+            savedComplexity[consoleName] = preset_name;
+            localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
+          }
           rebuildStations();
           return;
         }
+        case 'CommsState': {
+          // Handled by the comms-state module (gui/comms-state.js); mirror its
+          // messages/contacts for buildCommsConsoleState. Previously only the
+          // (now deleted) Bevy drain consumed this message.
+          if (window.commsState) {
+            state.commsMessages = window.commsState.messages;
+            state.commsContacts = window.commsState.contacts;
+          } else {
+            state.commsMessages = msg.data.messages || [];
+            state.commsContacts = msg.data.contacts || [];
+          }
+          pushCommsConsoleState();
+          return;
+        }
+        case 'GameOver':
+          state.phase = 'GameOver';
+          break;
         default:
           return; // unknown — skip re-render
       }

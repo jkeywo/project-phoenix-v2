@@ -287,6 +287,8 @@ describe('show_on_screen', () => {
     const send = mkSend();
     ACTION_MAP.show_on_screen({ action: 'show_on_screen' }, send);
     expect(send).not.toHaveBeenCalled();
+  });
+});
 
 describe('set_navigation_chart', () => {
   it('calls send SetView with NavigationChart kind', () => {

@@ -239,7 +239,7 @@
     // Receive server-pushed console state via BroadcastChannel (separate-tab mode).
     if (_consoleBroadcast) {
       _consoleBroadcast.onmessage = function(e) {
-        if (e.data && e.data.type === 'console_state' && e.data.name === 'Captain') {
+        if (e.data && e.data.type === 'console_state' && e.data.name === 'CaptainChair') {
           // __updateConsole is assigned to window in the bottom script; by the time
           // any async BroadcastChannel message arrives the page is fully initialised.
           if (typeof window.__updateConsole === 'function') {

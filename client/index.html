@@ -99,7 +99,8 @@
     #captain-ui.active,
     #helm-ui.active,
     #power-ui.active,
-    #repair-ui.active {
+    #repair-ui.active,
+    #shields-ui.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -111,7 +112,8 @@
     #captain-ui iframe,
     #helm-ui iframe,
     #power-ui iframe,
-    #repair-ui iframe {
+    #repair-ui iframe,
+    #shields-ui iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -217,7 +219,8 @@
     #captain-ui.active,
     #helm-ui.active,
     #power-ui.active,
-    #repair-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
+    #repair-ui.active,
+    #shields-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────
        First flex child of #console-container. In-flow so it takes up
@@ -395,7 +398,7 @@
     }
     #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-2c4c0ec03c221a91.js" crossorigin="anonymous" integrity="sha384-DbLFYfFBuuS/JP2rE2g4N4QIz4Q1SR4b9f3s0dLof3o2+fpF1xwzIEb8RbcpyUdg"><link rel="preload" href="./project-phoenix-2c4c0ec03c221a91_bg.wasm" crossorigin="anonymous" integrity="sha384-4w/HKGFt9KLas8n/ulvgPBdyllcVZpRaYOPxSwfwabqnT9zNlskUqOSrxQbm5Z2T" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-ebd4c313bccdcc3d.js" crossorigin="anonymous" integrity="sha384-Js+4GKeaN/IGMmZYG9snXgDdCI/88TOYu6VaSH6XYzHOtXz/EpGSAiMAJDrR5H+1"><link rel="preload" href="./project-phoenix-ebd4c313bccdcc3d_bg.wasm" crossorigin="anonymous" integrity="sha384-9E+TQB1J/XeFsUBlcmAPNMMu14O20bqZIdiIUQI6uvIaGah1TeWR5V05io5EvUNk" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -404,8 +407,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-2c4c0ec03c221a91.js';
-const wasm = await init({ module_or_path: './project-phoenix-2c4c0ec03c221a91_bg.wasm' });
+import init, * as bindings from './project-phoenix-ebd4c313bccdcc3d.js';
+const wasm = await init({ module_or_path: './project-phoenix-ebd4c313bccdcc3d_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -525,6 +528,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     <section id="repair-ui">
       <iframe id="repair-iframe" src="gui/repair-console.html"
         title="Repair Console" allowfullscreen></iframe>
+    </section>
+
+    <section id="shields-ui">
+      <iframe id="shields-iframe" src="gui/shield-console.html"
+        title="Shield Console" allowfullscreen></iframe>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -698,7 +706,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       // Repair console iframe state (issue #425)
       repairTeams: [], consoleHull: [],
       // Power console iframe state (issue #425)
-      powerHelm: 2, powerWeapons: 2, powerSensors: 2, powerBattery: 100, powerLocked: false };
+      powerHelm: 2, powerWeapons: 2, powerSensors: 2, powerBattery: 100, powerLocked: false,
+      // Shields console iframe state (issue #423)
+      shieldFacings: [], shieldFocusedFacing: null };
     let conn = null;
     // Station configs from server Welcome message (keyed by player count).
     let stationConfigs = {};
@@ -824,12 +834,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             'helm-ui':   inGame && activeConsole === 'Helm',
             'weapons-ui': inGame && activeConsole === 'Tactical',
             'repair-ui': inGame && activeConsole === 'Repair',
-            'power-ui':  inGame && activeConsole === 'Power' };
+            'power-ui':  inGame && activeConsole === 'Power',
+            'shields-ui': inGame && activeConsole === 'Shields' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
       $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
       $('power-ui').className  = sections['power-ui']  ? 'active' : '';
+      $('shields-ui').className = sections['shields-ui'] ? 'active' : '';
 
       // Orientation drives both the tab-bar layout and the container's
       // flex-direction (portrait = column, landscape = row). Computed once
@@ -1189,6 +1201,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (activeConsole === 'Power') {
         pushPowerConsoleState();
       }
+      if (activeConsole === 'Shields') {
+        pushShieldsConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1212,7 +1227,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (!iframe || !iframe.contentWindow) return;
       try {
         const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Captain', buildCaptainConsoleState());
+        if (typeof fn === 'function') fn('CaptainChair', buildCaptainConsoleState());
       } catch (_) {}
     }
 
@@ -1327,6 +1342,42 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       iframe.addEventListener('load', () => { pushPowerConsoleState(); });
     })();
 
+    // ── Shields console iframe bridge (issue #423) ───────────────────────────
+    function buildShieldsConsoleState() {
+      let targetBearing = null;
+      if (state.weaponsTarget && state.asteroids) {
+        const target = state.asteroids.find(a => a.uuid === state.weaponsTarget);
+        if (target) {
+          const dx = entityX(target) - state.shipX;
+          const dz = entityZ(target) - state.shipZ;
+          targetBearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+        }
+      }
+      return JSON.stringify({
+        facings:            state.shieldFacings || [],
+        hull_integrity_pct: state.hullIntegrity || 100,
+        focused_facing:     state.shieldFocusedFacing || null,
+        target_bearing:     targetBearing,
+        grid_status:        state.shieldFacings && state.shieldFacings.length > 0 ? 'GRID NOMINAL' : 'GRID OFFLINE',
+      });
+    }
+
+    function pushShieldsConsoleState() {
+      if (activeConsole !== 'Shields') return;
+      const iframe = $('shields-iframe');
+      if (!iframe || !iframe.contentWindow) return;
+      try {
+        const fn = iframe.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn('Shields', buildShieldsConsoleState());
+      } catch (_) {}
+    }
+
+    (function wireShieldsIframe() {
+      const iframe = $('shields-iframe');
+      if (!iframe) return;
+      iframe.addEventListener('load', () => { pushShieldsConsoleState(); });
+    })();
+
     // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
     // The weapons-console.html iframe sends {type:'console_action', payload:json}
     // via postMessage when the player fires or taps a target. We translate
@@ -1377,6 +1428,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           break;
         case 'decrease_power':
           if (action.target) send('DecreasePower', { console: action.target });
+          break;
+        case 'set_shield_focus':
+          send('SetShieldFocus', { facing: action.facing || null });
           break;
         default:
           break;
@@ -1652,6 +1706,21 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           if (typeof battery_charge === 'number') state.powerBattery = battery_charge;
           state.powerLocked = !!locked;
           pushPowerConsoleState();
+          return;
+        }
+        case 'ShieldStatus': {
+          state.shieldFacings = (msg.data.facings || []).map(f => ({
+            label: f.label,
+            hp: f.hp,
+            max_hp: f.max_hp,
+            online: f.online,
+            offline_remaining: f.offline_remaining || 0,
+            is_focused: !!f.is_focused,
+          }));
+          // Derive focused facing from facings list.
+          const focused = state.shieldFacings.find(f => f.is_focused);
+          state.shieldFocusedFacing = focused ? focused.label : null;
+          pushShieldsConsoleState();
           return;
         }
         case 'AsteroidDestroyed': {

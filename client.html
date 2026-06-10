@@ -20,6 +20,7 @@
   <script type="module" src="gui/content-switcher.js"></script>
   <script type="module" src="gui/active-console.js"></script>
   <script type="module" src="gui/iframe-bridge.js"></script>
+  <script type="module" src="gui/console-state.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -1135,11 +1136,6 @@
       }
     }
 
-    // EntitySnapshot position helpers (position: [x, y, z])
-    function entityX(e) { return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0); }
-    function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
-    function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
-
     // ── iframe state-push helper (wraps gui/iframe-bridge.js) ────────────────
     // Delegates to window.iframeBridgePush when the module is loaded; falls back
     // to the same inline logic for the rare race where the module hasn't run yet.
@@ -1159,34 +1155,11 @@
     // Builds a WeaponsConsoleState JSON from client state and pushes it to the
     // gui/weapons-console.html iframe via its window.__updateConsole function.
     // The iframe's __sendAction postMessages back; we forward those to the server.
-
-    const RADAR_RANGE = 60.0;
+    // State builder extracted to gui/console-state.js (issue #454).
 
     function buildWeaponsConsoleState() {
-      const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
-      const blips = (state.asteroids || []).map(a => {
-        const ax = entityX(a), az = entityZ(a);
-        const dx = ax - state.shipX, dz = az - state.shipZ;
-        if (dx * dx + dz * dz > RADAR_RANGE * RADAR_RANGE) return null;
-        const radar_x = (dx * cosY + dz * sinY) / RADAR_RANGE;
-        const radar_y = (dx * sinY - dz * cosY) / RADAR_RANGE;
-        const radius   = entityRadius(a);
-        const tags     = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
-        const kind     = tags.includes('ship') ? 'ship'
-                       : tags.includes('station') ? 'station' : 'asteroid';
-        return { uuid: a.uuid, radar_x, radar_y, scaled_radius: radius / RADAR_RANGE, kind };
-      }).filter(Boolean);
-
-      return JSON.stringify({
-        target_uuid:   state.weaponsTarget || null,
-        banks:         state.weaponsBanks  || [],
-        tubes:         state.weaponsTubes  || [],
-        torpedo_count: state.weaponsTorpedoCount || 0,
-        phaser_mode:   state.weaponsPhaserMode   || 'Auto',
-        blips,
-        phaser_arcs:   [],   // server-side arcs not forwarded; UI gracefully handles []
-        torpedo_arcs:  [],
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Tactical', state);
+      return JSON.stringify({ target_uuid: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto', blips: [], phaser_arcs: [], torpedo_arcs: [] });
     }
 
     function pushWeaponsConsoleState() {
@@ -1219,19 +1192,11 @@
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
-    // Builds a CaptainConsoleState JSON from client state and pushes it to the
-    // gui/captain-console.html iframe via its window.__updateConsole function.
+    // State builder extracted to gui/console-state.js (issue #454).
 
     function buildCaptainConsoleState() {
-      return JSON.stringify({
-        red_alert:           state.redAlert || false,
-        view_direction:      state.currentView || 'Fore',
-        view_mode:           'Camera',
-        objectives:          state.objectives || [],
-        hull_integrity_pct:  state.hullPct || 100,
-        game_status:         state.redAlert ? 'RED ALERT — All hands to battlestations.' : 'Standing by. All systems nominal.',
-        blips:               state.blips || [],
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('CaptainChair', state);
+      return JSON.stringify({ red_alert: false, view_direction: 'Fore', view_mode: 'Camera', objectives: [], hull_integrity_pct: 100, game_status: '', blips: [] });
     }
 
     function pushCaptainConsoleState() {
@@ -1242,37 +1207,11 @@
     if ($('captain-iframe')) $('captain-iframe').addEventListener('load', () => { pushCaptainConsoleState(); });
 
     // ── Helm console iframe bridge (issue #423) ──────────────────────────────
-    // Builds a HelmConsoleState JSON from client state and pushes it to the
-    // gui/helm-console.html iframe via its window.__updateConsole function.
-
-    const HELM_RADAR_RANGE = 250.0;
+    // State builder extracted to gui/console-state.js (issue #454).
 
     function buildHelmConsoleState() {
-      const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
-      const blips = (state.asteroids || []).map(a => {
-        const ax = entityX(a), az = entityZ(a);
-        const dx = ax - state.shipX, dz = az - state.shipZ;
-        if (dx * dx + dz * dz > HELM_RADAR_RANGE * HELM_RADAR_RANGE) return null;
-        const radar_x = (dx * cosY + dz * sinY) / HELM_RADAR_RANGE;
-        const radar_y = (dx * sinY - dz * cosY) / HELM_RADAR_RANGE;
-        const radius   = entityRadius(a);
-        const tags     = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
-        const kind     = tags.includes('ship') ? 'ship'
-                       : tags.includes('station') ? 'station' : 'asteroid';
-        return { uuid: a.uuid, radar_x, radar_y, scaled_radius: radius / HELM_RADAR_RANGE, kind };
-      }).filter(Boolean);
-
-      return JSON.stringify({
-        heading:                ((state.shipYaw * -180 / Math.PI) % 360 + 360) % 360,
-        speed:                  state.forwardSpeed || 0,
-        x:                      state.shipX || 0,
-        z:                      state.shipZ || 0,
-        yaw:                    state.shipYaw || 0,
-        impulse_charge_progress: state.impulseChargeProgress || 0,
-        on_screen:              state.currentView === 'Radar',
-        lock_id:                state.weaponsTarget || null,
-        blips,
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Helm', state);
+      return JSON.stringify({ heading: 0, speed: 0, x: 0, z: 0, yaw: 0, impulse_charge_progress: 0, on_screen: false, lock_id: null, blips: [] });
     }
 
     function pushHelmConsoleState() {
@@ -1284,13 +1223,10 @@
     if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState(); });
 
     // ── Repair console iframe bridge (issue #425) ────────────────────────────
+    // State builder extracted to gui/console-state.js (issue #454).
     function buildRepairConsoleState() {
-      return JSON.stringify({
-        teams:                state.repairTeams || [],
-        console_hull:         state.consoleHull || [],
-        travel_duration_secs: 5.0,
-        damageable_consoles:  [],
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Repair', state);
+      return JSON.stringify({ teams: [], console_hull: [], travel_duration_secs: 5.0, damageable_consoles: [] });
     }
 
     function pushRepairConsoleState() {
@@ -1301,14 +1237,10 @@
     if ($('repair-iframe')) $('repair-iframe').addEventListener('load', () => { pushRepairConsoleState(); });
 
     // ── Power console iframe bridge (issue #425) ─────────────────────────────
+    // State builder extracted to gui/console-state.js (issue #454).
     function buildPowerConsoleState() {
-      return JSON.stringify({
-        helm:           state.powerHelm    || 0,
-        weapons:        state.powerWeapons || 0,
-        sensors:        state.powerSensors || 0,
-        battery_charge: state.powerBattery || 0,
-        locked:         state.powerLocked  || false,
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Power', state);
+      return JSON.stringify({ helm: 0, weapons: 0, sensors: 0, battery_charge: 0, locked: false });
     }
 
     function pushPowerConsoleState() {
@@ -1319,23 +1251,10 @@
     if ($('power-iframe')) $('power-iframe').addEventListener('load', () => { pushPowerConsoleState(); });
 
     // ── Shields console iframe bridge (issue #423) ───────────────────────────
+    // State builder extracted to gui/console-state.js (issue #454).
     function buildShieldsConsoleState() {
-      let targetBearing = null;
-      if (state.weaponsTarget && state.asteroids) {
-        const target = state.asteroids.find(a => a.uuid === state.weaponsTarget);
-        if (target) {
-          const dx = entityX(target) - state.shipX;
-          const dz = entityZ(target) - state.shipZ;
-          targetBearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
-        }
-      }
-      return JSON.stringify({
-        facings:            state.shieldFacings || [],
-        hull_integrity_pct: state.hullIntegrity || 100,
-        focused_facing:     state.shieldFocusedFacing || null,
-        target_bearing:     targetBearing,
-        grid_status:        state.shieldFacings && state.shieldFacings.length > 0 ? 'GRID NOMINAL' : 'GRID OFFLINE',
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Shields', state);
+      return JSON.stringify({ facings: [], hull_integrity_pct: 100, focused_facing: null, target_bearing: null, grid_status: 'GRID OFFLINE' });
     }
 
     function pushShieldsConsoleState() {
@@ -1346,78 +1265,10 @@
     if ($('shields-iframe')) $('shields-iframe').addEventListener('load', () => { pushShieldsConsoleState(); });
 
     // ── Sensors console iframe bridge ─────────────────────────────────────────
-    const SENSORS_RADAR_RANGE = 2000.0;
-
+    // State builder extracted to gui/console-state.js (issue #454).
     function buildSensorsConsoleState() {
-      const blips = (state.asteroids || []).map(a => {
-        const ax = entityX(a), az = entityZ(a);
-        const dx = ax - state.shipX, dz = az - state.shipZ;
-        if (dx * dx + dz * dz > SENSORS_RADAR_RANGE * SENSORS_RADAR_RANGE) return null;
-        const radar_x = dx / SENSORS_RADAR_RANGE;
-        const radar_y = dz / SENSORS_RADAR_RANGE;
-        const radius = entityRadius(a);
-        const tags = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
-        const kind = tags.includes('ship') ? 'ship'
-                   : tags.includes('station') ? 'station' : 'asteroid';
-        return {
-          uuid: a.uuid, radar_x, radar_y,
-          scaled_radius: radius / SENSORS_RADAR_RANGE,
-          kind, color: null,
-          name: a.name || null,
-          stance: a.stance || 'neutral',
-          faction: a.faction || null,
-        };
-      }).filter(Boolean);
-
-      let targetBearing = null, targetRange = null;
-      let targetName = null, targetKind = null, targetStance = null, targetFaction = null;
-      let targetClass = null, targetHullPct = null, targetHeading = null, targetSpeed = null;
-      let targetThreat = null, targetShieldFreq = null, targetShields = [];
-
-      if (state.sensorsTarget && state.asteroids) {
-        const tgt = state.asteroids.find(a => a.uuid === state.sensorsTarget);
-        if (tgt) {
-          const dx = entityX(tgt) - state.shipX;
-          const dz = entityZ(tgt) - state.shipZ;
-          targetBearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
-          targetRange = Math.sqrt(dx * dx + dz * dz);
-          targetName = tgt.name || state.sensorsTarget;
-          const tags = (tgt.tags || tgt.entity_tags || []).map(t => String(t).toLowerCase());
-          targetKind = tags.includes('ship') ? 'ship'
-                     : tags.includes('station') ? 'station' : 'asteroid';
-          targetStance = tgt.stance || 'neutral';
-          targetFaction = tgt.faction || null;
-          targetClass = tgt.shipClass || null;
-          targetHullPct = tgt.hull_pct !== undefined ? tgt.hull_pct : null;
-          targetHeading = tgt.heading !== undefined ? tgt.heading : null;
-          targetSpeed = tgt.speed !== undefined ? tgt.speed : null;
-          targetThreat = tgt.threat || (targetStance === 'hostile' ? 'high' : 'low');
-          targetShieldFreq = tgt.shield_freq || null;
-          targetShields = tgt.shields || [];
-        }
-      }
-
-      return JSON.stringify({
-        scan_range: SENSORS_RADAR_RANGE,
-        complexity: state.complexity?.Sensors || 'full',
-        impulse_charge_progress: state.impulseChargeProgress || 0,
-        regions: state.regions || [],
-        blips,
-        target_uuid: state.sensorsTarget || null,
-        target_name: targetName,
-        target_kind: targetKind,
-        target_stance: targetStance,
-        target_faction: targetFaction,
-        target_bearing: targetBearing,
-        target_range: targetRange,
-        target_class: targetClass,
-        target_hull_pct: targetHullPct,
-        target_heading: targetHeading,
-        target_speed: targetSpeed,
-        target_threat: targetThreat,
-        target_shield_freq: targetShieldFreq,
-        target_shields: targetShields,
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Sensors', state);
+      return JSON.stringify({ scan_range: 2000, complexity: 'full', impulse_charge_progress: 0, regions: [], blips: [], target_uuid: null, target_name: null, target_kind: null, target_stance: null, target_faction: null, target_bearing: null, target_range: null, target_class: null, target_hull_pct: null, target_heading: null, target_speed: null, target_threat: null, target_shield_freq: null, target_shields: [] });
     }
 
     function pushSensorsConsoleState() {

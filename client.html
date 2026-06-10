@@ -16,8 +16,10 @@
   <script type="module" src="gui/phone-bezel.js"></script>
   <script type="module" src="gui/phase-toggle.js"></script>
   <script type="module" src="gui/tab-bar.js"></script>
+  <script type="module" src="gui/console-registry.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
   <script type="module" src="gui/active-console.js"></script>
+  <script type="module" src="gui/iframe-bridge.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -1138,6 +1140,21 @@
     function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
     function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
 
+    // ── iframe state-push helper (wraps gui/iframe-bridge.js) ────────────────
+    // Delegates to window.iframeBridgePush when the module is loaded; falls back
+    // to the same inline logic for the rare race where the module hasn't run yet.
+    function _pushIframe(iframeEl, consoleName, stateJson) {
+      if (typeof window.iframeBridgePush === 'function') {
+        window.iframeBridgePush(iframeEl, consoleName, stateJson);
+        return;
+      }
+      if (!iframeEl || !iframeEl.contentWindow) return;
+      try {
+        const fn = iframeEl.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn(consoleName, stateJson);
+      } catch (_) {}
+    }
+
     // ── Weapons console iframe bridge (issue #422) ──────────────────────────
     // Builds a WeaponsConsoleState JSON from client state and pushes it to the
     // gui/weapons-console.html iframe via its window.__updateConsole function.
@@ -1174,20 +1191,11 @@
 
     function pushWeaponsConsoleState() {
       if (activeConsole !== 'Tactical') return;
-      const iframe = $('weapons-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Tactical', buildWeaponsConsoleState());
-      } catch (_) {}
+      _pushIframe($('weapons-iframe'), 'Tactical', buildWeaponsConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    (function wireWeaponsIframe() {
-      const iframe = $('weapons-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushWeaponsConsoleState(); });
-    })();
+    if ($('weapons-iframe')) $('weapons-iframe').addEventListener('load', () => { pushWeaponsConsoleState(); });
 
     function renderGame(s) {
       if (activeConsole === 'CaptainChair') {
@@ -1227,20 +1235,11 @@
     }
 
     function pushCaptainConsoleState() {
-      const iframe = $('captain-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('CaptainChair', buildCaptainConsoleState());
-      } catch (_) {}
+      _pushIframe($('captain-iframe'), 'CaptainChair', buildCaptainConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    (function wireCaptainIframe() {
-      const iframe = $('captain-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushCaptainConsoleState(); });
-    })();
+    if ($('captain-iframe')) $('captain-iframe').addEventListener('load', () => { pushCaptainConsoleState(); });
 
     // ── Helm console iframe bridge (issue #423) ──────────────────────────────
     // Builds a HelmConsoleState JSON from client state and pushes it to the
@@ -1278,20 +1277,11 @@
 
     function pushHelmConsoleState() {
       if (activeConsole !== 'Helm') return;
-      const iframe = $('helm-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Helm', buildHelmConsoleState());
-      } catch (_) {}
+      _pushIframe($('helm-iframe'), 'Helm', buildHelmConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    (function wireHelmIframe() {
-      const iframe = $('helm-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushHelmConsoleState(); });
-    })();
+    if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState(); });
 
     // ── Repair console iframe bridge (issue #425) ────────────────────────────
     function buildRepairConsoleState() {
@@ -1305,19 +1295,10 @@
 
     function pushRepairConsoleState() {
       if (activeConsole !== 'Repair') return;
-      const iframe = $('repair-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Repair', buildRepairConsoleState());
-      } catch (_) {}
+      _pushIframe($('repair-iframe'), 'Repair', buildRepairConsoleState());
     }
 
-    (function wireRepairIframe() {
-      const iframe = $('repair-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushRepairConsoleState(); });
-    })();
+    if ($('repair-iframe')) $('repair-iframe').addEventListener('load', () => { pushRepairConsoleState(); });
 
     // ── Power console iframe bridge (issue #425) ─────────────────────────────
     function buildPowerConsoleState() {
@@ -1332,19 +1313,10 @@
 
     function pushPowerConsoleState() {
       if (activeConsole !== 'Power') return;
-      const iframe = $('power-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Power', buildPowerConsoleState());
-      } catch (_) {}
+      _pushIframe($('power-iframe'), 'Power', buildPowerConsoleState());
     }
 
-    (function wirePowerIframe() {
-      const iframe = $('power-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushPowerConsoleState(); });
-    })();
+    if ($('power-iframe')) $('power-iframe').addEventListener('load', () => { pushPowerConsoleState(); });
 
     // ── Shields console iframe bridge (issue #423) ───────────────────────────
     function buildShieldsConsoleState() {
@@ -1368,19 +1340,10 @@
 
     function pushShieldsConsoleState() {
       if (activeConsole !== 'Shields') return;
-      const iframe = $('shields-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Shields', buildShieldsConsoleState());
-      } catch (_) {}
+      _pushIframe($('shields-iframe'), 'Shields', buildShieldsConsoleState());
     }
 
-    (function wireShieldsIframe() {
-      const iframe = $('shields-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushShieldsConsoleState(); });
-    })();
+    if ($('shields-iframe')) $('shields-iframe').addEventListener('load', () => { pushShieldsConsoleState(); });
 
     // ── Sensors console iframe bridge ─────────────────────────────────────────
     const SENSORS_RADAR_RANGE = 2000.0;
@@ -1459,19 +1422,10 @@
 
     function pushSensorsConsoleState() {
       if (activeConsole !== 'Sensors') return;
-      const iframe = $('sensors-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Sensors', buildSensorsConsoleState());
-      } catch (_) {}
+      _pushIframe($('sensors-iframe'), 'Sensors', buildSensorsConsoleState());
     }
 
-    (function wireSensorsIframe() {
-      const iframe = $('sensors-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushSensorsConsoleState(); });
-    })();
+    if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); });
 
     // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
     // The weapons-console.html iframe sends {type:'console_action', payload:json}

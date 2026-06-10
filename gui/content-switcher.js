@@ -16,20 +16,19 @@
 // changes here. When Tactical is active the iframe sits on top of the canvas
 // at z-index 10.
 
-// Console name -> HTML section id. Only consoles with HTML panels are keyed.
-// Bevy-rendered consoles (Navigation, Comms) are absent from this map.
-export const CONSOLE_SECTION = Object.freeze({
-  CaptainChair: 'captain-ui',
-  Helm: 'helm-ui',
-  Tactical: 'weapons-ui',
-  Repair: 'repair-ui',
-  Power: 'power-ui',
-  Shields: 'shields-ui',
-  Sensors: 'sensors-ui',
-});
+import { REGISTRY } from './console-registry.js';
+
+// Console name -> HTML section id. Derived from REGISTRY so there is a single
+// source of truth for all HTML-panel consoles. Bevy-rendered consoles
+// (Navigation, Comms) are absent from this map.
+export const CONSOLE_SECTION = Object.freeze(
+  Object.fromEntries(Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId]))
+);
 
 // Set of all known section ids that the switcher will reset.
-export const HTML_SECTION_IDS = Object.freeze(['captain-ui', 'helm-ui', 'weapons-ui', 'repair-ui', 'power-ui', 'shields-ui', 'sensors-ui']);
+export const HTML_SECTION_IDS = Object.freeze(
+  Object.values(REGISTRY).map(v => v.sectionId)
+);
 
 // Returns the section id that should be visible for `activeConsole`, or null
 // if no HTML section maps to this console (Bevy renders it).

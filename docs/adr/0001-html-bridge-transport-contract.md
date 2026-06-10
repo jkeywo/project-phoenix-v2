@@ -64,7 +64,9 @@ Rust calls this global to push state into a loaded HTML console.
 
 ### 3. Transport shim — context detection
 
-Each HTML file includes this inline `<script>` block at the top of `<body>`, before any UI code:
+**Preferred implementation:** Import `gui/console-core.js` and call `initConsole({ name, render })`. It encapsulates all four transports, handles JSON parsing, and wires both the inbound BroadcastChannel path and the `window.__updateConsole` registration automatically (see §2). Copy-pasting the inline shim below is only required when a `type="module"` script is not possible.
+
+The reference inline shim, for environments that cannot use ES modules:
 
 ```html
 <script>
@@ -104,8 +106,6 @@ The four detection targets, in priority order:
 
 The shim also receives inbound state via BroadcastChannel (target 4 receive path), filtering by the console's own name. The `window.__updateConsole` callback is assigned in the bottom `<script>` block and is always ready before any async BroadcastChannel message arrives.
 
-**Preferred implementation:** use `gui/console-core.js` (see below) which encapsulates all four transports, rather than copy-pasting this shim verbatim.
-
 ---
 
 ### 4. wasm-bindgen export signatures
@@ -136,7 +136,7 @@ Callback invocation from Rust uses `call2(&JsValue::NULL, &name, &state_json)`, 
 
 ## Consequences
 
-- Every HTML console file **must** include the transport shim verbatim (copy-paste from this ADR).
+- Every HTML console file **must** implement the transport contract, preferably via `gui/console-core.js` (`import { initConsole } from './console-core.js'`). The inline shim from §3 is the fallback for non-module contexts.
 - Rust console state structs **must** derive `serde::Serialize` and use the default serde snake_case field names.
 - Downstream implementation issues must not introduce new `action` discriminants for Helm or Tactical without updating this ADR.
 - The `wry` dependency remains gated behind `#[cfg(not(target_arch = "wasm32"))]` (or the planned `native` feature flag from issue #115) so the WASM build is unaffected.

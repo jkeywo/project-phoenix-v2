@@ -504,16 +504,23 @@ pub fn direction_press_message(dir: ViewDirection) -> ClientMessage {
 // ── Observer: direction RadioGroup selected ──
 
 /// Fired on the `DirRadioGroup` entity when a member button is pressed.
-/// Looks up the `DirChoice` on the selected member entity and sends `SetView`.
+/// Looks up the `DirChoice` on the selected member entity, sends `SetView`,
+/// and optimistically updates `ShipView` so the button lights up immediately.
+/// `pending_view_mode` protects the optimistic state from being overwritten
+/// by stale `SimState` broadcasts until the server confirms the change.
 fn on_dir_selected(
     trigger: On<RadioSelected>,
     dir_choices: Query<&DirChoice>,
     mut outbound: MessageWriter<OutboundClientMessage>,
+    mut ship_view: ResMut<ShipView>,
 ) {
     let member = trigger.event().member;
     let Ok(choice) = dir_choices.get(member) else { return };
     let dir = choice.0.clone();
-    outbound.write(OutboundClientMessage(direction_press_message(dir)));
+    outbound.write(OutboundClientMessage(direction_press_message(dir.clone())));
+    let new_mode = ViewMode::Camera(dir);
+    ship_view.pending_view_mode = Some(new_mode.clone());
+    ship_view.view_mode = new_mode;
 }
 
 // ── Observer: Red Alert button pressed ──

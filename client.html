@@ -1187,7 +1187,7 @@
     function buildCaptainConsoleState() {
       return JSON.stringify({
         red_alert:           state.redAlert || false,
-        view_direction:      state.viewDirection || 'Fore',
+        view_direction:      state.currentView || 'Fore',
         view_mode:           'Camera',
         objectives:          state.objectives || [],
         hull_integrity_pct:  state.hullPct || 100,

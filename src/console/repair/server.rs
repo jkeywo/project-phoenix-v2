@@ -186,27 +186,38 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(LobbyPlugin)
-            .add_plugins(bevy::time::TimePlugin)
-            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-                std::time::Duration::from_millis(200),
-            ))
-            .insert_resource(crate::ship_state::ShipState::new())
-            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm, 25.0),
-                (Console::Tactical, 25.0),
-                (Console::Power, 25.0),
-                (Console::Shields, 25.0),
-            ])))
-            .insert_resource(ShipShields(ShieldSystem::default()))
-            .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
-            .insert_resource(crate::modifiers::ShipModifiers::new())
-            .init_resource::<crate::lobby::WorldResource>()
-            .init_resource::<SimOutbox>()
-            .init_resource::<Outbox>()
-            .add_plugins(RepairPlugin)
-            .add_plugins(repair_state_broadcaster())
-            .add_systems(PostUpdate, collect);
+        app.configure_sets(
+            Update,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
+        .add_plugins(LobbyPlugin)
+        .add_plugins(bevy::time::TimePlugin)
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_millis(200),
+        ))
+        .insert_resource(crate::ship_state::ShipState::new())
+        .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
+            (Console::Helm, 25.0),
+            (Console::Tactical, 25.0),
+            (Console::Power, 25.0),
+            (Console::Shields, 25.0),
+        ])))
+        .insert_resource(ShipShields(ShieldSystem::default()))
+        .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+        .insert_resource(crate::modifiers::ShipModifiers::new())
+        .init_resource::<crate::lobby::WorldResource>()
+        .init_resource::<SimOutbox>()
+        .init_resource::<Outbox>()
+        .add_plugins(RepairPlugin)
+        .add_plugins(repair_state_broadcaster())
+        .add_systems(PostUpdate, collect);
         app
     }
 

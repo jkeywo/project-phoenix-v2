@@ -68,19 +68,43 @@ Each HTML file includes this inline `<script>` block at the top of `<body>`, bef
 
 ```html
 <script>
+  /* ── Bridge transport shim (ADR-0001 §3) ─────────────────────── */
+  var _bc = ('BroadcastChannel' in window) ? new BroadcastChannel('phoenix-console-state') : null;
   window.__sendAction = function(json) {
-    if (window.ipc) {
-      window.ipc.postMessage(json);          // wry native server
-    } else {
-      window.wasmBindings.wasm_ui_action(json); // browser WASM (server or client)
+    if (window !== window.parent) {
+      window.parent.postMessage({ type: 'console_action', payload: json }, '*');
+    } else if (window.ipc) {
+      window.ipc.postMessage(json);
+    } else if (window.wasmBindings && typeof window.wasmBindings.wasm_ui_action === 'function') {
+      window.wasmBindings.wasm_ui_action(json);
+    } else if (_bc) {
+      _bc.postMessage({ type: 'console_action', payload: json });
     }
   };
+  if (_bc) {
+    _bc.onmessage = function(e) {
+      if (e.data && e.data.type === 'console_state' && e.data.name === '<ConsoleName>') {
+        if (typeof window.__updateConsole === 'function') window.__updateConsole(e.data.name, e.data.json);
+      }
+    };
+  }
 </script>
 ```
 
-- `window.ipc` is injected by wry automatically; its presence is the sole detection sentinel.
-- `window.wasmBindings` is the existing namespace established in `dist/index.html` where all wasm-bindgen exports are aliased.
-- The shim runs synchronously at parse time; no race with user interaction is possible.
+Replace `<ConsoleName>` with the PascalCase Console enum variant for the console (e.g. `'Helm'`, `'Tactical'`, `'Repair'`).
+
+The four detection targets, in priority order:
+
+| Priority | Target | How it works |
+|---|---|---|
+| 1 | `window !== window.parent` | Console is running inside a `client.html` iframe; forwards via `postMessage` |
+| 2 | `window.ipc` | wry native host; injected automatically by the wry webview |
+| 3 | `window.wasmBindings.wasm_ui_action` | Browser WASM (server or client); checked with `typeof` guard |
+| 4 | BroadcastChannel (`_bc`) | Same-origin separate-tab mode; broadcast to the server.html peer |
+
+The shim also receives inbound state via BroadcastChannel (target 4 receive path), filtering by the console's own name. The `window.__updateConsole` callback is assigned in the bottom `<script>` block and is always ready before any async BroadcastChannel message arrives.
+
+**Preferred implementation:** use `gui/console-core.js` (see below) which encapsulates all four transports, rather than copy-pasting this shim verbatim.
 
 ---
 

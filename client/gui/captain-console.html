@@ -217,39 +217,6 @@
 <body style="background:#000; margin:0; overflow:hidden;">
 
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ───────────── -->
-  <script>
-    // BroadcastChannel for same-origin cross-tab communication with server.html.
-    var _consoleBroadcast = ('BroadcastChannel' in window)
-        ? new BroadcastChannel('phoenix-console-state')
-        : null;
-
-    window.__sendAction = function(json) {
-      if (window !== window.parent) {
-        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
-      } else if (window.ipc) {
-        window.ipc.postMessage(json);
-      } else if (window.wasmBindings && typeof window.wasmBindings.wasm_ui_action === 'function') {
-        window.wasmBindings.wasm_ui_action(json);
-      } else if (_consoleBroadcast) {
-        // Separate-tab mode: relay action to the server.html tab via BroadcastChannel.
-        _consoleBroadcast.postMessage({ type: 'console_action', payload: json });
-      }
-    };
-
-    // Receive server-pushed console state via BroadcastChannel (separate-tab mode).
-    if (_consoleBroadcast) {
-      _consoleBroadcast.onmessage = function(e) {
-        if (e.data && e.data.type === 'console_state' && e.data.name === 'CaptainChair') {
-          // __updateConsole is assigned to window in the bottom script; by the time
-          // any async BroadcastChannel message arrives the page is fully initialised.
-          if (typeof window.__updateConsole === 'function') {
-            window.__updateConsole(e.data.name, e.data.json);
-          }
-        }
-      };
-    }
-  </script>
-
   <!-- Hidden data containers for smoke tests -->
   <div id="objectives" aria-hidden="true"></div>
   <div id="dir" aria-hidden="true"></div>
@@ -339,10 +306,10 @@
     </div>
   </div>
 
-  <script>
+  <script type="module">
+    import { initConsole } from './console-core.js';
+
     // ── State ────────────────────────────────────────────────────────────
-    var _lastName      = null;
-    var _lastStateJson = null;
     var _state         = null;
 
     // Direction names for the dir pad
@@ -352,15 +319,9 @@
     var DIR_AFT  = 'Aft';
 
     // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
-    window.__updateConsole = function(name, stateJson) {
-      _lastName      = name;
-      _lastStateJson = stateJson;
-      _renderConsole(name, stateJson);
-    };
+    // Handled by initConsole({ render }) — see bottom of script.
 
-    function _renderConsole(name, stateJson) {
-      var s;
-      try { s = JSON.parse(stateJson); } catch (e) { console.warn('[Captain] bad state json', e); return; }
+    function _renderConsole(s) {
       _state = s;
 
       // ── Hidden data-attr containers (smoke-test targets) ────────────────
@@ -480,20 +441,22 @@
 
     // ── Outbound actions ──────────────────────────────────────────────────
     document.getElementById('dir-fore').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'set_view', console: 'CaptainChair', direction: 'Fore' }));
+      sendAction('set_view', { direction: 'Fore' });
     });
     document.getElementById('dir-port').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'set_view', console: 'CaptainChair', direction: 'Port' }));
+      sendAction('set_view', { direction: 'Port' });
     });
     document.getElementById('dir-stbd').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'set_view', console: 'CaptainChair', direction: 'Starboard' }));
+      sendAction('set_view', { direction: 'Starboard' });
     });
     document.getElementById('dir-aft').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'set_view', console: 'CaptainChair', direction: 'Aft' }));
+      sendAction('set_view', { direction: 'Aft' });
     });
     document.getElementById('red-alert-btn').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'toggle_red_alert', console: 'CaptainChair' }));
+      sendAction('toggle_red_alert', {});
     });
+
+    var sendAction = initConsole({ name: 'CaptainChair', render: _renderConsole }).sendAction;
   </script>
 
 </body>

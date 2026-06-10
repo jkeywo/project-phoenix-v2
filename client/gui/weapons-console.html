@@ -155,21 +155,6 @@
 </head>
 <body style="background:#000; margin:0; overflow:hidden;">
 
-  <!-- ── HTML bridge transport shim (ADR-0001 §3, verbatim) ───────────── -->
-  <script>
-    window.__sendAction = function(json) {
-      if (window !== window.parent) {
-        // Running inside client.html iframe: forward action to parent via postMessage.
-        // client.html listens for {type:'console_action'} and sends to server via PeerJS.
-        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
-      } else if (window.ipc) {
-        window.ipc.postMessage(json);          // wry native server
-      } else {
-        window.wasmBindings.wasm_ui_action(json); // browser WASM (server or client)
-      }
-    };
-  </script>
-
   <!-- Hidden data containers for smoke tests (#banks .bank, #tubes .tube) -->
   <div id="banks" aria-hidden="true"></div>
   <div id="tubes" aria-hidden="true"></div>
@@ -350,28 +335,21 @@
 
   <script src="radar-widget.js"></script>
 
-  <script>
+  <script type="module">
+    import { initConsole } from './console-core.js';
+
     // ── State ────────────────────────────────────────────────────────────
-    // Defaults ensure FIRE buttons work before first __updateConsole call
+    // Defaults ensure FIRE buttons work before first state push
     // (smoke-test requirement: fire_phaser→bank:'fore', fire_torpedo→tube:'fore').
     var _selectedBank  = 'fore';
     var _selectedTube  = 'fore';
-    var _lastName      = null;
-    var _lastStateJson = null;
     var _state         = null;
     var _radarWidget   = null;
 
     // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
-    // Called by the host page: window.__updateConsole("Tactical", stateJson)
-    window.__updateConsole = function(name, stateJson) {
-      _lastName      = name;
-      _lastStateJson = stateJson;
-      _renderConsole(name, stateJson);
-    };
+    // Handled by initConsole({ render }) — see bottom of script.
 
-    function _renderConsole(name, stateJson) {
-      var s;
-      try { s = JSON.parse(stateJson); } catch (e) { console.warn('[Tactical] bad state json', e); return; }
+    function _renderConsole(s) {
       _state = s;
 
       // ── Hidden data-attr containers (smoke-test targets) ────────────────
@@ -425,7 +403,7 @@
         btn.addEventListener('pointerdown', (function(id) { return function(e) {
           e.preventDefault();  // prevent 300ms-delayed synthetic click after DOM rebuild
           _selectedTube = id;
-          if (_lastStateJson) _renderConsole(_lastName, _lastStateJson);
+          if (_state) _renderConsole(_state);
         }; })(t.id));
         chipsEl.appendChild(btn);
       });
@@ -517,19 +495,19 @@
         var ready = _state.banks.filter(function(b) { return b.fire_ready; });
         if (ready.length > 0) bank = ready[0].id;
       }
-      window.__sendAction(JSON.stringify({ action: 'fire_phaser', console: 'Tactical', bank: bank }));
+      sendAction('fire_phaser', { bank: bank });
     });
 
     document.getElementById('fire-torpedo').addEventListener('click', function() {
       var tube       = _selectedTube || 'fore';
       var targetUuid = (_state && _state.target_uuid) ? _state.target_uuid : null;
-      window.__sendAction(JSON.stringify({ action: 'fire_torpedo', console: 'Tactical', tube: tube, target_uuid: targetUuid }));
+      sendAction('fire_torpedo', { tube: tube, target_uuid: targetUuid });
     });
 
     document.getElementById('phaser-mode-btn').addEventListener('click', function() {
       var currentMode = (_state && _state.phaser_mode) ? _state.phaser_mode : 'Auto';
       var nextMode = currentMode === 'Auto' ? 'Manual' : 'Auto';
-      window.__sendAction(JSON.stringify({ action: 'set_phaser_mode', console: 'Tactical', mode: nextMode }));
+      sendAction('set_phaser_mode', { mode: nextMode });
     });
 
     // ── Radar tap-to-lock via RadarWidget ────────────────────────────────
@@ -541,10 +519,12 @@
         consoleId:   'tactical',
         orientation: 'world_fixed',  // tactical = north-up (world-fixed); orientation is ignored in pre-projected mode
         onBlipTap:   function (uuid) {
-          window.__sendAction(JSON.stringify({ action: 'set_target', console: 'Tactical', uuid: uuid }));
+          sendAction('set_target', { uuid: uuid });
         },
       });
     })();
+
+    var sendAction = initConsole({ name: 'Tactical', render: _renderConsole }).sendAction;
   </script>
 
 </body>

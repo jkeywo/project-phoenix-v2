@@ -16,8 +16,12 @@
   <script type="module" src="gui/phone-bezel.js"></script>
   <script type="module" src="gui/phase-toggle.js"></script>
   <script type="module" src="gui/tab-bar.js"></script>
+  <script type="module" src="gui/console-registry.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
   <script type="module" src="gui/active-console.js"></script>
+  <script type="module" src="gui/iframe-bridge.js"></script>
+  <script type="module" src="gui/console-state.js"></script>
+  <script type="module" src="gui/action-map.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -101,7 +105,8 @@
     #power-ui.active,
     #repair-ui.active,
     #shields-ui.active,
-    #sensors-ui.active {
+    #sensors-ui.active,
+    #comms-ui.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -115,7 +120,8 @@
     #power-ui iframe,
     #repair-ui iframe,
     #shields-ui iframe,
-    #sensors-ui iframe {
+    #sensors-ui iframe,
+    #comms-ui iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -223,7 +229,8 @@
     #power-ui.active,
     #repair-ui.active,
     #shields-ui.active,
-    #sensors-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
+    #sensors-ui.active,
+    #comms-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────
        First flex child of #console-container. In-flow so it takes up
@@ -543,6 +550,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         title="Sensors Console" allowfullscreen></iframe>
     </section>
 
+    <section id="comms-ui">
+      <iframe id="comms-iframe" src="gui/comms-console.html"
+        title="Comms Console" allowfullscreen></iframe>
+    </section>
+
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
          src/client_app.rs (#49). -->
   </div>
@@ -834,7 +846,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
       // Console sections (issue #441): map activeConsole → HTML section id
       // via gui/content-switcher.js. Only the matching section gets `.active`;
-      // Bevy-rendered consoles (Navigation, Comms) leave all sections off and the
+      // Bevy-rendered consoles (Navigation) leave all sections off and the
       // WASM canvas takes the bezel content area. Helm is HTML-rendered via
       // iframe, so it gets a section entry like weapons-ui.
       // so it must be listed in the section map like weapons-ui.
@@ -846,7 +858,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             'repair-ui': inGame && activeConsole === 'Repair',
             'power-ui':  inGame && activeConsole === 'Power',
             'shields-ui': inGame && activeConsole === 'Shields',
-            'sensors-ui': inGame && activeConsole === 'Sensors' };
+            'sensors-ui': inGame && activeConsole === 'Sensors',
+            'comms-ui':  inGame && activeConsole === 'Comms' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
@@ -854,6 +867,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       $('power-ui').className  = sections['power-ui']  ? 'active' : '';
       $('shields-ui').className = sections['shields-ui'] ? 'active' : '';
       $('sensors-ui').className = sections['sensors-ui'] ? 'active' : '';
+      $('comms-ui').className  = sections['comms-ui']  ? 'active' : '';
 
       // Orientation drives both the tab-bar layout and the container's
       // flex-direction (portrait = column, landscape = row). Computed once
@@ -1144,61 +1158,39 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
     }
 
-    // EntitySnapshot position helpers (position: [x, y, z])
-    function entityX(e) { return e.x !== undefined ? e.x : (e.position ? e.position[0] : 0); }
-    function entityZ(e) { return e.z !== undefined ? e.z : (e.position ? e.position[2] : 0); }
-    function entityRadius(e) { return (e.radius !== undefined && e.radius !== null) ? e.radius : 4; }
+    // ── iframe state-push helper (wraps gui/iframe-bridge.js) ────────────────
+    // Delegates to window.iframeBridgePush when the module is loaded; falls back
+    // to the same inline logic for the rare race where the module hasn't run yet.
+    function _pushIframe(iframeEl, consoleName, stateJson) {
+      if (typeof window.iframeBridgePush === 'function') {
+        window.iframeBridgePush(iframeEl, consoleName, stateJson);
+        return;
+      }
+      if (!iframeEl || !iframeEl.contentWindow) return;
+      try {
+        const fn = iframeEl.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn(consoleName, stateJson);
+      } catch (_) {}
+    }
 
     // ── Weapons console iframe bridge (issue #422) ──────────────────────────
     // Builds a WeaponsConsoleState JSON from client state and pushes it to the
     // gui/weapons-console.html iframe via its window.__updateConsole function.
     // The iframe's __sendAction postMessages back; we forward those to the server.
-
-    const RADAR_RANGE = 60.0;
+    // State builder extracted to gui/console-state.js (issue #454).
 
     function buildWeaponsConsoleState() {
-      const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
-      const blips = (state.asteroids || []).map(a => {
-        const ax = entityX(a), az = entityZ(a);
-        const dx = ax - state.shipX, dz = az - state.shipZ;
-        if (dx * dx + dz * dz > RADAR_RANGE * RADAR_RANGE) return null;
-        const radar_x = (dx * cosY + dz * sinY) / RADAR_RANGE;
-        const radar_y = (dx * sinY - dz * cosY) / RADAR_RANGE;
-        const radius   = entityRadius(a);
-        const tags     = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
-        const kind     = tags.includes('ship') ? 'ship'
-                       : tags.includes('station') ? 'station' : 'asteroid';
-        return { uuid: a.uuid, radar_x, radar_y, scaled_radius: radius / RADAR_RANGE, kind };
-      }).filter(Boolean);
-
-      return JSON.stringify({
-        target_uuid:   state.weaponsTarget || null,
-        banks:         state.weaponsBanks  || [],
-        tubes:         state.weaponsTubes  || [],
-        torpedo_count: state.weaponsTorpedoCount || 0,
-        phaser_mode:   state.weaponsPhaserMode   || 'Auto',
-        blips,
-        phaser_arcs:   [],   // server-side arcs not forwarded; UI gracefully handles []
-        torpedo_arcs:  [],
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Tactical', state);
+      return JSON.stringify({ target_uuid: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto', blips: [], phaser_arcs: [], torpedo_arcs: [] });
     }
 
     function pushWeaponsConsoleState() {
       if (activeConsole !== 'Tactical') return;
-      const iframe = $('weapons-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Tactical', buildWeaponsConsoleState());
-      } catch (_) {}
+      _pushIframe($('weapons-iframe'), 'Tactical', buildWeaponsConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    (function wireWeaponsIframe() {
-      const iframe = $('weapons-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushWeaponsConsoleState(); });
-    })();
+    if ($('weapons-iframe')) $('weapons-iframe').addEventListener('load', () => { pushWeaponsConsoleState(); });
 
     function renderGame(s) {
       if (activeConsole === 'CaptainChair') {
@@ -1219,333 +1211,130 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (activeConsole === 'Sensors') {
         pushSensorsConsoleState();
       }
+      if (activeConsole === 'Comms') {
+        pushCommsConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
-    // Builds a CaptainConsoleState JSON from client state and pushes it to the
-    // gui/captain-console.html iframe via its window.__updateConsole function.
+    // State builder extracted to gui/console-state.js (issue #454).
 
     function buildCaptainConsoleState() {
-      return JSON.stringify({
-        red_alert:           state.redAlert || false,
-        view_direction:      state.currentView || 'Fore',
-        view_mode:           'Camera',
-        objectives:          state.objectives || [],
-        hull_integrity_pct:  state.hullPct || 100,
-        game_status:         state.redAlert ? 'RED ALERT — All hands to battlestations.' : 'Standing by. All systems nominal.',
-        blips:               state.blips || [],
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('CaptainChair', state);
+      return JSON.stringify({ red_alert: false, view_direction: 'Fore', view_mode: 'Camera', objectives: [], hull_integrity_pct: 100, game_status: '', blips: [] });
     }
 
     function pushCaptainConsoleState() {
-      const iframe = $('captain-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('CaptainChair', buildCaptainConsoleState());
-      } catch (_) {}
+      _pushIframe($('captain-iframe'), 'CaptainChair', buildCaptainConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    (function wireCaptainIframe() {
-      const iframe = $('captain-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushCaptainConsoleState(); });
-    })();
+    if ($('captain-iframe')) $('captain-iframe').addEventListener('load', () => { pushCaptainConsoleState(); });
 
     // ── Helm console iframe bridge (issue #423) ──────────────────────────────
-    // Builds a HelmConsoleState JSON from client state and pushes it to the
-    // gui/helm-console.html iframe via its window.__updateConsole function.
-
-    const HELM_RADAR_RANGE = 250.0;
+    // State builder extracted to gui/console-state.js (issue #454).
 
     function buildHelmConsoleState() {
-      const cosY = Math.cos(state.shipYaw), sinY = Math.sin(state.shipYaw);
-      const blips = (state.asteroids || []).map(a => {
-        const ax = entityX(a), az = entityZ(a);
-        const dx = ax - state.shipX, dz = az - state.shipZ;
-        if (dx * dx + dz * dz > HELM_RADAR_RANGE * HELM_RADAR_RANGE) return null;
-        const radar_x = (dx * cosY + dz * sinY) / HELM_RADAR_RANGE;
-        const radar_y = (dx * sinY - dz * cosY) / HELM_RADAR_RANGE;
-        const radius   = entityRadius(a);
-        const tags     = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
-        const kind     = tags.includes('ship') ? 'ship'
-                       : tags.includes('station') ? 'station' : 'asteroid';
-        return { uuid: a.uuid, radar_x, radar_y, scaled_radius: radius / HELM_RADAR_RANGE, kind };
-      }).filter(Boolean);
-
-      return JSON.stringify({
-        heading:                ((state.shipYaw * -180 / Math.PI) % 360 + 360) % 360,
-        speed:                  state.forwardSpeed || 0,
-        x:                      state.shipX || 0,
-        z:                      state.shipZ || 0,
-        yaw:                    state.shipYaw || 0,
-        impulse_charge_progress: state.impulseChargeProgress || 0,
-        on_screen:              state.currentView === 'Radar',
-        lock_id:                state.weaponsTarget || null,
-        blips,
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Helm', state);
+      return JSON.stringify({ heading: 0, speed: 0, x: 0, z: 0, yaw: 0, impulse_charge_progress: 0, on_screen: false, lock_id: null, blips: [] });
     }
 
     function pushHelmConsoleState() {
       if (activeConsole !== 'Helm') return;
-      const iframe = $('helm-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Helm', buildHelmConsoleState());
-      } catch (_) {}
+      _pushIframe($('helm-iframe'), 'Helm', buildHelmConsoleState());
     }
 
     // Re-push when the iframe finishes loading so it receives current state.
-    (function wireHelmIframe() {
-      const iframe = $('helm-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushHelmConsoleState(); });
-    })();
+    if ($('helm-iframe')) $('helm-iframe').addEventListener('load', () => { pushHelmConsoleState(); });
 
     // ── Repair console iframe bridge (issue #425) ────────────────────────────
+    // State builder extracted to gui/console-state.js (issue #454).
     function buildRepairConsoleState() {
-      return JSON.stringify({
-        teams:                state.repairTeams || [],
-        console_hull:         state.consoleHull || [],
-        travel_duration_secs: 5.0,
-        damageable_consoles:  [],
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Repair', state);
+      return JSON.stringify({ teams: [], console_hull: [], travel_duration_secs: 5.0, damageable_consoles: [] });
     }
 
     function pushRepairConsoleState() {
       if (activeConsole !== 'Repair') return;
-      const iframe = $('repair-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Repair', buildRepairConsoleState());
-      } catch (_) {}
+      _pushIframe($('repair-iframe'), 'Repair', buildRepairConsoleState());
     }
 
-    (function wireRepairIframe() {
-      const iframe = $('repair-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushRepairConsoleState(); });
-    })();
+    if ($('repair-iframe')) $('repair-iframe').addEventListener('load', () => { pushRepairConsoleState(); });
 
     // ── Power console iframe bridge (issue #425) ─────────────────────────────
+    // State builder extracted to gui/console-state.js (issue #454).
     function buildPowerConsoleState() {
-      return JSON.stringify({
-        helm:           state.powerHelm    || 0,
-        weapons:        state.powerWeapons || 0,
-        sensors:        state.powerSensors || 0,
-        battery_charge: state.powerBattery || 0,
-        locked:         state.powerLocked  || false,
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Power', state);
+      return JSON.stringify({ helm: 0, weapons: 0, sensors: 0, battery_charge: 0, locked: false });
     }
 
     function pushPowerConsoleState() {
       if (activeConsole !== 'Power') return;
-      const iframe = $('power-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Power', buildPowerConsoleState());
-      } catch (_) {}
+      _pushIframe($('power-iframe'), 'Power', buildPowerConsoleState());
     }
 
-    (function wirePowerIframe() {
-      const iframe = $('power-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushPowerConsoleState(); });
-    })();
+    if ($('power-iframe')) $('power-iframe').addEventListener('load', () => { pushPowerConsoleState(); });
 
     // ── Shields console iframe bridge (issue #423) ───────────────────────────
+    // State builder extracted to gui/console-state.js (issue #454).
     function buildShieldsConsoleState() {
-      let targetBearing = null;
-      if (state.weaponsTarget && state.asteroids) {
-        const target = state.asteroids.find(a => a.uuid === state.weaponsTarget);
-        if (target) {
-          const dx = entityX(target) - state.shipX;
-          const dz = entityZ(target) - state.shipZ;
-          targetBearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
-        }
-      }
-      return JSON.stringify({
-        facings:            state.shieldFacings || [],
-        hull_integrity_pct: state.hullIntegrity || 100,
-        focused_facing:     state.shieldFocusedFacing || null,
-        target_bearing:     targetBearing,
-        grid_status:        state.shieldFacings && state.shieldFacings.length > 0 ? 'GRID NOMINAL' : 'GRID OFFLINE',
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Shields', state);
+      return JSON.stringify({ facings: [], hull_integrity_pct: 100, focused_facing: null, target_bearing: null, grid_status: 'GRID OFFLINE' });
     }
 
     function pushShieldsConsoleState() {
       if (activeConsole !== 'Shields') return;
-      const iframe = $('shields-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Shields', buildShieldsConsoleState());
-      } catch (_) {}
+      _pushIframe($('shields-iframe'), 'Shields', buildShieldsConsoleState());
     }
 
-    (function wireShieldsIframe() {
-      const iframe = $('shields-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushShieldsConsoleState(); });
-    })();
+    if ($('shields-iframe')) $('shields-iframe').addEventListener('load', () => { pushShieldsConsoleState(); });
 
     // ── Sensors console iframe bridge ─────────────────────────────────────────
-    const SENSORS_RADAR_RANGE = 2000.0;
-
+    // State builder extracted to gui/console-state.js (issue #454).
     function buildSensorsConsoleState() {
-      const blips = (state.asteroids || []).map(a => {
-        const ax = entityX(a), az = entityZ(a);
-        const dx = ax - state.shipX, dz = az - state.shipZ;
-        if (dx * dx + dz * dz > SENSORS_RADAR_RANGE * SENSORS_RADAR_RANGE) return null;
-        const radar_x = dx / SENSORS_RADAR_RANGE;
-        const radar_y = dz / SENSORS_RADAR_RANGE;
-        const radius = entityRadius(a);
-        const tags = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
-        const kind = tags.includes('ship') ? 'ship'
-                   : tags.includes('station') ? 'station' : 'asteroid';
-        return {
-          uuid: a.uuid, radar_x, radar_y,
-          scaled_radius: radius / SENSORS_RADAR_RANGE,
-          kind, color: null,
-          name: a.name || null,
-          stance: a.stance || 'neutral',
-          faction: a.faction || null,
-        };
-      }).filter(Boolean);
-
-      let targetBearing = null, targetRange = null;
-      let targetName = null, targetKind = null, targetStance = null, targetFaction = null;
-      let targetClass = null, targetHullPct = null, targetHeading = null, targetSpeed = null;
-      let targetThreat = null, targetShieldFreq = null, targetShields = [];
-
-      if (state.sensorsTarget && state.asteroids) {
-        const tgt = state.asteroids.find(a => a.uuid === state.sensorsTarget);
-        if (tgt) {
-          const dx = entityX(tgt) - state.shipX;
-          const dz = entityZ(tgt) - state.shipZ;
-          targetBearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
-          targetRange = Math.sqrt(dx * dx + dz * dz);
-          targetName = tgt.name || state.sensorsTarget;
-          const tags = (tgt.tags || tgt.entity_tags || []).map(t => String(t).toLowerCase());
-          targetKind = tags.includes('ship') ? 'ship'
-                     : tags.includes('station') ? 'station' : 'asteroid';
-          targetStance = tgt.stance || 'neutral';
-          targetFaction = tgt.faction || null;
-          targetClass = tgt.shipClass || null;
-          targetHullPct = tgt.hull_pct !== undefined ? tgt.hull_pct : null;
-          targetHeading = tgt.heading !== undefined ? tgt.heading : null;
-          targetSpeed = tgt.speed !== undefined ? tgt.speed : null;
-          targetThreat = tgt.threat || (targetStance === 'hostile' ? 'high' : 'low');
-          targetShieldFreq = tgt.shield_freq || null;
-          targetShields = tgt.shields || [];
-        }
-      }
-
-      return JSON.stringify({
-        scan_range: SENSORS_RADAR_RANGE,
-        complexity: state.complexity?.Sensors || 'full',
-        impulse_charge_progress: state.impulseChargeProgress || 0,
-        regions: state.regions || [],
-        blips,
-        target_uuid: state.sensorsTarget || null,
-        target_name: targetName,
-        target_kind: targetKind,
-        target_stance: targetStance,
-        target_faction: targetFaction,
-        target_bearing: targetBearing,
-        target_range: targetRange,
-        target_class: targetClass,
-        target_hull_pct: targetHullPct,
-        target_heading: targetHeading,
-        target_speed: targetSpeed,
-        target_threat: targetThreat,
-        target_shield_freq: targetShieldFreq,
-        target_shields: targetShields,
-      });
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Sensors', state);
+      return JSON.stringify({ scan_range: 2000, complexity: 'full', impulse_charge_progress: 0, regions: [], blips: [], target_uuid: null, target_name: null, target_kind: null, target_stance: null, target_faction: null, target_bearing: null, target_range: null, target_class: null, target_hull_pct: null, target_heading: null, target_speed: null, target_threat: null, target_shield_freq: null, target_shields: [] });
     }
 
     function pushSensorsConsoleState() {
       if (activeConsole !== 'Sensors') return;
-      const iframe = $('sensors-iframe');
-      if (!iframe || !iframe.contentWindow) return;
-      try {
-        const fn = iframe.contentWindow.__updateConsole;
-        if (typeof fn === 'function') fn('Sensors', buildSensorsConsoleState());
-      } catch (_) {}
+      _pushIframe($('sensors-iframe'), 'Sensors', buildSensorsConsoleState());
     }
 
-    (function wireSensorsIframe() {
-      const iframe = $('sensors-iframe');
-      if (!iframe) return;
-      iframe.addEventListener('load', () => { pushSensorsConsoleState(); });
-    })();
+    if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); });
 
-    // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
-    // The weapons-console.html iframe sends {type:'console_action', payload:json}
-    // via postMessage when the player fires or taps a target. We translate
-    // the action JSON to the appropriate ClientMessage and send via PeerJS.
+    // ── Comms console iframe bridge ────────────────────────────────────────────
+    // State builder extracted to gui/console-state.js (issue #454).
+    function buildCommsConsoleState() {
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Comms', state);
+      return JSON.stringify({ messages: [], contacts: [] });
+    }
+
+    function pushCommsConsoleState() {
+      if (activeConsole !== 'Comms') return;
+      _pushIframe($('comms-iframe'), 'Comms', buildCommsConsoleState());
+    }
+
+    if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); });
+
+    // ── Console action postMessage bridge (issue #422) ────────────────────────
+    // All iframe consoles send {type:'console_action', payload:json} via
+    // postMessage.  Dispatch is table-driven via gui/action-map.js (issue #455).
     window.addEventListener('message', (event) => {
       if (!event.data || event.data.type !== 'console_action') return;
       let action;
       try { action = JSON.parse(event.data.payload); } catch (_) { return; }
       if (!action || !action.action) return;
-      switch (action.action) {
-        case 'fire_phaser':
-          if (action.bank) send('FirePhaser', { bank: action.bank });
-          break;
-        case 'fire_torpedo':
-          send('FireTorpedo', { tube: action.tube || 'fore', target_uuid: action.target_uuid || null });
-          break;
-        case 'set_target':
-          if (action.uuid) send('SetTarget', { uuid: action.uuid });
-          break;
-        case 'set_phaser_mode':
-          if (action.mode) send('SetPhaserMode', { mode: action.mode });
-          break;
-        case 'set_view':
-          // ClientMessage::SetView { mode: ViewMode::Camera(direction) }
-          // serialises as {"type":"SetView","data":{"mode":{"kind":"Camera","data":"Fore"}}}
-          if (action.direction) send('SetView', { mode: { kind: 'Camera', data: action.direction } });
-          break;
-        case 'toggle_red_alert':
-          send('ToggleRedAlert');
-          break;
-        case 'helm_input':
-          send('HelmInput', { thrust: action.thrust || 0, steering: action.steering || 0 });
-          break;
-        case 'start_impulse_charge':
-          send('StartImpulseCharge');
-          break;
-        case 'cancel_impulse':
-          send('CancelImpulse');
-          break;
-        case 'set_radar_view':
-          send('SetView', { mode: { kind: 'Radar' } });
-          break;
-        case 'dispatch_repair_team':
-          send('DispatchRepairTeam', { team_idx: action.team_idx, console: action.target });
-          break;
-        case 'increase_power':
-          if (action.target) send('IncreasePower', { console: action.target });
-          break;
-        case 'decrease_power':
-          if (action.target) send('DecreasePower', { console: action.target });
-          break;
-        case 'set_shield_focus':
-          send('SetShieldFocus', { facing: action.facing || null });
-          break;
-        case 'set_sensors_target':
-          if (action.uuid) {
-            state.sensorsTarget = action.uuid;
-            send('SetScienceTarget', { uuid: action.uuid });
-          }
-          break;
-        default:
-          break;
+      if (typeof window.dispatchConsoleAction === 'function') {
+        window.dispatchConsoleAction(action, send, (patch) => Object.assign(state, patch));
+        return;
+      }
+      // Fallback for the rare race window before module scripts load.
+      // Only covers set_sensors_target (mutates local state); other actions
+      // are silently deferred (non-critical — they arrive after module load).
+      if (action.action === 'set_sensors_target' && action.uuid) {
+        state.sensorsTarget = action.uuid;
+        send('SetScienceTarget', { uuid: action.uuid });
       }
     });
 

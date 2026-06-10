@@ -354,18 +354,6 @@
 </head>
 <body style="background:#000; margin:0; overflow:hidden;">
 
-  <script>
-    window.__sendAction = function(json) {
-      if (window !== window.parent) {
-        window.parent.postMessage({ type: 'console_action', payload: json }, '*');
-      } else if (window.ipc) {
-        window.ipc.postMessage(json);
-      } else {
-        window.wasmBindings.wasm_ui_action(json);
-      }
-    };
-  </script>
-
   <div id="hdg" aria-hidden="true"></div>
   <div id="spd" aria-hidden="true"></div>
   <div id="pos-x" aria-hidden="true"></div>
@@ -514,9 +502,9 @@
 
   <script src="radar-widget.js"></script>
 
-  <script>
-    var _lastName      = null;
-    var _lastStateJson = null;
+  <script type="module">
+    import { initConsole } from './console-core.js';
+
     var _state         = null;
     var _radarWidget   = null;
 
@@ -529,15 +517,10 @@
       return s + Math.abs(n).toFixed(1).padStart(6, '0');
     }
 
-    window.__updateConsole = function(name, stateJson) {
-      _lastName      = name;
-      _lastStateJson = stateJson;
-      _renderConsole(name, stateJson);
-    };
+    // ── Inbound state push (ADR-0001 §2) ─────────────────────────────────
+    // Handled by initConsole({ render }) — see bottom of script.
 
-    function _renderConsole(name, stateJson) {
-      var s;
-      try { s = JSON.parse(stateJson); } catch (e) { console.warn('[Helm] bad state json', e); return; }
+    function _renderConsole(s) {
       _state = s;
 
       document.getElementById('hdg').dataset.heading = String(s.heading || 0);
@@ -620,7 +603,7 @@
       nub.style.marginTop  = (_stickValue.y * radius) + 'px';
       document.getElementById('thrust-val').textContent = _stickFmt(-_stickValue.y);
       document.getElementById('steering-val').textContent = _stickFmt(_stickValue.x);
-      window.__sendAction(JSON.stringify({ action: 'helm_input', console: 'Helm', thrust: -_stickValue.y, steering: _stickValue.x }));
+      sendAction('helm_input', { thrust: -_stickValue.y, steering: _stickValue.x });
     }
     function _stickSetFromPointer(clientX, clientY) {
       var bezel = document.getElementById('stick-bezel');
@@ -687,15 +670,15 @@
     })();
 
     document.getElementById('on-screen-btn').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'set_radar_view', console: 'Helm' }));
+      sendAction('set_radar_view', {});
     });
 
     document.getElementById('impulse-btn').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'start_impulse_charge', console: 'Helm' }));
+      sendAction('start_impulse_charge', {});
     });
 
     document.getElementById('cancel-impulse-btn').addEventListener('click', function() {
-      window.__sendAction(JSON.stringify({ action: 'cancel_impulse', console: 'Helm' }));
+      sendAction('cancel_impulse', {});
     });
 
     _radarWidget = (function() {
@@ -705,10 +688,12 @@
         consoleId:   'helm',
         orientation: 'ship_up',
         onBlipTap:   function(uuid) {
-          window.__sendAction(JSON.stringify({ action: 'set_target', console: 'Helm', uuid: uuid }));
+          sendAction('set_target', { uuid: uuid });
         },
       });
     })();
+
+    var sendAction = initConsole({ name: 'Helm', render: _renderConsole }).sendAction;
   </script>
 </body>
 </html>

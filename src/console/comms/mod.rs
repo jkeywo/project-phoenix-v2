@@ -1,7 +1,4 @@
-#[cfg(feature = "client")]
-pub mod client;
 pub mod inbox;
+pub mod server;
 
-#[cfg(feature = "client")]
-pub use client::*;
 pub use inbox::*;

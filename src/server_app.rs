@@ -158,6 +158,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::power_plugin::PowerPlugin)
     .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
     .add_plugins(crate::science_plugin::SciencePlugin)
+    .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_message::<AsteroidDestroyedVfx>()
     .insert_resource(ShipState::new())
     .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
@@ -1555,6 +1556,7 @@ mod tests {
             .add_plugins(crate::power_plugin::PowerPlugin)
             .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
             .add_plugins(crate::science_plugin::SciencePlugin)
+            .add_plugins(crate::comms_plugin::CommsConsolePlugin)
             .add_systems(
                 Update,
                 (

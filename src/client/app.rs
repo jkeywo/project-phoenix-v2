@@ -503,7 +503,6 @@ fn sync_complexity_hiding(
 /// - `SensorsPanelPlugin`      — long-range radar + science target designation
 /// - `ShieldsPanelPlugin`      — 4-quadrant HP bars + focus mechanic
 /// - `NavigationPanelPlugin`   — system chart + impulse status + cancel
-/// - `CommsPanelPlugin`        — comms console (placeholder)
 pub fn add_client_plugins(app: &mut App) {
     app.add_plugins(ClientAppPlugin)
         .add_plugins(crate::gui::GuiPlugin)
@@ -516,6 +515,5 @@ pub fn add_client_plugins(app: &mut App) {
         .add_plugins(crate::power_panel::PowerPanelPlugin)
         .add_plugins(crate::sensors_panel::SensorsPanelPlugin)
         .add_plugins(crate::shields_panel::ShieldsPanelPlugin)
-        .add_plugins(crate::navigation_panel::NavigationPanelPlugin)
-        .add_plugins(crate::comms_panel::CommsPanelPlugin);
+        .add_plugins(crate::navigation_panel::NavigationPanelPlugin);
 }

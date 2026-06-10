@@ -97,6 +97,7 @@ pub use console::power::server as power_plugin;
 pub use console::shields::server as shields_plugin;
 pub use console::science::server as science_plugin;
 pub use console::comms::inbox as comms_inbox;
+pub use console::comms::server as comms_plugin;
 
 #[cfg(feature = "client")]
 pub use console::captain::client as captain_panel;
@@ -114,8 +115,6 @@ pub use console::science::client as sensors_panel;
 pub use console::shields::client as shields_panel;
 #[cfg(feature = "client")]
 pub use console::navigation::client as navigation_panel;
-#[cfg(feature = "client")]
-pub use console::comms::client as comms_panel;
 
 // Server-only grouped module (bridge, renderer, viewscreen_border, debug_overlay).
 #[cfg(feature = "server")]

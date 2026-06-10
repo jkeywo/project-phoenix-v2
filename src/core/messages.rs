@@ -1324,6 +1324,23 @@ pub struct RepairConsoleState {
     pub damageable_consoles: Vec<Console>,
 }
 
+/// Serialised Comms console state pushed to the HTML comms panel (issue #427).
+///
+/// Written into a single `CommsConsoleStateComp` component and pushed on change
+/// via `ConsoleStateChanged { name: "Comms", json }`. Mirrors the data already
+/// broadcast as `ServerMessage::CommsState` but delivered through the HTML
+/// console bridge (ADR-0001) so the HTML panel can live in a wry iframe.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct CommsConsoleState {
+    /// Current inbox messages for the Comms holder, in insertion order.
+    pub messages: Vec<CommsMessage>,
+    /// Mission objectives visible to Comms.
+    #[serde(default)]
+    pub objectives: Vec<ObjectiveSnapshot>,
+    /// Hailable contacts derived from the active world content.
+    pub contacts: Vec<CommsContact>,
+}
+
 /// A console action decoded from the `window.__sendAction` envelope
 /// (ADR-0001 §1). The envelope's extra `console` field is ignored by serde.
 ///
@@ -1379,6 +1396,36 @@ pub enum UiAction {
         team_idx: u8,
         target: Console,
     },
+    /// Hail a contact (comms console).
+    ///
+    /// The HTML comms panel sends `{ action: "hail", console: "Comms", target_uuid: "..." }`.
+    Hail {
+        target_uuid: String,
+    },
+    /// Select (open) a message in the Comms inbox.
+    ///
+    /// The HTML comms panel sends `{ action: "select_comms_message", console: "Comms", message_id: "..." }`.
+    SelectCommsMessage {
+        message_id: String,
+    },
+    /// Choose a response to a received comms message.
+    ///
+    /// The HTML comms panel sends
+    /// `{ action: "respond_to_message", console: "Comms", message_id: "...", response_index: 0 }`.
+    RespondToMessage {
+        message_id: String,
+        response_index: usize,
+    },
+    /// Clear all read/orphaned messages from the Comms inbox.
+    ///
+    /// The HTML comms panel sends `{ action: "clear_comms", console: "Comms" }`.
+    ClearComms,
+    /// Push the selected comms message to the viewscreen.
+    ///
+    /// The HTML comms panel sends `{ action: "show_on_screen", console: "Comms", message_id: "..." }`.
+    ShowOnScreen {
+        message_id: String,
+    },
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
@@ -1413,6 +1460,14 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             team_idx: *team_idx,
             console: target.clone(),
         },
+        UiAction::Hail { target_uuid } => ClientMessage::Hail { target_uuid: target_uuid.clone() },
+        UiAction::SelectCommsMessage { message_id } => ClientMessage::SelectCommsMessage { message_id: message_id.clone() },
+        UiAction::RespondToMessage { message_id, response_index } => ClientMessage::RespondToMessage {
+            message_id: message_id.clone(),
+            response_index: *response_index,
+        },
+        UiAction::ClearComms => ClientMessage::ClearComms,
+        UiAction::ShowOnScreen { message_id } => ClientMessage::ShowOnScreen { message_id: message_id.clone() },
     }
 }
 

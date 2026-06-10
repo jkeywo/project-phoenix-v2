@@ -100,16 +100,6 @@ pub use console::comms::inbox as comms_inbox;
 pub use console::comms::server as comms_plugin;
 
 #[cfg(feature = "client")]
-pub use console::captain::client as captain_panel;
-#[cfg(feature = "client")]
-pub use console::helm::client as helm_panel;
-#[cfg(feature = "client")]
-pub use console::weapons::client as weapons_panel;
-#[cfg(feature = "client")]
-pub use console::repair::client as repair_panel;
-#[cfg(feature = "client")]
-pub use console::power::client as power_panel;
-#[cfg(feature = "client")]
 pub use console::science::client as sensors_panel;
 #[cfg(feature = "client")]
 pub use console::shields::client as shields_panel;

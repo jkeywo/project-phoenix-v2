@@ -1,11 +1,12 @@
 // Content switcher for the client GUI shell. Pure function (issue #441).
 //
 // Maps the currently-active console to which HTML <section> should be
-// visible. Three consoles have HTML sections in client.html
+// visible. Seven consoles have HTML sections in client.html
 // (CaptainChair -> #captain-ui, Helm -> #helm-ui, Tactical -> #weapons-ui,
-// Repair -> #repair-ui); the other five are rendered by the Bevy WASM canvas,
-// so when one of those is active no HTML section is shown — the canvas takes the whole bezel
-// content area.
+// Repair -> #repair-ui, Power -> #power-ui, Shields -> #shields-ui,
+// Sensors -> #sensors-ui); the other two (Navigation, Comms) are rendered by
+// the Bevy WASM canvas, so when one of those is active no HTML section is
+// shown — the canvas takes the whole bezel content area.
 //
 // This module exports a pure function `consoleSections(activeConsole, inGame)`
 // returning a visibility map keyed by section id. The inline `<script>` in

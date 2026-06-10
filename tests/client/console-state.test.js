@@ -10,6 +10,7 @@ import {
   buildPowerConsoleState,
   buildShieldsConsoleState,
   buildSensorsConsoleState,
+  buildCommsConsoleState,
 } from '../../gui/console-state.js';
 
 // ── Entity helpers ────────────────────────────────────────────────────────────
@@ -354,5 +355,29 @@ describe('buildSensorsConsoleState', () => {
       asteroids: [{ uuid: 'e1', x: 5, z: 0, tags: ['ship'], stance: 'hostile' }],
     };
     expect(parse(buildSensorsConsoleState(state)).target_threat).toBe('high');
+  });
+});
+
+describe('buildCommsConsoleState', () => {
+  it('returns valid JSON', () => {
+    expect(() => parse(buildCommsConsoleState({}))).not.toThrow();
+  });
+
+  it('messages defaults to empty array', () => {
+    expect(parse(buildCommsConsoleState({})).messages).toEqual([]);
+  });
+
+  it('contacts defaults to empty array', () => {
+    expect(parse(buildCommsConsoleState({})).contacts).toEqual([]);
+  });
+
+  it('passes messages through', () => {
+    const msgs = [{ id: 'msg-1', sender_name: 'Starbase', subject: 'Hello', body: 'Hi' }];
+    expect(parse(buildCommsConsoleState({ commsMessages: msgs })).messages).toEqual(msgs);
+  });
+
+  it('passes contacts through', () => {
+    const contacts = [{ uuid: 'npc-1', name: 'Station Alpha', in_range: true }];
+    expect(parse(buildCommsConsoleState({ commsContacts: contacts })).contacts).toEqual(contacts);
   });
 });

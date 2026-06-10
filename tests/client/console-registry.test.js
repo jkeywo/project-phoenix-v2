@@ -2,15 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { REGISTRY } from '../../gui/console-registry.js';
 
 describe('REGISTRY', () => {
-  it('contains exactly the seven HTML-panel consoles', () => {
+  it('contains exactly the eight HTML-panel consoles', () => {
     expect(Object.keys(REGISTRY).sort()).toEqual([
-      'CaptainChair', 'Helm', 'Power', 'Repair', 'Sensors', 'Shields', 'Tactical',
+      'CaptainChair', 'Comms', 'Helm', 'Power', 'Repair', 'Sensors', 'Shields', 'Tactical',
     ]);
   });
 
-  it('does not contain Navigation or Comms (Bevy-rendered)', () => {
+  it('does not contain Navigation (Bevy-rendered)', () => {
     expect(REGISTRY.Navigation).toBeUndefined();
-    expect(REGISTRY.Comms).toBeUndefined();
   });
 
   it('is frozen', () => {
@@ -25,6 +24,7 @@ describe('REGISTRY', () => {
     ['Power',        'power-ui',    'power-iframe'],
     ['Shields',      'shields-ui',  'shields-iframe'],
     ['Sensors',      'sensors-ui',  'sensors-iframe'],
+    ['Comms',        'comms-ui',    'comms-iframe'],
   ])('%s → sectionId=%s, iframeId=%s', (name, sectionId, iframeId) => {
     expect(REGISTRY[name].sectionId).toBe(sectionId);
     expect(REGISTRY[name].iframeId).toBe(iframeId);

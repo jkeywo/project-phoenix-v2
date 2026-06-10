@@ -99,6 +99,31 @@ export const ACTION_MAP = Object.freeze({
       send('SetScienceTarget', { uuid: a.uuid });
     }
   },
+
+  /** Open a comms channel to a contact by UUID. */
+  hail: (a, send) => {
+    if (a.target_uuid) send('Hail', { target_uuid: a.target_uuid });
+  },
+
+  /** Mark a comms message as selected / read. */
+  select_comms_message: (a, send) => {
+    if (a.message_id) send('SelectCommsMessage', { message_id: a.message_id });
+  },
+
+  /** Send a pre-written response to a comms message. */
+  respond_to_message: (a, send) => {
+    if (a.message_id) send('RespondToMessage', { message_id: a.message_id, response_index: a.response_index });
+  },
+
+  /** Clear all read/acknowledged comms messages from the inbox. */
+  clear_comms: (a, send) => {
+    send('ClearComms');
+  },
+
+  /** Send the selected comms message to the view screen. */
+  show_on_screen: (a, send) => {
+    if (a.message_id) send('ShowOnScreen', { message_id: a.message_id });
+  },
 });
 
 /**

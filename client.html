@@ -105,7 +105,8 @@
     #power-ui.active,
     #repair-ui.active,
     #shields-ui.active,
-    #sensors-ui.active {
+    #sensors-ui.active,
+    #comms-ui.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -119,7 +120,8 @@
     #power-ui iframe,
     #repair-ui iframe,
     #shields-ui iframe,
-    #sensors-ui iframe {
+    #sensors-ui iframe,
+    #comms-ui iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -227,7 +229,8 @@
     #power-ui.active,
     #repair-ui.active,
     #shields-ui.active,
-    #sensors-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
+    #sensors-ui.active,
+    #comms-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────
        First flex child of #console-container. In-flow so it takes up
@@ -536,6 +539,11 @@
         title="Sensors Console" allowfullscreen></iframe>
     </section>
 
+    <section id="comms-ui">
+      <iframe id="comms-iframe" src="gui/comms-console.html"
+        title="Comms Console" allowfullscreen></iframe>
+    </section>
+
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
          src/client_app.rs (#49). -->
   </div>
@@ -827,7 +835,7 @@
 
       // Console sections (issue #441): map activeConsole → HTML section id
       // via gui/content-switcher.js. Only the matching section gets `.active`;
-      // Bevy-rendered consoles (Navigation, Comms) leave all sections off and the
+      // Bevy-rendered consoles (Navigation) leave all sections off and the
       // WASM canvas takes the bezel content area. Helm is HTML-rendered via
       // iframe, so it gets a section entry like weapons-ui.
       // so it must be listed in the section map like weapons-ui.
@@ -839,7 +847,8 @@
             'repair-ui': inGame && activeConsole === 'Repair',
             'power-ui':  inGame && activeConsole === 'Power',
             'shields-ui': inGame && activeConsole === 'Shields',
-            'sensors-ui': inGame && activeConsole === 'Sensors' };
+            'sensors-ui': inGame && activeConsole === 'Sensors',
+            'comms-ui':  inGame && activeConsole === 'Comms' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
@@ -847,6 +856,7 @@
       $('power-ui').className  = sections['power-ui']  ? 'active' : '';
       $('shields-ui').className = sections['shields-ui'] ? 'active' : '';
       $('sensors-ui').className = sections['sensors-ui'] ? 'active' : '';
+      $('comms-ui').className  = sections['comms-ui']  ? 'active' : '';
 
       // Orientation drives both the tab-bar layout and the container's
       // flex-direction (portrait = column, landscape = row). Computed once
@@ -1190,6 +1200,9 @@
       if (activeConsole === 'Sensors') {
         pushSensorsConsoleState();
       }
+      if (activeConsole === 'Comms') {
+        pushCommsConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1278,6 +1291,20 @@
     }
 
     if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); });
+
+    // ── Comms console iframe bridge ────────────────────────────────────────────
+    // State builder extracted to gui/console-state.js (issue #454).
+    function buildCommsConsoleState() {
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Comms', state);
+      return JSON.stringify({ messages: [], contacts: [] });
+    }
+
+    function pushCommsConsoleState() {
+      if (activeConsole !== 'Comms') return;
+      _pushIframe($('comms-iframe'), 'Comms', buildCommsConsoleState());
+    }
+
+    if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); });
 
     // ── Console action postMessage bridge (issue #422) ────────────────────────
     // All iframe consoles send {type:'console_action', payload:json} via

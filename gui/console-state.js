@@ -283,6 +283,17 @@ export function buildSensorsConsoleState(state) {
   });
 }
 
+/**
+ * Comms console.
+ * @param {{ commsMessages, commsContacts }} state
+ */
+export function buildCommsConsoleState(state) {
+  return JSON.stringify({
+    messages: state.commsMessages || [],
+    contacts: state.commsContacts || [],
+  });
+}
+
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
 if (typeof window !== 'undefined') {
@@ -295,6 +306,7 @@ if (typeof window !== 'undefined') {
       case 'Power':        return buildPowerConsoleState(state);
       case 'Shields':      return buildShieldsConsoleState(state);
       case 'Sensors':      return buildSensorsConsoleState(state);
+      case 'Comms':        return buildCommsConsoleState(state);
       default:             return '{}';
     }
   };

@@ -8,21 +8,26 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 15 expected action keys', () => {
+  it('contains exactly the 20 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
+      'clear_comms',
       'decrease_power',
       'dispatch_repair_team',
       'fire_phaser',
       'fire_torpedo',
+      'hail',
       'helm_input',
       'increase_power',
+      'respond_to_message',
+      'select_comms_message',
       'set_phaser_mode',
       'set_radar_view',
       'set_sensors_target',
       'set_shield_focus',
       'set_target',
       'set_view',
+      'show_on_screen',
       'start_impulse_charge',
       'toggle_red_alert',
     ]);
@@ -216,6 +221,71 @@ describe('set_sensors_target', () => {
     ACTION_MAP.set_sensors_target({ action: 'set_sensors_target' }, send, mutate);
     expect(send).not.toHaveBeenCalled();
     expect(mutate).not.toHaveBeenCalled();
+  });
+});
+
+describe('hail', () => {
+  it('calls send Hail with target_uuid', () => {
+    const send = mkSend();
+    ACTION_MAP.hail({ action: 'hail', target_uuid: 'npc-1' }, send);
+    expect(send).toHaveBeenCalledWith('Hail', { target_uuid: 'npc-1' });
+  });
+
+  it('does nothing when target_uuid is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.hail({ action: 'hail' }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('select_comms_message', () => {
+  it('calls send SelectCommsMessage with message_id', () => {
+    const send = mkSend();
+    ACTION_MAP.select_comms_message({ action: 'select_comms_message', message_id: 'msg-42' }, send);
+    expect(send).toHaveBeenCalledWith('SelectCommsMessage', { message_id: 'msg-42' });
+  });
+
+  it('does nothing when message_id is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.select_comms_message({ action: 'select_comms_message' }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('respond_to_message', () => {
+  it('calls send RespondToMessage with message_id and response_index', () => {
+    const send = mkSend();
+    ACTION_MAP.respond_to_message({ action: 'respond_to_message', message_id: 'msg-1', response_index: 2 }, send);
+    expect(send).toHaveBeenCalledWith('RespondToMessage', { message_id: 'msg-1', response_index: 2 });
+  });
+
+  it('does nothing when message_id is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.respond_to_message({ action: 'respond_to_message', response_index: 0 }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('clear_comms', () => {
+  it('calls send ClearComms with no payload', () => {
+    const send = mkSend();
+    ACTION_MAP.clear_comms({}, send);
+    expect(send).toHaveBeenCalledWith('ClearComms');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('show_on_screen', () => {
+  it('calls send ShowOnScreen with message_id', () => {
+    const send = mkSend();
+    ACTION_MAP.show_on_screen({ action: 'show_on_screen', message_id: 'msg-7' }, send);
+    expect(send).toHaveBeenCalledWith('ShowOnScreen', { message_id: 'msg-7' });
+  });
+
+  it('does nothing when message_id is absent', () => {
+    const send = mkSend();
+    ACTION_MAP.show_on_screen({ action: 'show_on_screen' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

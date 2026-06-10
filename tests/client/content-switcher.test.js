@@ -8,9 +8,9 @@ import {
 } from '../../gui/content-switcher.js';
 
 describe('CONSOLE_SECTION map', () => {
-  it('keys the eight HTML-panel consoles', () => {
+  it('keys all nine HTML-panel consoles', () => {
     expect(Object.keys(CONSOLE_SECTION).sort())
-      .toEqual(['CaptainChair', 'Comms', 'Helm', 'Power', 'Repair', 'Sensors', 'Shields', 'Tactical']);
+      .toEqual(['CaptainChair', 'Comms', 'Helm', 'Navigation', 'Power', 'Repair', 'Sensors', 'Shields', 'Tactical']);
   });
 
   it('maps CaptainChair to captain-ui', () => {
@@ -33,11 +33,11 @@ describe('CONSOLE_SECTION map', () => {
     expect(CONSOLE_SECTION.Power).toBe('power-ui');
   });
 
-  it('does not key Navigation (Bevy renders it)', () => {
+  it('maps Sensors, Shields, Comms, and Navigation', () => {
     expect(CONSOLE_SECTION.Sensors).toBe('sensors-ui');
     expect(CONSOLE_SECTION.Shields).toBe('shields-ui');
     expect(CONSOLE_SECTION.Comms).toBe('comms-ui');
-    expect(CONSOLE_SECTION.Navigation).toBeUndefined();
+    expect(CONSOLE_SECTION.Navigation).toBe('navigation-ui');
   });
 
   it('CONSOLE_SECTION and HTML_SECTION_IDS are frozen', () => {
@@ -45,8 +45,11 @@ describe('CONSOLE_SECTION map', () => {
     expect(Object.isFrozen(HTML_SECTION_IDS)).toBe(true);
   });
 
-  it('HTML_SECTION_IDS lists all eight section ids', () => {
-    expect([...HTML_SECTION_IDS].sort()).toEqual(['captain-ui', 'comms-ui', 'helm-ui', 'power-ui', 'repair-ui', 'sensors-ui', 'shields-ui', 'weapons-ui']);
+  it('HTML_SECTION_IDS lists all nine section ids', () => {
+    expect([...HTML_SECTION_IDS].sort()).toEqual([
+      'captain-ui', 'comms-ui', 'helm-ui', 'navigation-ui',
+      'power-ui', 'repair-ui', 'sensors-ui', 'shields-ui', 'weapons-ui',
+    ]);
   });
 });
 
@@ -60,10 +63,7 @@ describe('sectionForConsole', () => {
     expect(sectionForConsole('Sensors')).toBe('sensors-ui');
     expect(sectionForConsole('Shields')).toBe('shields-ui');
     expect(sectionForConsole('Comms')).toBe('comms-ui');
-  });
-
-  it('returns null for Bevy-rendered consoles', () => {
-    expect(sectionForConsole('Navigation')).toBeNull();
+    expect(sectionForConsole('Navigation')).toBe('navigation-ui');
   });
 
   it('returns null for empty / null / undefined', () => {
@@ -79,7 +79,11 @@ describe('sectionForConsole', () => {
 
 describe('consoleSections', () => {
   function allFalse() {
-    return { 'captain-ui': false, 'helm-ui': false, 'weapons-ui': false, 'repair-ui': false, 'power-ui': false, 'sensors-ui': false, 'shields-ui': false, 'comms-ui': false };
+    return {
+      'captain-ui': false, 'helm-ui': false, 'weapons-ui': false,
+      'repair-ui': false, 'power-ui': false, 'sensors-ui': false,
+      'shields-ui': false, 'comms-ui': false, 'navigation-ui': false,
+    };
   }
 
   function withTrue(key) {
@@ -136,28 +140,22 @@ describe('consoleSections', () => {
     expect(out).toEqual(withTrue('comms-ui'));
   });
 
-  it('returns all-false for Bevy-rendered consoles (canvas takes the content area)', () => {
-    for (const c of ['Navigation']) {
-      const out = consoleSections(c, true);
-      expect(out).toEqual(allFalse());
-    }
+  it('shows only navigation-ui for Navigation', () => {
+    const out = consoleSections('Navigation', true);
+    expect(out).toEqual(withTrue('navigation-ui'));
+  });
+
+  it('returns all-false for unknown console strings', () => {
+    const out = consoleSections('Unknown', true);
+    expect(out).toEqual(allFalse());
   });
 });
 
 describe('isBevyConsole', () => {
-  it('returns true for the one Bevy-rendered console', () => {
-    expect(isBevyConsole('Navigation')).toBe(true);
-  });
-
-  it('returns false for the eight HTML-section consoles', () => {
-    expect(isBevyConsole('CaptainChair')).toBe(false);
-    expect(isBevyConsole('Helm')).toBe(false);
-    expect(isBevyConsole('Tactical')).toBe(false);
-    expect(isBevyConsole('Repair')).toBe(false);
-    expect(isBevyConsole('Power')).toBe(false);
-    expect(isBevyConsole('Sensors')).toBe(false);
-    expect(isBevyConsole('Shields')).toBe(false);
-    expect(isBevyConsole('Comms')).toBe(false);
+  it('returns false for all nine HTML-section consoles', () => {
+    for (const c of ['CaptainChair', 'Helm', 'Tactical', 'Repair', 'Power', 'Sensors', 'Shields', 'Comms', 'Navigation']) {
+      expect(isBevyConsole(c)).toBe(false);
+    }
   });
 
   it('returns false for null / empty / undefined (no active console)', () => {

@@ -106,7 +106,8 @@
     #repair-ui.active,
     #shields-ui.active,
     #sensors-ui.active,
-    #comms-ui.active {
+    #comms-ui.active,
+    #navigation-ui.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -121,7 +122,8 @@
     #repair-ui iframe,
     #shields-ui iframe,
     #sensors-ui iframe,
-    #comms-ui iframe {
+    #comms-ui iframe,
+    #navigation-ui iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -539,9 +541,15 @@
         title="Sensors Console" allowfullscreen></iframe>
     </section>
 
+
     <section id="comms-ui">
       <iframe id="comms-iframe" src="gui/comms-console.html"
         title="Comms Console" allowfullscreen></iframe>
+    </section>
+
+    <section id="navigation-ui">
+      <iframe id="navigation-iframe" src="gui/navigation-console.html"
+        title="Navigation Console" allowfullscreen></iframe>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -1203,6 +1211,9 @@
       if (activeConsole === 'Comms') {
         pushCommsConsoleState();
       }
+      if (activeConsole === 'Navigation') {
+        pushNavigationConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1305,6 +1316,20 @@
     }
 
     if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); });
+
+    // ── Navigation console iframe bridge (issue #458) ─────────────────────────
+    // State builder extracted to gui/console-state.js.
+    function buildNavigationConsoleState() {
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Navigation', state);
+      return JSON.stringify({ blips: [], ship_x: 0, ship_z: 0, impulse_charge_progress: 0, cancel_visible: false, on_screen: false, radar_range: 5000 });
+    }
+
+    function pushNavigationConsoleState() {
+      if (activeConsole !== 'Navigation') return;
+      _pushIframe($('navigation-iframe'), 'Navigation', buildNavigationConsoleState());
+    }
+
+    if ($('navigation-iframe')) $('navigation-iframe').addEventListener('load', () => { pushNavigationConsoleState(); });
 
     // ── Console action postMessage bridge (issue #422) ────────────────────────
     // All iframe consoles send {type:'console_action', payload:json} via

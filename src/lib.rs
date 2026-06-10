@@ -103,8 +103,6 @@ pub use console::comms::server as comms_plugin;
 pub use console::science::client as sensors_panel;
 #[cfg(feature = "client")]
 pub use console::shields::client as shields_panel;
-#[cfg(feature = "client")]
-pub use console::navigation::client as navigation_panel;
 
 // Server-only grouped module (bridge, renderer, viewscreen_border, debug_overlay).
 #[cfg(feature = "server")]

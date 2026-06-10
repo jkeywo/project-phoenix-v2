@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 20 expected action keys', () => {
+  it('contains exactly the 21 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'clear_comms',
@@ -21,6 +21,7 @@ describe('ACTION_MAP', () => {
       'increase_power',
       'respond_to_message',
       'select_comms_message',
+      'set_navigation_chart',
       'set_phaser_mode',
       'set_radar_view',
       'set_sensors_target',
@@ -286,6 +287,12 @@ describe('show_on_screen', () => {
     const send = mkSend();
     ACTION_MAP.show_on_screen({ action: 'show_on_screen' }, send);
     expect(send).not.toHaveBeenCalled();
+
+describe('set_navigation_chart', () => {
+  it('calls send SetView with NavigationChart kind', () => {
+    const send = mkSend();
+    ACTION_MAP.set_navigation_chart({ action: 'set_navigation_chart' }, send);
+    expect(send).toHaveBeenCalledWith('SetView', { mode: { kind: 'NavigationChart' } });
   });
 });
 

@@ -504,6 +504,5 @@ pub fn add_client_plugins(app: &mut App) {
         .add_plugins(crate::ship_view::ShipViewPlugin)
         .add_plugins(crate::phone_border::PhoneBorderPlugin)
         .add_plugins(crate::sensors_panel::SensorsPanelPlugin)
-        .add_plugins(crate::shields_panel::ShieldsPanelPlugin)
-        .add_plugins(crate::navigation_panel::NavigationPanelPlugin);
+        .add_plugins(crate::shields_panel::ShieldsPanelPlugin);
 }

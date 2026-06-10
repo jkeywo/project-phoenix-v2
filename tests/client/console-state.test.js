@@ -3,6 +3,7 @@ import {
   entityX, entityZ, entityRadius,
   buildBlips,
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
+  NAVIGATION_RADAR_RANGE,
   buildWeaponsConsoleState,
   buildCaptainConsoleState,
   buildHelmConsoleState,
@@ -11,6 +12,7 @@ import {
   buildShieldsConsoleState,
   buildSensorsConsoleState,
   buildCommsConsoleState,
+  buildNavigationConsoleState,
 } from '../../gui/console-state.js';
 
 // ── Entity helpers ────────────────────────────────────────────────────────────
@@ -379,5 +381,102 @@ describe('buildCommsConsoleState', () => {
   it('passes contacts through', () => {
     const contacts = [{ uuid: 'npc-1', name: 'Station Alpha', in_range: true }];
     expect(parse(buildCommsConsoleState({ commsContacts: contacts })).contacts).toEqual(contacts);
+  });
+});
+
+// ── buildNavigationConsoleState ───────────────────────────────────────────────
+
+describe('buildNavigationConsoleState', () => {
+  const EMPTY = {};
+
+  it('returns valid JSON', () => {
+    expect(() => parse(buildNavigationConsoleState(EMPTY))).not.toThrow();
+  });
+
+  it('radar_range matches NAVIGATION_RADAR_RANGE constant', () => {
+    expect(parse(buildNavigationConsoleState(EMPTY)).radar_range).toBe(NAVIGATION_RADAR_RANGE);
+  });
+
+  it('blips is empty when no asteroids', () => {
+    expect(parse(buildNavigationConsoleState(EMPTY)).blips).toEqual([]);
+  });
+
+  it('includes station entities', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [{ uuid: 'st1', x: 100, z: 0, tags: ['station'], name: 'Starbase 1' }],
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    expect(blips.length).toBe(1);
+    expect(blips[0].kind).toBe('station');
+    expect(blips[0].name).toBe('Starbase 1');
+  });
+
+  it('includes planet and star entities', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [
+        { uuid: 'p1', x: 50, z: 0,  tags: ['planet'] },
+        { uuid: 's1', x: 0,  z: 50, tags: ['star']   },
+      ],
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    expect(blips.length).toBe(2);
+    expect(blips.map(b => b.kind).sort()).toEqual(['planet', 'star']);
+  });
+
+  it('excludes bare asteroid entities', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [{ uuid: 'a1', x: 10, z: 0, tags: ['asteroid'] }],
+    };
+    expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
+  });
+
+  it('excludes NPC ship entities (ship tag only)', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [{ uuid: 'npc1', x: 10, z: 0, tags: ['ship'] }],
+    };
+    expect(parse(buildNavigationConsoleState(state)).blips).toEqual([]);
+  });
+
+  it('includes player_ship entities', () => {
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [{ uuid: 'ps1', x: 5, z: 0, tags: ['player_ship'] }],
+    };
+    const blips = parse(buildNavigationConsoleState(state)).blips;
+    expect(blips.length).toBe(1);
+    expect(blips[0].kind).toBe('ship');
+  });
+
+  it('cancel_visible is true when impulse_charge_progress > 0', () => {
+    const s = parse(buildNavigationConsoleState({ impulseChargeProgress: 0.5 }));
+    expect(s.cancel_visible).toBe(true);
+    expect(s.impulse_charge_progress).toBeCloseTo(0.5);
+  });
+
+  it('cancel_visible is false when charge is 0', () => {
+    expect(parse(buildNavigationConsoleState(EMPTY)).cancel_visible).toBe(false);
+  });
+
+  it('on_screen is true when currentView is NavigationChart', () => {
+    expect(parse(buildNavigationConsoleState({ currentView: 'NavigationChart' })).on_screen).toBe(true);
+  });
+
+  it('on_screen is false for other views', () => {
+    expect(parse(buildNavigationConsoleState({ currentView: 'Radar' })).on_screen).toBe(false);
+  });
+
+  it('blips use world-axis (north-up) projection — no ship yaw rotation', () => {
+    // Entity directly east (x+) of ship → radar_x positive, radar_y ≈ 0
+    const state = {
+      shipX: 0, shipZ: 0,
+      asteroids: [{ uuid: 'st', x: 500, z: 0, tags: ['station'] }],
+    };
+    const blip = parse(buildNavigationConsoleState(state)).blips[0];
+    expect(blip.radar_x).toBeCloseTo(500 / NAVIGATION_RADAR_RANGE);
+    expect(blip.radar_y).toBeCloseTo(0);
   });
 });

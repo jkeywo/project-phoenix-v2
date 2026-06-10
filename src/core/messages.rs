@@ -1426,6 +1426,10 @@ pub enum UiAction {
     ShowOnScreen {
         message_id: String,
     },
+    /// Switch the viewscreen to navigation chart mode (navigation console).
+    ///
+    /// The HTML navigation panel sends `{ action: "set_navigation_chart", console: "Navigation" }`.
+    SetNavigationChart,
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
@@ -1468,6 +1472,7 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         },
         UiAction::ClearComms => ClientMessage::ClearComms,
         UiAction::ShowOnScreen { message_id } => ClientMessage::ShowOnScreen { message_id: message_id.clone() },
+        UiAction::SetNavigationChart => ClientMessage::SetView { mode: ViewMode::NavigationChart },
     }
 }
 

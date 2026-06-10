@@ -271,16 +271,20 @@ impl ClientSimState {
                 self.world = world.clone();
             }
             ServerMessage::Welcome { state, ship_config, .. } => {
-                let preserved_world = state.world.clone().unwrap_or_default();
+                let world_opt = state.world.clone();
+                let preserved_world = world_opt.clone().unwrap_or_default();
                 *self = Self::default();
                 self.world = preserved_world;
                 // Pre-seed repair_teams with idle slots so the Repair panel
                 // can spawn its rows immediately on Welcome, before the first
                 // 10 Hz RepairState broadcast arrives. RepairState overwrites
                 // this when it lands.
-                let count = ship_config.repair_team_count as usize;
-                if count > 0 {
-                    self.repair_teams = vec![TeamSlot::Idle; count];
+                // Only pre-seed when entering a game (world is Some), not during lobby.
+                if world_opt.is_some() {
+                    let count = ship_config.repair_team_count as usize;
+                    if count > 0 {
+                        self.repair_teams = vec![TeamSlot::Idle; count];
+                    }
                 }
             }
             ServerMessage::RepairState { teams } => {
@@ -2248,7 +2252,7 @@ mod tests {
                 phase: GamePhase::Lobby,
                 players: vec![],
                 complexity: HashMap::new(),
-                world: None,
+                world: Some(WorldData::default()),
             },
             ship_stations: crate::stations_config::ShipStations::default(),
             ship_config: ShipClientConfig::default(),

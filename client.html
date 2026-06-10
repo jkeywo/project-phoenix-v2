@@ -21,6 +21,7 @@
   <script type="module" src="gui/active-console.js"></script>
   <script type="module" src="gui/iframe-bridge.js"></script>
   <script type="module" src="gui/console-state.js"></script>
+  <script type="module" src="gui/action-map.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -1278,68 +1279,24 @@
 
     if ($('sensors-iframe')) $('sensors-iframe').addEventListener('load', () => { pushSensorsConsoleState(); });
 
-    // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
-    // The weapons-console.html iframe sends {type:'console_action', payload:json}
-    // via postMessage when the player fires or taps a target. We translate
-    // the action JSON to the appropriate ClientMessage and send via PeerJS.
+    // ── Console action postMessage bridge (issue #422) ────────────────────────
+    // All iframe consoles send {type:'console_action', payload:json} via
+    // postMessage.  Dispatch is table-driven via gui/action-map.js (issue #455).
     window.addEventListener('message', (event) => {
       if (!event.data || event.data.type !== 'console_action') return;
       let action;
       try { action = JSON.parse(event.data.payload); } catch (_) { return; }
       if (!action || !action.action) return;
-      switch (action.action) {
-        case 'fire_phaser':
-          if (action.bank) send('FirePhaser', { bank: action.bank });
-          break;
-        case 'fire_torpedo':
-          send('FireTorpedo', { tube: action.tube || 'fore', target_uuid: action.target_uuid || null });
-          break;
-        case 'set_target':
-          if (action.uuid) send('SetTarget', { uuid: action.uuid });
-          break;
-        case 'set_phaser_mode':
-          if (action.mode) send('SetPhaserMode', { mode: action.mode });
-          break;
-        case 'set_view':
-          // ClientMessage::SetView { mode: ViewMode::Camera(direction) }
-          // serialises as {"type":"SetView","data":{"mode":{"kind":"Camera","data":"Fore"}}}
-          if (action.direction) send('SetView', { mode: { kind: 'Camera', data: action.direction } });
-          break;
-        case 'toggle_red_alert':
-          send('ToggleRedAlert');
-          break;
-        case 'helm_input':
-          send('HelmInput', { thrust: action.thrust || 0, steering: action.steering || 0 });
-          break;
-        case 'start_impulse_charge':
-          send('StartImpulseCharge');
-          break;
-        case 'cancel_impulse':
-          send('CancelImpulse');
-          break;
-        case 'set_radar_view':
-          send('SetView', { mode: { kind: 'Radar' } });
-          break;
-        case 'dispatch_repair_team':
-          send('DispatchRepairTeam', { team_idx: action.team_idx, console: action.target });
-          break;
-        case 'increase_power':
-          if (action.target) send('IncreasePower', { console: action.target });
-          break;
-        case 'decrease_power':
-          if (action.target) send('DecreasePower', { console: action.target });
-          break;
-        case 'set_shield_focus':
-          send('SetShieldFocus', { facing: action.facing || null });
-          break;
-        case 'set_sensors_target':
-          if (action.uuid) {
-            state.sensorsTarget = action.uuid;
-            send('SetScienceTarget', { uuid: action.uuid });
-          }
-          break;
-        default:
-          break;
+      if (typeof window.dispatchConsoleAction === 'function') {
+        window.dispatchConsoleAction(action, send, (patch) => Object.assign(state, patch));
+        return;
+      }
+      // Fallback for the rare race window before module scripts load.
+      // Only covers set_sensors_target (mutates local state); other actions
+      // are silently deferred (non-critical — they arrive after module load).
+      if (action.action === 'set_sensors_target' && action.uuid) {
+        state.sensorsTarget = action.uuid;
+        send('SetScienceTarget', { uuid: action.uuid });
       }
     });
 

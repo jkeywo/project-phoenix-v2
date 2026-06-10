@@ -86,6 +86,8 @@ export function initConsole({ name, render }) {
     } else if (_win && _win.wasmBindings &&
                typeof _win.wasmBindings.wasm_ui_action === 'function') {
       _win.wasmBindings.wasm_ui_action(json);
+    } else if (_win && typeof _win.__sendAction === 'function') {
+      _win.__sendAction(json);
     } else if (_bc) {
       _bc.postMessage({ type: 'console_action', payload: json });
     }

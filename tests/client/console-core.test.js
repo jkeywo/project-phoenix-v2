@@ -99,6 +99,14 @@ describe('sendAction — transport selection', () => {
     expect(bc.instance.postMessage).toHaveBeenCalled();
   });
 
+  it('calls window.__sendAction when present (legacy/test transport)', () => {
+    const sendActionFn = vi.fn();
+    setup({ __sendAction: sendActionFn });
+    sendAction('toggle_red_alert', {});
+    const expected = JSON.stringify({ action: 'toggle_red_alert', console: 'Test' });
+    expect(sendActionFn).toHaveBeenCalledWith(expected);
+  });
+
   it('uses BroadcastChannel as final fallback', () => {
     const { bc } = setup();
     sendAction('dispatch_repair_team', { team_idx: 0, target: 'Helm' });

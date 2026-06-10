@@ -490,19 +490,13 @@ fn sync_complexity_hiding(
 /// that `client/bridge.rs` remains a thin JS/WASM boundary with no
 /// knowledge of the panel set.
 ///
-/// Panel inventory (HTML-converted consoles removed per issue #456):
-/// - `ShipViewPlugin`          — ship-level broadcast resource
-/// - `ClientAppPlugin`         — message routing + complexity UI + radar widget sync
-/// - `PhoneBorderPlugin`       — loads `PhoneAssets` and drives `DeviceOrientation`
-///                                (the Bevy bezel frame and tab bar moved to HTML in #442)
-/// - `SensorsPanelPlugin`      — no-op stub; HTML panel active (#457)
-/// - `ShieldsPanelPlugin`      — no-op stub; HTML panel active (#424)
-/// - `NavigationPanelPlugin`   — system chart + impulse status + cancel (Bevy)
+/// Panel inventory (all per-console Bevy panels deleted per #456–#458):
+/// - `ShipViewPlugin`   — ship-level broadcast resource
+/// - `ClientAppPlugin`  — message routing + complexity UI + radar widget sync
+/// - `PhoneBorderPlugin`— loads `PhoneAssets` and drives `DeviceOrientation`
 pub fn add_client_plugins(app: &mut App) {
     app.add_plugins(ClientAppPlugin)
         .add_plugins(crate::gui::GuiPlugin)
         .add_plugins(crate::ship_view::ShipViewPlugin)
-        .add_plugins(crate::phone_border::PhoneBorderPlugin)
-        .add_plugins(crate::sensors_panel::SensorsPanelPlugin)
-        .add_plugins(crate::shields_panel::ShieldsPanelPlugin);
+        .add_plugins(crate::phone_border::PhoneBorderPlugin);
 }

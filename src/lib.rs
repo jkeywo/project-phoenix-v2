@@ -99,11 +99,6 @@ pub use console::science::server as science_plugin;
 pub use console::comms::inbox as comms_inbox;
 pub use console::comms::server as comms_plugin;
 
-#[cfg(feature = "client")]
-pub use console::science::client as sensors_panel;
-#[cfg(feature = "client")]
-pub use console::shields::client as shields_panel;
-
 // Server-only grouped module (bridge, renderer, viewscreen_border, debug_overlay).
 #[cfg(feature = "server")]
 pub mod server;

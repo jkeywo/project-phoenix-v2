@@ -2486,6 +2486,61 @@ mod tests {
     }
 
     #[test]
+    fn shields_console_state_round_trips() {
+        use crate::messages::{ShieldFacingStatus, ShieldsConsoleState};
+        let state = ShieldsConsoleState {
+            facings: vec![
+                ShieldFacingStatus { label: "Fore".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: true },
+                ShieldFacingStatus { label: "Port".into(), hp: 72, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus { label: "Aft".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 8.0, is_focused: false },
+                ShieldFacingStatus { label: "Starboard".into(), hp: 88, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+            ],
+            hull_integrity_pct: 78.0,
+            focused_facing: Some("Fore".into()),
+            grid_status: "GRID NOMINAL".into(),
+            target_bearing: Some(272.0),
+        };
+        let json = encode_console_state(&state).expect("encode shields console state");
+        let decoded: ShieldsConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn shields_console_state_no_target_no_focus_round_trips() {
+        use crate::messages::ShieldsConsoleState;
+        let state = ShieldsConsoleState {
+            facings: vec![],
+            hull_integrity_pct: 100.0,
+            focused_facing: None,
+            grid_status: "GRID OFFLINE".into(),
+            target_bearing: None,
+        };
+        let json = encode_console_state(&state).expect("encode shields console state no target");
+        let decoded: ShieldsConsoleState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn shields_console_state_json_field_names() {
+        use crate::messages::{ShieldFacingStatus, ShieldsConsoleState};
+        let state = ShieldsConsoleState {
+            facings: vec![
+                ShieldFacingStatus { label: "Fore".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: true },
+            ],
+            hull_integrity_pct: 100.0,
+            focused_facing: Some("Fore".into()),
+            grid_status: "GRID NOMINAL".into(),
+            target_bearing: None,
+        };
+        let json = encode_console_state(&state).expect("encode shields console state");
+        assert!(json.contains("\"facings\":"), "got: {json}");
+        assert!(json.contains("\"hull_integrity_pct\":"), "got: {json}");
+        assert!(json.contains("\"focused_facing\":"), "got: {json}");
+        assert!(json.contains("\"grid_status\":"), "got: {json}");
+        assert!(json.contains("\"target_bearing\":"), "got: {json}");
+    }
+
+    #[test]
     fn weapons_console_state_with_regions_round_trips() {
         let state = WeaponsConsoleState {
             target_uuid: None,

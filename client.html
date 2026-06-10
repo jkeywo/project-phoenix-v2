@@ -99,7 +99,8 @@
     #captain-ui.active,
     #helm-ui.active,
     #power-ui.active,
-    #repair-ui.active {
+    #repair-ui.active,
+    #shields-ui.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -111,7 +112,8 @@
     #captain-ui iframe,
     #helm-ui iframe,
     #power-ui iframe,
-    #repair-ui iframe {
+    #repair-ui iframe,
+    #shields-ui iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -217,7 +219,8 @@
     #captain-ui.active,
     #helm-ui.active,
     #power-ui.active,
-    #repair-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
+    #repair-ui.active,
+    #shields-ui.active { padding: 0 var(--bezel-inset) var(--bezel-inset); }
 
     /* ── Console tab bar (issue #441) ──────────────────────────────────
        First flex child of #console-container. In-flow so it takes up
@@ -516,6 +519,11 @@
         title="Repair Console" allowfullscreen></iframe>
     </section>
 
+    <section id="shields-ui">
+      <iframe id="shields-iframe" src="gui/shield-console.html"
+        title="Shield Console" allowfullscreen></iframe>
+    </section>
+
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
          src/client_app.rs (#49). -->
   </div>
@@ -687,7 +695,9 @@
       // Repair console iframe state (issue #425)
       repairTeams: [], consoleHull: [],
       // Power console iframe state (issue #425)
-      powerHelm: 2, powerWeapons: 2, powerSensors: 2, powerBattery: 100, powerLocked: false };
+      powerHelm: 2, powerWeapons: 2, powerSensors: 2, powerBattery: 100, powerLocked: false,
+      // Shields console iframe state (issue #423)
+      shieldFacings: [], shieldFocusedFacing: null };
     let conn = null;
     // Station configs from server Welcome message (keyed by player count).
     let stationConfigs = {};
@@ -813,12 +823,14 @@
             'helm-ui':   inGame && activeConsole === 'Helm',
             'weapons-ui': inGame && activeConsole === 'Tactical',
             'repair-ui': inGame && activeConsole === 'Repair',
-            'power-ui':  inGame && activeConsole === 'Power' };
+            'power-ui':  inGame && activeConsole === 'Power',
+            'shields-ui': inGame && activeConsole === 'Shields' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
       $('repair-ui').className = sections['repair-ui'] ? 'active' : '';
       $('power-ui').className  = sections['power-ui']  ? 'active' : '';
+      $('shields-ui').className = sections['shields-ui'] ? 'active' : '';
 
       // Orientation drives both the tab-bar layout and the container's
       // flex-direction (portrait = column, landscape = row). Computed once
@@ -1178,6 +1190,9 @@
       if (activeConsole === 'Power') {
         pushPowerConsoleState();
       }
+      if (activeConsole === 'Shields') {
+        pushShieldsConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1316,6 +1331,42 @@
       iframe.addEventListener('load', () => { pushPowerConsoleState(); });
     })();
 
+    // ── Shields console iframe bridge (issue #423) ───────────────────────────
+    function buildShieldsConsoleState() {
+      let targetBearing = null;
+      if (state.weaponsTarget && state.asteroids) {
+        const target = state.asteroids.find(a => a.uuid === state.weaponsTarget);
+        if (target) {
+          const dx = entityX(target) - state.shipX;
+          const dz = entityZ(target) - state.shipZ;
+          targetBearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+        }
+      }
+      return JSON.stringify({
+        facings:            state.shieldFacings || [],
+        hull_integrity_pct: state.hullIntegrity || 100,
+        focused_facing:     state.shieldFocusedFacing || null,
+        target_bearing:     targetBearing,
+        grid_status:        state.shieldFacings && state.shieldFacings.length > 0 ? 'GRID NOMINAL' : 'GRID OFFLINE',
+      });
+    }
+
+    function pushShieldsConsoleState() {
+      if (activeConsole !== 'Shields') return;
+      const iframe = $('shields-iframe');
+      if (!iframe || !iframe.contentWindow) return;
+      try {
+        const fn = iframe.contentWindow.__updateConsole;
+        if (typeof fn === 'function') fn('Shields', buildShieldsConsoleState());
+      } catch (_) {}
+    }
+
+    (function wireShieldsIframe() {
+      const iframe = $('shields-iframe');
+      if (!iframe) return;
+      iframe.addEventListener('load', () => { pushShieldsConsoleState(); });
+    })();
+
     // ── Weapons console iframe → PeerJS action bridge (issue #422) ──────────
     // The weapons-console.html iframe sends {type:'console_action', payload:json}
     // via postMessage when the player fires or taps a target. We translate
@@ -1366,6 +1417,9 @@
           break;
         case 'decrease_power':
           if (action.target) send('DecreasePower', { console: action.target });
+          break;
+        case 'set_shield_focus':
+          send('SetShieldFocus', { facing: action.facing || null });
           break;
         default:
           break;
@@ -1641,6 +1695,21 @@
           if (typeof battery_charge === 'number') state.powerBattery = battery_charge;
           state.powerLocked = !!locked;
           pushPowerConsoleState();
+          return;
+        }
+        case 'ShieldStatus': {
+          state.shieldFacings = (msg.data.facings || []).map(f => ({
+            label: f.label,
+            hp: f.hp,
+            max_hp: f.max_hp,
+            online: f.online,
+            offline_remaining: f.offline_remaining || 0,
+            is_focused: !!f.is_focused,
+          }));
+          // Derive focused facing from facings list.
+          const focused = state.shieldFacings.find(f => f.is_focused);
+          state.shieldFocusedFacing = focused ? focused.label : null;
+          pushShieldsConsoleState();
           return;
         }
         case 'AsteroidDestroyed': {

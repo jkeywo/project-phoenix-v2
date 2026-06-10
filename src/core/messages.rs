@@ -1255,6 +1255,25 @@ pub struct HelmConsoleState {
     pub lock_id: Option<String>,
 }
 
+/// Serialised Shields console state pushed to the HTML shields panel (issue #423).
+///
+/// Broadcast at 10 Hz only to the player holding `Console::Shields`.
+/// Focus and target-bearing are computed server-side from live resources.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ShieldsConsoleState {
+    /// Current shield quadrant snapshots (Fore, Port, Aft, Starboard).
+    pub facings: Vec<ShieldFacingStatus>,
+    /// Overall ship hull integrity as a percentage (0–100).
+    pub hull_integrity_pct: f32,
+    /// Label of the currently focused facing (None = balanced/omni).
+    pub focused_facing: Option<String>,
+    /// Grid status string (e.g. "GRID NOMINAL", "EMITTER OFFLINE").
+    pub grid_status: String,
+    /// Bearing of the current Tactical target in degrees, or None if no target.
+    #[serde(default)]
+    pub target_bearing: Option<f32>,
+}
+
 /// Serialised Power console state pushed to the HTML power panel (issue #425).
 ///
 /// Data-driven: `consoles` is derived from `PowerMultiplierResource` so adding

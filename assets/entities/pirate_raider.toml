@@ -6,12 +6,12 @@
 
 name = "Pirate Raider"
 tags = ["ship", "npc", "enemy"]
+faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
 
 [target]
 tags = ["ship"]
-threat_level = "high"
+threat_level = "low"
 description = "Pirate Raider"
-faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
 
 [hull]
 captain_chair = 60.0

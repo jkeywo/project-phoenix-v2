@@ -94,6 +94,7 @@ power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 [sensors_console.long_range_radar]
 range = 400.0
 shows = ["player", "asteroid", "ship", "station", "planet", "star"]
+selects = ["ship", "station", "planet"]
 
 [power]
 capacity = 100.0
@@ -120,7 +121,8 @@ shows = ["player", "asteroid", "asteroid_field", "ship", "station", "planet", "s
 
 [navigation_console.system_chart]
 range = 800.0
-shows = ["region", "asteroid_field", "star", "planet", "station", "player", "objective_marker"]
+shows = ["region", "asteroid_field", "star", "planet", "station", "player", "objective_marker", "ship"]
+selects = ["ship", "station", "planet", "star", "region"]
 
 # Comms range — within this radius the player ship can hail / be hailed.
 # Scale matches helm radar / system chart so default-world entities are

@@ -1,6 +1,11 @@
 name = "Earth"
 tags = ["planet", "habitable"]
 
+[target]
+tags = ["planet"]
+threat_level = "none"
+description = "Earth"
+
 [collider]
 shape = "Ball"
 radius = 20.0

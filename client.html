@@ -1343,6 +1343,12 @@
             // pick up the Welcome repair-team pre-seed.
             state.asteroids   = window.simState.world.entities;
             state.repairTeams = window.simState.repairTeams;
+            // Radar ranges + arc configs from server ship_config (data-driven).
+            state.weaponsRadarRange = window.simState.weaponsRadarRange;
+            state.helmRadarRange    = window.simState.helmRadarRange;
+            state.sensorsRadarRange = window.simState.sensorsRadarRange;
+            state.phaserArcConfigs  = window.simState.phaserArcConfigs;
+            state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
           }
           if (msg.data.ship_stations) {
             state.maxPlayers = msg.data.ship_stations.max_players || 0;

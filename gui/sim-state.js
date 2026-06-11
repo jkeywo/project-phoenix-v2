@@ -99,6 +99,13 @@ export class ClientSimState {
     /** Per-tube torpedo state from the latest WeaponsUpdate. */
     this.tubeStates = [];
     this.currentTargetUuid = null;
+    /** Radar range from server ship_config, populated on Welcome. */
+    this.weaponsRadarRange = 300.0;
+    this.helmRadarRange = 500.0;
+    this.sensorsRadarRange = 500.0;
+    /** Fire-arc configs from server ship_config, populated on Welcome. */
+    this.phaserArcConfigs = [];
+    this.torpedoArcConfigs = [];
   }
 
   /**
@@ -127,13 +134,21 @@ export class ClientSimState {
       case 'Welcome': {
         const world = (d.state && d.state.world) || null;
         this.reset();
+        // Store ship_config radar ranges (data-driven from TOML via server).
+        // Used by console-state.js builders; fall back to server defaults.
+        const sc = d.ship_config || {};
+        this.weaponsRadarRange = sc.tactical_radar_range ?? 300.0;
+        this.helmRadarRange    = sc.helm_radar_range    ?? 500.0;
+        this.sensorsRadarRange = sc.sensors_radar_range ?? 500.0;
+        this.phaserArcConfigs  = sc.phaser_banks        ?? [];
+        this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
         if (world) {
           // Reset to defaults but preserve the world snapshot from Welcome.
           this.world = world;
           // Pre-seed repair teams with Idle slots so the Repair panel can
           // render rows immediately, before the first RepairState broadcast.
           // Only when entering a game (world present), not during lobby.
-          const count = (d.ship_config && d.ship_config.repair_team_count) || 0;
+          const count = (sc.repair_team_count) || 0;
           if (count > 0) this.repairTeams = new Array(count).fill('Idle');
         }
         break;

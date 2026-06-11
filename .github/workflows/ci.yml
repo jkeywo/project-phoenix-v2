@@ -69,6 +69,11 @@ jobs:
       - name: Build server page (WASM + JS)
         run: trunk build --release
 
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Build client page (pure JS — copies client.html + gui/assets, no WASM)
         run: node scripts/build-client.mjs
 

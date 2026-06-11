@@ -1,8 +1,9 @@
 /**
  * gui/repair-button.js — Pure JS port of the shell-level repair button logic
- * from src/client/app.rs (issue #462): `handle_repair_button_press` (the
- * all-busy dispatch guard + message shape) and `refresh_repair_button` (the
- * label / colour / disabled state derivation).
+ * from the Bevy client (formerly src/client/app.rs; ported in #462, the Rust
+ * original deleted in #463): `handle_repair_button_press` (the all-busy
+ * dispatch guard + message shape) and `refresh_repair_button` (the label /
+ * colour / disabled state derivation).
  *
  * This is the *shell* repair affordance (a single "REPAIR" button + hull
  * readout that any bridge console can surface), distinct from the full Repair

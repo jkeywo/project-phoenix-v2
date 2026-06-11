@@ -1223,6 +1223,7 @@ fn project_blip(
     effective_range: f32,
     meta: Option<&crate::messages::EntitySnapshot>,
     shows: &[crate::entity_tags::EntityTag],
+    selects: &[crate::entity_tags::EntityTag],
 ) -> Option<RadarBlip> {
     let raw_tags: &[String] = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
     let radius: f32 = meta.and_then(|e| e.radius).unwrap_or(0.0);
@@ -1282,6 +1283,16 @@ fn project_blip(
     let objective_target = meta.map(|e| e.objective_target).unwrap_or(false);
     let name = meta.and_then(|e| e.name.clone());
 
+    // Resolve target info for selectability.
+    let target_tags_raw: &[String] = meta.map(|e| e.target_tags.as_slice()).unwrap_or(&[]);
+    let target_tags = crate::entity_tags::parse_tags(target_tags_raw);
+    let selectable = crate::entity_tags::matches_any(&target_tags, selects);
+    let threat_level = meta.and_then(|e| e.threat_level.as_deref()).map(|s| s.to_string());
+    let description = meta
+        .and_then(|e| e.target_description.as_deref())
+        .or_else(|| name.as_deref())
+        .map(|s| s.to_string());
+
     Some(RadarBlip {
         uuid: uuid.to_string(),
         radar_x,
@@ -1292,6 +1303,10 @@ fn project_blip(
         color,
         objective_target,
         name,
+        selectable,
+        threat_level,
+        description,
+        target_tags: target_tags_raw.to_vec(),
     })
 }
 
@@ -1421,6 +1436,12 @@ fn recompute_weapons_console_state(
         .iter()
         .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
         .collect();
+    let selects: Vec<crate::entity_tags::EntityTag> = ship_config
+        .0
+        .tactical_radar_selects
+        .iter()
+        .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
+        .collect();
 
     // Build UUID → EntitySnapshot lookup for tags + radius. Allocation is
     // per-frame but bounded by world entity count (typically tens, not millions).
@@ -1446,7 +1467,7 @@ fn recompute_weapons_console_state(
                 transform.translation.z,
                 ship.x, ship.z, ship.yaw,
                 effective_tactical_range,
-                meta, &shows,
+                meta, &shows, &selects,
             ) {
                 blips.push(b);
             }
@@ -1460,7 +1481,7 @@ fn recompute_weapons_console_state(
                 transform.translation.z,
                 ship.x, ship.z, ship.yaw,
                 effective_tactical_range,
-                meta, &shows,
+                meta, &shows, &selects,
             ) {
                 blips.push(b);
             }

@@ -419,6 +419,7 @@ pub fn navigation_chart_config() -> RadarConfig {
             EntityTag::AsteroidField,
             EntityTag::Region,
         ],
+        selects: Vec::new(),
     }
 }
 
@@ -677,6 +678,9 @@ mod tests {
             half_extents: None,
             radar_icon: None,
             objective_target: false,
+            target_tags: Vec::new(),
+            threat_level: None,
+            target_description: None,
         }
     }
 
@@ -816,6 +820,7 @@ mod tests {
         RadarConfig {
             range: RADAR_RANGE,
             shows: vec![EntityTag::Asteroid],
+            selects: Vec::new(),
         }
     }
 
@@ -834,6 +839,7 @@ mod tests {
         let cfg = RadarConfig {
             range: 30.0,
             shows: vec![EntityTag::Asteroid],
+            selects: Vec::new(),
         };
         assert!(project_to_radar_with_config(0.0, -35.0, 0.0, 0.0, 0.0, &cfg).is_none());
         // Same point is within the global RADAR_RANGE (50) — ensure we use config range.
@@ -846,6 +852,7 @@ mod tests {
         let cfg = RadarConfig {
             range: 80.0,
             shows: vec![],
+            selects: Vec::new(),
         };
         let p = project_to_radar_with_config(0.0, -80.0, 0.0, 0.0, 0.0, &cfg).unwrap();
         close(p.1, 1.0);
@@ -860,6 +867,7 @@ mod tests {
         let cfg = RadarConfig {
             range: 50.0,
             shows: vec![EntityTag::Asteroid],
+            selects: Vec::new(),
         };
         let dots: Vec<_> =
             radar_dots_with_config(&[asteroid.clone(), ship_entity], 0.0, 0.0, 0.0, &cfg).collect();
@@ -874,6 +882,7 @@ mod tests {
         let cfg = RadarConfig {
             range: 50.0,
             shows: vec![],
+            selects: Vec::new(),
         };
         let dots: Vec<_> = radar_dots_with_config(&[asteroid], 0.0, 0.0, 0.0, &cfg).collect();
         assert!(dots.is_empty());
@@ -886,6 +895,7 @@ mod tests {
         let cfg = RadarConfig {
             range: 30.0,
             shows: vec![EntityTag::Asteroid],
+            selects: Vec::new(),
         };
         let dots: Vec<_> = radar_dots_with_config(&[asteroid], 0.0, 0.0, 0.0, &cfg).collect();
         assert!(dots.is_empty());
@@ -898,6 +908,7 @@ mod tests {
         let cfg = RadarConfig {
             range: 50.0,
             shows: vec![EntityTag::Asteroid, EntityTag::Ship],
+            selects: Vec::new(),
         };
         let dots: Vec<_> = radar_dots_with_config(&[a, s], 0.0, 0.0, 0.0, &cfg).collect();
         assert_eq!(dots.len(), 2);
@@ -923,6 +934,9 @@ mod tests {
             half_extents: None,
             radar_icon: None,
             objective_target: false,
+            target_tags: Vec::new(),
+            threat_level: None,
+            target_description: None,
         }
     }
 
@@ -990,6 +1004,7 @@ mod tests {
         RadarConfig {
             range: 100.0,
             shows: vec![EntityTag::Asteroid, EntityTag::AsteroidField],
+            selects: Vec::new(),
         }
     }
 
@@ -1037,6 +1052,7 @@ mod tests {
         let cfg = RadarConfig {
             range: 100.0,
             shows: vec![EntityTag::Asteroid],
+            selects: Vec::new(),
         };
         let ship = EntitySnapshot::simple("s1", 0.0, -20.0, vec!["ship".into()]);
         let view = compute_science_radar_view(&[ship], 0.0, 0.0, 0.0, &cfg);
@@ -1049,6 +1065,7 @@ mod tests {
         let cfg = RadarConfig {
             range: 80.0,
             shows: vec![EntityTag::Asteroid],
+            selects: Vec::new(),
         };
         let a = ast_entity("a2", 0.0, -80.0);
         let view = compute_science_radar_view(&[a], 0.0, 0.0, 0.0, &cfg);
@@ -1122,6 +1139,7 @@ mod tests {
                 EntityTag::AsteroidField,
                 EntityTag::Region,
             ],
+            selects: Vec::new(),
         }
     }
 
@@ -1206,6 +1224,7 @@ mod tests {
                 EntityTag::AsteroidField,
                 EntityTag::Region,
             ],
+            selects: Vec::new(),
         }
     }
 

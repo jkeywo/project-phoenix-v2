@@ -42,6 +42,7 @@ torpedo_arc_color = [1.0, 0.55, 0.2, 0.15]
 [weapons_console.radar]
 range = 300.0
 shows = ["player", "ship", "asteroid", "station", "missile", "torpedo", "region"]
+selects = ["ship", "station", "asteroid"]
 
 # Fore phaser bank: forward-facing, 270° arc (blind spot is the rear 90°).
 # Auto-fire window covers the forward hemisphere only.

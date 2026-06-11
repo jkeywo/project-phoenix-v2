@@ -82,6 +82,11 @@ pub struct HelmConsoleSection(pub crate::entity_config::HelmConsoleConfig);
 #[derive(Component, Clone, Debug)]
 pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfig);
 
+/// Present when the EntityConfig has a `[target]` section.
+/// Carries targetability tags, threat level, and description.
+#[derive(Component, Clone, Debug)]
+pub struct EntityTarget(pub crate::entity_target::TargetSection);
+
 /// Hull tracker attached to any entity (NPC ship, asteroid) that carries a
 /// `[hull]` section in its TOML config. For NPC ships the HP is placed in a
 /// single `CaptainChair` console slot; asteroids use the same single-slot
@@ -188,6 +193,11 @@ pub fn spawn_entity(
     // Radar appearance section
     if let Some(radar_appearance) = &config.radar_appearance {
         entity_commands.insert(RadarAppearanceSection(radar_appearance.clone()));
+    }
+
+    // Target section
+    if let Some(target) = &config.target {
+        entity_commands.insert(EntityTarget(target.clone()));
     }
 
     // Faction Ã¢â‚¬â€ attach a FactionComponent so the AI can read faction from ECS.
@@ -302,6 +312,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -340,6 +351,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -375,6 +387,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
 
@@ -413,6 +426,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
 
@@ -454,6 +468,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
 
@@ -500,6 +515,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
 
@@ -555,6 +571,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
 
@@ -597,6 +614,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
 
@@ -664,6 +682,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
 
@@ -709,6 +728,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
 
@@ -748,6 +768,7 @@ mod tests {
             effects: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -813,6 +834,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -867,6 +889,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -912,6 +935,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -956,6 +980,7 @@ mod tests {
             faction: None,
             behaviour: None,
             radar_appearance: None,
+            target: None,
             mesh: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

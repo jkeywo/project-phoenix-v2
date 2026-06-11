@@ -874,6 +874,9 @@ pub struct EntityConfig {
     /// Radar appearance (colour, optional radius) for the helm radar blip.
     #[serde(default)]
     pub radar_appearance: Option<RadarAppearanceConfig>,
+    /// Targetability section. When absent the entity is not targetable.
+    #[serde(default)]
+    pub target: Option<crate::entity_target::TargetSection>,
     /// 3-D mesh definition. When present the entity receives a visual on the viewscreen.
     #[serde(default)]
     pub mesh: Option<MeshConfig>,
@@ -908,6 +911,7 @@ struct TomlConfig {
     faction: Option<Uuid>,
     behaviour: Option<BehaviourConfig>,
     radar_appearance: Option<RadarAppearanceConfig>,
+    target: Option<crate::entity_target::TargetSection>,
     mesh: Option<MeshConfig>,
     #[serde(default)]
     light: Vec<LightConfig>,
@@ -993,6 +997,7 @@ impl EntityConfig {
             faction: raw.faction,
             behaviour,
             radar_appearance: raw.radar_appearance,
+            target: raw.target,
             mesh: raw.mesh,
             light: raw.light,
         })

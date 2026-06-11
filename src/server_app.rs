@@ -786,6 +786,7 @@ fn reconcile_runtime_entities(
             Option<&RadarAppearanceSection>,
             Option<&AsteroidFieldSection>,
             Option<&crate::entity_spawner::EntityConsoleHull>,
+            Option<&crate::entity_spawner::EntityTarget>,
         ),
         Without<Asteroid>,
     >,
@@ -807,7 +808,7 @@ fn reconcile_runtime_entities(
     // Build the current set of ECS entity UUIDs.
     let current: HashMap<String, Entity> = query
         .iter()
-        .map(|(e, u, _, _, _, _, _, _, _, _)| (u.0.clone(), e))
+        .map(|(e, u, _, _, _, _, _, _, _, _, _)| (u.0.clone(), e))
         .collect();
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
@@ -827,7 +828,7 @@ fn reconcile_runtime_entities(
     if !registry.seeded {
         for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field, hull_comp)) =
+            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field, hull_comp, entity_target)) =
                 query.get(*entity)
             {
                 let hull_fraction = hull_comp.map(|h| {
@@ -888,6 +889,12 @@ fn reconcile_runtime_entities(
                 );
                 if let Some(ref id) = snapshot.id {
                     snapshot.objective_target = active_objective_names.contains(id);
+                }
+                // Target info
+                if let Some(t) = entity_target {
+                    snapshot.target_tags = t.0.tags.clone();
+                    snapshot.threat_level = Some(t.0.threat_level.as_str().to_string());
+                    snapshot.target_description = t.0.description.clone();
                 }
                 world.0.entities.push(snapshot);
             }
@@ -899,7 +906,7 @@ fn reconcile_runtime_entities(
     // Emit EntitySpawned for new entities.
     for (uuid, entity) in &current {
         if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field, hull_comp)) =
+            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field, hull_comp, entity_target)) =
                 query.get(*entity)
             {
                 let hull_fraction = hull_comp.map(|h| {
@@ -960,6 +967,12 @@ fn reconcile_runtime_entities(
                 );
                 if let Some(ref id) = snapshot.id {
                     snapshot.objective_target = active_objective_names.contains(id);
+                }
+                // Target info
+                if let Some(t) = entity_target {
+                    snapshot.target_tags = t.0.tags.clone();
+                    snapshot.threat_level = Some(t.0.threat_level.as_str().to_string());
+                    snapshot.target_description = t.0.description.clone();
                 }
                 world.0.entities.push(snapshot.clone());
                 outbox

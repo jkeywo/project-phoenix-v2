@@ -21,6 +21,7 @@ use crate::entity_tags::EntityTag;
 /// [weapons_console.radar]
 /// range = 60.0
 /// shows = ["asteroid", "ship"]
+/// selects = ["ship", "station"]
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RadarConfig {
@@ -30,6 +31,11 @@ pub struct RadarConfig {
     /// Uses OR logic — an entity must match **at least one** tag.
     /// An empty list means nothing is shown.
     pub shows: Vec<EntityTag>,
+    /// Targetability filter: only entities whose `[target].tags` overlap this
+    /// list are selectable on the radar. Uses OR logic.
+    /// An empty list means nothing is selectable.
+    #[serde(default)]
+    pub selects: Vec<EntityTag>,
 }
 
 impl Default for RadarConfig {
@@ -37,6 +43,7 @@ impl Default for RadarConfig {
         Self {
             range: 50.0,
             shows: vec![EntityTag::Asteroid],
+            selects: Vec::new(),
         }
     }
 }
@@ -48,6 +55,8 @@ struct RawRadarConfig {
     range: f32,
     #[serde(default)]
     shows: Vec<String>,
+    #[serde(default)]
+    selects: Vec<String>,
 }
 
 fn default_range() -> f32 {
@@ -78,9 +87,15 @@ impl RadarConfig {
             .iter()
             .filter_map(|s| EntityTag::from_str(s))
             .collect();
+        let selects = raw
+            .selects
+            .iter()
+            .filter_map(|s| EntityTag::from_str(s))
+            .collect();
         Ok(RadarConfig {
             range: raw.range,
             shows,
+            selects,
         })
     }
 }
@@ -96,9 +111,15 @@ impl<'de> Deserialize<'de> for RadarConfig {
             .iter()
             .filter_map(|s| EntityTag::from_str(s))
             .collect();
+        let selects = raw
+            .selects
+            .iter()
+            .filter_map(|s| EntityTag::from_str(s))
+            .collect();
         Ok(RadarConfig {
             range: raw.range,
             shows,
+            selects,
         })
     }
 }
@@ -118,6 +139,20 @@ shows = ["asteroid"]
         let cfg = RadarConfig::from_toml(toml).expect("parse must succeed");
         assert_eq!(cfg.range, 50.0);
         assert_eq!(cfg.shows, vec![EntityTag::Asteroid]);
+        assert!(cfg.selects.is_empty());
+    }
+
+    #[test]
+    fn parse_selects() {
+        let toml = r#"
+range = 60.0
+shows = ["asteroid", "ship"]
+selects = ["ship"]
+"#;
+        let cfg = RadarConfig::from_toml(toml).expect("parse must succeed");
+        assert_eq!(cfg.range, 60.0);
+        assert_eq!(cfg.shows, vec![EntityTag::Asteroid, EntityTag::Ship]);
+        assert_eq!(cfg.selects, vec![EntityTag::Ship]);
     }
 
     #[test]
@@ -129,6 +164,7 @@ shows = ["asteroid", "ship"]
         let cfg = RadarConfig::from_toml(toml).expect("parse must succeed");
         assert_eq!(cfg.range, 60.0);
         assert_eq!(cfg.shows, vec![EntityTag::Asteroid, EntityTag::Ship]);
+        assert!(cfg.selects.is_empty());
     }
 
     #[test]
@@ -136,6 +172,7 @@ shows = ["asteroid", "ship"]
         let cfg = RadarConfig::from_toml("").expect("empty TOML should use defaults");
         assert_eq!(cfg.range, 50.0);
         assert!(cfg.shows.is_empty());
+        assert!(cfg.selects.is_empty());
     }
 
     #[test]
@@ -146,6 +183,7 @@ shows = ["asteroid", "wormhole", "ship"]
 "#;
         let cfg = RadarConfig::from_toml(toml).expect("parse must succeed");
         assert_eq!(cfg.shows, vec![EntityTag::Asteroid, EntityTag::Ship]);
+        assert!(cfg.selects.is_empty());
     }
 
     #[test]

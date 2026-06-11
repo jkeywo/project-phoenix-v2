@@ -177,13 +177,16 @@ fn update_session_with_config(
         if let Some(sc) = &ship_config.sensors_console {
             next.sensors_radar_range = sc.long_range_radar.range;
             next.sensors_radar_shows = sc.long_range_radar.shows.iter().map(|t| t.as_str().to_string()).collect();
+            next.sensors_radar_selects = sc.long_range_radar.selects.iter().map(|t| t.as_str().to_string()).collect();
         }
         if let Some(nc) = &ship_config.navigation_console {
             next.nav_chart_shows = nc.system_chart.shows.iter().map(|t| t.as_str().to_string()).collect();
+            next.nav_chart_selects = nc.system_chart.selects.iter().map(|t| t.as_str().to_string()).collect();
         }
         if let Some(wc) = &ship_config.weapons_console {
             if let Some(r) = &wc.radar {
                 next.tactical_radar_shows = r.shows.iter().map(|t| t.as_str().to_string()).collect();
+                next.tactical_radar_selects = r.selects.iter().map(|t| t.as_str().to_string()).collect();
                 next.tactical_radar_range = r.range;
             }
         }

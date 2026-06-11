@@ -54,6 +54,7 @@ pub use entities::config as entity_config;
 pub use entities::loader as entity_loader;
 pub use entities::entity_override;
 pub use entities::spawner as entity_spawner;
+pub use entities::target as entity_target;
 pub mod objectives;
 pub use core::messages;
 pub mod lobby;

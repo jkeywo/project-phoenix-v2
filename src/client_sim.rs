@@ -31,6 +31,7 @@ pub fn helm_radar_config() -> RadarConfig {
     RadarConfig {
         range: HELM_RADAR_RANGE,
         shows: vec![EntityTag::Asteroid, EntityTag::Star, EntityTag::Planet, EntityTag::Ship],
+        selects: Vec::new(),
     }
 }
 
@@ -43,6 +44,7 @@ pub fn weapons_radar_config() -> RadarConfig {
     RadarConfig {
         range: WEAPONS_RADAR_RANGE,
         shows: vec![EntityTag::Asteroid, EntityTag::Ship],
+        selects: Vec::new(),
     }
 }
 
@@ -65,6 +67,7 @@ pub fn science_radar_config() -> RadarConfig {
             EntityTag::Star,
             EntityTag::Planet,
         ],
+        selects: Vec::new(),
     }
 }
 
@@ -135,6 +138,7 @@ pub fn system_chart_config() -> RadarConfig {
             EntityTag::AsteroidField,
             EntityTag::Region,
         ],
+        selects: Vec::new(),
     }
 }
 

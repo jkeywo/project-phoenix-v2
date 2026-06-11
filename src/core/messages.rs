@@ -435,6 +435,18 @@ pub struct ShipClientConfig {
     /// from `[weapons_console.radar] range` in the ship TOML.
     #[serde(default = "default_tactical_radar_range")]
     pub tactical_radar_range: f32,
+    /// Targetability filter for the Tactical radar. Sourced from
+    /// `[weapons_console.radar] selects`.
+    #[serde(default)]
+    pub tactical_radar_selects: Vec<String>,
+    /// Targetability filter for the Sensors long-range radar. Sourced from
+    /// `[sensors_console.long_range_radar] selects`.
+    #[serde(default)]
+    pub sensors_radar_selects: Vec<String>,
+    /// Targetability filter for the Navigation system chart. Sourced from
+    /// `[navigation_console.system_chart] selects`.
+    #[serde(default)]
+    pub nav_chart_selects: Vec<String>,
 }
 
 fn default_tactical_radar_range() -> f32 {
@@ -488,9 +500,12 @@ impl Default for ShipClientConfig {
             helm_radar_shows: Vec::new(),
             sensors_radar_range: default_sensors_radar_range(),
             sensors_radar_shows: Vec::new(),
+            sensors_radar_selects: Vec::new(),
             nav_chart_shows: Vec::new(),
+            nav_chart_selects: Vec::new(),
             tactical_radar_shows: Vec::new(),
             tactical_radar_range: default_tactical_radar_range(),
+            tactical_radar_selects: Vec::new(),
         }
     }
 }
@@ -588,6 +603,17 @@ pub struct EntitySnapshot {
     /// objective. The client radar renders a visual indicator for these entities.
     #[serde(default)]
     pub objective_target: bool,
+    /// Targetability tags from the entity's `[target]` section.
+    /// Empty when the entity has no `[target]` section (not targetable).
+    #[serde(default)]
+    pub target_tags: Vec<String>,
+    /// Cosmetic threat level string: `"none"`, `"low"`, `"medium"`, or `"high"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threat_level: Option<String>,
+    /// Short description from the entity's `[target]` section.
+    /// Falls back to the entity `name` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_description: Option<String>,
 }
 
 impl EntitySnapshot {
@@ -635,6 +661,9 @@ impl EntitySnapshot {
             half_extents: None,
             radar_icon: Some("asteroid".into()),
             objective_target: false,
+            target_tags: Vec::new(),
+            threat_level: None,
+            target_description: None,
         }
     }
 
@@ -663,6 +692,9 @@ impl EntitySnapshot {
             half_extents: None,
             radar_icon: Some("asteroid".into()),
             objective_target: false,
+            target_tags: Vec::new(),
+            threat_level: None,
+            target_description: None,
         }
     }
 
@@ -685,6 +717,9 @@ impl EntitySnapshot {
             half_extents: None,
             radar_icon: None,
             objective_target: false,
+            target_tags: Vec::new(),
+            threat_level: None,
+            target_description: None,
         }
     }
 }
@@ -1134,6 +1169,21 @@ pub struct RadarBlip {
     /// Display name from the entity snapshot, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Whether this blip can be selected/targeted on the radar.
+    /// Set by the server based on the radar's `selects` filter vs the entity's
+    /// `[target].tags`.
+    #[serde(default)]
+    pub selectable: bool,
+    /// Cosmetic threat level string: `"none"`, `"low"`, `"medium"`, or `"high"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threat_level: Option<String>,
+    /// Short description from the entity's `[target]` section.
+    /// Falls back to the entity `name` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Targetability tags from the entity's `[target]` section.
+    #[serde(default)]
+    pub target_tags: Vec<String>,
 }
 
 /// A radar overlay region drawn as a coloured shape on the Tactical radar.

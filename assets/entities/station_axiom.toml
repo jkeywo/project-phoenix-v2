@@ -1,6 +1,11 @@
 name = "Axiom Station"
 tags = ["station", "comms_contact", "allied"]
 
+[target]
+tags = ["station"]
+threat_level = "none"
+description = "Axiom Station"
+
 [hull]
 hull_integrity = 200.0
 

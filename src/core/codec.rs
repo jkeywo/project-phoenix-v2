@@ -448,6 +448,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     }],
                 ..Default::default()
             },
@@ -478,6 +481,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     },
                     EntitySnapshot {
                         uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(),
@@ -496,6 +502,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     },
                 ],
                 ..Default::default()
@@ -530,6 +539,9 @@ mod tests {
                         half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     }],
                     ..Default::default()
                 }),
@@ -1299,6 +1311,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     }],
                 ..Default::default()
             },
@@ -1328,6 +1343,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     }],
                 ..Default::default()
             },
@@ -1357,6 +1375,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     }],
                 ..Default::default()
             },
@@ -1386,6 +1407,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     }],
                 ..Default::default()
             },
@@ -1415,6 +1439,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     }],
                 ..Default::default()
             },
@@ -1449,6 +1476,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     },
                     EntitySnapshot {
                         uuid: "field-1".into(),
@@ -1467,6 +1497,9 @@ mod tests {
                     half_extents: None,
                     radar_icon: None,
                     objective_target: false,
+                    target_tags: Vec::new(),
+                    threat_level: None,
+                    target_description: None,
                     },
                 ],
                 ..Default::default()
@@ -1683,6 +1716,9 @@ mod tests {
                 half_extents: None,
             radar_icon: None,
             objective_target: false,
+            target_tags: Vec::new(),
+            threat_level: None,
+            target_description: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1709,6 +1745,9 @@ mod tests {
                 half_extents: None,
             radar_icon: None,
             objective_target: false,
+            target_tags: Vec::new(),
+            threat_level: None,
+            target_description: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2560,6 +2599,10 @@ mod tests {
                 color: [0.478, 0.753, 1.0],
                 objective_target: false,
                 name: None,
+                selectable: false,
+                threat_level: None,
+                description: None,
+                target_tags: Vec::new(),
             }],
             regions: vec![RadarRegion {
                 uuid: "zone-1".into(),

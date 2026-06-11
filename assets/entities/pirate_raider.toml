@@ -6,6 +6,11 @@
 
 name = "Pirate Raider"
 tags = ["ship", "npc", "enemy"]
+
+[target]
+tags = ["ship"]
+threat_level = "high"
+description = "Pirate Raider"
 faction = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb"
 
 [hull]

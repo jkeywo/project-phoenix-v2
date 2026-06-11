@@ -4,3 +4,4 @@ pub mod entity_override;
 pub mod loader;
 pub mod spawner;
 pub mod tags;
+pub mod target;

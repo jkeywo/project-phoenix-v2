@@ -1,6 +1,11 @@
 name = "Outpost Alpha"
 tags = ["station", "destructible"]
 
+[target]
+tags = ["station"]
+threat_level = "none"
+description = "Outpost Alpha"
+
 [hull]
 hull_integrity = 200.0
 

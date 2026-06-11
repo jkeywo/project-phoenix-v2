@@ -2,6 +2,11 @@ name = "Harrow Warhawk"
 tags = ["ship", "npc"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
+[target]
+tags = ["ship"]
+threat_level = "high"
+description = "Harrow Warhawk"
+
 [hull]
 captain_chair = 400.0
 

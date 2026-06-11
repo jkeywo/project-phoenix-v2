@@ -1,6 +1,11 @@
 name = "Research Outpost"
 tags = ["station", "comms_contact", "science_facility"]
 
+[target]
+tags = ["station"]
+threat_level = "none"
+description = "Research Outpost"
+
 [hull]
 hull_integrity = 60.0
 

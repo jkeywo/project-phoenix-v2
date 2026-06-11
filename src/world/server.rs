@@ -548,6 +548,7 @@ fn setup_fallback_world(
         faction: None,
         behaviour: None,
         radar_appearance: None,
+        target: None,
         mesh: None,
         light: Vec::new(),
     };

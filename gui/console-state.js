@@ -151,14 +151,13 @@ export function buildHelmConsoleState(state) {
     HELM_RADAR_RANGE, { rotate: true }
   );
   return JSON.stringify({
-    heading:                 ((((state.shipYaw || 0) * -180 / Math.PI) % 360) + 360) % 360,
+    heading:                 (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
     speed:                   state.forwardSpeed          || 0,
     x:                       state.shipX                 || 0,
     z:                       state.shipZ                 || 0,
     yaw:                     state.shipYaw               || 0,
     impulse_charge_progress: state.impulseChargeProgress || 0,
     on_screen:               state.currentView === 'Radar',
-    lock_id:                 state.weaponsTarget         || null,
     blips,
   });
 }

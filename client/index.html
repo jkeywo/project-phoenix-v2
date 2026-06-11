@@ -22,6 +22,17 @@
   <script type="module" src="gui/iframe-bridge.js"></script>
   <script type="module" src="gui/console-state.js"></script>
   <script type="module" src="gui/action-map.js"></script>
+  <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
+       (window.lobbyState / simState / commsState / complexityStore) with an
+       apply(serverMessage) method; handleMessage() feeds every inbound
+       message through them, replacing the deleted Bevy message drain. -->
+  <script type="module" src="gui/lobby-state.js"></script>
+  <script type="module" src="gui/sim-state.js"></script>
+  <script type="module" src="gui/comms-state.js"></script>
+  <script type="module" src="gui/complexity-store.js"></script>
+  <!-- Complexity preset shell UI logic (issue #461): first-use pop-up plan,
+       segmented-selector state, SetComplexity message builders. -->
+  <script type="module" src="gui/complexity-ui.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -106,7 +117,8 @@
     #repair-ui.active,
     #shields-ui.active,
     #sensors-ui.active,
-    #comms-ui.active {
+    #comms-ui.active,
+    #navigation-ui.active {
       display: flex;
       flex-direction: column;
       flex: 1;
@@ -121,7 +133,8 @@
     #repair-ui iframe,
     #shields-ui iframe,
     #sensors-ui iframe,
-    #comms-ui iframe {
+    #comms-ui iframe,
+    #navigation-ui iframe {
       flex: 1;
       min-height: 0;
       width: 100%;
@@ -408,7 +421,7 @@
     }
     #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-1f04bed86fa7e6c5.js" crossorigin="anonymous" integrity="sha384-eLu2QaXtBF94V/oUgFGIohVojG/QNepFPIsRkdyK8335UAlp+sM4rOM6f1ZrRttv"><link rel="preload" href="./project-phoenix-1f04bed86fa7e6c5_bg.wasm" crossorigin="anonymous" integrity="sha384-xPLcRea4kT4LVFnvC1vKjwTnFfzHk1XFz/m2OmdwnNI74hVleSaMThmqysV7BFtc" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-78ce99e247af59bb.js" crossorigin="anonymous" integrity="sha384-aVe6hywf+VufcsXtYjc/DS8/mTQNEb2bgjg0znG4Jn16VJLK1yVkGBJvWy+qGK7T"><link rel="preload" href="./project-phoenix-78ce99e247af59bb_bg.wasm" crossorigin="anonymous" integrity="sha384-wKtu+Y8neeFwlqYDAYs35dqUVs1tcvtPLS4Rm78ltOzeP1Fde7I4i5TG/ne2Imij" as="fetch" type="application/wasm"></head>
 <body>
   <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
@@ -417,8 +430,8 @@
        It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-1f04bed86fa7e6c5.js';
-const wasm = await init({ module_or_path: './project-phoenix-1f04bed86fa7e6c5_bg.wasm' });
+import init, * as bindings from './project-phoenix-78ce99e247af59bb.js';
+const wasm = await init({ module_or_path: './project-phoenix-78ce99e247af59bb_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -489,13 +502,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         </div>
         <div id="detail-console-area">
           <div class="detail-consoles"></div>
-          <div class="complexity-row">
-            <label>Complexity</label>
-            <div class="segmented">
-              <button data-complexity="Low">Low</button>
-              <button data-complexity="Std" class="active">Normal</button>
-            </div>
-          </div>
+          <!-- Per-console complexity selectors, built dynamically by
+               renderComplexitySelectors() from window.complexityStore /
+               window.complexityUi (issue #461). Only consoles with more than
+               one preset (Tactical, Power) get a row. -->
+          <div id="complexity-selectors"></div>
         </div>
       </div>
 
@@ -550,9 +561,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         title="Sensors Console" allowfullscreen></iframe>
     </section>
 
+
     <section id="comms-ui">
       <iframe id="comms-iframe" src="gui/comms-console.html"
         title="Comms Console" allowfullscreen></iframe>
+    </section>
+
+    <section id="navigation-ui">
+      <iframe id="navigation-iframe" src="gui/navigation-console.html"
+        title="Navigation Console" allowfullscreen></iframe>
     </section>
 
     <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
@@ -795,6 +812,53 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       return (window.CONSOLE_LABEL && window.CONSOLE_LABEL[name]) || name;
     }
 
+    // ── Complexity preset selectors (issue #461) ───────────────────────────
+    // Renders one segmented Low/Std control per held console that actually has
+    // more than one preset (Tactical, Power). Backed by window.complexityStore
+    // and window.complexityUi (gui/complexity-store.js + gui/complexity-ui.js,
+    // ported from the deleted Bevy complexity systems). Selecting a preset
+    // persists via the store and sends SetComplexity to the host.
+    const PRESET_LABEL = { Low: 'Low', Std: 'Normal' };
+    function renderComplexitySelectors(detail, consoles) {
+      const host = detail.querySelector('#complexity-selectors');
+      if (!host) return;
+      host.innerHTML = '';
+      const store = window.complexityStore;
+      const ui = window.complexityUi;
+      if (!store || !ui) return;
+      // Materialise choices so own-console ComplexityChanged broadcasts apply.
+      ui.materialiseConsoles(store, consoles);
+      for (const c of consoles) {
+        const ds = ui.dropdownState(store, c);
+        if (!ds.showDropdown) continue;     // single-preset consoles: no selector
+        const row = document.createElement('div');
+        row.className = 'complexity-row';
+        const label = document.createElement('label');
+        label.textContent = consoles.length > 1 ? consoleLabel(c) : 'Complexity';
+        row.appendChild(label);
+        const seg = document.createElement('div');
+        seg.className = 'segmented';
+        for (const preset of ds.presets) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.complexity = preset;
+          btn.textContent = PRESET_LABEL[preset] || preset;
+          if (preset === ds.active) btn.classList.add('active');
+          btn.onclick = () => {
+            const msg = ui.selectPreset(store, c, preset);  // persists via store
+            if (!msg) return;
+            savedComplexity[c] = preset;                    // keep legacy sync map in step
+            seg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            send(msg.type, msg.data);
+          };
+          seg.appendChild(btn);
+        }
+        row.appendChild(seg);
+        host.appendChild(row);
+      }
+    }
+
     // Defer re-render so rapid server messages don't steal pointer events.
     let _renderFrame = null;
     function scheduleRender() {
@@ -834,12 +898,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const bezel = $('phone-bezel');
       if (bezel) bezel.setAttribute('aria-hidden', vis.bezel ? 'false' : 'true');
 
-      // Reconcile activeConsole with current consoles list.
+      // Reconcile activeConsole with current consoles list (port of the
+      // deleted Bevy reconcile_active_console — see gui/lobby-state.js).
       const mine = myConsoles(s);
       if (inGame) {
-        if (!activeConsole || !mine.includes(activeConsole)) {
-          setActiveConsole(mine[0] || null);
-        }
+        const next = (typeof window.reconcileActiveConsole === 'function')
+          ? window.reconcileActiveConsole(activeConsole, mine)
+          : ((activeConsole && mine.includes(activeConsole)) ? activeConsole : (mine[0] || null));
+        if (next !== activeConsole) setActiveConsole(next);
       } else {
         setActiveConsole(null);
       }
@@ -977,23 +1043,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             chip.textContent = consoleLabel(c);
             consolesArea.appendChild(chip);
           }
-          const seg = detail.querySelector('.segmented');
-          if (seg) {
-            seg.querySelectorAll('button').forEach(segBtn => {
-              segBtn.classList.remove('active');
-              const preset = savedComplexity[myStation.consoles[0]] || 'Std';
-              if (segBtn.dataset.complexity === preset) segBtn.classList.add('active');
-              segBtn.onclick = () => {
-                const consoleName = myStation.consoles[0];
-                const presetName = segBtn.dataset.complexity;
-                savedComplexity[consoleName] = presetName;
-                localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
-                seg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-                segBtn.classList.add('active');
-                send('SetComplexity', { console: consoleName, preset_name: presetName });
-              };
-            });
-          }
+          renderComplexitySelectors(detail, myStation.consoles || []);
         } else {
           detail.className = 'idle';
           detail.querySelector('.detail-station-name').textContent = 'No station assigned';
@@ -1214,6 +1264,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (activeConsole === 'Comms') {
         pushCommsConsoleState();
       }
+      if (activeConsole === 'Navigation') {
+        pushNavigationConsoleState();
+      }
     }
 
     // ── Captain console iframe bridge (issue #428) ───────────────────────────
@@ -1316,6 +1369,20 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     }
 
     if ($('comms-iframe')) $('comms-iframe').addEventListener('load', () => { pushCommsConsoleState(); });
+
+    // ── Navigation console iframe bridge (issue #458) ─────────────────────────
+    // State builder extracted to gui/console-state.js.
+    function buildNavigationConsoleState() {
+      if (typeof window.buildConsoleState === 'function') return window.buildConsoleState('Navigation', state);
+      return JSON.stringify({ blips: [], ship_x: 0, ship_z: 0, impulse_charge_progress: 0, cancel_visible: false, on_screen: false, radar_range: 5000 });
+    }
+
+    function pushNavigationConsoleState() {
+      if (activeConsole !== 'Navigation') return;
+      _pushIframe($('navigation-iframe'), 'Navigation', buildNavigationConsoleState());
+    }
+
+    if ($('navigation-iframe')) $('navigation-iframe').addEventListener('load', () => { pushNavigationConsoleState(); });
 
     // ── Console action postMessage bridge (issue #422) ────────────────────────
     // All iframe consoles send {type:'console_action', payload:json} via
@@ -1430,14 +1497,35 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // ── Incoming message handler ────────────────────────────────
 
     function handleMessage(msg) {
+      // JS state modules (issue #460) — every inbound ServerMessage is applied
+      // to the pure state modules first; they are the source of truth that the
+      // inline `state` object mirrors below. Guards cover the brief window
+      // before the module scripts have executed.
+      if (window.lobbyState)      window.lobbyState.apply(msg);
+      if (window.simState)        window.simState.apply(msg);
+      if (window.commsState)      window.commsState.apply(msg);
+      if (window.complexityStore) window.complexityStore.apply(msg);
       switch (msg.type) {
         case 'Welcome':
-          state.phase   = msg.data.state.phase;
-          state.players = msg.data.state.players.map(p => ({
-            ...p,
-            consoles: consolesOf(p),
-          }));
-          state.complexity = msg.data.state.complexity || {};
+          if (window.lobbyState) {
+            state.phase      = window.lobbyState.phase;
+            state.players    = window.lobbyState.players;
+            state.complexity = window.lobbyState.complexity;
+          } else {
+            state.phase   = msg.data.state.phase;
+            state.players = msg.data.state.players.map(p => ({
+              ...p,
+              consoles: consolesOf(p),
+            }));
+            state.complexity = msg.data.state.complexity || {};
+          }
+          if (window.simState) {
+            // Share the module's entity array so in-place SimState position
+            // updates and Entity/AsteroidSpawned appends flow through, and
+            // pick up the Welcome repair-team pre-seed.
+            state.asteroids   = window.simState.world.entities;
+            state.repairTeams = window.simState.repairTeams;
+          }
           if (msg.data.ship_stations) {
             state.maxPlayers = msg.data.ship_stations.max_players || 0;
             stationConfigs = msg.data.ship_stations.configs || {};
@@ -1465,35 +1553,51 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           rebuildStations();
           break;
         case 'PlayerJoined': {
-          const p = msg.data.player;
-          const existing = state.players.findIndex(x => x.token === p.token);
-          if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p) };
-          else state.players.push({ ...p, consoles: consolesOf(p) });
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            const p = msg.data.player;
+            const existing = state.players.findIndex(x => x.token === p.token);
+            if (existing >= 0) state.players[existing] = { ...p, consoles: consolesOf(p) };
+            else state.players.push({ ...p, consoles: consolesOf(p) });
+          }
           rebuildStations();
           break;
         }
         case 'PlayerLeft':
-          state.players = state.players.filter(p => p.token !== msg.data.token);
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            state.players = state.players.filter(p => p.token !== msg.data.token);
+          }
           rebuildStations();
           break;
         case 'StationAssigned': {
-          const { token, consoles } = msg.data;
-          // Clear these consoles from any other player who held them.
-          for (const c of (consoles || [])) {
-            for (const p of state.players) {
-              if (p.token !== token && p.consoles) {
-                p.consoles = p.consoles.filter(x => x !== c);
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            const { token, consoles } = msg.data;
+            // Clear these consoles from any other player who held them.
+            for (const c of (consoles || [])) {
+              for (const p of state.players) {
+                if (p.token !== token && p.consoles) {
+                  p.consoles = p.consoles.filter(x => x !== c);
+                }
               }
             }
+            const target = state.players.find(p => p.token === token);
+            if (target) target.consoles = consoles || [];
           }
-          const target = state.players.find(p => p.token === token);
-          if (target) target.consoles = consoles || [];
           rebuildStations();
           break;
         }
         case 'NameChanged': {
-          const p = state.players.find(p => p.token === msg.data.token);
-          if (p) p.name = msg.data.name;
+          if (window.lobbyState) {
+            state.players = window.lobbyState.players;
+          } else {
+            const p = state.players.find(p => p.token === msg.data.token);
+            if (p) p.name = msg.data.name;
+          }
           if (msg.data.token === myToken) myName = msg.data.name;
           rebuildStations();
           break;
@@ -1544,10 +1648,26 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           break;
         }
         case 'WorldSetup': {
-          state.asteroids = (msg.data.world && msg.data.world.entities) || [];
+          // Share the sim-state module's entity array (in-place updates and
+          // spawn/despawn flow through automatically).
+          state.asteroids = window.simState
+            ? window.simState.world.entities
+            : ((msg.data.world && msg.data.world.entities) || []);
           pushWeaponsConsoleState();
           pushHelmConsoleState();
           pushSensorsConsoleState();
+          return;
+        }
+        case 'EntitySpawned':
+        case 'AsteroidSpawned': {
+          // Handled by the sim-state module (idempotent append); re-mirror the
+          // entity array and refresh the radar-bearing consoles.
+          if (!window.simState) return;
+          state.asteroids = window.simState.world.entities;
+          pushWeaponsConsoleState();
+          pushHelmConsoleState();
+          pushSensorsConsoleState();
+          pushNavigationConsoleState();
           return;
         }
         case 'TargetLock': {
@@ -1597,7 +1717,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           return;
         }
         case 'RepairState': {
-          state.repairTeams = msg.data.teams || [];
+          state.repairTeams = window.simState
+            ? window.simState.repairTeams
+            : (msg.data.teams || []);
           pushRepairConsoleState();
           return;
         }
@@ -1628,7 +1750,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         }
         case 'AsteroidDestroyed': {
           const { uuid } = msg.data;
-          state.asteroids = state.asteroids.filter(a => a.uuid !== uuid);
+          // Removal already done in place by the sim-state module when loaded.
+          state.asteroids = window.simState
+            ? window.simState.world.entities
+            : state.asteroids.filter(a => a.uuid !== uuid);
           if (state.weaponsTarget === uuid) {
             state.weaponsTarget = null;
             state.weaponsLocked = false;
@@ -1642,7 +1767,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         }
         case 'EntityDespawned': {
           const { uuid } = msg.data;
-          state.asteroids = state.asteroids.filter(a => a.uuid !== uuid);
+          // Removal already done in place by the sim-state module when loaded.
+          state.asteroids = window.simState
+            ? window.simState.world.entities
+            : state.asteroids.filter(a => a.uuid !== uuid);
           if (state.weaponsTarget === uuid) {
             state.weaponsTarget = null;
             state.weaponsLocked = false;
@@ -1664,13 +1792,38 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           return;
         }
         case 'ComplexityChanged': {
+          // window.complexityStore (gui/complexity-store.js) was already
+          // updated + persisted by the apply() pass above (own consoles
+          // only); mirror server truth for the lobby segmented buttons.
+          // Persist only consoles the local player holds — recording another
+          // player's broadcast as a local preference would suppress that
+          // console's first-use popup on this device.
           const { console: consoleName, preset_name } = msg.data;
           state.complexity[consoleName] = preset_name;
-          savedComplexity[consoleName] = preset_name;
-          localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
+          if (myConsoles(state).includes(consoleName)) {
+            savedComplexity[consoleName] = preset_name;
+            localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
+          }
           rebuildStations();
           return;
         }
+        case 'CommsState': {
+          // Handled by the comms-state module (gui/comms-state.js); mirror its
+          // messages/contacts for buildCommsConsoleState. Previously only the
+          // (now deleted) Bevy drain consumed this message.
+          if (window.commsState) {
+            state.commsMessages = window.commsState.messages;
+            state.commsContacts = window.commsState.contacts;
+          } else {
+            state.commsMessages = msg.data.messages || [];
+            state.commsContacts = msg.data.contacts || [];
+          }
+          pushCommsConsoleState();
+          return;
+        }
+        case 'GameOver':
+          state.phase = 'GameOver';
+          break;
         default:
           return; // unknown — skip re-render
       }

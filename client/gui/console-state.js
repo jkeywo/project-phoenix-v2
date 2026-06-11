@@ -100,7 +100,7 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
 /**
  * Tactical / Weapons console.
  * @param {{ weaponsTarget, weaponsBanks, weaponsTubes, weaponsTorpedoCount,
- *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw }} state
+ *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw, complexity }} state
  */
 export function buildWeaponsConsoleState(state) {
   const blips = buildBlips(
@@ -116,6 +116,9 @@ export function buildWeaponsConsoleState(state) {
     blips,
     phaser_arcs:   [],
     torpedo_arcs:  [],
+    // Server complexity preset name (issue #461); drives [data-hideable]
+    // element hiding via gui/hideable-elements.js in console-core.
+    complexityPreset: state.complexity?.Tactical || 'Std',
   });
 }
 
@@ -175,7 +178,8 @@ export function buildRepairConsoleState(state) {
 
 /**
  * Power console.
- * @param {{ powerHelm, powerWeapons, powerSensors, powerBattery, powerLocked }} state
+ * @param {{ powerHelm, powerWeapons, powerSensors, powerBattery, powerLocked,
+ *           complexity }} state
  */
 export function buildPowerConsoleState(state) {
   return JSON.stringify({
@@ -184,6 +188,9 @@ export function buildPowerConsoleState(state) {
     sensors:        state.powerSensors || 0,
     battery_charge: state.powerBattery || 0,
     locked:         state.powerLocked  || false,
+    // Server complexity preset name (issue #461); drives [data-hideable]
+    // element hiding via gui/hideable-elements.js in console-core.
+    complexityPreset: state.complexity?.Power || 'Std',
   });
 }
 
@@ -294,6 +301,62 @@ export function buildCommsConsoleState(state) {
   });
 }
 
+// ── Navigation radar range ──────────────────────────────────────────────────
+
+export const NAVIGATION_RADAR_RANGE = 5000.0;
+
+// Tags that appear on strategic navigational entities shown in the nav chart.
+// Individual asteroid rocks and NPC ships are excluded.
+const NAV_CHART_TAGS = new Set(['star', 'planet', 'station', 'player_ship', 'player']);
+
+/**
+ * Navigation console state builder (issue #458).
+ *
+ * Produces a world-centred north-up radar snapshot filtered to strategic
+ * navigational entities (stars, planets, stations, player ship).
+ * Individual asteroids and NPC ship blips are excluded.
+ *
+ * @param {{ asteroids, shipX, shipZ, impulseChargeProgress, currentView }} state
+ */
+export function buildNavigationConsoleState(state) {
+  // Filter to navigational entities only.
+  const navEntities = (state.asteroids || []).filter(e => {
+    const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
+    return tags.some(t => NAV_CHART_TAGS.has(t));
+  });
+
+  const blips = buildBlips(
+    navEntities,
+    state.shipX || 0, state.shipZ || 0,
+    0,                  // north-up: no ship-yaw rotation
+    NAVIGATION_RADAR_RANGE,
+    {
+      rotate: false,    // world-axis frame
+      extra: (e) => {
+        const tags = (e.tags || e.entity_tags || []).map(t => String(t).toLowerCase());
+        const kind = tags.includes('star')    ? 'star'
+                   : tags.includes('planet')  ? 'planet'
+                   : tags.includes('station') ? 'station'
+                   : 'ship';
+        return { name: e.name || null, kind };
+      },
+    }
+  );
+
+  const charge = state.impulseChargeProgress || 0;
+  const onScreen = state.currentView === 'NavigationChart';
+
+  return JSON.stringify({
+    blips,
+    ship_x:                  state.shipX || 0,
+    ship_z:                  state.shipZ || 0,
+    impulse_charge_progress: charge,
+    cancel_visible:          charge > 0,
+    on_screen:               onScreen,
+    radar_range:             NAVIGATION_RADAR_RANGE,
+  });
+}
+
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────
 
 if (typeof window !== 'undefined') {
@@ -307,6 +370,7 @@ if (typeof window !== 'undefined') {
       case 'Shields':      return buildShieldsConsoleState(state);
       case 'Sensors':      return buildSensorsConsoleState(state);
       case 'Comms':        return buildCommsConsoleState(state);
+      case 'Navigation':   return buildNavigationConsoleState(state);
       default:             return '{}';
     }
   };

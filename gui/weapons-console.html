@@ -178,7 +178,7 @@
             <div class="bar"><div class="fill" id="hull-fill" style="width:100%;"></div></div>
             <span class="val" id="hull-val">—</span>
           </div>
-          <div class="complexity">CPX: STD ▾</div>
+          <div class="complexity" id="cpx-display">CPX: STD ▾</div>
         </header>
 
         <!-- ── Main split: radar (left) + controls (right) ───────────── -->
@@ -209,8 +209,8 @@
               </div>
             </div>
 
-            <!-- Target readout strip under radar -->
-            <div class="readout">
+            <!-- Target readout strip under radar (hidden by Tactical Low preset) -->
+            <div class="readout" data-hideable="target_lock_button">
               <div>
                 <div class="k">LOCKED TARGET</div>
                 <div class="v" id="target-name" style="font-size:32px;">—</div>
@@ -238,8 +238,9 @@
                   <div class="spacer"></div>
                 </div>
 
-                <!-- Tube selector chips (built dynamically from state) -->
-                <div class="tubes" id="tube-chips"></div>
+                <!-- Tube selector chips (built dynamically from state;
+                     hidden by Tactical Low preset) -->
+                <div class="tubes" id="tube-chips" data-hideable="torpedo_tube_selector"></div>
 
                 <!-- Per-tube status indicators (built dynamically) -->
                 <div class="tube-status-row" id="tube-status-row"></div>
@@ -263,7 +264,8 @@
                   <span class="tag" id="phaser-tag">BEAM</span>
                 </div>
 
-                <div style="display:flex; gap:18px; align-items:stretch;">
+                <!-- Mode toggle row (hidden by Tactical Low preset) -->
+                <div style="display:flex; gap:18px; align-items:stretch;" data-hideable="phaser_mode_selector">
                   <button class="btn" id="phaser-mode-btn" style="flex:1;" type="button">
                     <span class="btn-bg"></span>
                     <span class="led cyan"></span>
@@ -431,6 +433,13 @@
       // ── Phaser state ─────────────────────────────────────────────────────
       var banks   = s.banks || [];
       var anyReady = banks.some(function(b) { return b.fire_ready; });
+
+      // ── Complexity preset display (issue #461) ──────────────────────────
+      // Element hiding itself is handled by console-core + hideable-elements.
+      var cpxEl = document.getElementById('cpx-display');
+      if (cpxEl && typeof s.complexityPreset === 'string') {
+        cpxEl.textContent = 'CPX: ' + s.complexityPreset.toUpperCase() + ' ▾';
+      }
 
       var modeStr        = String(s.phaser_mode || 'Auto');
       var phaserModeLabel = document.getElementById('phaser-mode-label');

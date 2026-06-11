@@ -1,12 +1,10 @@
 // Content switcher for the client GUI shell. Pure function (issue #441).
 //
 // Maps the currently-active console to which HTML <section> should be
-// visible. Eight consoles have HTML sections in client.html
+// visible. All nine consoles have HTML sections in client.html
 // (CaptainChair -> #captain-ui, Helm -> #helm-ui, Tactical -> #weapons-ui,
 // Repair -> #repair-ui, Power -> #power-ui, Shields -> #shields-ui,
-// Sensors -> #sensors-ui, Comms -> #comms-ui); Navigation is rendered by
-// the Bevy WASM canvas, so when it is active no HTML section is shown —
-// the canvas takes the whole bezel content area.
+// Sensors -> #sensors-ui, Navigation -> #navigation-ui, Comms -> #comms-ui).
 //
 // This module exports a pure function `consoleSections(activeConsole, inGame)`
 // returning a visibility map keyed by section id. The inline `<script>` in
@@ -19,8 +17,7 @@
 import { REGISTRY } from './console-registry.js';
 
 // Console name -> HTML section id. Derived from REGISTRY so there is a single
-// source of truth for all HTML-panel consoles. Bevy-rendered consoles
-// (Navigation) are absent from this map.
+// source of truth for all HTML-panel consoles.
 export const CONSOLE_SECTION = Object.freeze(
   Object.fromEntries(Object.entries(REGISTRY).map(([k, v]) => [k, v.sectionId]))
 );

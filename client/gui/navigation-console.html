@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Project Phoenix — Navigation Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: 16px; }
+
+    /* ── Layout ─────────────────────────────────────────────────── */
+    .panel-inner {
+      padding: 20px 48px 18px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    .panel-mid {
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: row; gap: 24px;
+    }
+
+    .radar-col {
+      flex: 1 1 0; min-width: 0;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    .ctrl-col {
+      flex: 0 0 300px;
+      display: flex; flex-direction: column; gap: 14px;
+      justify-content: flex-start;
+    }
+
+    /* ── Hero ───────────────────────────────────────────────────── */
+    .hero h1       { font-size: 40px; letter-spacing: 0.28em; }
+    .hero h1 .sub  { font-size: 12px; margin-top: 2px; }
+    .hero .bar     { width: 6px; }
+    .hero          { gap: 16px; }
+
+    /* ── Radar ──────────────────────────────────────────────────── */
+    .radar-wrap {
+      flex: 1; min-height: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .radar {
+      aspect-ratio: 1/1; height: 100%; width: auto;
+      max-height: 680px; max-width: 680px;
+      position: relative;
+    }
+    .radar canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      z-index: 2; pointer-events: none;
+    }
+
+    /* ── Readout strip below radar ───────────────────────────────── */
+    .radar-footer {
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 16px;
+      padding: 6px 0;
+    }
+
+    /* ── Ctrl column ─────────────────────────────────────────────── */
+    .nav-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; letter-spacing: 0.3em;
+      color: var(--ink-faint);
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--line-faint);
+    }
+
+    .impulse-readout {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 28px; letter-spacing: 0.12em;
+      color: var(--ink-dim);
+    }
+
+    .impulse-label {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px; letter-spacing: 0.25em;
+      color: var(--ink-faint);
+    }
+
+    .charge-bar-wrap {
+      width: 100%; height: 8px;
+      background: var(--line-faint);
+      border-radius: 1px;
+      overflow: hidden;
+    }
+    .charge-bar {
+      height: 100%;
+      background: var(--reloading);
+      transition: width 0.3s linear;
+      width: 0%;
+    }
+
+    #cancel-btn { width: 100%; display: none; }
+    #cancel-btn.visible { display: block; }
+
+    #on-screen-btn { width: 100%; }
+
+    /* ── Side rails ─────────────────────────────────────────────── */
+    .side-rail {
+      position: absolute;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.38em;
+    }
+    .side-rail.top    { top: 15px;    left: 50%; transform: translateX(-50%); }
+    .side-rail.bottom { bottom: 13px; left: 50%; transform: translateX(-50%); }
+
+    /* ── Portrait (mobile) ──────────────────────────────────────── */
+    @media (max-aspect-ratio: 1/1) {
+      .panel-inner { padding: 12px 16px 10px; gap: 8px; }
+      .panel-mid { flex-direction: column; gap: 8px; }
+      .radar-col { flex: 0 0 auto; min-height: 50vw; }
+      .ctrl-col { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; gap: 10px; }
+      .hero h1 { font-size: 1.2rem; letter-spacing: 0.15em; }
+      .hero .bar { display: none; }
+      .hero .sub { display: none; }
+      .side-rail { display: none; }
+      .ctrl-col .nav-label { display: none; }
+    }
+  </style>
+</head>
+<body style="background:#000; margin:0; overflow:hidden;">
+
+  <!-- Hidden data containers for Playwright smoke tests -->
+  <div id="nav-data"    aria-hidden="true"></div>
+  <div id="impulse-data" aria-hidden="true"></div>
+
+  <div class="frame landscape" data-screen-label="Navigation Console">
+    <div class="panel">
+      <div class="panel-inner">
+
+        <div class="side-rail top">PROJECT PHOENIX · NAVIGATION</div>
+        <div class="side-rail bottom" id="footer-ticker">NAVIGATION · SYSTEM CHART</div>
+
+        <!-- ── Hero header ──────────────────────────────────────── -->
+        <header class="hero">
+          <div class="bar"></div>
+          <h1>NAV <span class="sub">NAVIGATION · OFFICER</span></h1>
+          <div style="flex:1"></div>
+        </header>
+
+        <!-- ── Main split: radar (left) + controls (right) ──────── -->
+        <div class="panel-mid">
+
+          <!-- ── LEFT: System chart radar ─────────────────────────── -->
+          <section class="radar-col">
+            <div class="radar-wrap">
+              <div class="radar" id="radar-wrap">
+                <canvas id="nav-radar"></canvas>
+              </div>
+            </div>
+
+            <div class="radar-footer">
+              <div class="readout" style="flex:1; padding:6px 14px;">
+                <div class="v" id="blip-count">0</div>
+                <div class="k">CONTACTS</div>
+              </div>
+              <div class="readout" style="flex:1; padding:6px 14px;">
+                <div class="v" id="range-display">5000</div>
+                <div class="k">RANGE (u)</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── RIGHT: Controls ──────────────────────────────────── -->
+          <section class="ctrl-col">
+            <div class="nav-label">PROPULSION</div>
+
+            <div>
+              <div class="impulse-label">IMPULSE STATUS</div>
+              <div class="impulse-readout" id="impulse-status">STANDBY</div>
+            </div>
+
+            <div>
+              <div class="charge-bar-wrap">
+                <div class="charge-bar" id="charge-bar"></div>
+              </div>
+            </div>
+
+            <button id="cancel-btn" class="btn danger" type="button">
+              <span class="btn-bg"></span>
+              <span class="label">CANCEL IMPULSE</span>
+            </button>
+
+            <div class="nav-label" style="margin-top:8px;">VIEWSCREEN</div>
+
+            <button id="on-screen-btn" class="btn" type="button">
+              <span class="btn-bg"></span>
+              <span class="label">ON SCREEN</span>
+            </button>
+          </section>
+
+        </div>
+        <!-- /panel-mid -->
+
+        <footer class="console-footer footer-bar">
+          <span class="dot"></span>
+          <span id="footer-status">NAVIGATION ONLINE</span>
+          <span class="sep">·</span>
+          <span id="footer-impulse" style="color:var(--ink-faint);">STANDBY</span>
+          <span style="flex:1"></span>
+          <span id="footer-contacts" style="color:var(--ink-faint);">0 CONTACTS</span>
+        </footer>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="radar-widget.js"></script>
+  <script type="module">
+    import { initConsole } from './console-core.js';
+
+    // ── State ─────────────────────────────────────────────────────────────
+    var _radarWidget = null;
+    var _state       = null;
+
+    // ── Init console bridge ───────────────────────────────────────────────
+    var { sendAction } = initConsole({ name: 'Navigation', render: _apply });
+
+    // ── Render ─────────────────────────────────────────────────────────────
+    function _apply(s) {
+      _state = s;
+
+      // Hidden data containers (Playwright)
+      var navData = document.getElementById('nav-data');
+      navData.dataset.blipCount       = String((s.blips || []).length);
+      navData.dataset.shipX           = String(s.ship_x || 0);
+      navData.dataset.shipZ           = String(s.ship_z || 0);
+      navData.dataset.onScreen        = String(!!s.on_screen);
+
+      var impulseData = document.getElementById('impulse-data');
+      impulseData.dataset.charge      = String(s.impulse_charge_progress || 0);
+      impulseData.dataset.cancelVisible = String(!!s.cancel_visible);
+
+      // Radar
+      _updateRadar(s);
+
+      // Impulse status
+      _updateImpulse(s);
+
+      // Footer
+      var blips = s.blips || [];
+      var footerContacts = document.getElementById('footer-contacts');
+      if (footerContacts) footerContacts.textContent = blips.length + ' CONTACT' + (blips.length === 1 ? '' : 'S');
+
+      var blipCount = document.getElementById('blip-count');
+      if (blipCount) blipCount.textContent = String(blips.length);
+
+      var rangeDisplay = document.getElementById('range-display');
+      if (rangeDisplay) rangeDisplay.textContent = String(Math.round(s.radar_range || 5000));
+    }
+
+    function _updateRadar(s) {
+      var canvas = document.getElementById('nav-radar');
+      if (!canvas) return;
+
+      // Init widget on first call
+      if (!_radarWidget) {
+        _radarWidget = new RadarWidget(canvas, {
+          consoleId: 'navigation',
+          onBlipTap: null,
+        });
+      }
+
+      // Size canvas to wrapper
+      var wrap = document.getElementById('radar-wrap');
+      if (wrap) {
+        var sz = Math.min(wrap.clientWidth, wrap.clientHeight);
+        if (sz > 0 && (canvas.width !== sz || canvas.height !== sz)) {
+          canvas.width  = sz;
+          canvas.height = sz;
+        }
+      }
+
+      _radarWidget.update({
+        mode:   'pre-projected',
+        blips:  s.blips || [],
+        range:  s.radar_range || 5000,
+        phaser_arcs:  [],
+        torpedo_arcs: [],
+      });
+    }
+
+    function _updateImpulse(s) {
+      var charge = s.impulse_charge_progress || 0;
+      var label  = _impulseLabel(charge);
+
+      var statusEl = document.getElementById('impulse-status');
+      if (statusEl) statusEl.textContent = label;
+
+      var barEl = document.getElementById('charge-bar');
+      if (barEl) barEl.style.width = Math.round(charge * 100) + '%';
+
+      var cancelBtn = document.getElementById('cancel-btn');
+      if (cancelBtn) {
+        if (s.cancel_visible) cancelBtn.classList.add('visible');
+        else                  cancelBtn.classList.remove('visible');
+      }
+
+      var footerImpulse = document.getElementById('footer-impulse');
+      if (footerImpulse) footerImpulse.textContent = label;
+    }
+
+    function _impulseLabel(charge) {
+      if (charge <= 0)    return 'STANDBY';
+      if (charge < 0.25)  return 'CHARGING…';
+      if (charge < 0.5)   return 'CHARGING… 25%';
+      if (charge < 0.75)  return 'CHARGING… 50%';
+      if (charge < 1.0)   return 'CHARGING… 75%';
+      return 'READY';
+    }
+
+    // ── Button actions ─────────────────────────────────────────────────────
+    document.getElementById('cancel-btn').addEventListener('click', function() {
+      sendAction('cancel_impulse');
+    });
+
+    document.getElementById('on-screen-btn').addEventListener('click', function() {
+      sendAction('set_navigation_chart');
+    });
+
+    // ── Resize: re-render radar when container changes ─────────────────────
+    (function() {
+      var resizeTimer = null;
+      window.addEventListener('resize', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+          if (_state) _updateRadar(_state);
+        }, 80);
+      });
+    })();
+
+    // ── Demo / initial state ───────────────────────────────────────────────
+    var _DEMO = {
+      blips: [
+        { uuid: 'sol',    radar_x:  0.00, radar_y:  0.00, scaled_radius: 0.012, kind: 'star',    name: 'Sol'        },
+        { uuid: 'earth',  radar_x:  0.06, radar_y: -0.03, scaled_radius: 0.006, kind: 'planet',  name: 'Earth'      },
+        { uuid: 'mars',   radar_x: -0.10, radar_y:  0.04, scaled_radius: 0.004, kind: 'planet',  name: 'Mars'       },
+        { uuid: 'ds9',    radar_x:  0.18, radar_y:  0.22, scaled_radius: 0.003, kind: 'station', name: 'Starbase 9' },
+        { uuid: 'outpost',radar_x: -0.30, radar_y: -0.18, scaled_radius: 0.003, kind: 'station', name: 'Outpost 7'  },
+      ],
+      ship_x:                  0,
+      ship_z:                  0,
+      impulse_charge_progress: 0.6,
+      cancel_visible:          true,
+      on_screen:               false,
+      radar_range:             5000,
+    };
+
+    _apply(_DEMO);
+  </script>
+
+</body>
+</html>

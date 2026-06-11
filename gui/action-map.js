@@ -89,6 +89,11 @@ export const ACTION_MAP = Object.freeze({
     send('SetShieldFocus', { facing: a.facing || null });
   },
 
+  /** Switch the view-screen to navigation chart mode. */
+  set_navigation_chart: (a, send) => {
+    send('SetView', { mode: { kind: 'NavigationChart' } });
+  },
+
   /**
    * Select a science target.  Mutates local `state.sensorsTarget` so the
    * sensor display updates before the server acks the message.

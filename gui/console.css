@@ -689,3 +689,73 @@ html, body {
 /* Applied by gui/hideable-elements.js to [data-hideable] elements
    the active complexity preset wants hidden. */
 .cpx-hidden { display: none !important; }
+
+/* ── Help system (issue #462) ─────────────────────────
+   Per-console "?" trigger + shared click-to-dismiss modal.
+   Mirrors the old Bevy help overlay: dark ~90% alpha backdrop,
+   cyan heading, "HELP — tap to dismiss". Mounted by
+   gui/console-core.js via gui/help-panel.js. */
+.help-btn {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 60;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--cyan);
+  background: rgba(26, 56, 72, 0.55);
+  border: 1px solid var(--cyan-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+.help-btn:hover { background: rgba(26, 56, 72, 0.85); color: #d0f0ff; }
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  overflow-y: auto;
+  background: rgba(5, 8, 24, 0.92);
+  cursor: pointer;
+}
+.help-overlay[hidden] { display: none; }
+
+.help-heading {
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--cyan);
+  text-transform: uppercase;
+}
+.help-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+.help-section-title {
+  font-family: "Chakra Petch", sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+.help-section-body {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+  margin-top: 0.125rem;
+}

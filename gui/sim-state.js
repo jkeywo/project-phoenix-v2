@@ -253,6 +253,15 @@ export function dispatchRepairTeamMessage(teamIdx, console) {
   return { type: 'DispatchRepairTeam', data: { team_idx: teamIdx, console } };
 }
 
+/**
+ * Default repair dispatch message — team 0 → Helm. Mirrors `repair_message()`
+ * in src/client_sim.rs. The shell-level repair button uses this when the UI
+ * does not select a specific team/console.
+ */
+export function repairMessage() {
+  return dispatchRepairTeamMessage(0, 'Helm');
+}
+
 export function setTargetMessage(uuid) {
   return { type: 'SetTarget', data: { uuid } };
 }

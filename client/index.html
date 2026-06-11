@@ -28,6 +28,7 @@
        message through them, replacing the deleted Bevy message drain. -->
   <script type="module" src="gui/lobby-state.js"></script>
   <script type="module" src="gui/sim-state.js"></script>
+  <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
   <script type="module" src="gui/complexity-store.js"></script>
   <!-- Complexity preset shell UI logic (issue #461): first-use pop-up plan,
@@ -101,8 +102,6 @@
     #console-container > *, #console-container section.active > * {
       pointer-events: auto;
     }
-    /* In lobby phase the name input sits at the bottom; don't give it a
-       background so the Bevy canvas shows through on either side. */
     /* Console tab bar now rendered by gui/tab-bar.js (issue #441). See
        the #console-tab-bar rule below for layout. */
     /* Helm console UI moved to Bevy WASM (#49). */
@@ -141,33 +140,6 @@
       border: none;
       display: block;
     }
-    /* Bevy WASM canvas — full-viewport, behind the JS overlays so the
-       lobby UI rendered by Bevy is visible while the name input,
-       connection status, and fullscreen button stay clickable on top. */
-    #wasm-host { position: fixed; inset: 0; z-index: 0; background: #0a0a1a; }
-    /* touch-action: none lets Bevy receive all touch events without the
-       browser intercepting them for scroll/pan gestures. width/height are
-       managed by Bevy's fit_canvas_to_parent ResizeObserver; no !important
-       so Bevy can set inline styles freely. */
-    #wasm-host canvas { width: 100%; height: 100%; display: block; touch-action: none; }
-    #wasm-spinner {
-      position: fixed; inset: 0; z-index: 200;
-      background: #0a0a1a url('assets/logo.png') center 40% / min(55vw, 55vh) auto no-repeat;
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      color: #8af; font-family: monospace; font-size: 0.9rem;
-      gap: 1rem;
-      padding-bottom: 15vh;
-    }
-    .spinner-ring {
-      width: 48px; height: 48px;
-      border: 4px solid #223;
-      border-top-color: #8af;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
     /* ─── Phone bezel frame (issue #439) ────────────────────────────────────
        Eight fixed-position pieces (4 corners + 4 edges) overlay the canvas /
        weapons iframe and form the diegetic phone-console border. Corners are
@@ -421,46 +393,17 @@
     }
     #engage-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
   </style>
-<link rel="modulepreload" href="./project-phoenix-78ce99e247af59bb.js" crossorigin="anonymous" integrity="sha384-aVe6hywf+VufcsXtYjc/DS8/mTQNEb2bgjg0znG4Jn16VJLK1yVkGBJvWy+qGK7T"><link rel="preload" href="./project-phoenix-78ce99e247af59bb_bg.wasm" crossorigin="anonymous" integrity="sha384-wKtu+Y8neeFwlqYDAYs35dqUVs1tcvtPLS4Rm78ltOzeP1Fde7I4i5TG/ne2Imij" as="fetch" type="application/wasm"></head>
+</head>
 <body>
-  <!-- UI click sound (Bevy 0.18 WASM audio is broken; played from JS instead) -->
+  <!-- UI click sound (played from JS). -->
   <audio id="ui-click" src="assets/sounds/ui_click.ogg"></audio>
 
-  <!-- Trunk replaces this with the compiled WASM bundle (client feature).
-       It fires TrunkApplicationStarted and sets window.wasmBindings when ready. -->
-  
-<script type="module">
-import init, * as bindings from './project-phoenix-78ce99e247af59bb.js';
-const wasm = await init({ module_or_path: './project-phoenix-78ce99e247af59bb_bg.wasm' });
-
-
-window.wasmBindings = bindings;
-
-
-dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
-
-</script>
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
-  <!-- Loading spinner shown until WASM is ready -->
-  <div id="wasm-spinner">
-    <div class="spinner-ring"></div>
-    <span>Loading…</span>
-  </div>
-
-  <!-- Full-viewport host for the Bevy canvas; the WASM lobby UI renders
-       here, with JS overlays (name input, connection dot, fullscreen
-       button) positioned above via z-index. -->
-  <div id="wasm-host"><canvas id="canvas"></canvas></div>
+  <!-- This is a pure-JS console (issue #463): no client-side WASM. The page
+       and its assets are shipped to dist/client/ by scripts/build-client.mjs
+       (npm run build:client) — a plain file copy, NOT a Trunk build, because
+       Trunk would implicitly compile the crate's default (server) lib into a
+       WASM bundle and inject a loader even with no `rel="rust"` link.
+       All client state lives in the gui/*.js modules loaded in <head>. -->
 
   <!-- Console container: full-screen flex layout host for the tab bar and
        all in-game console sections. [data-orientation] drives portrait
@@ -571,9 +514,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       <iframe id="navigation-iframe" src="gui/navigation-console.html"
         title="Navigation Console" allowfullscreen></iframe>
     </section>
-
-    <!-- Helm joystick is rendered by the Bevy WASM helm UI; see
-         src/client_app.rs (#49). -->
   </div>
 
   <div id="status">Connecting…</div>
@@ -685,28 +625,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       document.addEventListener('fullscreenchange', syncIcon);
     })();
 
-    // ── Canvas resize ──────────────────────────────────────────────────
-    // Bevy's fit_canvas_to_parent uses a ResizeObserver as the primary
-    // mechanism. This handler is a belt-and-braces fallback: it sets the
-    // canvas buffer dimensions to physical pixels (CSS size × dPR) whenever
-    // the window resizes, so the WebGL surface stays crisp and correctly
-    // sized even if Bevy's observer fires late or is overridden.
-    (function initCanvasResize() {
-      const canvas = document.getElementById('canvas');
-      function syncCanvasSize() {
-        const dpr = window.devicePixelRatio || 1;
-        const w = Math.round(window.innerWidth  * dpr);
-        const h = Math.round(window.innerHeight * dpr);
-        if (canvas.width !== w || canvas.height !== h) {
-          canvas.width  = w;
-          canvas.height = h;
-        }
-      }
-      window.addEventListener('resize', syncCanvasSize);
-      // Also fire once at startup in case the initial DPR != 1.
-      syncCanvasSize();
-    })();
-
     setConnectionStatus('connecting');
 
     // ── Persistence ─────────────────────────────────────────────
@@ -756,19 +674,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     // Single source of truth for changing the active console. Called by
     // the render() reconciler, the tab-bar onPress handler, and the swipe
-    // gesture. No-op if the value is already current. Forwards to WASM so
-    // the Bevy panels know which console to draw. Delegates the
-    // null/undefined/"" → "" sentinel mapping to gui/active-console.js so
-    // the contract is locked by Vitest (see src/client/bridge.rs:160).
+    // gesture. No-op if the value is already current. Delegates the
+    // null/undefined/"" → next sentinel mapping to gui/active-console.js so
+    // the contract is locked by Vitest.
     function setActiveConsole(name) {
       const step = (typeof window.nextActiveConsole === 'function')
         ? window.nextActiveConsole(activeConsole, name)
-        : { changed: (name || null) !== activeConsole, next: name || null, wasmArg: name || '' };
+        : { changed: (name || null) !== activeConsole, next: name || null };
       if (!step.changed) return;
       activeConsole = step.next;
-      if (typeof wasm_client_set_active_console === 'function') {
-        wasm_client_set_active_console(step.wasmArg);
-      }
     }
 
     // ── Helpers ─────────────────────────────────────────────────
@@ -868,6 +782,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         render(state);
       });
     }
+    // Expose so gui/device-orientation.js can coalesce its resize-driven
+    // re-render through the same rAF scheduler (issue #462).
+    window.scheduleRender = scheduleRender;
 
     function render(s) {
       // Phase → section visibility (pure JS module, gui/phase-toggle.js).
@@ -880,7 +797,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
             bezel: s.phase === 'InProgress' || s.phase === 'GameOver' };
       const inGame = vis.game;
       // Show the active console name in the top-bar during game phase.
-      // In lobby the Bevy canvas renders its own "Lobby" heading.
       const titleEl = $('phase-title');
       if (!inGame) {
         titleEl.style.display = 'none';
@@ -911,11 +827,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
 
       // Console sections (issue #441): map activeConsole → HTML section id
-      // via gui/content-switcher.js. Only the matching section gets `.active`;
-      // Bevy-rendered consoles (Navigation) leave all sections off and the
-      // WASM canvas takes the bezel content area. Helm is HTML-rendered via
-      // iframe, so it gets a section entry like weapons-ui.
-      // so it must be listed in the section map like weapons-ui.
+      // via gui/content-switcher.js. Only the matching section gets `.active`.
+      // Every console (including Helm and Navigation) is an HTML iframe with
+      // its own section entry like weapons-ui.
       const sections = (typeof window.consoleSections === 'function')
         ? window.consoleSections(activeConsole, inGame)
         : { 'captain-ui': inGame && activeConsole === 'CaptainChair',
@@ -1123,90 +1037,15 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       scheduleRender();
     }
 
-    function renderRepair(hp, repairTarget) {
-      const clamped = Math.max(0, Math.min(100, hp));
-      const text = $('eng-hp-text');
-      const bar = $('eng-hp-bar');
-      if (!text || !bar) return;
-      text.textContent = clamped + ' / 100';
-      const filled = Math.ceil(clamped / 10);
-      const color = clamped > 60 ? '#4cf' : clamped > 30 ? '#fa0' : '#f44';
-      text.style.color = color;
-      // Rebuild segments only when count changes; otherwise update colours.
-      const segs = bar.querySelectorAll('div');
-      if (segs.length !== 10) {
-        bar.innerHTML = '';
-        for (let i = 0; i < 10; i++) {
-          const seg = document.createElement('div');
-          seg.style.cssText = 'flex:1;height:28px;border-radius:3px;transition:background .2s';
-          bar.appendChild(seg);
-        }
-      }
-      bar.querySelectorAll('div').forEach((seg, i) => {
-        seg.style.background = i < filled ? color : '#333';
-      });
-      // Repair target display
-      const targetBox = $('eng-repair-target');
-      const targetLabel = $('eng-repair-console');
-      if (targetBox && targetLabel) {
-        if (repairTarget) {
-          const names = {
-            CaptainChair: "CAPTAIN'S CHAIR",
-            Helm: 'HELM',
-            Tactical: 'TACTICAL',
-            Repair: 'REPAIR',
-            Power: 'POWER',
-          };
-          targetLabel.textContent = names[repairTarget] || repairTarget;
-          targetBox.style.display = '';
-        } else {
-          targetBox.style.display = 'none';
-        }
-      }
-    }
-
-    const REPAIR_BTN_MAP = {
-      CaptainChair: 'captain-repair-btn',
-      Tactical: 'weapons-repair-btn',
-      Repair: 'eng-repair-btn',
-    };
-
-    function renderRepairButtons(s) {
-      for (const [console, id] of Object.entries(REPAIR_BTN_MAP)) {
-        const btn = $(id);
-        if (!btn) continue;
-        if (console !== activeConsole) {
-          // Reset non-active buttons to ready state so they don't show stale state.
-          btn.textContent = 'REPAIR';
-          btn.style.background = '#063';
-          btn.style.color = '#5f5';
-          btn.style.borderColor = '#5f5';
-          btn.disabled = false;
-          continue;
-        }
-        // Active console's button reflects current repair state.
-        if (s.repairPenalty) {
-          const flash = Math.floor(Date.now() / 333) % 2 === 0;
-          btn.textContent = 'COOLDOWN ' + Math.ceil(s.repairCooldownSecs) + 's';
-          btn.style.background = flash ? '#800' : '#400';
-          btn.style.color = '#f66';
-          btn.style.borderColor = '#f44';
-          btn.disabled = true;
-        } else if (s.repairInProgress) {
-          btn.textContent = 'REPAIRING ' + Math.ceil(s.repairCooldownSecs) + 's';
-          btn.style.background = '#030';
-          btn.style.color = '#5f5';
-          btn.style.borderColor = '#4a4';
-          btn.disabled = true;
-        } else {
-          btn.textContent = 'REPAIR';
-          btn.style.background = '#063';
-          btn.style.color = '#5f5';
-          btn.style.borderColor = '#5f5';
-          btn.disabled = false;
-        }
-      }
-    }
+    // Repair UI (issue #462): the full repair affordance is owned by the
+    // Repair console iframe (gui/repair-console.html), which renders the hull
+    // readout + per-team dispatch buttons and sends `dispatch_repair_team`
+    // itself. The pure shell-button logic ported from the old Bevy
+    // `handle_repair_button_press` / `refresh_repair_button` lives in
+    // gui/repair-button.js (all-busy guard, message shape, refresh states).
+    // The earlier `renderRepair` / `renderRepairButtons` shell stubs targeted
+    // HTML ids that were never added (orphaned Bevy-era remnants) and were
+    // removed here; the iframe supersedes them.
 
     // ── iframe state-push helper (wraps gui/iframe-bridge.js) ────────────────
     // Delegates to window.iframeBridgePush when the module is loaded; falls back
@@ -1414,8 +1253,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       const val = e.target.value.trim();
       if (!val) return;
       myName = val;
-      // Forward immediately to the WASM bridge (queued until ready).
-      callWasmSetName(myName);
       clearTimeout(nameTimer);
       nameTimer = setTimeout(() => {
         localStorage.setItem('player-name', myName);
@@ -1632,10 +1469,12 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
               }
             }
           }
-          if (typeof hp === 'number' && (state.hullIntegrity !== hp || state.repairTarget !== repairTarget)) {
+          // Hull integrity + authorized repair target are mirrored into the
+          // inline state for any shell reader; the Repair console iframe owns
+          // the actual hull readout via pushRepairConsoleState (issue #462).
+          if (typeof hp === 'number') {
             state.hullIntegrity = hp;
             state.repairTarget = repairTarget;
-            renderRepair(hp, repairTarget);
           }
           if (snap.console_hull) state.consoleHull = snap.console_hull;
           pushWeaponsConsoleState();
@@ -1830,72 +1669,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       scheduleRender();
     }
 
-    // ── WASM client bridge (Trunk) ──────────────────────────────
-    //
-    // The page hosts a Bevy WASM bundle compiled with --features client.
-    // The renderer is currently an empty placeholder; we wire the JS
-    // surface now so later issues can migrate UI into Bevy without
-    // touching the PeerJS plumbing.
-
-    // Inbound ServerMessage JSON payloads queued until WASM is ready.
-    const wasmInboundQueue = [];
-    // Pending name updates queued until WASM is ready.
-    let pendingName = null;
-    // Resolved once Trunk fires TrunkApplicationStarted.
-    let wasmReady = false;
-
-    function callWasmReceive(json) {
-      if (wasmReady && typeof wasm_client_receive === 'function') {
-        wasm_client_receive(json);
-      } else {
-        wasmInboundQueue.push(json);
-      }
-    }
-
-    function callWasmSetName(name) {
-      if (wasmReady && typeof wasm_client_set_name === 'function') {
-        wasm_client_set_name(name);
-      } else {
-        pendingName = name;
-      }
-    }
-
-    // Outbound callback the WASM uses to send ClientMessage JSON to the host.
-    function clientSendCallback(payload) {
-      if (conn && conn.open) conn.send(payload);
-      try {
-        const msg = JSON.parse(payload);
-        if (!NO_CLICK.has(msg.type)) playClick();
-      } catch (_) {}
-    }
-
-    function startClientWasm() {
-      window.wasm_client_init                 = wasmBindings.wasm_client_init;
-      window.wasm_client_receive              = wasmBindings.wasm_client_receive;
-      window.wasm_client_set_name             = wasmBindings.wasm_client_set_name;
-      window.wasm_client_set_token            = wasmBindings.wasm_client_set_token;
-      window.wasm_client_set_active_console   = wasmBindings.wasm_client_set_active_console;
-      window.wasm_client_set_complexity_presets = wasmBindings.wasm_client_set_complexity_presets;
-      window.set_client_send_callback         = wasmBindings.set_client_send_callback;
-      set_client_send_callback(clientSendCallback);
-      // The local player's session token is needed by the lobby UI to
-      // highlight "my" console selection.
-      wasm_client_set_token(myToken);
-      if (pendingName !== null) wasm_client_set_name(pendingName);
-      // Inject stored complexity presets so WASM can decide pop-up/dropdown state.
-      wasm_client_set_complexity_presets(JSON.stringify(savedComplexity));
-      // Flush queued inbound messages before wasm_client_init: in WASM
-      // App::run() unwinds the JS stack via throw, so anything after it
-      // never executes.
-      for (const json of wasmInboundQueue.splice(0)) wasm_client_receive(json);
-      wasmReady = true;
-      const spinner = document.getElementById('wasm-spinner');
-      if (spinner) spinner.style.display = 'none';
-      try { wasm_client_init(); } catch (_) {}
-    }
-
-    window.addEventListener('TrunkApplicationStarted', startClientWasm);
-
     // ── PeerJS connection ───────────────────────────────────────
 
     const hostPeerId = location.hash.slice(1);
@@ -1939,9 +1712,6 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           conn.on('data', raw => {
             try {
               const str = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
-              // Forward to the WASM client bridge (queued until ready) so
-              // future Bevy systems can react alongside the existing JS UI.
-              callWasmReceive(str);
               handleMessage(JSON.parse(str));
             } catch (e) { console.error('[client] bad message', e, raw); }
           });

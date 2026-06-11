@@ -21,7 +21,7 @@
       gap: 36px;
       min-height: 0;
     }
-    .panel-mid > .radar-col   { width: 1020px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+    .panel-mid > .radar-col   { flex: 1; min-width: 0; max-width: 720px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
     .panel-mid > .ctrl-col    { flex: 1; display: flex; flex-direction: column; gap: 18px; min-height: 0; }
     .panel-inner > .hero       { padding: 4px 0 4px; flex-shrink: 0; }
     .panel-inner > .footer-bar { flex-shrink: 0; }
@@ -60,6 +60,34 @@
     .ctrl-col .fire-row          { margin-top: 12px; }
     .radar-col > .readout        { padding: 10px 22px; }
     .radar-col > .readout .v     { font-size: 28px; }
+
+    /* Narrow landscape compact breakpoint (phone landscape) */
+    @media (orientation: landscape) and (max-width: 900px) {
+      .panel-inner { padding: 14px 20px 16px; gap: 8px; }
+      .panel-mid { gap: 16px; }
+      .panel-mid > .radar-col { max-width: 50%; }
+      .hero h1 { font-size: 28px; letter-spacing: 0.18em; }
+      .hero { gap: 10px; }
+      .hero .sub { font-size: 11px; }
+      .hero .complexity { display: none; }
+      .radar-col .radar { max-height: 50vh; max-width: 50vh; }
+      .side-rail { font-size: 9px; }
+      .side-rail.top { top: 10px; }
+      .side-rail.bottom { bottom: 10px; }
+      .ctrl-col .inset .inset-body { padding: 10px 14px; }
+      .ctrl-col .readout { padding: 6px 12px; }
+      .ctrl-col .readout .v { font-size: 24px; }
+      .ctrl-col .readout .k { font-size: 10px; }
+      .ctrl-col .chip { --h: 36px; font-size: 12px; padding: 0 0.5rem; }
+      .ctrl-col .btn { --h: 44px; font-size: 14px; padding: 0 10px 0 36px; }
+      .ctrl-col .btn .led { width: 14px; height: 14px; left: 10px; }
+      .ctrl-col .tube-status { height: 22px; font-size: 11px; }
+      .ctrl-col .cooldown .value { font-size: 14px; }
+      .ctrl-col .frequency .freq-bar { height: 18px; }
+      .radar-col > .readout { padding: 6px 14px; }
+      .radar-col > .readout .v { font-size: 20px; }
+      .section-header { font-size: 14px; }
+    }
 
     /* Side-rail micro-labels (centred top/bottom of frame) */
     .side-rail {
@@ -132,7 +160,7 @@
       .ctrl-col .readout .v { font-size: 1.25rem; }
       .ctrl-col .readout .k { font-size: 0.55rem; }
       .ctrl-col .readout .u { font-size: 0.55rem; }
-      .ctrl-col .chip { --h: 2.5rem; font-size: 0.75rem; padding: 0 0.4rem; }
+      .ctrl-col .chip { --h: 2rem; font-size: 0.6rem; padding: 0 0.4rem; }
 
       .ctrl-col .tube-status-row { margin-top: 0.25rem; }
       .ctrl-col .tube-status { height: 1.5rem; font-size: 0.65rem; gap: 0.25rem; }

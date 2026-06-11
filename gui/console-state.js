@@ -43,9 +43,9 @@ export function entityRadius(e) {
 
 // ── Radar range constants (exported for tests) ──────────────────────────────
 
-export const WEAPONS_RADAR_RANGE = 60.0;
-export const HELM_RADAR_RANGE    = 250.0;
-export const SENSORS_RADAR_RANGE = 2000.0;
+export const WEAPONS_RADAR_RANGE = 300.0;
+export const HELM_RADAR_RANGE    = 500.0;
+export const SENSORS_RADAR_RANGE = 500.0;
 
 // ── Shared radar blip builder ───────────────────────────────────────────────
 
@@ -103,9 +103,10 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
  *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw, complexity }} state
  */
 export function buildWeaponsConsoleState(state) {
+  const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
   const blips = buildBlips(
     state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
-    WEAPONS_RADAR_RANGE, { rotate: true }
+    range, { rotate: true }
   );
   return JSON.stringify({
     target_uuid:   state.weaponsTarget      || null,
@@ -114,8 +115,8 @@ export function buildWeaponsConsoleState(state) {
     torpedo_count: state.weaponsTorpedoCount || 0,
     phaser_mode:   state.weaponsPhaserMode   || 'Auto',
     blips,
-    phaser_arcs:   [],
-    torpedo_arcs:  [],
+    phaser_arcs:   state.phaserArcConfigs  || [],
+    torpedo_arcs:  state.torpedoArcConfigs || [],
     // Server complexity preset name (issue #461); drives [data-hideable]
     // element hiding via gui/hideable-elements.js in console-core.
     complexityPreset: state.complexity?.Tactical || 'Std',
@@ -146,9 +147,10 @@ export function buildCaptainConsoleState(state) {
  *           currentView, weaponsTarget, asteroids }} state
  */
 export function buildHelmConsoleState(state) {
+  const range = state.helmRadarRange ?? HELM_RADAR_RANGE;
   const blips = buildBlips(
     state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
-    HELM_RADAR_RANGE, { rotate: true }
+    range, { rotate: true }
   );
   return JSON.stringify({
     heading:                 (((state.shipYaw || 0) * 180 / Math.PI % 360) + 360) % 360,
@@ -224,9 +226,10 @@ export function buildShieldsConsoleState(state) {
  *           complexity, impulseChargeProgress }} state
  */
 export function buildSensorsConsoleState(state) {
+  const range = state.sensorsRadarRange ?? SENSORS_RADAR_RANGE;
   const blips = buildBlips(
     state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
-    SENSORS_RADAR_RANGE,
+    range,
     {
       rotate: false,
       extra: (a) => ({
@@ -267,7 +270,7 @@ export function buildSensorsConsoleState(state) {
   }
 
   return JSON.stringify({
-    scan_range:              SENSORS_RADAR_RANGE,
+    scan_range:              range,
     complexity:              state.complexity?.Sensors || 'full',
     impulse_charge_progress: state.impulseChargeProgress || 0,
     regions:                 state.regions || [],

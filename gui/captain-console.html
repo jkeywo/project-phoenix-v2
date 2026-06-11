@@ -406,7 +406,6 @@
 
       var viewStatusEl = document.getElementById('view-status');
       if (viewStatusEl) {
-        var dirLabels = { Fore: 'FORE', Port: 'PORT', Starboard: 'STBD', Aft: 'AFT' };
         viewStatusEl.textContent = dirLabels[dir] || dir.toUpperCase();
       }
 
@@ -439,17 +438,41 @@
 
     var dirLabels = { Fore: 'FORE', Port: 'PORT', Starboard: 'STBD', Aft: 'AFT' };
 
+    // ── Optimistic direction update ───────────────────────────────────────
+    // Apply the highlight immediately on click, before the server round-trip.
+    var _lastDir = null;
+    function onDirSelected(dir) {
+      _lastDir = dir;
+      var btnIds = { Fore: 'dir-fore', Port: 'dir-port', Starboard: 'dir-stbd', Aft: 'dir-aft' };
+      Object.keys(btnIds).forEach(function(k) {
+        var el = document.getElementById(btnIds[k]);
+        if (el) el.className = 'dir-btn' + (k === dir ? ' active' : '');
+      });
+      var viewStatusEl = document.getElementById('view-status');
+      if (viewStatusEl) viewStatusEl.textContent = dirLabels[dir] || dir.toUpperCase();
+      var footerEl = document.getElementById('footer-ticker');
+      if (footerEl) {
+        var ra = document.getElementById('alert-led');
+        var alertActive = ra && ra.className.indexOf('fire') !== -1;
+        footerEl.textContent = 'CAPTAIN \u00B7 ' + (dirLabels[dir] || 'FORE') + ' \u00B7 ' + (alertActive ? 'RED ALERT' : 'STANDARD');
+      }
+    }
+
     // ── Outbound actions ──────────────────────────────────────────────────
     document.getElementById('dir-fore').addEventListener('click', function() {
+      onDirSelected('Fore');
       sendAction('set_view', { direction: 'Fore' });
     });
     document.getElementById('dir-port').addEventListener('click', function() {
+      onDirSelected('Port');
       sendAction('set_view', { direction: 'Port' });
     });
     document.getElementById('dir-stbd').addEventListener('click', function() {
+      onDirSelected('Starboard');
       sendAction('set_view', { direction: 'Starboard' });
     });
     document.getElementById('dir-aft').addEventListener('click', function() {
+      onDirSelected('Aft');
       sendAction('set_view', { direction: 'Aft' });
     });
     document.getElementById('red-alert-btn').addEventListener('click', function() {

@@ -1425,7 +1425,9 @@
           break;
         case 'SimState': {
           const snap = msg.data.snapshot;
-          const vd = snap.view_direction;
+          // SimSnapshot has view_mode: ViewMode (tagged enum), not view_direction.
+          const vm = snap.view_mode;
+          const vd = vm && vm.kind === 'Camera' ? vm.data : null;
           const hp = snap.hull_integrity;
           const repairTarget = snap.authorized_repair_console || null;
           state.shipX = snap.ship_x || 0;
@@ -1461,7 +1463,6 @@
           pushWeaponsConsoleState();
           pushRepairConsoleState();
           pushSensorsConsoleState();
-          // View-direction highlighting is handled by the Bevy WASM UI (#48).
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state (the weapons console is pushed above so
           // it doesn't need renderGame dispatch).

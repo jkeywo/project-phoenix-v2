@@ -100,7 +100,7 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
 /**
  * Tactical / Weapons console.
  * @param {{ weaponsTarget, weaponsBanks, weaponsTubes, weaponsTorpedoCount,
- *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw }} state
+ *           weaponsPhaserMode, asteroids, shipX, shipZ, shipYaw, complexity }} state
  */
 export function buildWeaponsConsoleState(state) {
   const blips = buildBlips(
@@ -116,6 +116,9 @@ export function buildWeaponsConsoleState(state) {
     blips,
     phaser_arcs:   [],
     torpedo_arcs:  [],
+    // Server complexity preset name (issue #461); drives [data-hideable]
+    // element hiding via gui/hideable-elements.js in console-core.
+    complexityPreset: state.complexity?.Tactical || 'Std',
   });
 }
 
@@ -175,7 +178,8 @@ export function buildRepairConsoleState(state) {
 
 /**
  * Power console.
- * @param {{ powerHelm, powerWeapons, powerSensors, powerBattery, powerLocked }} state
+ * @param {{ powerHelm, powerWeapons, powerSensors, powerBattery, powerLocked,
+ *           complexity }} state
  */
 export function buildPowerConsoleState(state) {
   return JSON.stringify({
@@ -184,6 +188,9 @@ export function buildPowerConsoleState(state) {
     sensors:        state.powerSensors || 0,
     battery_charge: state.powerBattery || 0,
     locked:         state.powerLocked  || false,
+    // Server complexity preset name (issue #461); drives [data-hideable]
+    // element hiding via gui/hideable-elements.js in console-core.
+    complexityPreset: state.complexity?.Power || 'Std',
   });
 }
 

@@ -30,6 +30,9 @@
   <script type="module" src="gui/sim-state.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
   <script type="module" src="gui/complexity-store.js"></script>
+  <!-- Complexity preset shell UI logic (issue #461): first-use pop-up plan,
+       segmented-selector state, SetComplexity message builders. -->
+  <script type="module" src="gui/complexity-ui.js"></script>
   <style>
     /* ── CSS variables (lobby + shared) ──────────────────────────────── */
     :root {
@@ -488,13 +491,11 @@
         </div>
         <div id="detail-console-area">
           <div class="detail-consoles"></div>
-          <div class="complexity-row">
-            <label>Complexity</label>
-            <div class="segmented">
-              <button data-complexity="Low">Low</button>
-              <button data-complexity="Std" class="active">Normal</button>
-            </div>
-          </div>
+          <!-- Per-console complexity selectors, built dynamically by
+               renderComplexitySelectors() from window.complexityStore /
+               window.complexityUi (issue #461). Only consoles with more than
+               one preset (Tactical, Power) get a row. -->
+          <div id="complexity-selectors"></div>
         </div>
       </div>
 
@@ -800,6 +801,53 @@
       return (window.CONSOLE_LABEL && window.CONSOLE_LABEL[name]) || name;
     }
 
+    // ── Complexity preset selectors (issue #461) ───────────────────────────
+    // Renders one segmented Low/Std control per held console that actually has
+    // more than one preset (Tactical, Power). Backed by window.complexityStore
+    // and window.complexityUi (gui/complexity-store.js + gui/complexity-ui.js,
+    // ported from the deleted Bevy complexity systems). Selecting a preset
+    // persists via the store and sends SetComplexity to the host.
+    const PRESET_LABEL = { Low: 'Low', Std: 'Normal' };
+    function renderComplexitySelectors(detail, consoles) {
+      const host = detail.querySelector('#complexity-selectors');
+      if (!host) return;
+      host.innerHTML = '';
+      const store = window.complexityStore;
+      const ui = window.complexityUi;
+      if (!store || !ui) return;
+      // Materialise choices so own-console ComplexityChanged broadcasts apply.
+      ui.materialiseConsoles(store, consoles);
+      for (const c of consoles) {
+        const ds = ui.dropdownState(store, c);
+        if (!ds.showDropdown) continue;     // single-preset consoles: no selector
+        const row = document.createElement('div');
+        row.className = 'complexity-row';
+        const label = document.createElement('label');
+        label.textContent = consoles.length > 1 ? consoleLabel(c) : 'Complexity';
+        row.appendChild(label);
+        const seg = document.createElement('div');
+        seg.className = 'segmented';
+        for (const preset of ds.presets) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.complexity = preset;
+          btn.textContent = PRESET_LABEL[preset] || preset;
+          if (preset === ds.active) btn.classList.add('active');
+          btn.onclick = () => {
+            const msg = ui.selectPreset(store, c, preset);  // persists via store
+            if (!msg) return;
+            savedComplexity[c] = preset;                    // keep legacy sync map in step
+            seg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            send(msg.type, msg.data);
+          };
+          seg.appendChild(btn);
+        }
+        row.appendChild(seg);
+        host.appendChild(row);
+      }
+    }
+
     // Defer re-render so rapid server messages don't steal pointer events.
     let _renderFrame = null;
     function scheduleRender() {
@@ -984,23 +1032,7 @@
             chip.textContent = consoleLabel(c);
             consolesArea.appendChild(chip);
           }
-          const seg = detail.querySelector('.segmented');
-          if (seg) {
-            seg.querySelectorAll('button').forEach(segBtn => {
-              segBtn.classList.remove('active');
-              const preset = savedComplexity[myStation.consoles[0]] || 'Std';
-              if (segBtn.dataset.complexity === preset) segBtn.classList.add('active');
-              segBtn.onclick = () => {
-                const consoleName = myStation.consoles[0];
-                const presetName = segBtn.dataset.complexity;
-                savedComplexity[consoleName] = presetName;
-                localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
-                seg.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-                segBtn.classList.add('active');
-                send('SetComplexity', { console: consoleName, preset_name: presetName });
-              };
-            });
-          }
+          renderComplexitySelectors(detail, myStation.consoles || []);
         } else {
           detail.className = 'idle';
           detail.querySelector('.detail-station-name').textContent = 'No station assigned';

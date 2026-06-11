@@ -58,6 +58,14 @@
 
     #power-rows { display: flex; flex-direction: column; }
 
+    /* Overflow note row (hidden by Power Low preset — issue #461) */
+    .overflow-row {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 8px 4px 2px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; color: var(--ink-faint); letter-spacing: 0.22em;
+    }
+
     /* Individual power row */
     .power-row {
       display: flex; align-items: center; gap: 12px;
@@ -285,6 +293,11 @@
               </div>
               <div id="power-rows">
                 <!-- Rows built dynamically -->
+              </div>
+              <!-- Overflow controls note (Bevy parity: "Overflow (pts 7-8):
+                   Manual"). Hidden under the Power Low complexity preset. -->
+              <div class="overflow-row" id="overflow-row" data-hideable="power_overflow_controls">
+                OVERFLOW (PTS 7–8) · MANUAL
               </div>
             </div>
           </div>

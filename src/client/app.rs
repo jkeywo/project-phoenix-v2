@@ -1,10 +1,14 @@
 ﻿//! Client-side Bevy app — in-game console UI and message routing.
 //!
 //! This plugin owns the `LobbyState` and `LocalPlayerToken` resources and
-//! emits outbound `ClientMessage` events when in-game UI elements (repair
-//! button, complexity popup) are pressed.  Outbound emission is the only
-//! side effect that escapes the plugin; the bridge layer (`client_bridge`)
-//! is responsible for marshalling those events to/from JS.
+//! emits outbound `ClientMessage` events when in-game UI elements (the repair
+//! button) are pressed.  Outbound emission is the only side effect that
+//! escapes the plugin; the bridge layer (`client_bridge`) is responsible for
+//! marshalling those events to/from JS.
+//!
+//! The complexity preset selector, first-use pop-up, and per-preset element
+//! hiding moved to the HTML/JS shell in issue #461 (gui/complexity-ui.js,
+//! gui/hideable-elements.js, gui/console-core.js).
 //!
 //! Inbound `ServerMessage` draining moved to pure JS in #460 — the gui/
 //! state modules (lobby-state.js, sim-state.js, comms-state.js,
@@ -24,14 +28,12 @@
 
 use bevy::prelude::*;
 
-use crate::client_lobby::{ActiveConsole, LobbyState, LobbyView, LocalPlayerToken};
+use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::client_comms::ClientCommsState;
-use crate::client_complexity::{self, ComplexityStore};
-use crate::client_elements::{
-    handle_help_button_press, handle_help_overlay_dismiss, HideableElementRegistry,
-};
-use crate::messages::{ClientMessage, Console, ServerMessage};
+use crate::client_complexity::ComplexityStore;
+use crate::client_elements::{handle_help_button_press, handle_help_overlay_dismiss};
+use crate::messages::{ClientMessage, ServerMessage};
 use crate::gui::{ConsoleRadar, GenericRadarWidget, RadarFilter};
 
 // ── Events ─────────────────────────────────────────────────────────
@@ -101,27 +103,10 @@ pub struct WeaponsPanel;
 #[derive(Component)]
 pub struct WeaponsRadarPanel;
 
-/// Marks the complexity preset pop-up overlay root.
-#[derive(Component)]
-pub struct ComplexityPopupRoot;
-
-/// Marks a preset option button inside the pop-up or dropdown.
-/// Carries the preset name as payload (e.g. "Low", "Std").
-#[derive(Component)]
-pub struct ComplexityPresetButton(pub String);
-
-/// Marks the confirm button on the pop-up.
-#[derive(Component)]
-pub struct ComplexityPopupConfirm;
-
-/// Marks the complexity dropdown row root.
-#[derive(Component)]
-pub struct ComplexityDropdownRoot;
-
-/// Marks a UI element that can be hidden by complexity preset `hidden_elements`.
-/// The string name must match an entry in the complexity TOML for this console.
-#[derive(Component)]
-pub struct HideableElement(pub String);
+// Complexity pop-up / dropdown and hideable-element markers were removed in
+// issue #461; the preset selector, first-use pop-up, and element hiding now
+// live entirely in the HTML/JS shell (gui/complexity-ui.js,
+// gui/hideable-elements.js, gui/console-core.js).
 
 // ── System sets ────────────────────────────────────────────────────
 
@@ -159,7 +144,6 @@ impl Plugin for ClientAppPlugin {
         .init_resource::<LocalPlayerToken>()
         .init_resource::<ActiveConsole>()
         .init_resource::<ComplexityStore>()
-        .init_resource::<HideableElementRegistry>()
         .add_message::<InboundServerMessage>()
         .add_message::<OutboundClientMessage>()
         .add_systems(Startup, (setup_ui_camera, setup_helm_ui))
@@ -167,12 +151,6 @@ impl Plugin for ClientAppPlugin {
             Update,
             (
                 (handle_repair_button_press, refresh_repair_button),
-                (
-                    refresh_complexity_ui,
-                    handle_complexity_preset_press,
-                    handle_complexity_popup_confirm,
-                ),
-                (register_hideable_elements, sync_complexity_hiding),
                 (handle_help_button_press, handle_help_overlay_dismiss),
                 sync_radar_widgets_from_lobby,
             ),
@@ -306,156 +284,14 @@ fn refresh_repair_button(
     }
 }
 
-// ── Complexity dropdown / pop-up ───────────────────────────────────
-
-/// Refresh complexity pop-up and dropdown visibility based on the store.
-fn refresh_complexity_ui(
-    store: Res<ComplexityStore>,
-    mut popup: Query<&mut Visibility, (With<ComplexityPopupRoot>, Without<ComplexityDropdownRoot>)>,
-    mut dropdown: Query<&mut Visibility, (With<ComplexityDropdownRoot>, Without<ComplexityPopupRoot>)>,
-) {
-    let choice = store.choices.get(&Console::Tactical);
-    let Some(choice) = choice else { return };
-
-    for mut vis in popup.iter_mut() {
-        *vis = if choice.show_popup() {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-    for mut vis in dropdown.iter_mut() {
-        *vis = if choice.show_dropdown() && !choice.show_popup() {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-}
-
-/// Handle presses on complexity preset buttons (both pop-up and dropdown).
-fn handle_complexity_preset_press(
-    interactions: Query<(&Interaction, &ComplexityPresetButton), Changed<Interaction>>,
-    mut store: ResMut<ComplexityStore>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for (interaction, btn) in interactions.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        // Update local store selection.
-        if let Some(choice) = store.choices.get_mut(&Console::Tactical) {
-            let _ = choice.select(&btn.0);
-        }
-        // Send SetComplexity immediately so the server knows.
-        outbound.write(OutboundClientMessage(
-            client_complexity::set_complexity_message(Console::Tactical, &btn.0),
-        ));
-    }
-}
-
-/// Handle the confirm button on the complexity pop-up.
-///
-/// The preset was already selected (and `SetComplexity` sent) by
-/// `handle_complexity_preset_press` when the user tapped a pop-up
-/// preset button. Confirm merely closes the pop-up (the store was
-/// already updated by `select()`, which sets `popup_shown = true`,
-/// causing `refresh_complexity_ui` to hide it).
-fn handle_complexity_popup_confirm(
-    interactions: Query<&Interaction, (Changed<Interaction>, With<ComplexityPopupConfirm>)>,
-    mut store: ResMut<ComplexityStore>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for interaction in interactions.iter() {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        // Ensure a preset is selected (default to Low if none was tapped).
-        let need_send = {
-            let choice = store.choices.get(&Console::Tactical);
-            choice.map(|c| c.chosen.is_none()).unwrap_or(true)
-        };
-        if need_send {
-            let _ = store.for_console(&Console::Tactical).select("Low");
-            outbound.write(OutboundClientMessage(
-                client_complexity::set_complexity_message(Console::Tactical, "Low"),
-            ));
-        }
-    }
-}
-
-// ── Hideable element registration ────────────────────────────────
-
-/// One-shot system: scans all existing `HideableElement` markers and
-/// registers their names in the `HideableElementRegistry`.
-fn register_hideable_elements(
-    mut registry: ResMut<HideableElementRegistry>,
-    elements: Query<&HideableElement>,
-    mut done: Local<bool>,
-) {
-    if *done {
-        return;
-    }
-    for element in elements.iter() {
-        registry.register(element.0.clone());
-    }
-    *done = true;
-}
-
-/// Reads the `ComplexityStore` and applies hide/show to `HideableElement`
-/// entities when the effective preset changes for the local player's consoles.
-///
-/// - Only affects consoles held by the local player
-/// - Unknown TOML element names produce runtime warnings
-/// - Hidden elements get `Display::None`; restored elements get `Display::Flex`
-fn sync_complexity_hiding(
-    mut registry: ResMut<HideableElementRegistry>,
-    store: Res<ComplexityStore>,
-    mut elements: Query<(&mut Node, &HideableElement)>,
-    token: Res<LocalPlayerToken>,
-    lobby: Res<LobbyState>,
-) {
-    // Guard: if neither resource changed, skip.
-    if !store.is_changed() && !lobby.is_changed() && !token.is_changed() {
-        return;
-    }
-
-    let view = LobbyView::new(&lobby, &token.0);
-    for console in view.my_consoles() {
-        let Some(choice) = store.choices.get(console) else {
-            continue;
-        };
-        let current = choice.effective_preset().to_string();
-        let last = registry.last_applied.get(console).cloned();
-
-        if last.as_ref() == Some(&current) {
-            continue;
-        }
-
-        let changes = registry.planned_changes(console, &current);
-
-        // Log warnings for unknown element names from TOML.
-        for name in &changes.unknown {
-            bevy::log::warn!(
-                "Hideable element '{name}' is in TOML hidden_elements for {console:?} \
-                 but no UI element registered that name; check spelling or add a \
-                 HideableElement(\"{name}\") marker"
-            );
-        }
-
-        // Apply display: none / display: flex to matching entities.
-        for (mut node, element) in elements.iter_mut() {
-            if changes.to_hide.contains(&element.0) {
-                node.display = bevy::ui::Display::None;
-            } else if changes.to_show.contains(&element.0) {
-                node.display = bevy::ui::Display::Flex;
-            }
-        }
-
-        registry.apply_changes(&changes);
-        registry.last_applied.insert(console.clone(), current);
-    }
-}
+// Complexity pop-up / dropdown systems (refresh_complexity_ui,
+// handle_complexity_preset_press, handle_complexity_popup_confirm) and the
+// hideable-element systems (register_hideable_elements, sync_complexity_hiding)
+// were removed in issue #461. The preset selector, first-use pop-up, and
+// per-preset element hiding now live in the HTML/JS shell:
+//   - gui/complexity-ui.js     — pop-up plan / segmented selector / SetComplexity
+//   - gui/hideable-elements.js — preset → hidden_elements table + DOM toggling
+//   - gui/console-core.js      — applies hiding on each __updateConsole push
 
 // ── Thin composition ────────────────────────────────────────────────────────
 
@@ -468,7 +304,7 @@ fn sync_complexity_hiding(
 ///
 /// Panel inventory (all per-console Bevy panels deleted per #456–#458):
 /// - `ShipViewPlugin`   — ship-level broadcast resource
-/// - `ClientAppPlugin`  — message routing + complexity UI + radar widget sync
+/// - `ClientAppPlugin`  — message routing + radar widget sync
 /// - `PhoneBorderPlugin`— loads `PhoneAssets` and drives `DeviceOrientation`
 pub fn add_client_plugins(app: &mut App) {
     app.add_plugins(ClientAppPlugin)

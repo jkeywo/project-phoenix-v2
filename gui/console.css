@@ -684,3 +684,8 @@ html, body {
   width: 100%;
 }
 .hull .val { color: var(--ink); }
+
+/* ── Complexity-preset hiding (issue #461) ──────────── */
+/* Applied by gui/hideable-elements.js to [data-hideable] elements
+   the active complexity preset wants hidden. */
+.cpx-hidden { display: none !important; }

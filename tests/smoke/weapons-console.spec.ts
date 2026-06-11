@@ -45,6 +45,40 @@ test('weapons console: __updateConsole renders banks, tubes and torpedo count', 
   await expect(page.locator('#torpedo-count')).toHaveText('7');
 });
 
+test('weapons console: Low complexity preset hides the gated controls, Std shows them', async ({ page }) => {
+  // Issue #461 — console-core applies gui/hideable-elements.js after render,
+  // toggling .cpx-hidden on [data-hideable] elements per the active preset.
+  await page.goto(CONSOLE_URL);
+
+  const base = {
+    target_uuid: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto',
+  };
+  const hideable = [
+    '[data-hideable="phaser_mode_selector"]',
+    '[data-hideable="torpedo_tube_selector"]',
+    '[data-hideable="target_lock_button"]',
+  ];
+
+  // Low preset → all three hideable controls carry .cpx-hidden (display:none).
+  // (tube-chips is empty in this state, so assert on the class — the hiding
+  // contract — rather than computed visibility of a zero-size container.)
+  await page.evaluate((s) => (window as any).__updateConsole('Tactical', JSON.stringify(s)),
+    { ...base, complexityPreset: 'Low' });
+  for (const sel of hideable) {
+    await expect(page.locator(sel)).toHaveClass(/cpx-hidden/);
+    await expect(page.locator(sel)).toBeHidden();
+  }
+
+  // Std preset → .cpx-hidden removed from every control.
+  await page.evaluate((s) => (window as any).__updateConsole('Tactical', JSON.stringify(s)),
+    { ...base, complexityPreset: 'Std' });
+  for (const sel of hideable) {
+    await expect(page.locator(sel)).not.toHaveClass(/cpx-hidden/);
+  }
+  // The non-empty readout strip is genuinely visible again under Std.
+  await expect(page.locator('[data-hideable="target_lock_button"]')).toBeVisible();
+});
+
 test('weapons console: FIRE buttons call __sendAction with correct envelopes', async ({ page }) => {
   // The landscape layout targets 2160×1080; at the default 1280×720 viewport
   // the fixed-width radar-col crowds out the ctrl-col, causing the fire buttons

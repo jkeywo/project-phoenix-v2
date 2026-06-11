@@ -29,9 +29,6 @@ jobs:
       - name: Run unit tests (server)
         run: cargo test
 
-      - name: Run unit tests (client feature)
-        run: cargo test --features client
-
   # ── WASM build ────────────────────────────────────────────────────────────────
   build:
     runs-on: ubuntu-latest
@@ -72,8 +69,8 @@ jobs:
       - name: Build server page (WASM + JS)
         run: trunk build --release
 
-      - name: Build client page (WASM + JS)
-        run: trunk build --release --config client-trunk.toml
+      - name: Build client page (pure JS — copies client.html + gui/assets, no WASM)
+        run: node scripts/build-client.mjs
 
       - name: Verify dist contents
         run: find dist/ -type f | sort

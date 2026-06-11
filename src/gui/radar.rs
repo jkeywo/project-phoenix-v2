@@ -2226,7 +2226,6 @@ mod tests {
         assert!((b - 2.0 * a).abs() < 1e-4);
     }
 
-    #[cfg(feature = "client")]
     #[test]
     fn radar_blip_press_triggers_event_on_radar_with_source_payload() {
         // detect_radar_blip_press must fire RadarBlipClicked targeting the

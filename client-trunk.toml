@@ -1,8 +1,0 @@
-[build]
-target = "client.html"
-dist = "dist/client"
-public_url = "./"
-
-[watch]
-watch_path = ["assets/"]
-include = "*.toml"

@@ -54,16 +54,16 @@ cargo check
 # Local dev — server page (WASM, Bevy, peer host)
 trunk serve                                    # → http://localhost:8080
 
-# Local dev — client page (plain HTML, connects to server)
-trunk serve --config client-trunk.toml --port 8081  # → http://localhost:8081
+# Local dev — client page (pure HTML/JS, no WASM; connects to server)
+node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
 
 # Production build
-trunk build --release
-trunk build --release --config client-trunk.toml
+trunk build --release                          # server page (WASM)
+node scripts/build-client.mjs                  # client page (pure JS, file copy → dist/client/)
 
 # Smoke tests (Playwright, Chromium) — requires dist/ built first
 trunk build --release
-trunk build --release --config client-trunk.toml
+node scripts/build-client.mjs
 cd tests/smoke && npm install && npx playwright install chromium
 npx playwright test                            # from tests/smoke/
 
@@ -123,10 +123,10 @@ assets/
   complexity/   — Per-console complexity presets (Low / Full) + AI tuning
 
 server.html       — Host page: loads server WASM, runs Bevy, owns PeerJS host peer
-client.html       — Client page: loads client WASM, connects via PeerJS peer ID in URL hash
-Cargo.toml        — Single crate: cdylib (WASM) + rlib (tests). Features: server | client
+client.html       — Client page: pure HTML/JS (no WASM), connects via PeerJS peer ID in URL hash
+Cargo.toml        — Single crate: cdylib (WASM) + rlib (tests). Feature: server
 Trunk.toml        — Build config for server.html
-client-trunk.toml — Build config for client.html
+scripts/build-client.mjs — Builds the pure-JS client page (file copy → dist/client/)
 wiki/             — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.
 docs/             — Draft design notes (numbered).
 ```
@@ -208,7 +208,8 @@ crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for testing
 [features]
 default = ["server"]
 server = []   # host build → server.html (bridge.rs compiled in)
-client = []   # client build → client.html (client_bridge.rs compiled in)
+# The client page (client.html) is now pure JS (gui/*.js) — there is no
+# `client` cargo feature and no client-side WASM (removed in #463).
 
 # WASM-specific: no parallel physics, needs getrandom wasm_js backend
 [target.'cfg(target_arch = "wasm32")'.dependencies]

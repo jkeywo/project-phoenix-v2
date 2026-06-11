@@ -120,36 +120,7 @@ pub mod viewscreen_border {
 
 pub mod debug_overlay;
 
-// Client-only grouped module (app, bridge, elements, phone_border).
-#[cfg(feature = "client")]
-pub mod client;
-
-// Generic GUI widget library — needed by both client consoles and the server
-// viewscreen radar (ServerViewscreenRadarPlugin).
-#[cfg(any(feature = "client", feature = "server"))]
+// Generic GUI widget library — needed by the server viewscreen radar
+// (ServerViewscreenRadarPlugin).
+#[cfg(feature = "server")]
 pub mod gui;
-
-// Backwards-compat flat modules for client.
-#[cfg(feature = "client")]
-pub mod client_app {
-    pub use crate::client::app::*;
-}
-
-#[cfg(feature = "client")]
-pub mod client_bridge {
-    pub use crate::client::bridge::*;
-}
-
-#[cfg(feature = "client")]
-pub mod client_elements {
-    // elements.rs was emptied in #462 (help system ported to JS); the glob
-    // re-export has nothing to export until #463 deletes this alias. Allow the
-    // otherwise-empty glob so #462 introduces no new warnings.
-    #[allow(unused_imports)]
-    pub use crate::client::elements::*;
-}
-
-#[cfg(feature = "client")]
-pub mod phone_border {
-    pub use crate::client::phone_border::*;
-}

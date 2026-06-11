@@ -1,6 +1,7 @@
 /**
- * gui/device-orientation.js — Pure JS port of detect_orientation() from
- * src/client/phone_border/framing.rs (issue #462).
+ * gui/device-orientation.js — Pure JS port of the Bevy detect_orientation()
+ * system (formerly src/client/phone_border/framing.rs; ported in #462, the
+ * Rust original deleted in #463).
  *
  * Computes a singleton orientation ('portrait' | 'landscape') from the window
  * aspect ratio: landscape when width / height >= 1.0, otherwise portrait
@@ -62,12 +63,16 @@ export function updateOrientation(win) {
 if (typeof window !== 'undefined') {
   updateOrientation(window);
 
-  window.addEventListener('resize', function() {
+  const onViewportChange = function() {
     updateOrientation(window);
     if (typeof window.scheduleRender === 'function') {
       window.scheduleRender();
     }
-  });
+  };
+  // `orientationchange` is the reliable signal on phone rotation; `resize`
+  // covers desktop window resizing and browsers that don't fire the former.
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('orientationchange', onViewportChange);
 
   // Expose the reader client.html's render() consumes.
   window.currentOrientation = currentOrientation;

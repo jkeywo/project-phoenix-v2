@@ -835,7 +835,7 @@
       // per render so both consumers see the same value.
       const orientation = (typeof window.currentOrientation === 'function')
         ? window.currentOrientation()
-        : (window.innerWidth > window.innerHeight ? 'landscape' : 'portrait');
+        : (window.innerWidth >= window.innerHeight ? 'landscape' : 'portrait');
       const container = $('console-container');
       if (container) container.dataset.orientation = orientation;
 
@@ -1245,16 +1245,9 @@
     // View selector and Red Alert button moved to Bevy WASM captain UI (#48).
     // Helm joystick moved to Bevy WASM helm UI (#49).
 
-    // ── Orientation watcher (issue #441) ───────────────────────────────
-    // The tab bar layout depends on portrait/landscape (see gui/tab-bar.js).
-    // Re-render on every resize / orientationchange so the bar flips when
-    // the phone rotates. scheduleRender() is a no-op if a frame is already
-    // queued, so this is cheap even during a smooth resize.
-    (function initOrientationWatch() {
-      const handler = () => scheduleRender();
-      window.addEventListener('resize', handler);
-      window.addEventListener('orientationchange', handler);
-    })();
+    // Orientation watching (resize + orientationchange → recompute the
+    // singleton and rerender so the tab bar flips) lives in
+    // gui/device-orientation.js, which owns window.currentOrientation().
 
     // ── Swipe to switch console tabs (when 2+ consoles assigned) ───────
     (function initSwipe() {
@@ -1349,6 +1342,10 @@
             state.sensorsRadarRange = window.simState.sensorsRadarRange;
             state.phaserArcConfigs  = window.simState.phaserArcConfigs;
             state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
+            // Push the pre-seeded repair teams so the Repair console renders its
+            // rows immediately on (re)connect, before the first RepairState
+            // broadcast (no-op unless Repair is the active console).
+            pushRepairConsoleState();
           }
           if (msg.data.ship_stations) {
             state.maxPlayers = msg.data.ship_stations.max_players || 0;
@@ -1449,8 +1446,12 @@
             state.redAlert = nextAlert;
             applyBezelAlert(nextAlert);
           }
-          // Update entity positions from per-tick entity state snapshots
-          if (snap.entity_states) {
+          // Update entity positions from per-tick entity state snapshots.
+          // When window.simState is present it already applied these in place
+          // to the shared entities array (state.asteroids is aliased to it in
+          // the Welcome handler), so this loop runs only as the no-module
+          // fallback to avoid a redundant second pass.
+          if (!window.simState && snap.entity_states) {
             for (const es of snap.entity_states) {
               const match = state.asteroids.find(a => a.uuid === es.uuid);
               if (match && es.position) {
@@ -1628,8 +1629,12 @@
           const { console: consoleName, preset_name } = msg.data;
           state.complexity[consoleName] = preset_name;
           if (myConsoles(state).includes(consoleName)) {
+            // window.complexityStore is the sole writer of the
+            // 'complexity-presets' localStorage key; select() materialises the
+            // choice, validates the preset and persists. savedComplexity stays
+            // an in-memory mirror for the lobby segmented buttons.
+            window.complexityStore?.select(consoleName, preset_name);
             savedComplexity[consoleName] = preset_name;
-            localStorage.setItem('complexity-presets', JSON.stringify(savedComplexity));
           }
           rebuildStations();
           return;

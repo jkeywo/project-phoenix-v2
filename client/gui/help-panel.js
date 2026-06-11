@@ -1,8 +1,9 @@
 /**
  * gui/help-panel.js — Pure JS port of the client-side help system.
  *
- * Ports the 9 `HelpPanel` variants + `help_sections()` static text from
- * src/client/elements.rs (issue #462). Each console can show a "?" help
+ * Ports the 9 `HelpPanel` variants + `help_sections()` static text from the
+ * Bevy help system (formerly src/client/elements.rs; ported in #462, the Rust
+ * original deleted in #463). Each console can show a "?" help
  * button that opens a dark click-to-dismiss modal overlay describing its
  * controls, matching the look of the old Bevy overlay (dark ~90% alpha
  * background, cyan-ish heading, "HELP — tap to dismiss", click/tap anywhere

@@ -2253,7 +2253,6 @@ mod tests {
             yaw: 0.785,
             impulse_charge_progress: 0.0,
             on_screen: false,
-            lock_id: Some("A-014".into()),
         };
         let json = encode_console_state(&state).expect("encode helm console");
         let decoded: HelmConsoleState = serde_json::from_str(&json).unwrap();

@@ -206,7 +206,7 @@ describe('buildHelmConsoleState', () => {
     const cases = [
       { yaw: 0,           expectedHeading: 0 },
       { yaw: Math.PI,     expectedHeading: 180 },
-      { yaw: Math.PI / 2, expectedHeading: 270 }, // yaw=+90 rad → heading=-90 → 270°
+      { yaw: Math.PI / 2, expectedHeading: 90 },  // yaw=+90 rad → heading=90°
     ];
     for (const { yaw, expectedHeading } of cases) {
       const s = parse(buildHelmConsoleState({ shipYaw: yaw }));
@@ -220,10 +220,6 @@ describe('buildHelmConsoleState', () => {
 
   it('on_screen false for other views', () => {
     expect(parse(buildHelmConsoleState({ currentView: 'Fore' })).on_screen).toBe(false);
-  });
-
-  it('lock_id comes from weaponsTarget', () => {
-    expect(parse(buildHelmConsoleState({ weaponsTarget: 'lock-uuid' })).lock_id).toBe('lock-uuid');
   });
 });
 

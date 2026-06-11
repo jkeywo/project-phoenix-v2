@@ -261,7 +261,9 @@
     var R  = Math.min(W, H) / 2 - 8;
     var data = this._data;
 
-    ctx.clearRect(0, 0, W, H);
+    // Opaque fill prevents canvas clearRect flicker (issue #2)
+    ctx.fillStyle = '#07080c';
+    ctx.fillRect(0, 0, W, H);
 
     // ── Background disc ────────────────────────────────────────────────────
     ctx.fillStyle = 'rgba(5,8,22,0.52)';

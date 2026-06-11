@@ -30,12 +30,11 @@ fn spawn_helm_console_state_entity(mut commands: Commands) {
         yaw: 0.0,
         impulse_charge_progress: 0.0,
         on_screen: false,
-        lock_id: None,
     }));
 }
 
 fn heading_from_yaw(yaw_rad: f32) -> f32 {
-    ((-yaw_rad).to_degrees()).rem_euclid(360.0)
+    (yaw_rad.to_degrees()).rem_euclid(360.0)
 }
 
 fn recompute_helm_console_state(
@@ -58,7 +57,6 @@ fn recompute_helm_console_state(
         yaw: ship.yaw,
         impulse_charge_progress: charge_progress,
         on_screen,
-        lock_id: None,
     };
 
     for mut comp in comp_q.iter_mut() {
@@ -122,7 +120,7 @@ mod tests {
             yaw: 0.0,
             impulse_charge_progress: 0.0,
             on_screen: false,
-            lock_id: None,
+
         }));
         app.insert_resource(ShipState::new());
         app.insert_resource(ShipImpulse(ImpulseState::new()));
@@ -163,7 +161,7 @@ mod tests {
         assert!((comp.0.x - 100.0).abs() < 0.001);
         assert!((comp.0.z - (-200.0)).abs() < 0.001);
         assert!((comp.0.speed - 50.0).abs() < 0.001);
-        assert!((comp.0.heading - 315.0).abs() < 0.1);
+        assert!((comp.0.heading - 45.0).abs() < 0.1);
     }
 
     #[test]
@@ -215,7 +213,6 @@ mod tests {
                 yaw: std::f32::consts::PI,
                 impulse_charge_progress: 0.0,
                 on_screen: true,
-                lock_id: Some("A-014".into()),
             };
         }
         app.update();
@@ -227,7 +224,6 @@ mod tests {
         assert!(push.json.contains("\"heading\":180.0"), "json: {}", push.json);
         assert!(push.json.contains("\"speed\":100.0"), "json: {}", push.json);
         assert!(push.json.contains("\"on_screen\":true"), "json: {}", push.json);
-        assert!(push.json.contains("\"lock_id\":\"A-014\""), "json: {}", push.json);
 
         // No further change -> no further pushes.
         app.world_mut().resource_mut::<Outbox>().0.clear();

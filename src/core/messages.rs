@@ -1251,8 +1251,6 @@ pub struct HelmConsoleState {
     pub impulse_charge_progress: f32,
     #[serde(default)]
     pub on_screen: bool,
-    #[serde(default)]
-    pub lock_id: Option<String>,
 }
 
 /// Serialised Shields console state pushed to the HTML shields panel (issue #423).

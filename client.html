@@ -46,7 +46,7 @@
       --dim: #6a7178;
       --amber: #f0a030;
     }
-    html, body { margin: 0; padding: 0; background: transparent; color: #cce; font-family: monospace; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: #cce; font-family: monospace; }
     body { box-sizing: border-box; }
     label { display: block; margin-bottom: 0.5rem; font-size: 0.85rem; }
     input[type="text"] { display: block; width: 100%; box-sizing: border-box;
@@ -74,30 +74,18 @@
     }
     /* View selector cross and Red Alert button moved to Bevy WASM (#48). */
     /* Console container: full-screen flex layout host for the tab bar and
-       all console sections. Orientation-driven via [data-orientation] so
-       the tab bar sits above (portrait) or to the left (landscape) of the
-       console content, taking up space rather than floating over it. */
+        all console sections. Always column layout — tab bar at top,
+        console content below. */
     #console-container {
       position: fixed;
       inset: 0;
       display: flex;
+      flex-direction: column;
+      padding-top: var(--bezel-inset);
       border: 4px solid transparent;
       transition: border-color 0.15s;
       z-index: 1;
       pointer-events: none;
-    }
-    #console-container[data-orientation="portrait"],
-    #console-container:not([data-orientation]) {
-      flex-direction: column;
-      /* Top padding clears the top bezel edge; tab bar adds its own
-         horizontal corner-clearance via padding. */
-      padding-top: var(--bezel-inset);
-    }
-    #console-container[data-orientation="landscape"] {
-      flex-direction: row;
-      /* Only the bezel edge strip height; corner art floats at z-index 15. */
-      padding-top: var(--bezel-inset);
-      padding-bottom: var(--bezel-inset);
     }
     #console-container > *, #console-container section.active > * {
       pointer-events: auto;
@@ -227,30 +215,19 @@
     #console-tab-bar {
       pointer-events: auto;
       display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      align-items: stretch;
       flex-shrink: 0;
       gap: 0.25rem;
-      align-items: stretch;
-      justify-content: center;
+      padding: 0.25rem clamp(50px, 20vw, 120px);
     }
     /* Visibility driven by aria-hidden, not inline style. renderTabBar()
        toggles the attribute and the cascade does the rest — avoids the
        trap where `style.display = ''` removes the override and the
        stylesheet's `display: none` rule wins. */
     #console-tab-bar[aria-hidden="true"] { display: none; }
-    #console-tab-bar[data-orientation="portrait"],
-    #console-tab-bar:not([data-orientation]) {
-      flex-direction: row;
-      flex-wrap: wrap;
-      /* Horizontal padding clears the corner art on each side. */
-      padding: 0.25rem clamp(50px, 20vw, 120px);
-    }
-    #console-tab-bar[data-orientation="landscape"] {
-      flex-direction: column;
-      /* Left padding clears the left bezel edge; top/bottom padding pushes
-         tab buttons clear of the corner art (clamp matches corner height). */
-      padding: clamp(32px, 12vw, 72px) 0.25rem clamp(32px, 12vw, 72px) var(--bezel-inset);
-      width: 84px;
-    }
     #console-tab-bar .tab-button {
       display: block;
       width: auto;
@@ -271,8 +248,12 @@
          buttons feel instant alongside the pointerdown listener. */
       touch-action: manipulation;
     }
-    #console-tab-bar[data-orientation="portrait"] .tab-button { flex: 0 1 auto; }
-    #console-tab-bar[data-orientation="landscape"] .tab-button { flex: 0 0 auto; }
+    @media (orientation: portrait) {
+      #console-tab-bar .tab-button { flex: 0 1 auto; font-size: 0.7rem; padding: 0.3rem 0.5rem; }
+    }
+    @media (orientation: landscape) {
+      #console-tab-bar .tab-button { flex: 0 0 auto; font-size: 1rem; padding: 0.5rem 1rem; min-width: 6rem; }
+    }
     #console-tab-bar .tab-button:active { background: #1a2230; }
     #console-tab-bar .tab-button.active {
       background: rgba(95, 216, 232, 0.18);

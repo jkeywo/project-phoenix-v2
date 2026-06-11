@@ -2,22 +2,22 @@ import { describe, it, expect } from 'vitest';
 import { nextActiveConsole } from '../../gui/active-console.js';
 
 describe('nextActiveConsole', () => {
-  it('null name from a set console -> wasmArg "", next null, changed', () => {
+  it('null name from a set console -> next null, changed', () => {
     expect(nextActiveConsole('CaptainChair', null))
-      .toEqual({ changed: true, next: null, wasmArg: '' });
+      .toEqual({ changed: true, next: null });
   });
 
-  it('undefined name behaves like null (auto sentinel)', () => {
+  it('undefined name behaves like null', () => {
     expect(nextActiveConsole('Tactical', undefined))
-      .toEqual({ changed: true, next: null, wasmArg: '' });
+      .toEqual({ changed: true, next: null });
   });
 
-  it('empty-string name maps to null + wasmArg "" (Bevy bridge.rs:160 contract)', () => {
+  it('empty-string name normalises to null', () => {
     expect(nextActiveConsole('Helm', ''))
-      .toEqual({ changed: true, next: null, wasmArg: '' });
+      .toEqual({ changed: true, next: null });
   });
 
-  it('null -> null is idempotent (no WASM round-trip)', () => {
+  it('null -> null is idempotent', () => {
     expect(nextActiveConsole(null, null).changed).toBe(false);
   });
 
@@ -25,19 +25,19 @@ describe('nextActiveConsole', () => {
     expect(nextActiveConsole('Helm', 'Helm').changed).toBe(false);
   });
 
-  it('one name to another -> wasmArg is the new name', () => {
+  it('one name to another -> next is the new name', () => {
     expect(nextActiveConsole('Helm', 'Tactical'))
-      .toEqual({ changed: true, next: 'Tactical', wasmArg: 'Tactical' });
+      .toEqual({ changed: true, next: 'Tactical' });
   });
 
-  it('null -> a name -> wasmArg is the new name', () => {
+  it('null -> a name -> next is the new name', () => {
     expect(nextActiveConsole(null, 'CaptainChair'))
-      .toEqual({ changed: true, next: 'CaptainChair', wasmArg: 'CaptainChair' });
+      .toEqual({ changed: true, next: 'CaptainChair' });
   });
 
   it('undefined current is treated like null', () => {
     expect(nextActiveConsole(undefined, 'Helm'))
-      .toEqual({ changed: true, next: 'Helm', wasmArg: 'Helm' });
+      .toEqual({ changed: true, next: 'Helm' });
   });
 
   it('empty-string current is treated like null (no-op when next is also null)', () => {

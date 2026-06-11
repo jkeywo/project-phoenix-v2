@@ -1,15 +1,11 @@
 // Tab bar for the client GUI shell. Pure layout + DOM renderer (issue #441).
 //
 // The tab bar lets a player switch between consoles assigned to them. Layout
-// matches the Rust/Bevy `console_shell` widget it replaces:
+// is always a horizontal strip across the top, left-aligned:
 //
 //   - Hidden when `inGame === false` OR when the player owns <= 1 console.
-//   - Portrait (orientation === 'portrait'): horizontal strip across the top
-//     of the bezel content area. Uses initials when count >= 5 (otherwise the
-//     full names overflow the viewport width).
-//   - Landscape (orientation === 'landscape'): vertical strip down the left
-//     of the bezel content area. Always uses full names — there's enough
-//     vertical room for any count.
+//   - Portrait: smaller buttons, uses initials when count >= 5.
+//   - Landscape: full-size buttons with full labels.
 //
 // This module exports both pure functions (testable with no DOM) and a
 // DOM-mutating renderer. The pure functions feed Vitest tests; the renderer
@@ -55,7 +51,7 @@ export function currentOrientation(win) {
 }
 
 // True if the portrait bar should show initials instead of full names.
-// Landscape always returns false (vertical bar has unlimited room).
+// Landscape has more horizontal room so uses full labels.
 export function useInitials(consoles, orientation) {
   if (!Array.isArray(consoles)) return false;
   if (orientation !== 'portrait') return false;
@@ -74,6 +70,8 @@ export function useInitials(consoles, orientation) {
 //     useInitials: bool,
 //     buttons: [{ console, label, active }],
 //   }
+// Tab is always a horizontal strip across the top; orientation only affects
+// button size and whether initials or full labels are used.
 export function tabBarLayout(consoles, active, orientation, inGame) {
   const list = Array.isArray(consoles) ? consoles : [];
   const orient = orientation === 'landscape' ? 'landscape' : 'portrait';

@@ -190,7 +190,7 @@ describe('tabBarLayout — labels', () => {
     expect(out.buttons.map((b) => b.label)).toEqual(['CC', 'H', 'T', 'R', 'S']);
   });
 
-  it('uses full names for 9 consoles in landscape (vertical bar has room)', () => {
+  it('uses full names for 9 consoles in landscape (horizontal bar has room)', () => {
     const all = ['CaptainChair','Helm','Tactical','Repair','Sensors','Shields','Navigation','Power','Comms'];
     const out = tabBarLayout(all, 'Comms', 'landscape', true);
     expect(out.useInitials).toBe(false);

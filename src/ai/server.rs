@@ -1021,9 +1021,6 @@ mod tests {
 
     fn make_weapons_console_config(beam_range: f32) -> crate::entity_config::WeaponsConsoleConfig {
         crate::entity_config::WeaponsConsoleConfig {
-            radar_range: 0.0,
-            target_range: 0.0,
-            fire_arc: 0.0,
             beam_range,
             beam_damage_per_sec: 5.0,
             beam_duration_secs: 3.0,

@@ -1177,6 +1177,7 @@ mod tests {
             comms: None,
             radar_appearance: None,
             mesh: None,
+            target: None,
         };
 
         let mut commands = app.world_mut().commands();

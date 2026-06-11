@@ -2363,6 +2363,10 @@ mod tests {
             color: [1.0, 0.502, 0.376],
             objective_target: true,
             name: Some("Pirate Raider".into()),
+            selectable: true,
+            threat_level: Some("medium".into()),
+            description: Some("A pirate vessel".into()),
+            target_tags: vec!["ship".into(), "pirate".into()],
         };
         let json = serde_json::to_string(&blip).unwrap();
         let decoded: RadarBlip = serde_json::from_str(&json).unwrap();

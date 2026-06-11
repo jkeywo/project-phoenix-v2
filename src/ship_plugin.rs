@@ -484,6 +484,7 @@ mod tests {
             behaviour: None,
             radar_appearance: None,
             mesh: None,
+            target: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
         let mut commands = app.world_mut().commands();

@@ -5556,6 +5556,7 @@ condition = "on_world_loaded"
             navigation_console: None, shields_console: None, torpedoes: None,
             repair: None, comms: None, asteroid_field: None, faction: None,
             behaviour: None, radar_appearance: None, mesh: None,
+            target: None,
         };
         let mut commands = app.world_mut().commands();
         spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid.to_string(), None)

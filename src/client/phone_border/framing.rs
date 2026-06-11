@@ -6,9 +6,13 @@
 //! wrapper that:
 //!
 //! - loads the per-console image and font handles into [`PhoneAssets`],
-//! - populates the shared [`RadarIconLookup`] from those handles,
-//! - detects landscape vs. portrait from window dimensions and exposes
-//!   the result as [`DeviceOrientation`].
+//! - populates the shared [`RadarIconLookup`] from those handles.
+//!
+//! Device-orientation detection (the `DeviceOrientation` resource,
+//! `is_landscape()` helper, and `detect_orientation` system) was ported to
+//! pure JS in issue #462; see gui/device-orientation.js (a singleton exposed
+//! as `window.currentOrientation()` and refreshed on `window.resize`). Console
+//! layouts already consume a `[data-orientation]` attribute driven from there.
 //!
 //! It deliberately does NOT load the 9-slice bezel border art — the HTML
 //! bezel ships those PNGs via CSS, and the server's
@@ -82,37 +86,20 @@ pub struct PhoneAssets {
     pub radar_icons: RadarIconHandles,
 }
 
-/// Auto-detected device orientation, updated each frame from the window
-/// aspect ratio.
-#[derive(Resource, Debug, Clone, PartialEq, Eq)]
-pub enum DeviceOrientation {
-    Portrait,
-    Landscape,
-}
-
-impl Default for DeviceOrientation {
-    fn default() -> Self {
-        Self::Portrait
-    }
-}
-
-/// Returns `true` when the device is in landscape orientation.
-///
-/// Accepts `Option<&DeviceOrientation>` so callers can pass
-/// `orientation.as_deref()` directly from an `Option<Res<DeviceOrientation>>`.
-pub fn is_landscape(orientation: Option<&DeviceOrientation>) -> bool {
-    matches!(orientation, Some(DeviceOrientation::Landscape))
-}
+// Device orientation (`DeviceOrientation` resource + `is_landscape()` helper)
+// was ported to pure JS in issue #462; see gui/device-orientation.js.
 
 // ── Plugin ───────────────────────────────────────────────────────────
 
-/// Loads phone-panel asset handles and drives [`DeviceOrientation`].
+/// Loads phone-panel asset handles into [`PhoneAssets`] and the shared
+/// [`RadarIconLookup`].
 ///
 /// Pre-#442 this plugin also spawned the Bevy phone bezel frame, drove
 /// the red-alert texture swap, and reparented console panels into the
 /// bezel safe zone. All three responsibilities moved to the HTML shell
-/// (`client.html` issues #439/#440/#441); only asset loading and
-/// orientation detection remain on the Rust side.
+/// (`client.html` issues #439/#440/#441). Orientation detection moved to
+/// pure JS in #462 (gui/device-orientation.js); only asset loading remains
+/// on the Rust side.
 ///
 /// The plugin name is retained for compatibility with
 /// `add_client_plugins`. A rename to `PhoneAssetsPlugin` is deferred to
@@ -122,12 +109,7 @@ pub struct PhoneBorderPlugin;
 
 impl Plugin for PhoneBorderPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DeviceOrientation>()
-            .add_systems(Startup, load_phone_assets)
-            // detect_orientation runs in PreUpdate so DeviceOrientation is
-            // always up-to-date before any Update system reads it. Panels
-            // use it to decide between portrait and landscape layouts.
-            .add_systems(PreUpdate, detect_orientation)
+        app.add_systems(Startup, load_phone_assets)
             .add_systems(Update, populate_radar_icon_lookup);
     }
 }
@@ -223,36 +205,7 @@ fn populate_radar_icon_lookup(
         .insert(RadarIcon::Torpedo, assets.radar_icons.torpedo.clone());
 }
 
-/// Detect device orientation from window aspect ratio. Updated each frame
-/// but only inserted once; change detection avoids pointless writes.
-fn detect_orientation(windows: Query<&Window>, mut orientation: ResMut<DeviceOrientation>) {
-    let Ok(window) = windows.single() else { return };
-    let aspect = window.width() / window.height();
-    let new = if aspect >= 1.0 {
-        DeviceOrientation::Landscape
-    } else {
-        DeviceOrientation::Portrait
-    };
-    if new != *orientation {
-        *orientation = new;
-    }
-}
-
-// ── Tests ────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn orientation_default_is_portrait() {
-        assert_eq!(DeviceOrientation::default(), DeviceOrientation::Portrait);
-    }
-
-    #[test]
-    fn is_landscape_returns_true_only_for_landscape_variant() {
-        assert!(is_landscape(Some(&DeviceOrientation::Landscape)));
-        assert!(!is_landscape(Some(&DeviceOrientation::Portrait)));
-        assert!(!is_landscape(None));
-    }
-}
+// Device-orientation detection (`detect_orientation`) and its tests
+// (`orientation_default_is_portrait`, `is_landscape_*`) were ported to pure JS
+// in issue #462; the equivalent logic + tests now live in
+// gui/device-orientation.js and tests/client/device-orientation.test.js.

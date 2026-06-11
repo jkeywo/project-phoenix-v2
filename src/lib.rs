@@ -142,6 +142,10 @@ pub mod client_bridge {
 
 #[cfg(feature = "client")]
 pub mod client_elements {
+    // elements.rs was emptied in #462 (help system ported to JS); the glob
+    // re-export has nothing to export until #463 deletes this alias. Allow the
+    // otherwise-empty glob so #462 introduces no new warnings.
+    #[allow(unused_imports)]
     pub use crate::client::elements::*;
 }
 

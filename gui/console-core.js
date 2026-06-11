@@ -42,6 +42,7 @@
  *     4. BroadcastChannel    (separate-tab mode)
  */
 import { applyHiddenElements } from './hideable-elements.js';
+import { mountHelp } from './help-panel.js';
 
 export function initConsole({ name, render }) {
   var _bc = (typeof BroadcastChannel !== 'undefined')
@@ -99,6 +100,20 @@ export function initConsole({ name, render }) {
       _win.__sendAction(json);
     } else if (_bc) {
       _bc.postMessage({ type: 'console_action', payload: json });
+    }
+  }
+
+  // ── Help system (issue #462) ───────────────────────────────────────────
+  // Mount the shared "?" help button + click-to-dismiss modal for this
+  // console. `name` is the PascalCase Console variant, which doubles as the
+  // HelpPanel key. Runs only in a real DOM (guarded inside mountHelp); a no-op
+  // in Node tests. Deferred until the DOM is ready so the trigger host
+  // (`.frame`) exists.
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function() { mountHelp(name); });
+    } else {
+      mountHelp(name);
     }
   }
 

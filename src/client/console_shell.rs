@@ -5,16 +5,16 @@
 //! widget keeps only the parts the per-console panels still rely on:
 //!
 //! - a full-viewport root node carrying the panel background image,
-//! - two flex slots (`primary` / `secondary`) for the panel to fill,
-//! - a top-left "?" help button + the matching help overlay at window root.
+//! - two flex slots (`primary` / `secondary`) for the panel to fill.
 //!
-//! All nine per-console panels still call [`ConsoleShell::spawn`]; the
-//! function shape is preserved on purpose so the panel plugins are
-//! untouched by this slice.
+//! The "?" help button + overlay this shell used to spawn were ported to pure
+//! JS in issue #462 (gui/help-panel.js + gui/console-core.js), so the
+//! `help_panel` parameter was dropped. This widget is itself dead code (no
+//! caller spawns it any more) and is slated for deletion in the #463 teardown;
+//! it is kept compiling here only so this slice stays scoped.
 
 use bevy::prelude::*;
 
-use crate::client::elements::{spawn_help_overlay_root, HelpButton, HelpPanel};
 use crate::phone_border::framing::PhoneAssets;
 
 // ── Return type for ConsoleShell::spawn ────────────────────────────
@@ -50,10 +50,6 @@ impl ConsoleShell {
     /// `is_landscape` — layout mode for the primary/secondary stack:
     /// `true` lays them out as a row, `false` as a column.
     ///
-    /// `help_panel` — which [`HelpPanel`] the top-left "?" button opens.
-    /// The button is spawned inside the shell root; its overlay is
-    /// spawned at window root so it can render above the bezel.
-    ///
     /// `fill_primary` / `fill_secondary` — called after the content
     /// containers exist.  Each receives `(&mut Commands, Entity)` where
     /// the `Entity` is the primary or secondary container, so the caller
@@ -67,7 +63,6 @@ impl ConsoleShell {
         commands: &mut Commands,
         panel_bg: Handle<Image>,
         is_landscape: bool,
-        help_panel: HelpPanel,
         fill_primary: impl FnOnce(&mut Commands, Entity),
         fill_secondary: impl FnOnce(&mut Commands, Entity),
         _phone_assets: &PhoneAssets,
@@ -144,43 +139,8 @@ impl ConsoleShell {
             })
             .id();
 
-        // ── Help "?" button (top-left of shell root) ────────────────
-        // Absolutely positioned so it sits above the primary/secondary
-        // stack without disrupting the flex layout.
-        commands.entity(root_id).with_children(|root| {
-            root.spawn((
-                HelpButton(help_panel),
-                Button,
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(4.0),
-                    left: Val::Px(4.0),
-                    width: Val::Px(28.0),
-                    height: Val::Px(28.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.7)),
-                ZIndex(50),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("?"),
-                    TextFont {
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.7, 0.8, 1.0)),
-                ));
-            });
-        });
-
-        // ── Help overlay (full-screen modal at window root) ─────────
-        // Lives at top level so it covers the HTML bezel + tab bar when
-        // visible. Matched to its button by HelpPanel discriminant via
-        // handle_help_button_press.
-        spawn_help_overlay_root(commands, help_panel);
+        // The "?" help button + overlay this shell used to spawn here were
+        // ported to pure JS in issue #462 (gui/help-panel.js + console-core.js).
 
         // Invoke fill closures so callers can populate the slots.
         fill_primary(commands, primary_id);

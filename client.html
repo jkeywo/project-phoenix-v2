@@ -28,6 +28,7 @@
        message through them, replacing the deleted Bevy message drain. -->
   <script type="module" src="gui/lobby-state.js"></script>
   <script type="module" src="gui/sim-state.js"></script>
+  <script type="module" src="gui/device-orientation.js"></script>
   <script type="module" src="gui/comms-state.js"></script>
   <script type="module" src="gui/complexity-store.js"></script>
   <!-- Complexity preset shell UI logic (issue #461): first-use pop-up plan,
@@ -857,6 +858,9 @@
         render(state);
       });
     }
+    // Expose so gui/device-orientation.js can coalesce its resize-driven
+    // re-render through the same rAF scheduler (issue #462).
+    window.scheduleRender = scheduleRender;
 
     function render(s) {
       // Phase → section visibility (pure JS module, gui/phase-toggle.js).
@@ -1112,90 +1116,15 @@
       scheduleRender();
     }
 
-    function renderRepair(hp, repairTarget) {
-      const clamped = Math.max(0, Math.min(100, hp));
-      const text = $('eng-hp-text');
-      const bar = $('eng-hp-bar');
-      if (!text || !bar) return;
-      text.textContent = clamped + ' / 100';
-      const filled = Math.ceil(clamped / 10);
-      const color = clamped > 60 ? '#4cf' : clamped > 30 ? '#fa0' : '#f44';
-      text.style.color = color;
-      // Rebuild segments only when count changes; otherwise update colours.
-      const segs = bar.querySelectorAll('div');
-      if (segs.length !== 10) {
-        bar.innerHTML = '';
-        for (let i = 0; i < 10; i++) {
-          const seg = document.createElement('div');
-          seg.style.cssText = 'flex:1;height:28px;border-radius:3px;transition:background .2s';
-          bar.appendChild(seg);
-        }
-      }
-      bar.querySelectorAll('div').forEach((seg, i) => {
-        seg.style.background = i < filled ? color : '#333';
-      });
-      // Repair target display
-      const targetBox = $('eng-repair-target');
-      const targetLabel = $('eng-repair-console');
-      if (targetBox && targetLabel) {
-        if (repairTarget) {
-          const names = {
-            CaptainChair: "CAPTAIN'S CHAIR",
-            Helm: 'HELM',
-            Tactical: 'TACTICAL',
-            Repair: 'REPAIR',
-            Power: 'POWER',
-          };
-          targetLabel.textContent = names[repairTarget] || repairTarget;
-          targetBox.style.display = '';
-        } else {
-          targetBox.style.display = 'none';
-        }
-      }
-    }
-
-    const REPAIR_BTN_MAP = {
-      CaptainChair: 'captain-repair-btn',
-      Tactical: 'weapons-repair-btn',
-      Repair: 'eng-repair-btn',
-    };
-
-    function renderRepairButtons(s) {
-      for (const [console, id] of Object.entries(REPAIR_BTN_MAP)) {
-        const btn = $(id);
-        if (!btn) continue;
-        if (console !== activeConsole) {
-          // Reset non-active buttons to ready state so they don't show stale state.
-          btn.textContent = 'REPAIR';
-          btn.style.background = '#063';
-          btn.style.color = '#5f5';
-          btn.style.borderColor = '#5f5';
-          btn.disabled = false;
-          continue;
-        }
-        // Active console's button reflects current repair state.
-        if (s.repairPenalty) {
-          const flash = Math.floor(Date.now() / 333) % 2 === 0;
-          btn.textContent = 'COOLDOWN ' + Math.ceil(s.repairCooldownSecs) + 's';
-          btn.style.background = flash ? '#800' : '#400';
-          btn.style.color = '#f66';
-          btn.style.borderColor = '#f44';
-          btn.disabled = true;
-        } else if (s.repairInProgress) {
-          btn.textContent = 'REPAIRING ' + Math.ceil(s.repairCooldownSecs) + 's';
-          btn.style.background = '#030';
-          btn.style.color = '#5f5';
-          btn.style.borderColor = '#4a4';
-          btn.disabled = true;
-        } else {
-          btn.textContent = 'REPAIR';
-          btn.style.background = '#063';
-          btn.style.color = '#5f5';
-          btn.style.borderColor = '#5f5';
-          btn.disabled = false;
-        }
-      }
-    }
+    // Repair UI (issue #462): the full repair affordance is owned by the
+    // Repair console iframe (gui/repair-console.html), which renders the hull
+    // readout + per-team dispatch buttons and sends `dispatch_repair_team`
+    // itself. The pure shell-button logic ported from the old Bevy
+    // `handle_repair_button_press` / `refresh_repair_button` lives in
+    // gui/repair-button.js (all-busy guard, message shape, refresh states).
+    // The earlier `renderRepair` / `renderRepairButtons` shell stubs targeted
+    // HTML ids that were never added (orphaned Bevy-era remnants) and were
+    // removed here; the iframe supersedes them.
 
     // ── iframe state-push helper (wraps gui/iframe-bridge.js) ────────────────
     // Delegates to window.iframeBridgePush when the module is loaded; falls back
@@ -1621,10 +1550,12 @@
               }
             }
           }
-          if (typeof hp === 'number' && (state.hullIntegrity !== hp || state.repairTarget !== repairTarget)) {
+          // Hull integrity + authorized repair target are mirrored into the
+          // inline state for any shell reader; the Repair console iframe owns
+          // the actual hull readout via pushRepairConsoleState (issue #462).
+          if (typeof hp === 'number') {
             state.hullIntegrity = hp;
             state.repairTarget = repairTarget;
-            renderRepair(hp, repairTarget);
           }
           if (snap.console_hull) state.consoleHull = snap.console_hull;
           pushWeaponsConsoleState();

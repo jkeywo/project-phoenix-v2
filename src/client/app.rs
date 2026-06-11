@@ -32,7 +32,6 @@ use crate::client_lobby::{ActiveConsole, LobbyState, LocalPlayerToken};
 use crate::client_sim::ClientSimState;
 use crate::client_comms::ClientCommsState;
 use crate::client_complexity::ComplexityStore;
-use crate::client_elements::{handle_help_button_press, handle_help_overlay_dismiss};
 use crate::messages::{ClientMessage, ServerMessage};
 use crate::gui::{ConsoleRadar, GenericRadarWidget, RadarFilter};
 
@@ -79,14 +78,6 @@ pub struct HelmReadout;
 /// `SetView { mode: Radar }` so the server viewscreen mirrors the radar.
 #[derive(Component)]
 pub struct OnScreenButton;
-
-/// Marks the Repair button on the helm console.
-#[derive(Component)]
-pub struct RepairButton;
-
-/// Marks the text label inside the Repair button (used to refresh cooldown text).
-#[derive(Component)]
-pub struct RepairButtonLabel;
 
 /// Marks a text node that displays the current repair icon shape (or clearance).
 /// Spawned on any panel that should show it (Helm, Tactical, Science at minimum).
@@ -147,14 +138,7 @@ impl Plugin for ClientAppPlugin {
         .add_message::<InboundServerMessage>()
         .add_message::<OutboundClientMessage>()
         .add_systems(Startup, (setup_ui_camera, setup_helm_ui))
-        .add_systems(
-            Update,
-            (
-                (handle_repair_button_press, refresh_repair_button),
-                (handle_help_button_press, handle_help_overlay_dismiss),
-                sync_radar_widgets_from_lobby,
-            ),
-        );
+        .add_systems(Update, sync_radar_widgets_from_lobby);
     }
 }
 
@@ -230,59 +214,13 @@ fn sync_radar_widgets_from_lobby(
 // those systems are removed in later slices (#461/#462).
 
 // ── Repair button ──────────────────────────────────────────────────
-
-fn handle_repair_button_press(
-    mut interactions: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, With<RepairButton>),
-    >,
-    sim: Res<ClientSimState>,
-    mut outbound: MessageWriter<OutboundClientMessage>,
-) {
-    for (interaction, _bg) in interactions.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            // Suppress if all teams are busy.
-            let all_busy = sim
-                .repair_teams
-                .iter()
-                .all(|t| !matches!(t, crate::messages::TeamSlot::Idle));
-            if all_busy {
-                continue;
-            }
-            outbound.write(OutboundClientMessage(crate::client_sim::repair_message()));
-        }
-    }
-}
-
-fn refresh_repair_button(
-    sim: Res<ClientSimState>,
-    mut button: Query<&mut BackgroundColor, (With<RepairButton>, Without<RepairButtonLabel>)>,
-    mut label: Query<(&mut Text, &mut TextColor), With<RepairButtonLabel>>,
-) {
-    if !sim.is_changed() {
-        return;
-    }
-    let any_active = sim
-        .repair_teams
-        .iter()
-        .any(|t| !matches!(t, crate::messages::TeamSlot::Idle));
-    for mut bg in button.iter_mut() {
-        *bg = if any_active {
-            BackgroundColor(Color::srgb(0.05, 0.30, 0.05))
-        } else {
-            BackgroundColor(Color::srgb(0.13, 0.27, 0.13))
-        };
-    }
-    for (mut text, mut color) in label.iter_mut() {
-        if any_active {
-            **text = "TEAMS DISPATCHED".to_string();
-            *color = TextColor(Color::srgb(0.5, 1.0, 0.5));
-        } else {
-            **text = "REPAIR".to_string();
-            *color = TextColor(Color::srgb(0.5, 1.0, 0.5));
-        }
-    }
-}
+//
+// `handle_repair_button_press` (all-busy dispatch guard + message shape) and
+// `refresh_repair_button` (label/colour/disabled refresh), plus the
+// `RepairButton` / `RepairButtonLabel` marker components, were ported to pure
+// JS in issue #462. The shell repair-button logic now lives in
+// gui/repair-button.js (with `repairMessage()` in gui/sim-state.js); the full
+// repair affordance is the Repair console iframe (gui/repair-console.html).
 
 // Complexity pop-up / dropdown systems (refresh_complexity_ui,
 // handle_complexity_preset_press, handle_complexity_popup_confirm) and the

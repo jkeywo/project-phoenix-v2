@@ -1400,53 +1400,83 @@ fn dump_tracked_entities(
 }
 
 /// Add visual meshes and materials to spawned entities that have a `[mesh]`
-/// section but no `Mesh3d` yet. Additionally, if the entity carries a `Lights`
-/// component (from one or more `[[light]]` TOML entries), attach the matching
-/// `PointLight`/`DirectionalLight` components (single light → inline, multiple
-/// → spawned as child entities).
+/// section but no `Mesh3d` yet. When `cfg.model` is set, loads a GLB scene
+/// instead of creating a procedural shape. Applies `cfg.scale` and
+/// `cfg.rotation` to the entity's transform in both paths. Additionally,
+/// if the entity carries a `Lights` component (from one or more `[[light]]`
+/// TOML entries), attach the matching `PointLight`/`DirectionalLight`
+/// components (single light → inline, multiple → spawned as child entities).
 fn render_spawned_entities(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     entities: Query<
-        (Entity, &crate::entity_spawner::MeshSection, Option<&crate::entity_spawner::Lights>),
-        Without<Mesh3d>,
+        (
+            Entity,
+            &Transform,
+            &crate::entity_spawner::MeshSection,
+            Option<&crate::entity_spawner::Lights>,
+        ),
+        (Without<Mesh3d>, Without<bevy::scene::SceneRoot>),
     >,
 ) {
     use crate::entity_config::MeshShape;
 
-    for (entity, mesh_sec, lights_opt) in entities.iter() {
+    for (entity, transform, mesh_sec, lights_opt) in entities.iter() {
         let cfg = &mesh_sec.0;
-
-        let color = if cfg.colour.len() >= 3 {
-            Color::srgb(cfg.colour[0], cfg.colour[1], cfg.colour[2])
-        } else {
-            Color::srgb(0.6, 0.6, 0.6)
-        };
-
-        let emissive_mul = cfg.emissive.unwrap_or(0.4);
-        let emissive = LinearRgba::from(color) * emissive_mul;
-
-        let mesh = match cfg.shape {
-            MeshShape::Sphere => meshes.add(Sphere { radius: cfg.radius.max(0.1) }),
-            MeshShape::Cuboid => {
-                let [x, y, z] = cfg.size.unwrap_or([2.0, 1.0, 3.0]);
-                meshes.add(Cuboid::new(x, y, z))
-            }
-            MeshShape::Torus => meshes.add(Torus {
-                major_radius: cfg.radius.max(0.5),
-                minor_radius: cfg.minor_radius.max(0.1),
-            }),
-        };
-
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
-            emissive,
-            ..default()
-        });
-
         let mut ec = commands.entity(entity);
-        ec.insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+
+        if let Some(model_path) = &cfg.model {
+            // PATH A: GLB model — load scene, keep procedural fields as fallback.
+            let scene: Handle<bevy::scene::Scene> =
+                asset_server.load(format!("{}#Scene0", model_path));
+            ec.insert(bevy::scene::SceneRoot(scene));
+        } else {
+            // PATH B: Procedural primitive.
+            let color = if cfg.colour.len() >= 3 {
+                Color::srgb(cfg.colour[0], cfg.colour[1], cfg.colour[2])
+            } else {
+                Color::srgb(0.6, 0.6, 0.6)
+            };
+
+            let emissive_mul = cfg.emissive.unwrap_or(0.4);
+            let emissive = LinearRgba::from(color) * emissive_mul;
+
+            let mesh = match cfg.shape {
+                MeshShape::Sphere => meshes.add(Sphere { radius: cfg.radius.max(0.1) }),
+                MeshShape::Cuboid => {
+                    let [x, y, z] = cfg.size.unwrap_or([2.0, 1.0, 3.0]);
+                    meshes.add(Cuboid::new(x, y, z))
+                }
+                MeshShape::Torus => meshes.add(Torus {
+                    major_radius: cfg.radius.max(0.5),
+                    minor_radius: cfg.minor_radius.max(0.1),
+                }),
+            };
+
+            let mat = materials.add(StandardMaterial {
+                base_color: color,
+                emissive,
+                ..default()
+            });
+
+            ec.insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+        }
+
+        // Apply scale/rotation to both paths — preserves spawn position.
+        if cfg.scale != 1.0 || cfg.rotation != [0.0, 0.0, 0.0] {
+            ec.insert(Transform {
+                translation: transform.translation,
+                rotation: bevy::math::Quat::from_euler(
+                    bevy::math::EulerRot::XYZ,
+                    cfg.rotation[0],
+                    cfg.rotation[1],
+                    cfg.rotation[2],
+                ),
+                scale: Vec3::splat(cfg.scale),
+            });
+        }
 
         // Attach lights, if any.
         if let Some(lights_comp) = lights_opt {

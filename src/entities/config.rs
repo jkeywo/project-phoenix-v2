@@ -73,9 +73,18 @@ pub enum MeshShape {
 /// Present in entity TOMLs as a `[mesh]` section. The renderer creates the
 /// appropriate Bevy primitive and material from this data; entities without
 /// a `[mesh]` section are not given a 3-D visual on the viewscreen.
+///
+/// When `model` is set, the renderer loads a GLB scene instead of creating a
+/// procedural shape (the `shape`/`colour`/`radius`/etc. fields are ignored for
+/// rendering but kept as fallback). `scale` and `rotation` are applied to both
+/// paths.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshConfig {
+    /// Path to a .glb file, e.g. "assets/models/dynasty_destroyer.glb".
+    /// When set, overrides the procedural shape rendering.
+    #[serde(default)]
+    pub model: Option<String>,
     pub shape: MeshShape,
     /// RGB colour `[r, g, b]` in linear 0–1 range.
     pub colour: Vec<f32>,
@@ -93,7 +102,17 @@ pub struct MeshConfig {
     /// applies its own default (typically `0.4` for general-purpose entities).
     #[serde(default)]
     pub emissive: Option<f32>,
+    /// Uniform scale multiplier applied to the entity's transform.
+    /// Affects both GLB models and procedural shapes.
+    #[serde(default = "default_mesh_scale")]
+    pub scale: f32,
+    /// Euler rotation [x, y, z] in radians applied to the entity's transform.
+    /// Affects both GLB models and procedural shapes.
+    #[serde(default)]
+    pub rotation: [f32; 3],
 }
+
+fn default_mesh_scale() -> f32 { 1.0 }
 
 /// Kind of a `[[light]]` entry: a point light or a directional light.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

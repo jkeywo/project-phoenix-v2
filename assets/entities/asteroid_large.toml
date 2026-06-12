@@ -1,6 +1,10 @@
 name = "Large Asteroid"
 tags = ["asteroid", "gameplay", "large"]
 
+[target]
+tags = ["asteroid"]
+threat_level = "none"
+
 [collider]
 shape = "Ball"
 radius = 4.0

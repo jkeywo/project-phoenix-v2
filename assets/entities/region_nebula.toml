@@ -1,4 +1,10 @@
+name = "Nebula"
 tags = ["region", "nebula"]
+
+[target]
+tags = ["region"]
+threat_level = "none"
+description = "Nebula region"
 
 [shape]
 type = "sphere"

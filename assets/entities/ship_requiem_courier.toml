@@ -2,6 +2,11 @@ name = "Requiem Courier"
 tags = ["ship", "npc", "comms_contact"]
 faction = "dddddddd-4444-4444-8444-dddddddddddd"
 
+[target]
+tags = ["ship"]
+threat_level = "low"
+description = "Requiem Courier"
+
 [hull]
 captain_chair = 40.0
 

@@ -617,12 +617,14 @@
         orientation:  'world_fixed',
         iconBasePath: 'src_assets/radar_icons/Icon-',
         onBlipTap: function(uuid) {
-          if (typeof window._sendSensorsAction === 'function') {
-            window._sendSensorsAction('set_sensors_target', { uuid: uuid });
-          }
           if (!_state) return;
           var blip = (_state.blips || []).find(function(b){ return b.uuid === uuid; });
           if (!blip) return;
+          if (!blip.selectable) return;
+
+          if (typeof window._sendSensorsAction === 'function') {
+            window._sendSensorsAction('set_sensors_target', { uuid: uuid });
+          }
 
           _state.target_uuid    = uuid;
           _state.target_name    = blip.name || uuid;
@@ -636,15 +638,17 @@
           _state.target_range =
             Math.sqrt(rx*rx + ry*ry) * (_state.scan_range || 1200);
 
-          _state.target_class       = blip.shipClass   || null;
+          _state.target_class       = blip.shipClass   || blip.description || null;
           _state.target_hull_pct    = blip.hullPct     || null;
           _state.target_heading     = blip.heading     || null;
           _state.target_speed       = blip.speed       || null;
-          _state.target_threat      = blip.threat      || (blip.stance === 'hostile' ? 'high' : 'low');
+          // threat_level is the live server field; blip.threat is demo-only fallback
+          var tl = blip.threat_level || blip.threat || null;
+          _state.target_threat = (tl && tl !== 'none') ? tl : null;
           _state.target_shield_freq = blip.shieldFreq  || null;
           _state.target_shields     = blip.shields     || [];
           if (blip.kind === 'asteroid') {
-            _state.target_class = 'TYPE-M ASTEROID';
+            _state.target_class = blip.description || 'ASTEROID';
             _state.target_shields = [];
           }
 

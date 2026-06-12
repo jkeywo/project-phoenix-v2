@@ -1,6 +1,11 @@
 name = "Sun"
 tags = ["star", "center"]
 
+[target]
+tags = ["star"]
+threat_level = "none"
+description = "Sun"
+
 [collider]
 shape = "Ball"
 radius = 50.0

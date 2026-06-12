@@ -2,6 +2,11 @@ name = "Harrow Warhawk"
 tags = ["ship", "npc"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
+[target]
+tags = ["ship"]
+threat_level = "high"
+description = "Harrow Warhawk"
+
 [hull]
 captain_chair = 400.0
 
@@ -13,9 +18,10 @@ length = 12.0
 [radar_appearance]
 colour = [0.9, 0.2, 0.05]
 radius = 12.0
-icon = "ship"
+icon = "battleship"
 
 [mesh]
+model = "assets/models/dynasty_battleship.glb"
 shape = "cuboid"
 size = [10.0, 3.0, 16.0]
 colour = [0.9, 0.2, 0.05]

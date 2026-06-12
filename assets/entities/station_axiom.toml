@@ -1,6 +1,11 @@
 name = "Axiom Station"
 tags = ["station", "comms_contact", "allied"]
 
+[target]
+tags = ["station"]
+threat_level = "none"
+description = "Axiom Station"
+
 [hull]
 hull_integrity = 200.0
 
@@ -10,6 +15,7 @@ radius = 18.0
 icon = "station"
 
 [mesh]
+model = "assets/models/alliance_starbase.glb"
 shape = "torus"
 radius = 18.0
 minor_radius = 4.5

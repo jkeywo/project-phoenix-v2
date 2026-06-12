@@ -31,6 +31,7 @@ console = "Shields"
 max_hp = 25.0
 
 [weapons_console]
+complexity_toml = "assets/complexity/tactical.toml"
 power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 beam_range = 100.0
 beam_damage_per_sec = 5.0
@@ -42,6 +43,7 @@ torpedo_arc_color = [1.0, 0.55, 0.2, 0.15]
 [weapons_console.radar]
 range = 300.0
 shows = ["player", "ship", "asteroid", "station", "missile", "torpedo", "region"]
+selects = ["ship", "station", "asteroid"]
 
 # Fore phaser bank: forward-facing, 270° arc (blind spot is the rear 90°).
 # Auto-fire window covers the forward hemisphere only.
@@ -88,13 +90,16 @@ facing_deg = 180.0
 fire_arc_deg = 90.0
 
 [sensors_console]
+complexity_toml = "assets/complexity/sensors.toml"
 power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 
 [sensors_console.long_range_radar]
 range = 400.0
 shows = ["player", "asteroid", "ship", "station", "planet", "star"]
+selects = ["ship", "station", "planet"]
 
 [power]
+complexity_toml = "assets/complexity/power.toml"
 capacity = 100.0
 rates = [6.0, 5.0, 4.0, 2.0, -2.0, -6.0]
 emergency_threshold = 25.0
@@ -116,10 +121,12 @@ range = 250.0
 shows = ["player", "asteroid", "asteroid_field", "ship", "station", "planet", "star"]
 
 [navigation_console]
+complexity_toml = "assets/complexity/navigation.toml"
 
 [navigation_console.system_chart]
 range = 800.0
-shows = ["region", "asteroid_field", "star", "planet", "station", "player", "objective_marker"]
+shows = ["region", "asteroid_field", "star", "planet", "station", "player", "objective_marker", "ship"]
+selects = ["ship", "station", "planet", "star", "region"]
 
 # Comms range — within this radius the player ship can hail / be hailed.
 # Scale matches helm radar / system chart so default-world entities are
@@ -128,6 +135,7 @@ shows = ["region", "asteroid_field", "star", "planet", "station", "player", "obj
 range = 1200.0
 
 [shields_console]
+complexity_toml = "assets/complexity/shields.toml"
 focus_bonus_max_hp = 50
 focus_bonus_regen = 5.0
 focus_penalty_max_hp = 25
@@ -144,7 +152,7 @@ offline_duration = 10.0
 [engineering_console]
 
 [radar_appearance]
-colour = [0.6, 0.8, 1.0]
+colour = [0.0, 1.0, 0.2]
 radius = 6.0
 icon = "player_ship"
 

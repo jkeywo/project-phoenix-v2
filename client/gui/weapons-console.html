@@ -242,9 +242,13 @@
               <div>
                 <div class="k">LOCKED TARGET</div>
                 <div class="v" id="target-name" style="font-size:32px;">—</div>
+                <div class="sub" id="target-desc" style="display:none; color: var(--ink-faint);"></div>
               </div>
               <div class="spacer"></div>
-              <div class="sub" id="target-sub">NO LOCK</div>
+              <div>
+                <div class="sub" id="target-threat" style="display:none;"></div>
+                <div class="sub" id="target-sub">NO LOCK</div>
+              </div>
             </div>
           </section>
 
@@ -499,11 +503,28 @@
       }
 
       // ── Target readout ────────────────────────────────────────────────
-      var nameEl  = document.getElementById('target-name');
-      var subEl   = document.getElementById('target-sub');
-      var hasLock = !!s.target_uuid;
+      var nameEl    = document.getElementById('target-name');
+      var subEl     = document.getElementById('target-sub');
+      var descEl    = document.getElementById('target-desc');
+      var threatEl  = document.getElementById('target-threat');
+      var hasLock   = !!s.target_uuid;
+      var lockedBlip = hasLock ? (s.blips || []).find(function(b) { return b.uuid === s.target_uuid; }) : null;
       if (nameEl) nameEl.textContent = hasLock ? (s.target_name || s.target_uuid.substring(0, 20) + '…') : '—';
       if (subEl)  subEl.textContent  = hasLock ? '◉ LOCK ACTIVE' : 'NO LOCK';
+      if (descEl) {
+        var desc = lockedBlip && lockedBlip.description;
+        descEl.textContent = desc || '';
+        descEl.style.display = desc ? '' : 'none';
+      }
+      if (threatEl) {
+        var tl = lockedBlip && lockedBlip.threat_level;
+        var tlMap = { none: null, low: 'THREAT: LOW', medium: 'THREAT: MEDIUM', high: 'THREAT: HIGH' };
+        var tlText = tl ? (tlMap[tl] || null) : null;
+        var tlColor = { low: 'var(--green)', medium: 'var(--yellow, #f0c040)', high: 'var(--tactical)' };
+        threatEl.textContent = tlText || '';
+        threatEl.style.display = tlText ? '' : 'none';
+        threatEl.style.color = tl ? (tlColor[tl] || 'var(--ink-faint)') : '';
+      }
 
       var footerLock = document.getElementById('footer-lock');
       if (footerLock) {
@@ -556,6 +577,8 @@
         consoleId:   'tactical',
         orientation: 'world_fixed',  // tactical = north-up (world-fixed); orientation is ignored in pre-projected mode
         onBlipTap:   function (uuid) {
+          var blip = _state && (_state.blips || []).find(function(b) { return b.uuid === uuid; });
+          if (!blip || !blip.selectable) return;
           sendAction('set_target', { uuid: uuid });
         },
       });

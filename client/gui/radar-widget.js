@@ -33,6 +33,9 @@
     station:  '#ffe060',
     torpedo:  '#ff60ff',
     unknown:  '#a8b0c0',
+    battleship: '#e6330d',   // dark red — large enemy
+    cruiser:    '#cc4d1a',   // orange-red — medium enemy
+    destroyer:  '#ff3333',   // bright red — small enemy
   };
 
   /** Icon name → PNG filename stem (e.g. "ship" → "Icon-Ship.png"). */
@@ -44,6 +47,9 @@
     planet:     'Planet',
     star:       'Star',
     torpedo:    'Torpedo',
+    battleship: 'Battleship',
+    cruiser:    'Cruiser',
+    destroyer:  'Destroyer',
   };
 
   var MIN_BLIP_PX        = 8;    // minimum blip diameter in canvas pixels

@@ -1,3 +1,18 @@
+# Sensors console complexity presets.
+#
+# [preset.ai] keys enable server-side AI behaviours while this console's
+# preset is active (see src/console_ai/server.rs):
+#   auto_hint — after `auto_hint_delay_secs` of continuous target lock, the
+#       server sends the correct phaser frequency as a hint to the Tactical
+#       holder (only while Tactical itself is not auto-matching).
+
+[[preset]]
+name = "Low"
+hidden_elements = ["shield_frequency_readout"]
+
+[preset.ai]
+auto_hint = { auto_hint_delay_secs = 3.0 }
+
 [[preset]]
 name = "Std"
 hidden_elements = []

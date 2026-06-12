@@ -1,6 +1,11 @@
 name = "Research Outpost"
 tags = ["station", "comms_contact", "science_facility"]
 
+[target]
+tags = ["station"]
+threat_level = "none"
+description = "Research Outpost"
+
 [hull]
 hull_integrity = 60.0
 
@@ -10,6 +15,7 @@ radius = 8.0
 icon = "station"
 
 [mesh]
+model = "assets/models/alliance_research_outpost.glb"
 shape = "torus"
 radius = 8.0
 minor_radius = 2.0

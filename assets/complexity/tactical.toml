@@ -1,13 +1,27 @@
+# Tactical console complexity presets.
+#
+# [preset.delegated] — while this console's preset is active, the listed
+# OTHER consoles are authorised to issue the listed control messages
+# (checked by src/console_ai/delegation.rs). A console is always authorised
+# for its own controls.
+#
+# [preset.ai] keys enable server-side AI behaviours while this console's
+# preset is active (see src/console_ai/server.rs):
+#   torpedo_auto_fire — fire loaded, in-arc tubes at the locked target.
+#   frequency_match   — after `auto_match_delay_secs` of continuous lock,
+#       set the phaser frequency to match the target (when Sensors is also
+#       assisted or unmanned).
+
 [[preset]]
 name = "Low"
 hidden_elements = ["phaser_mode_selector", "torpedo_tube_selector", "target_lock_button"]
 
 [preset.delegated]
-Tactical = { controls = ["auto_fire_torpedoes", "auto_frequency_match"] }
+Sensors = { controls = ["set_phaser_frequency"] }
 
 [preset.ai]
-torpedo_auto_fire = { lead_prediction = true, min_accuracy = 0.7 }
-frequency_match = { sweep_interval_secs = 2.0, auto_match_delay_secs = 3.0 }
+torpedo_auto_fire = {}
+frequency_match = { auto_match_delay_secs = 3.0 }
 
 [[preset]]
 name = "Std"

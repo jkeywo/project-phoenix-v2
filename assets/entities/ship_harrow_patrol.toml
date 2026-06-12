@@ -2,6 +2,11 @@ name = "Harrow Patrol"
 tags = ["ship", "npc", "comms_contact"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 
+[target]
+tags = ["ship"]
+threat_level = "medium"
+description = "Harrow Patrol"
+
 [hull]
 captain_chair = 120.0
 
@@ -13,9 +18,10 @@ length = 7.0
 [radar_appearance]
 colour = [0.8, 0.3, 0.1]
 radius = 7.0
-icon = "ship"
+icon = "cruiser"
 
 [mesh]
+model = "assets/models/dynasty_cruiser.glb"
 shape = "cuboid"
 size = [6.0, 2.0, 10.0]
 colour = [0.8, 0.3, 0.1]

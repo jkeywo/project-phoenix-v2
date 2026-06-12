@@ -1241,9 +1241,10 @@
       }, 500);
     });
 
-    // Engage button moved to Bevy WASM lobby UI (#47).
-    // View selector and Red Alert button moved to Bevy WASM captain UI (#48).
-    // Helm joystick moved to Bevy WASM helm UI (#49).
+    // Engage button, view selector, Red Alert button, and helm joystick all
+    // live in the per-console iframe pages (gui/*-console.html); the old
+    // Bevy WASM client console UIs (#47–#49) were retired with the pure-JS
+    // client migration.
 
     // Orientation watching (resize + orientationchange → recompute the
     // singleton and rerender so the tab bar flips) lives in

@@ -72,7 +72,12 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
   const rotate = opts.rotate !== false;
   const cosY = rotate ? Math.cos(shipYaw) : 0;
   const sinY = rotate ? Math.sin(shipYaw) : 0;
+  const shows = (opts.shows || []).map(t => String(t).toLowerCase());
+  const selects = (opts.selects || []).map(t => String(t).toLowerCase());
   return (entities || []).map(a => {
+    const tags = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
+    if (shows.length > 0 && !tags.some(t => shows.includes(t))) return null;
+
     const ax = entityX(a), az = entityZ(a);
     const dx = ax - shipX, dz = az - shipZ;
     if (dx * dx + dz * dz > range * range) return null;
@@ -84,12 +89,33 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
       radar_x = dx / range;
       radar_y = dz / range;
     }
-    const radius = entityRadius(a);
-    const tags   = (a.tags || a.entity_tags || []).map(t => String(t).toLowerCase());
+    const radius = (a.radar_world_size !== undefined && a.radar_world_size !== null)
+      ? a.radar_world_size
+      : entityRadius(a);
     const kind   = tags.includes('ship')    ? 'ship'
                  : tags.includes('station') ? 'station'
+                 : tags.includes('planet')  ? 'planet'
+                 : tags.includes('star')    ? 'star'
+                 : tags.includes('torpedo') || tags.includes('missile') ? 'torpedo'
+                 : tags.includes('region')  ? 'region'
                  : 'asteroid';
-    const blip = { uuid: a.uuid, radar_x, radar_y, scaled_radius: radius / range, kind };
+    const targetTags = (a.target_tags || []).map(t => String(t).toLowerCase());
+    const selectable = selects.length > 0 && targetTags.some(t => selects.includes(t));
+    const blip = {
+      uuid: a.uuid,
+      radar_x,
+      radar_y,
+      scaled_radius: radius / range,
+      kind,
+      icon: a.radar_icon || kind,
+      color: a.colour || a.color || null,
+      objective_target: !!a.objective_target,
+      name: a.name || null,
+      selectable,
+      threat_level: a.threat_level || null,
+      description: a.target_description || a.description || a.name || null,
+      target_tags: a.target_tags || [],
+    };
     if (opts.extra) Object.assign(blip, opts.extra(a));
     return blip;
   }).filter(Boolean);
@@ -104,10 +130,17 @@ export function buildBlips(entities, shipX, shipZ, shipYaw, range, opts = {}) {
  */
 export function buildWeaponsConsoleState(state) {
   const range = state.weaponsRadarRange ?? WEAPONS_RADAR_RANGE;
-  const blips = buildBlips(
-    state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
-    range, { rotate: true }
-  );
+  const blips = Array.isArray(state.weaponsBlips)
+    ? state.weaponsBlips
+    : buildBlips(
+      state.asteroids, state.shipX || 0, state.shipZ || 0, state.shipYaw || 0,
+      range,
+      {
+        rotate: true,
+        shows: state.tacticalRadarShows || ['player', 'ship', 'asteroid', 'station', 'missile', 'torpedo', 'region'],
+        selects: state.tacticalRadarSelects || ['ship', 'station', 'asteroid'],
+      }
+    );
   return JSON.stringify({
     target_uuid:   state.weaponsTarget      || null,
     banks:         state.weaponsBanks       || [],
@@ -232,6 +265,8 @@ export function buildSensorsConsoleState(state) {
     range,
     {
       rotate: false,
+      shows: state.sensorsRadarShows || ['player', 'asteroid', 'ship', 'station', 'planet', 'star'],
+      selects: state.sensorsRadarSelects || ['ship', 'station', 'planet'],
       extra: (a) => ({
         color:   null,
         name:    a.name    || null,

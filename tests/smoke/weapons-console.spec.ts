@@ -107,6 +107,41 @@ test('weapons console: FIRE buttons call __sendAction with correct envelopes', a
   });
 });
 
+test('weapons console: short landscape keeps action buttons on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.goto(CONSOLE_URL);
+
+  await page.evaluate((s) => (window as any).__updateConsole('Tactical', JSON.stringify(s)), {
+    target_uuid: 'tgt-1',
+    target_name: 'Harrow Patrol',
+    banks: [
+      { id: 'fore', fire_ready: true, on_cooldown: false, cooldown_remaining: 0.0 },
+      { id: 'aft', fire_ready: false, on_cooldown: false, cooldown_remaining: 0.0 },
+    ],
+    tubes: [
+      { id: 'fore', loaded: true, reload_secs: 0.0 },
+      { id: 'port', loaded: true, reload_secs: 0.0 },
+      { id: 'aft', loaded: false, reload_secs: 3.5 },
+    ],
+    torpedo_count: 7,
+    phaser_mode: 'Auto',
+  });
+
+  const buttons = ['#fire-torpedo', '#fire-phaser', '#phaser-mode-btn'];
+  for (const selector of buttons) {
+    const box = await page.locator(selector).boundingBox();
+    expect(box, `${selector} should have layout bounds`).not.toBeNull();
+    expect(box!.top, `${selector} top`).toBeGreaterThanOrEqual(0);
+    expect(box!.bottom, `${selector} bottom`).toBeLessThanOrEqual(390);
+  }
+
+  const bodySizes = await page.locator('body').evaluate((body) => ({
+    clientHeight: body.clientHeight,
+    scrollHeight: body.scrollHeight,
+  }));
+  expect(bodySizes.scrollHeight).toBeLessThanOrEqual(bodySizes.clientHeight);
+});
+
 test('viewscreen HUD: __updateHud updates the status strip and red-alert class', async ({ context }) => {
   // Boot the real server page (it carries the #hud-overlay markup + __updateHud).
   // createServerPage already waits for __wasmReady.

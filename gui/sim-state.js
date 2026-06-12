@@ -103,6 +103,10 @@ export class ClientSimState {
     this.weaponsRadarRange = 300.0;
     this.helmRadarRange = 500.0;
     this.sensorsRadarRange = 500.0;
+    this.tacticalRadarShows = ['player', 'ship', 'asteroid', 'station', 'missile', 'torpedo', 'region'];
+    this.tacticalRadarSelects = ['ship', 'station', 'asteroid'];
+    this.sensorsRadarShows = ['player', 'asteroid', 'ship', 'station', 'planet', 'star'];
+    this.sensorsRadarSelects = ['ship', 'station', 'planet'];
     /** Fire-arc configs from server ship_config, populated on Welcome. */
     this.phaserArcConfigs = [];
     this.torpedoArcConfigs = [];
@@ -140,6 +144,10 @@ export class ClientSimState {
         this.weaponsRadarRange = sc.tactical_radar_range ?? 300.0;
         this.helmRadarRange    = sc.helm_radar_range    ?? 500.0;
         this.sensorsRadarRange = sc.sensors_radar_range ?? 500.0;
+        this.tacticalRadarShows   = sc.tactical_radar_shows   || this.tacticalRadarShows;
+        this.tacticalRadarSelects = sc.tactical_radar_selects || this.tacticalRadarSelects;
+        this.sensorsRadarShows    = sc.sensors_radar_shows    || this.sensorsRadarShows;
+        this.sensorsRadarSelects  = sc.sensors_radar_selects  || this.sensorsRadarSelects;
         this.phaserArcConfigs  = sc.phaser_banks        ?? [];
         this.torpedoArcConfigs = sc.torpedo_tubes       ?? [];
         if (world) {

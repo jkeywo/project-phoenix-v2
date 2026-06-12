@@ -73,7 +73,7 @@ describe('buildBlips', () => {
   });
 
   it('classifies entity with no recognised tag as asteroid', () => {
-    const blips = buildBlips([{ uuid: 'x', x: 1, z: 0, tags: ['region'] }], 0, 0, 0, 100);
+    const blips = buildBlips([{ uuid: 'x', x: 1, z: 0, tags: ['unknown'] }], 0, 0, 0, 100);
     expect(blips[0].kind).toBe('asteroid');
   });
 
@@ -122,6 +122,31 @@ describe('buildBlips', () => {
     expect(blips[0].name).toBe('Zeta');
     expect(blips[0].faction).toBe('pirate');
   });
+
+  it('filters visible blips by opts.shows', () => {
+    const blips = buildBlips(
+      [
+        { uuid: 'ship-1', x: 1, z: 0, tags: ['ship'] },
+        { uuid: 'planet-1', x: 2, z: 0, tags: ['planet'] },
+      ],
+      0, 0, 0, 100,
+      { shows: ['ship'] }
+    );
+    expect(blips.map(b => b.uuid)).toEqual(['ship-1']);
+  });
+
+  it('marks blips selectable from target_tags and opts.selects', () => {
+    const blips = buildBlips(
+      [
+        { uuid: 'ship-1', x: 1, z: 0, tags: ['ship'], target_tags: ['ship'] },
+        { uuid: 'rock-1', x: 2, z: 0, tags: ['asteroid'], target_tags: ['asteroid'] },
+      ],
+      0, 0, 0, 100,
+      { shows: ['ship', 'asteroid'], selects: ['ship'] }
+    );
+    expect(blips.find(b => b.uuid === 'ship-1').selectable).toBe(true);
+    expect(blips.find(b => b.uuid === 'rock-1').selectable).toBe(false);
+  });
 });
 
 // ── State builders — all return valid JSON ─────────────────────────────────────
@@ -161,12 +186,23 @@ describe('buildWeaponsConsoleState', () => {
     const state = {
       shipX: 0, shipZ: 0, shipYaw: 0,
       asteroids: [
-        { uuid: 'close', x: 1, z: 0, tags: [] },
-        { uuid: 'far', x: WEAPONS_RADAR_RANGE + 1, z: 0, tags: [] },
+        { uuid: 'close', x: 1, z: 0, tags: ['asteroid'] },
+        { uuid: 'far', x: WEAPONS_RADAR_RANGE + 1, z: 0, tags: ['asteroid'] },
       ],
     };
     const s = parse(buildWeaponsConsoleState(state));
     expect(s.blips.map(b => b.uuid)).toEqual(['close']);
+  });
+
+  it('uses authoritative server blips when WeaponsUpdate provided them', () => {
+    const serverBlips = [
+      { uuid: 'srv-1', radar_x: 0.2, radar_y: 0.1, scaled_radius: 0.02, kind: 'ship', selectable: true },
+    ];
+    const s = parse(buildWeaponsConsoleState({
+      weaponsBlips: serverBlips,
+      asteroids: [{ uuid: 'fallback-1', x: 1, z: 0, tags: ['asteroid'] }],
+    }));
+    expect(s.blips).toEqual(serverBlips);
   });
 });
 
@@ -333,6 +369,19 @@ describe('buildSensorsConsoleState', () => {
     expect(blips[0].stance).toBe('hostile');
     expect(blips[0].faction).toBe('pirate');
     expect(blips[0].color).toBeNull();
+  });
+
+  it('marks sensor-visible ships selectable and asteroids untargetable by default', () => {
+    const state = {
+      shipX: 0, shipZ: 0, shipYaw: 0,
+      asteroids: [
+        { uuid: 'ship-1', x: 10, z: 0, tags: ['ship'], target_tags: ['ship'] },
+        { uuid: 'rock-1', x: 20, z: 0, tags: ['asteroid'], target_tags: ['asteroid'] },
+      ],
+    };
+    const blips = parse(buildSensorsConsoleState(state)).blips;
+    expect(blips.find(b => b.uuid === 'ship-1').selectable).toBe(true);
+    expect(blips.find(b => b.uuid === 'rock-1').selectable).toBe(false);
   });
 
   it('target_uuid and derived fields are null when no sensorsTarget', () => {

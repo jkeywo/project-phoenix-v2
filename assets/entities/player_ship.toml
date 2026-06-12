@@ -152,7 +152,7 @@ offline_duration = 10.0
 [engineering_console]
 
 [radar_appearance]
-colour = [0.6, 0.8, 1.0]
+colour = [0.0, 1.0, 0.2]
 radius = 6.0
 icon = "player_ship"
 

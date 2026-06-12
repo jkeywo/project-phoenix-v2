@@ -49,6 +49,9 @@ pub enum RadarIcon {
     Planet,
     Star,
     Torpedo,
+    Battleship,
+    Cruiser,
+    Destroyer,
 }
 
 /// How a region entity's shape is rendered on the 2D radar projection.
@@ -441,6 +444,9 @@ fn setup_radar_blip_fallback(mut commands: Commands, mut images: ResMut<Assets<I
 /// - `"missile"`, `"torpedo"` → `Torpedo`
 /// - `"planet"` → `Planet`
 /// - `"star"` → `Star`
+/// - `"battleship"` → `Battleship`
+/// - `"cruiser"` → `Cruiser`
+/// - `"destroyer"` → `Destroyer`
 /// - anything else → `Ship` (defensive fallback)
 pub fn icon_from_radar_icon_str(s: &str) -> RadarIcon {
     match s {
@@ -451,6 +457,9 @@ pub fn icon_from_radar_icon_str(s: &str) -> RadarIcon {
         "missile" | "torpedo" => RadarIcon::Torpedo,
         "planet" => RadarIcon::Planet,
         "star" => RadarIcon::Star,
+        "battleship" => RadarIcon::Battleship,
+        "cruiser" => RadarIcon::Cruiser,
+        "destroyer" => RadarIcon::Destroyer,
         _ => RadarIcon::Ship,
     }
 }

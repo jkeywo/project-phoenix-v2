@@ -44,7 +44,7 @@ auto_arc_deg = 180.0
 [radar_appearance]
 colour = [1.0, 0.2, 0.2]
 radius = 4.0
-icon = "ship"
+icon = "destroyer"
 
 [mesh]
 model = "assets/models/dynasty_destroyer.glb"

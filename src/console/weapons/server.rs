@@ -1308,14 +1308,17 @@ fn project_blip(
 /// explicit colour.  Mirrors the `KIND_COLOR` palette in `radar-widget.js`.
 fn blip_default_color(icon: &str) -> [f32; 3] {
     match icon {
-        "asteroid" => [0.478, 0.753, 1.0],    // #7ac0ff
-        "ship"     => [1.0, 0.502, 0.376],    // #ff8060
-        "station"  => [1.0, 0.878, 0.376],    // #ffe060
-        "torpedo"  => [1.0, 0.376, 1.0],      // #ff60ff
-        "planet"   => [0.376, 1.0, 0.753],    // #60ffc0
-        "star"     => [1.0, 0.980, 0.753],    // #fffac0
-        "player"   => [0.424, 0.714, 0.816],  // #6cb6d0
-        _          => [0.659, 0.690, 0.753],  // #a8b0c0 unknown
+        "asteroid"   => [0.478, 0.753, 1.0],   // #7ac0ff
+        "ship"       => [1.0, 0.502, 0.376],    // #ff8060
+        "station"    => [1.0, 0.878, 0.376],    // #ffe060
+        "torpedo"    => [1.0, 0.376, 1.0],      // #ff60ff
+        "planet"     => [0.376, 1.0, 0.753],    // #60ffc0
+        "star"       => [1.0, 0.980, 0.753],    // #fffac0
+        "player"     => [0.0, 1.0, 0.2],        // green — player ship
+        "battleship" => [0.9, 0.2, 0.05],       // dark red — large enemy
+        "cruiser"    => [0.8, 0.3, 0.1],        // orange-red — medium enemy
+        "destroyer"  => [1.0, 0.2, 0.2],        // bright red — small enemy
+        _            => [0.659, 0.690, 0.753],  // #a8b0c0 unknown
     }
 }
 

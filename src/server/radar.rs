@@ -148,6 +148,9 @@ fn load_server_radar_icons(
     lookup.0.insert(RadarIcon::Planet, asset_server.load("radar_icons/Icon-Planet.png"));
     lookup.0.insert(RadarIcon::Star, asset_server.load("radar_icons/Icon-Star.png"));
     lookup.0.insert(RadarIcon::Torpedo, asset_server.load("radar_icons/Icon-Torpedo.png"));
+    lookup.0.insert(RadarIcon::Battleship, asset_server.load("radar_icons/Icon-Battleship.png"));
+    lookup.0.insert(RadarIcon::Cruiser, asset_server.load("radar_icons/Icon-Cruiser.png"));
+    lookup.0.insert(RadarIcon::Destroyer, asset_server.load("radar_icons/Icon-Destroyer.png"));
 }
 
 // ── Startup system: radar widgets ─────────────────────────────────────────────

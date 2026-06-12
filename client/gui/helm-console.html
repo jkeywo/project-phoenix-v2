@@ -229,15 +229,23 @@
     .impulse-overlay {
       position: absolute;
       inset: 0;
-      display: none;
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 12px;
       background: rgba(5, 8, 24, 0.7);
       z-index: 5;
+      transition: opacity 0.1s ease, visibility 0s 0.1s;
     }
-    .impulse-overlay.show { display: flex; }
+    .impulse-overlay.show {
+      visibility: visible;
+      opacity: 1;
+      pointer-events: auto;
+      transition: opacity 0.1s ease, visibility 0s 0s;
+    }
     .impulse-bar-wrap {
       width: 200px;
       height: 12px;

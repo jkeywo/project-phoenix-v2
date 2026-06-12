@@ -6,6 +6,7 @@
 [[comms]]
 thread_id  = "research-scholar"
 from       = "Research Outpost"
+speaker    = "Dr. Myst"
 trigger    = "on_world_loaded"
 entity     = "Research Outpost"
 delay_secs = 3.0
@@ -16,7 +17,7 @@ message    = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying
   text = "What happens if it fires?"
 
     [comms.response.follow_up]
-    from       = "Dr. Myst"
+    speaker    = "Dr. Myst"
     delay_secs = 2.0
     message    = "If it fires at full charge it will create a persistent quantum interference zone across this system. It's not a targeted weapon — it's a geography weapon. Navigation through this system will be effectively impossible for decades. The charge cycle is approximately twenty minutes. I don't know how far along they are. The signature is already strong."
 
@@ -33,7 +34,7 @@ message    = "Ardent, this is Dr. Myst at the Research Outpost. I've been trying
   text = "Is there anything unusual about the signal?"
 
     [comms.response.follow_up]
-    from       = "Dr. Myst"
+    speaker    = "Dr. Myst"
     delay_secs = 2.0
     message    = "Yes — there's a sub-harmonic embedded in the resonance signature I cannot explain. It doesn't match any known Harrow or Imperium technology. It may be nothing. Or it may be something this system has been doing for longer than the Harrow have been pointing weapons at it. I've flagged it in my logs."
 

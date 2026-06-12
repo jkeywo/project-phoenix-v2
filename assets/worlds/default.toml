@@ -64,7 +64,7 @@ transform = { position = [600.0, 0.0, -600.0] }
 # `relative_to = "..." + offset = [x,y,z]` (relative to another named entity).
 
 [[entity]]
-template_path = "assets/entities/station_outpost.toml"
+template_path = "assets/entities/station_axiom.toml"
 name = "Starbase Alpha"
 transform = { anchor = "starbase_alpha" }
 

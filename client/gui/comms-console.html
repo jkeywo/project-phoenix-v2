@@ -386,44 +386,57 @@
 
     function _renderContacts(contacts) {
       var strip = document.getElementById('contacts-strip');
-      strip.innerHTML = '';
       if (contacts.length === 0) {
+        strip.innerHTML = '';
         var ph = document.createElement('span');
         ph.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:0.2em;color:var(--ink-faint);padding:4px 0;';
         ph.textContent = 'NO CONTACTS';
         strip.appendChild(ph);
         return;
       }
+      var existing = {};
+      for (var i = 0; i < strip.children.length; i++) {
+        var ch = strip.children[i];
+        if (ch.dataset && ch.dataset.uuid) existing[ch.dataset.uuid] = ch;
+      }
+      var seen = {};
       contacts.forEach(function(c) {
-        var pill = document.createElement('button');
-        pill.type = 'button';
+        seen[c.uuid] = true;
+        var pill = existing[c.uuid];
+        if (!pill) {
+          pill = document.createElement('button');
+          pill.type = 'button';
+          pill.dataset.uuid = c.uuid;
+          strip.appendChild(pill);
+        }
         pill.className = 'contact-pill' +
           (c.is_urgent ? ' urgent' : '') +
           (c.in_range === false ? ' out-of-range' : '');
-        pill.dataset.uuid = c.uuid;
         pill.textContent = c.name.toUpperCase();
-        if (c.in_range !== false) {
+        pill.disabled = (c.in_range === false);
+        // Wire click once; preserve on re-render.
+        if (!pill._hailWired) {
           pill.addEventListener('click', function() {
             if (typeof window._sendCommsAction === 'function') {
-              window._sendCommsAction('hail', { target_uuid: c.uuid });
+              window._sendCommsAction('hail', { target_uuid: pill.dataset.uuid });
             }
           });
-        } else {
-          pill.disabled = true;
+          pill._hailWired = true;
         }
-        strip.appendChild(pill);
       });
+      for (var key in existing) {
+        if (!seen[key]) existing[key].remove();
+      }
     }
 
     function _renderInbox(messages) {
       var list  = document.getElementById('inbox-list');
-      var ph    = document.getElementById('no-msgs-placeholder');
       var count = document.getElementById('inbox-count');
 
       count.textContent = String(messages.length);
-      list.innerHTML = '';
 
       if (messages.length === 0) {
+        list.innerHTML = '';
         var p = document.createElement('div');
         p.className = 'no-msgs';
         p.id = 'no-msgs-placeholder';
@@ -432,97 +445,172 @@
         return;
       }
 
+      var existing = {};
+      for (var i = 0; i < list.children.length; i++) {
+        var ch = list.children[i];
+        if (ch.dataset && ch.dataset.id) existing[ch.dataset.id] = ch;
+      }
+      var seen = {};
       messages.forEach(function(m) {
-        var row = document.createElement('div');
+        seen[m.id] = true;
+        var row = existing[m.id];
+        if (!row) {
+          row = document.createElement('div');
+          row.dataset.id = m.id;
+          row.addEventListener('click', function() {
+            _selectedId = row.dataset.id;
+            if (typeof window._sendCommsAction === 'function') {
+              window._sendCommsAction('select_comms_message', { message_id: row.dataset.id });
+            }
+            if (_state) _render(_state);
+          });
+          var sender = document.createElement('span');
+          sender.className = 'msg-sender';
+          var subject = document.createElement('span');
+          subject.className = 'msg-subject';
+          var tag = document.createElement('span');
+          tag.className = 'msg-tag';
+          row.appendChild(sender);
+          row.appendChild(subject);
+          row.appendChild(tag);
+          list.appendChild(row);
+        }
         row.className = 'msg-row' +
           (m.id === _selectedId ? ' selected' : '') +
           (!m.is_read ? ' unread' : '') +
           (m.is_urgent && !m.is_read ? ' urgent' : '') +
           (m.is_orphaned ? ' orphaned' : '');
-        row.dataset.id = m.id;
-
-        var sender = document.createElement('span');
-        sender.className = 'msg-sender';
-        sender.textContent = m.sender_name.toUpperCase();
-
-        var subject = document.createElement('span');
-        subject.className = 'msg-subject';
-        subject.textContent = m.subject;
-
-        var tag = document.createElement('span');
-        tag.className = 'msg-tag ' +
+        row.children[0].textContent = m.sender_name.toUpperCase();
+        row.children[1].textContent = m.subject;
+        row.children[2].className = 'msg-tag ' +
           (m.is_urgent && !m.is_read ? 'urgent-tag' : m.is_read ? 'read-tag' : 'unread-tag');
-        tag.textContent = m.is_urgent && !m.is_read ? '!' : m.is_read ? '✓' : '●';
-
-        row.appendChild(sender);
-        row.appendChild(subject);
-        row.appendChild(tag);
-
-        row.addEventListener('click', function() {
-          _selectedId = m.id;
-          if (typeof window._sendCommsAction === 'function') {
-            window._sendCommsAction('select_comms_message', { message_id: m.id });
-          }
-          // Re-render with new selection (state will also be re-pushed by server).
-          if (_state) _render(_state);
-        });
-
-        list.appendChild(row);
+        row.children[2].textContent = m.is_urgent && !m.is_read ? '!' : m.is_read ? '✓' : '●';
       });
+      for (var key in existing) {
+        if (!seen[key]) existing[key].remove();
+      }
     }
+
+    var _prevChatMsgId = null;
 
     function _renderChat(messages) {
       var panel = document.getElementById('chat-panel');
-      panel.innerHTML = '';
-
       var msg = messages.find(function(m) { return m.id === _selectedId; });
 
       if (!msg) {
+        panel.innerHTML = '';
         var ph = document.createElement('div');
         ph.className = 'chat-placeholder';
         ph.id = 'chat-placeholder';
         ph.textContent = 'SELECT A MESSAGE';
         panel.appendChild(ph);
+        _prevChatMsgId = null;
         return;
       }
 
-      // Header row
+      var sameMsg = (msg.id === _prevChatMsgId);
+      _prevChatMsgId = msg.id;
+
+      if (sameMsg) {
+        // In-place update: update text/classes on existing elements.
+        var badge = panel.querySelector('.chat-badge');
+        if (badge) badge.textContent = msg.is_orphaned ? 'TRANSMISSION ENDED' :
+          msg.sender_in_range === false ? 'OUT OF RANGE' :
+          msg.is_read ? 'READ' : 'UNREAD';
+        var bodyEl = panel.querySelector('.chat-body');
+        if (bodyEl) bodyEl.textContent = msg.body;
+        var subjEl = panel.querySelector('.chat-subject-line');
+        if (subjEl) subjEl.textContent = msg.subject.toUpperCase();
+        // Update response buttons in-place.
+        var actions = panel.querySelector('#response-buttons');
+        if (actions) _syncResponseBtns(actions, msg);
+        // Update footer row.
+        var footerRow = panel.querySelector('.chat-footer-row');
+        if (footerRow) _syncChatFooter(footerRow, msg);
+        return;
+      }
+
+      // New message: full build.
+      panel.innerHTML = '';
+
       var hdr = document.createElement('div');
       hdr.className = 'chat-header';
-
       var senderEl = document.createElement('span');
       senderEl.className = 'chat-sender';
       senderEl.textContent = msg.sender_name.toUpperCase();
       hdr.appendChild(senderEl);
-
       var badge = document.createElement('span');
       badge.className = 'chat-badge';
       badge.textContent = msg.is_orphaned ? 'TRANSMISSION ENDED' :
-                          msg.sender_in_range === false ? 'OUT OF RANGE' :
-                          msg.is_read ? 'READ' : 'UNREAD';
+        msg.sender_in_range === false ? 'OUT OF RANGE' :
+        msg.is_read ? 'READ' : 'UNREAD';
       hdr.appendChild(badge);
       panel.appendChild(hdr);
 
-      // Subject
       var subj = document.createElement('div');
+      subj.className = 'chat-subject-line';
       subj.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:0.2em;color:var(--ink-faint);flex-shrink:0;';
       subj.textContent = msg.subject.toUpperCase();
       panel.appendChild(subj);
 
-      // Body
       var body = document.createElement('div');
       body.className = 'chat-body';
       body.id = 'chat-body';
       body.textContent = msg.body;
       panel.appendChild(body);
 
-      // Response buttons
       var actions = document.createElement('div');
       actions.className = 'chat-actions';
       actions.id = 'response-buttons';
+      _rebuildResponseBtns(actions, msg);
+      panel.appendChild(actions);
 
+      var footerRow = document.createElement('div');
+      footerRow.className = 'chat-footer-row';
+      _rebuildChatFooter(footerRow, msg);
+      panel.appendChild(footerRow);
+    }
+
+    function _syncResponseBtns(actions, msg) {
       var canRespond = !msg.is_orphaned && msg.sender_in_range !== false;
+      var existing = {};
+      for (var i = 0; i < actions.children.length; i++) {
+        var ch = actions.children[i];
+        existing[ch.dataset.responseIndex] = ch;
+      }
+      var seen = {};
+      (msg.responses || []).forEach(function(resp, idx) {
+        var key = String(idx);
+        seen[key] = true;
+        var btn = existing[key];
+        if (!btn) {
+          btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.responseIndex = key;
+          btn.dataset.msgId = msg.id;
+          btn.addEventListener('click', function() {
+            if (typeof window._sendCommsAction === 'function') {
+              window._sendCommsAction('respond_to_message', {
+                message_id: btn.dataset.msgId,
+                response_index: parseInt(btn.dataset.responseIndex),
+              });
+            }
+          });
+          actions.appendChild(btn);
+        }
+        btn.dataset.msgId = msg.id;
+        btn.className = 'response-btn' +
+          (msg.selected_response === idx ? ' selected-response' : '');
+        btn.textContent = resp;
+        btn.disabled = !canRespond || msg.selected_response != null;
+      });
+      for (var key in existing) {
+        if (!seen[key]) existing[key].remove();
+      }
+    }
 
+    function _rebuildResponseBtns(actions, msg) {
+      var canRespond = !msg.is_orphaned && msg.sender_in_range !== false;
       (msg.responses || []).forEach(function(resp, idx) {
         var btn = document.createElement('button');
         btn.type = 'button';
@@ -545,13 +633,10 @@
         }
         actions.appendChild(btn);
       });
+    }
 
-      panel.appendChild(actions);
-
-      // Footer row: On Screen + out-of-range note
-      var footerRow = document.createElement('div');
-      footerRow.className = 'chat-footer-row';
-
+    function _syncChatFooter(footerRow, msg) {
+      footerRow.innerHTML = '';
       if (!msg.is_orphaned) {
         var onScreenBtn = document.createElement('button');
         onScreenBtn.type = 'button';
@@ -565,7 +650,6 @@
         });
         footerRow.appendChild(onScreenBtn);
       }
-
       if (msg.sender_in_range === false) {
         var note = document.createElement('span');
         note.className = 'out-of-range-note';
@@ -577,8 +661,33 @@
         note2.textContent = 'TRANSMISSION ENDED';
         footerRow.appendChild(note2);
       }
+    }
 
-      panel.appendChild(footerRow);
+    function _rebuildChatFooter(footerRow, msg) {
+      if (!msg.is_orphaned) {
+        var onScreenBtn = document.createElement('button');
+        onScreenBtn.type = 'button';
+        onScreenBtn.className = 'on-screen-btn';
+        onScreenBtn.id = 'on-screen-btn';
+        onScreenBtn.textContent = 'ON SCREEN';
+        onScreenBtn.addEventListener('click', function() {
+          if (typeof window._sendCommsAction === 'function') {
+            window._sendCommsAction('show_on_screen', { message_id: msg.id });
+          }
+        });
+        footerRow.appendChild(onScreenBtn);
+      }
+      if (msg.sender_in_range === false) {
+        var note = document.createElement('span');
+        note.className = 'out-of-range-note';
+        note.textContent = 'OUT OF RANGE';
+        footerRow.appendChild(note);
+      } else if (msg.is_orphaned) {
+        var note2 = document.createElement('span');
+        note2.className = 'orphaned-note';
+        note2.textContent = 'TRANSMISSION ENDED';
+        footerRow.appendChild(note2);
+      }
     }
 
     function _renderFooter(s) {

@@ -89,6 +89,167 @@
       .section-header { font-size: 14px; }
     }
 
+    /* Short landscape phones: keep the whole console inside the iframe. */
+    @media (orientation: landscape) and (max-height: 480px) {
+      body { overflow: hidden; }
+      .panel-inner {
+        padding: 8px 14px 10px;
+        gap: 5px;
+      }
+      .panel-mid {
+        gap: 10px;
+      }
+      .panel-mid > .radar-col {
+        max-width: 46%;
+        gap: 5px;
+      }
+      .panel-mid > .ctrl-col {
+        gap: 6px;
+      }
+      .panel-inner > .hero {
+        padding: 0;
+      }
+      .hero {
+        gap: 7px;
+      }
+      .hero h1 {
+        font-size: clamp(18px, 5.2vh, 24px);
+        letter-spacing: 0.14em;
+      }
+      .hero h1 .sub,
+      .hero .bar,
+      .hero .complexity,
+      .hero .hull {
+        display: none;
+      }
+      .side-rail,
+      .footer-bar {
+        display: none;
+      }
+      .radar-col .radar {
+        max-height: calc(100dvh - 54px);
+        max-width: calc(100dvh - 54px);
+      }
+      .radar-col > .readout {
+        padding: 4px 9px;
+        gap: 6px;
+      }
+      .radar-col > .readout .v,
+      #target-name {
+        font-size: clamp(14px, 4.4vh, 18px) !important;
+      }
+      .radar-col > .readout .k,
+      .radar-col > .readout .sub {
+        font-size: 9px;
+        line-height: 1.2;
+      }
+      .ctrl-col .inset .inset-body {
+        padding: 6px 10px;
+      }
+      .ctrl-col .section-header {
+        margin-bottom: 3px;
+        font-size: clamp(10px, 3.1vh, 12px);
+        letter-spacing: 0.18em;
+      }
+      .ctrl-col .section-header .tag {
+        font-size: 8px;
+        padding: 1px 4px;
+      }
+      .ctrl-col .readout {
+        padding: 3px 8px;
+        gap: 6px;
+      }
+      .ctrl-col .readout .v,
+      .ctrl-col .readout .v.tactical {
+        font-size: clamp(18px, 6vh, 23px);
+      }
+      .ctrl-col .readout .k,
+      .ctrl-col .readout .u,
+      .ctrl-col .readout .sub {
+        font-size: 8px;
+      }
+      .ctrl-col .tubes {
+        gap: 4px;
+        margin-top: 3px;
+      }
+      .ctrl-col .chip {
+        --h: clamp(24px, 7.5dvh, 32px);
+        padding: 0 5px;
+        font-size: clamp(9px, 2.8vh, 11px);
+        letter-spacing: 0.14em;
+      }
+      .ctrl-col .tube-status-row {
+        gap: 4px;
+        margin-top: 3px;
+      }
+      .ctrl-col .tube-status {
+        height: clamp(16px, 5dvh, 20px);
+        gap: 4px;
+        font-size: clamp(8px, 2.5vh, 10px);
+        letter-spacing: 0.12em;
+      }
+      .ctrl-col .tube-status .dot {
+        width: 5px;
+        height: 5px;
+      }
+      .ctrl-col .btn {
+        --h: clamp(28px, 9dvh, 38px);
+        padding: 0 8px 0 28px;
+        font-size: clamp(10px, 3.2vh, 13px);
+        letter-spacing: 0.14em;
+      }
+      .ctrl-col .btn .led {
+        width: 10px;
+        height: 10px;
+        left: 9px;
+      }
+      .ctrl-col .fire-row {
+        margin-top: 4px;
+      }
+      .ctrl-col .fire-row[style] {
+        padding-top: 5px !important;
+      }
+      .ctrl-col [data-hideable="phaser_mode_selector"] {
+        gap: 6px !important;
+      }
+      .mini-toggle {
+        font-size: 8px;
+        letter-spacing: 0.1em;
+      }
+      .mini-toggle .opt {
+        padding: 4px 6px;
+      }
+      .ctrl-col .cooldown {
+        padding: 3px 0;
+        gap: 6px;
+      }
+      .ctrl-col .cooldown .label {
+        font-size: 8px;
+      }
+      .ctrl-col .cooldown .bar {
+        height: 8px;
+      }
+      .ctrl-col .cooldown .value {
+        min-width: 46px;
+        font-size: 10px;
+      }
+      .ctrl-col .frequency {
+        padding: 3px 0 1px;
+        gap: 3px;
+      }
+      .ctrl-col .frequency .freq-bar {
+        height: 10px;
+      }
+      .freq-row {
+        display: none;
+      }
+      .help-btn {
+        width: 1.4rem;
+        height: 1.4rem;
+        font-size: 0.8rem;
+      }
+    }
+
     /* Side-rail micro-labels (centred top/bottom of frame) */
     .side-rail {
       position: absolute;

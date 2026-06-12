@@ -78,8 +78,24 @@
     .diagram-wrap {
       position: relative; width: 100%; max-width: 520px; aspect-ratio: 1/1;
       display: flex; align-items: center; justify-content: center;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(2, 10, 24, 0.18) 0%, rgba(2, 10, 24, 0.84) 68%, rgba(2, 10, 24, 0.98) 100%),
+        url("../assets/shield_console/shield-hex-bg.png") center / 118% 118% no-repeat;
     }
     .diagram-wrap svg { display: block; width: 100%; height: 100%; }
+    .shield-segment {
+      cursor: pointer;
+      transition: opacity 120ms ease, stroke-width 120ms ease, filter 120ms ease;
+    }
+    .shield-segment:hover,
+    .shield-segment:focus {
+      opacity: 0.9;
+      filter: drop-shadow(0 0 5px rgba(108,182,208,0.6));
+      outline: none;
+    }
+    .shield-segment.focused {
+      filter: drop-shadow(0 0 9px rgba(240,132,56,0.85));
+    }
     .diagram-wrap .corner-readout {
       position: absolute; font-family: "JetBrains Mono", monospace;
       font-size: 11px; letter-spacing: 0.16em; color: var(--ink-dim); line-height: 1.4;
@@ -107,7 +123,7 @@
       --cham: 9px; background: linear-gradient(180deg, #0e1633 0%, #060b1f 100%);
       clip-path: polygon(var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham), 100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%, var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham));
       width: 100%; height: 100%; padding: 10px 14px;
-      display: flex; flex-direction: column; gap: 6px; cursor: pointer;
+      display: flex; flex-direction: column; gap: 6px;
     }
     .quad-card.focused { background: linear-gradient(180deg, var(--tactical) 0%, #6a3a14 60%, #2c1808 100%); box-shadow: 0 0 24px rgba(240,132,56,0.25); }
     .quad-card.focused > .qc-body { background: radial-gradient(ellipse at 50% 0%, rgba(240,132,56,0.22) 0%, transparent 60%), linear-gradient(180deg, #1e1408 0%, #100a04 100%); }
@@ -133,18 +149,6 @@
     .qc-meta { display: flex; justify-content: space-between; font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.18em; color: var(--ink-faint); }
     .qc-meta .k { color: var(--ink-faint); }
     .qc-meta .v { color: var(--ink-dim); }
-
-    /* ── Focus button ────────────────────────────────────────── */
-    .focus-row { display: flex; gap: 8px; margin-top: 4px; }
-    .focus-btn {
-      flex: 1; --cham: 6px; height: 32px; border: none; cursor: pointer;
-      clip-path: polygon(var(--cham) 0, calc(100% - var(--cham)) 0, 100% var(--cham), 100% calc(100% - var(--cham)), calc(100% - var(--cham)) 100%, var(--cham) 100%, 0 calc(100% - var(--cham)), 0 var(--cham));
-      background: var(--bg-up); color: var(--ink-dim);
-      font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.2em;
-    }
-    .focus-btn.active { background: var(--tactical); color: #fff; box-shadow: 0 0 12px rgba(240,132,56,0.4); }
-    .focus-btn.clear { background: var(--reloading-dim); color: var(--ink-faint); }
-    .focus-btn.clear.active { background: var(--reloading); color: #fff; }
 
     /* ── Footer ──────────────────────────────────────────────── */
     .footer-bar {
@@ -175,7 +179,6 @@
       .hull-row .val { font-size: 16px; }
       .sec-lbl { font-size: 12px; }
       .footer-bar { font-size: 9px; gap: 8px; flex-wrap: wrap; }
-      .focus-btn { height: 28px; font-size: 9px; }
     }
   </style>
 </head>
@@ -229,15 +232,6 @@
             </div>
           </div>
 
-          <!-- Focus buttons (no power allocation panel) -->
-          <div class="sec-lbl">FOCUS<span class="tag">SELECT QUADRANT</span></div>
-          <div class="focus-row">
-            <button class="focus-btn" data-facing="Fore" onclick="onFocus('Fore')">FORE</button>
-            <button class="focus-btn" data-facing="Port" onclick="onFocus('Port')">PORT</button>
-            <button class="focus-btn" data-facing="Aft" onclick="onFocus('Aft')">AFT</button>
-            <button class="focus-btn" data-facing="Starboard" onclick="onFocus('Starboard')">STBD</button>
-            <button class="focus-btn clear" onclick="onFocus(null)">CLEAR</button>
-          </div>
         </div>
 
         <!-- CENTER COL -->
@@ -254,13 +248,13 @@
               <!-- Crosshair -->
               <line x1="20" y1="100" x2="180" y2="100" stroke="var(--line-faint)" stroke-width="0.3" opacity="0.3"/>
               <line x1="100" y1="20" x2="100" y2="180" stroke="var(--line-faint)" stroke-width="0.3" opacity="0.3"/>
-              <!-- Ship icon in centre -->
-              <polygon points="100,15 107,45 107,55 100,60 93,55 93,45" fill="var(--cyan)" opacity="0.6"/>
               <!-- Quadrant arcs -->
-              <path id="arc-fore" fill="none" stroke="var(--cyan)" stroke-width="3" opacity="0.6"/>
-              <path id="arc-aft" fill="none" stroke="var(--cyan)" stroke-width="3" opacity="0.6"/>
-              <path id="arc-port" fill="none" stroke="var(--cyan)" stroke-width="3" opacity="0.6"/>
-              <path id="arc-stbd" fill="none" stroke="var(--cyan)" stroke-width="3" opacity="0.6"/>
+              <path id="arc-fore" class="shield-segment" data-facing="Fore" tabindex="0" role="button" aria-label="Focus fore shields" fill="var(--cyan)" stroke="var(--cyan)" stroke-width="1.6" opacity="0.38"/>
+              <path id="arc-aft" class="shield-segment" data-facing="Aft" tabindex="0" role="button" aria-label="Focus aft shields" fill="var(--cyan)" stroke="var(--cyan)" stroke-width="1.6" opacity="0.38"/>
+              <path id="arc-port" class="shield-segment" data-facing="Port" tabindex="0" role="button" aria-label="Focus port shields" fill="var(--cyan)" stroke="var(--cyan)" stroke-width="1.6" opacity="0.38"/>
+              <path id="arc-stbd" class="shield-segment" data-facing="Starboard" tabindex="0" role="button" aria-label="Focus starboard shields" fill="var(--cyan)" stroke="var(--cyan)" stroke-width="1.6" opacity="0.38"/>
+              <!-- Ship icon in centre -->
+              <polygon points="100,15 107,45 107,55 100,60 93,55 93,45" fill="var(--cyan)" opacity="0.6" pointer-events="none"/>
               <!-- Threat indicator (triangle on perimeter) -->
               <polygon id="threat-arrow" points="0,0 0,0 0,0" fill="var(--fire-bright)" opacity="0.8" display="none"/>
             </svg>
@@ -303,13 +297,13 @@
     };
 
     var QUADRANT_ORDER = ['Fore', 'Port', 'Aft', 'Starboard'];
-    var _focusedFacing = null;
 
     function onFocus(facing) {
-      _focusedFacing = facing;
+      var nextFacing = (_state.focused_facing === facing) ? null : facing;
       if (typeof window._sendShieldAction === 'function') {
-        window._sendShieldAction('set_shield_focus', { facing: facing });
+        window._sendShieldAction('set_shield_focus', { facing: nextFacing });
       }
+      _state.focused_facing = nextFacing;
       _rerender();
     }
 
@@ -336,13 +330,26 @@
       return { v: Math.round(20 + (100 - pct) * 0.8) + 'S', cls: '' };
     }
 
-    function quadrantArcPath(cx, cy, r, startAngle, endAngle) {
-      var x1 = cx + r * Math.sin(startAngle);
-      var y1 = cy - r * Math.cos(startAngle);
-      var x2 = cx + r * Math.sin(endAngle);
-      var y2 = cy - r * Math.cos(endAngle);
+    function polarPoint(cx, cy, r, angle) {
+      return {
+        x: cx + r * Math.sin(angle),
+        y: cy - r * Math.cos(angle)
+      };
+    }
+
+    function shieldSegmentPath(cx, cy, innerR, outerR, startAngle, endAngle) {
+      var outerStart = polarPoint(cx, cy, outerR, startAngle);
+      var outerEnd = polarPoint(cx, cy, outerR, endAngle);
+      var innerStart = polarPoint(cx, cy, innerR, startAngle);
+      var innerEnd = polarPoint(cx, cy, innerR, endAngle);
       var large = (endAngle - startAngle) > Math.PI ? 1 : 0;
-      return 'M ' + cx + ' ' + cy + ' L ' + x1 + ' ' + y1 + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2 + ' ' + y2 + ' Z';
+      return [
+        'M', outerStart.x, outerStart.y,
+        'A', outerR, outerR, 0, large, 1, outerEnd.x, outerEnd.y,
+        'L', innerEnd.x, innerEnd.y,
+        'A', innerR, innerR, 0, large, 0, innerStart.x, innerStart.y,
+        'Z'
+      ].join(' ');
     }
 
     function _rerender() {
@@ -374,13 +381,6 @@
         threatBearing.textContent = '—';
       }
 
-      // Focus buttons
-      var focusBtns = document.querySelectorAll('.focus-btn');
-      focusBtns.forEach(function(btn) {
-        var facing = btn.dataset.facing;
-        btn.classList.toggle('active', facing === s.focused_facing);
-      });
-
       // Threat arrow on SVG
       var threatArrow = document.getElementById('threat-arrow');
       if (s.target_bearing != null) {
@@ -398,7 +398,7 @@
       }
 
       // Shield diagram arcs
-      var CX = 100, CY = 100, R = 65;
+      var CX = 100, CY = 100, INNER_R = 34, MIN_OUTER_R = 46, MAX_OUTER_R = 78;
       var arcFore = document.getElementById('arc-fore');
       var arcAft = document.getElementById('arc-aft');
       var arcPort = document.getElementById('arc-port');
@@ -414,30 +414,38 @@
       var portPct = portQ ? (portQ.hp / Math.max(portQ.max_hp, 1)) : 0;
       var stbdPct = stbdQ ? (stbdQ.hp / Math.max(stbdQ.max_hp, 1)) : 0;
 
-      var foreR = R * (0.3 + 0.7 * forePct);
-      var aftR = R * (0.3 + 0.7 * aftPct);
-      var portR = R * (0.3 + 0.7 * portPct);
-      var stbdR = R * (0.3 + 0.7 * stbdPct);
+      var foreR = MIN_OUTER_R + (MAX_OUTER_R - MIN_OUTER_R) * forePct;
+      var aftR = MIN_OUTER_R + (MAX_OUTER_R - MIN_OUTER_R) * aftPct;
+      var portR = MIN_OUTER_R + (MAX_OUTER_R - MIN_OUTER_R) * portPct;
+      var stbdR = MIN_OUTER_R + (MAX_OUTER_R - MIN_OUTER_R) * stbdPct;
 
-      arcFore.setAttribute('d', quadrantArcPath(CX, CY, foreR, -Math.PI/4, Math.PI/4));
-      arcAft.setAttribute('d', quadrantArcPath(CX, CY, aftR, 3*Math.PI/4, 5*Math.PI/4));
-      arcPort.setAttribute('d', quadrantArcPath(CX, CY, portR, Math.PI/4, 3*Math.PI/4));
-      arcStbd.setAttribute('d', quadrantArcPath(CX, CY, stbdR, 5*Math.PI/4, 7*Math.PI/4));
+      arcFore.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, foreR, -Math.PI/4, Math.PI/4));
+      arcAft.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, aftR, 3*Math.PI/4, 5*Math.PI/4));
+      arcPort.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, portR, Math.PI/4, 3*Math.PI/4));
+      arcStbd.setAttribute('d', shieldSegmentPath(CX, CY, INNER_R, stbdR, 5*Math.PI/4, 7*Math.PI/4));
 
       function arcColor(t) {
+        if (t === 'down') return 'var(--fire-dim)';
         if (t === 'low') return 'var(--fire-bright)';
         if (t === 'mid') return 'var(--reloading)';
         return 'var(--cyan)';
       }
-      arcFore.setAttribute('stroke', arcColor(tier(foreQ ? foreQ.hp : 0)));
-      arcAft.setAttribute('stroke', arcColor(tier(aftQ ? aftQ.hp : 0)));
-      arcPort.setAttribute('stroke', arcColor(tier(portQ ? portQ.hp : 0)));
-      arcStbd.setAttribute('stroke', arcColor(tier(stbdQ ? stbdQ.hp : 0)));
+      function styleArc(arc, q, pctFraction, label) {
+        var pct = Math.round(pctFraction * 100);
+        var isFocused = s.focused_facing === label;
+        var color = isFocused ? 'var(--tactical)' : arcColor(tier(q && q.online ? pct : 0));
+        arc.setAttribute('stroke', color);
+        arc.setAttribute('fill', color);
+        arc.setAttribute('stroke-width', isFocused ? '2.5' : '1.6');
+        arc.style.opacity = q && q.online ? (isFocused ? '0.72' : '0.42') : '0.16';
+        arc.classList.toggle('focused', isFocused);
+        arc.setAttribute('aria-pressed', isFocused ? 'true' : 'false');
+      }
 
-      arcFore.style.opacity = foreQ && foreQ.online ? '0.7' : '0.2';
-      arcAft.style.opacity = aftQ && aftQ.online ? '0.7' : '0.2';
-      arcPort.style.opacity = portQ && portQ.online ? '0.7' : '0.2';
-      arcStbd.style.opacity = stbdQ && stbdQ.online ? '0.7' : '0.2';
+      styleArc(arcFore, foreQ, forePct, 'Fore');
+      styleArc(arcAft, aftQ, aftPct, 'Aft');
+      styleArc(arcPort, portQ, portPct, 'Port');
+      styleArc(arcStbd, stbdQ, stbdPct, 'Starboard');
 
       // Focus display
       var focusName = s.focused_facing || 'OMNI';
@@ -474,7 +482,6 @@
         var isFocused = (s.focused_facing === label);
         var card = document.createElement('div');
         card.className = 'quad-card' + (isFocused ? ' focused' : '');
-        card.onclick = function() { onFocus(label); };
         card.innerHTML =
           '<div class="qc-body">' +
           '  <div class="qc-head"><div class="qc-name">' + quadLabel(label) + '</div></div>' +
@@ -504,6 +511,18 @@
       if (s.grid_status) _state.grid_status = s.grid_status;
       _rerender();
     }
+
+    document.querySelectorAll('.shield-segment').forEach(function(segment) {
+      segment.addEventListener('click', function() {
+        onFocus(segment.dataset.facing);
+      });
+      segment.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onFocus(segment.dataset.facing);
+        }
+      });
+    });
   </script>
   <script type="module">
     import { initConsole } from './console-core.js';

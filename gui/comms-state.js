@@ -144,11 +144,12 @@ export class ClientCommsState {
     const summaries = seen.map(tid => {
       const threadMsgs = this.threadMessages(tid);
       const latest = threadMsgs[threadMsgs.length - 1];
+      const contact = this.contacts.find(c => c.uuid === latest.sender_uuid);
       const anyUnread = threadMsgs.some(m => !m.is_read);
       const anyUrgent = threadMsgs.some(m => m.is_urgent && !m.is_read);
       return {
         thread_id: tid,
-        sender_name: latest.sender_name,
+        sender_name: contact ? contact.name : latest.sender_name,
         subject: latest.subject,
         any_unread: anyUnread,
         any_urgent: anyUrgent,

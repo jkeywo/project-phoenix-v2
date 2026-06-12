@@ -820,7 +820,8 @@
             'power-ui':  inGame && activeConsole === 'Power',
             'shields-ui': inGame && activeConsole === 'Shields',
             'sensors-ui': inGame && activeConsole === 'Sensors',
-            'comms-ui':  inGame && activeConsole === 'Comms' };
+             'comms-ui':  inGame && activeConsole === 'Comms',
+             'navigation-ui': inGame && activeConsole === 'Navigation' };
       $('captain-ui').className = sections['captain-ui'] ? 'active' : '';
       $('helm-ui').className = sections['helm-ui'] ? 'active' : '';
       $('weapons-ui').className = sections['weapons-ui'] ? 'active' : '';
@@ -829,6 +830,7 @@
       $('shields-ui').className = sections['shields-ui'] ? 'active' : '';
       $('sensors-ui').className = sections['sensors-ui'] ? 'active' : '';
       $('comms-ui').className  = sections['comms-ui']  ? 'active' : '';
+      $('navigation-ui').className = sections['navigation-ui'] ? 'active' : '';
 
       // Orientation drives both the tab-bar layout and the container's
       // flex-direction (portrait = column, landscape = row). Computed once
@@ -1341,6 +1343,10 @@
             state.weaponsRadarRange = window.simState.weaponsRadarRange;
             state.helmRadarRange    = window.simState.helmRadarRange;
             state.sensorsRadarRange = window.simState.sensorsRadarRange;
+            state.tacticalRadarShows   = window.simState.tacticalRadarShows;
+            state.tacticalRadarSelects = window.simState.tacticalRadarSelects;
+            state.sensorsRadarShows    = window.simState.sensorsRadarShows;
+            state.sensorsRadarSelects  = window.simState.sensorsRadarSelects;
             state.phaserArcConfigs  = window.simState.phaserArcConfigs;
             state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
             // Push the pre-seeded repair teams so the Repair console renders its
@@ -1514,7 +1520,7 @@
         }
         case 'WeaponsUpdate': {
           // Save full bank/tube/torpedo/mode state for the iframe console.
-          const { target_uuid, banks, tubes, torpedo_count, phaser_mode } = msg.data;
+          const { target_uuid, banks, tubes, torpedo_count, phaser_mode, blips } = msg.data;
           const bankList = Array.isArray(banks) ? banks : [];
           const fire_ready  = bankList.some(b => b.fire_ready);
           const on_cooldown = bankList.length > 0 && bankList.every(b => b.on_cooldown);
@@ -1526,6 +1532,7 @@
           state.weaponsTubes         = Array.isArray(tubes) ? tubes : [];
           state.weaponsTorpedoCount  = typeof torpedo_count === 'number' ? torpedo_count : 0;
           state.weaponsPhaserMode    = phaser_mode || 'Auto';
+          state.weaponsBlips         = Array.isArray(blips) ? blips : state.weaponsBlips;
           if (target_uuid) {
             state.weaponsTarget = target_uuid;
             state.weaponsLocked = true;

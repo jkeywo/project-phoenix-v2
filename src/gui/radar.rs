@@ -566,7 +566,7 @@ pub fn px_to_world_delta(px_delta: f32, range: f32, radar_radius_px: f32) -> f32
 /// Project a world-space entity position onto the radar's normalised coordinate
 /// space `[-1.0, 1.0]`, or `None` if the entity is beyond `range`.
 ///
-/// Mirrors the axis conventions of `crate::radar::project_to_radar`:
+/// Axis conventions (shared with `gui/radar-math.js` on the JS client):
 /// - X right, Y forward (ship-relative); for `WorldFixed`, ship yaw is
 ///   treated as zero.
 ///
@@ -596,7 +596,7 @@ pub fn project_radar_entity(
     };
     let cos_y = effective_yaw.cos();
     let sin_y = effective_yaw.sin();
-    // Identical to project_to_radar math with configurable range.
+    // Ship-aligned projection: forward = (sin yaw, -cos yaw), right = (cos yaw, sin yaw).
     let radar_x = (dx * cos_y + dz * sin_y) / range;
     let radar_y = (dx * sin_y - dz * cos_y) / range;
     Some((radar_x, radar_y))
@@ -1254,7 +1254,7 @@ fn sync_radar_blip_nodes(
                         ..default()
                     };
                     let transform = Transform::from_rotation(Quat::from_rotation_z(intent.angle));
-                    let spawned = parent.spawn((
+                    parent.spawn((
                         node,
                         MaterialNode(mat_handle),
                         transform,
@@ -1262,11 +1262,7 @@ fn sync_radar_blip_nodes(
                         RadarBlipNode { source },
                         Button,
                         Interaction::default(),
-                    )).id();
-                    crate::wasm_log!(
-                        "[radar-instr 1] blip spawned: blip={:?} radar={:?} source={:?} left={} top={} size={}",
-                        spawned, radar_entity, source, intent.left, intent.top, intent.size_px
-                    );
+                    ));
                 }
                 for (source, (nx, ny, colour, shape, _)) in intended_regions.drain() {
                     let (node, bg, border_color) = region_shape_node(
@@ -1735,24 +1731,17 @@ fn detect_radar_blip_press(
     query: Query<(Entity, &Interaction, &RadarBlipNode, &ChildOf), Changed<Interaction>>,
     mut commands: Commands,
 ) {
-    for (blip_entity, interaction, blip, child_of) in query.iter() {
-        crate::wasm_log!(
-            "[radar-instr 2] blip interaction changed: blip={:?} source={:?} parent={:?} state={:?}",
-            blip_entity, blip.source, child_of.parent(), interaction
-        );
+    for (_blip_entity, interaction, blip, child_of) in query.iter() {
         if *interaction == Interaction::Pressed {
-            let radar = child_of.parent();
-            let source = blip.source;
-            crate::wasm_log!(
-                "[radar-instr 3] RadarBlipClicked triggered: radar={:?} source={:?}",
-                radar, source
-            );
-            commands.trigger(RadarBlipClicked { radar, source });
+            commands.trigger(RadarBlipClicked {
+                radar: child_of.parent(),
+                source: blip.source,
+            });
         }
     }
 }
 
-/// Sub-plugin for the radar widget.  Registered automatically by `GuiPlugin`.
+/// Plugin for the radar widget. Registered by `ServerViewscreenRadarPlugin`.
 pub struct GuiRadarPlugin;
 
 impl Plugin for GuiRadarPlugin {

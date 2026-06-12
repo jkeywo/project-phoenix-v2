@@ -4,7 +4,7 @@
 import { installDom, FakeElement, fixture } from './slice-5-helpers.js';
 
 const FACTION_FILES = ['federation.toml', 'pirate.toml', 'harrow.toml', 'requiem.toml'];
-const COMPLEXITY_FILES = ['tactical.toml', 'power.toml', 'science.toml', 'sensors.toml', 'shields.toml', 'navigation.toml'];
+const COMPLEXITY_FILES = ['tactical.toml', 'power.toml', 'sensors.toml', 'shields.toml', 'navigation.toml'];
 
 export async function setupDefinitionsMode(opts = {}) {
   installDom();

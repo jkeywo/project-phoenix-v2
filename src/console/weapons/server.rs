@@ -16,15 +16,13 @@ use crate::ship_state::ShipState;
 
 // ── Beam constants ───────────────────────────────────────────────────────
 //
-// The legacy hardcoded values that used to drive the player phaser beam.
-// As of slice 3 of the data-driven refactor these are sourced from the
-// `PhaserCombatConfigResource` (Bevy resource), which is seeded from the
-// `[weapons_console]` block in the ship TOML. `BEAM_DAMAGE_PER_SEC`
-// remains `pub` because test scaffolding in `server_app.rs` references it
-// as a documented baseline; gameplay systems must read the resource.
-const _LEGACY_BEAM_DURATION_SECS: f32 = 6.0;
-pub const BEAM_DAMAGE_PER_SEC: f32 = 5.0;
-const _LEGACY_BEAM_COOLDOWN_SECS: f32 = 6.0;
+// Live values are sourced from the `PhaserCombatConfigResource` (Bevy
+// resource), seeded from the `[weapons_console]` block in the ship TOML.
+// `BEAM_DAMAGE_PER_SEC` remains `pub` because test scaffolding in
+// `server_app.rs` references it as a documented baseline; gameplay systems
+// must read the resource.
+pub const BEAM_DAMAGE_PER_SEC: f32 =
+    crate::entity_config::PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC;
 
 // ── Resources ─────────────────────────────────────────────────────────────
 
@@ -252,12 +250,7 @@ fn handle_set_target(
         let ClientMessage::SetTarget { uuid } = &ev.msg else { continue };
 
         let holder = sessions.0.console_holder(Console::Tactical);
-        let holder_match = holder == Some(ev.token.as_str());
-        crate::wasm_log!(
-            "[radar-instr 7] handle_set_target: token={} uuid={} tactical_holder={:?} holder_match={}",
-            ev.token, uuid, holder, holder_match
-        );
-        if !holder_match {
+        if holder != Some(ev.token.as_str()) {
             continue;
         }
 
@@ -273,11 +266,6 @@ fn handle_set_target(
                 dx * dx + dz * dz <= effective_weapons_range * effective_weapons_range
             }
         };
-        crate::wasm_log!(
-            "[radar-instr 7] handle_set_target result: uuid={} entity_found={} base_range={} mult={} effective={} locked={}",
-            uuid, live_pos.is_some(), base_range, radar_range_mult, effective_weapons_range, locked
-        );
-
         if locked {
             weapons_target.0 = Some(uuid.clone());
         } else {
@@ -700,12 +688,13 @@ fn handle_set_phaser_frequency(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
     complexity: Res<crate::console_ai_plugin::ConsoleComplexityState>,
+    rules: Res<crate::console_ai_plugin::ComplexityRules>,
     mut ship: ResMut<ShipState>,
 ) {
-    use crate::delegation::{is_sender_authorized, ComplexityContext, DelegatedControl};
-    let ctx = ComplexityContext {
-        tactical_is_low: complexity.is_low(&Console::Tactical),
-    };
+    use crate::delegation::{is_sender_authorized, CONTROL_SET_PHASER_FREQUENCY};
+    // Delegation grants come from Tactical's active complexity preset
+    // (`[preset.delegated]` in its complexity TOML).
+    let tactical_preset = rules.active_preset(&Console::Tactical, &complexity);
     for ev in reader.read() {
         let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else { continue };
 
@@ -717,7 +706,12 @@ fn handle_set_phaser_frequency(
             continue;
         };
 
-        if !is_sender_authorized(DelegatedControl::SetPhaserFrequency, &sender_console, &ctx) {
+        if !is_sender_authorized(
+            CONTROL_SET_PHASER_FREQUENCY,
+            &sender_console,
+            &Console::Tactical,
+            tactical_preset,
+        ) {
             continue;
         }
 
@@ -1425,9 +1419,10 @@ fn recompute_weapons_console_state(
     // live positions for all currently-alive entities; `WorldResource` gives the
     // stable tag set used for the `tactical_radar_shows` filter.
     //
-    // The projection is the same ship-aligned radar transform used by
-    // `radar::project_to_radar` — forward = +radar_y, right = +radar_x,
-    // normalised to `[-1.0, 1.0]` at `effective_tactical_range`.
+    // The projection is the standard ship-aligned radar transform
+    // (see `gui::radar::project_radar_entity`) — forward = +radar_y,
+    // right = +radar_x, normalised to `[-1.0, 1.0]` at
+    // `effective_tactical_range`.
     let effective_tactical_range =
         ship_config.0.tactical_radar_range * radar_range_mult;
     let shows: Vec<crate::entity_tags::EntityTag> = ship_config
@@ -1598,6 +1593,7 @@ mod tests {
             .insert_resource(ShipModifiers::new())
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
+            .insert_resource(crate::console_ai_plugin::ComplexityRules::from_asset_files())
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
             .insert_resource(crate::lobby::server::ShipClientConfigResource::default())
@@ -2798,9 +2794,6 @@ mod tests {
             EntityUuid(npc_uuid_str.to_string()),
             EntityPhaserState::default(),
             WeaponsConsoleSection(crate::entity_config::WeaponsConsoleConfig {
-                radar_range: 0.0,
-                target_range: 0.0,
-                fire_arc: 0.0,
                 beam_range,
                 beam_damage_per_sec: 5.0,
                 beam_duration_secs: 3.0,

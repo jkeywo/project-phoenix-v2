@@ -1,60 +1,26 @@
-//! Viewscreen border frame.
+//! Viewscreen combat feedback and HUD state push.
 //!
-//! This module owns the viewscreen border frame around the 3D scene.
-//! It loads the ten normal-state and ten alert-variant border PNGs,
-//! the HUD font, and the Red Alert vignette WGSL shader through
-//! `AssetServer` at startup, and spawns the frame immediately at
-//! startup (visible in both Lobby and InProgress phases).
+//! The visible border frame, lobby UI, in-game HEADING/HULL/CONDITION
+//! readout, and red-alert vignette are all rendered by the HTML overlay in
+//! `server.html` (issues #422/#436); the corresponding Bevy UI paths were
+//! removed. What remains here is everything the HTML overlay can't do:
+//!
+//! - **Shield-hit white flash** — [`RedAlertVignetteMaterial`] over the 3D
+//!   scene, driven by [`process_shield_flash`] / [`drive_vignette_intensity`].
+//! - **Hull-damage camera shake** — [`process_hull_shake`] /
+//!   [`apply_camera_shake`] jitter the active `GameCamera`.
+//! - **HUD state push** — [`recompute_hud_state`] / [`push_hud_state`]
+//!   serialise heading/hull/condition for the HTML overlay via
+//!   `HudStateChanged`.
+//! - **Lobby state push** — [`push_lobby_state`] serialises station/crew
+//!   snapshots for the HTML lobby via `LobbyStateChanged`.
 //!
 //! Server-only — gated by the `server` feature in `lib.rs`.
-//!
-//! ## Layout
-//!
-//! Children of a viewport-filling root `Node`, in spawn order (which is
-//! Bevy UI's back-to-front order):
-//!
-//! 1. **Vignette `MaterialNode<RedAlertVignetteMaterial>`** — full-bleed,
-//!    spawned first so the border sprites occlude its outermost ring.
-//! 2. **4 corners** (240×140 px) anchored to each viewport corner.
-//! 3. **Top cap** (320×56 px) centred along the top edge.
-//! 4. **Bottom cap** (520×56 px) centred along the bottom edge.
-//! 5. **4 edges** using `NodeImageMode::Tiled` to fill the gap between
-//!    corners and caps along each side.
-//!
-//! Bevy UI's default render order layers the frame above the 3D scene
-//! cameras. The existing `ViewDirectionLabel` (top-centre) and
-//! `FpsText` (top-right) sit at fixed pixel positions outside the
-//! corner/cap footprint and remain visible.
-//!
-//! ## Bottom cap HUD strip
-//!
-//! - **Lobby strip** (spawned at startup): CLOCK / PLAYERS / STATUS.
-//!   CLOCK shows the real-world `hh:mm:ss` via `js_sys::Date`.
-//!   PLAYERS shows `connected / max_players` from `SessionManager` and
-//!   `ShipStations`. STATUS shows `AWAITING CREW` when any connected
-//!   player has no console, `READY FOR DEPARTURE` when all do.
-//! - On `InProgress` the lobby strip is despawned; the in-game
-//!   HEADING / HULL / CONDITION readout is now rendered by the HTML
-//!   viewscreen overlay (issue #422), fed by `HudStateChanged` messages.
-//!
-//! ## Red Alert
-//!
-//! When `ShipState.red_alert` flips:
-//!
-//! - Each border `ImageNode`'s texture handle is swapped instantly
-//!   between its normal and alert variant by [`swap_border_textures`].
-//! - The full-screen red vignette pulse is owned by the HTML viewscreen
-//!   overlay's CSS (issue #422), driven by the `red_alert` field of the
-//!   `ViewscreenHudState` pushed to JS. The shared
-//!   [`RedAlertVignetteMaterial`] is kept only for the shield-hit white
-//!   flash; its red `intensity` uniform is held at `0.0`.
 
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 use bevy::ui_render::prelude::{UiMaterial, UiMaterialPlugin};
-#[cfg(target_arch = "wasm32")]
-use js_sys::Date;
 
 use rand::Rng;
 
@@ -69,9 +35,6 @@ use crate::sim_sets::SimSet;
 use crate::simulation::ShipHullIntegrity;
 use crate::stations_config::ShipStations;
 
-// ── Layout constants ─────────────────────────────────────────────────
-//
-
 // ── Shield flash constants ────────────────────────────────────────────
 
 /// Rate at which shield-hit flash decays per second (1.0 → 0.0 in 0.3 s).
@@ -81,53 +44,7 @@ const FLASH_DECAY_RATE: f32 = 1.0 / 0.3;
 /// `exp(-5.0 * 0.8) ≈ 0.018` — fully settled within ~0.8 s at max magnitude.
 const SHAKE_DECAY_RATE: f32 = 5.0;
 
-// ── HUD constants ────────────────────────────────────────────────────
-
-/// Signal-cyan `#5fd8e8` — designation + status values when nominal.
-const COLOR_SIGNAL_CYAN: Color = Color::srgb(0.373, 0.847, 0.910);
-
-/// Neutral `#b8c0c8` — status labels (never swap colour).
-const COLOR_NEUTRAL_LABEL: Color = Color::srgb(0.722, 0.753, 0.784);
-
-
-const STATUS_LABEL_FONT_SIZE: f32 = 11.0;
-const STATUS_VALUE_FONT_SIZE: f32 = 18.0;
-
 // ── Resources ────────────────────────────────────────────────────────
-
-/// Holds asset handles for the viewscreen border frame.
-///
-/// Inserted at startup by [`ViewscreenBorderPlugin`]. Holding the handles
-/// in a resource keeps the assets alive (Bevy reference-counts handles)
-/// and gives later systems a stable place to look them up.
-#[derive(Resource, Debug, Clone)]
-pub struct ViewscreenAssets {
-    pub corner_tl: Handle<Image>,
-    pub corner_tr: Handle<Image>,
-    pub corner_bl: Handle<Image>,
-    pub corner_br: Handle<Image>,
-    pub edge_top: Handle<Image>,
-    pub edge_bottom: Handle<Image>,
-    pub edge_left: Handle<Image>,
-    pub edge_right: Handle<Image>,
-    pub cap_top: Handle<Image>,
-    pub cap_bottom: Handle<Image>,
-    // Alert variants — swapped in by [`swap_border_textures`] on red_alert change.
-    pub corner_tl_alert: Handle<Image>,
-    pub corner_tr_alert: Handle<Image>,
-    pub corner_bl_alert: Handle<Image>,
-    pub corner_br_alert: Handle<Image>,
-    pub edge_top_alert: Handle<Image>,
-    pub edge_bottom_alert: Handle<Image>,
-    pub edge_left_alert: Handle<Image>,
-    pub edge_right_alert: Handle<Image>,
-    pub cap_top_alert: Handle<Image>,
-    pub cap_bottom_alert: Handle<Image>,
-    /// Display font for HUD readouts (added in #184).
-    pub font_display: Handle<Font>,
-    /// Monospace font for the HUD numeric value cells (added in #184).
-    pub font_mono: Handle<Font>,
-}
 
 /// Cached handle to the single `RedAlertVignetteMaterial` instance,
 /// so `drive_vignette_intensity` can mutate its uniform without a query.
@@ -154,75 +71,6 @@ pub struct ShieldFlashState {
 pub struct ShakeState {
     /// Current shake magnitude in world units (0.0 = no shake).
     pub magnitude: f32,
-}
-
-// ── Marker components ────────────────────────────────────────────────
-
-/// Marker for the root `Node` that owns the entire border frame.
-///
-/// Despawning this entity (with descendants) tears down all border
-/// `ImageNode` children and the vignette material node in one shot.
-#[derive(Component)]
-struct ViewscreenBorderRoot;
-
-/// Identifies which border slot an `ImageNode` occupies, so
-/// [`swap_border_textures`] can rewrite each handle on `red_alert`
-/// change without coupling spawn order to lookup order.
-#[derive(Component, Copy, Clone, Debug, PartialEq, Eq)]
-enum BorderSlot {
-    CornerTl,
-    CornerTr,
-    CornerBl,
-    CornerBr,
-    EdgeTop,
-    EdgeBottom,
-    EdgeLeft,
-    EdgeRight,
-    CapTop,
-    CapBottom,
-}
-
-impl BorderSlot {
-    fn handle<'a>(self, assets: &'a ViewscreenAssets, alert: bool) -> &'a Handle<Image> {
-        match (self, alert) {
-            (Self::CornerTl, false) => &assets.corner_tl,
-            (Self::CornerTl, true) => &assets.corner_tl_alert,
-            (Self::CornerTr, false) => &assets.corner_tr,
-            (Self::CornerTr, true) => &assets.corner_tr_alert,
-            (Self::CornerBl, false) => &assets.corner_bl,
-            (Self::CornerBl, true) => &assets.corner_bl_alert,
-            (Self::CornerBr, false) => &assets.corner_br,
-            (Self::CornerBr, true) => &assets.corner_br_alert,
-            (Self::EdgeTop, false) => &assets.edge_top,
-            (Self::EdgeTop, true) => &assets.edge_top_alert,
-            (Self::EdgeBottom, false) => &assets.edge_bottom,
-            (Self::EdgeBottom, true) => &assets.edge_bottom_alert,
-            (Self::EdgeLeft, false) => &assets.edge_left,
-            (Self::EdgeLeft, true) => &assets.edge_left_alert,
-            (Self::EdgeRight, false) => &assets.edge_right,
-            (Self::EdgeRight, true) => &assets.edge_right_alert,
-            (Self::CapTop, false) => &assets.cap_top,
-            (Self::CapTop, true) => &assets.cap_top_alert,
-            (Self::CapBottom, false) => &assets.cap_bottom,
-            (Self::CapBottom, true) => &assets.cap_bottom_alert,
-        }
-    }
-}
-
-// ── HUD marker components ────────────────────────────────────────────
-
-
-/// Marker for the root node of the lobby HUD strip.
-/// Despawned when transitioning to InProgress.
-#[derive(Component)]
-struct LobbyHudStrip;
-
-/// Identifies which lobby HUD value cell a `Text` node is.
-#[derive(Component, Copy, Clone, Debug, PartialEq, Eq)]
-enum LobbyHudValue {
-    Clock,
-    Players,
-    Status,
 }
 
 // ── Red Alert vignette material ──────────────────────────────────────
@@ -261,8 +109,8 @@ impl UiMaterial for RedAlertVignetteMaterial {
 
 // ── Plugin ───────────────────────────────────────────────────────────
 
-/// Loads viewscreen border assets at startup, registers the Red Alert
-/// vignette material, and renders the frame during `GameState::InProgress`.
+/// Registers the shield-flash vignette material, hull-shake camera systems,
+/// and the HUD/lobby state pushes for the HTML overlay.
 pub struct ViewscreenBorderPlugin;
 
 impl Plugin for ViewscreenBorderPlugin {
@@ -272,17 +120,15 @@ impl Plugin for ViewscreenBorderPlugin {
             .add_message::<LobbyStateChanged>()
             .init_resource::<ShieldFlashState>()
             .init_resource::<ShakeState>()
-            // The viewscreen border, HUD state, and red-alert vignette are managed here.
-            // The lobby UI is rendered entirely by the HTML overlay in `server.html`
-            // (`window.__updateLobby`); this plugin pushes `LobbyStatePayload` snapshots
-            // via `push_lobby_state`. The Bevy `LobbyScreenRoot` tree was deleted as part
-            // of issue #436's HTML rebuild — see wiki/concepts/server-lobby-ui.md.
-            .add_systems(Startup, (load_viewscreen_assets, spawn_border_on_startup, spawn_hud_state_entity).chain())
+            // The border frame, lobby UI, and red-alert vignette are rendered by the
+            // HTML overlay in `server.html` (`window.__updateLobby` / `__updateHud`);
+            // this plugin pushes the `LobbyStatePayload` / `ViewscreenHudState`
+            // snapshots that drive it. The Bevy border/lobby UI trees were deleted in
+            // issues #422/#436 — see wiki/concepts/server-lobby-ui.md.
+            .add_systems(Startup, (setup_vignette_material, spawn_hud_state_entity).chain())
             .add_systems(
                 Update,
                 (
-                    sync_hud_strips_to_phase,
-                    swap_border_textures,
                     process_shield_flash.after(SimSet::Broadcast),
                     drive_vignette_intensity.after(process_shield_flash),
                     process_hull_shake.after(SimSet::Broadcast),
@@ -290,7 +136,6 @@ impl Plugin for ViewscreenBorderPlugin {
                         .after(process_shield_flash)
                         .after(process_hull_shake)
                         .run_if(in_state(GamePhase::InProgress)),
-                    update_lobby_hud,
                     push_lobby_state,
                 ),
             )
@@ -387,38 +232,11 @@ fn push_lobby_state(
 
 // ── Systems ──────────────────────────────────────────────────────────
 
-fn load_viewscreen_assets(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let assets = ViewscreenAssets {
-        corner_tl: asset_server.load("viewscreen/corner-tl.png"),
-        corner_tr: asset_server.load("viewscreen/corner-tr.png"),
-        corner_bl: asset_server.load("viewscreen/corner-bl.png"),
-        corner_br: asset_server.load("viewscreen/corner-br.png"),
-        edge_top: asset_server.load("viewscreen/edge-top.png"),
-        edge_bottom: asset_server.load("viewscreen/edge-bottom.png"),
-        edge_left: asset_server.load("viewscreen/edge-left.png"),
-        edge_right: asset_server.load("viewscreen/edge-right.png"),
-        cap_top: asset_server.load("viewscreen/cap-top.png"),
-        cap_bottom: asset_server.load("viewscreen/cap-bottom.png"),
-        corner_tl_alert: asset_server.load("viewscreen/corner-tl-alert.png"),
-        corner_tr_alert: asset_server.load("viewscreen/corner-tr-alert.png"),
-        corner_bl_alert: asset_server.load("viewscreen/corner-bl-alert.png"),
-        corner_br_alert: asset_server.load("viewscreen/corner-br-alert.png"),
-        edge_top_alert: asset_server.load("viewscreen/edge-top-alert.png"),
-        edge_bottom_alert: asset_server.load("viewscreen/edge-bottom-alert.png"),
-        edge_left_alert: asset_server.load("viewscreen/edge-left-alert.png"),
-        edge_right_alert: asset_server.load("viewscreen/edge-right-alert.png"),
-        cap_top_alert: asset_server.load("viewscreen/cap-top-alert.png"),
-        cap_bottom_alert: asset_server.load("viewscreen/cap-bottom-alert.png"),
-        font_display: asset_server.load("fonts/ChakraPetch-SemiBold.ttf"),
-        font_mono: asset_server.load("fonts/JetBrainsMono-Regular.ttf"),
-    };
-    commands.insert_resource(assets);
-}
-
-/// Spawns the border frame (vignette, corners, edges, caps, designation).
-fn spawn_border_on_startup(
+/// Creates the single shield-flash vignette material and caches its handle.
+/// (The red-alert vignette and border frame are HTML-owned; only the
+/// shield-hit white flash still renders through Bevy.)
+fn setup_vignette_material(
     mut commands: Commands,
-    assets: Res<ViewscreenAssets>,
     window: Query<&Window>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
 ) {
@@ -433,85 +251,7 @@ fn spawn_border_on_startup(
         aspect_ratio,
         _pad0: 0.0,
     });
-    commands.insert_resource(VignetteMaterialHandle(vignette.clone()));
-    // Border frame and lobby UI are owned by the HTML overlay in `server.html`
-    // (issue #436 deleted the Bevy `LobbyScreenRoot` tree; `spawn_border_frame`
-    // is kept for now but not called). The vignette material is still created
-    // above for the shield-hit white flash.
-    let _ = &assets; // suppress unused-variable warning
-}
-
-
-/// Swaps the lobby HUD strip on phase transition.
-///
-/// The in-game HEADING/HULL/CONDITION strip is now owned by the HTML
-/// viewscreen overlay (issue #422), so on `InProgress` we simply despawn the
-/// lobby strip and spawn nothing in-game. On `Lobby` the lobby strip is
-/// (re)spawned.
-///
-/// Idempotent — re-entering a phase while the correct strip already exists is
-/// a no-op.
-fn sync_hud_strips_to_phase(
-    mut commands: Commands,
-    state: Res<State<GamePhase>>,
-    assets: Option<Res<ViewscreenAssets>>,
-    slots: Query<(&BorderSlot, Entity)>,
-    lobby_strip: Query<Entity, With<LobbyHudStrip>>,
-) {
-    if !state.is_changed() {
-        return;
-    }
-    let Some(assets) = assets else { return };
-    let bottom_cap = slots
-        .iter()
-        .find(|(slot, _)| **slot == BorderSlot::CapBottom)
-        .map(|(_, e)| e)
-        .or_else(|| slots.iter().next().map(|(_, e)| e));
-
-    match state.get() {
-        GamePhase::InProgress => {
-            // In-game HUD moved to HTML — just tear down the lobby strip.
-            for e in lobby_strip.iter() {
-                commands.entity(e).despawn();
-            }
-        }
-        GamePhase::Lobby => {
-            // Only spawn the Bevy lobby strip when the border frame exists (i.e.
-            // `bottom_cap` is Some). When the HTML overlay owns the border
-            // (issue #422), `bottom_cap` is None and we skip the Bevy strip so
-            // no stray root node appears on screen.
-            if lobby_strip.is_empty() {
-                if let Some(parent) = bottom_cap {
-                    let strip = spawn_lobby_hud_strip(&mut commands, &assets);
-                    commands.entity(parent).add_child(strip);
-                }
-            }
-        }
-        GamePhase::GameOver => {
-            // Keep the current HUD strip visible during game-over.
-        }
-    }
-}
-
-/// Rewrites each border `ImageNode`'s `image` handle to the alert or
-/// normal variant whenever `ShipState.red_alert` changes.
-///
-/// The swap is instant (one frame) — matches the demo's pop. The pulsing
-/// vignette carries the temporal energy.
-fn swap_border_textures(
-    ship: Option<Res<ShipState>>,
-    assets: Option<Res<ViewscreenAssets>>,
-    mut q: Query<(&BorderSlot, &mut ImageNode)>,
-) {
-    let Some(ship) = ship else { return };
-    let Some(assets) = assets else { return };
-    if !ship.is_changed() {
-        return;
-    }
-    let alert = ship.red_alert();
-    for (slot, mut image_node) in q.iter_mut() {
-        image_node.image = slot.handle(&assets, alert).clone();
-    }
+    commands.insert_resource(VignetteMaterialHandle(vignette));
 }
 
 /// Reads [`OutboundMessage`] for [`ServerMessage::DamageTaken`] with
@@ -626,141 +366,6 @@ fn drive_vignette_intensity(
 pub fn yaw_to_compass_bearing(yaw_radians: f32) -> u32 {
     let degrees = yaw_radians.to_degrees().rem_euclid(360.0);
     (degrees.round() as u32) % 360
-}
-
-/// Per-frame system: update lobby HUD values (CLOCK / PLAYERS / STATUS).
-/// Reads wall-clock time via `js_sys::Date`, player counts from
-/// `Sessions` + `ShipStations`.
-fn update_lobby_hud(
-    sessions: Option<Res<Sessions>>,
-    ship_stations: Option<Res<ShipStations>>,
-    mut values: Query<(&LobbyHudValue, &mut Text)>,
-) {
-    if values.is_empty() {
-        return;
-    }
-
-    // ── Clock ────────────────────────────────────────────────────────
-    #[cfg(target_arch = "wasm32")]
-    let clock_str = {
-        let date = Date::new_0();
-        format!(
-            "{:02}:{:02}:{:02}",
-            date.get_hours() as u32,
-            date.get_minutes() as u32,
-            date.get_seconds() as u32,
-        )
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let clock_str = "--:--:--".to_string();
-
-    // ── Players ──────────────────────────────────────────────────────
-    let (connected, max) = if let (Some(sessions), Some(stations)) = (&sessions, &ship_stations) {
-        let count = sessions
-            .0
-            .players()
-            .iter()
-            .filter(|p| p.connected && !p.consoles.is_empty())
-            .count() as u32;
-        (count, stations.max_players)
-    } else {
-        (0, 0)
-    };
-    let players_str = format!("{}/{}", connected, max);
-
-    // ── Status ───────────────────────────────────────────────────────
-    let status_str = if let Some(sessions) = &sessions {
-        let all_have_console = sessions
-            .0
-            .players()
-            .iter()
-            .filter(|p| p.connected)
-            .all(|p| !p.consoles.is_empty());
-        let any_connected = sessions.0.players().iter().any(|p| p.connected);
-        if any_connected && all_have_console {
-            "READY FOR DEPARTURE"
-        } else {
-            "AWAITING CREW"
-        }
-    } else {
-        "AWAITING CREW"
-    };
-
-    for (kind, mut text) in values.iter_mut() {
-        let new_value = match kind {
-            LobbyHudValue::Clock => clock_str.clone(),
-            LobbyHudValue::Players => players_str.clone(),
-            LobbyHudValue::Status => status_str.to_string(),
-        };
-        if text.0 != new_value {
-            text.0 = new_value;
-        }
-    }
-}
-
-/// Spawn the lobby HUD strip (CLOCK / PLAYERS / STATUS) as an overlay
-/// that fills the bottom cap. The strip should be attached as a child of
-/// the bottom cap entity so it inherits the cap's position and size.
-fn spawn_lobby_hud_strip(commands: &mut Commands, assets: &ViewscreenAssets) -> Entity {
-    commands
-        .spawn((
-            LobbyHudStrip,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceAround,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-        ))
-        .with_children(|strip| {
-            spawn_lobby_column(strip, assets, "CLOCK", "--:--:--", LobbyHudValue::Clock);
-            spawn_lobby_column(strip, assets, "PLAYERS", "0/0", LobbyHudValue::Players);
-            spawn_lobby_column(strip, assets, "STATUS", "AWAITING CREW", LobbyHudValue::Status);
-        })
-        .id()
-}
-
-/// Build one CLOCK/PLAYERS/STATUS column inside the lobby bottom-cap strip.
-fn spawn_lobby_column(
-    parent: &mut ChildSpawnerCommands,
-    assets: &ViewscreenAssets,
-    label: &str,
-    initial_value: &str,
-    value_kind: LobbyHudValue,
-) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
-        .with_children(|col| {
-            col.spawn((
-                Text::new(label),
-                TextFont {
-                    font: assets.font_display.clone(),
-                    font_size: STATUS_LABEL_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(COLOR_NEUTRAL_LABEL),
-            ));
-            col.spawn((
-                value_kind,
-                Text::new(initial_value),
-                TextFont {
-                    font: assets.font_mono.clone(),
-                    font_size: STATUS_VALUE_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(COLOR_SIGNAL_CYAN),
-            ));
-        });
 }
 
 // ── HUD state push (issue #422) ──────────────────────────────────────
@@ -930,48 +535,5 @@ mod tests {
         // -0.5° (tiny left turn) → 359.5°, rounds to 360 then wraps to 0.
         let yaw = (-0.5_f32).to_radians();
         assert_eq!(yaw_to_compass_bearing(yaw), 0);
-    }
-
-    #[test]
-    fn slot_handle_picks_normal_or_alert_variant() {
-        // Sanity check that BorderSlot::handle returns distinct asset
-        // ids for the normal and alert variants of one slot.
-        let assets = test_assets();
-        let normal = BorderSlot::CornerTl.handle(&assets, false);
-        let alert = BorderSlot::CornerTl.handle(&assets, true);
-        assert_ne!(normal.id(), alert.id());
-    }
-
-    fn test_assets() -> ViewscreenAssets {
-        // Construct dummy handles — none of the fields are dereffed in
-        // these tests, we only compare `Handle::id()`. In Bevy 0.18 a
-        // weak handle is built from a `Uuid` via `Handle::from(uuid)`.
-        use bevy::asset::uuid::Uuid;
-        let h = |n: u128| -> Handle<Image> { Uuid::from_u128(n).into() };
-        let f = |n: u128| -> Handle<Font> { Uuid::from_u128(n).into() };
-        ViewscreenAssets {
-            corner_tl: h(1),
-            corner_tr: h(2),
-            corner_bl: h(3),
-            corner_br: h(4),
-            edge_top: h(5),
-            edge_bottom: h(6),
-            edge_left: h(7),
-            edge_right: h(8),
-            cap_top: h(9),
-            cap_bottom: h(10),
-            corner_tl_alert: h(11),
-            corner_tr_alert: h(12),
-            corner_bl_alert: h(13),
-            corner_br_alert: h(14),
-            edge_top_alert: h(15),
-            edge_bottom_alert: h(16),
-            edge_left_alert: h(17),
-            edge_right_alert: h(18),
-            cap_top_alert: h(19),
-            cap_bottom_alert: h(20),
-            font_display: f(21),
-            font_mono: f(22),
-        }
     }
 }

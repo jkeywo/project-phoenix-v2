@@ -245,13 +245,19 @@ name = "Bad"
         assert!(!config.has_multiple_presets(), "Navigation should not have multiple presets");
     }
 
+    /// Sensors carries the auto-hint AI rule on its Low preset (merged from
+    /// the retired science.toml). NOTE: the JS client does not yet offer a
+    /// Low preset for Sensors (`gui/complexity-store.js defaultPresetsFor`),
+    /// so the Low preset is currently selectable only programmatically.
     #[test]
-    fn sensors_toml_has_only_std_preset() {
+    fn sensors_toml_low_preset_has_auto_hint() {
         let toml = include_str!("../../assets/complexity/sensors.toml");
         let config = parse_complexity_config(toml).expect("sensors.toml should parse");
-        assert_eq!(config.presets.len(), 1, "Sensors should have exactly one preset (no Low)");
-        assert_eq!(config.presets[0].name, "Std", "Sensors preset should be 'Std'");
-        assert!(config.get_preset("Low").is_none(), "Sensors should NOT have a Low preset");
-        assert!(!config.has_multiple_presets(), "Sensors should not have multiple presets");
+        let low = config.get_preset("Low").expect("Sensors should have a Low preset");
+        assert!(
+            low.ai.contains_key("auto_hint"),
+            "Sensors Low preset should enable the auto_hint AI rule"
+        );
+        assert!(config.get_preset("Std").is_some(), "Sensors should have a Std preset");
     }
 }

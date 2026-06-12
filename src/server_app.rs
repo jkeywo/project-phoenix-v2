@@ -362,19 +362,19 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         };
 
         let radar_state = {
-            let science_range = world
+            // All four ranges come from the ship TOML via ShipClientConfig
+            // (populated by lobby/server.rs); the Default fallback only
+            // applies before the lobby has loaded the player ship config.
+            let default_cfg = crate::messages::ShipClientConfig::default();
+            let cfg = world
                 .get_resource::<crate::lobby::server::ShipClientConfigResource>()
-                .map(|r| r.0.sensors_radar_range)
-                .unwrap_or(crate::client_sim::SCIENCE_RADAR_RANGE);
-            let tactical_range = world
-                .get_resource::<crate::lobby::server::ShipClientConfigResource>()
-                .map(|r| r.0.tactical_radar_range)
-                .unwrap_or(crate::client_sim::WEAPONS_RADAR_RANGE);
+                .map(|r| &r.0)
+                .unwrap_or(&default_cfg);
             crate::messages::RadarStateSnapshot {
-                helm_range: crate::client_sim::HELM_RADAR_RANGE * helm_range_mult,
-                tactical_range: tactical_range * helm_range_mult,
-                science_long_range: science_range * helm_range_mult,
-                science_system_map: crate::client_sim::SYSTEM_CHART_RANGE,
+                helm_range: cfg.helm_radar_range * helm_range_mult,
+                tactical_range: cfg.tactical_radar_range * helm_range_mult,
+                science_long_range: cfg.sensors_radar_range * helm_range_mult,
+                science_system_map: cfg.nav_chart_range,
             }
         };
 
@@ -1560,6 +1560,7 @@ mod tests {
             )))
             .init_resource::<WorldSetupBroadcast>()
             .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
+            .insert_resource(crate::console_ai_plugin::ComplexityRules::from_asset_files())
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
             .add_message::<crate::ai_plugin::AiEntityDestroyed>()

@@ -1,51 +1,57 @@
-//! Pure delegation allowlist.
+//! Data-driven delegation allowlist.
 //!
-//! A per-control table that, given `(control, sender_console, tactical_is_low)`,
-//! returns whether the sender is authorised to issue that control.
+//! Whether a console may issue a given control is decided by the owning
+//! console's *active complexity preset*: the `[preset.delegated]` table in
+//! that console's complexity TOML (e.g. `assets/complexity/tactical.toml`)
+//! lists, per receiver console, the control ids the receiver may issue while
+//! the preset is active. A console is always authorised for its own controls.
 //!
-//! This module is Bevy-free and has no side effects — it is a pure look-up.
+//! This module is Bevy-free and has no side effects — it is a pure look-up
+//! over an already-parsed [`ComplexityPreset`].
 
+use crate::complexity::ComplexityPreset;
 use crate::messages::Console;
 
-/// A named control that can be delegated between consoles.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DelegatedControl {
-    /// Set the phaser frequency (normally Tactical's responsibility).
-    SetPhaserFrequency,
-}
+/// Control id for setting the phaser frequency (owned by Tactical).
+/// Matches the `controls` entries in `[preset.delegated]` tables.
+pub const CONTROL_SET_PHASER_FREQUENCY: &str = "set_phaser_frequency";
 
-/// Complexity context required by the allowlist.
-///
-/// Currently only `tactical_is_low` is needed; extend this struct when more
-/// delegation rows are introduced.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ComplexityContext {
-    /// Whether Tactical is currently at Low complexity.
-    pub tactical_is_low: bool,
-}
-
-/// Returns `true` when `sender_console` is authorised to issue `control`
-/// under the given complexity state.
-///
-/// The allowlist is defined inline as a match:
-///
-/// | control              | sender             | condition           |
-/// |----------------------|--------------------|---------------------|
-/// | SetPhaserFrequency   | Tactical           | always              |
-/// | SetPhaserFrequency   | Sensors            | tactical_is_low     |
-pub fn is_sender_authorized(
-    control: DelegatedControl,
-    sender: &Console,
-    ctx: &ComplexityContext,
-) -> bool {
-    match (control, sender) {
-        // Tactical may always set phaser frequency.
-        (DelegatedControl::SetPhaserFrequency, Console::Tactical) => true,
-        // Science may set phaser frequency only when Tactical is Low.
-        (DelegatedControl::SetPhaserFrequency, Console::Sensors) => ctx.tactical_is_low,
-        // All other combinations are denied.
-        _ => false,
+/// Stable string key for a console, as used by `[preset.delegated]` table
+/// keys in complexity TOMLs (matches the `Console` enum variant names).
+pub fn console_key(console: &Console) -> &'static str {
+    match console {
+        Console::CaptainChair => "CaptainChair",
+        Console::Helm => "Helm",
+        Console::Tactical => "Tactical",
+        Console::Repair => "Repair",
+        Console::Sensors => "Sensors",
+        Console::Shields => "Shields",
+        Console::Navigation => "Navigation",
+        Console::Power => "Power",
+        Console::Comms => "Comms",
     }
+}
+
+/// Returns `true` when `sender` is authorised to issue `control` on the
+/// console `owner`, given the owner's currently-active complexity preset
+/// (`None` when the owner has no preset selected or no complexity TOML).
+///
+/// Rules:
+/// 1. The owner console is always authorised for its own controls.
+/// 2. Any other console is authorised only when the owner's active preset
+///    has a `[preset.delegated]` entry for it that lists `control`.
+pub fn is_sender_authorized(
+    control: &str,
+    sender: &Console,
+    owner: &Console,
+    owner_active_preset: Option<&ComplexityPreset>,
+) -> bool {
+    if sender == owner {
+        return true;
+    }
+    owner_active_preset
+        .and_then(|preset| preset.delegated.get(console_key(sender)))
+        .is_some_and(|grant| grant.controls.iter().any(|c| c == control))
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -53,90 +59,111 @@ pub fn is_sender_authorized(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::complexity::parse_complexity_config;
 
-    fn low_ctx() -> ComplexityContext {
-        ComplexityContext { tactical_is_low: true }
+    /// The shipped Tactical complexity TOML drives these tests, so they fail
+    /// if the asset and the delegation behaviour drift apart.
+    fn tactical_preset(name: &str) -> ComplexityPreset {
+        let toml_str = std::fs::read_to_string("assets/complexity/tactical.toml")
+            .expect("tactical.toml must be readable");
+        parse_complexity_config(&toml_str)
+            .expect("tactical.toml must parse")
+            .get_preset(name)
+            .unwrap_or_else(|| panic!("preset '{name}' must exist"))
+            .clone()
     }
 
-    fn full_ctx() -> ComplexityContext {
-        ComplexityContext { tactical_is_low: false }
-    }
-
-    // ── SetPhaserFrequency × Tactical ──────────────────────────────────────
+    // ── SetPhaserFrequency × Tactical (owner) ──────────────────────────────
 
     #[test]
-    fn tactical_always_authorized_for_set_phaser_frequency_when_low() {
+    fn owner_always_authorized_for_own_control_when_low() {
+        let low = tactical_preset("Low");
         assert!(is_sender_authorized(
-            DelegatedControl::SetPhaserFrequency,
+            CONTROL_SET_PHASER_FREQUENCY,
             &Console::Tactical,
-            &low_ctx(),
+            &Console::Tactical,
+            Some(&low),
         ));
     }
 
     #[test]
-    fn tactical_always_authorized_for_set_phaser_frequency_when_full() {
+    fn owner_always_authorized_even_without_preset() {
         assert!(is_sender_authorized(
-            DelegatedControl::SetPhaserFrequency,
+            CONTROL_SET_PHASER_FREQUENCY,
             &Console::Tactical,
-            &full_ctx(),
+            &Console::Tactical,
+            None,
         ));
     }
 
     // ── SetPhaserFrequency × Sensors ──────────────────────────────────────
 
     #[test]
-    fn sensors_authorized_for_set_phaser_frequency_when_tactical_is_low() {
+    fn sensors_authorized_when_tactical_low_preset_grants_it() {
+        let low = tactical_preset("Low");
         assert!(is_sender_authorized(
-            DelegatedControl::SetPhaserFrequency,
+            CONTROL_SET_PHASER_FREQUENCY,
             &Console::Sensors,
-            &low_ctx(),
+            &Console::Tactical,
+            Some(&low),
         ));
     }
 
     #[test]
-    fn sensors_not_authorized_for_set_phaser_frequency_when_tactical_is_full() {
+    fn sensors_not_authorized_under_std_preset() {
+        let std_preset = tactical_preset("Std");
         assert!(!is_sender_authorized(
-            DelegatedControl::SetPhaserFrequency,
+            CONTROL_SET_PHASER_FREQUENCY,
             &Console::Sensors,
-            &full_ctx(),
+            &Console::Tactical,
+            Some(&std_preset),
+        ));
+    }
+
+    #[test]
+    fn sensors_not_authorized_without_active_preset() {
+        assert!(!is_sender_authorized(
+            CONTROL_SET_PHASER_FREQUENCY,
+            &Console::Sensors,
+            &Console::Tactical,
+            None,
         ));
     }
 
     // ── SetPhaserFrequency × other consoles ────────────────────────────────
 
     #[test]
-    fn helm_not_authorized_for_set_phaser_frequency() {
-        assert!(!is_sender_authorized(
-            DelegatedControl::SetPhaserFrequency,
-            &Console::Helm,
-            &low_ctx(),
-        ));
+    fn other_consoles_not_authorized_even_when_low() {
+        let low = tactical_preset("Low");
+        for sender in [
+            Console::Helm,
+            Console::CaptainChair,
+            Console::Repair,
+            Console::Power,
+            Console::Shields,
+            Console::Navigation,
+            Console::Comms,
+        ] {
+            assert!(
+                !is_sender_authorized(
+                    CONTROL_SET_PHASER_FREQUENCY,
+                    &sender,
+                    &Console::Tactical,
+                    Some(&low),
+                ),
+                "{sender:?} must not be authorised",
+            );
+        }
     }
 
     #[test]
-    fn captain_not_authorized_for_set_phaser_frequency() {
+    fn unknown_control_is_denied_for_non_owner() {
+        let low = tactical_preset("Low");
         assert!(!is_sender_authorized(
-            DelegatedControl::SetPhaserFrequency,
-            &Console::CaptainChair,
-            &low_ctx(),
-        ));
-    }
-
-    #[test]
-    fn repair_not_authorized_for_set_phaser_frequency() {
-        assert!(!is_sender_authorized(
-            DelegatedControl::SetPhaserFrequency,
-            &Console::Repair,
-            &low_ctx(),
-        ));
-    }
-
-    #[test]
-    fn power_not_authorized_for_set_phaser_frequency() {
-        assert!(!is_sender_authorized(
-            DelegatedControl::SetPhaserFrequency,
-            &Console::Power,
-            &low_ctx(),
+            "no_such_control",
+            &Console::Sensors,
+            &Console::Tactical,
+            Some(&low),
         ));
     }
 }

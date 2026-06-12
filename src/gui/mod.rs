@@ -1,31 +1,11 @@
-//! Generic GUI widget library for all phone console panels.
+//! Radar widget used by the server viewscreen
+//! (`ServerViewscreenRadarPlugin`).
 //!
-//! Add `GuiPlugin` once to the `App`; it registers every widget sub-system.
-//! Each widget module is also available directly for callers that need just the
-//! types.
+//! Historical note: this module was once a full widget library (buttons,
+//! joysticks, panels, …) for the Bevy/WASM phone consoles. Those consoles
+//! are now pure HTML/JS (`gui/*.js` + `client.html`), so only the radar
+//! widget — still rendered on the server's 3D viewscreen — remains.
 
-use bevy::prelude::*;
-
-pub use button::{
-    spawn_gui_button, ButtonPressed, ButtonSize,
-    GuiButtonMarker, WidgetActivated, WidgetDeactivated,
-};
-pub use foundation::{
-    resolve_visual, resolve_visuals_system, Disabled, StateVisuals, Visual, WidgetState,
-};
-pub use joystick::{
-    normalize_joystick, reset_joystick_drag, should_emit_resend, GenericJoystick,
-    GenericJoystickKnob, GenericJoystickPad, JoystickDragState, JoystickMoved,
-    JoystickResendTimer,
-};
-pub use light::{
-    effective_interval, FlickerLight, FlickerLightConfig, FlickerLightMarker, FlickerLightState,
-};
-pub use panel::{lerp_size, GuiPanel, GuiPanelMarker, PanelSize};
-pub use progress::{
-    filled_segments, ProgressBar, ProgressBarMarker, ProgressBarVariant, ProgressValue,
-    SegmentCount,
-};
 pub use radar::{
     apply_zoom_step, blip_local_offset, bridge_sim_to_radar, icon_from_radar_icon_str, is_on_radar,
     pinch_zoom, project_radar_entity, px_to_world_delta, region_shape_from_snapshot,
@@ -37,44 +17,5 @@ pub use radar::{
     RadarIconLookup, RadarLastGeom, RadarRegionNode, RadarTargetHighlight, RadarTargetRing,
     RadarViewControl, RegionRadarShape, WorldCentredRadar, RADAR_MAX_ZOOM, RADAR_MIN_ZOOM,
 };
-pub use radio::{
-    next_radio_selection, on_radio_member_pressed, RadioButtonConfig, RadioGroup, RadioGroupMarker,
-    RadioMember, RadioSelected,
-};
-pub use readout::{ReadoutValue, TextReadout, TextReadoutMarker};
-pub use vignette::{
-    GuiVignette, GuiVignettePlugin, GuiVignetteWidget, RedAlertIntensity, RedAlertVignetteMaterial,
-    VignetteMaterialHandle,
-};
 
-pub mod button;
-mod foundation;
-pub mod joystick;
-pub mod light;
-pub mod panel;
-pub mod progress;
 pub mod radar;
-pub mod radio;
-pub mod readout;
-pub mod vignette;
-
-// ── Root plugin ───────────────────────────────────────────────────────────────
-
-/// Root plugin for the gui widget library.  Add it once; it pulls in every
-/// widget sub-system.
-pub struct GuiPlugin;
-
-impl Plugin for GuiPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, resolve_visuals_system)
-            .add_plugins(button::GuiButtonPlugin)
-            .add_plugins(joystick::GuiJoystickPlugin)
-            .add_plugins(radar::GuiRadarPlugin)
-            .add_plugins(panel::GuiPanelPlugin)
-            .add_plugins(progress::GuiProgressPlugin)
-            .add_plugins(light::GuiLightPlugin)
-            .add_plugins(readout::GuiReadoutPlugin)
-            .add_plugins(radio::GuiRadioPlugin)
-            .add_plugins(vignette::GuiVignettePlugin);
-    }
-}

@@ -31,6 +31,7 @@ console = "Shields"
 max_hp = 25.0
 
 [weapons_console]
+complexity_toml = "assets/complexity/tactical.toml"
 power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 beam_range = 100.0
 beam_damage_per_sec = 5.0
@@ -89,6 +90,7 @@ facing_deg = 180.0
 fire_arc_deg = 90.0
 
 [sensors_console]
+complexity_toml = "assets/complexity/sensors.toml"
 power_multipliers = [-0.5, 0.0, 0.25, 0.5]
 
 [sensors_console.long_range_radar]
@@ -97,6 +99,7 @@ shows = ["player", "asteroid", "ship", "station", "planet", "star"]
 selects = ["ship", "station", "planet"]
 
 [power]
+complexity_toml = "assets/complexity/power.toml"
 capacity = 100.0
 rates = [6.0, 5.0, 4.0, 2.0, -2.0, -6.0]
 emergency_threshold = 25.0
@@ -118,6 +121,7 @@ range = 250.0
 shows = ["player", "asteroid", "asteroid_field", "ship", "station", "planet", "star"]
 
 [navigation_console]
+complexity_toml = "assets/complexity/navigation.toml"
 
 [navigation_console.system_chart]
 range = 800.0
@@ -131,6 +135,7 @@ selects = ["ship", "station", "planet", "star", "region"]
 range = 1200.0
 
 [shields_console]
+complexity_toml = "assets/complexity/shields.toml"
 focus_bonus_max_hp = 50
 focus_bonus_regen = 5.0
 focus_penalty_max_hp = 25

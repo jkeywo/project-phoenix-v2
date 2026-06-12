@@ -145,7 +145,7 @@ describe('KNOWN_UI_ELEMENTS', () => {
   });
 
   it('has entries for all shipped consoles', () => {
-    const consoles = ['tactical', 'science', 'power', 'helm', 'sensors', 'shields', 'navigation'];
+    const consoles = ['tactical', 'power', 'helm', 'sensors', 'shields', 'navigation'];
     for (const c of consoles) {
       expect(Array.isArray(KNOWN_UI_ELEMENTS[c]), `missing: ${c}`).toBe(true);
     }
@@ -164,17 +164,16 @@ describe('ComplexityEditor — file list', () => {
 
   it('shows every assets/complexity/*.toml file', () => {
     const list = editor.getFileList();
-    expect(list.length).toBeGreaterThanOrEqual(6);
+    expect(list.length).toBeGreaterThanOrEqual(5);
     for (const entry of list) {
       expect(entry).toMatch(/^assets\/complexity\/.+\.toml$/);
     }
   });
 
-  it('includes tactical, power, science, shields, sensors, navigation', () => {
+  it('includes tactical, power, shields, sensors, navigation', () => {
     const list = editor.getFileList();
     expect(list).toContain('assets/complexity/tactical.toml');
     expect(list).toContain('assets/complexity/power.toml');
-    expect(list).toContain('assets/complexity/science.toml');
     expect(list).toContain('assets/complexity/shields.toml');
     expect(list).toContain('assets/complexity/sensors.toml');
     expect(list).toContain('assets/complexity/navigation.toml');
@@ -227,15 +226,15 @@ describe('ComplexityEditor — openFile', () => {
   it('tactical Low preset has delegated block', () => {
     editor.openFile('assets/complexity/tactical.toml');
     const low = editor.getPreset(0);
-    expect(low.delegated).toHaveProperty('Tactical');
-    expect(low.delegated.Tactical.controls).toContain('auto_fire_torpedoes');
+    expect(low.delegated).toHaveProperty('Sensors');
+    expect(low.delegated.Sensors.controls).toContain('set_phaser_frequency');
   });
 
   it('tactical Low preset has ai block', () => {
     editor.openFile('assets/complexity/tactical.toml');
     const low = editor.getPreset(0);
     expect(low.ai).toHaveProperty('torpedo_auto_fire');
-    expect(low.ai.torpedo_auto_fire.min_accuracy).toBeCloseTo(0.7);
+    expect(low.ai.frequency_match.auto_match_delay_secs).toBeCloseTo(3.0);
   });
 
   it('getPresets returns deep copies (mutations do not affect internal state)', () => {

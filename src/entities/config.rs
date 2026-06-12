@@ -10,6 +10,7 @@ use uuid::Uuid;
 /// for one state. The `name` field is used as a stable identifier for
 /// per-spawn `[spawn.overrides]` by-name replacement.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct StateConfig {
     /// Stable name for this state (used in `initial_state` and overrides).
     pub name: String,
@@ -45,6 +46,7 @@ impl StateConfig {
 /// Configuration for an AI behaviour controller attached to an entity.
 /// Re-exports the AI module's config type so callers only need `entity_config`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BehaviourConfig {
     /// Name of the initial AI state (e.g. `"idle"`).
     pub initial_state: String,
@@ -72,6 +74,7 @@ pub enum MeshShape {
 /// appropriate Bevy primitive and material from this data; entities without
 /// a `[mesh]` section are not given a 3-D visual on the viewscreen.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MeshConfig {
     pub shape: MeshShape,
     /// RGB colour `[r, g, b]` in linear 0–1 range.
@@ -104,6 +107,7 @@ pub enum LightKind {
 ///
 /// Replaces the per-section light fields that used to live on `[star]`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LightConfig {
     pub kind: LightKind,
     /// RGB colour `[r, g, b]` in linear 0–1 range.
@@ -117,6 +121,7 @@ pub struct LightConfig {
 
 /// One entry in the `[[hull.console_hull]]` TOML array.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConsoleHullEntry {
     /// Console name matching the `Console` enum variant (e.g. `"Helm"`).
     pub console: crate::messages::Console,
@@ -125,6 +130,7 @@ pub struct ConsoleHullEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct HullConfig {
     /// Legacy single-value hull integrity (kept for backward compat with station/asteroid configs).
     #[serde(default)]
@@ -148,6 +154,7 @@ pub enum ColliderShape {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ColliderConfig {
     pub shape: ColliderShape,
     pub radius: f32,
@@ -155,6 +162,7 @@ pub struct ColliderConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppearanceConfig {
     pub colour: String,
     pub size_min: f32,
@@ -162,6 +170,7 @@ pub struct AppearanceConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RadarAppearanceConfig {
     pub colour: Vec<f32>,
     #[serde(default)]
@@ -180,6 +189,7 @@ pub struct RadarAppearanceConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HelmConsoleConfig {
     #[serde(default)]
     pub max_speed: f32,
@@ -191,15 +201,8 @@ pub struct HelmConsoleConfig {
     pub deceleration: f32,
     #[serde(default)]
     pub max_yaw_rate: f32,
-    /// Legacy flat radar range. Prefer the nested `[helm_console.radar] range`
-    /// table. Read with `effective_radar_range()` which prefers `radar.range`
-    /// when present.
-    #[serde(default)]
-    pub radar_range: f32,
-    #[serde(default)]
-    pub radar_shows: bool,
-    /// Structured radar configuration. When present, `radar.range` overrides
-    /// the legacy flat `radar_range` field.
+    /// Radar configuration for the Helm radar widget, from
+    /// `[helm_console.radar]`.
     #[serde(default)]
     pub radar: Option<crate::radar_config::RadarConfig>,
     #[serde(default)]
@@ -222,14 +225,10 @@ pub struct HelmConsoleConfig {
 }
 
 impl HelmConsoleConfig {
-    /// Effective radar range: prefers the structured `[helm_console.radar]
-    /// range` table value when present, otherwise falls back to the legacy
-    /// flat `radar_range` field. Returns `0.0` if neither is set.
+    /// Radar range from `[helm_console.radar] range`. Returns `0.0` when the
+    /// `[helm_console.radar]` table is absent.
     pub fn effective_radar_range(&self) -> f32 {
-        if let Some(r) = &self.radar {
-            return r.range;
-        }
-        self.radar_range
+        self.radar.as_ref().map_or(0.0, |r| r.range)
     }
 }
 
@@ -271,6 +270,7 @@ pub type PhaserBankId = String;
 /// `beam_range` is in world units. When `0.0`, the renderer/server
 /// falls back to the parent `[weapons_console].beam_range`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PhaserBankConfig {
     pub id: PhaserBankId,
     pub facing_deg: f32,
@@ -298,6 +298,7 @@ pub type TorpedoTubeId = String;
 /// `facing_deg` and `fire_arc_deg` use the same convention as
 /// [`PhaserBankConfig`] (ship-local degrees, 0 = forward).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TorpedoTubeConfig {
     pub id: TorpedoTubeId,
     pub facing_deg: f32,
@@ -360,13 +361,8 @@ pub fn validate_torpedo_tubes(tubes: &[TorpedoTubeConfig]) -> Result<(), String>
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WeaponsConsoleConfig {
-    #[serde(default)]
-    pub radar_range: f32,
-    #[serde(default)]
-    pub target_range: f32,
-    #[serde(default)]
-    pub fire_arc: f32,
     #[serde(default)]
     pub beam_range: f32,
     #[serde(default)]
@@ -402,28 +398,25 @@ pub struct WeaponsConsoleConfig {
     /// is unset.
     #[serde(default)]
     pub shield_pierce: f32,
-    /// Structured radar configuration for the Tactical console radar widget.
-    /// When present, overrides the legacy flat `radar_range` field.
+    /// Radar configuration for the Tactical console radar widget, from
+    /// `[weapons_console.radar]`.
     #[serde(default)]
     pub radar: Option<crate::radar_config::RadarConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EngineeringConsoleConfig {
-    #[serde(default)]
-    pub repair_rate: f32,
-    #[serde(default)]
-    pub repair_hp_per_cycle: i32,
-    #[serde(default)]
-    pub repair_cooldown_secs: f32,
-    #[serde(default)]
-    pub cooldown_secs: f32,
     /// Path to a complexity TOML file for this console.
+    ///
+    /// NOTE: repair pacing is configured by the top-level `[repair]` block
+    /// (`RepairConfig`), not here.
     #[serde(default)]
     pub complexity_toml: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CaptainConsoleConfig {
     /// Path to a complexity TOML file for this console.
     #[serde(default)]
@@ -431,10 +424,14 @@ pub struct CaptainConsoleConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PowerConfigSection {
     pub capacity: f32,
     pub rates: [f32; 6],
     pub emergency_threshold: f32,
+    /// Path to a complexity TOML file for the Power console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
 }
 
 /// Config block for the Shields console focus bonuses/penalties.
@@ -445,6 +442,7 @@ pub struct PowerConfigSection {
 /// max HP, regen, offline duration) that were previously hardcoded by
 /// `ShieldConfig::default()` at `src/weapons/shield.rs:50-58`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ShieldsConsoleConfig {
     /// Extra max HP applied to the focused facing.
     #[serde(default = "default_focus_bonus_max_hp")]
@@ -490,11 +488,11 @@ fn default_focus_decay_rate() -> f32 {
 impl Default for ShieldsConsoleConfig {
     fn default() -> Self {
         Self {
-            focus_bonus_max_hp: 50,
-            focus_bonus_regen: 5.0,
-            focus_penalty_max_hp: 25,
-            focus_penalty_regen: 2.5,
-            focus_decay_rate: 10.0,
+            focus_bonus_max_hp: default_focus_bonus_max_hp(),
+            focus_bonus_regen: default_focus_bonus_regen(),
+            focus_penalty_max_hp: default_focus_penalty_max_hp(),
+            focus_penalty_regen: default_focus_penalty_regen(),
+            focus_decay_rate: default_focus_decay_rate(),
             base: None,
             complexity_toml: None,
         }
@@ -511,6 +509,7 @@ impl Default for ShieldsConsoleConfig {
 /// `num_facings` is exposed for symmetry but the client panel UI assumes
 /// 4 quadrants — values other than 4 will break the Shields panel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ShieldsBaseConfig {
     /// Number of equally-spaced shield facings. The client panel UI
     /// assumes 4 (fore/port/aft/starboard); other values will not render
@@ -596,16 +595,24 @@ pub struct PhaserCombatConfig {
     pub banks: Vec<PhaserBankConfig>,
 }
 
+impl PhaserCombatConfig {
+    /// Canonical baseline phaser values, used when the ship TOML omits (or
+    /// zeroes) the corresponding `[weapons_console]` field. Other modules
+    /// needing the baseline (e.g. `weapons_plugin::BEAM_DAMAGE_PER_SEC`)
+    /// alias these rather than restating the numbers.
+    pub const DEFAULT_PHASER_RANGE: f32 = 40.0;
+    pub const DEFAULT_BEAM_DURATION_SECS: f32 = 6.0;
+    pub const DEFAULT_BEAM_COOLDOWN_SECS: f32 = 6.0;
+    pub const DEFAULT_BEAM_DAMAGE_PER_SEC: f32 = 5.0;
+}
+
 impl Default for PhaserCombatConfig {
     fn default() -> Self {
-        // These four constants are the historical hardcoded values from
-        // `src/console/weapons/server.rs` (BEAM_*) and `src/radar.rs:19`
-        // (PHASER_RANGE). Keep them in sync with the live constants.
         Self {
-            phaser_range: 40.0,
-            beam_duration_secs: 6.0,
-            beam_cooldown_secs: 6.0,
-            beam_damage_per_sec: 5.0,
+            phaser_range: Self::DEFAULT_PHASER_RANGE,
+            beam_duration_secs: Self::DEFAULT_BEAM_DURATION_SECS,
+            beam_cooldown_secs: Self::DEFAULT_BEAM_COOLDOWN_SECS,
+            beam_damage_per_sec: Self::DEFAULT_BEAM_DAMAGE_PER_SEC,
             banks: Vec::new(),
         }
     }
@@ -658,6 +665,7 @@ impl PhaserCombatConfig {
 /// `ShipClientConfig.repair_rate_hp_per_sec` so that the Repair panel UI
 /// can derive its progress-bar timings without redefining the constants.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepairConfig {
     /// Seconds a team spends travelling to a console (and the same again returning).
     #[serde(default = "default_repair_travel_duration_secs")]
@@ -700,6 +708,7 @@ impl RepairConfig {
 /// player ship. The player ship's own `[comms].range` defines how far it can
 /// listen. Effective range between two entities is `min(a.range, b.range)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommsConfig {
     /// Comms range in world units.
     pub range: f32,
@@ -714,6 +723,7 @@ pub struct CommsConfig {
 /// `turn_rate_deg_per_sec` is in **degrees per second** for designer
 /// readability; it is converted to radians by `to_runtime()`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TorpedoesConfig {
     #[serde(default = "default_torpedo_count")]
     pub count: u32,
@@ -813,16 +823,21 @@ impl TorpedoesConfig {
 ///
 /// Loaded from `[navigation_console]` in `player_ship.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NavigationConsoleConfig {
     /// System chart radar config for the Navigation console.
     #[serde(default)]
     pub system_chart: crate::radar_config::RadarConfig,
+    /// Path to a complexity TOML file for this console.
+    #[serde(default)]
+    pub complexity_toml: Option<String>,
 }
 
 /// Config block for the Sensors console in a ship TOML.
 ///
 /// Loaded from `[sensors_console]` in `player_ship.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SensorsConsoleConfig {
     #[serde(default)]
     pub power_multipliers: Option<[f32; 4]>,
@@ -834,11 +849,13 @@ pub struct SensorsConsoleConfig {
     pub complexity_toml: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct EntityConfig {
     /// Display name (top-level scalar). Informational for most entities; used
     /// by triggers/comms to identify named instances.
     pub name: Option<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
     pub hull: Option<HullConfig>,
     pub collider: Option<ColliderConfig>,
@@ -885,81 +902,47 @@ pub struct EntityConfig {
     pub light: Vec<LightConfig>,
 }
 
-#[derive(Deserialize)]
-struct TomlConfig {
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-    hull: Option<HullConfig>,
-    collider: Option<ColliderConfig>,
-    appearance: Option<AppearanceConfig>,
-    helm_console: Option<HelmConsoleConfig>,
-    weapons_console: Option<WeaponsConsoleConfig>,
-    engineering_console: Option<EngineeringConsoleConfig>,
-    captain_console: Option<CaptainConsoleConfig>,
-    power: Option<PowerConfigSection>,
-    sensors_console: Option<SensorsConsoleConfig>,
-    navigation_console: Option<NavigationConsoleConfig>,
-    shields_console: Option<ShieldsConsoleConfig>,
-    torpedoes: Option<TorpedoesConfig>,
-    repair: Option<RepairConfig>,
-    comms: Option<CommsConfig>,
-    asteroid_field: Option<AsteroidFieldConfig>,
-    shape: Option<RegionShape>,
-    effects: Option<RegionEffectsConfig>,
-    faction: Option<Uuid>,
-    behaviour: Option<BehaviourConfig>,
-    radar_appearance: Option<RadarAppearanceConfig>,
-    target: Option<crate::entity_target::TargetSection>,
-    mesh: Option<MeshConfig>,
-    #[serde(default)]
-    light: Vec<LightConfig>,
-}
-
 impl EntityConfig {
+    /// `(console, complexity_toml path)` for every console config that
+    /// references a complexity TOML.
+    pub fn complexity_toml_by_console(&self) -> Vec<(crate::messages::Console, &str)> {
+        use crate::messages::Console;
+        let refs = [
+            (Console::Helm, self.helm_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+            (Console::Tactical, self.weapons_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+            (Console::Repair, self.engineering_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+            (Console::CaptainChair, self.captain_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+            (Console::Sensors, self.sensors_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+            (Console::Shields, self.shields_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+            (Console::Navigation, self.navigation_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+            (Console::Power, self.power.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+        ];
+        refs.into_iter()
+            .filter_map(|(console, path)| path.map(|p| (console, p)))
+            .collect()
+    }
+
     /// Collect all `complexity_toml` paths referenced by any console config.
     pub fn complexity_toml_paths(&self) -> Vec<String> {
-        let mut paths = Vec::new();
-        if let Some(ref c) = self.helm_console {
-            if let Some(ref p) = c.complexity_toml {
-                paths.push(p.clone());
-            }
-        }
-        if let Some(ref c) = self.weapons_console {
-            if let Some(ref p) = c.complexity_toml {
-                paths.push(p.clone());
-            }
-        }
-        if let Some(ref c) = self.engineering_console {
-            if let Some(ref p) = c.complexity_toml {
-                paths.push(p.clone());
-            }
-        }
-        if let Some(ref c) = self.captain_console {
-            if let Some(ref p) = c.complexity_toml {
-                paths.push(p.clone());
-            }
-        }
-        if let Some(ref c) = self.sensors_console {
-            if let Some(ref p) = c.complexity_toml {
-                paths.push(p.clone());
-            }
-        }
-        if let Some(ref c) = self.shields_console {
-            if let Some(ref p) = c.complexity_toml {
-                paths.push(p.clone());
-            }
-        }
-        paths
+        self.complexity_toml_by_console()
+            .into_iter()
+            .map(|(_, p)| p.to_string())
+            .collect()
     }
 
     pub fn from_toml(s: &str) -> Result<Self, toml::de::Error> {
-        let raw: TomlConfig = toml::from_str(s)?;
+        let mut value: toml::Value = toml::from_str(s)?;
+        if let Some(table) = value.as_table_mut() {
+            // `[stations]` is parsed from the same ship TOML by
+            // `lobby::stations_config` with its own schema; drop it so
+            // `deny_unknown_fields` doesn't reject ship templates.
+            table.remove("stations");
+        }
+        let mut config: EntityConfig = value.try_into()?;
 
         // Validation: region entity with effects but no shape is an error.
-        if let Some(ref effects) = raw.effects {
-            if !effects.is_empty() && raw.shape.is_none() {
+        if let Some(ref effects) = config.effects {
+            if !effects.is_empty() && config.shape.is_none() {
                 return Err(SerdeError::custom(
                     "region entity has effects but no [shape] section",
                 ));
@@ -967,40 +950,13 @@ impl EntityConfig {
         }
 
         // Clamp target_speed in every StateConfig entry.
-        let behaviour = raw.behaviour.map(|mut b| {
+        if let Some(ref mut b) = config.behaviour {
             for s in &mut b.state {
                 s.clamp();
             }
-            b
-        });
+        }
 
-        Ok(EntityConfig {
-            name: raw.name,
-            tags: raw.tags,
-            hull: raw.hull,
-            collider: raw.collider,
-            appearance: raw.appearance,
-            helm_console: raw.helm_console,
-            weapons_console: raw.weapons_console,
-            engineering_console: raw.engineering_console,
-            captain_console: raw.captain_console,
-            power: raw.power,
-            shields_console: raw.shields_console,
-            sensors_console: raw.sensors_console,
-            navigation_console: raw.navigation_console,
-            torpedoes: raw.torpedoes,
-            repair: raw.repair,
-            comms: raw.comms,
-            asteroid_field: raw.asteroid_field,
-            shape: raw.shape,
-            effects: raw.effects,
-            faction: raw.faction,
-            behaviour,
-            radar_appearance: raw.radar_appearance,
-            target: raw.target,
-            mesh: raw.mesh,
-            light: raw.light,
-        })
+        Ok(config)
     }
 }
 
@@ -1033,23 +989,18 @@ max_reverse_speed = 25.0
 acceleration = 16.7
 deceleration = 50.0
 max_yaw_rate = 0.785
-radar_range = 50.0
-radar_shows = true
+
+[helm_console.radar]
+range = 50.0
+shows = ["asteroid"]
 
 [weapons_console]
-radar_range = 60.0
-target_range = 60.0
-fire_arc = 3.14159
 beam_range = 40.0
 beam_damage_per_sec = 5.0
 beam_duration_secs = 6.0
 cooldown_secs = 6.0
 
 [engineering_console]
-repair_rate = 0.33
-repair_hp_per_cycle = 1
-repair_cooldown_secs = 30.0
-penalty_cooldown_secs = 10.0
 
 [captain_console]
 "##;
@@ -1078,8 +1029,7 @@ penalty_cooldown_secs = 10.0
         assert!(config.helm_console.is_some());
         let h = config.helm_console.as_ref().unwrap();
         assert_eq!(h.max_speed, 50.0);
-        assert_eq!(h.radar_range, 50.0);
-        assert!(h.radar_shows);
+        assert_eq!(h.effective_radar_range(), 50.0);
 
         assert!(config.weapons_console.is_some());
         let w = config.weapons_console.as_ref().unwrap();
@@ -1087,8 +1037,6 @@ penalty_cooldown_secs = 10.0
         assert_eq!(w.cooldown_secs, 6.0);
 
         assert!(config.engineering_console.is_some());
-        let e = config.engineering_console.as_ref().unwrap();
-        assert_eq!(e.repair_cooldown_secs, 30.0);
 
         assert!(config.captain_console.is_some());
     }
@@ -1185,12 +1133,10 @@ length = 6.0
         let toml_str = r##"
 [helm_console]
 max_speed = 30.0
-radar_shows = false
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let h = config.helm_console.expect("helm_console must be Some");
         assert_eq!(h.max_speed, 30.0);
-        assert!(!h.radar_shows);
         assert_eq!(h.max_reverse_speed, 0.0);
     }
 
@@ -1212,34 +1158,15 @@ shows = ["asteroid", "ship"]
     }
 
     #[test]
-    fn helm_console_effective_radar_range_prefers_nested_over_flat() {
+    fn helm_console_effective_radar_range_zero_when_no_radar_table() {
         let toml_str = r##"
 [helm_console]
-radar_range = 100.0
-
-[helm_console.radar]
-range = 750.0
-shows = ["asteroid"]
-"##;
-        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
-        let h = config.helm_console.expect("helm_console must be Some");
-        assert_eq!(
-            h.effective_radar_range(),
-            750.0,
-            "nested [helm_console.radar] range must win over flat radar_range"
-        );
-    }
-
-    #[test]
-    fn helm_console_effective_radar_range_falls_back_to_flat_when_no_nested() {
-        let toml_str = r##"
-[helm_console]
-radar_range = 250.0
+max_speed = 30.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let h = config.helm_console.expect("helm_console must be Some");
         assert!(h.radar.is_none());
-        assert_eq!(h.effective_radar_range(), 250.0);
+        assert_eq!(h.effective_radar_range(), 0.0);
     }
 
     #[test]
@@ -1439,6 +1366,34 @@ complexity_toml = "assets/complexity/captain.toml"
     fn complexity_toml_defaults_to_none_when_omitted() {
         let config = EntityConfig::from_toml("").expect("parse must succeed");
         assert!(config.weapons_console.is_none());
+    }
+
+    /// Every shipped entity template must parse under the strict
+    /// (`deny_unknown_fields`) schema. Catches both schema drift in the code
+    /// and typo'd keys in the TOMLs.
+    #[test]
+    fn all_shipped_entity_templates_parse_strictly() {
+        let dir = std::path::Path::new("assets/entities");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(dir).expect("assets/entities must exist") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("template must be readable");
+            EntityConfig::from_toml(&text).unwrap_or_else(|e| {
+                panic!("entity template {} failed strict parse: {e}", path.display())
+            });
+            checked += 1;
+        }
+        assert!(checked > 0, "no entity templates found in {}", dir.display());
+    }
+
+    /// Unknown keys in an entity TOML must be rejected, not silently ignored.
+    #[test]
+    fn unknown_section_and_field_are_rejected() {
+        assert!(EntityConfig::from_toml("[helm_consol]\nmax_speed = 1.0").is_err());
+        assert!(EntityConfig::from_toml("[helm_console]\nmax_sped = 1.0").is_err());
     }
 
     #[test]

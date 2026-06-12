@@ -50,6 +50,7 @@ impl Default for RadarConfig {
 
 /// Intermediate deserialisation type for TOML parsing.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRadarConfig {
     #[serde(default = "default_range")]
     range: f32,

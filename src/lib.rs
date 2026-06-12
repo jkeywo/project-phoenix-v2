@@ -3,23 +3,6 @@
 // common in game-development patterns.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-// ── WIP: radar click instrumentation ───────────────────────────────────────
-// Browser-console logging for diagnosing the targeting-on-click bug.
-// Revert this block (and the wasm_log! call sites) once the bug is fixed.
-#[cfg(target_arch = "wasm32")]
-#[macro_export]
-macro_rules! wasm_log {
-    ($($arg:tt)*) => {
-        ::web_sys::console::log_1(&::wasm_bindgen::JsValue::from_str(&format!($($arg)*)))
-    };
-}
-#[cfg(not(target_arch = "wasm32"))]
-#[macro_export]
-macro_rules! wasm_log {
-    ($($arg:tt)*) => { let _ = format_args!($($arg)*); };
-}
-// ───────────────────────────────────────────────────────────────────────────
-
 pub mod core;
 pub mod ai;
 pub use ai::core as ai_core;
@@ -62,7 +45,6 @@ pub use lobby::stations_config;
 pub use lobby::stations_policy;
 pub mod modifiers;
 pub use modifiers::coordination as modifier_coordination;
-pub mod ship_view;
 pub use modifiers::power_system;
 pub use core::codec;
 pub use lobby::session;
@@ -79,11 +61,7 @@ pub mod world;
 pub mod radar;
 pub mod radar_config;
 pub use modifiers::repair_teams;
-pub use lobby::client_panel as client_lobby;
-pub mod client_sim;
-pub mod client_comms;
 pub mod comms;
-pub mod client_complexity;
 
 // ── Console module ─────────────────────────────────────────────────────────
 

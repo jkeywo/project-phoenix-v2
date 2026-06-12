@@ -26,7 +26,7 @@ describe('Slice 6: Definitions Mode', () => {
     const factionRows = sections[0].querySelectorAll('.definitions-file-list-row');
     const complexityRows = sections[1].querySelectorAll('.definitions-file-list-row');
     expect(factionRows.length).toBe(4);
-    expect(complexityRows.length).toBe(6);
+    expect(complexityRows.length).toBe(5);
   });
 
   it('clicking a faction file populates the form with UUID + name + enemies (AC2)', async () => {
@@ -76,7 +76,8 @@ describe('Slice 6: Definitions Mode', () => {
 
     const delegatedRows = ctx.host.querySelectorAll('.def-delegated-row');
     expect(delegatedRows.length).toBe(1);
-    expect(delegatedRows[0].dataset.consoleKey).toBe('Tactical');
+    // tactical.toml Low delegates set_phaser_frequency to Sensors.
+    expect(delegatedRows[0].dataset.consoleKey).toBe('Sensors');
 
     const aiBlocks = ctx.host.querySelectorAll('.def-ai-block');
     expect(aiBlocks.length).toBe(2);

@@ -2,11 +2,13 @@
 //!
 //! This plugin runs per-tick AI decision functions from `console_ai` and
 //! synthesises the same `InboundMessage` types that a human player would
-//! produce. AI only runs on **occupied** consoles whose complexity preset is
-//! currently "Low".
+//! produce. AI only runs on **occupied** consoles whose *active complexity
+//! preset* carries the matching `[preset.ai]` rule in that console's
+//! complexity TOML (see [`ComplexityRules`]).
 //!
-//! If the holder switches from "Low" to "Std" (or back), the complexity
-//! state is updated and AI immediately stops generating actions.
+//! When the holder switches preset, `ConsoleComplexityState` is updated and
+//! any AI rules absent from the new preset immediately stop generating
+//! actions.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -27,15 +29,21 @@ use crate::simulation::{ShipPowerSystem, TorpedoSystemResource, WeaponsTarget};
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const LOW_PRESET: &str = "Low";
+// AI rule keys, matching the `[preset.ai]` table keys in
+// `assets/complexity/*.toml`.
+pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
+pub const AI_RULE_FREQUENCY_MATCH: &str = "frequency_match";
+pub const AI_RULE_AUTO_HINT: &str = "auto_hint";
+pub const AI_RULE_POWER_MOVEMENT: &str = "movement_rule";
+pub const AI_RULE_POWER_RED_ALERT: &str = "red_alert_rule";
 
-/// Default delay (seconds) before the frequency hint fires when Science is Low.
+/// Default delay (seconds) before the frequency hint fires.
 const DEFAULT_AUTO_HINT_DELAY_SECS: f32 = 3.0;
 
-/// Default delay (seconds) before the auto-match fires when both consoles are Low.
+/// Default delay (seconds) before the auto-match fires.
 const DEFAULT_AUTO_MATCH_DELAY_SECS: f32 = 3.0;
 
-// Power AI tuning defaults (used when TOML loading fails).
+// Power AI tuning defaults (used when the TOML rule omits a param).
 const DEFAULT_THRUST_THRESHOLD: f32 = 0.7;
 const DEFAULT_ENGAGE_DELAY_SECS: f32 = 3.0;
 const DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT: f32 = 50.0;
@@ -48,129 +56,107 @@ const DEFAULT_BATTERY_RECHARGE_PCT: f32 = 100.0;
 #[derive(Resource, Default)]
 pub struct FrequencyHintTimer(pub FrequencyHintState);
 
-/// Configurable delay (in seconds) before the auto-hint fires.
-/// Loaded from `assets/complexity/science.toml` `[preset.ai] auto_hint`.
-#[derive(Resource)]
-pub struct AutoHintDelaySecs(pub f32);
-
-impl Default for AutoHintDelaySecs {
-    fn default() -> Self {
-        Self(load_auto_hint_delay_secs())
-    }
-}
-
-/// Read `auto_hint_delay_secs` from the embedded Science complexity TOML.
-/// Falls back to `DEFAULT_AUTO_HINT_DELAY_SECS` on any parse failure.
-fn load_auto_hint_delay_secs() -> f32 {
-    let toml_str = include_str!("../../assets/complexity/science.toml");
-    if let Ok(config) = crate::complexity::parse_complexity_config(toml_str) {
-        if let Some(low) = config.get_preset("Low") {
-            if let Some(ai_cfg) = low.ai.get("auto_hint") {
-                if let Some(v) = ai_cfg.params.get("auto_hint_delay_secs") {
-                    if let Some(f) = v.as_float() {
-                        return f as f32;
-                    }
-                }
-            }
-        }
-    }
-    DEFAULT_AUTO_HINT_DELAY_SECS
-}
-
 /// Wraps `FrequencyMatchState` as a Bevy resource so it persists between frames.
 #[derive(Resource, Default)]
 pub struct FrequencyMatchTimer(pub FrequencyMatchState);
 
-/// Configurable delay (in seconds) before the auto-match fires.
-/// Loaded from `assets/complexity/tactical.toml` `[preset.ai] frequency_match`.
-#[derive(Resource)]
-pub struct AutoMatchDelaySecs(pub f32);
-
-impl Default for AutoMatchDelaySecs {
-    fn default() -> Self {
-        Self(load_auto_match_delay_secs())
-    }
+/// Parsed complexity configs per console, sourced from the player ship's
+/// `complexity_toml` references via the runtime config cache (the same TOMLs
+/// the lobby preloads). Built once by [`build_complexity_rules`].
+///
+/// Together with [`ConsoleComplexityState`] (the live per-console preset
+/// selections) this answers "which AI rules and delegation grants are active
+/// right now" — see [`Self::active_preset`] and [`Self::ai_rule`].
+#[derive(Resource, Default)]
+pub struct ComplexityRules {
+    pub per_console: HashMap<Console, crate::complexity::ComplexityConfig>,
+    /// True once the player-ship config and all referenced complexity TOMLs
+    /// have been loaded and the map built.
+    pub loaded: bool,
 }
 
-/// Read `auto_match_delay_secs` from the embedded Tactical complexity TOML.
-/// Falls back to `DEFAULT_AUTO_MATCH_DELAY_SECS` on any parse failure.
-fn load_auto_match_delay_secs() -> f32 {
-    let toml_str = include_str!("../../assets/complexity/tactical.toml");
-    if let Ok(config) = crate::complexity::parse_complexity_config(toml_str) {
-        if let Some(low) = config.get_preset("Low") {
-            if let Some(ai_cfg) = low.ai.get("frequency_match") {
-                if let Some(v) = ai_cfg.params.get("auto_match_delay_secs") {
-                    if let Some(f) = v.as_float() {
-                        return f as f32;
+impl ComplexityRules {
+    /// The currently-active preset for `console`, given the live preset
+    /// selections in `ConsoleComplexityState`. `None` when the console has
+    /// no selection yet, no complexity TOML, or the selected name is not a
+    /// preset in its config.
+    pub fn active_preset<'a>(
+        &'a self,
+        console: &Console,
+        state: &ConsoleComplexityState,
+    ) -> Option<&'a crate::complexity::ComplexityPreset> {
+        let name = state.presets.get(console)?;
+        self.per_console.get(console)?.get_preset(name)
+    }
+
+    /// The named `[preset.ai]` rule on `console`'s active preset, if any.
+    /// `Some` means the behaviour is enabled right now.
+    pub fn ai_rule<'a>(
+        &'a self,
+        console: &Console,
+        state: &ConsoleComplexityState,
+        rule: &str,
+    ) -> Option<&'a crate::complexity::AiBehaviorConfig> {
+        self.active_preset(console, state)?.ai.get(rule)
+    }
+
+    /// Native/test helper: build rules by reading the player-ship template
+    /// and its complexity TOMLs from the filesystem — the same mapping
+    /// [`build_complexity_rules`] derives from the wasm config cache. Tests
+    /// using this exercise the shipped asset files, so asset/behaviour drift
+    /// shows up as test failures.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_asset_files() -> Self {
+        let mut per_console = HashMap::new();
+        let ship = std::fs::read_to_string("assets/entities/player_ship.toml")
+            .ok()
+            .and_then(|s| crate::entity_config::EntityConfig::from_toml(&s).ok());
+        if let Some(ship) = ship {
+            for (console, path) in ship.complexity_toml_by_console() {
+                if let Ok(toml_str) = std::fs::read_to_string(path) {
+                    if let Ok(cfg) = crate::complexity::parse_complexity_config(&toml_str) {
+                        per_console.insert(console, cfg);
                     }
                 }
             }
         }
-    }
-    DEFAULT_AUTO_MATCH_DELAY_SECS
-}
-
-/// Tuning parameters for the Power Low AI, loaded from `assets/complexity/power.toml`.
-#[derive(Resource, Clone)]
-pub struct PowerAiConfig {
-    pub thrust_threshold: f32,
-    pub movement_engage_delay_secs: f32,
-    pub battery_engage_min_pct_movement: f32,
-    pub battery_engage_min_pct_red_alert: f32,
-    pub red_alert_engage_delay_secs: f32,
-    pub battery_recharge_pct: f32,
-}
-
-impl Default for PowerAiConfig {
-    fn default() -> Self {
-        Self::load()
+        Self { per_console, loaded: true }
     }
 }
 
-impl PowerAiConfig {
-    /// Load tuning params from the embedded power TOML. Falls back to
-    /// compiled-in defaults on any parse failure.
-    pub fn load() -> Self {
-        let toml_str = include_str!("../../assets/complexity/power.toml");
-        let mut cfg = Self {
-            thrust_threshold: DEFAULT_THRUST_THRESHOLD,
-            movement_engage_delay_secs: DEFAULT_ENGAGE_DELAY_SECS,
-            battery_engage_min_pct_movement: DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT,
-            battery_engage_min_pct_red_alert: DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT,
-            red_alert_engage_delay_secs: DEFAULT_ENGAGE_DELAY_SECS,
-            battery_recharge_pct: DEFAULT_BATTERY_RECHARGE_PCT,
-        };
-        if let Ok(config) = crate::complexity::parse_complexity_config(toml_str) {
-            if let Some(low) = config.get_preset("Low") {
-                if let Some(ai_cfg) = low.ai.get("movement_rule") {
-                    if let Some(v) = ai_cfg.params.get("thrust_threshold").and_then(|v| v.as_float()) {
-                        cfg.thrust_threshold = v as f32;
-                    }
-                    if let Some(v) = ai_cfg.params.get("engage_delay_secs").and_then(|v| v.as_float()) {
-                        cfg.movement_engage_delay_secs = v as f32;
-                    }
-                    if let Some(v) = ai_cfg.params.get("battery_engage_min_pct").and_then(|v| v.as_float()) {
-                        cfg.battery_engage_min_pct_movement = v as f32;
-                    }
-                    if let Some(v) = ai_cfg.params.get("battery_recharge_pct").and_then(|v| v.as_float()) {
-                        cfg.battery_recharge_pct = v as f32;
-                    }
-                }
-                if let Some(ai_cfg) = low.ai.get("red_alert_rule") {
-                    if let Some(v) = ai_cfg.params.get("engage_delay_secs").and_then(|v| v.as_float()) {
-                        cfg.red_alert_engage_delay_secs = v as f32;
-                    }
-                    if let Some(v) = ai_cfg.params.get("battery_engage_min_pct").and_then(|v| v.as_float()) {
-                        cfg.battery_engage_min_pct_red_alert = v as f32;
-                    }
-                    if let Some(v) = ai_cfg.params.get("battery_recharge_pct").and_then(|v| v.as_float()) {
-                        cfg.battery_recharge_pct = v as f32;
-                    }
-                }
-            }
-        }
-        cfg
+/// Float param from an AI rule, with a fallback for omitted params.
+fn ai_param_f32(rule: &crate::complexity::AiBehaviorConfig, key: &str, default: f32) -> f32 {
+    rule.params
+        .get(key)
+        .and_then(|v| v.as_float())
+        .map(|v| v as f32)
+        .unwrap_or(default)
+}
+
+/// Build [`ComplexityRules`] from the runtime config cache once the player
+/// ship template and every complexity TOML it references have been loaded.
+/// Runs each tick until it succeeds, then becomes a no-op.
+fn build_complexity_rules(mut rules: ResMut<ComplexityRules>) {
+    if rules.loaded {
+        return;
     }
+    let cache = crate::config_cache::get_config_cache();
+    let Some(ship_config) = cache.get("assets/entities/player_ship.toml") else {
+        return;
+    };
+    let refs = ship_config.complexity_toml_by_console();
+    let resources = crate::config_cache::get_complexity_resources();
+    // Wait until every referenced complexity TOML has been fetched and
+    // parsed; a TOML that fails to parse never arrives, which (deliberately)
+    // keeps the AI off rather than running with partial rules.
+    if refs.iter().any(|(_, path)| !resources.contains_key(*path)) {
+        return;
+    }
+    rules.per_console = refs
+        .into_iter()
+        .filter_map(|(console, path)| resources.get(path).map(|cfg| (console, cfg.clone())))
+        .collect();
+    rules.loaded = true;
 }
 
 /// Persistent engage-state for the Power movement rule (Helm +1).
@@ -193,7 +179,7 @@ pub struct ConsoleComplexityState {
 impl ConsoleComplexityState {
     /// Returns `true` when the given console is currently at "Low" complexity.
     pub fn is_low(&self, console: &Console) -> bool {
-        self.presets.get(console).map(|p| p == LOW_PRESET).unwrap_or(false)
+        self.presets.get(console).map(|p| p == "Low").unwrap_or(false)
     }
 
     /// Update the preset for a console.
@@ -209,14 +195,13 @@ pub struct ConsoleAiPlugin;
 impl Plugin for ConsoleAiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ConsoleComplexityState>()
+            .init_resource::<ComplexityRules>()
             .init_resource::<FrequencyHintTimer>()
-            .init_resource::<AutoHintDelaySecs>()
             .init_resource::<FrequencyMatchTimer>()
-            .init_resource::<AutoMatchDelaySecs>()
-            .init_resource::<PowerAiConfig>()
             .init_resource::<PowerMovementEngageState>()
             .init_resource::<PowerRedAlertEngageState>()
             .add_systems(Update, (
+                build_complexity_rules.in_set(crate::sim_sets::SimSet::Input),
                 track_complexity_changes.in_set(crate::sim_sets::SimSet::Input),
                 run_tactical_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
                 run_science_hint_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
@@ -245,7 +230,8 @@ fn track_complexity_changes(
 /// Run the torpedo auto-fire AI for the Tactical console when:
 /// 1. Game is in-progress
 /// 2. The Tactical console is occupied (has a connected holder)
-/// 3. Tactical complexity is "Low"
+/// 3. Tactical's active complexity preset has the `torpedo_auto_fire`
+///    `[preset.ai]` rule
 ///
 /// On each qualifying tick, calls `auto_fire_torpedo` and synthesises a
 /// `FireTorpedo` `InboundMessage` for every tube that should fire.  Those
@@ -254,6 +240,7 @@ fn track_complexity_changes(
 fn run_tactical_ai(
     sessions: Res<Sessions>,
     complexity: Res<ConsoleComplexityState>,
+    rules: Res<ComplexityRules>,
     ship: Res<ShipState>,
     torpedo_sys: Res<TorpedoSystemResource>,
     weapons_target: Res<WeaponsTarget>,
@@ -267,8 +254,8 @@ fn run_tactical_ai(
         return;
     };
 
-    // AI only runs at Low complexity.
-    if !complexity.is_low(&Console::Tactical) {
+    // AI only runs when the active preset enables torpedo auto-fire.
+    if rules.ai_rule(&Console::Tactical, &complexity, AI_RULE_TORPEDO_AUTO_FIRE).is_none() {
         return;
     }
 
@@ -333,40 +320,46 @@ fn run_tactical_ai(
     }
 }
 
-/// Run the Science-Low frequency-hint AI.
+/// Run the Sensors frequency-hint AI.
 ///
 /// Conditions to run:
 /// 1. Game is InProgress
-/// 2. Tactical is **Full** (player needs the hint — they are controlling frequency)
-/// 3. Science is **Low** (the readout is hidden, so the AI provides the hint)
+/// 2. Sensors' active preset has the `auto_hint` `[preset.ai]` rule (the
+///    readout is hidden, so the AI provides the hint)
+/// 3. Tactical is **not** auto-matching (its active preset lacks
+///    `frequency_match` — the player is controlling frequency and needs
+///    the hint)
 /// 4. Tactical console is occupied (someone to send the hint to)
 /// 5. A target is currently locked on Tactical
 ///
-/// After `auto_hint_delay_secs` of continuous lock on the same target, sends a
-/// `FrequencyHint` outbound message addressed to the Tactical holder.
+/// After `auto_hint_delay_secs` (an `auto_hint` rule param) of continuous
+/// lock on the same target, sends a `FrequencyHint` outbound message
+/// addressed to the Tactical holder.
 ///
 /// The timer resets when:
 /// - The locked target changes
-/// - Science complexity changes (back to Full) — handled by clearing the timer
-///   via the `ConsoleComplexityState` check each tick.
+/// - The enabling preset conditions stop holding (checked each tick).
 fn run_science_hint_ai(
     sessions: Res<Sessions>,
     complexity: Res<ConsoleComplexityState>,
+    rules: Res<ComplexityRules>,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,
     time: Res<Time>,
-    delay: Res<AutoHintDelaySecs>,
     mut hint_timer: ResMut<FrequencyHintTimer>,
     mut outbox: ResMut<SimOutbox>,
 ) {
 
-    // Hint is only relevant when Tactical is Full (player manages frequency)
-    // and Sensors is Low (readout is hidden).
-    if !complexity.is_low(&Console::Sensors) || complexity.is_low(&Console::Tactical) {
+    // Hint is only relevant when Sensors' preset enables it and Tactical is
+    // not auto-matching the frequency itself.
+    let hint_rule = rules.ai_rule(&Console::Sensors, &complexity, AI_RULE_AUTO_HINT);
+    let tactical_auto_matches =
+        rules.ai_rule(&Console::Tactical, &complexity, AI_RULE_FREQUENCY_MATCH).is_some();
+    let Some(hint_rule) = hint_rule.filter(|_| !tactical_auto_matches) else {
         // Reset timer when conditions aren't met so it doesn't carry over.
         hint_timer.0 = FrequencyHintState::default();
         return;
-    }
+    };
 
     // Need a Tactical holder to send the hint to.
     let Some(tactical_token) = sessions.0.console_holder(Console::Tactical) else {
@@ -378,7 +371,7 @@ fn run_science_hint_ai(
         locked_target: weapons_target.0.clone(),
         correct_frequency: ship.phaser_frequency,
         dt: time.delta_secs(),
-        delay_secs: delay.0,
+        delay_secs: ai_param_f32(hint_rule, "auto_hint_delay_secs", DEFAULT_AUTO_HINT_DELAY_SECS),
     };
 
     use crate::console_ai::FrequencyHintOutput;
@@ -389,47 +382,52 @@ fn run_science_hint_ai(
     }
 }
 
-/// Run the auto-match frequency AI when both Tactical and Science are Low
-/// (or Science is unmanned).
+/// Run the auto-match frequency AI when Tactical's preset enables it and
+/// Sensors is assisted or unmanned.
 ///
 /// Conditions to run:
 /// 1. Game is InProgress
-/// 2. Tactical is **Low** (phaser-frequency control is delegated to AI)
-/// 3. Science is **Low** OR Science is unmanned (no holder)
+/// 2. Tactical's active preset has the `frequency_match` `[preset.ai]` rule
+///    (phaser-frequency control is delegated to AI)
+/// 3. Sensors' active preset has the `auto_hint` rule (assisted) OR Sensors
+///    is unmanned (no holder)
 /// 4. Tactical console is occupied (someone to receive the synthesised message)
 /// 5. A target is currently locked on Tactical
 ///
-/// After `auto_match_delay_secs` of continuous lock on the same target,
-/// synthesises `SetPhaserFrequency` as an `InboundMessage` from the Tactical
-/// holder token — the same path a human player would use.
+/// After `auto_match_delay_secs` (a `frequency_match` rule param) of
+/// continuous lock on the same target, synthesises `SetPhaserFrequency` as
+/// an `InboundMessage` from the Tactical holder token — the same path a
+/// human player would use.
 ///
 /// The frequency persists at its last set value when the trigger ends.
 /// There is no auto-revert.
 ///
 /// The pending countdown is cancelled when:
-/// - Either console flips to Full (trigger_active becomes false)
+/// - The enabling presets stop holding (trigger_active becomes false)
 /// - The locked target changes (handled inside `tick_auto_match_frequency`)
 fn run_auto_match_ai(
     sessions: Res<Sessions>,
     complexity: Res<ConsoleComplexityState>,
+    rules: Res<ComplexityRules>,
     ship: Res<ShipState>,
     weapons_target: Res<WeaponsTarget>,
     time: Res<Time>,
-    delay: Res<AutoMatchDelaySecs>,
     mut match_timer: ResMut<FrequencyMatchTimer>,
     mut writer: MessageWriter<InboundMessage>,
 ) {
 
-    // Tactical must be Low for the AI to act.
-    if !complexity.is_low(&Console::Tactical) {
+    // Tactical's active preset must enable frequency matching.
+    let Some(match_rule) = rules.ai_rule(&Console::Tactical, &complexity, AI_RULE_FREQUENCY_MATCH)
+    else {
         match_timer.0 = FrequencyMatchState::default();
         return;
-    }
+    };
 
-    // Trigger: Sensors is Low OR Sensors is unmanned (no holder).
-    let sensors_is_low = complexity.is_low(&Console::Sensors);
+    // Trigger: Sensors is assisted (auto_hint preset active) OR unmanned.
+    let sensors_assisted =
+        rules.ai_rule(&Console::Sensors, &complexity, AI_RULE_AUTO_HINT).is_some();
     let sensors_unmanned = sessions.0.console_holder(Console::Sensors).is_none();
-    let trigger_active = sensors_is_low || sensors_unmanned;
+    let trigger_active = sensors_assisted || sensors_unmanned;
 
     // Need a Tactical holder to synthesise the message on behalf of.
     let Some(tactical_token) = sessions.0.console_holder(Console::Tactical) else {
@@ -441,7 +439,7 @@ fn run_auto_match_ai(
         locked_target: weapons_target.0.clone(),
         target_frequency: ship.phaser_frequency,
         dt: time.delta_secs(),
-        delay_secs: delay.0,
+        delay_secs: ai_param_f32(match_rule, "auto_match_delay_secs", DEFAULT_AUTO_MATCH_DELAY_SECS),
         trigger_active,
     };
 
@@ -455,12 +453,13 @@ fn run_auto_match_ai(
     }
 }
 
-/// Run the Power-Low AI: two independent overflow rules.
+/// Run the Power-assist AI: two independent overflow rules.
 ///
 /// Conditions to run:
 /// 1. Game is InProgress
 /// 2. Power console is occupied
-/// 3. Power complexity is "Low"
+/// 3. Power's active preset has the corresponding `[preset.ai]` rule
+///    (`movement_rule` / `red_alert_rule`); each rule runs independently
 ///
 /// **Movement rule**: sustained thrust ≥ threshold AND battery ≥ min% for
 /// `engage_delay_secs` → synthesise `IncreasePower { Helm }`.  Immediate
@@ -471,15 +470,15 @@ fn run_auto_match_ai(
 /// battery drop.
 ///
 /// Both rules stack independently (both can fire → 8 total).
-/// Switching Power to Full (power_is_low = false) cancels pending engages.
+/// Switching Power to a preset without the rule cancels pending engages.
 fn run_power_ai(
     sessions: Res<Sessions>,
     complexity: Res<ConsoleComplexityState>,
+    rules: Res<ComplexityRules>,
     power_sys: Res<ShipPowerSystem>,
     helm_input: Res<LastHelmInput>,
     ship: Res<ShipState>,
     time: Res<Time>,
-    config: Res<PowerAiConfig>,
     mut movement_state: ResMut<PowerMovementEngageState>,
     mut red_alert_state: ResMut<PowerRedAlertEngageState>,
     mut writer: MessageWriter<InboundMessage>,
@@ -490,32 +489,38 @@ fn run_power_ai(
         return;
     };
 
-    let power_is_low = complexity.is_low(&Console::Power);
+    let movement_rule = rules.ai_rule(&Console::Power, &complexity, AI_RULE_POWER_MOVEMENT);
+    let red_alert_rule = rules.ai_rule(&Console::Power, &complexity, AI_RULE_POWER_RED_ALERT);
     let battery_pct = power_sys.0.battery_charge; // range 0–100
     let dt = time.delta_secs();
 
     // ── Movement rule ─────────────────────────────────────────────────────
 
+    let movement_active = movement_rule.is_some();
     let prev_movement = movement_state.0.clone();
     let movement_out = tick_power_movement_rule(
         &mut movement_state.0,
         &PowerMovementInput {
             thrust: helm_input.thrust,
-            thrust_threshold: config.thrust_threshold,
-            engage_delay_secs: config.movement_engage_delay_secs,
-            battery_engage_min_pct: config.battery_engage_min_pct_movement,
-            battery_recharge_pct: config.battery_recharge_pct,
+            thrust_threshold: movement_rule
+                .map_or(DEFAULT_THRUST_THRESHOLD, |r| ai_param_f32(r, "thrust_threshold", DEFAULT_THRUST_THRESHOLD)),
+            engage_delay_secs: movement_rule
+                .map_or(DEFAULT_ENGAGE_DELAY_SECS, |r| ai_param_f32(r, "engage_delay_secs", DEFAULT_ENGAGE_DELAY_SECS)),
+            battery_engage_min_pct: movement_rule
+                .map_or(DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT, |r| ai_param_f32(r, "battery_engage_min_pct", DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT)),
+            battery_recharge_pct: movement_rule
+                .map_or(DEFAULT_BATTERY_RECHARGE_PCT, |r| ai_param_f32(r, "battery_recharge_pct", DEFAULT_BATTERY_RECHARGE_PCT)),
             battery_pct,
             dt,
-            power_is_low,
+            power_is_low: movement_active,
         },
     );
 
-    // Disengagement must also be synthesised when power_is_low goes false
-    // while a rule was Engaged (the state machine resets to Idle but doesn't
+    // Disengagement must also be synthesised when the rule deactivates
+    // while it was Engaged (the state machine resets to Idle but doesn't
     // return Disengage).
     let movement_was_engaged = matches!(prev_movement, EngageState::Engaged);
-    let movement_disengaged_implicitly = movement_was_engaged && !power_is_low;
+    let movement_disengaged_implicitly = movement_was_engaged && !movement_active;
 
     match movement_out {
         PowerEngageOutput::Engage => {
@@ -542,22 +547,26 @@ fn run_power_ai(
 
     // ── Red Alert rule ────────────────────────────────────────────────────
 
+    let red_alert_active = red_alert_rule.is_some();
     let prev_red_alert = red_alert_state.0.clone();
     let red_alert_out = tick_power_red_alert_rule(
         &mut red_alert_state.0,
         &PowerRedAlertInput {
             red_alert: ship.red_alert(),
-            engage_delay_secs: config.red_alert_engage_delay_secs,
-            battery_engage_min_pct: config.battery_engage_min_pct_red_alert,
-            battery_recharge_pct: config.battery_recharge_pct,
+            engage_delay_secs: red_alert_rule
+                .map_or(DEFAULT_ENGAGE_DELAY_SECS, |r| ai_param_f32(r, "engage_delay_secs", DEFAULT_ENGAGE_DELAY_SECS)),
+            battery_engage_min_pct: red_alert_rule
+                .map_or(DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT, |r| ai_param_f32(r, "battery_engage_min_pct", DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT)),
+            battery_recharge_pct: red_alert_rule
+                .map_or(DEFAULT_BATTERY_RECHARGE_PCT, |r| ai_param_f32(r, "battery_recharge_pct", DEFAULT_BATTERY_RECHARGE_PCT)),
             battery_pct,
             dt,
-            power_is_low,
+            power_is_low: red_alert_active,
         },
     );
 
     let red_alert_was_engaged = matches!(prev_red_alert, EngageState::Engaged);
-    let red_alert_disengaged_implicitly = red_alert_was_engaged && !power_is_low;
+    let red_alert_disengaged_implicitly = red_alert_was_engaged && !red_alert_active;
 
     match red_alert_out {
         PowerEngageOutput::Engage => {
@@ -616,6 +625,25 @@ mod tests {
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
+    /// Override a float param on an AI rule across every preset that carries
+    /// it, in the test app's `ComplexityRules`. Lets tests tune delays the
+    /// way a designer would edit the complexity TOML.
+    fn set_ai_param(app: &mut App, console: Console, rule: &str, key: &str, value: f64) {
+        let mut rules = app.world_mut().resource_mut::<ComplexityRules>();
+        let cfg = rules
+            .per_console
+            .get_mut(&console)
+            .unwrap_or_else(|| panic!("no complexity rules for {console:?}"));
+        let mut found = false;
+        for preset in &mut cfg.presets {
+            if let Some(r) = preset.ai.get_mut(rule) {
+                r.params.insert(key.to_string(), toml::Value::Float(value));
+                found = true;
+            }
+        }
+        assert!(found, "no preset of {console:?} has ai rule '{rule}'");
+    }
+
     fn collect_outbound(mut reader: MessageReader<OutboundMessage>, mut outbox: ResMut<Outbox>) {
         for m in reader.read() {
             outbox.0.push(m.clone());
@@ -633,6 +661,9 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(ConsoleAiPlugin)
+            // Rules from the shipped asset files, so these tests exercise the
+            // real complexity TOMLs (native builds have no wasm config cache).
+            .insert_resource(ComplexityRules::from_asset_files())
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                 (crate::messages::Console::Helm, 25.0),
@@ -922,7 +953,7 @@ mod tests {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
         // Use a very long delay so a single tick won't fire.
-        app.insert_resource(AutoHintDelaySecs(9999.0));
+        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 9999.0);
 
         let (_, outbound) = tick(&mut app);
         let hints: Vec<_> = outbound.iter()
@@ -936,7 +967,7 @@ mod tests {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
         // Use zero delay so any elapsed time triggers.
-        app.insert_resource(AutoHintDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
 
         // Inject elapsed time directly into the hint timer.
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
@@ -960,7 +991,7 @@ mod tests {
         // doesn't need the hint, auto-fire handles frequency).
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
-        app.insert_resource(AutoHintDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("hint-target".into()),
             elapsed_secs: 5.0,
@@ -981,7 +1012,7 @@ mod tests {
         // Science Full → player sees the readout, no hint needed.
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Std".into());
-        app.insert_resource(AutoHintDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("hint-target".into()),
             elapsed_secs: 5.0,
@@ -1000,7 +1031,7 @@ mod tests {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
         app.world_mut().resource_mut::<WeaponsTarget>().0 = None;
-        app.insert_resource(AutoHintDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
 
         let (_, outbound) = tick(&mut app);
         let hints: Vec<_> = outbound.iter()
@@ -1017,7 +1048,7 @@ mod tests {
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("hint-target".into());
-        app.insert_resource(AutoHintDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("hint-target".into()),
             elapsed_secs: 5.0,
@@ -1035,7 +1066,7 @@ mod tests {
     fn target_change_resets_hint_timer_in_plugin() {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
-        app.insert_resource(AutoHintDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
         // Fake nearly-elapsed timer for old target.
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("old-target".into()),
@@ -1050,7 +1081,7 @@ mod tests {
         // (elapsed = 0.0 + dt, which is tiny, so delay=0.0 means it WILL fire
         // immediately with the new target because tick_frequency_hint resets to
         // elapsed=0 then adds dt. Let's use a longer delay to confirm reset.)
-        app.insert_resource(AutoHintDelaySecs(100.0));
+        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 100.0);
         let (_, outbound) = tick(&mut app);
         let hints: Vec<_> = outbound.iter()
             .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
@@ -1085,7 +1116,7 @@ mod tests {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
         // Very long delay — single tick won't fire.
-        app.insert_resource(AutoMatchDelaySecs(9999.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 9999.0);
 
         let (inbound, _) = tick(&mut app);
         let matched: Vec<_> = inbound.iter()
@@ -1099,7 +1130,7 @@ mod tests {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
         // Zero delay — triggers immediately once any elapsed time is added.
-        app.insert_resource(AutoMatchDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
         // Pre-seed elapsed time so a single tick fires.
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
@@ -1118,7 +1149,7 @@ mod tests {
     fn auto_match_emits_correct_frequency() {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
-        app.insert_resource(AutoMatchDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1148,7 +1179,7 @@ mod tests {
         // Override Tactical to Full
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
-        app.insert_resource(AutoMatchDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1176,7 +1207,7 @@ mod tests {
         // Science NOT set to Low AND no holder → unmanned
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
         app.world_mut().resource_mut::<ShipState>().phaser_frequency = 0.4;
-        app.insert_resource(AutoMatchDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1195,7 +1226,7 @@ mod tests {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
         app.world_mut().resource_mut::<WeaponsTarget>().0 = None;
-        app.insert_resource(AutoMatchDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
 
         let (inbound, _) = tick(&mut app);
         let matched: Vec<_> = inbound.iter()
@@ -1214,7 +1245,7 @@ mod tests {
         app.world_mut().resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
-        app.insert_resource(AutoMatchDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1232,7 +1263,7 @@ mod tests {
     fn auto_match_timer_resets_when_tactical_flips_to_full() {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
-        app.insert_resource(AutoMatchDelaySecs(100.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 100.0);
         // Nearly at delay
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
@@ -1257,7 +1288,7 @@ mod tests {
     fn auto_match_no_auto_revert_after_trigger_ends() {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
-        app.insert_resource(AutoMatchDelaySecs(0.0));
+        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1348,14 +1379,7 @@ mod tests {
         setup_power_low(&mut app);
 
         // Use zero delay so the rule engages in a single tick with any elapsed time.
-        app.insert_resource(PowerAiConfig {
-            thrust_threshold: 0.7,
-            movement_engage_delay_secs: 0.0,
-            battery_engage_min_pct_movement: 50.0,
-            battery_engage_min_pct_red_alert: 10.0,
-            red_alert_engage_delay_secs: 0.0,
-            battery_recharge_pct: 100.0,
-        });
+        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_MOVEMENT, "engage_delay_secs", 0.0);
         // Pre-seed elapsed time past the (zero) delay.
         app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
             EngageState::Counting { elapsed_secs: 1.0 };
@@ -1390,14 +1414,8 @@ mod tests {
     fn power_ai_engages_weapons_after_sustained_red_alert() {
         let mut app = test_app();
         setup_power_low(&mut app);
-        app.insert_resource(PowerAiConfig {
-            thrust_threshold: 0.7,
-            movement_engage_delay_secs: 9999.0,
-            battery_engage_min_pct_movement: 50.0,
-            battery_engage_min_pct_red_alert: 10.0,
-            red_alert_engage_delay_secs: 0.0,
-            battery_recharge_pct: 100.0,
-        });
+        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_MOVEMENT, "engage_delay_secs", 9999.0);
+        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_RED_ALERT, "engage_delay_secs", 0.0);
         // Pre-seed elapsed time past the (zero) delay.
         app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 =
             EngageState::Counting { elapsed_secs: 1.0 };
@@ -1431,14 +1449,8 @@ mod tests {
     fn power_ai_both_rules_can_engage_simultaneously() {
         let mut app = test_app();
         setup_power_low(&mut app);
-        app.insert_resource(PowerAiConfig {
-            thrust_threshold: 0.7,
-            movement_engage_delay_secs: 0.0,
-            battery_engage_min_pct_movement: 50.0,
-            battery_engage_min_pct_red_alert: 10.0,
-            red_alert_engage_delay_secs: 0.0,
-            battery_recharge_pct: 100.0,
-        });
+        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_MOVEMENT, "engage_delay_secs", 0.0);
+        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_RED_ALERT, "engage_delay_secs", 0.0);
         // Both at Counting with elapsed past delay
         app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
             EngageState::Counting { elapsed_secs: 1.0 };

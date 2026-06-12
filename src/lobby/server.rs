@@ -182,6 +182,9 @@ fn update_session_with_config(
         if let Some(nc) = &ship_config.navigation_console {
             next.nav_chart_shows = nc.system_chart.shows.iter().map(|t| t.as_str().to_string()).collect();
             next.nav_chart_selects = nc.system_chart.selects.iter().map(|t| t.as_str().to_string()).collect();
+            if nc.system_chart.range > 0.0 {
+                next.nav_chart_range = nc.system_chart.range;
+            }
         }
         if let Some(wc) = &ship_config.weapons_console {
             if let Some(r) = &wc.radar {

@@ -28,11 +28,6 @@ export const KNOWN_UI_ELEMENTS = {
     'fire_confirm',
     'auto_fire_toggle',
   ],
-  science: [
-    'shield_frequency_readout',
-    'science_scan_button',
-    'beam_aim_assist',
-  ],
   power: [
     'power_overflow_controls',
     'battery_level_readout',
@@ -43,9 +38,14 @@ export const KNOWN_UI_ELEMENTS = {
     'impulse_slider',
     'course_lock_button',
   ],
+  // Includes the elements formerly listed under "science" — the Science
+  // console's complexity file was merged into sensors.toml.
   sensors: [
     'sensor_range_slider',
     'passive_scan_toggle',
+    'shield_frequency_readout',
+    'science_scan_button',
+    'beam_aim_assist',
   ],
   shields: [
     'shield_arc_selector',

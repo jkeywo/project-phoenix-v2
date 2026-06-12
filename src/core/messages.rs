@@ -447,10 +447,19 @@ pub struct ShipClientConfig {
     /// `[navigation_console.system_chart] selects`.
     #[serde(default)]
     pub nav_chart_selects: Vec<String>,
+    /// Detection range for the Navigation system chart, in world units.
+    /// Sourced from `[navigation_console.system_chart] range` in the ship
+    /// TOML.
+    #[serde(default = "default_nav_chart_range")]
+    pub nav_chart_range: f32,
 }
 
 fn default_tactical_radar_range() -> f32 {
     300.0
+}
+
+fn default_nav_chart_range() -> f32 {
+    500.0
 }
 
 fn default_helm_radar_range() -> f32 {
@@ -503,6 +512,7 @@ impl Default for ShipClientConfig {
             sensors_radar_selects: Vec::new(),
             nav_chart_shows: Vec::new(),
             nav_chart_selects: Vec::new(),
+            nav_chart_range: default_nav_chart_range(),
             tactical_radar_shows: Vec::new(),
             tactical_radar_range: default_tactical_radar_range(),
             tactical_radar_selects: Vec::new(),

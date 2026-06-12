@@ -81,28 +81,27 @@ test('shields console: threat indicator hidden when no target', async ({ page })
   await expect(page.locator('#threat-row')).not.toHaveClass(/active/);
 });
 
-test('shields console: focus button calls __sendAction with correct envelope', async ({ page }) => {
+test('shields console: shield segment click sends set_shield_focus', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
-  // Stub __sendAction to capture calls.
   await page.evaluate(() => {
     (window as any).__sent = [];
     (window as any).__sendAction = (json: string) => (window as any).__sent.push(json);
   });
 
-  // Click Fore focus button.
-  await page.locator('.focus-btn[data-facing="Fore"]').click();
+  // Click Port segment (non-focused in demo state) to set focus to Port.
+  await page.locator('.shield-segment[data-facing="Port"]').click();
 
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(1);
   expect(JSON.parse(sent[0])).toEqual({
     action: 'set_shield_focus',
     console: 'Shields',
-    facing: 'Fore',
+    facing: 'Port',
   });
 });
 
-test('shields console: Clear focus button calls __sendAction with null facing', async ({ page }) => {
+test('shields console: clicking focused facing clears focus via null', async ({ page }) => {
   await page.goto(CONSOLE_URL);
 
   await page.evaluate(() => {
@@ -110,8 +109,8 @@ test('shields console: Clear focus button calls __sendAction with null facing', 
     (window as any).__sendAction = (json: string) => (window as any).__sent.push(json);
   });
 
-  // Click Clear focus button.
-  await page.locator('.focus-btn.clear').click();
+  // Click Fore segment (focused in demo state) — toggles to null.
+  await page.locator('.shield-segment[data-facing="Fore"]').click();
 
   const sent: string[] = await page.evaluate(() => (window as any).__sent);
   expect(sent).toHaveLength(1);

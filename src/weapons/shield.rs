@@ -336,8 +336,7 @@ impl ShieldSystem {
     /// (rather than snapping to max_hp in a single tick).
     pub fn tick(&mut self, dt: f32) {
         for (i, facing) in self.facings.iter_mut().enumerate() {
-            let is_decaying = self.focused_facing.is_some()
-                && self.focused_facing != Some(i)
+            let is_decaying = self.focused_facing != Some(i)
                 && facing.hp > facing.max_hp;
 
             if is_decaying {
@@ -722,11 +721,22 @@ mod tests {
         s.set_focused_facing(Some(0));
         assert_eq!(s.facings[0].max_hp, 150);
         assert_eq!(s.facings[1].max_hp, 75);
+        // Simulate the focused facing having regen'd above base max_hp.
+        s.facings[0].hp = 130;
         s.set_focused_facing(None);
         for f in &s.facings {
             assert_eq!(f.max_hp, 100);
             assert!((f.regen_per_sec - 5.0).abs() < 1e-4);
         }
+        // HP is NOT snapped immediately — it decays gradually via tick().
+        assert_eq!(s.facings[0].hp, 130, "HP should persist above max after clear");
+        s.tick(0.5); // decay_rate=10/s * 0.5s = 5 HP decay
+        assert_eq!(s.facings[0].hp, 125);
+        s.tick(3.0); // 125 - min(10*3, 125-100) = 100
+        assert_eq!(s.facings[0].hp, 100);
+        // Once at max, regen applies normally on subsequent ticks.
+        s.tick(0.5); // regen 5/s → 100 + 2.5 = 102.5 → capped to 100
+        assert_eq!(s.facings[0].hp, 100);
     }
 
     #[test]

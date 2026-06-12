@@ -599,7 +599,7 @@ mod tests {
         world.comms.push(CommsTemplate {
             from: "starbase".into(),
             trigger: TriggerCondition::OnHailed { entity_name: "starbase".into() },
-            node: CommsDialogueNode { body: "hello".into(), responses: vec![], from: None, delay_secs: None },
+            node: CommsDialogueNode { body: "hello".into(), responses: vec![], speaker: None, delay_secs: None },
             thread_id: None,
             urgent: false,
         });
@@ -616,7 +616,7 @@ mod tests {
             template: CommsTemplate {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], from: None, delay_secs: None },
+                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], speaker: None, delay_secs: None },
                 thread_id: None,
                 urgent: false,
             },
@@ -639,7 +639,7 @@ mod tests {
             template: CommsTemplate {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], from: None, delay_secs: None },
+                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], speaker: None, delay_secs: None },
                 thread_id: None,
                 urgent: false,
             },
@@ -663,7 +663,7 @@ mod tests {
             template: CommsTemplate {
                 from: "raider".into(),
                 trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], from: None, delay_secs: None },
+                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], speaker: None, delay_secs: None },
                 thread_id: None,
                 urgent: false,
             },

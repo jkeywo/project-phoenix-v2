@@ -163,7 +163,8 @@ A comms template — a top-level message and a tree of player response choices.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `from` | string | **required** | Named `[[entity]]` `name` whose UUID is the sender. |
+| `from` | string | **required** | Channel/source identity used for hailing, range, contact lookup, and synthetic broadcasts. Usually a named `[[entity]]` `name`; synthetic names such as `"Starcorp Command"` are allowed for broadcasts with no physical contact. |
+| `speaker` | string | none | Optional display speaker for this root message. Use when the voice on the channel is a specific character distinct from the hailed contact, e.g. `speaker = "Dr. Myst"` on a message sent via `from = "Research Outpost"`. |
 | `trigger` | `"on_hailed"` \| `"on_destroyed"` \| `"on_attacked"` | **required** | When to deliver this message. |
 | `entity` | string | depends | The named `[[entity]]` whose event triggers delivery (typically the same as `from`). |
 | `message` | string | **required** | The root message body. |
@@ -175,7 +176,24 @@ A comms template — a top-level message and a tree of player response choices.
 |---|---|---|---|
 | `text` | string | **required** | Display text on the response button. |
 | `[[comms.response.action]]` | array | `[]` | Same shape as `[[trigger.action]]`. |
-| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, response... }` block presented after this choice. |
+| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, speaker?, response... }` block presented after this choice. Follow-ups may set `speaker`; legacy `from` is accepted as a display-speaker alias, but new content should use `speaker`. |
+
+`from` is the radio endpoint; `speaker` is the voice currently talking on that endpoint. This lets one chat thread stay anchored to a station while multiple characters speak inside it:
+
+```toml
+[[comms]]
+thread_id = "research-scholar"
+from      = "Research Outpost"
+trigger   = "on_hailed"
+entity    = "Research Outpost"
+message   = "A.E.V. Ardent, this is the Research Outpost. Stand by — patching you through to Dr. Myst now."
+
+  [[comms.response]]
+  text = "Patch them through."
+    [comms.response.follow_up]
+    speaker = "Dr. Myst"
+    message = "Ardent, this is Dr. Myst. The resonance signature is getting stronger."
+```
 
 ### Example — `assets/worlds/default.toml`
 

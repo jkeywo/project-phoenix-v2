@@ -36,6 +36,21 @@ inherit the same id. Auto-triggered messages (no hail) each get their own `threa
 (single-message threads). Old wire payloads without `thread_id` default to `""` and
 the client treats that as "own thread" (`effective_thread_id` falls back to `msg.id`).
 
+### Multi-speaker channels
+
+Comms threads can contain multiple displayed speakers while staying anchored to
+one physical or synthetic channel. In world TOML, top-level `from` is the radio
+endpoint used for hailing, range checks, contact lookup, and synthetic broadcast
+identity. Optional `speaker` on the root comms node or a follow-up changes only
+the delivered `CommsMessage.sender_name`. Legacy follow-up `from` is still
+accepted as a display-speaker alias, but new content should use `speaker`.
+
+Example: Before the Fire keeps `from = "Research Outpost"` and
+`thread_id = "research-scholar"` for the channel, while Dr. Myst's entries set
+`speaker = "Dr. Myst"`. The Comms inbox can remain labelled as the Research
+Outpost channel, while the chat transcript shows Dr. Myst as the speaker for
+the relevant messages.
+
 ### Inbox list — one row per thread
 
 `sorted_threads()` groups `messages` by `effective_thread_id`, then sorts unread
@@ -44,7 +59,7 @@ the thread:
 
 | Field | Source |
 |---|---|
-| `sender_name` | latest message |
+| `sender_name` | latest message; in `gui/comms-state.js`, matching contact name wins for channel-anchored multi-speaker threads |
 | `subject` | latest message |
 | `any_unread` | any message in thread has `!is_read` |
 | `latest_out_of_range` | latest message `!sender_in_range` |
@@ -152,5 +167,6 @@ cargo test comms
 - `src/client_comms.rs`
 - `src/console/comms/inbox.rs`
 - `src/core/messages.rs`
+- `src/world/config.rs` (`speaker` parsing, legacy follow-up `from` alias)
 - `src/world/server.rs` (thread_id generation in handle_hail, handle_respond_to_message, auto-triggered comms)
 - `src/world/content.rs` (ActiveDialogue.thread_id)

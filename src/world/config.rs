@@ -231,8 +231,11 @@ struct RawCommsFollowUp {
     message: String,
     #[serde(default, rename = "response")]
     responses: Vec<RawCommsResponse>,
-    /// Optional sender name override for this follow-up node.
-    /// When absent the parent template's `from` is inherited.
+    /// Preferred display-speaker override for this follow-up node.
+    #[serde(default)]
+    speaker: Option<String>,
+    /// Legacy display-speaker override for this follow-up node. Prefer
+    /// `speaker`; kept so existing authored worlds continue to parse.
     #[serde(default)]
     from: Option<String>,
     /// Optional delay in seconds before this follow-up message is injected.
@@ -255,6 +258,11 @@ struct RawCommsEntry {
     from: String,
     message: String,
     trigger: String,
+    /// Optional display-speaker override for this root message. `from`
+    /// remains the physical/synthetic comms endpoint used for hailing,
+    /// range, and contact lookup.
+    #[serde(default)]
+    speaker: Option<String>,
     #[serde(default)]
     entity: Option<String>,
     #[serde(default, rename = "response")]
@@ -393,9 +401,9 @@ pub struct CommsResponse {
 pub struct CommsDialogueNode {
     pub body: String,
     pub responses: Vec<CommsResponse>,
-    /// Sender name override for this node. When `Some`, it overrides the
-    /// template-level `from` when this node is injected as a follow-up.
-    pub from: Option<String>,
+    /// Display-speaker override for this node. When `Some`, it overrides the
+    /// channel/contact name used for the delivered `CommsMessage`.
+    pub speaker: Option<String>,
     /// Delay in seconds before this node is injected after being triggered.
     /// `None` / `0.0` means immediate injection.
     pub delay_secs: Option<f32>,
@@ -589,7 +597,7 @@ fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<Comms
             Some(CommsDialogueNode {
                 body: raw_fu.message.clone(),
                 responses: fu_responses,
-                from: raw_fu.from.clone(),
+                speaker: raw_fu.speaker.clone().or_else(|| raw_fu.from.clone()),
                 delay_secs: raw_fu.delay_secs,
             })
         } else {
@@ -742,7 +750,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
         let node = CommsDialogueNode {
             body: raw_comms.message,
             responses,
-            from: None,           // root node always uses the template-level `from`
+            speaker: raw_comms.speaker,
             delay_secs: raw_comms.delay_secs,
         };
         comms.push(CommsTemplate { from: raw_comms.from, trigger, node, thread_id: raw_comms.thread_id, urgent: raw_comms.urgent });
@@ -1524,6 +1532,92 @@ message = "Please state your business."
             TriggerAction::AddObjective { mandatory, .. } => assert!(*mandatory),
             _ => panic!("expected mandatory AddObjective"),
         }
+    }
+
+    #[test]
+    fn parse_world_reads_root_comms_speaker_override() {
+        let toml = r#"
+[[comms]]
+from    = "Research Outpost"
+speaker = "Dr. Myst"
+trigger = "on_hailed"
+entity  = "Research Outpost"
+message = "The signal is getting stronger."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let tmpl = &cfg.comms[0];
+        assert_eq!(tmpl.from, "Research Outpost");
+        assert_eq!(tmpl.node.speaker.as_deref(), Some("Dr. Myst"));
+    }
+
+    #[test]
+    fn parse_world_reads_follow_up_speaker_override() {
+        let toml = r#"
+[[comms]]
+from    = "Research Outpost"
+trigger = "on_hailed"
+entity  = "Research Outpost"
+message = "Stand by."
+
+  [[comms.response]]
+  text = "Patch them through."
+    [comms.response.follow_up]
+    speaker = "Dr. Myst"
+    message = "This is Dr. Myst."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let follow_up = cfg.comms[0].node.responses[0]
+            .follow_up
+            .as_ref()
+            .expect("follow-up should parse");
+        assert_eq!(follow_up.speaker.as_deref(), Some("Dr. Myst"));
+    }
+
+    #[test]
+    fn parse_world_keeps_legacy_follow_up_from_as_speaker_alias() {
+        let toml = r#"
+[[comms]]
+from    = "Research Outpost"
+trigger = "on_hailed"
+entity  = "Research Outpost"
+message = "Stand by."
+
+  [[comms.response]]
+  text = "Patch them through."
+    [comms.response.follow_up]
+    from    = "Dr. Myst"
+    message = "This is Dr. Myst."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let follow_up = cfg.comms[0].node.responses[0]
+            .follow_up
+            .as_ref()
+            .expect("follow-up should parse");
+        assert_eq!(follow_up.speaker.as_deref(), Some("Dr. Myst"));
+    }
+
+    #[test]
+    fn parse_world_follow_up_speaker_wins_over_legacy_from_alias() {
+        let toml = r#"
+[[comms]]
+from    = "Research Outpost"
+trigger = "on_hailed"
+entity  = "Research Outpost"
+message = "Stand by."
+
+  [[comms.response]]
+  text = "Patch them through."
+    [comms.response.follow_up]
+    speaker = "Dr. Myst"
+    from    = "Outpost Operator"
+    message = "This is Dr. Myst."
+"#;
+        let cfg = parse_world(toml).expect("must parse");
+        let follow_up = cfg.comms[0].node.responses[0]
+            .follow_up
+            .as_ref()
+            .expect("follow-up should parse");
+        assert_eq!(follow_up.speaker.as_deref(), Some("Dr. Myst"));
     }
 
     #[test]

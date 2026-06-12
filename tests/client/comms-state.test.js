@@ -249,6 +249,45 @@ describe('sortedThreads', () => {
   });
 });
 
+describe('multi-speaker thread summaries', () => {
+  it('uses contact name as the thread sender when a multi-speaker thread shares one channel', () => {
+    const s = new ClientCommsState();
+    s.apply(commsStateMsg([
+      msgInThread('m1', 'research-scholar', {
+        sender_uuid: 'research-uuid',
+        sender_name: 'Research Outpost',
+        subject: 'Stand by',
+      }),
+      msgInThread('m2', 'research-scholar', {
+        sender_uuid: 'research-uuid',
+        sender_name: 'Dr. Myst',
+        subject: 'Signal analysis',
+      }),
+    ], [contact('research-uuid', 'Research Outpost')]));
+
+    const [thread] = s.sortedThreads();
+    expect(thread.sender_name).toBe('Research Outpost');
+    expect(thread.subject).toBe('Signal analysis');
+  });
+
+  it('falls back to latest speaker name for synthetic broadcasts without contacts', () => {
+    const s = new ClientCommsState();
+    s.apply(commsStateMsg([
+      msgInThread('m1', 'starcorp-command', {
+        sender_uuid: 'Starcorp Command',
+        sender_name: 'Starcorp Command',
+      }),
+      msgInThread('m2', 'starcorp-command', {
+        sender_uuid: 'Starcorp Command',
+        sender_name: 'Admiral Vale',
+      }),
+    ]));
+
+    const [thread] = s.sortedThreads();
+    expect(thread.sender_name).toBe('Admiral Vale');
+  });
+});
+
 describe('outbound message builders', () => {
   it('build serde tag/content wire objects', () => {
     expect(hailMessage('u1')).toEqual({ type: 'Hail', data: { target_uuid: 'u1' } });

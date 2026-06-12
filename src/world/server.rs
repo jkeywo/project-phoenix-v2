@@ -736,13 +736,15 @@ fn handle_hail(
             // Build a CommsMessage and inject it.
             let thread_id = f.thread_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let sender_uuid = target_uuid.clone();
-            // Resolve sender display name from contacts (best effort).
-            let sender_name = runtime
+            // Resolve channel display name from contacts (best effort), then
+            // let the dialogue node override the visible speaker.
+            let channel_name = runtime
                 .contacts
                 .iter()
                 .find(|c| c.uuid == *target_uuid)
                 .map(|c| c.name.clone())
                 .unwrap_or_else(|| target_uuid.clone());
+            let sender_name = f.node.speaker.clone().unwrap_or(channel_name);
 
             let delay = f.node.delay_secs.unwrap_or(0.0);
             if delay > 0.0 {
@@ -1337,10 +1339,10 @@ fn handle_respond_to_message(
                 .0
                 .sender_uuid_for(message_id)
                 .unwrap_or_default();
-            // Use the follow-up's own `from` override if set, otherwise inherit
-            // the sender name from the parent message.
+            // Use the follow-up's own speaker override if set, otherwise
+            // inherit the sender name from the parent message.
             let sender_name = follow_up
-                .from
+                .speaker
                 .clone()
                 .unwrap_or_else(|| inbox.0.sender_name_for(message_id).unwrap_or_default());
 
@@ -1727,11 +1729,12 @@ fn handle_ai_events(
         // `_self` is the reserved synthetic internal-sender name; render it as
         // "Internal Report" in the comms UI so the crew sees a ship-generated
         // intelligence summary rather than a literal "_self" sender label.
-        let sender_name = if fc.from == "_self" {
+        let channel_name = if fc.from == "_self" {
             "Internal Report".to_string()
         } else {
             fc.from.clone()
         };
+        let sender_name = fc.node.speaker.clone().unwrap_or(channel_name);
         let sender_uuid = name_to_uuid
             .get(&fc.from)
             .cloned()
@@ -2920,7 +2923,7 @@ mod tests {
                         }],
                         follow_up: None,
                     }],
-                    from: None,
+                    speaker: None,
                     delay_secs: None,
                 },
                 thread_id: None,
@@ -3227,6 +3230,101 @@ mod tests {
         );
     }
 
+    #[test]
+    fn follow_up_speaker_changes_display_name_but_keeps_sender_uuid() {
+        let station_uuid = "station-uuid-007c";
+        let mut app = comms_test_app();
+        setup_game_with_comms_and_followup(&mut app, station_uuid);
+        let _ = tick(&mut app);
+
+        push_msg(&mut app, "comms", ClientMessage::Hail { target_uuid: station_uuid.into() });
+        let out = tick(&mut app);
+        let first_msg = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                messages.first().cloned()
+            } else {
+                None
+            }
+        }).expect("CommsState expected after hail");
+
+        assert_eq!(first_msg.sender_uuid, station_uuid);
+        assert_eq!(first_msg.sender_name, "Starbase Alpha");
+
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::RespondToMessage {
+                message_id: first_msg.id.clone(),
+                response_index: 0,
+            },
+        );
+        let out = tick(&mut app);
+
+        let messages = out.iter().find_map(|m| {
+            if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                Some(messages.clone())
+            } else {
+                None
+            }
+        }).expect("CommsState expected after follow-up");
+        let follow_up_msg = messages.get(1).expect("follow-up message expected");
+
+        assert_eq!(follow_up_msg.sender_uuid, station_uuid);
+        assert_eq!(follow_up_msg.sender_name, "Dockmaster Kade");
+        assert_eq!(follow_up_msg.thread_id, first_msg.thread_id);
+    }
+
+    #[test]
+    fn delayed_follow_up_replacement_preserves_display_speaker() {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin)
+            .init_resource::<WorldContentRuntime>()
+            .init_resource::<CommsInboxRes>()
+            .add_systems(Update, tick_pending_follow_ups);
+
+        let placeholder = CommsMessage {
+            id: "placeholder-001".into(),
+            sender_uuid: "station-uuid-delayed".into(),
+            sender_name: "Dockmaster Kade".into(),
+            subject: "...".into(),
+            body: "...".into(),
+            responses: vec![],
+            selected_response: None,
+            is_read: false,
+            is_orphaned: false,
+            sender_in_range: true,
+            thread_id: "thread-delayed".into(),
+            is_urgent: false,
+        };
+        app.world_mut().resource_mut::<CommsInboxRes>().0.inject(placeholder);
+        app.world_mut()
+            .resource_mut::<WorldContentRuntime>()
+            .pending_follow_ups
+            .push(PendingFollowUp {
+                node: CommsDialogueNode {
+                    body: "Welcome, Phoenix.".into(),
+                    responses: vec![],
+                    speaker: Some("Dockmaster Kade".into()),
+                    delay_secs: Some(1.0),
+                },
+                sender_uuid: "station-uuid-delayed".into(),
+                sender_name: "Dockmaster Kade".into(),
+                thread_id: "thread-delayed".into(),
+                remaining_secs: -1.0,
+                placeholder_id: "placeholder-001".into(),
+                urgent: false,
+            });
+
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 1);
+        assert_ne!(messages[0].id, "placeholder-001");
+        assert_eq!(messages[0].sender_uuid, "station-uuid-delayed");
+        assert_eq!(messages[0].sender_name, "Dockmaster Kade");
+        assert_eq!(messages[0].thread_id, "thread-delayed");
+    }
+
     fn setup_game_with_comms_and_followup(app: &mut App, station_uuid: &str) {
         setup_game_with_comms(app, station_uuid);
         // Replace the single template with one that has a follow-up node.
@@ -3246,11 +3344,11 @@ mod tests {
                         follow_up: Some(CommsDialogueNode {
                             body: "Welcome, Phoenix.".into(),
                             responses: vec![],
-                            from: None,
+                            speaker: Some("Dockmaster Kade".into()),
                             delay_secs: None,
                         }),
                     }],
-                    from: None,
+                    speaker: None,
                     delay_secs: None,
                 },
                 thread_id: None,
@@ -3837,7 +3935,7 @@ mod tests {
                     node: CommsDialogueNode {
                         body: "Mayday! We are under attack!".to_string(),
                         responses: vec![],
-                        from: None,
+                        speaker: None,
                         delay_secs: None,
                     },
                     thread_id: None,
@@ -3884,7 +3982,7 @@ mod tests {
                     node: CommsDialogueNode {
                         body: "Distress signal transmitted.".to_string(),
                         responses: vec![],
-                        from: None,
+                        speaker: None,
                         delay_secs: None,
                     },
                     thread_id: None,
@@ -6568,7 +6666,7 @@ size_max = 2.0
                             actions,
                             follow_up: None,
                         }],
-                        from: None,
+                        speaker: None,
                         delay_secs: None,
                     },
                     thread_id: None,
@@ -6922,7 +7020,7 @@ size_max = 2.0
                             }],
                             follow_up: None,
                         }],
-                        from: None,
+                        speaker: None,
                         delay_secs: None,
                     },
                     thread_id: None,

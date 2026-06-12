@@ -173,7 +173,7 @@ export function buildRepairConsoleState(state) {
     teams:                state.repairTeams || [],
     console_hull:         state.consoleHull || [],
     travel_duration_secs: 5.0,
-    damageable_consoles:  [],
+    damageable_consoles:  (state.consoleHull || []).map(h => h.console),
   });
 }
 

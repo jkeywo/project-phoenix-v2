@@ -236,6 +236,26 @@ describe('buildRepairConsoleState', () => {
     const teams = [{ id: 1, location: 'Helm' }];
     expect(parse(buildRepairConsoleState({ repairTeams: teams })).teams).toEqual(teams);
   });
+
+  it('damageable_consoles derives from consoleHull', () => {
+    const hull = [
+      { console: 'Helm',     current: 14, max_hp: 25 },
+      { console: 'Tactical', current: 25, max_hp: 25 },
+      { console: 'Power',    current:  6, max_hp: 25 },
+    ];
+    const s = parse(buildRepairConsoleState({ consoleHull: hull }));
+    expect(s.damageable_consoles).toEqual(['Helm', 'Tactical', 'Power']);
+  });
+
+  it('damageable_consoles is empty when consoleHull is empty', () => {
+    const s = parse(buildRepairConsoleState({ consoleHull: [] }));
+    expect(s.damageable_consoles).toEqual([]);
+  });
+
+  it('damageable_consoles is empty when consoleHull is absent', () => {
+    const s = parse(buildRepairConsoleState({}));
+    expect(s.damageable_consoles).toEqual([]);
+  });
 });
 
 describe('buildPowerConsoleState', () => {

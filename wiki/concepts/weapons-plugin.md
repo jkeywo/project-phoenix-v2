@@ -181,6 +181,16 @@ then overlays the focus configuration. `Option<ShieldsBaseConfig>` was
 used so the 22 existing `EntityConfig {...}` test literals scattered
 across the codebase did not need to be touched.
 
+## HTML Shields console runtime
+
+The live phone Shields panel is `gui/shield-console.html`, embedded by
+`client.html` as the `Shields` iframe. It receives `ShieldsConsoleState`
+through `gui/console-core.js`, renders the four shield facings over
+`assets/shield_console/shield-hex-bg.png`, and sends
+`set_shield_focus` actions through `gui/action-map.js`. Focus is controlled
+by clicking or keyboard-activating the shield segment itself: clicking the
+currently focused segment clears focus by sending `facing: null`.
+
 ## Sources
 
 - `src/weapons_plugin.rs`

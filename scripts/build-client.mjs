@@ -29,6 +29,7 @@ const ASSET_DIRS = [
   'gui',
   'helm_console',
   'captain_console',
+  'shield_console',
   'radar_icons',
   'sounds',
 ];

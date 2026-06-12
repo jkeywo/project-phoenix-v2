@@ -131,8 +131,8 @@ test('weapons console: short landscape keeps action buttons on screen', async ({
   for (const selector of buttons) {
     const box = await page.locator(selector).boundingBox();
     expect(box, `${selector} should have layout bounds`).not.toBeNull();
-    expect(box!.top, `${selector} top`).toBeGreaterThanOrEqual(0);
-    expect(box!.bottom, `${selector} bottom`).toBeLessThanOrEqual(390);
+    expect(box!.y, `${selector} top`).toBeGreaterThanOrEqual(0);
+    expect(box!.y + box!.height, `${selector} bottom`).toBeLessThanOrEqual(390);
   }
 
   const bodySizes = await page.locator('body').evaluate((body) => ({

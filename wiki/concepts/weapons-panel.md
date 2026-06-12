@@ -6,6 +6,26 @@ title: WeaponsPanelPlugin
 
 Extracted from `client/app.rs` as part of the client split series (issue [#251](https://github.com/jkeywo/project-phoenix-v2/issues/251)).
 
+> Current runtime note (2026-06-12): the phone Tactical console is now the HTML
+> page `gui/weapons-console.html`, embedded by `client.html` as the full-viewport
+> `#weapons-iframe`. The old Bevy `WeaponsPanelPlugin` notes below describe the
+> pre-client-WASM-removal implementation and remain historical context.
+
+## HTML Tactical Console
+
+`gui/weapons-console.html` owns the live Tactical phone UI: radar canvas,
+target readout, torpedo tube chips/status, phaser mode, cooldown, and FIRE
+buttons. It receives state through `gui/console-core.js`'s `__updateConsole`
+bridge and sends action envelopes back to `client.html`.
+
+The page has a dedicated short-landscape breakpoint for phones with limited
+height (`@media (orientation: landscape) and (max-height: 480px)`). That mode
+hides nonessential chrome, tightens card spacing, and scales the chip/status/
+button heights with dynamic viewport units so the phaser and torpedo FIRE
+buttons stay inside the iframe. The regression test is
+`tests/smoke/weapons-console.spec.ts` ("short landscape keeps action buttons on
+screen").
+
 ## Location
 
 `src/weapons_panel.rs` — compiled under the `client` Cargo feature.

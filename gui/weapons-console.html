@@ -90,7 +90,7 @@
     }
 
     /* Short landscape phones: keep the whole console inside the iframe. */
-    @media (orientation: landscape) and (max-height: 430px) {
+    @media (orientation: landscape) and (max-height: 480px) {
       body { overflow: hidden; }
       .panel-inner {
         padding: 8px 14px 10px;
@@ -173,7 +173,7 @@
         margin-top: 3px;
       }
       .ctrl-col .chip {
-        --h: clamp(24px, 7.5vh, 32px);
+        --h: clamp(24px, 7.5dvh, 32px);
         padding: 0 5px;
         font-size: clamp(9px, 2.8vh, 11px);
         letter-spacing: 0.14em;
@@ -183,7 +183,7 @@
         margin-top: 3px;
       }
       .ctrl-col .tube-status {
-        height: clamp(16px, 5vh, 20px);
+        height: clamp(16px, 5dvh, 20px);
         gap: 4px;
         font-size: clamp(8px, 2.5vh, 10px);
         letter-spacing: 0.12em;
@@ -193,7 +193,7 @@
         height: 5px;
       }
       .ctrl-col .btn {
-        --h: clamp(30px, 9.8vh, 38px);
+        --h: clamp(28px, 9dvh, 38px);
         padding: 0 8px 0 28px;
         font-size: clamp(10px, 3.2vh, 13px);
         letter-spacing: 0.14em;

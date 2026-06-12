@@ -1399,18 +1399,26 @@ fn dump_tracked_entities(
     bevy::log::info!("=== ENTITY DUMP END ({} entities) ===", count);
 }
 
+/// Marker: entity mesh has been rendered (GLB procedural).
+/// Prevents re-processing by `render_spawned_entities`.
+#[derive(Component)]
+struct RenderProcessed;
+
 /// Add visual meshes and materials to spawned entities that have a `[mesh]`
-/// section but no `Mesh3d` yet. When `cfg.model` is set, loads a GLB scene
-/// instead of creating a procedural shape. Applies `cfg.scale` and
-/// `cfg.rotation` to the entity's transform in both paths. Additionally,
-/// if the entity carries a `Lights` component (from one or more `[[light]]`
-/// TOML entries), attach the matching `PointLight`/`DirectionalLight`
-/// components (single light → inline, multiple → spawned as child entities).
+/// section but no `RenderProcessed` yet. When `cfg.model` is set, loads a GLB
+/// scene instead of creating a procedural shape — but defers insertion until
+/// the asset is actually loaded (avoids attaching an unloaded handle that
+/// would never retry). Applies `cfg.scale` and `cfg.rotation` to the entity's
+/// transform in both paths. Additionally, if the entity carries a `Lights`
+/// component (from one or more `[[light]]` TOML entries), attach the matching
+/// `PointLight`/`DirectionalLight` components (single light → inline, multiple
+/// → spawned as child entities).
 fn render_spawned_entities(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    scenes: Res<Assets<bevy::scene::Scene>>,
     entities: Query<
         (
             Entity,
@@ -1418,7 +1426,7 @@ fn render_spawned_entities(
             &crate::entity_spawner::MeshSection,
             Option<&crate::entity_spawner::Lights>,
         ),
-        (Without<Mesh3d>, Without<bevy::scene::SceneRoot>),
+        Without<RenderProcessed>,
     >,
 ) {
     use crate::entity_config::MeshShape;
@@ -1426,12 +1434,16 @@ fn render_spawned_entities(
     for (entity, transform, mesh_sec, lights_opt) in entities.iter() {
         let cfg = &mesh_sec.0;
         let mut ec = commands.entity(entity);
+        let mut rendered = false;
 
         if let Some(model_path) = &cfg.model {
-            // PATH A: GLB model — load scene, keep procedural fields as fallback.
-            let scene: Handle<bevy::scene::Scene> =
-                asset_server.load(format!("{}#Scene0", model_path));
-            ec.insert(bevy::scene::SceneRoot(scene));
+            // PATH A: GLB model — only attach scene when asset is ready.
+            let path = format!("{}#Scene0", model_path);
+            let scene: Handle<bevy::scene::Scene> = asset_server.load(&path);
+            if scenes.get(&scene).is_some() {
+                ec.insert(bevy::scene::SceneRoot(scene));
+                rendered = true;
+            }
         } else {
             // PATH B: Procedural primitive.
             let color = if cfg.colour.len() >= 3 {
@@ -1462,6 +1474,12 @@ fn render_spawned_entities(
             });
 
             ec.insert((Mesh3d(mesh), MeshMaterial3d(mat)));
+            rendered = true;
+        }
+
+        if !rendered {
+            // GLB not loaded yet — try again next frame.
+            continue;
         }
 
         // Apply scale/rotation to both paths — preserves spawn position.
@@ -1477,6 +1495,9 @@ fn render_spawned_entities(
                 scale: Vec3::splat(cfg.scale),
             });
         }
+
+        // Mark processed so we never visit this entity again.
+        ec.insert(RenderProcessed);
 
         // Attach lights, if any.
         if let Some(lights_comp) = lights_opt {

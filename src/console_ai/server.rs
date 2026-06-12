@@ -625,6 +625,15 @@ mod tests {
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
+    /// Return ComplexityRules populated from shipped asset files on native,
+    /// or an empty default on WASM (tests do not run on WASM).
+    fn test_complexity_rules() -> ComplexityRules {
+        #[cfg(not(target_arch = "wasm32"))]
+        { ComplexityRules::from_asset_files() }
+        #[cfg(target_arch = "wasm32")]
+        { ComplexityRules::default() }
+    }
+
     /// Override a float param on an AI rule across every preset that carries
     /// it, in the test app's `ComplexityRules`. Lets tests tune delays the
     /// way a designer would edit the complexity TOML.
@@ -663,7 +672,7 @@ mod tests {
             .add_plugins(ConsoleAiPlugin)
             // Rules from the shipped asset files, so these tests exercise the
             // real complexity TOMLs (native builds have no wasm config cache).
-            .insert_resource(ComplexityRules::from_asset_files())
+            .insert_resource(test_complexity_rules())
             .insert_resource(ShipState::new())
             .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
                 (crate::messages::Console::Helm, 25.0),

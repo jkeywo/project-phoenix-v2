@@ -2513,14 +2513,13 @@ fn apply_pending_scenario_loads(
 /// step), so we fall back to reading each template file from disk so that
 /// `spawn_immediate_entities_internal` can resolve them.
 fn build_layer_config_cache(
-    world_config: &crate::world::config::WorldConfig,
+    _world_config: &crate::world::config::WorldConfig,
 ) -> crate::config_cache::ConfigCache {
-    let mut cache = crate::config_cache::get_config_cache();
-
     #[cfg(not(target_arch = "wasm32"))]
     {
         use crate::entity_config::EntityConfig;
-        for entity in &world_config.entities {
+        let mut cache = crate::config_cache::get_config_cache();
+        for entity in &_world_config.entities {
             if cache.contains_key(&entity.template_path) {
                 continue;
             }
@@ -2541,9 +2540,13 @@ fn build_layer_config_cache(
                 }
             }
         }
+        cache
     }
 
-    cache
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::config_cache::get_config_cache()
+    }
 }
 
 /// Bevy system: drain `PendingWorldLayerChanges` and apply each `LoadWorld` or
@@ -4188,9 +4191,10 @@ mod tests {
         // Build a fixture ConfigCache with the templates referenced above.
         // Empty EntityConfig is sufficient â€” no asteroid_field section, so
         // `is_owned_by_unified_pipeline` routes by `name.is_some()`.
-        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
-        cache.insert("fixture/station.toml".into(), EntityConfig::from_toml("").unwrap());
-        cache.insert("fixture/star.toml".into(), EntityConfig::from_toml("").unwrap());
+        let mut m: HashMap<String, EntityConfig> = HashMap::new();
+        m.insert("fixture/station.toml".into(), EntityConfig::from_toml("").unwrap());
+        m.insert("fixture/star.toml".into(), EntityConfig::from_toml("").unwrap());
+        let cache = crate::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -4255,11 +4259,12 @@ mod tests {
             .name_to_uuid
             .insert("raider_alpha".into(), "raider-uuid-001".into());
 
-        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
-        cache.insert(
+        let mut m: HashMap<String, EntityConfig> = HashMap::new();
+        m.insert(
             "fixture/raider.toml".into(),
             EntityConfig::from_toml("").unwrap(),
         );
+        let cache = crate::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -4322,11 +4327,12 @@ transition = []
             .name_to_uuid
             .insert("raider_alpha".into(), "raider-uuid-002".into());
 
-        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
-        cache.insert(
+        let mut m: HashMap<String, EntityConfig> = HashMap::new();
+        m.insert(
             "fixture/raider.toml".into(),
             EntityConfig::from_toml(raider_toml).unwrap(),
         );
+        let cache = crate::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -4402,8 +4408,9 @@ transition = []
             anchor: Some("belt_origin".into()),
             anchor_offset: [0.0, 0.0, 0.0],
         });
-        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
-        cache.insert("fixture/anchored_belt.toml".into(), field_template);
+        let mut m: HashMap<String, EntityConfig> = HashMap::new();
+        m.insert("fixture/anchored_belt.toml".into(), field_template);
+        let cache = crate::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -4487,8 +4494,9 @@ transition = []
             anchor: Some("typo_anchor".into()),
             anchor_offset: [0.0, 0.0, 0.0],
         });
-        let mut cache: HashMap<String, EntityConfig> = HashMap::new();
-        cache.insert("fixture/typo_belt.toml".into(), field_template);
+        let mut m: HashMap<String, EntityConfig> = HashMap::new();
+        m.insert("fixture/typo_belt.toml".into(), field_template);
+        let cache = crate::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -4797,14 +4805,14 @@ transition = []
         );
 
         // Drop borrow before mutating pending again.
-        drop(layer_map);
+        let _ = layer_map;
 
         // Capture trigger/contact/name counts after the first-tick double-load.
         let runtime = app.world().resource::<WorldContentRuntime>();
         let triggers_after_double = runtime.trigger_states.len();
         let names_after_double = runtime.name_to_uuid.len();
         let contacts_after_double = runtime.contacts.len();
-        drop(runtime);
+        let _ = runtime;
 
         // Now load the same path AGAIN on a separate tick: must also be a
         // no-op (existing behaviour) and keep the same counts.

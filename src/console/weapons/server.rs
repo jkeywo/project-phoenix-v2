@@ -1565,6 +1565,15 @@ mod tests {
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
+    /// Return ComplexityRules populated from shipped asset files on native,
+    /// or an empty default on WASM (tests do not run on WASM).
+    fn test_complexity_rules() -> crate::console_ai_plugin::ComplexityRules {
+        #[cfg(not(target_arch = "wasm32"))]
+        { crate::console_ai_plugin::ComplexityRules::from_asset_files() }
+        #[cfg(target_arch = "wasm32")]
+        { crate::console_ai_plugin::ComplexityRules::default() }
+    }
+
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
         for m in reader.read() {
             box_.0.push(m.clone());
@@ -1596,7 +1605,7 @@ mod tests {
             .insert_resource(ShipModifiers::new())
             .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
             .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
-            .insert_resource(crate::console_ai_plugin::ComplexityRules::from_asset_files())
+            .insert_resource(test_complexity_rules())
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
             .insert_resource(crate::lobby::server::ShipClientConfigResource::default())

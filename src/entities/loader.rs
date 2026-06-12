@@ -44,18 +44,19 @@ pub fn assign_uuid() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config_cache::ConfigCache;
     use crate::entity_config::EntityConfig;
     use std::collections::HashMap;
 
-    fn make_cache(path: &str, toml: &str) -> HashMap<String, EntityConfig> {
+    fn make_cache(path: &str, toml: &str) -> ConfigCache {
         let mut m = HashMap::new();
         m.insert(path.to_string(), EntityConfig::from_toml(toml).unwrap());
-        m
+        ConfigCache::from(m)
     }
 
     #[test]
     fn resolve_missing_template_returns_err() {
-        let cache: HashMap<String, EntityConfig> = HashMap::new();
+        let cache = ConfigCache::from(HashMap::new());
         let inst = WorldEntity {
             template_path: "assets/entities/missing.toml".to_string(),
             ..Default::default()

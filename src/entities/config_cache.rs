@@ -456,6 +456,13 @@ impl std::ops::Deref for ConfigCache {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+impl From<HashMap<String, EntityConfig>> for ConfigCache {
+    fn from(map: HashMap<String, EntityConfig>) -> Self {
+        ConfigCache(map)
+    }
+}
+
 /// On non-wasm, ConfigCache is just a plain HashMap (no Bevy Resource needed).
 #[cfg(not(target_arch = "wasm32"))]
 pub type ConfigCache = std::collections::HashMap<String, crate::entity_config::EntityConfig>;

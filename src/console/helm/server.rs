@@ -2,8 +2,8 @@ use bevy::prelude::*;
 
 use crate::console_bridge::ConsoleStateChanged;
 use crate::messages::{HelmConsoleState, ViewMode};
-use crate::ship_state::ShipState;
 use crate::server_app::ShipImpulse;
+use crate::ship_state::ShipState;
 
 pub struct HelmPlugin;
 
@@ -11,10 +11,13 @@ impl Plugin for HelmPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>();
         app.add_systems(Startup, spawn_helm_console_state_entity);
-        app.add_systems(Update, (
-            recompute_helm_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-            push_helm_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-        ));
+        app.add_systems(
+            Update,
+            (
+                recompute_helm_console_state,
+                push_helm_console_state.after(recompute_helm_console_state),
+            ).in_set(crate::sim_sets::SimSet::Broadcast),
+        );
     }
 }
 
@@ -85,7 +88,6 @@ mod tests {
     use super::*;
     use crate::impulse::ImpulseState;
 
-
     #[derive(Resource, Default)]
     struct Outbox(Vec<ConsoleStateChanged>);
 
@@ -108,20 +110,23 @@ mod tests {
         let mut app = App::new();
         app.add_message::<ConsoleStateChanged>()
             .init_resource::<Outbox>()
-            .add_systems(Update, (
-                push_helm_console_state,
-                collect.after(push_helm_console_state),
-            ));
-        app.world_mut().spawn(HelmConsoleStateComp(HelmConsoleState {
-            heading: 0.0,
-            speed: 0.0,
-            x: 0.0,
-            z: 0.0,
-            yaw: 0.0,
-            impulse_charge_progress: 0.0,
-            on_screen: false,
-
-        }));
+            .add_systems(
+                Update,
+                (
+                    push_helm_console_state,
+                    collect.after(push_helm_console_state),
+                ),
+            );
+        app.world_mut()
+            .spawn(HelmConsoleStateComp(HelmConsoleState {
+                heading: 0.0,
+                speed: 0.0,
+                x: 0.0,
+                z: 0.0,
+                yaw: 0.0,
+                impulse_charge_progress: 0.0,
+                on_screen: false,
+            }));
         app.insert_resource(ShipState::new());
         app.insert_resource(ShipImpulse(ImpulseState::new()));
         app
@@ -221,9 +226,17 @@ mod tests {
         assert_eq!(pushes.len(), 1, "expected exactly one push after a change");
         let push = &pushes[0];
         assert_eq!(push.name, "Helm");
-        assert!(push.json.contains("\"heading\":180.0"), "json: {}", push.json);
+        assert!(
+            push.json.contains("\"heading\":180.0"),
+            "json: {}",
+            push.json
+        );
         assert!(push.json.contains("\"speed\":100.0"), "json: {}", push.json);
-        assert!(push.json.contains("\"on_screen\":true"), "json: {}", push.json);
+        assert!(
+            push.json.contains("\"on_screen\":true"),
+            "json: {}",
+            push.json
+        );
 
         // No further change -> no further pushes.
         app.world_mut().resource_mut::<Outbox>().0.clear();

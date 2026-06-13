@@ -255,6 +255,28 @@
       .hero h1 { font-size: 1.2rem; letter-spacing: 0.15em; }
       .hero .bar { display: none; }
       .hero .sub { display: none; }
+
+      /* Message-view slide: hide inbox, show chat full-height */
+      .portrait-message .primary-col { display: none; }
+      .portrait-message .secondary-col { flex: 1; min-height: 0; }
+    }
+
+    /* Back button (portrait only) */
+    .back-btn {
+      display: none;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px; letter-spacing: 0.2em;
+      padding: 4px 12px;
+      background: transparent;
+      border: 1px solid var(--line-soft);
+      color: var(--ink-faint);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+    .back-btn:hover { border-color: var(--line); color: var(--ink-dim); }
+    @media (max-aspect-ratio: 1/1) {
+      .back-btn { display: inline-block; }
     }
   </style>
 </head>
@@ -329,6 +351,17 @@
     // ── State ─────────────────────────────────────────────────────────────
     var _state        = null;
     var _selectedId   = null;  // currently open message id
+    var _portraitMsg  = false; // portrait: showing message view instead of inbox
+
+    function _isPortrait() {
+      return window.matchMedia('(max-aspect-ratio: 1/1)').matches;
+    }
+
+    function _setPortraitView(showMsg) {
+      _portraitMsg = showMsg;
+      var mid = document.querySelector('.panel-mid');
+      if (mid) mid.classList.toggle('portrait-message', showMsg);
+    }
 
     // ── Inbound state push (ADR-0001 §2) ──────────────────────────────────
     window.__updateConsole = function(name, stateJson) {
@@ -459,6 +492,7 @@
           row.dataset.id = m.id;
           row.addEventListener('click', function() {
             _selectedId = row.dataset.id;
+            if (_isPortrait()) _setPortraitView(true);
             if (typeof window._sendCommsAction === 'function') {
               window._sendCommsAction('select_comms_message', { message_id: row.dataset.id });
             }
@@ -535,6 +569,14 @@
 
       var hdr = document.createElement('div');
       hdr.className = 'chat-header';
+      var backBtn = document.createElement('button');
+      backBtn.type = 'button';
+      backBtn.className = 'back-btn';
+      backBtn.textContent = '← BACK';
+      backBtn.addEventListener('click', function() {
+        _setPortraitView(false);
+      });
+      hdr.appendChild(backBtn);
       var senderEl = document.createElement('span');
       senderEl.className = 'chat-sender';
       senderEl.textContent = msg.sender_name.toUpperCase();
@@ -726,6 +768,11 @@
       if (inbox) inbox.textContent = msgs.length + ' MESSAGE' + (msgs.length === 1 ? '' : 'S');
       if (cont)  cont.textContent  = conts.length + ' CONTACT' + (conts.length === 1 ? '' : 'S');
     }
+
+    // ── Orientation change: exit portrait-message view if rotated landscape ──
+    window.matchMedia('(max-aspect-ratio: 1/1)').addEventListener('change', function(e) {
+      if (!e.matches) _setPortraitView(false);
+    });
 
     // ── Clear button ──────────────────────────────────────────────────────
     document.getElementById('clear-btn').addEventListener('click', function() {

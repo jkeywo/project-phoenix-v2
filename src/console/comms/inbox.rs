@@ -50,7 +50,8 @@ impl CommsInbox {
     /// Returns the number of messages removed.
     pub fn clear(&mut self) -> usize {
         let before = self.records.len();
-        self.records.retain(|r| !r.message.is_orphaned && !r.message.is_read);
+        self.records
+            .retain(|r| !r.message.is_orphaned && !r.message.is_read);
         let removed = before - self.records.len();
         if removed > 0 {
             self.dirty = true;

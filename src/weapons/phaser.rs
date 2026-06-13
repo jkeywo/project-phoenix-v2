@@ -159,7 +159,9 @@ impl PhaserSystem {
         ship_z: f32,
         ship_yaw: f32,
     ) -> bool {
-        let Some(bank) = self.bank(id) else { return false };
+        let Some(bank) = self.bank(id) else {
+            return false;
+        };
         let range_sq = (target_x - ship_x).powi(2) + (target_z - ship_z).powi(2);
         if range_sq > bank.beam_range.powi(2) {
             return false;
@@ -178,7 +180,9 @@ impl PhaserSystem {
         ship_z: f32,
         ship_yaw: f32,
     ) -> bool {
-        let Some(bank) = self.bank(id) else { return false };
+        let Some(bank) = self.bank(id) else {
+            return false;
+        };
         let range_sq = (target_x - ship_x).powi(2) + (target_z - ship_z).powi(2);
         if range_sq > bank.beam_range.powi(2) {
             return false;
@@ -208,10 +212,9 @@ impl PhaserSystem {
             .banks
             .iter()
             .map(|b| {
-                let in_range_sq =
-                    (target_x - ship_x).powi(2) + (target_z - ship_z).powi(2) <= b.beam_range.powi(2);
-                let (rx, ry) =
-                    ship_local(target_x, target_z, ship_x, ship_z, ship_yaw);
+                let in_range_sq = (target_x - ship_x).powi(2) + (target_z - ship_z).powi(2)
+                    <= b.beam_range.powi(2);
+                let (rx, ry) = ship_local(target_x, target_z, ship_x, ship_z, ship_yaw);
                 let in_a = in_range_sq && in_arc(rx, ry, b.facing_deg, b.auto_arc_deg);
                 (b.id.clone(), in_a)
             })
@@ -232,7 +235,13 @@ impl PhaserSystem {
 // ── helpers ────────────────────────────────────────────────────────────────
 
 /// Convert a world-space target to ship-local (radar) coordinates.
-pub(crate) fn ship_local(target_x: f32, target_z: f32, ship_x: f32, ship_z: f32, ship_yaw: f32) -> (f32, f32) {
+pub(crate) fn ship_local(
+    target_x: f32,
+    target_z: f32,
+    ship_x: f32,
+    ship_z: f32,
+    ship_yaw: f32,
+) -> (f32, f32) {
     let dx = target_x - ship_x;
     let dz = target_z - ship_z;
     let cos_y = ship_yaw.cos();

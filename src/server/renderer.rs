@@ -1,9 +1,11 @@
-use bevy::prelude::*;
 use bevy::pbr::{DistanceFog, FogFalloff};
+use bevy::prelude::*;
 use rand::Rng;
 use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
 
+use crate::ai_plugin::WarpOutMarker;
+use crate::beam_render;
 use crate::entity_spawner::{RegionEffectsSection, RegionShapeSection};
 use crate::lobby::GameStateCache;
 use crate::messages::{GamePhase, ViewDirection, ViewMode};
@@ -11,9 +13,9 @@ use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::region_shape::RegionShape;
 use crate::ship_state::ShipState;
-use crate::simulation::{ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource};
-use crate::beam_render;
-use crate::ai_plugin::WarpOutMarker;
+use crate::simulation::{
+    ActiveBeam, AsteroidDestroyedVfx, PhaserRenderConfig, TorpedoSystemResource,
+};
 use crate::world::server::OnScreenMessage;
 
 // ── VFX Components ────────────────────────────────────────────────
@@ -64,7 +66,6 @@ struct LobbyCamera;
 #[derive(Component)]
 pub struct GameCamera;
 
-
 /// FPS counter text — rendered in the Bevy UI overlay.
 #[derive(Component)]
 struct FpsText;
@@ -100,38 +101,50 @@ impl Plugin for RendererPlugin {
                 // visible at the registration site.
                 spawn_world_ambient_light.after(crate::world::server::insert_world_config_resource),
             )
-            .add_systems(Update, (
-                update_fps_counter,
-                update_camera_aspect,
-                toggle_cameras,
-                update_view_screen_text,
-                update_view_direction_label,
-                hull_camera.run_if(in_state(GamePhase::InProgress)),
-                sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
-            ))
-            .add_systems(Update, (
-                draw_beam_vfx.run_if(in_state(GamePhase::InProgress)),
-                spawn_ripples,
-                tick_ripples.run_if(in_state(GamePhase::InProgress)),
-                sync_torpedo_entities.run_if(in_state(GamePhase::InProgress)),
-                draw_warp_exit_markers.run_if(in_state(GamePhase::InProgress)),
-                nebula_fog_system.run_if(in_state(GamePhase::InProgress)),
-                spawn_nebula_cloud_particles,
-            ))
+            .add_systems(
+                Update,
+                (
+                    update_fps_counter,
+                    update_camera_aspect,
+                    toggle_cameras,
+                    update_view_screen_text,
+                    update_view_direction_label,
+                    hull_camera.run_if(in_state(GamePhase::InProgress)),
+                    sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    draw_beam_vfx.run_if(in_state(GamePhase::InProgress)),
+                    spawn_ripples,
+                    tick_ripples.run_if(in_state(GamePhase::InProgress)),
+                    sync_torpedo_entities.run_if(in_state(GamePhase::InProgress)),
+                    draw_warp_exit_markers.run_if(in_state(GamePhase::InProgress)),
+                    nebula_fog_system.run_if(in_state(GamePhase::InProgress)),
+                    spawn_nebula_cloud_particles,
+                ),
+            )
             .add_systems(OnExit(GamePhase::InProgress), cleanup_nebula_fog);
     }
 }
 
 // ── Setup ─────────────────────────────────────────────────────────
 
-fn setup(
-    mut commands: Commands,
-) {
+fn setup(mut commands: Commands) {
     // 2D camera — active during lobby phase. `IsDefaultUiCamera` marks
     // this as the canonical UI target for all UI nodes. It stays active
     // throughout InProgress so the FPS counter, radar widgets, and viewscreen
     // border continue to render without an explicit UiTargetCamera.
-    commands.spawn((LobbyCamera, Camera2d, Camera { order: 0, ..default() }, IsDefaultUiCamera));
+    commands.spawn((
+        LobbyCamera,
+        Camera2d,
+        Camera {
+            order: 0,
+            ..default()
+        },
+        IsDefaultUiCamera,
+    ));
 
     // 3D camera — active during in-game phase, positioned for ship view.
     // order: -1 so the 3D scene composites before the UI layer (LobbyCamera
@@ -140,7 +153,11 @@ fn setup(
     commands.spawn((
         GameCamera,
         Camera3d::default(),
-        Camera { is_active: false, order: -1, ..default() },
+        Camera {
+            is_active: false,
+            order: -1,
+            ..default()
+        },
         Projection::Perspective(PerspectiveProjection {
             far: 5000.0,
             ..default()
@@ -162,7 +179,10 @@ fn setup(
             ..default()
         },
         Text::new(""),
-        TextFont { font_size: 14.0, ..default() },
+        TextFont {
+            font_size: 14.0,
+            ..default()
+        },
         TextColor(Color::srgba(0.7, 0.85, 1.0, 0.75)),
         Visibility::Hidden,
     ));
@@ -183,7 +203,10 @@ fn setup(
         .with_children(|parent| {
             parent.spawn((
                 Text::new("FORE"),
-                TextFont { font_size: 20.0, ..default() },
+                TextFont {
+                    font_size: 20.0,
+                    ..default()
+                },
                 TextColor(Color::srgba(0.9, 0.95, 1.0, 0.9)),
             ));
         });
@@ -201,7 +224,10 @@ fn setup(
             ..default()
         },
         Text::new("-- fps"),
-        TextFont { font_size: 13.0, ..default() },
+        TextFont {
+            font_size: 13.0,
+            ..default()
+        },
         TextColor(Color::srgb(0.8, 0.8, 0.95)),
     ));
 }
@@ -221,7 +247,10 @@ fn spawn_world_ambient_light(
         .and_then(|wc| wc.ambient_light.as_ref())
         .map(|al| {
             let c = al.color.unwrap_or([0.6, 0.55, 0.5]);
-            (Color::srgb(c[0], c[1], c[2]), al.brightness.unwrap_or(300.0))
+            (
+                Color::srgb(c[0], c[1], c[2]),
+                al.brightness.unwrap_or(300.0),
+            )
         })
         .unwrap_or_else(|| (Color::srgb(0.6, 0.55, 0.5), 300.0));
 
@@ -287,8 +316,7 @@ fn toggle_cameras(
     // Radar views are handled by the GenericRadarWidget UI pipeline
     // (ServerViewscreenRadarPlugin), which renders through the always-active
     // LobbyCamera (Camera2d, IsDefaultUiCamera).
-    let game_active = in_game
-        && matches!(ship.view_mode, ViewMode::Camera(_) | ViewMode::Comms);
+    let game_active = in_game && matches!(ship.view_mode, ViewMode::Camera(_) | ViewMode::Comms);
 
     // LobbyCamera (Camera2d, IsDefaultUiCamera) is intentionally kept active
     // in all phases so that UI nodes (FPS counter, radar widgets) continue to
@@ -305,7 +333,9 @@ fn update_view_screen_text(
     if !cache.is_changed() {
         return;
     }
-    let Ok((_text, mut vis)) = query.single_mut() else { return };
+    let Ok((_text, mut vis)) = query.single_mut() else {
+        return;
+    };
     // Console roster is now hidden on the view screen — crew can see the
     // in-game HUD. Keep the entity but always hide it.
     *vis = Visibility::Hidden;
@@ -314,11 +344,10 @@ fn update_view_screen_text(
 /// First-person hull camera: positioned at the ship's hull edge in the view direction,
 /// looking straight out. Ship is always behind the camera.
 /// Hull offset = 6.0 units (matches the ship's collision capsule radius).
-fn hull_camera(
-    ship: Res<ShipState>,
-    mut cam_query: Query<&mut Transform, With<GameCamera>>,
-) {
-    let Ok(mut transform) = cam_query.single_mut() else { return };
+fn hull_camera(ship: Res<ShipState>, mut cam_query: Query<&mut Transform, With<GameCamera>>) {
+    let Ok(mut transform) = cam_query.single_mut() else {
+        return;
+    };
 
     // Direction vectors relative to ship heading (yaw=0 → ship faces -Z).
     // fwd = (sin(yaw), 0, -cos(yaw)), port = left of heading, starboard = right.
@@ -326,13 +355,18 @@ fn hull_camera(
     // remains coherent; the radar overlay is drawn separately (#45).
     let direction = match &ship.view_mode {
         ViewMode::Camera(d) => d.clone(),
-        ViewMode::Radar | ViewMode::ScienceRadar | ViewMode::SensorsRadar | ViewMode::SystemChart | ViewMode::NavigationChart | ViewMode::Comms => ViewDirection::Fore,
+        ViewMode::Radar
+        | ViewMode::ScienceRadar
+        | ViewMode::SensorsRadar
+        | ViewMode::SystemChart
+        | ViewMode::NavigationChart
+        | ViewMode::Comms => ViewDirection::Fore,
     };
     let offset_dir = match direction {
-        ViewDirection::Fore      => Vec3::new( ship.yaw.sin(), 0.0, -ship.yaw.cos()),
-        ViewDirection::Aft       => Vec3::new(-ship.yaw.sin(), 0.0,  ship.yaw.cos()),
-        ViewDirection::Port      => Vec3::new(-ship.yaw.cos(), 0.0, -ship.yaw.sin()),
-        ViewDirection::Starboard => Vec3::new( ship.yaw.cos(), 0.0,  ship.yaw.sin()),
+        ViewDirection::Fore => Vec3::new(ship.yaw.sin(), 0.0, -ship.yaw.cos()),
+        ViewDirection::Aft => Vec3::new(-ship.yaw.sin(), 0.0, ship.yaw.cos()),
+        ViewDirection::Port => Vec3::new(-ship.yaw.cos(), 0.0, -ship.yaw.sin()),
+        ViewDirection::Starboard => Vec3::new(ship.yaw.cos(), 0.0, ship.yaw.sin()),
     };
 
     const HULL_RADIUS: f32 = 6.0;
@@ -361,23 +395,25 @@ fn update_view_direction_label(
     if !ship.is_changed() && !state.is_changed() {
         return;
     }
-    let Ok((children, mut vis)) = label_query.single_mut() else { return };
+    let Ok((children, mut vis)) = label_query.single_mut() else {
+        return;
+    };
     if state.get() != &GamePhase::InProgress {
         *vis = Visibility::Hidden;
         return;
     }
     *vis = Visibility::Visible;
     let label = match &ship.view_mode {
-        ViewMode::Camera(ViewDirection::Fore)      => "FORE",
-        ViewMode::Camera(ViewDirection::Aft)       => "AFT",
-        ViewMode::Camera(ViewDirection::Port)      => "PORT",
+        ViewMode::Camera(ViewDirection::Fore) => "FORE",
+        ViewMode::Camera(ViewDirection::Aft) => "AFT",
+        ViewMode::Camera(ViewDirection::Port) => "PORT",
         ViewMode::Camera(ViewDirection::Starboard) => "STARBOARD",
-        ViewMode::Radar                            => "RADAR",
-        ViewMode::ScienceRadar                     => "SCIENCE RADAR",
-        ViewMode::SensorsRadar                     => "SENSORS",
-        ViewMode::SystemChart                      => "SYSTEM CHART",
-        ViewMode::NavigationChart                  => "NAV CHART",
-        ViewMode::Comms                            => "COMMS",
+        ViewMode::Radar => "RADAR",
+        ViewMode::ScienceRadar => "SCIENCE RADAR",
+        ViewMode::SensorsRadar => "SENSORS",
+        ViewMode::SystemChart => "SYSTEM CHART",
+        ViewMode::NavigationChart => "NAV CHART",
+        ViewMode::Comms => "COMMS",
     };
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {
@@ -410,27 +446,32 @@ fn sync_comms_overlay(
     let Some(ref msg) = on_screen.0 else { return };
 
     // Semi-transparent dark panel, centred on screen, ~60% width.
-    let overlay = commands.spawn((
-        CommsOverlay,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Percent(10.0),
-            right: Val::Percent(10.0),
-            top: Val::Percent(15.0),
-            bottom: Val::Percent(15.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(Val::Px(16.0)),
-            row_gap: Val::Px(8.0),
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.88)),
-    )).id();
+    let overlay = commands
+        .spawn((
+            CommsOverlay,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(10.0),
+                right: Val::Percent(10.0),
+                top: Val::Percent(15.0),
+                bottom: Val::Percent(15.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(16.0)),
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.88)),
+        ))
+        .id();
 
     // Sender name header
     commands.entity(overlay).with_children(|p| {
         p.spawn((
             Text::new(msg.sender_name.clone()),
-            TextFont { font_size: 22.0, ..default() },
+            TextFont {
+                font_size: 22.0,
+                ..default()
+            },
             TextColor(Color::srgb(0.7, 0.6, 1.0)),
         ));
     });
@@ -438,8 +479,13 @@ fn sync_comms_overlay(
     // Divider label
     commands.entity(overlay).with_children(|p| {
         p.spawn((
-            Text::new("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"),
-            TextFont { font_size: 14.0, ..default() },
+            Text::new(
+                "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+            ),
+            TextFont {
+                font_size: 14.0,
+                ..default()
+            },
             TextColor(Color::srgb(0.3, 0.3, 0.5)),
         ));
     });
@@ -448,7 +494,10 @@ fn sync_comms_overlay(
     commands.entity(overlay).with_children(|p| {
         p.spawn((
             Text::new(msg.body.clone()),
-            TextFont { font_size: 16.0, ..default() },
+            TextFont {
+                font_size: 16.0,
+                ..default()
+            },
             TextColor(Color::srgb(0.9, 0.9, 1.0)),
             Node {
                 flex_grow: 1.0,
@@ -462,7 +511,10 @@ fn sync_comms_overlay(
         commands.entity(overlay).with_children(|p| {
             p.spawn((
                 Text::new("POSSIBLE RESPONSES:"),
-                TextFont { font_size: 12.0, ..default() },
+                TextFont {
+                    font_size: 12.0,
+                    ..default()
+                },
                 TextColor(Color::srgb(0.5, 0.5, 0.6)),
             ));
         });
@@ -472,7 +524,10 @@ fn sync_comms_overlay(
             commands.entity(overlay).with_children(|p| {
                 p.spawn((
                     Text::new(label),
-                    TextFont { font_size: 15.0, ..default() },
+                    TextFont {
+                        font_size: 15.0,
+                        ..default()
+                    },
                     TextColor(Color::srgb(0.7, 0.95, 0.85)),
                 ));
             });
@@ -491,11 +546,19 @@ fn draw_beam_vfx(
     ship: Res<ShipState>,
     beam: Res<ActiveBeam>,
     render_cfg: Res<PhaserRenderConfig>,
-    asteroid_q: Query<(&crate::simulation::AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
-    npc_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<crate::simulation::Asteroid>>,
-    npc_beam_q: Query<
-        (&crate::entity_spawner::EntityUuid, &Transform, &crate::ai_plugin::EntityPhaserState),
+    asteroid_q: Query<
+        (&crate::simulation::AsteroidUuid, &Transform),
+        With<crate::simulation::Asteroid>,
     >,
+    npc_q: Query<
+        (&crate::entity_spawner::EntityUuid, &Transform),
+        Without<crate::simulation::Asteroid>,
+    >,
+    npc_beam_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &Transform,
+        &crate::ai_plugin::EntityPhaserState,
+    )>,
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::simulation::Ship>>,
     mut gizmos: Gizmos,
 ) {
@@ -508,17 +571,16 @@ fn draw_beam_vfx(
         let target_xz = asteroid_q
             .iter()
             .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z)))
-            .or_else(|| npc_q
-                .iter()
-                .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))));
+            .or_else(|| {
+                npc_q.iter().find_map(|(u, t)| {
+                    (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))
+                })
+            });
 
         if let Some((tx, tz)) = target_xz {
             // Endpoint clamped to configured max range.
-            let (end_x, end_z) = beam_render::beam_endpoint(
-                ship.x, ship.z,
-                tx, tz,
-                render_cfg.beam_range,
-            );
+            let (end_x, end_z) =
+                beam_render::beam_endpoint(ship.x, ship.z, tx, tz, render_cfg.beam_range);
 
             // Resolve beam colour from config.
             let [r, g, b, a] = render_cfg.beam_color;
@@ -528,7 +590,11 @@ fn draw_beam_vfx(
             // Draw a beam for each bank, originating from the correct hull side.
             for bank_side in [-1.0_f32, 1.0_f32] {
                 let (ox, oz) = beam_render::bank_origin(
-                    ship.x, ship.z, ship.yaw, bank_side, beam_render::BANK_HULL_OFFSET,
+                    ship.x,
+                    ship.z,
+                    ship.yaw,
+                    bank_side,
+                    beam_render::BANK_HULL_OFFSET,
                 );
                 let origin = Vec3::new(ox, -1.5, oz);
                 let target = Vec3::new(end_x, 0.0, end_z);
@@ -553,13 +619,14 @@ fn draw_beam_vfx(
     // Uses red colouring to distinguish hostile fire from player fire.
     let npc_beam_color = Color::srgba(1.0, 0.25, 0.15, 0.95);
     let npc_glow_color = Color::srgba(1.0, 0.4, 0.4, 0.35);
-    let player_ship_uuid: Option<String> =
-        player_ship_q.single().ok().map(|u| u.0.clone());
+    let player_ship_uuid: Option<String> = player_ship_q.single().ok().map(|u| u.0.clone());
     for (_src_uuid, src_t, phaser) in npc_beam_q.iter() {
         if !phaser.beam_active {
             continue;
         }
-        let Some(target_uuid) = phaser.beam_target else { continue };
+        let Some(target_uuid) = phaser.beam_target else {
+            continue;
+        };
         let target_uuid_str = target_uuid.to_string();
 
         // Target could be the player ship, another NPC, or an asteroid.
@@ -568,10 +635,14 @@ fn draw_beam_vfx(
         } else {
             npc_q
                 .iter()
-                .find_map(|(u, t)| (u.0 == target_uuid_str).then(|| (t.translation.x, t.translation.z)))
-                .or_else(|| asteroid_q
-                    .iter()
-                    .find_map(|(u, t)| (u.0 == target_uuid_str).then(|| (t.translation.x, t.translation.z))))
+                .find_map(|(u, t)| {
+                    (u.0 == target_uuid_str).then(|| (t.translation.x, t.translation.z))
+                })
+                .or_else(|| {
+                    asteroid_q.iter().find_map(|(u, t)| {
+                        (u.0 == target_uuid_str).then(|| (t.translation.x, t.translation.z))
+                    })
+                })
         };
         let Some((tx, tz)) = target_xz else { continue };
 
@@ -592,12 +663,13 @@ fn draw_beam_vfx(
 }
 
 /// Spawns a `RippleEffect` entity for each `AsteroidDestroyedVfx` event received.
-fn spawn_ripples(
-    mut events: MessageReader<AsteroidDestroyedVfx>,
-    mut commands: Commands,
-) {
+fn spawn_ripples(mut events: MessageReader<AsteroidDestroyedVfx>, mut commands: Commands) {
     for ev in events.read() {
-        commands.spawn(RippleEffect { x: ev.x, z: ev.z, elapsed: 0.0 });
+        commands.spawn(RippleEffect {
+            x: ev.x,
+            z: ev.z,
+            elapsed: 0.0,
+        });
     }
 }
 
@@ -617,9 +689,9 @@ fn tick_ripples(
             continue;
         }
 
-        let t = ripple.elapsed / RIPPLE_DURATION;           // 0..1
+        let t = ripple.elapsed / RIPPLE_DURATION; // 0..1
         let radius = RIPPLE_MAX_RADIUS * t;
-        let alpha = (1.0 - t) * 0.85;                       // fade out
+        let alpha = (1.0 - t) * 0.85; // fade out
 
         // Draw a horizontal circle (XZ plane) as the ripple ring.
         // `gizmos.circle` draws in a plane defined by a normal vector.
@@ -665,10 +737,11 @@ fn sync_torpedo_entities(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut transforms: Query<&mut Transform, With<TorpedoSphere>>,
 ) {
-    let Some(torpedo_sys) = torpedo_sys else { return };
+    let Some(torpedo_sys) = torpedo_sys else {
+        return;
+    };
 
     // Entity cleanup for non-InProgress is handled by OnExit schedule
-
 
     let in_flight = &torpedo_sys.0.in_flight;
     let in_flight_uuids: HashSet<String> = in_flight.iter().map(|t| t.uuid.clone()).collect();
@@ -690,12 +763,14 @@ fn sync_torpedo_entities(
 
     for uuid in &to_spawn {
         if let Some(t) = in_flight.iter().find(|t| &t.uuid == uuid) {
-            let entity = commands.spawn((
-                TorpedoSphere,
-                Mesh3d(torpedo_mesh.clone()),
-                MeshMaterial3d(torpedo_mat.clone()),
-                Transform::from_xyz(t.x, 0.0, t.z),
-            )).id();
+            let entity = commands
+                .spawn((
+                    TorpedoSphere,
+                    Mesh3d(torpedo_mesh.clone()),
+                    MeshMaterial3d(torpedo_mat.clone()),
+                    Transform::from_xyz(t.x, 0.0, t.z),
+                ))
+                .id();
             entity_map.0.insert(uuid.clone(), entity);
         }
     }
@@ -729,7 +804,9 @@ struct NebulaFogState {
 }
 
 impl Default for NebulaFogState {
-    fn default() -> Self { Self { intensity: 0.0 } }
+    fn default() -> Self {
+        Self { intensity: 0.0 }
+    }
 }
 
 /// How fast the fog intensity approaches its target (per second).
@@ -750,8 +827,12 @@ fn nebula_fog_system(
     mut commands: Commands,
     time: Res<Time>,
 ) {
-    let Ok(ship_entity) = ship_q.single() else { return };
-    let Ok(cam_entity) = cam_q.single() else { return };
+    let Ok(ship_entity) = ship_q.single() else {
+        return;
+    };
+    let Ok(cam_entity) = cam_q.single() else {
+        return;
+    };
     let dt = time.delta_secs();
 
     let mut active_fog: Option<([f32; 3], f32)> = None;
@@ -761,7 +842,9 @@ fn nebula_fog_system(
                 if let Some(e) = effects.0.iter().find_map(|e| {
                     if let RegionEffectKind::NebulaFog { color, density } = e {
                         Some((*color, *density))
-                    } else { None }
+                    } else {
+                        None
+                    }
                 }) {
                     active_fog = Some(e);
                     break;
@@ -794,10 +877,7 @@ fn nebula_fog_system(
 
 /// Remove fog when the game leaves `InProgress` so residual settings do not
 /// carry over (the camera entity persists between phases).
-fn cleanup_nebula_fog(
-    mut commands: Commands,
-    cam_q: Query<Entity, With<GameCamera>>,
-) {
+fn cleanup_nebula_fog(mut commands: Commands, cam_q: Query<Entity, With<GameCamera>>) {
     if let Ok(cam) = cam_q.single() {
         commands.entity(cam).remove::<DistanceFog>();
     }
@@ -809,7 +889,12 @@ fn cleanup_nebula_fog(
 /// that have been despawned (e.g. during world reload).
 fn spawn_nebula_cloud_particles(
     mut state: ResMut<NebulaCloudState>,
-    region_q: Query<(Entity, &RegionEffectsSection, &Transform, &RegionShapeSection)>,
+    region_q: Query<(
+        Entity,
+        &RegionEffectsSection,
+        &Transform,
+        &RegionShapeSection,
+    )>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -817,7 +902,12 @@ fn spawn_nebula_cloud_particles(
     let active: HashSet<Entity> = region_q.iter().map(|(e, ..)| e).collect();
 
     // Despawn particles for regions that no longer exist.
-    let dead: Vec<Entity> = state.entities.keys().copied().filter(|e| !active.contains(e)).collect();
+    let dead: Vec<Entity> = state
+        .entities
+        .keys()
+        .copied()
+        .filter(|e| !active.contains(e))
+        .collect();
     for region in dead {
         if let Some(particles) = state.entities.remove(&region) {
             for p in particles {
@@ -828,9 +918,15 @@ fn spawn_nebula_cloud_particles(
 
     // Spawn particles for new nebula regions.
     for (entity, effects, transform, shape) in region_q.iter() {
-        if state.entities.contains_key(&entity) { continue; }
+        if state.entities.contains_key(&entity) {
+            continue;
+        }
 
-        let nebula_color = match effects.0.iter().find(|e| matches!(e, RegionEffectKind::NebulaFog { .. })) {
+        let nebula_color = match effects
+            .0
+            .iter()
+            .find(|e| matches!(e, RegionEffectKind::NebulaFog { .. }))
+        {
             Some(RegionEffectKind::NebulaFog { color, .. }) => *color,
             _ => continue,
         };
@@ -847,7 +943,10 @@ fn spawn_nebula_cloud_particles(
         let particle_mat = materials.add(StandardMaterial {
             base_color: Color::srgba(nebula_color[0], nebula_color[1], nebula_color[2], 0.15),
             emissive: LinearRgba::new(
-                nebula_color[0] * 1.2, nebula_color[1] * 1.2, nebula_color[2] * 1.2, 1.0,
+                nebula_color[0] * 1.2,
+                nebula_color[1] * 1.2,
+                nebula_color[2] * 1.2,
+                1.0,
             ),
             alpha_mode: AlphaMode::Blend,
             ..default()
@@ -874,12 +973,14 @@ fn spawn_nebula_cloud_particles(
                 center.z + r * phi.sin() * theta.sin(),
             );
 
-            let p = commands.spawn((
-                NebulaCloudParticle,
-                Mesh3d(particle_mesh.clone()),
-                MeshMaterial3d(particle_mat.clone()),
-                Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
-            )).id();
+            let p = commands
+                .spawn((
+                    NebulaCloudParticle,
+                    Mesh3d(particle_mesh.clone()),
+                    MeshMaterial3d(particle_mat.clone()),
+                    Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
+                ))
+                .id();
             particles.push(p);
         }
         state.entities.insert(entity, particles);
@@ -936,10 +1037,7 @@ mod tests {
 ///
 /// The ring glows cyan and pulses in opacity with the remaining time so crews
 /// can anticipate where the entity will disappear.
-fn draw_warp_exit_markers(
-    query: Query<(&WarpOutMarker, &Transform)>,
-    mut gizmos: Gizmos,
-) {
+fn draw_warp_exit_markers(query: Query<(&WarpOutMarker, &Transform)>, mut gizmos: Gizmos) {
     for (marker, transform) in query.iter() {
         let center = transform.translation;
         // Pulse: brightest at full time remaining, dims as time runs out.
@@ -949,11 +1047,7 @@ fn draw_warp_exit_markers(
         // Vertical ring: identity rotation → XY plane (normal = Z).
         // Radius scales with target speed so faster entities show a larger ring.
         let radius = (marker.target_speed * 0.4).clamp(5.0, 40.0);
-        gizmos.circle(
-            Isometry3d::new(center, Quat::IDENTITY),
-            radius,
-            color,
-        );
+        gizmos.circle(Isometry3d::new(center, Quat::IDENTITY), radius, color);
         // Second inner ring for visual depth.
         gizmos.circle(
             Isometry3d::new(center, Quat::IDENTITY),

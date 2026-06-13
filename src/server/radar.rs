@@ -25,12 +25,11 @@
 use bevy::prelude::*;
 use std::collections::HashSet;
 
-use crate::gui::{
-    bridge_sim_to_radar, AutoScaleRadar, ConsoleRadar, GenericRadar, OrientationMode,
-    RadarBlipMap, RadarCenterPose, RadarClipMode, RadarFilter, RadarIcon, RadarIconLookup,
-    WorldCentredRadar,
-};
 use crate::gui::radar::GuiRadarPlugin;
+use crate::gui::{
+    bridge_sim_to_radar, AutoScaleRadar, ConsoleRadar, GenericRadar, OrientationMode, RadarBlipMap,
+    RadarCenterPose, RadarClipMode, RadarFilter, RadarIcon, RadarIconLookup, WorldCentredRadar,
+};
 use crate::lobby::WorldResource;
 use crate::messages::{GamePhase, ViewMode};
 use crate::ship_state::ShipState;
@@ -101,11 +100,7 @@ fn view_mode_to_console_radar(mode: &ViewMode) -> Option<ConsoleRadar> {
 ///
 /// The container starts hidden; `toggle_viewscreen_radar_widgets` shows/hides
 /// it based on the current view mode.
-fn spawn_radar_container(
-    commands: &mut Commands,
-    mode: RadarContainerMode,
-    widget_entity: Entity,
-) {
+fn spawn_radar_container(commands: &mut Commands, mode: RadarContainerMode, widget_entity: Entity) {
     let container = commands
         .spawn((
             mode,
@@ -134,23 +129,50 @@ fn spawn_radar_container(
 
 /// Loads the six radar icon PNGs and populates the shared `RadarIconLookup`
 /// so the viewscreen renders icons instead of falling back to plain squares.
-fn load_server_radar_icons(
-    asset_server: Res<AssetServer>,
-    mut lookup: ResMut<RadarIconLookup>,
-) {
+fn load_server_radar_icons(asset_server: Res<AssetServer>, mut lookup: ResMut<RadarIconLookup>) {
     if !lookup.0.is_empty() {
         return;
     }
-    lookup.0.insert(RadarIcon::Ship, asset_server.load("radar_icons/Icon-Ship.png"));
-    lookup.0.insert(RadarIcon::PlayerShip, asset_server.load("radar_icons/Icon-PlayerShip.png"));
-    lookup.0.insert(RadarIcon::Asteroid, asset_server.load("radar_icons/Icon-Asteroid.png"));
-    lookup.0.insert(RadarIcon::Station, asset_server.load("radar_icons/Icon-Station.png"));
-    lookup.0.insert(RadarIcon::Planet, asset_server.load("radar_icons/Icon-Planet.png"));
-    lookup.0.insert(RadarIcon::Star, asset_server.load("radar_icons/Icon-Star.png"));
-    lookup.0.insert(RadarIcon::Torpedo, asset_server.load("radar_icons/Icon-Torpedo.png"));
-    lookup.0.insert(RadarIcon::Battleship, asset_server.load("radar_icons/Icon-Battleship.png"));
-    lookup.0.insert(RadarIcon::Cruiser, asset_server.load("radar_icons/Icon-Cruiser.png"));
-    lookup.0.insert(RadarIcon::Destroyer, asset_server.load("radar_icons/Icon-Destroyer.png"));
+    lookup.0.insert(
+        RadarIcon::Ship,
+        asset_server.load("radar_icons/Icon-Ship.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::PlayerShip,
+        asset_server.load("radar_icons/Icon-PlayerShip.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::Asteroid,
+        asset_server.load("radar_icons/Icon-Asteroid.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::Station,
+        asset_server.load("radar_icons/Icon-Station.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::Planet,
+        asset_server.load("radar_icons/Icon-Planet.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::Star,
+        asset_server.load("radar_icons/Icon-Star.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::Torpedo,
+        asset_server.load("radar_icons/Icon-Torpedo.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::Battleship,
+        asset_server.load("radar_icons/Icon-Battleship.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::Cruiser,
+        asset_server.load("radar_icons/Icon-Cruiser.png"),
+    );
+    lookup.0.insert(
+        RadarIcon::Destroyer,
+        asset_server.load("radar_icons/Icon-Destroyer.png"),
+    );
 }
 
 // ── Startup system: radar widgets ─────────────────────────────────────────────
@@ -222,7 +244,10 @@ fn spawn_viewscreen_radar_widgets(mut commands: Commands) {
             orientation: OrientationMode::WorldFixed,
             filter: radar_filter_from_shows(&nav_chart.shows),
             world_centred: true,
-            auto_scale: Some(AutoScaleRadar { margin: 1.1, min_range: 50.0 }),
+            auto_scale: Some(AutoScaleRadar {
+                margin: 1.1,
+                min_range: 50.0,
+            }),
         },
     ];
 
@@ -269,17 +294,18 @@ fn sync_server_radar_bridge(
     let Some(active) = view_mode_to_console_radar(&ship.view_mode) else {
         return;
     };
-    let Some((widget, _, mut map)) = widgets
-        .iter_mut()
-        .find(|(_, c, _)| **c == active)
-    else {
+    let Some((widget, _, mut map)) = widgets.iter_mut().find(|(_, c, _)| **c == active) else {
         return;
     };
     bridge_sim_to_radar(
         &mut commands,
         widget,
         &mut map,
-        RadarCenterPose { x: ship.x, z: ship.z, yaw: ship.yaw },
+        RadarCenterPose {
+            x: ship.x,
+            z: ship.z,
+            yaw: ship.yaw,
+        },
         &world.0.entities,
     );
 }

@@ -167,7 +167,8 @@ A comms template — a top-level message and a tree of player response choices.
 | `speaker` | string | none | Optional display speaker for this root message. Use when the voice on the channel is a specific character distinct from the hailed contact, e.g. `speaker = "Dr. Myst"` on a message sent via `from = "Research Outpost"`. |
 | `trigger` | `"on_hailed"` \| `"on_destroyed"` \| `"on_attacked"` | **required** | When to deliver this message. |
 | `entity` | string | depends | The named `[[entity]]` whose event triggers delivery (typically the same as `from`). |
-| `message` | string | **required** | The root message body. |`n| `delay_secs` | number | `0.0` | Optional delay before the root message is delivered. Root delays are silent: no `...` placeholder or speaker reveal appears until the timer expires. |
+| `message` | string | **required** | The root message body. |
+| `delay_secs` | number | `0.0` | Optional delay before the root message is delivered. Root delays are silent: no `...` placeholder or speaker reveal appears until the timer expires. |
 | `[[comms.response]]` | array | `[]` | Player response options. |
 
 #### `[[comms.response]]`

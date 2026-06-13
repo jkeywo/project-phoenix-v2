@@ -1,4 +1,4 @@
-﻿// Pure Rust module for generating asteroid positions in a donut-shaped field.
+// Pure Rust module for generating asteroid positions in a donut-shaped field.
 // No Bevy, no physics engine — input → output design for isolated unit testing.
 
 use crate::entity_config::{AsteroidFieldShape, GridConfig};
@@ -65,30 +65,31 @@ pub fn generate_donut_field(
 ) -> DonutFieldResult {
     // Calculate ring area: π * (outer² - inner²)
     let ring_area = PI * (outer_radius.powi(2) - inner_radius.powi(2));
-    
+
     // Calculate expected count from density and area
     let expected_count = (ring_area * density).round() as usize;
-    
+
     // Split count between gameplay and cosmetic based on available types
     // If no type paths, no asteroids of that type
     let gameplay_types_available = gameplay_type_paths.len();
     let cosmetic_types_available = cosmetic_type_paths.len();
-    
-    let (gameplay_count, cosmetic_count) = if gameplay_types_available > 0 && cosmetic_types_available > 0 {
-        // Split roughly 70/30 gameplay/cosmetic if both available
-        let gameplay = (expected_count * 7) / 10;
-        let cosmetic = expected_count - gameplay;
-        (gameplay, cosmetic)
-    } else if gameplay_types_available > 0 {
-        (expected_count, 0)
-    } else if cosmetic_types_available > 0 {
-        (0, expected_count)
-    } else {
-        (0, 0)
-    };
-    
+
+    let (gameplay_count, cosmetic_count) =
+        if gameplay_types_available > 0 && cosmetic_types_available > 0 {
+            // Split roughly 70/30 gameplay/cosmetic if both available
+            let gameplay = (expected_count * 7) / 10;
+            let cosmetic = expected_count - gameplay;
+            (gameplay, cosmetic)
+        } else if gameplay_types_available > 0 {
+            (expected_count, 0)
+        } else if cosmetic_types_available > 0 {
+            (0, expected_count)
+        } else {
+            (0, 0)
+        };
+
     let total_count = gameplay_count + cosmetic_count;
-    
+
     // Generate seed from parameters using a simple hash combination
     let seed = {
         let mut seed: u64 = seed_offset;
@@ -100,32 +101,24 @@ pub fn generate_donut_field(
         seed = seed.wrapping_mul(2654435761); // Golden ratio
         seed
     };
-    
+
     let mut rng = StdRng::seed_from_u64(seed);
     let mut spawns = Vec::with_capacity(total_count);
-    
+
     // Generate gameplay asteroids
     for _ in 0..gameplay_count {
-        let spawn = generate_single_spawn(
-            &mut rng,
-            inner_radius,
-            outer_radius,
-            gameplay_type_paths,
-        );
+        let spawn =
+            generate_single_spawn(&mut rng, inner_radius, outer_radius, gameplay_type_paths);
         spawns.push(spawn);
     }
-    
+
     // Generate cosmetic asteroids
     for _ in 0..cosmetic_count {
-        let spawn = generate_single_spawn(
-            &mut rng,
-            inner_radius,
-            outer_radius,
-            cosmetic_type_paths,
-        );
+        let spawn =
+            generate_single_spawn(&mut rng, inner_radius, outer_radius, cosmetic_type_paths);
         spawns.push(spawn);
     }
-    
+
     DonutFieldResult {
         spawns,
         count: total_count,
@@ -163,27 +156,71 @@ pub fn eval_cell(
     let cell_center_z = (cell_gz as f32) * grid.resolution;
 
     if !gameplay_type_paths.is_empty() {
-        let density = compute_density(cell_gx, cell_gz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
+        let density = compute_density(
+            cell_gx,
+            cell_gz,
+            grid.density_noise_freq,
+            grid.density_noise_octaves,
+            grid.uniformity,
+            &mut rng,
+        );
         if density >= grid.fill_gameplay {
-            let jitter = compute_jitter(cell_center_x, cell_center_z, inner_radius, outer_radius, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
+            let jitter = compute_jitter(
+                cell_center_x,
+                cell_center_z,
+                inner_radius,
+                outer_radius,
+                grid.jitter,
+                grid.noise_freq,
+                grid.noise_octaves,
+                &mut rng,
+            );
             let x = cell_center_x + jitter.0;
             let z = cell_center_z + jitter.1;
-            let config_path = gameplay_type_paths[rng.random_range(0..gameplay_type_paths.len())].clone();
+            let config_path =
+                gameplay_type_paths[rng.random_range(0..gameplay_type_paths.len())].clone();
             let y = (rng.random::<f32>() * 2.0 - 1.0) * grid.gameplay_y_variance;
-            return Some(AsteroidSpawn { x, z, y, config_path });
+            return Some(AsteroidSpawn {
+                x,
+                z,
+                y,
+                config_path,
+            });
         }
         return None;
     }
 
     if !cosmetic_type_paths.is_empty() {
-        let density = compute_density(cell_gx, cell_gz, grid.density_noise_freq, grid.density_noise_octaves, grid.uniformity, &mut rng);
+        let density = compute_density(
+            cell_gx,
+            cell_gz,
+            grid.density_noise_freq,
+            grid.density_noise_octaves,
+            grid.uniformity,
+            &mut rng,
+        );
         if density >= grid.fill_cosmetic {
-            let jitter = compute_jitter(cell_center_x, cell_center_z, inner_radius, outer_radius, grid.jitter, grid.noise_freq, grid.noise_octaves, &mut rng);
+            let jitter = compute_jitter(
+                cell_center_x,
+                cell_center_z,
+                inner_radius,
+                outer_radius,
+                grid.jitter,
+                grid.noise_freq,
+                grid.noise_octaves,
+                &mut rng,
+            );
             let x = cell_center_x + jitter.0;
             let z = cell_center_z + jitter.1;
             let y_offset = grid.cosmetic_y_offset * (0.5 + rng.random::<f32>() * 0.5);
-            let config_path = cosmetic_type_paths[rng.random_range(0..cosmetic_type_paths.len())].clone();
-            return Some(AsteroidSpawn { x, z, y: y_offset, config_path });
+            let config_path =
+                cosmetic_type_paths[rng.random_range(0..cosmetic_type_paths.len())].clone();
+            return Some(AsteroidSpawn {
+                x,
+                z,
+                y: y_offset,
+                config_path,
+            });
         }
         return None;
     }
@@ -261,8 +298,16 @@ pub fn cell_in_field(
 
             // Squared farthest-corner distance from origin: the bbox corner
             // whose component magnitudes are maximal on each axis.
-            let far_x = if min_x.abs() > max_x.abs() { min_x } else { max_x };
-            let far_z = if min_z.abs() > max_z.abs() { min_z } else { max_z };
+            let far_x = if min_x.abs() > max_x.abs() {
+                min_x
+            } else {
+                max_x
+            };
+            let far_z = if min_z.abs() > max_z.abs() {
+                min_z
+            } else {
+                max_z
+            };
             let farthest_sq = far_x * far_x + far_z * far_z;
 
             let inner_sq = inner_radius * inner_radius;
@@ -347,16 +392,43 @@ pub fn generate_grid_field_with_shape(
             }
 
             if !gameplay_type_paths.is_empty() {
-                if let Some(spawn) = eval_cell(cell_id * 3, cx, cz, &grid, r_min, r_max, gameplay_type_paths, &[]) {
+                if let Some(spawn) = eval_cell(
+                    cell_id * 3,
+                    cx,
+                    cz,
+                    &grid,
+                    r_min,
+                    r_max,
+                    gameplay_type_paths,
+                    &[],
+                ) {
                     gameplay.push(spawn);
                 }
             }
 
             if !cosmetic_type_paths.is_empty() {
-                if let Some(spawn) = eval_cell(cell_id * 3 + 1, cx, cz, &grid, r_min, r_max, &[], cosmetic_type_paths) {
+                if let Some(spawn) = eval_cell(
+                    cell_id * 3 + 1,
+                    cx,
+                    cz,
+                    &grid,
+                    r_min,
+                    r_max,
+                    &[],
+                    cosmetic_type_paths,
+                ) {
                     cosmetic_upper.push(spawn);
                 }
-                if let Some(mut spawn) = eval_cell(cell_id * 3 + 2, cx, cz, &grid, r_min, r_max, &[], cosmetic_type_paths) {
+                if let Some(mut spawn) = eval_cell(
+                    cell_id * 3 + 2,
+                    cx,
+                    cz,
+                    &grid,
+                    r_min,
+                    r_max,
+                    &[],
+                    cosmetic_type_paths,
+                ) {
                     spawn.y = -spawn.y;
                     cosmetic_lower.push(spawn);
                 }
@@ -367,7 +439,12 @@ pub fn generate_grid_field_with_shape(
     }
 
     let count = gameplay.len() + cosmetic_upper.len() + cosmetic_lower.len();
-    AsteroidGridResult { gameplay, cosmetic_upper, cosmetic_lower, count }
+    AsteroidGridResult {
+        gameplay,
+        cosmetic_upper,
+        cosmetic_lower,
+        count,
+    }
 }
 
 /// Compute the density value for a grid cell using rand + normalized perlin noise.
@@ -432,23 +509,23 @@ fn generate_single_spawn(
 ) -> AsteroidSpawn {
     // Generate random angle
     let angle: f32 = rng.random_range(0.0..(2.0 * PI));
-    
+
     // Generate random radius in the ring
     // Use sqrt to get uniform distribution across the area
     let radius_range = outer_radius - inner_radius;
     let radius = inner_radius + (rng.random::<f32>().sqrt() * radius_range);
-    
+
     // Convert polar to cartesian
     let x = radius * angle.cos();
     let z = radius * angle.sin();
-    
+
     // Select a random type path
     let config_path = if type_paths.is_empty() {
         String::new()
     } else {
         type_paths[rng.random_range(0..type_paths.len())].clone()
     };
-    
+
     AsteroidSpawn {
         x,
         z,
@@ -477,11 +554,11 @@ pub fn generate_donut_uuids(
         seed = seed.wrapping_mul(2654435761); // Golden ratio
         seed
     };
-    
+
     // Use a secondary seed offset for UUIDs
     let uuid_seed = seed.wrapping_add(0xDEAD_BEEF_CAFE_1234);
     let mut rng = StdRng::seed_from_u64(uuid_seed);
-    
+
     (0..count)
         .map(|_| {
             let a: u64 = rng.random();
@@ -538,12 +615,22 @@ pub fn generate_grid_uuids(
         let a: u64 = rng.random();
         let b: u64 = rng.random();
         let bytes: [u8; 16] = [
-            (a >> 56) as u8, (a >> 48) as u8, (a >> 40) as u8, (a >> 32) as u8,
-            (a >> 24) as u8, (a >> 16) as u8,
-            0x40 | ((a >> 8) as u8 & 0x0f), a as u8,
+            (a >> 56) as u8,
+            (a >> 48) as u8,
+            (a >> 40) as u8,
+            (a >> 32) as u8,
+            (a >> 24) as u8,
+            (a >> 16) as u8,
+            0x40 | ((a >> 8) as u8 & 0x0f),
+            a as u8,
             0x80 | ((b >> 56) as u8 & 0x3f),
-            (b >> 48) as u8, (b >> 40) as u8, (b >> 32) as u8,
-            (b >> 24) as u8, (b >> 16) as u8, (b >> 8) as u8, b as u8,
+            (b >> 48) as u8,
+            (b >> 40) as u8,
+            (b >> 32) as u8,
+            (b >> 24) as u8,
+            (b >> 16) as u8,
+            (b >> 8) as u8,
+            b as u8,
         ];
         format!(
             "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
@@ -556,8 +643,12 @@ pub fn generate_grid_uuids(
     };
 
     let gameplay: Vec<String> = (0..gameplay_count).map(|_| make_uuid(&mut rng)).collect();
-    let cosmetic_upper: Vec<String> = (0..cosmetic_upper_count).map(|_| make_uuid(&mut rng)).collect();
-    let cosmetic_lower: Vec<String> = (0..cosmetic_lower_count).map(|_| make_uuid(&mut rng)).collect();
+    let cosmetic_upper: Vec<String> = (0..cosmetic_upper_count)
+        .map(|_| make_uuid(&mut rng))
+        .collect();
+    let cosmetic_lower: Vec<String> = (0..cosmetic_lower_count)
+        .map(|_| make_uuid(&mut rng))
+        .collect();
 
     (gameplay, cosmetic_upper, cosmetic_lower)
 }
@@ -576,7 +667,7 @@ mod tests {
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
-        
+
         for spawn in &result.spawns {
             let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
             assert!(
@@ -599,7 +690,7 @@ mod tests {
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
-        
+
         for spawn in &result.spawns {
             let dist = (spawn.x * spawn.x + spawn.z * spawn.z).sqrt();
             assert!(
@@ -617,7 +708,7 @@ mod tests {
         let inner = 100.0;
         let outer = 200.0;
         let density = 0.005;
-        
+
         let result = generate_donut_field(
             inner,
             outer,
@@ -626,11 +717,11 @@ mod tests {
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
-        
+
         let ring_area = PI * (outer.powi(2) - inner.powi(2));
         let expected = (ring_area * density).round() as usize;
         let actual = result.count;
-        
+
         // Allow 10% tolerance
         let tolerance = (expected as f32 * 0.1).ceil() as usize;
         assert!(
@@ -653,7 +744,7 @@ mod tests {
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
-        
+
         let result_b = generate_donut_field(
             100.0,
             200.0,
@@ -662,7 +753,7 @@ mod tests {
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
-        
+
         assert_eq!(result_a.spawns, result_b.spawns, "Determinism failed");
     }
 
@@ -676,7 +767,7 @@ mod tests {
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
-        
+
         let result_b = generate_donut_field(
             100.0,
             200.0,
@@ -685,7 +776,7 @@ mod tests {
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
-        
+
         assert_ne!(
             result_a.spawns, result_b.spawns,
             "Different seeds should produce different layouts"
@@ -702,18 +793,23 @@ mod tests {
             &["gameplay1.toml".to_string(), "gameplay2.toml".to_string()],
             &["cosmetic1.toml".to_string()],
         );
-        
+
         // Find the first cosmetic asteroid
-        let first_cosmetic_idx = result.spawns.iter()
+        let first_cosmetic_idx = result
+            .spawns
+            .iter()
             .position(|s| s.config_path.contains("cosmetic"));
-        
+
         // Find the last gameplay asteroid
-        let last_gameplay_idx = result.spawns.iter()
+        let last_gameplay_idx = result
+            .spawns
+            .iter()
             .rev()
             .position(|s| s.config_path.contains("gameplay"))
             .map(|pos| result.spawns.len() - 1 - pos);
-        
-        if let (Some(first_cosmetic), Some(last_gameplay)) = (first_cosmetic_idx, last_gameplay_idx) {
+
+        if let (Some(first_cosmetic), Some(last_gameplay)) = (first_cosmetic_idx, last_gameplay_idx)
+        {
             assert!(
                 last_gameplay < first_cosmetic,
                 "Gameplay asteroids should come before cosmetic asteroids"
@@ -728,16 +824,9 @@ mod tests {
             "type2.toml".to_string(),
             "type3.toml".to_string(),
         ];
-        
-        let result = generate_donut_field(
-            100.0,
-            200.0,
-            0.01,
-            42,
-            &paths,
-            &[],
-        );
-        
+
+        let result = generate_donut_field(100.0, 200.0, 0.01, 42, &paths, &[]);
+
         for spawn in &result.spawns {
             assert!(
                 paths.contains(&spawn.config_path),
@@ -749,30 +838,17 @@ mod tests {
 
     #[test]
     fn empty_type_paths_produces_no_asteroids() {
-        let result = generate_donut_field(
-            100.0,
-            200.0,
-            0.01,
-            42,
-            &[],
-            &[],
-        );
-        
+        let result = generate_donut_field(100.0, 200.0, 0.01, 42, &[], &[]);
+
         assert_eq!(result.count, 0);
         assert!(result.spawns.is_empty());
     }
 
     #[test]
     fn only_gameplay_types_produces_only_gameplay() {
-        let result = generate_donut_field(
-            100.0,
-            200.0,
-            0.01,
-            42,
-            &["gameplay.toml".to_string()],
-            &[],
-        );
-        
+        let result =
+            generate_donut_field(100.0, 200.0, 0.01, 42, &["gameplay.toml".to_string()], &[]);
+
         for spawn in &result.spawns {
             assert!(
                 spawn.config_path.contains("gameplay"),
@@ -783,15 +859,9 @@ mod tests {
 
     #[test]
     fn only_cosmetic_types_produces_only_cosmetic() {
-        let result = generate_donut_field(
-            100.0,
-            200.0,
-            0.01,
-            42,
-            &[],
-            &["cosmetic.toml".to_string()],
-        );
-        
+        let result =
+            generate_donut_field(100.0, 200.0, 0.01, 42, &[], &["cosmetic.toml".to_string()]);
+
         for spawn in &result.spawns {
             assert!(
                 spawn.config_path.contains("cosmetic"),
@@ -869,12 +939,24 @@ mod tests {
             despawn_cells: 12,
         };
         let a = eval_cell(
-            0, 5, 3, &grid, 100.0, 200.0,
-            &["gameplay.toml".to_string()], &[],
+            0,
+            5,
+            3,
+            &grid,
+            100.0,
+            200.0,
+            &["gameplay.toml".to_string()],
+            &[],
         );
         let b = eval_cell(
-            0, 5, 3, &grid, 100.0, 200.0,
-            &["gameplay.toml".to_string()], &[],
+            0,
+            5,
+            3,
+            &grid,
+            100.0,
+            200.0,
+            &["gameplay.toml".to_string()],
+            &[],
         );
         assert_eq!(a, b, "eval_cell must be deterministic");
     }
@@ -897,8 +979,14 @@ mod tests {
             despawn_cells: 12,
         };
         let result = eval_cell(
-            0, 5, 3, &grid, 100.0, 200.0,
-            &["gameplay.toml".to_string()], &[],
+            0,
+            5,
+            3,
+            &grid,
+            100.0,
+            200.0,
+            &["gameplay.toml".to_string()],
+            &[],
         );
         assert!(result.is_none(), "Should be None when fill is 1.0");
     }
@@ -921,8 +1009,14 @@ mod tests {
             despawn_cells: 12,
         };
         let result = eval_cell(
-            0, 5, 3, &grid, 100.0, 200.0,
-            &["gameplay.toml".to_string()], &[],
+            0,
+            5,
+            3,
+            &grid,
+            100.0,
+            200.0,
+            &["gameplay.toml".to_string()],
+            &[],
         );
         assert!(result.is_some(), "Should be Some when fill is 0.0");
         let spawn = result.unwrap();
@@ -962,7 +1056,9 @@ mod tests {
             assert!(
                 dist >= 100.0 && dist <= 200.0,
                 "Gameplay pos ({}, {}) dist={} outside torus [100,200]",
-                spawn.x, spawn.z, dist
+                spawn.x,
+                spawn.z,
+                dist
             );
         }
         for spawn in &result.cosmetic_upper {
@@ -970,7 +1066,9 @@ mod tests {
             assert!(
                 dist >= 100.0 && dist <= 200.0,
                 "Cosmetic upper pos ({}, {}) dist={} outside torus [100,200]",
-                spawn.x, spawn.z, dist
+                spawn.x,
+                spawn.z,
+                dist
             );
         }
         for spawn in &result.cosmetic_lower {
@@ -978,7 +1076,9 @@ mod tests {
             assert!(
                 dist >= 100.0 && dist <= 200.0,
                 "Cosmetic lower pos ({}, {}) dist={} outside torus [100,200]",
-                spawn.x, spawn.z, dist
+                spawn.x,
+                spawn.z,
+                dist
             );
         }
     }
@@ -1016,9 +1116,18 @@ mod tests {
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
-        assert_eq!(result_a.gameplay, result_b.gameplay, "Gameplay must be deterministic");
-        assert_eq!(result_a.cosmetic_upper, result_b.cosmetic_upper, "Cosmetic upper must be deterministic");
-        assert_eq!(result_a.cosmetic_lower, result_b.cosmetic_lower, "Cosmetic lower must be deterministic");
+        assert_eq!(
+            result_a.gameplay, result_b.gameplay,
+            "Gameplay must be deterministic"
+        );
+        assert_eq!(
+            result_a.cosmetic_upper, result_b.cosmetic_upper,
+            "Cosmetic upper must be deterministic"
+        );
+        assert_eq!(
+            result_a.cosmetic_lower, result_b.cosmetic_lower,
+            "Cosmetic lower must be deterministic"
+        );
         assert_eq!(result_a.count, result_b.count);
     }
 
@@ -1039,14 +1148,8 @@ mod tests {
             spawn_cells: 10,
             despawn_cells: 12,
         };
-        let result = generate_grid_field(
-            100.0,
-            200.0,
-            grid,
-            42,
-            &[],
-            &["cosmetic.toml".to_string()],
-        );
+        let result =
+            generate_grid_field(100.0, 200.0, grid, 42, &[], &["cosmetic.toml".to_string()]);
         for spawn in &result.gameplay {
             assert_eq!(spawn.y, 0.0, "Gameplay Y must be 0");
         }
@@ -1085,8 +1188,14 @@ mod tests {
             despawn_cells: 12,
         };
         let result = eval_cell(
-            0, 5, 3, &grid, 100.0, 200.0,
-            &["gameplay.toml".to_string()], &[],
+            0,
+            5,
+            3,
+            &grid,
+            100.0,
+            200.0,
+            &["gameplay.toml".to_string()],
+            &[],
         );
         let spawn = result.expect("Should spawn when fill is 0.0");
         assert!(
@@ -1122,7 +1231,14 @@ mod tests {
         //   farthest corner = (112.5, 7.5) → dist ≈ 112.75
         // With inner_radius=100, the bbox straddles the inner boundary.
         // Torus admits it.
-        assert!(cell_in_field(7, 0, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        assert!(cell_in_field(
+            7,
+            0,
+            15.0,
+            100.0,
+            200.0,
+            Some(AsteroidFieldShape::Torus)
+        ));
     }
 
     #[test]
@@ -1131,7 +1247,14 @@ mod tests {
         //   bbox centred at origin = [-5..5] × [-5..5]
         //   farthest corner = (5, 5) → dist ≈ 7.07
         // With inner_radius=50, the entire bbox is inside the inner hole.
-        assert!(!cell_in_field(0, 0, 10.0, 50.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        assert!(!cell_in_field(
+            0,
+            0,
+            10.0,
+            50.0,
+            200.0,
+            Some(AsteroidFieldShape::Torus)
+        ));
     }
 
     #[test]
@@ -1141,7 +1264,14 @@ mod tests {
         //   bbox = [292.5..307.5] × [292.5..307.5]
         //   nearest corner = (292.5, 292.5) → dist ≈ 413.66
         // With outer_radius=200, the nearest corner is well beyond.
-        assert!(!cell_in_field(20, 20, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        assert!(!cell_in_field(
+            20,
+            20,
+            15.0,
+            100.0,
+            200.0,
+            Some(AsteroidFieldShape::Torus)
+        ));
     }
 
     #[test]
@@ -1152,7 +1282,14 @@ mod tests {
         //   nearest corner = (187.5, 0) → dist = 187.5 (inside outer=200)
         //   farthest = (202.5, 7.5) → dist ≈ 202.6 (outside outer=200)
         // Straddles outer boundary. Admitted because nearest is inside.
-        assert!(cell_in_field(13, 0, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        assert!(cell_in_field(
+            13,
+            0,
+            15.0,
+            100.0,
+            200.0,
+            Some(AsteroidFieldShape::Torus)
+        ));
     }
 
     #[test]
@@ -1162,7 +1299,14 @@ mod tests {
         //   nearest corner distance = 0 (origin is inside the bbox)
         //   With inner_radius=10, the cell straddles the inner boundary
         //   (farthest corner at sqrt(112.5) ≈ 10.6 > 10).
-        assert!(cell_in_field(0, 0, 15.0, 10.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        assert!(cell_in_field(
+            0,
+            0,
+            15.0,
+            10.0,
+            200.0,
+            Some(AsteroidFieldShape::Torus)
+        ));
     }
 
     #[test]
@@ -1170,15 +1314,36 @@ mod tests {
         // With inner_radius = 0, no cells are "fully inside" the inner
         // hole (the hole has no area). Admit any cell whose nearest
         // corner is inside outer_radius.
-        assert!(cell_in_field(0, 0, 15.0, 0.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        assert!(cell_in_field(
+            0,
+            0,
+            15.0,
+            0.0,
+            200.0,
+            Some(AsteroidFieldShape::Torus)
+        ));
     }
 
     #[test]
     fn cell_in_field_torus_negative_coords_symmetric() {
         // Symmetry across quadrants: rejection of cells far in -X, -Z.
-        assert!(!cell_in_field(-20, -20, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        assert!(!cell_in_field(
+            -20,
+            -20,
+            15.0,
+            100.0,
+            200.0,
+            Some(AsteroidFieldShape::Torus)
+        ));
         // Cell whose bbox crosses the outer boundary on the -X side.
-        assert!(cell_in_field(-13, 0, 15.0, 100.0, 200.0, Some(AsteroidFieldShape::Torus)));
+        assert!(cell_in_field(
+            -13,
+            0,
+            15.0,
+            100.0,
+            200.0,
+            Some(AsteroidFieldShape::Torus)
+        ));
     }
 
     #[test]
@@ -1260,9 +1425,16 @@ mod tests {
         // returned position the exact cell centre — easy to assert against.
         let (field_idx, gx, gz) = (7_u64, 8_i32, 4_i32);
         let anchor_relative = eval_cell(
-            field_idx, gx, gz, &grid, 100.0, 200.0,
-            &["gameplay.toml".to_string()], &[],
-        ).expect("fill_gameplay=0.0 must produce Some");
+            field_idx,
+            gx,
+            gz,
+            &grid,
+            100.0,
+            200.0,
+            &["gameplay.toml".to_string()],
+            &[],
+        )
+        .expect("fill_gameplay=0.0 must produce Some");
 
         // Invariant 1: cell centre is `(gx*res, _, gz*res)` — anchor-relative,
         // anchor is not even an input to eval_cell.
@@ -1271,9 +1443,16 @@ mod tests {
 
         // Invariant 2: identical inputs → identical output (anchor-independent).
         let again = eval_cell(
-            field_idx, gx, gz, &grid, 100.0, 200.0,
-            &["gameplay.toml".to_string()], &[],
-        ).expect("second call with identical (field_idx, gx, gz) must also spawn");
+            field_idx,
+            gx,
+            gz,
+            &grid,
+            100.0,
+            200.0,
+            &["gameplay.toml".to_string()],
+            &[],
+        )
+        .expect("second call with identical (field_idx, gx, gz) must also spawn");
         assert_eq!(
             (anchor_relative.x, anchor_relative.y, anchor_relative.z),
             (again.x, again.y, again.z),
@@ -1319,12 +1498,18 @@ mod tests {
             despawn_cells: 12,
         };
         let legacy = generate_grid_field(
-            100.0, 200.0, grid.clone(), 42,
+            100.0,
+            200.0,
+            grid.clone(),
+            42,
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
         );
         let shaped = generate_grid_field_with_shape(
-            100.0, 200.0, grid, 42,
+            100.0,
+            200.0,
+            grid,
+            42,
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
             None,
@@ -1360,14 +1545,19 @@ mod tests {
         };
         let res = grid.resolution;
         let result = generate_grid_field_with_shape(
-            100.0, 200.0, grid, 42,
+            100.0,
+            200.0,
+            grid,
+            42,
             &["gameplay.toml".to_string()],
             &["cosmetic.toml".to_string()],
             Some(AsteroidFieldShape::Torus),
         );
         // Bounded tolerance: one cell diagonal beyond the annulus on either side.
         let tol = res * std::f32::consts::SQRT_2;
-        for spawn in result.gameplay.iter()
+        for spawn in result
+            .gameplay
+            .iter()
             .chain(result.cosmetic_upper.iter())
             .chain(result.cosmetic_lower.iter())
         {
@@ -1375,7 +1565,11 @@ mod tests {
             assert!(
                 dist >= 100.0 - tol && dist <= 200.0 + tol,
                 "torus pos ({}, {}) dist={} outside [{}, {}]",
-                spawn.x, spawn.z, dist, 100.0 - tol, 200.0 + tol,
+                spawn.x,
+                spawn.z,
+                dist,
+                100.0 - tol,
+                200.0 + tol,
             );
         }
     }
@@ -1402,13 +1596,19 @@ mod tests {
             despawn_cells: 12,
         };
         let legacy = generate_grid_field_with_shape(
-            100.0, 200.0, grid.clone(), 42,
+            100.0,
+            200.0,
+            grid.clone(),
+            42,
             &["gameplay.toml".to_string()],
             &[],
             None,
         );
         let torus = generate_grid_field_with_shape(
-            100.0, 200.0, grid, 42,
+            100.0,
+            200.0,
+            grid,
+            42,
             &["gameplay.toml".to_string()],
             &[],
             Some(AsteroidFieldShape::Torus),
@@ -1416,7 +1616,8 @@ mod tests {
         assert!(
             torus.gameplay.len() >= legacy.gameplay.len(),
             "torus admits a superset of cells: legacy={} torus={}",
-            legacy.gameplay.len(), torus.gameplay.len(),
+            legacy.gameplay.len(),
+            torus.gameplay.len(),
         );
     }
 }

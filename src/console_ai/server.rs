@@ -14,17 +14,16 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::console_ai::{
-    auto_fire_torpedo, tick_auto_match_frequency, tick_frequency_hint,
-    tick_power_movement_rule, tick_power_red_alert_rule,
-    EngageState, FrequencyHintInput, FrequencyHintState, FrequencyMatchInput,
-    FrequencyMatchState, PowerEngageOutput, PowerMovementInput,
+    auto_fire_torpedo, tick_auto_match_frequency, tick_frequency_hint, tick_power_movement_rule,
+    tick_power_red_alert_rule, EngageState, FrequencyHintInput, FrequencyHintState,
+    FrequencyMatchInput, FrequencyMatchState, PowerEngageOutput, PowerMovementInput,
     PowerRedAlertInput, TorpedoAiInput, TubeSummary,
 };
 use crate::lobby::{InboundMessage, Sessions};
-use crate::simulation::SimOutbox;
 use crate::messages::{ClientMessage, Console, ServerMessage};
-use crate::ship_state::ShipState;
 use crate::ship_plugin::LastHelmInput;
+use crate::ship_state::ShipState;
+use crate::simulation::SimOutbox;
 use crate::simulation::{ShipPowerSystem, TorpedoSystemResource, WeaponsTarget};
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -120,7 +119,10 @@ impl ComplexityRules {
                 }
             }
         }
-        Self { per_console, loaded: true }
+        Self {
+            per_console,
+            loaded: true,
+        }
     }
 }
 
@@ -179,7 +181,10 @@ pub struct ConsoleComplexityState {
 impl ConsoleComplexityState {
     /// Returns `true` when the given console is currently at "Low" complexity.
     pub fn is_low(&self, console: &Console) -> bool {
-        self.presets.get(console).map(|p| p == "Low").unwrap_or(false)
+        self.presets
+            .get(console)
+            .map(|p| p == "Low")
+            .unwrap_or(false)
     }
 
     /// Update the preset for a console.
@@ -200,14 +205,25 @@ impl Plugin for ConsoleAiPlugin {
             .init_resource::<FrequencyMatchTimer>()
             .init_resource::<PowerMovementEngageState>()
             .init_resource::<PowerRedAlertEngageState>()
-            .add_systems(Update, (
-                build_complexity_rules.in_set(crate::sim_sets::SimSet::Input),
-                track_complexity_changes.in_set(crate::sim_sets::SimSet::Input),
-                run_tactical_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
-                run_science_hint_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
-                run_auto_match_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
-                run_power_ai.in_set(crate::sim_sets::SimSet::Input).after(track_complexity_changes),
-            ));
+            .add_systems(
+                Update,
+                (
+                    build_complexity_rules.in_set(crate::sim_sets::SimSet::Input),
+                    track_complexity_changes.in_set(crate::sim_sets::SimSet::Input),
+                    run_tactical_ai
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .after(track_complexity_changes),
+                    run_science_hint_ai
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .after(track_complexity_changes),
+                    run_auto_match_ai
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .after(track_complexity_changes),
+                    run_power_ai
+                        .in_set(crate::sim_sets::SimSet::Input)
+                        .after(track_complexity_changes),
+                ),
+            );
     }
 }
 
@@ -221,7 +237,11 @@ fn track_complexity_changes(
     mut complexity: ResMut<ConsoleComplexityState>,
 ) {
     for msg in outbound.read() {
-        if let ServerMessage::ComplexityChanged { console, preset_name } = &msg.msg {
+        if let ServerMessage::ComplexityChanged {
+            console,
+            preset_name,
+        } = &msg.msg
+        {
             complexity.set(console.clone(), preset_name.clone());
         }
     }
@@ -244,18 +264,26 @@ fn run_tactical_ai(
     ship: Res<ShipState>,
     torpedo_sys: Res<TorpedoSystemResource>,
     weapons_target: Res<WeaponsTarget>,
-    asteroid_q: Query<(&crate::simulation::AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
-    npc_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<crate::simulation::Asteroid>>,
+    asteroid_q: Query<
+        (&crate::simulation::AsteroidUuid, &Transform),
+        With<crate::simulation::Asteroid>,
+    >,
+    npc_q: Query<
+        (&crate::entity_spawner::EntityUuid, &Transform),
+        Without<crate::simulation::Asteroid>,
+    >,
     mut writer: MessageWriter<InboundMessage>,
 ) {
-
     // AI only runs on occupied consoles.
     let Some(holder_token) = sessions.0.console_holder(Console::Tactical) else {
         return;
     };
 
     // AI only runs when the active preset enables torpedo auto-fire.
-    if rules.ai_rule(&Console::Tactical, &complexity, AI_RULE_TORPEDO_AUTO_FIRE).is_none() {
+    if rules
+        .ai_rule(&Console::Tactical, &complexity, AI_RULE_TORPEDO_AUTO_FIRE)
+        .is_none()
+    {
         return;
     }
 
@@ -272,9 +300,11 @@ fn run_tactical_ai(
     let target_xz = asteroid_q
         .iter()
         .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z)))
-        .or_else(|| npc_q
-            .iter()
-            .find_map(|(u, t)| (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))));
+        .or_else(|| {
+            npc_q.iter().find_map(|(u, t)| {
+                (u.0 == *target_uuid).then(|| (t.translation.x, t.translation.z))
+            })
+        });
     let Some((tx, tz)) = target_xz else {
         return;
     };
@@ -349,12 +379,12 @@ fn run_science_hint_ai(
     mut hint_timer: ResMut<FrequencyHintTimer>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-
     // Hint is only relevant when Sensors' preset enables it and Tactical is
     // not auto-matching the frequency itself.
     let hint_rule = rules.ai_rule(&Console::Sensors, &complexity, AI_RULE_AUTO_HINT);
-    let tactical_auto_matches =
-        rules.ai_rule(&Console::Tactical, &complexity, AI_RULE_FREQUENCY_MATCH).is_some();
+    let tactical_auto_matches = rules
+        .ai_rule(&Console::Tactical, &complexity, AI_RULE_FREQUENCY_MATCH)
+        .is_some();
     let Some(hint_rule) = hint_rule.filter(|_| !tactical_auto_matches) else {
         // Reset timer when conditions aren't met so it doesn't carry over.
         hint_timer.0 = FrequencyHintState::default();
@@ -371,14 +401,22 @@ fn run_science_hint_ai(
         locked_target: weapons_target.0.clone(),
         correct_frequency: ship.phaser_frequency,
         dt: time.delta_secs(),
-        delay_secs: ai_param_f32(hint_rule, "auto_hint_delay_secs", DEFAULT_AUTO_HINT_DELAY_SECS),
+        delay_secs: ai_param_f32(
+            hint_rule,
+            "auto_hint_delay_secs",
+            DEFAULT_AUTO_HINT_DELAY_SECS,
+        ),
     };
 
     use crate::console_ai::FrequencyHintOutput;
     use crate::lobby::Target;
 
-    if let FrequencyHintOutput::Hint { frequency } = tick_frequency_hint(&mut hint_timer.0, &input) {
-        outbox.0.push((Target::Token(tactical_token.to_string()), ServerMessage::FrequencyHint { frequency }));
+    if let FrequencyHintOutput::Hint { frequency } = tick_frequency_hint(&mut hint_timer.0, &input)
+    {
+        outbox.0.push((
+            Target::Token(tactical_token.to_string()),
+            ServerMessage::FrequencyHint { frequency },
+        ));
     }
 }
 
@@ -415,7 +453,6 @@ fn run_auto_match_ai(
     mut match_timer: ResMut<FrequencyMatchTimer>,
     mut writer: MessageWriter<InboundMessage>,
 ) {
-
     // Tactical's active preset must enable frequency matching.
     let Some(match_rule) = rules.ai_rule(&Console::Tactical, &complexity, AI_RULE_FREQUENCY_MATCH)
     else {
@@ -424,8 +461,9 @@ fn run_auto_match_ai(
     };
 
     // Trigger: Sensors is assisted (auto_hint preset active) OR unmanned.
-    let sensors_assisted =
-        rules.ai_rule(&Console::Sensors, &complexity, AI_RULE_AUTO_HINT).is_some();
+    let sensors_assisted = rules
+        .ai_rule(&Console::Sensors, &complexity, AI_RULE_AUTO_HINT)
+        .is_some();
     let sensors_unmanned = sessions.0.console_holder(Console::Sensors).is_none();
     let trigger_active = sensors_assisted || sensors_unmanned;
 
@@ -439,13 +477,19 @@ fn run_auto_match_ai(
         locked_target: weapons_target.0.clone(),
         target_frequency: ship.phaser_frequency,
         dt: time.delta_secs(),
-        delay_secs: ai_param_f32(match_rule, "auto_match_delay_secs", DEFAULT_AUTO_MATCH_DELAY_SECS),
+        delay_secs: ai_param_f32(
+            match_rule,
+            "auto_match_delay_secs",
+            DEFAULT_AUTO_MATCH_DELAY_SECS,
+        ),
         trigger_active,
     };
 
     use crate::console_ai::FrequencyMatchOutput;
 
-    if let FrequencyMatchOutput::Match { frequency } = tick_auto_match_frequency(&mut match_timer.0, &input) {
+    if let FrequencyMatchOutput::Match { frequency } =
+        tick_auto_match_frequency(&mut match_timer.0, &input)
+    {
         writer.write(InboundMessage {
             token: tactical_token.to_string(),
             msg: ClientMessage::SetPhaserFrequency { frequency },
@@ -483,7 +527,6 @@ fn run_power_ai(
     mut red_alert_state: ResMut<PowerRedAlertEngageState>,
     mut writer: MessageWriter<InboundMessage>,
 ) {
-
     // AI only runs on occupied consoles.
     let Some(holder_token) = sessions.0.console_holder(Console::Power) else {
         return;
@@ -502,14 +545,25 @@ fn run_power_ai(
         &mut movement_state.0,
         &PowerMovementInput {
             thrust: helm_input.thrust,
-            thrust_threshold: movement_rule
-                .map_or(DEFAULT_THRUST_THRESHOLD, |r| ai_param_f32(r, "thrust_threshold", DEFAULT_THRUST_THRESHOLD)),
-            engage_delay_secs: movement_rule
-                .map_or(DEFAULT_ENGAGE_DELAY_SECS, |r| ai_param_f32(r, "engage_delay_secs", DEFAULT_ENGAGE_DELAY_SECS)),
-            battery_engage_min_pct: movement_rule
-                .map_or(DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT, |r| ai_param_f32(r, "battery_engage_min_pct", DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT)),
-            battery_recharge_pct: movement_rule
-                .map_or(DEFAULT_BATTERY_RECHARGE_PCT, |r| ai_param_f32(r, "battery_recharge_pct", DEFAULT_BATTERY_RECHARGE_PCT)),
+            thrust_threshold: movement_rule.map_or(DEFAULT_THRUST_THRESHOLD, |r| {
+                ai_param_f32(r, "thrust_threshold", DEFAULT_THRUST_THRESHOLD)
+            }),
+            engage_delay_secs: movement_rule.map_or(DEFAULT_ENGAGE_DELAY_SECS, |r| {
+                ai_param_f32(r, "engage_delay_secs", DEFAULT_ENGAGE_DELAY_SECS)
+            }),
+            battery_engage_min_pct: movement_rule.map_or(
+                DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT,
+                |r| {
+                    ai_param_f32(
+                        r,
+                        "battery_engage_min_pct",
+                        DEFAULT_BATTERY_ENGAGE_MIN_PCT_MOVEMENT,
+                    )
+                },
+            ),
+            battery_recharge_pct: movement_rule.map_or(DEFAULT_BATTERY_RECHARGE_PCT, |r| {
+                ai_param_f32(r, "battery_recharge_pct", DEFAULT_BATTERY_RECHARGE_PCT)
+            }),
             battery_pct,
             dt,
             power_is_low: movement_active,
@@ -526,20 +580,26 @@ fn run_power_ai(
         PowerEngageOutput::Engage => {
             writer.write(InboundMessage {
                 token: holder_token.to_string(),
-                msg: ClientMessage::IncreasePower { console: Console::Helm },
+                msg: ClientMessage::IncreasePower {
+                    console: Console::Helm,
+                },
             });
         }
         PowerEngageOutput::Disengage => {
             writer.write(InboundMessage {
                 token: holder_token.to_string(),
-                msg: ClientMessage::DecreasePower { console: Console::Helm },
+                msg: ClientMessage::DecreasePower {
+                    console: Console::Helm,
+                },
             });
         }
         PowerEngageOutput::NoChange => {
             if movement_disengaged_implicitly {
                 writer.write(InboundMessage {
                     token: holder_token.to_string(),
-                    msg: ClientMessage::DecreasePower { console: Console::Helm },
+                    msg: ClientMessage::DecreasePower {
+                        console: Console::Helm,
+                    },
                 });
             }
         }
@@ -553,12 +613,22 @@ fn run_power_ai(
         &mut red_alert_state.0,
         &PowerRedAlertInput {
             red_alert: ship.red_alert(),
-            engage_delay_secs: red_alert_rule
-                .map_or(DEFAULT_ENGAGE_DELAY_SECS, |r| ai_param_f32(r, "engage_delay_secs", DEFAULT_ENGAGE_DELAY_SECS)),
-            battery_engage_min_pct: red_alert_rule
-                .map_or(DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT, |r| ai_param_f32(r, "battery_engage_min_pct", DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT)),
-            battery_recharge_pct: red_alert_rule
-                .map_or(DEFAULT_BATTERY_RECHARGE_PCT, |r| ai_param_f32(r, "battery_recharge_pct", DEFAULT_BATTERY_RECHARGE_PCT)),
+            engage_delay_secs: red_alert_rule.map_or(DEFAULT_ENGAGE_DELAY_SECS, |r| {
+                ai_param_f32(r, "engage_delay_secs", DEFAULT_ENGAGE_DELAY_SECS)
+            }),
+            battery_engage_min_pct: red_alert_rule.map_or(
+                DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT,
+                |r| {
+                    ai_param_f32(
+                        r,
+                        "battery_engage_min_pct",
+                        DEFAULT_BATTERY_ENGAGE_MIN_PCT_RED_ALERT,
+                    )
+                },
+            ),
+            battery_recharge_pct: red_alert_rule.map_or(DEFAULT_BATTERY_RECHARGE_PCT, |r| {
+                ai_param_f32(r, "battery_recharge_pct", DEFAULT_BATTERY_RECHARGE_PCT)
+            }),
             battery_pct,
             dt,
             power_is_low: red_alert_active,
@@ -572,20 +642,26 @@ fn run_power_ai(
         PowerEngageOutput::Engage => {
             writer.write(InboundMessage {
                 token: holder_token.to_string(),
-                msg: ClientMessage::IncreasePower { console: Console::Tactical },
+                msg: ClientMessage::IncreasePower {
+                    console: Console::Tactical,
+                },
             });
         }
         PowerEngageOutput::Disengage => {
             writer.write(InboundMessage {
                 token: holder_token.to_string(),
-                msg: ClientMessage::DecreasePower { console: Console::Tactical },
+                msg: ClientMessage::DecreasePower {
+                    console: Console::Tactical,
+                },
             });
         }
         PowerEngageOutput::NoChange => {
             if red_alert_disengaged_implicitly {
                 writer.write(InboundMessage {
                     token: holder_token.to_string(),
-                    msg: ClientMessage::DecreasePower { console: Console::Tactical },
+                    msg: ClientMessage::DecreasePower {
+                        console: Console::Tactical,
+                    },
                 });
             }
         }
@@ -602,22 +678,20 @@ fn run_power_ai(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::damage::ConsoleHull;
+    use crate::impulse::ImpulseState;
+    use crate::lobby::{InboundMessage, WorldResource};
     use crate::lobby::{LobbyPlugin, OutboundMessage, Target};
     use crate::messages::*;
+    use crate::repair_teams::RepairTeams;
+    use crate::shield::ShieldSystem;
     use crate::ship_plugin::LastHelmInput;
     use crate::simulation::{
-        ShipHullIntegrity, ShipImpulse, ShipRepairTeams, ShipShields,
-        TorpedoSystemResource, WeaponsTarget,
-        ShipPowerSystem,
-        PowerConfigResource, PowerMultiplierResource, TrackedEntities,
-        ActiveBeam, PhaserCooldown, CurrentPhaserMode,
+        ActiveBeam, CurrentPhaserMode, PhaserCooldown, PowerConfigResource,
+        PowerMultiplierResource, ShipHullIntegrity, ShipImpulse, ShipPowerSystem, ShipRepairTeams,
+        ShipShields, TorpedoSystemResource, TrackedEntities, WeaponsTarget,
     };
-    use crate::damage::ConsoleHull;
-    use crate::shield::ShieldSystem;
-    use crate::impulse::ImpulseState;
-    use crate::repair_teams::RepairTeams;
     use crate::torpedo::{TorpedoConfig, TorpedoSystem};
-    use crate::lobby::{InboundMessage, WorldResource};
 
     #[derive(Resource, Default)]
     struct Inbox(Vec<InboundMessage>);
@@ -629,9 +703,13 @@ mod tests {
     /// or an empty default on WASM (tests do not run on WASM).
     fn test_complexity_rules() -> ComplexityRules {
         #[cfg(not(target_arch = "wasm32"))]
-        { ComplexityRules::from_asset_files() }
+        {
+            ComplexityRules::from_asset_files()
+        }
         #[cfg(target_arch = "wasm32")]
-        { ComplexityRules::default() }
+        {
+            ComplexityRules::default()
+        }
     }
 
     /// Override a float param on an AI rule across every preset that carries
@@ -691,7 +769,9 @@ mod tests {
             .init_resource::<crate::weapons_plugin::PhaserCombatConfigResource>()
             .insert_resource(ShipRepairTeams(RepairTeams::default()))
             .insert_resource(crate::modifiers::ShipModifiers::new())
-            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
+            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
+                TorpedoConfig::default(),
+            )))
             .insert_resource(ShipPowerSystem(crate::power_system::PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
@@ -710,13 +790,19 @@ mod tests {
     fn push_outbound(app: &mut App, msg: ServerMessage) {
         app.world_mut()
             .resource_mut::<Messages<OutboundMessage>>()
-            .write(OutboundMessage { target: Target::All, msg });
+            .write(OutboundMessage {
+                target: Target::All,
+                msg,
+            });
     }
 
     fn push_inbound(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> (Vec<InboundMessage>, Vec<OutboundMessage>) {
@@ -734,20 +820,38 @@ mod tests {
 
     fn setup_occupied_low_complexity_tactical(app: &mut App) {
         // Register and assign the Tactical console holder
-        push_inbound(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push_inbound(
+            app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         app.update();
-        push_inbound(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push_inbound(
+            app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         app.update();
         // Switch to InProgress phase manually
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
         // Set Tactical to Low complexity
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         // Set a locked target
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
         // Add the target entity to the world at a position in ForePort arc
         let mut world_res = app.world_mut().resource_mut::<WorldResource>();
-        world_res.0.entities.push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
+        world_res
+            .0
+            .entities
+            .push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
         drop(world_res);
         // Also spawn the live ECS entity — run_tactical_ai uses live Transforms
         // (not the WorldResource snapshot) since the fix in e147fe2.
@@ -755,7 +859,8 @@ mod tests {
             crate::simulation::Asteroid,
             crate::simulation::AsteroidUuid("target-uuid".into()),
             crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair, 30.0,
+                crate::messages::Console::CaptainChair,
+                30.0,
             )])),
             bevy::prelude::Transform::from_xyz(0.0, 0.0, -30.0),
         ));
@@ -767,36 +872,61 @@ mod tests {
     fn ai_does_not_fire_when_no_console_holder() {
         let mut app = test_app();
         // No one is holding Tactical
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
 
         let (inbound, _) = tick(&mut app);
-        let fired: Vec<_> = inbound.iter()
+        let fired: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
             .collect();
-        assert!(fired.is_empty(), "AI must not fire when console is unoccupied");
+        assert!(
+            fired.is_empty(),
+            "AI must not fire when console is unoccupied"
+        );
     }
 
     #[test]
     fn ai_does_not_fire_at_full_complexity() {
         let mut app = test_app();
-        push_inbound(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push_inbound(
+            &mut app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         app.update();
-        push_inbound(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push_inbound(
+            &mut app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         app.update();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
         // Tactical is Full (default / unset → not Low)
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
         let mut world_res = app.world_mut().resource_mut::<WorldResource>();
-        world_res.0.entities.push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
+        world_res
+            .0
+            .entities
+            .push(EntitySnapshot::asteroid("target-uuid", 0.0, -30.0, 2.0));
         drop(world_res);
 
         let (inbound, _) = tick(&mut app);
-        let fired: Vec<_> = inbound.iter()
+        let fired: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
             .collect();
         assert!(fired.is_empty(), "AI must not fire at Full complexity");
@@ -805,17 +935,32 @@ mod tests {
     #[test]
     fn ai_does_not_fire_in_lobby_phase() {
         let mut app = test_app();
-        push_inbound(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push_inbound(
+            &mut app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         app.update();
-        push_inbound(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push_inbound(
+            &mut app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         app.update();
         // Leave phase as Lobby (default)
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("target-uuid".into());
 
         let (inbound, _) = tick(&mut app);
-        let fired: Vec<_> = inbound.iter()
+        let fired: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
             .collect();
         assert!(fired.is_empty(), "AI must not fire during Lobby phase");
@@ -828,10 +973,14 @@ mod tests {
         // Target at (0, -30) → bearing 0 from ship at origin yaw=0 → in ForePort arc
 
         let (inbound, _) = tick(&mut app);
-        let fired: Vec<_> = inbound.iter()
+        let fired: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
             .collect();
-        assert!(!fired.is_empty(), "AI should fire when all conditions are met");
+        assert!(
+            !fired.is_empty(),
+            "AI should fire when all conditions are met"
+        );
     }
 
     #[test]
@@ -854,18 +1003,34 @@ mod tests {
     #[test]
     fn ai_does_not_fire_without_locked_target() {
         let mut app = test_app();
-        push_inbound(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push_inbound(
+            &mut app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         app.update();
-        push_inbound(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push_inbound(
+            &mut app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         app.update();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         // No target locked
         app.world_mut().resource_mut::<WeaponsTarget>().0 = None;
 
         let (inbound, _) = tick(&mut app);
-        let fired: Vec<_> = inbound.iter()
+        let fired: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
             .collect();
         assert!(fired.is_empty(), "AI must not fire without a locked target");
@@ -876,10 +1041,13 @@ mod tests {
         let mut app = test_app();
         app.update(); // initial tick
 
-        push_outbound(&mut app, ServerMessage::ComplexityChanged {
-            console: Console::Tactical,
-            preset_name: "Low".into(),
-        });
+        push_outbound(
+            &mut app,
+            ServerMessage::ComplexityChanged {
+                console: Console::Tactical,
+                preset_name: "Low".into(),
+            },
+        );
         app.update();
 
         let state = app.world().resource::<ConsoleComplexityState>();
@@ -895,16 +1063,22 @@ mod tests {
         app.update();
 
         // First set to Low
-        push_outbound(&mut app, ServerMessage::ComplexityChanged {
-            console: Console::Tactical,
-            preset_name: "Low".into(),
-        });
+        push_outbound(
+            &mut app,
+            ServerMessage::ComplexityChanged {
+                console: Console::Tactical,
+                preset_name: "Low".into(),
+            },
+        );
         app.update();
         // Then switch back to Full
-        push_outbound(&mut app, ServerMessage::ComplexityChanged {
-            console: Console::Tactical,
-            preset_name: "Std".into(),
-        });
+        push_outbound(
+            &mut app,
+            ServerMessage::ComplexityChanged {
+                console: Console::Tactical,
+                preset_name: "Std".into(),
+            },
+        );
         app.update();
 
         let state = app.world().resource::<ConsoleComplexityState>();
@@ -921,21 +1095,27 @@ mod tests {
 
         // First tick — AI should fire
         let (inbound1, _) = tick(&mut app);
-        let fired1: Vec<_> = inbound1.iter()
+        let fired1: Vec<_> = inbound1
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
             .collect();
         assert!(!fired1.is_empty(), "AI should fire at Low complexity");
 
         // Switch to Full
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
 
         // Next tick — AI should not fire
         let (inbound2, _) = tick(&mut app);
-        let fired2: Vec<_> = inbound2.iter()
+        let fired2: Vec<_> = inbound2
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::FireTorpedo { .. }))
             .collect();
-        assert!(fired2.is_empty(), "AI must not fire after switching to Full");
+        assert!(
+            fired2.is_empty(),
+            "AI must not fire after switching to Full"
+        );
     }
 
     // ── Science-hint AI tests ──────────────────────────────────────────────
@@ -944,13 +1124,28 @@ mod tests {
     /// - Tactical Full, Science Low, Tactical occupied, target locked.
     fn setup_science_hint_conditions(app: &mut App) {
         // Register a Tactical holder.
-        push_inbound(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push_inbound(
+            app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         app.update();
-        push_inbound(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push_inbound(
+            app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         app.update();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
         // Tactical is Full (default), Science is Low.
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Low".into());
         // Tactical complexity left at default (not Low) → Full by omission.
         // Lock a target.
@@ -962,13 +1157,23 @@ mod tests {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
         // Use a very long delay so a single tick won't fire.
-        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 9999.0);
+        set_ai_param(
+            &mut app,
+            Console::Sensors,
+            AI_RULE_AUTO_HINT,
+            "auto_hint_delay_secs",
+            9999.0,
+        );
 
         let (_, outbound) = tick(&mut app);
-        let hints: Vec<_> = outbound.iter()
+        let hints: Vec<_> = outbound
+            .iter()
             .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
             .collect();
-        assert!(hints.is_empty(), "hint must not emit when delay has not elapsed");
+        assert!(
+            hints.is_empty(),
+            "hint must not emit when delay has not elapsed"
+        );
     }
 
     #[test]
@@ -976,7 +1181,13 @@ mod tests {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
         // Use zero delay so any elapsed time triggers.
-        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Sensors,
+            AI_RULE_AUTO_HINT,
+            "auto_hint_delay_secs",
+            0.0,
+        );
 
         // Inject elapsed time directly into the hint timer.
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
@@ -986,7 +1197,8 @@ mod tests {
         };
 
         let (_, outbound) = tick(&mut app);
-        let hints: Vec<_> = outbound.iter()
+        let hints: Vec<_> = outbound
+            .iter()
             .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
             .collect();
         assert!(!hints.is_empty(), "hint must emit when delay has elapsed");
@@ -998,9 +1210,16 @@ mod tests {
         setup_science_hint_conditions(&mut app);
         // Both Tactical and Science Low → hint should NOT emit (Tactical player
         // doesn't need the hint, auto-fire handles frequency).
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
-        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Sensors,
+            AI_RULE_AUTO_HINT,
+            "auto_hint_delay_secs",
+            0.0,
+        );
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("hint-target".into()),
             elapsed_secs: 5.0,
@@ -1008,10 +1227,14 @@ mod tests {
         };
 
         let (_, outbound) = tick(&mut app);
-        let hints: Vec<_> = outbound.iter()
+        let hints: Vec<_> = outbound
+            .iter()
             .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
             .collect();
-        assert!(hints.is_empty(), "hint must not emit when Tactical is also Low");
+        assert!(
+            hints.is_empty(),
+            "hint must not emit when Tactical is also Low"
+        );
     }
 
     #[test]
@@ -1019,9 +1242,16 @@ mod tests {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
         // Science Full → player sees the readout, no hint needed.
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Std".into());
-        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Sensors,
+            AI_RULE_AUTO_HINT,
+            "auto_hint_delay_secs",
+            0.0,
+        );
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("hint-target".into()),
             elapsed_secs: 5.0,
@@ -1029,7 +1259,8 @@ mod tests {
         };
 
         let (_, outbound) = tick(&mut app);
-        let hints: Vec<_> = outbound.iter()
+        let hints: Vec<_> = outbound
+            .iter()
             .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
             .collect();
         assert!(hints.is_empty(), "hint must not emit when Science is Full");
@@ -1040,24 +1271,42 @@ mod tests {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
         app.world_mut().resource_mut::<WeaponsTarget>().0 = None;
-        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Sensors,
+            AI_RULE_AUTO_HINT,
+            "auto_hint_delay_secs",
+            0.0,
+        );
 
         let (_, outbound) = tick(&mut app);
-        let hints: Vec<_> = outbound.iter()
+        let hints: Vec<_> = outbound
+            .iter()
             .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
             .collect();
-        assert!(hints.is_empty(), "hint must not emit when no target is locked");
+        assert!(
+            hints.is_empty(),
+            "hint must not emit when no target is locked"
+        );
     }
 
     #[test]
     fn hint_not_emitted_without_tactical_holder() {
         let mut app = test_app();
         // Science Low, no Tactical holder.
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("hint-target".into());
-        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Sensors,
+            AI_RULE_AUTO_HINT,
+            "auto_hint_delay_secs",
+            0.0,
+        );
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("hint-target".into()),
             elapsed_secs: 5.0,
@@ -1065,17 +1314,27 @@ mod tests {
         };
 
         let (_, outbound) = tick(&mut app);
-        let hints: Vec<_> = outbound.iter()
+        let hints: Vec<_> = outbound
+            .iter()
             .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
             .collect();
-        assert!(hints.is_empty(), "hint must not emit without a Tactical holder");
+        assert!(
+            hints.is_empty(),
+            "hint must not emit without a Tactical holder"
+        );
     }
 
     #[test]
     fn target_change_resets_hint_timer_in_plugin() {
         let mut app = test_app();
         setup_science_hint_conditions(&mut app);
-        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Sensors,
+            AI_RULE_AUTO_HINT,
+            "auto_hint_delay_secs",
+            0.0,
+        );
         // Fake nearly-elapsed timer for old target.
         app.world_mut().resource_mut::<FrequencyHintTimer>().0 = FrequencyHintState {
             current_target: Some("old-target".into()),
@@ -1090,12 +1349,22 @@ mod tests {
         // (elapsed = 0.0 + dt, which is tiny, so delay=0.0 means it WILL fire
         // immediately with the new target because tick_frequency_hint resets to
         // elapsed=0 then adds dt. Let's use a longer delay to confirm reset.)
-        set_ai_param(&mut app, Console::Sensors, AI_RULE_AUTO_HINT, "auto_hint_delay_secs", 100.0);
+        set_ai_param(
+            &mut app,
+            Console::Sensors,
+            AI_RULE_AUTO_HINT,
+            "auto_hint_delay_secs",
+            100.0,
+        );
         let (_, outbound) = tick(&mut app);
-        let hints: Vec<_> = outbound.iter()
+        let hints: Vec<_> = outbound
+            .iter()
             .filter(|m| matches!(&m.msg, ServerMessage::FrequencyHint { .. }))
             .collect();
-        assert!(hints.is_empty(), "after target change, timer should reset and hint should not fire");
+        assert!(
+            hints.is_empty(),
+            "after target change, timer should reset and hint should not fire"
+        );
         // Confirm the timer is now tracking the new target.
         let state = app.world().resource::<FrequencyHintTimer>();
         assert_eq!(state.0.current_target.as_deref(), Some("new-target"));
@@ -1106,14 +1375,30 @@ mod tests {
     /// Set up conditions for the auto-match AI:
     /// both Tactical and Science Low, Tactical occupied, target locked.
     fn setup_auto_match_conditions(app: &mut App) {
-        push_inbound(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push_inbound(
+            app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         app.update();
-        push_inbound(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push_inbound(
+            app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         app.update();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
         // Set a known phaser frequency to match against.
@@ -1125,13 +1410,23 @@ mod tests {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
         // Very long delay — single tick won't fire.
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 9999.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            9999.0,
+        );
 
         let (inbound, _) = tick(&mut app);
-        let matched: Vec<_> = inbound.iter()
+        let matched: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(matched.is_empty(), "auto-match must not fire before delay elapses");
+        assert!(
+            matched.is_empty(),
+            "auto-match must not fire before delay elapses"
+        );
     }
 
     #[test]
@@ -1139,7 +1434,13 @@ mod tests {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
         // Zero delay — triggers immediately once any elapsed time is added.
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            0.0,
+        );
         // Pre-seed elapsed time so a single tick fires.
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
@@ -1148,17 +1449,27 @@ mod tests {
         };
 
         let (inbound, _) = tick(&mut app);
-        let matched: Vec<_> = inbound.iter()
+        let matched: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(!matched.is_empty(), "auto-match must fire when delay has elapsed");
+        assert!(
+            !matched.is_empty(),
+            "auto-match must fire when delay has elapsed"
+        );
     }
 
     #[test]
     fn auto_match_emits_correct_frequency() {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            0.0,
+        );
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1166,7 +1477,8 @@ mod tests {
         };
 
         let (inbound, _) = tick(&mut app);
-        let freq_msg = inbound.iter()
+        let freq_msg = inbound
+            .iter()
             .find(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }));
         if let Some(msg) = freq_msg {
             if let ClientMessage::SetPhaserFrequency { frequency } = &msg.msg {
@@ -1186,9 +1498,16 @@ mod tests {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
         // Override Tactical to Full
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            0.0,
+        );
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1196,27 +1515,52 @@ mod tests {
         };
 
         let (inbound, _) = tick(&mut app);
-        let matched: Vec<_> = inbound.iter()
+        let matched: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(matched.is_empty(), "auto-match must not fire when Tactical is Full");
+        assert!(
+            matched.is_empty(),
+            "auto-match must not fire when Tactical is Full"
+        );
     }
 
     #[test]
     fn auto_match_fires_when_science_unmanned() {
         let mut app = test_app();
         // Set up Tactical Low but Science has no holder (unmanned).
-        push_inbound(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push_inbound(
+            &mut app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         app.update();
-        push_inbound(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push_inbound(
+            &mut app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         app.update();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
         // Science NOT set to Low AND no holder → unmanned
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
         app.world_mut().resource_mut::<ShipState>().phaser_frequency = 0.4;
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            0.0,
+        );
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1224,10 +1568,14 @@ mod tests {
         };
 
         let (inbound, _) = tick(&mut app);
-        let matched: Vec<_> = inbound.iter()
+        let matched: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(!matched.is_empty(), "auto-match must fire when Science is unmanned");
+        assert!(
+            !matched.is_empty(),
+            "auto-match must fire when Science is unmanned"
+        );
     }
 
     #[test]
@@ -1235,26 +1583,45 @@ mod tests {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
         app.world_mut().resource_mut::<WeaponsTarget>().0 = None;
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            0.0,
+        );
 
         let (inbound, _) = tick(&mut app);
-        let matched: Vec<_> = inbound.iter()
+        let matched: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(matched.is_empty(), "auto-match must not fire without a locked target");
+        assert!(
+            matched.is_empty(),
+            "auto-match must not fire without a locked target"
+        );
     }
 
     #[test]
     fn auto_match_not_emitted_without_tactical_holder() {
         let mut app = test_app();
         // No Tactical holder.
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Low".into());
         app.world_mut().resource_mut::<WeaponsTarget>().0 = Some("match-target".into());
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            0.0,
+        );
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1262,17 +1629,27 @@ mod tests {
         };
 
         let (inbound, _) = tick(&mut app);
-        let matched: Vec<_> = inbound.iter()
+        let matched: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(matched.is_empty(), "auto-match must not fire without a Tactical holder");
+        assert!(
+            matched.is_empty(),
+            "auto-match must not fire without a Tactical holder"
+        );
     }
 
     #[test]
     fn auto_match_timer_resets_when_tactical_flips_to_full() {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 100.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            100.0,
+        );
         // Nearly at delay
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
@@ -1280,24 +1657,38 @@ mod tests {
             match_sent: false,
         };
         // Flip Tactical to Full mid-countdown
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
 
         let (inbound, _) = tick(&mut app);
-        let matched: Vec<_> = inbound.iter()
+        let matched: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(matched.is_empty(), "pending match must be cancelled when Tactical flips to Full");
+        assert!(
+            matched.is_empty(),
+            "pending match must be cancelled when Tactical flips to Full"
+        );
         // Timer must be reset
         let state = app.world().resource::<FrequencyMatchTimer>();
-        assert!(state.0.current_target.is_none(), "timer state must reset when Tactical goes Full");
+        assert!(
+            state.0.current_target.is_none(),
+            "timer state must reset when Tactical goes Full"
+        );
     }
 
     #[test]
     fn auto_match_no_auto_revert_after_trigger_ends() {
         let mut app = test_app();
         setup_auto_match_conditions(&mut app);
-        set_ai_param(&mut app, Console::Tactical, AI_RULE_FREQUENCY_MATCH, "auto_match_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Tactical,
+            AI_RULE_FREQUENCY_MATCH,
+            "auto_match_delay_secs",
+            0.0,
+        );
         app.world_mut().resource_mut::<FrequencyMatchTimer>().0 = FrequencyMatchState {
             current_target: Some("match-target".into()),
             elapsed_secs: 5.0,
@@ -1306,55 +1697,92 @@ mod tests {
 
         // First tick — match fires
         let (inbound1, _) = tick(&mut app);
-        let matched1: Vec<_> = inbound1.iter()
+        let matched1: Vec<_> = inbound1
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(!matched1.is_empty(), "match should fire on first qualifying tick");
+        assert!(
+            !matched1.is_empty(),
+            "match should fire on first qualifying tick"
+        );
 
         // Now flip both consoles to Full — trigger ends
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Tactical, "Std".into());
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Sensors, "Std".into());
 
         // Second tick — no revert message
         let (inbound2, _) = tick(&mut app);
-        let matched2: Vec<_> = inbound2.iter()
+        let matched2: Vec<_> = inbound2
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::SetPhaserFrequency { .. }))
             .collect();
-        assert!(matched2.is_empty(), "frequency must persist — no auto-revert when trigger ends");
+        assert!(
+            matched2.is_empty(),
+            "frequency must persist — no auto-revert when trigger ends"
+        );
     }
 
     // ── Power AI plugin tests ─────────────────────────────────────────────
 
     /// Set up the Power console occupied and at Low complexity with full battery.
     fn setup_power_low(app: &mut App) {
-        push_inbound(app, "power", ClientMessage::Identify { token: "power".into(), name: "Alice".into() });
+        push_inbound(
+            app,
+            "power",
+            ClientMessage::Identify {
+                token: "power".into(),
+                name: "Alice".into(),
+            },
+        );
         app.update();
-        push_inbound(app, "power", ClientMessage::SelectStation { station: "Power".into() });
+        push_inbound(
+            app,
+            "power",
+            ClientMessage::SelectStation {
+                station: "Power".into(),
+            },
+        );
         app.update();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Power, "Low".into());
         // Full battery
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.battery_charge = 100.0;
+        app.world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .battery_charge = 100.0;
     }
 
     #[test]
     fn power_ai_does_not_run_when_console_unoccupied() {
         let mut app = test_app();
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Power, "Low".into());
         // Thrust above threshold
         app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.battery_charge = 100.0;
+        app.world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .battery_charge = 100.0;
 
         let (inbound, _) = tick(&mut app);
-        let power_msgs: Vec<_> = inbound.iter()
+        let power_msgs: Vec<_> = inbound
+            .iter()
             .filter(|m| matches!(&m.msg, ClientMessage::IncreasePower { .. }))
             .collect();
-        assert!(power_msgs.is_empty(), "AI must not run when Power console is unoccupied");
+        assert!(
+            power_msgs.is_empty(),
+            "AI must not run when Power console is unoccupied"
+        );
     }
 
     #[test]
@@ -1362,7 +1790,8 @@ mod tests {
         let mut app = test_app();
         setup_power_low(&mut app);
         // Override to Full
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Power, "Std".into());
         app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
         // Pre-seed the movement state as if counting was underway
@@ -1370,10 +1799,19 @@ mod tests {
             EngageState::Counting { elapsed_secs: 2.9 };
 
         let (inbound, _) = tick(&mut app);
-        let power_msgs: Vec<_> = inbound.iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. }))
+        let power_msgs: Vec<_> = inbound
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ClientMessage::IncreasePower { .. } | ClientMessage::DecreasePower { .. }
+                )
+            })
             .collect();
-        assert!(power_msgs.is_empty(), "AI must not generate power messages at Full complexity");
+        assert!(
+            power_msgs.is_empty(),
+            "AI must not generate power messages at Full complexity"
+        );
         // State should reset to Idle
         assert_eq!(
             app.world().resource::<PowerMovementEngageState>().0,
@@ -1388,7 +1826,13 @@ mod tests {
         setup_power_low(&mut app);
 
         // Use zero delay so the rule engages in a single tick with any elapsed time.
-        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_MOVEMENT, "engage_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Power,
+            AI_RULE_POWER_MOVEMENT,
+            "engage_delay_secs",
+            0.0,
+        );
         // Pre-seed elapsed time past the (zero) delay.
         app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
             EngageState::Counting { elapsed_secs: 1.0 };
@@ -1396,10 +1840,21 @@ mod tests {
         app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
 
         let (inbound, _) = tick(&mut app);
-        let increase_helm: Vec<_> = inbound.iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::IncreasePower { console: Console::Helm }))
+        let increase_helm: Vec<_> = inbound
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ClientMessage::IncreasePower {
+                        console: Console::Helm
+                    }
+                )
+            })
             .collect();
-        assert!(!increase_helm.is_empty(), "AI should increase Helm power after sustained thrust");
+        assert!(
+            !increase_helm.is_empty(),
+            "AI should increase Helm power after sustained thrust"
+        );
     }
 
     #[test]
@@ -1409,33 +1864,72 @@ mod tests {
         // Pre-set movement state to Engaged
         app.world_mut().resource_mut::<PowerMovementEngageState>().0 = EngageState::Engaged;
         // Battery drops below minimum (50%)
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.battery_charge = 30.0;
+        app.world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .battery_charge = 30.0;
         app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
 
         let (inbound, _) = tick(&mut app);
-        let decrease_helm: Vec<_> = inbound.iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::DecreasePower { console: Console::Helm }))
+        let decrease_helm: Vec<_> = inbound
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ClientMessage::DecreasePower {
+                        console: Console::Helm
+                    }
+                )
+            })
             .collect();
-        assert!(!decrease_helm.is_empty(), "AI should decrease Helm power when battery drops");
+        assert!(
+            !decrease_helm.is_empty(),
+            "AI should decrease Helm power when battery drops"
+        );
     }
 
     #[test]
     fn power_ai_engages_weapons_after_sustained_red_alert() {
         let mut app = test_app();
         setup_power_low(&mut app);
-        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_MOVEMENT, "engage_delay_secs", 9999.0);
-        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_RED_ALERT, "engage_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Power,
+            AI_RULE_POWER_MOVEMENT,
+            "engage_delay_secs",
+            9999.0,
+        );
+        set_ai_param(
+            &mut app,
+            Console::Power,
+            AI_RULE_POWER_RED_ALERT,
+            "engage_delay_secs",
+            0.0,
+        );
         // Pre-seed elapsed time past the (zero) delay.
         app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 =
             EngageState::Counting { elapsed_secs: 1.0 };
         // Set red alert
-        app.world_mut().resource_mut::<ShipState>().toggle_red_alert();
+        app.world_mut()
+            .resource_mut::<ShipState>()
+            .toggle_red_alert();
 
         let (inbound, _) = tick(&mut app);
-        let increase_weapons: Vec<_> = inbound.iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::IncreasePower { console: Console::Tactical }))
+        let increase_weapons: Vec<_> = inbound
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ClientMessage::IncreasePower {
+                        console: Console::Tactical
+                    }
+                )
+            })
             .collect();
-        assert!(!increase_weapons.is_empty(), "AI should increase Weapons power under red alert");
+        assert!(
+            !increase_weapons.is_empty(),
+            "AI should increase Weapons power under red alert"
+        );
     }
 
     #[test]
@@ -1444,35 +1938,77 @@ mod tests {
         setup_power_low(&mut app);
         app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 = EngageState::Engaged;
         // Battery drops below min for red alert (10%)
-        app.world_mut().resource_mut::<ShipPowerSystem>().0.battery_charge = 5.0;
-        app.world_mut().resource_mut::<ShipState>().toggle_red_alert();
+        app.world_mut()
+            .resource_mut::<ShipPowerSystem>()
+            .0
+            .battery_charge = 5.0;
+        app.world_mut()
+            .resource_mut::<ShipState>()
+            .toggle_red_alert();
 
         let (inbound, _) = tick(&mut app);
-        let decrease_weapons: Vec<_> = inbound.iter()
-            .filter(|m| matches!(&m.msg, ClientMessage::DecreasePower { console: Console::Tactical }))
+        let decrease_weapons: Vec<_> = inbound
+            .iter()
+            .filter(|m| {
+                matches!(
+                    &m.msg,
+                    ClientMessage::DecreasePower {
+                        console: Console::Tactical
+                    }
+                )
+            })
             .collect();
-        assert!(!decrease_weapons.is_empty(), "AI should decrease Weapons power when battery drops");
+        assert!(
+            !decrease_weapons.is_empty(),
+            "AI should decrease Weapons power when battery drops"
+        );
     }
 
     #[test]
     fn power_ai_both_rules_can_engage_simultaneously() {
         let mut app = test_app();
         setup_power_low(&mut app);
-        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_MOVEMENT, "engage_delay_secs", 0.0);
-        set_ai_param(&mut app, Console::Power, AI_RULE_POWER_RED_ALERT, "engage_delay_secs", 0.0);
+        set_ai_param(
+            &mut app,
+            Console::Power,
+            AI_RULE_POWER_MOVEMENT,
+            "engage_delay_secs",
+            0.0,
+        );
+        set_ai_param(
+            &mut app,
+            Console::Power,
+            AI_RULE_POWER_RED_ALERT,
+            "engage_delay_secs",
+            0.0,
+        );
         // Both at Counting with elapsed past delay
         app.world_mut().resource_mut::<PowerMovementEngageState>().0 =
             EngageState::Counting { elapsed_secs: 1.0 };
         app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 =
             EngageState::Counting { elapsed_secs: 1.0 };
         app.world_mut().resource_mut::<LastHelmInput>().thrust = 0.9;
-        app.world_mut().resource_mut::<ShipState>().toggle_red_alert();
+        app.world_mut()
+            .resource_mut::<ShipState>()
+            .toggle_red_alert();
 
         let (inbound, _) = tick(&mut app);
-        let increase_helm = inbound.iter()
-            .any(|m| matches!(&m.msg, ClientMessage::IncreasePower { console: Console::Helm }));
-        let increase_weapons = inbound.iter()
-            .any(|m| matches!(&m.msg, ClientMessage::IncreasePower { console: Console::Tactical }));
+        let increase_helm = inbound.iter().any(|m| {
+            matches!(
+                &m.msg,
+                ClientMessage::IncreasePower {
+                    console: Console::Helm
+                }
+            )
+        });
+        let increase_weapons = inbound.iter().any(|m| {
+            matches!(
+                &m.msg,
+                ClientMessage::IncreasePower {
+                    console: Console::Tactical
+                }
+            )
+        });
         assert!(increase_helm, "movement rule should engage Helm");
         assert!(increase_weapons, "red alert rule should engage Weapons");
     }
@@ -1486,24 +2022,51 @@ mod tests {
             EngageState::Counting { elapsed_secs: 2.9 };
         app.world_mut().resource_mut::<PowerRedAlertEngageState>().0 = EngageState::Engaged;
         // Switch to Full
-        app.world_mut().resource_mut::<ConsoleComplexityState>()
+        app.world_mut()
+            .resource_mut::<ConsoleComplexityState>()
             .set(Console::Power, "Std".into());
-        app.world_mut().resource_mut::<ShipState>().toggle_red_alert();
+        app.world_mut()
+            .resource_mut::<ShipState>()
+            .toggle_red_alert();
 
         let (inbound, _) = tick(&mut app);
 
         // Movement rule: counting → should reset (no increase)
-        let increase_helm = inbound.iter()
-            .any(|m| matches!(&m.msg, ClientMessage::IncreasePower { console: Console::Helm }));
-        assert!(!increase_helm, "pending movement rule must not fire when switching to Full");
+        let increase_helm = inbound.iter().any(|m| {
+            matches!(
+                &m.msg,
+                ClientMessage::IncreasePower {
+                    console: Console::Helm
+                }
+            )
+        });
+        assert!(
+            !increase_helm,
+            "pending movement rule must not fire when switching to Full"
+        );
 
         // Red alert rule was Engaged → implicit disengage expected
-        let decrease_weapons = inbound.iter()
-            .any(|m| matches!(&m.msg, ClientMessage::DecreasePower { console: Console::Tactical }));
-        assert!(decrease_weapons, "engaged red alert rule must disengage when switching to Full");
+        let decrease_weapons = inbound.iter().any(|m| {
+            matches!(
+                &m.msg,
+                ClientMessage::DecreasePower {
+                    console: Console::Tactical
+                }
+            )
+        });
+        assert!(
+            decrease_weapons,
+            "engaged red alert rule must disengage when switching to Full"
+        );
 
         // Both states should be Idle now
-        assert_eq!(app.world().resource::<PowerMovementEngageState>().0, EngageState::Idle);
-        assert_eq!(app.world().resource::<PowerRedAlertEngageState>().0, EngageState::Idle);
+        assert_eq!(
+            app.world().resource::<PowerMovementEngageState>().0,
+            EngageState::Idle
+        );
+        assert_eq!(
+            app.world().resource::<PowerRedAlertEngageState>().0,
+            EngageState::Idle
+        );
     }
 }

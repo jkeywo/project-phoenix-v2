@@ -4,15 +4,15 @@ use bevy::prelude::*;
 
 use crate::entity_spawner::{EntityUuid, RegionEffectsSection};
 use crate::flag_kind::FlagKind;
+use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
 use crate::messages::{Console, ModifierSlot, ModifierSource};
 use crate::modifiers::{Modifier, ShipModifiers};
+use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
 use crate::power_system::PowerSystem;
 use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::{RegionEntered, RegionExited, RegionMembership};
-use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
-use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
-use crate::simulation::ShipImpulse;
 use crate::ship_plugin::ImpulseConfigResource;
+use crate::simulation::ShipImpulse;
 
 /// Single owner of `ShipModifiers` lifecycle.
 ///
@@ -108,7 +108,9 @@ pub fn apply_region_effects(
     let source = ModifierSource::RegionEffect { uuid: region_uuid };
     for effect in effects {
         match effect {
-            RegionEffectKind::DamageZone { .. } | RegionEffectKind::BlocksImpulse | RegionEffectKind::NebulaFog { .. } => {}
+            RegionEffectKind::DamageZone { .. }
+            | RegionEffectKind::BlocksImpulse
+            | RegionEffectKind::NebulaFog { .. } => {}
             RegionEffectKind::CommsJam => {
                 modifiers.add_flag(source.clone(), FlagKind::CommsJammed);
             }
@@ -122,7 +124,10 @@ pub fn apply_region_effects(
                     bonus: *multiplier,
                 });
             }
-            RegionEffectKind::SlowZone { thrust_modifier, yaw_rate_modifier } => {
+            RegionEffectKind::SlowZone {
+                thrust_modifier,
+                yaw_rate_modifier,
+            } => {
                 if let Some(bonus) = thrust_modifier {
                     modifiers.add_or_update(Modifier {
                         source: source.clone(),
@@ -151,7 +156,11 @@ pub fn apply_region_effects(
 ///
 /// When the drive is idle or charging the modifier is removed, so any
 /// previously applied impulse effect is cleaned up.
-pub fn apply_impulse_to(modifiers: &mut ShipModifiers, impulse: &ImpulseState, speed_multiplier: f32) {
+pub fn apply_impulse_to(
+    modifiers: &mut ShipModifiers,
+    impulse: &ImpulseState,
+    speed_multiplier: f32,
+) {
     if impulse.is_active() {
         modifiers.add_or_update(Modifier {
             source: ModifierSource::ImpulseDrive,
@@ -288,11 +297,17 @@ mod tests {
     fn enter_radar_dampening_adds_radar_range_modifier_with_correct_source() {
         let mut mods = ShipModifiers::new();
         let uuid = uuid::Uuid::from_u128(1);
-        apply_region_effects(&mut mods, uuid, &[RegionEffectKind::RadarDampening { multiplier: -0.3 }]);
+        apply_region_effects(
+            &mut mods,
+            uuid,
+            &[RegionEffectKind::RadarDampening { multiplier: -0.3 }],
+        );
         let expected = 1.0 / 1.3;
         assert!((mods.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6);
         // Verify source UUID is correct by removing it
-        mods.clear_source(&ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) });
+        mods.clear_source(&ModifierSource::RegionEffect {
+            uuid: uuid::Uuid::from_u128(1),
+        });
         assert!((mods.get(&ModifierSlot::RadarRange) - 1.0).abs() < 1e-6);
     }
 
@@ -300,7 +315,14 @@ mod tests {
     fn enter_slow_zone_thrust_registers_maxspeed() {
         let mut mods = ShipModifiers::new();
         let uuid = uuid::Uuid::from_u128(1);
-        apply_region_effects(&mut mods, uuid, &[RegionEffectKind::SlowZone { thrust_modifier: Some(-0.5), yaw_rate_modifier: None }]);
+        apply_region_effects(
+            &mut mods,
+            uuid,
+            &[RegionEffectKind::SlowZone {
+                thrust_modifier: Some(-0.5),
+                yaw_rate_modifier: None,
+            }],
+        );
         assert!((mods.get(&ModifierSlot::MaxSpeed) - (1.0 / 1.5)).abs() < 1e-6);
         assert!((mods.get(&ModifierSlot::MaxYawRate) - 1.0).abs() < 1e-6);
     }
@@ -309,7 +331,14 @@ mod tests {
     fn enter_slow_zone_yaw_registers_maxyawrate() {
         let mut mods = ShipModifiers::new();
         let uuid = uuid::Uuid::from_u128(1);
-        apply_region_effects(&mut mods, uuid, &[RegionEffectKind::SlowZone { thrust_modifier: None, yaw_rate_modifier: Some(-0.3) }]);
+        apply_region_effects(
+            &mut mods,
+            uuid,
+            &[RegionEffectKind::SlowZone {
+                thrust_modifier: None,
+                yaw_rate_modifier: Some(-0.3),
+            }],
+        );
         assert!((mods.get(&ModifierSlot::MaxYawRate) - (1.0 / 1.3)).abs() < 1e-6);
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-6);
     }
@@ -318,7 +347,14 @@ mod tests {
     fn enter_slow_zone_both_fields_registers_both_slots() {
         let mut mods = ShipModifiers::new();
         let uuid = uuid::Uuid::from_u128(1);
-        apply_region_effects(&mut mods, uuid, &[RegionEffectKind::SlowZone { thrust_modifier: Some(-0.5), yaw_rate_modifier: Some(-0.3) }]);
+        apply_region_effects(
+            &mut mods,
+            uuid,
+            &[RegionEffectKind::SlowZone {
+                thrust_modifier: Some(-0.5),
+                yaw_rate_modifier: Some(-0.3),
+            }],
+        );
         assert!((mods.get(&ModifierSlot::MaxSpeed) - (1.0 / 1.5)).abs() < 1e-6);
         assert!((mods.get(&ModifierSlot::MaxYawRate) - (1.0 / 1.3)).abs() < 1e-6);
     }
@@ -326,14 +362,22 @@ mod tests {
     #[test]
     fn enter_comms_jam_sets_flag() {
         let mut mods = ShipModifiers::new();
-        apply_region_effects(&mut mods, uuid::Uuid::from_u128(1), &[RegionEffectKind::CommsJam]);
+        apply_region_effects(
+            &mut mods,
+            uuid::Uuid::from_u128(1),
+            &[RegionEffectKind::CommsJam],
+        );
         assert!(mods.has_flag(&FlagKind::CommsJammed));
     }
 
     #[test]
     fn enter_sensor_blind_sets_flag() {
         let mut mods = ShipModifiers::new();
-        apply_region_effects(&mut mods, uuid::Uuid::from_u128(1), &[RegionEffectKind::SensorBlind]);
+        apply_region_effects(
+            &mut mods,
+            uuid::Uuid::from_u128(1),
+            &[RegionEffectKind::SensorBlind],
+        );
         assert!(mods.has_flag(&FlagKind::SensorBlind));
     }
 
@@ -345,21 +389,37 @@ mod tests {
         apply_region_effects(&mut mods, uuid1, &[RegionEffectKind::CommsJam]);
         apply_region_effects(&mut mods, uuid2, &[RegionEffectKind::CommsJam]);
         assert!(mods.has_flag(&FlagKind::CommsJammed));
-        mods.remove_flag(ModifierSource::RegionEffect { uuid: uuid1 }, FlagKind::CommsJammed);
-        assert!(mods.has_flag(&FlagKind::CommsJammed), "flag should remain after removing first source");
-        mods.remove_flag(ModifierSource::RegionEffect { uuid: uuid2 }, FlagKind::CommsJammed);
-        assert!(!mods.has_flag(&FlagKind::CommsJammed), "flag should clear after removing last source");
+        mods.remove_flag(
+            ModifierSource::RegionEffect { uuid: uuid1 },
+            FlagKind::CommsJammed,
+        );
+        assert!(
+            mods.has_flag(&FlagKind::CommsJammed),
+            "flag should remain after removing first source"
+        );
+        mods.remove_flag(
+            ModifierSource::RegionEffect { uuid: uuid2 },
+            FlagKind::CommsJammed,
+        );
+        assert!(
+            !mods.has_flag(&FlagKind::CommsJammed),
+            "flag should clear after removing last source"
+        );
     }
 
     #[test]
     fn multiple_effects_in_one_region_all_applied() {
         let mut mods = ShipModifiers::new();
         let uuid = uuid::Uuid::from_u128(1);
-        apply_region_effects(&mut mods, uuid, &[
-            RegionEffectKind::CommsJam,
-            RegionEffectKind::SensorBlind,
-            RegionEffectKind::RadarDampening { multiplier: -0.3 },
-        ]);
+        apply_region_effects(
+            &mut mods,
+            uuid,
+            &[
+                RegionEffectKind::CommsJam,
+                RegionEffectKind::SensorBlind,
+                RegionEffectKind::RadarDampening { multiplier: -0.3 },
+            ],
+        );
         assert!(mods.has_flag(&FlagKind::CommsJammed));
         assert!(mods.has_flag(&FlagKind::SensorBlind));
         assert!((mods.get(&ModifierSlot::RadarRange) - (1.0 / 1.3)).abs() < 1e-6);
@@ -369,10 +429,17 @@ mod tests {
     fn damage_zone_and_blocks_impulse_do_not_write_modifiers() {
         let mut mods = ShipModifiers::new();
         let uuid = uuid::Uuid::from_u128(1);
-        apply_region_effects(&mut mods, uuid, &[
-            RegionEffectKind::DamageZone { dps: 50.0, shield_pierce: 0.0 },
-            RegionEffectKind::BlocksImpulse,
-        ]);
+        apply_region_effects(
+            &mut mods,
+            uuid,
+            &[
+                RegionEffectKind::DamageZone {
+                    dps: 50.0,
+                    shield_pierce: 0.0,
+                },
+                RegionEffectKind::BlocksImpulse,
+            ],
+        );
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-6);
         assert!((mods.get(&ModifierSlot::RadarRange) - 1.0).abs() < 1e-6);
         assert!(!mods.has_flag(&FlagKind::CommsJammed));
@@ -381,7 +448,7 @@ mod tests {
 
     // ── apply_impulse_to tests ──────────────────────────────────────────
 
-use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIPLIER};
+    use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIPLIER};
 
     #[test]
     fn impulse_idle_does_not_write_modifier() {
@@ -461,9 +528,9 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
     /// MaxSpeed modifier must reflect the resource value.
     #[test]
     fn translate_impulse_modifiers_reads_speed_multiplier_from_resource() {
+        use crate::impulse::ImpulseState;
         use crate::ship_plugin::ImpulseConfigResource;
         use crate::simulation::ShipImpulse;
-        use crate::impulse::ImpulseState;
 
         let mut app = App::new();
         app.init_resource::<ShipModifiers>();
@@ -472,7 +539,10 @@ use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIP
         let mut impulse = ImpulseState::new();
         impulse.start_charge();
         impulse.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
-        assert!(impulse.is_active(), "test fixture: impulse should be active");
+        assert!(
+            impulse.is_active(),
+            "test fixture: impulse should be active"
+        );
         app.insert_resource(ShipImpulse(impulse));
 
         // Configure a non-default speed multiplier (3.0 instead of 10.0).

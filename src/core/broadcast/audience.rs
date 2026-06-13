@@ -33,7 +33,8 @@ mod tests {
 
     fn sm_with_holder(token: &str, console: Console) -> SessionManager {
         let mut sm = SessionManager::new();
-        sm.register(token.to_string(), "Player".to_string()).unwrap();
+        sm.register(token.to_string(), "Player".to_string())
+            .unwrap();
         sm.toggle_console(token, console).unwrap();
         sm
     }

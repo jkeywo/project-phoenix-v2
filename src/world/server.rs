@@ -1,20 +1,19 @@
-use bevy::prelude::*;
 use crate::damage::ConsoleHull;
 use crate::simulation::{Ship, ShipHullIntegrity};
+use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::comms_inbox::CommsInbox;
 use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
-use crate::simulation::SimOutbox;
 use crate::messages::{
     ClientMessage, CommsContact, CommsMessage, Console, GamePhase, ServerMessage, ViewMode,
 };
-use crate::ship_state::ShipState;
 use crate::objectives::ObjectiveManager;
+use crate::ship_state::ShipState;
+use crate::simulation::SimOutbox;
 use crate::world::content::{
-    ActiveDialogue, CommsTemplateState, PendingFollowUp, TriggerAction,
-    TriggerState, WorldEvent, comms_template_states_from_world, evaluate_comms_templates,
-    trigger_states_from_world,
+    comms_template_states_from_world, evaluate_comms_templates, trigger_states_from_world,
+    ActiveDialogue, CommsTemplateState, PendingFollowUp, TriggerAction, TriggerState, WorldEvent,
 };
 
 // -- Resources --------------------------------------------------------------
@@ -104,7 +103,6 @@ pub struct CommsInboxRes(pub CommsInbox);
 #[derive(Resource, Default)]
 pub struct ObjectiveManagerRes(pub ObjectiveManager);
 
-
 /// Queue of world TOML paths to load additively into the live `WorldContentRuntime`.
 ///
 /// The `apply_pending_scenario_loads` system drains it each frame, parses the
@@ -164,7 +162,10 @@ pub enum WorldLayerChange {
     /// (base world's `extra_worlds`). Recorded on the new
     /// `WorldRuntime.loader_path` so `parent:` walks from the loaded
     /// layer reach the right outer flag store (PRD #397 fix 1).
-    Load { path: String, loader_path: Option<String> },
+    Load {
+        path: String,
+        loader_path: Option<String>,
+    },
     Unload(String),
 }
 
@@ -196,8 +197,10 @@ impl Plugin for WorldPlugin {
                     spawn_world_entities,
                     init_world_runtime,
                     load_extra_worlds,
-                    setup_fallback_world.run_if(not(resource_exists::<crate::world::config::WorldConfig>)),
-                ).chain(),
+                    setup_fallback_world
+                        .run_if(not(resource_exists::<crate::world::config::WorldConfig>)),
+                )
+                    .chain(),
             )
             .add_systems(
                 OnEnter(crate::messages::GamePhase::InProgress),
@@ -214,12 +217,25 @@ impl Plugin for WorldPlugin {
                     update_comms_range_flags.in_set(crate::sim_sets::SimSet::Broadcast),
                     broadcast_comms_state.in_set(crate::sim_sets::SimSet::Broadcast),
                     broadcast_objective_summary.in_set(crate::sim_sets::SimSet::Broadcast),
-                ).chain(),
+                )
+                    .chain(),
             )
-            .add_systems(Update, handle_ai_events.in_set(crate::sim_sets::SimSet::Physics))
-            .add_systems(Update, tick_pending_follow_ups.in_set(crate::sim_sets::SimSet::Physics))
-            .add_systems(Update, apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics))
-            .add_systems(Update, apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics))
+            .add_systems(
+                Update,
+                handle_ai_events.in_set(crate::sim_sets::SimSet::Physics),
+            )
+            .add_systems(
+                Update,
+                tick_pending_follow_ups.in_set(crate::sim_sets::SimSet::Physics),
+            )
+            .add_systems(
+                Update,
+                apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics),
+            )
+            .add_systems(
+                Update,
+                apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics),
+            )
             .add_observer(handle_region_entered_event)
             .add_observer(handle_region_exited_event);
     }
@@ -256,7 +272,9 @@ fn handle_region_entered_event(
     let Some(uuid) = membership.region_uuids.get(&ev.region_entity).cloned() else {
         return;
     };
-    runtime.pending_world_events.push(WorldEvent::EnteredRegion { uuid });
+    runtime
+        .pending_world_events
+        .push(WorldEvent::EnteredRegion { uuid });
 }
 
 /// Observer: mirror of `handle_region_entered_event` for region exits.
@@ -274,7 +292,9 @@ fn handle_region_exited_event(
     let Some(uuid) = membership.region_uuids.get(&ev.region_entity).cloned() else {
         return;
     };
-    runtime.pending_world_events.push(WorldEvent::ExitedRegion { uuid });
+    runtime
+        .pending_world_events
+        .push(WorldEvent::ExitedRegion { uuid });
 }
 
 /// Startup system: copy the unified `WorldConfig` from the WASM-side
@@ -351,15 +371,13 @@ pub fn spawn_immediate_entities_internal(
     world_config: &crate::world::config::WorldConfig,
     config_cache: &crate::config_cache::ConfigCache,
 ) -> Vec<Entity> {
-    let (fields, named, _anon) = crate::world::config::partition_immediate_entities_three_way(
-        world_config,
-        |path| {
+    let (fields, named, _anon) =
+        crate::world::config::partition_immediate_entities_three_way(world_config, |path| {
             config_cache
                 .get(path)
                 .and_then(|c| c.asteroid_field.as_ref())
                 .is_some()
-        },
-    );
+        });
 
     // Pre-resolve named-entity positions so `relative_to` references can be
     // looked up during spawn (PRD #337).
@@ -374,7 +392,8 @@ pub fn spawn_immediate_entities_internal(
             Err(e) => {
                 bevy::log::error!(
                     "spawn_world_entities: failed to resolve asteroid field '{}': {}",
-                    entity_inst.template_path, e
+                    entity_inst.template_path,
+                    e
                 );
                 continue;
             }
@@ -419,7 +438,10 @@ pub fn spawn_immediate_entities_internal(
     // entity. A missing registration is a programmer error â€” log and skip
     // rather than allocate a fresh UUID (which would silently desync).
     for entity_inst in named {
-        let name = entity_inst.name.as_ref().expect("partition guarantees Some");
+        let name = entity_inst
+            .name
+            .as_ref()
+            .expect("partition guarantees Some");
         let uuid = match world_config.name_to_uuid.get(name) {
             Some(u) => u.clone(),
             None => {
@@ -435,7 +457,9 @@ pub fn spawn_immediate_entities_internal(
             Err(e) => {
                 bevy::log::error!(
                     "spawn_world_entities: failed to resolve named entity '{}' ({}): {}",
-                    name, entity_inst.template_path, e
+                    name,
+                    entity_inst.template_path,
+                    e
                 );
                 continue;
             }
@@ -471,11 +495,8 @@ fn resolve_position(
     anchors: &HashMap<String, [f32; 3]>,
     entities_by_name: &HashMap<String, [f32; 3]>,
 ) -> Result<Vec3, String> {
-    let pos = crate::world::config::resolve_entity_position_with(
-        entity_inst,
-        anchors,
-        entities_by_name,
-    )?;
+    let pos =
+        crate::world::config::resolve_entity_position_with(entity_inst, anchors, entities_by_name)?;
     Ok(Vec3::new(pos[0], pos[1], pos[2]))
 }
 
@@ -529,7 +550,10 @@ fn setup_fallback_world(
             radius: 6.0,
             length: 6.0,
         }),
-        hull: Some(crate::entity_config::HullConfig { hull_integrity: 100.0, ..Default::default() }),
+        hull: Some(crate::entity_config::HullConfig {
+            hull_integrity: 100.0,
+            ..Default::default()
+        }),
         appearance: None,
         helm_console: None,
         weapons_console: None,
@@ -554,7 +578,11 @@ fn setup_fallback_world(
     };
     let ship_uuid = crate::entity_loader::assign_uuid();
     let ship_entity = crate::entity_spawner::spawn_entity(
-        &mut commands, &ship_config, Vec3::ZERO, ship_uuid, Some("player-ship".to_string()),
+        &mut commands,
+        &ship_config,
+        Vec3::ZERO,
+        ship_uuid,
+        Some("player-ship".to_string()),
     );
     commands.entity(ship_entity).insert(Ship);
     commands.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
@@ -564,7 +592,6 @@ fn setup_fallback_world(
         (crate::messages::Console::Shields, 25.0),
     ])));
 }
-
 
 // -- Startup systems ---------------------------------------------------------
 
@@ -604,8 +631,7 @@ fn init_world_runtime(
 
     // Derive trigger/comms runtime states straight from the parsed world.
     runtime.trigger_states = trigger_states_from_world(&world_config);
-    runtime.comms_template_states =
-        comms_template_states_from_world(&world_config);
+    runtime.comms_template_states = comms_template_states_from_world(&world_config);
 
     // Build the contact list from comms templates using the merged
     // `runtime.name_to_uuid` so unified-pipeline UUIDs are picked up.
@@ -653,7 +679,10 @@ fn load_extra_worlds(
         return;
     };
     for path in &world_config.extra_worlds {
-        pending.0.push(WorldLayerChange::Load { path: path.clone(), loader_path: None });
+        pending.0.push(WorldLayerChange::Load {
+            path: path.clone(),
+            loader_path: None,
+        });
     }
 }
 
@@ -718,11 +747,7 @@ fn handle_hail(
             comms_template_states,
             ..
         } = &mut *runtime;
-        let fired = evaluate_comms_templates(
-            comms_template_states,
-            &world_events,
-            name_to_uuid,
-        );
+        let fired = evaluate_comms_templates(comms_template_states, &world_events, name_to_uuid);
 
         // Route the Hailed event into the trigger system so that
         // on_hailed triggers (e.g. complete_objective, load_world)
@@ -734,7 +759,10 @@ fn handle_hail(
 
         for f in fired {
             // Build a CommsMessage and inject it.
-            let thread_id = f.thread_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let thread_id = f
+                .thread_id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let sender_uuid = target_uuid.clone();
             // Resolve channel display name from contacts (best effort), then
             // let the dialogue node override the visible speaker.
@@ -811,7 +839,9 @@ fn tick_pending_follow_ups(
     }
 
     // Remove the expired entries from the queue.
-    runtime.pending_follow_ups.retain(|p| p.remaining_secs > 0.0);
+    runtime
+        .pending_follow_ups
+        .retain(|p| p.remaining_secs > 0.0);
 
     for pfu in ready {
         if let Some(placeholder_id) = &pfu.placeholder_id {
@@ -932,11 +962,17 @@ fn handle_respond_to_message(
         let sender_uuid = inbox.0.sender_uuid_for(message_id);
         for action in &response.actions {
             match action {
-                TriggerAction::AddObjective { id, text, mandatory, targets } => {
+                TriggerAction::AddObjective {
+                    id,
+                    text,
+                    mandatory,
+                    targets,
+                } => {
                     // Explicit targets win; otherwise fall back to the comms
                     // sender so legacy single-entity objectives still mark up.
                     let resolved = if targets.is_empty() {
-                        sender_uuid.clone()
+                        sender_uuid
+                            .clone()
                             .and_then(|suid| uuid_to_name.get(suid.as_str()).copied())
                             .map(String::from)
                             .into_iter()
@@ -952,7 +988,11 @@ fn handle_respond_to_message(
                 TriggerAction::FailObjective { id } => {
                     objectives.0.fail(id);
                 }
-                TriggerAction::SetAiState { entity, state, target } => {
+                TriggerAction::SetAiState {
+                    entity,
+                    state,
+                    target,
+                } => {
                     let target_uuid = match name_to_uuid_snapshot.get(entity) {
                         Some(u) => u.clone(),
                         None => {
@@ -985,7 +1025,12 @@ fn handle_respond_to_message(
                         break;
                     }
                 }
-                TriggerAction::ApplyModifier { entity, tag, slot, bonus } => {
+                TriggerAction::ApplyModifier {
+                    entity,
+                    tag,
+                    slot,
+                    bonus,
+                } => {
                     if !name_to_uuid_snapshot.contains_key(entity) {
                         bevy::log::warn!(
                             "handle_respond_to_message: ApplyModifier: unknown entity name '{entity}'"
@@ -1054,7 +1099,12 @@ fn handle_respond_to_message(
                         );
                     }
                 }
-                TriggerAction::ApplyIntModifier { entity, tag, slot, bonus } => {
+                TriggerAction::ApplyIntModifier {
+                    entity,
+                    tag,
+                    slot,
+                    bonus,
+                } => {
                     if !name_to_uuid_snapshot.contains_key(entity) {
                         bevy::log::warn!(
                             "handle_respond_to_message: ApplyIntModifier: unknown entity name '{entity}'"
@@ -1115,71 +1165,80 @@ fn handle_respond_to_message(
                     }
                 }
                 TriggerAction::SetWorldFlag { name } => {
-                    if let Some((target_layer, stripped, before, after)) =
-                        mutate_world_flag(
-                            &mut runtime.flags,
-                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &origin_layer,
-                            name,
-                            FlagMutation::Set,
-                        )
-                    {
+                    if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                        &mut runtime.flags,
+                        layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                        &origin_layer,
+                        name,
+                        FlagMutation::Set,
+                    ) {
                         emit_flag_transition(
                             &mut runtime.pending_world_events,
-                            &stripped, &target_layer, before, after,
+                            &stripped,
+                            &target_layer,
+                            before,
+                            after,
                         );
                     }
                 }
                 TriggerAction::ClearWorldFlag { name } => {
-                    if let Some((target_layer, stripped, before, after)) =
-                        mutate_world_flag(
-                            &mut runtime.flags,
-                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &origin_layer,
-                            name,
-                            FlagMutation::Clear,
-                        )
-                    {
+                    if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                        &mut runtime.flags,
+                        layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                        &origin_layer,
+                        name,
+                        FlagMutation::Clear,
+                    ) {
                         emit_flag_transition(
                             &mut runtime.pending_world_events,
-                            &stripped, &target_layer, before, after,
+                            &stripped,
+                            &target_layer,
+                            before,
+                            after,
                         );
                     }
                 }
                 TriggerAction::IncrementWorldFlag { name, by } => {
-                    if let Some((target_layer, stripped, before, after)) =
-                        mutate_world_flag(
-                            &mut runtime.flags,
-                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &origin_layer,
-                            name,
-                            FlagMutation::Increment(*by),
-                        )
-                    {
+                    if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                        &mut runtime.flags,
+                        layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                        &origin_layer,
+                        name,
+                        FlagMutation::Increment(*by),
+                    ) {
                         emit_flag_transition(
                             &mut runtime.pending_world_events,
-                            &stripped, &target_layer, before, after,
+                            &stripped,
+                            &target_layer,
+                            before,
+                            after,
                         );
                     }
                 }
                 TriggerAction::SetWorldFlagValue { name, value } => {
-                    if let Some((target_layer, stripped, before, after)) =
-                        mutate_world_flag(
-                            &mut runtime.flags,
-                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                            &origin_layer,
-                            name,
-                            FlagMutation::SetValue(*value),
-                        )
-                    {
+                    if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                        &mut runtime.flags,
+                        layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                        &origin_layer,
+                        name,
+                        FlagMutation::SetValue(*value),
+                    ) {
                         emit_flag_transition(
                             &mut runtime.pending_world_events,
-                            &stripped, &target_layer, before, after,
+                            &stripped,
+                            &target_layer,
+                            before,
+                            after,
                         );
                     }
                 }
                 TriggerAction::SpawnEntity {
-                    template_path, name, anchor, position, rotation, scale,
+                    template_path,
+                    name,
+                    anchor,
+                    position,
+                    rotation,
+                    scale,
                 } => {
                     let pos_arr: [f32; 3] = if let Some(pos) = position {
                         *pos
@@ -1210,7 +1269,8 @@ fn handle_respond_to_message(
                         ..Default::default()
                     };
                     let entity_config = match crate::entity_loader::resolve_entity(
-                        &template_inst, &config_cache,
+                        &template_inst,
+                        &config_cache,
                     ) {
                         Ok(c) => c,
                         Err(e) => {
@@ -1218,7 +1278,9 @@ fn handle_respond_to_message(
                             {
                                 match std::fs::read_to_string(template_path) {
                                     Ok(toml_str) => {
-                                        match crate::entity_config::EntityConfig::from_toml(&toml_str) {
+                                        match crate::entity_config::EntityConfig::from_toml(
+                                            &toml_str,
+                                        ) {
                                             Ok(c) => c,
                                             Err(err) => {
                                                 bevy::log::warn!(
@@ -1261,13 +1323,11 @@ fn handle_respond_to_message(
                         let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
                         let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
                         let scale_vec = Vec3::new(sx, sy, sz);
-                        commands.entity(spawned).insert(
-                            Transform {
-                                translation: pos_vec,
-                                rotation: quat,
-                                scale: scale_vec,
-                            },
-                        );
+                        commands.entity(spawned).insert(Transform {
+                            translation: pos_vec,
+                            rotation: quat,
+                            scale: scale_vec,
+                        });
                     }
 
                     runtime.name_to_uuid.insert(name.clone(), uuid);
@@ -1295,14 +1355,14 @@ fn handle_respond_to_message(
                     // Defer AiEntityDestroyed via Commands::queue so
                     // external consumers (and chained on_destroyed triggers
                     // in handle_ai_events later this tick) observe the event.
-                    runtime.pending_world_events.push(
-                        WorldEvent::Destroyed { uuid: uuid.clone() }
-                    );
+                    runtime
+                        .pending_world_events
+                        .push(WorldEvent::Destroyed { uuid: uuid.clone() });
                     let msg_uuid = uuid.clone();
                     commands.queue(move |world: &mut World| {
-                        if let Some(mut msgs) = world.get_resource_mut::<
-                            Messages<crate::ai_plugin::AiEntityDestroyed>,
-                        >() {
+                        if let Some(mut msgs) = world
+                            .get_resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
+                        {
                             msgs.write(crate::ai_plugin::AiEntityDestroyed {
                                 entity_uuid: msg_uuid,
                             });
@@ -1321,10 +1381,7 @@ fn handle_respond_to_message(
         // Advance to follow-up node if present.
         if let Some(follow_up) = &response.follow_up {
             let thread_id = dialogue.thread_id.clone();
-            let sender_uuid = inbox
-                .0
-                .sender_uuid_for(message_id)
-                .unwrap_or_default();
+            let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
             // Use the follow-up's own speaker override if set, otherwise
             // inherit the sender name from the parent message.
             let sender_name = follow_up
@@ -1457,12 +1514,17 @@ fn auto_clear_on_screen_message(
     }
     // Check the live inbox record for the displayed message.
     let should_clear = if let Some(ref displayed) = on_screen.0 {
-        match inbox.0.messages().into_iter().find(|m| m.id == displayed.id) {
+        match inbox
+            .0
+            .messages()
+            .into_iter()
+            .find(|m| m.id == displayed.id)
+        {
             None => true, // message purged from inbox
             Some(live) => {
                 live.selected_response.is_some()   // responded to
                 || live.is_orphaned                // sender gone
-                || !live.sender_in_range           // out of range
+                || !live.sender_in_range // out of range
             }
         }
     } else {
@@ -1585,7 +1647,6 @@ fn broadcast_comms_state(
     objectives: Res<ObjectiveManagerRes>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-
     let dirty = inbox.0.is_dirty() || runtime.needs_broadcast || objectives.0.is_dirty();
     if !dirty {
         return;
@@ -1620,11 +1681,14 @@ fn broadcast_comms_state(
             .any(|m| m.sender_uuid == contact.uuid && m.is_urgent && !m.is_read);
     }
 
-    outbox.0.push((Target::Token(comms_token.to_string()), ServerMessage::CommsState {
-        messages,
-        objectives: objectives_snap,
-        contacts,
-    }));
+    outbox.0.push((
+        Target::Token(comms_token.to_string()),
+        ServerMessage::CommsState {
+            messages,
+            objectives: objectives_snap,
+            contacts,
+        },
+    ));
 
     inbox.0.mark_clean();
     runtime.needs_broadcast = false;
@@ -1636,7 +1700,6 @@ fn broadcast_objective_summary(
     mut objectives: ResMut<ObjectiveManagerRes>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-
     if !objectives.0.is_dirty() {
         return;
     }
@@ -1648,9 +1711,12 @@ fn broadcast_objective_summary(
 
     let objectives_snap = objectives.0.sorted_snapshots();
 
-    outbox.0.push((Target::Token(captain_token.to_string()), ServerMessage::ObjectiveSummary {
-        objectives: objectives_snap,
-    }));
+    outbox.0.push((
+        Target::Token(captain_token.to_string()),
+        ServerMessage::ObjectiveSummary {
+            objectives: objectives_snap,
+        },
+    ));
 
     objectives.0.mark_clean();
 }
@@ -1678,7 +1744,6 @@ fn handle_ai_events(
     base_world_config: Option<Res<crate::world::config::WorldConfig>>,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
 ) {
-
     let mut world_events: Vec<WorldEvent> = Vec::new();
     for ev in attacked_reader.read() {
         world_events.push(WorldEvent::Attacked {
@@ -1687,7 +1752,9 @@ fn handle_ai_events(
         });
     }
     for ev in destroyed_reader.read() {
-        world_events.push(WorldEvent::Destroyed { uuid: ev.entity_uuid.clone() });
+        world_events.push(WorldEvent::Destroyed {
+            uuid: ev.entity_uuid.clone(),
+        });
     }
     // Drain any externally-queued world events (e.g. WorldLoaded pushed by
     // init_world_runtime or apply_world_layer_changes). This lets those
@@ -1711,7 +1778,10 @@ fn handle_ai_events(
         &name_to_uuid,
     );
     for fc in fired_comms {
-        let thread_id = fc.thread_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let thread_id = fc
+            .thread_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         // `_self` is the reserved synthetic internal-sender name; render it as
         // "Internal Report" in the comms UI so the crew sees a ship-generated
         // intelligence summary rather than a literal "_self" sender label.
@@ -1859,7 +1929,12 @@ fn handle_ai_events(
         for ft in fired {
             for action in &ft.actions {
                 match action {
-                    TriggerAction::AddObjective { id, text, mandatory, targets } => {
+                    TriggerAction::AddObjective {
+                        id,
+                        text,
+                        mandatory,
+                        targets,
+                    } => {
                         // Explicit targets win; otherwise fall back to the
                         // trigger condition's entity (legacy behaviour).
                         let resolved = if targets.is_empty() {
@@ -1867,12 +1942,9 @@ fn handle_ai_events(
                         } else {
                             targets.clone()
                         };
-                        objectives.0.add(
-                            id.clone(),
-                            text.clone(),
-                            *mandatory,
-                            resolved,
-                        );
+                        objectives
+                            .0
+                            .add(id.clone(), text.clone(), *mandatory, resolved);
                     }
                     TriggerAction::CompleteObjective { id } => {
                         objectives.0.complete(id);
@@ -1880,7 +1952,11 @@ fn handle_ai_events(
                     TriggerAction::FailObjective { id } => {
                         objectives.0.fail(id);
                     }
-                    TriggerAction::SetAiState { entity, state, target } => {
+                    TriggerAction::SetAiState {
+                        entity,
+                        state,
+                        target,
+                    } => {
                         // Resolve spawn name ? UUID
                         let target_uuid = match name_to_uuid.get(entity) {
                             Some(u) => u.clone(),
@@ -1915,7 +1991,12 @@ fn handle_ai_events(
                             break;
                         }
                     }
-                    TriggerAction::ApplyModifier { entity, tag, slot, bonus } => {
+                    TriggerAction::ApplyModifier {
+                        entity,
+                        tag,
+                        slot,
+                        bonus,
+                    } => {
                         if !name_to_uuid.contains_key(entity) {
                             bevy::log::warn!(
                                 "handle_ai_events: ApplyModifier: unknown entity name '{entity}'"
@@ -1984,7 +2065,12 @@ fn handle_ai_events(
                             );
                         }
                     }
-                    TriggerAction::ApplyIntModifier { entity, tag, slot, bonus } => {
+                    TriggerAction::ApplyIntModifier {
+                        entity,
+                        tag,
+                        slot,
+                        bonus,
+                    } => {
                         if !name_to_uuid.contains_key(entity) {
                             bevy::log::warn!(
                                 "handle_ai_events: ApplyIntModifier: unknown entity name '{entity}'"
@@ -2045,67 +2131,80 @@ fn handle_ai_events(
                         }
                     }
                     TriggerAction::SetWorldFlag { name } => {
-                        if let Some((target_layer, stripped, before, after)) =
-                            mutate_world_flag(
-                                &mut runtime.flags,
-                                layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                                &ft.origin_layer,
-                                name,
-                                FlagMutation::Set,
-                            )
-                        {
+                        if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                            &mut runtime.flags,
+                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                            &ft.origin_layer,
+                            name,
+                            FlagMutation::Set,
+                        ) {
                             emit_flag_transition(
-                                &mut next_events, &stripped, &target_layer, before, after,
+                                &mut next_events,
+                                &stripped,
+                                &target_layer,
+                                before,
+                                after,
                             );
                         }
                     }
                     TriggerAction::ClearWorldFlag { name } => {
-                        if let Some((target_layer, stripped, before, after)) =
-                            mutate_world_flag(
-                                &mut runtime.flags,
-                                layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                                &ft.origin_layer,
-                                name,
-                                FlagMutation::Clear,
-                            )
-                        {
+                        if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                            &mut runtime.flags,
+                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                            &ft.origin_layer,
+                            name,
+                            FlagMutation::Clear,
+                        ) {
                             emit_flag_transition(
-                                &mut next_events, &stripped, &target_layer, before, after,
+                                &mut next_events,
+                                &stripped,
+                                &target_layer,
+                                before,
+                                after,
                             );
                         }
                     }
                     TriggerAction::IncrementWorldFlag { name, by } => {
-                        if let Some((target_layer, stripped, before, after)) =
-                            mutate_world_flag(
-                                &mut runtime.flags,
-                                layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                                &ft.origin_layer,
-                                name,
-                                FlagMutation::Increment(*by),
-                            )
-                        {
+                        if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                            &mut runtime.flags,
+                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                            &ft.origin_layer,
+                            name,
+                            FlagMutation::Increment(*by),
+                        ) {
                             emit_flag_transition(
-                                &mut next_events, &stripped, &target_layer, before, after,
+                                &mut next_events,
+                                &stripped,
+                                &target_layer,
+                                before,
+                                after,
                             );
                         }
                     }
                     TriggerAction::SetWorldFlagValue { name, value } => {
-                        if let Some((target_layer, stripped, before, after)) =
-                            mutate_world_flag(
-                                &mut runtime.flags,
-                                layer_map.as_deref_mut().map(|lm| &mut lm.0),
-                                &ft.origin_layer,
-                                name,
-                                FlagMutation::SetValue(*value),
-                            )
-                        {
+                        if let Some((target_layer, stripped, before, after)) = mutate_world_flag(
+                            &mut runtime.flags,
+                            layer_map.as_deref_mut().map(|lm| &mut lm.0),
+                            &ft.origin_layer,
+                            name,
+                            FlagMutation::SetValue(*value),
+                        ) {
                             emit_flag_transition(
-                                &mut next_events, &stripped, &target_layer, before, after,
+                                &mut next_events,
+                                &stripped,
+                                &target_layer,
+                                before,
+                                after,
                             );
                         }
                     }
                     TriggerAction::SpawnEntity {
-                        template_path, name, anchor, position, rotation, scale,
+                        template_path,
+                        name,
+                        anchor,
+                        position,
+                        rotation,
+                        scale,
                     } => {
                         // Resolve spawn position. `anchor` looks up in the
                         // origin layer's anchors (or the base world's anchors
@@ -2146,7 +2245,8 @@ fn handle_ai_events(
                             ..Default::default()
                         };
                         let entity_config = match crate::entity_loader::resolve_entity(
-                            &template_inst, &config_cache,
+                            &template_inst,
+                            &config_cache,
                         ) {
                             Ok(c) => c,
                             Err(e) => {
@@ -2155,7 +2255,9 @@ fn handle_ai_events(
                                 {
                                     match std::fs::read_to_string(template_path) {
                                         Ok(toml_str) => {
-                                            match crate::entity_config::EntityConfig::from_toml(&toml_str) {
+                                            match crate::entity_config::EntityConfig::from_toml(
+                                                &toml_str,
+                                            ) {
                                                 Ok(c) => c,
                                                 Err(err) => {
                                                     bevy::log::warn!(
@@ -2204,13 +2306,11 @@ fn handle_ai_events(
                             let quat = Quat::from_euler(EulerRot::XYZ, rx, ry, rz);
                             let [sx, sy, sz] = scale.unwrap_or([1.0, 1.0, 1.0]);
                             let scale_vec = Vec3::new(sx, sy, sz);
-                            commands.entity(spawned).insert(
-                                Transform {
-                                    translation: pos_vec,
-                                    rotation: quat,
-                                    scale: scale_vec,
-                                },
-                            );
+                            commands.entity(spawned).insert(Transform {
+                                translation: pos_vec,
+                                rotation: quat,
+                                scale: scale_vec,
+                            });
                         }
 
                         // Register name â†’ uuid for subsequent triggers.
@@ -2259,9 +2359,9 @@ fn handle_ai_events(
                         next_events.push(WorldEvent::Destroyed { uuid: uuid.clone() });
                         let msg_uuid = uuid.clone();
                         commands.queue(move |world: &mut World| {
-                            if let Some(mut msgs) = world.get_resource_mut::<
-                                Messages<crate::ai_plugin::AiEntityDestroyed>,
-                            >() {
+                            if let Some(mut msgs) = world
+                                .get_resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
+                            {
                                 msgs.write(crate::ai_plugin::AiEntityDestroyed {
                                     entity_uuid: msg_uuid,
                                 });
@@ -2437,7 +2537,11 @@ fn apply_pending_scenario_loads(
             Some(toml_str) => {
                 match crate::world::config::parse_world(&toml_str) {
                     Err(e) => {
-                        bevy::log::error!("apply_pending_scenario_loads: failed to parse {}: {}", path, e);
+                        bevy::log::error!(
+                            "apply_pending_scenario_loads: failed to parse {}: {}",
+                            path,
+                            e
+                        );
                         runtime.loaded_scenario_paths.insert(path);
                     }
                     Ok(scenario_config) => {
@@ -2455,7 +2559,11 @@ fn apply_pending_scenario_loads(
                                 Some(u) => u.clone(),
                                 None => continue,
                             };
-                            if !runtime.contacts.iter().any(|c: &crate::messages::CommsContact| c.uuid == uuid) {
+                            if !runtime
+                                .contacts
+                                .iter()
+                                .any(|c: &crate::messages::CommsContact| c.uuid == uuid)
+                            {
                                 runtime.contacts.push(crate::messages::CommsContact {
                                     uuid,
                                     name: tmpl.from.clone(),
@@ -2578,7 +2686,9 @@ fn apply_world_layer_changes(
 
                                 // Merge into live runtime.
                                 runtime.trigger_states.extend(trigger_states.clone());
-                                runtime.comms_template_states.extend(comms_template_states.clone());
+                                runtime
+                                    .comms_template_states
+                                    .extend(comms_template_states.clone());
 
                                 // Assign UUIDs to named entities in this layer's config
                                 // and register them in the live runtime's name_to_uuid map.
@@ -2587,7 +2697,9 @@ fn apply_world_layer_changes(
                                     crate::entity_loader::assign_uuid,
                                 );
                                 for (name, uuid) in &new_names {
-                                    scenario_config.name_to_uuid.insert(name.clone(), uuid.clone());
+                                    scenario_config
+                                        .name_to_uuid
+                                        .insert(name.clone(), uuid.clone());
                                     runtime.name_to_uuid.insert(name.clone(), uuid.clone());
                                 }
 
@@ -2664,9 +2776,10 @@ fn apply_world_layer_changes(
                     .trigger_states
                     .iter()
                     .filter_map(|ls| {
-                        runtime.trigger_states.iter().position(|rs| {
-                            rs.trigger == ls.trigger
-                        })
+                        runtime
+                            .trigger_states
+                            .iter()
+                            .position(|rs| rs.trigger == ls.trigger)
                     })
                     .collect();
                 let mut ti = 0usize;
@@ -2681,9 +2794,10 @@ fn apply_world_layer_changes(
                     .comms_template_states
                     .iter()
                     .filter_map(|ls| {
-                        runtime.comms_template_states.iter().position(|rs| {
-                            rs.template == ls.template
-                        })
+                        runtime
+                            .comms_template_states
+                            .iter()
+                            .position(|rs| rs.template == ls.template)
                     })
                     .collect();
                 let mut ci = 0usize;
@@ -2711,12 +2825,11 @@ fn load_scenario_toml(path: &str) -> Option<String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::config_cache::pop_pending_world_toml(path)
-            .or_else(|| {
-                // Fire a JS fetch request if we haven't already.
-                crate::config_cache::request_world_fetch(path.to_string());
-                None
-            })
+        crate::config_cache::pop_pending_world_toml(path).or_else(|| {
+            // Fire a JS fetch request if we haven't already.
+            crate::config_cache::request_world_fetch(path.to_string());
+            None
+        })
     }
 }
 
@@ -2726,7 +2839,9 @@ mod tests {
     use crate::ai_plugin::{AiEntityAttacked, AiEntityDestroyed};
     use crate::lobby::{LobbyPlugin, OutboundMessage, WorldResource};
     use crate::messages::*;
-    use crate::world::content::{CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition};
+    use crate::world::content::{
+        CommsDialogueNode, CommsResponse, CommsTemplateState, TriggerCondition,
+    };
 
     // -- setup_fallback_world run-condition tests (PRD #341) ------------------
     //
@@ -2804,7 +2919,8 @@ mod tests {
                     update_comms_range_flags,
                     broadcast_comms_state,
                     broadcast_objective_summary,
-                ).chain(),
+                )
+                    .chain(),
             )
             .add_systems(PostUpdate, collect);
         app
@@ -2813,7 +2929,10 @@ mod tests {
     fn push_msg(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -2872,7 +2991,9 @@ mod tests {
         // Manually install a comms template into the runtime so tests are
         // independent of TOML loading.
         let runtime = &mut app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.name_to_uuid.insert("starbase_alpha".into(), station_uuid.into());
+        runtime
+            .name_to_uuid
+            .insert("starbase_alpha".into(), station_uuid.into());
         runtime.contacts.push(CommsContact {
             uuid: station_uuid.into(),
             name: "Starbase Alpha".into(),
@@ -2892,7 +3013,8 @@ mod tests {
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-survey".into(),
                             text: "Complete the survey".into(),
-                            mandatory: true, targets: vec![],
+                            mandatory: true,
+                            targets: vec![],
                         }],
                         follow_up: None,
                     }],
@@ -2929,9 +3051,7 @@ mod tests {
 
         let comms_state = out.iter().find_map(|m| {
             if let ServerMessage::CommsState {
-                messages,
-                contacts,
-                ..
+                messages, contacts, ..
             } = &m.msg
             {
                 Some((messages.clone(), contacts.clone()))
@@ -2943,10 +3063,7 @@ mod tests {
         assert!(comms_state.is_some(), "CommsState must be sent after Hail");
         let (messages, _contacts) = comms_state.unwrap();
         assert_eq!(messages.len(), 1, "one message should arrive");
-        assert_eq!(
-            messages[0].body,
-            "USS Phoenix, please identify yourself."
-        );
+        assert_eq!(messages[0].body, "USS Phoenix, please identify yourself.");
         assert_eq!(messages[0].responses.len(), 1);
     }
 
@@ -3030,10 +3147,20 @@ mod tests {
                 None
             }
         });
-        assert!(comms_state.is_some(), "CommsState expected after RespondToMessage");
+        assert!(
+            comms_state.is_some(),
+            "CommsState expected after RespondToMessage"
+        );
         let messages = comms_state.unwrap();
-        let msg = messages.iter().find(|m| m.id == msg_id).expect("original message must still be in inbox");
-        assert_eq!(msg.selected_response, Some(0), "selected_response must be recorded");
+        let msg = messages
+            .iter()
+            .find(|m| m.id == msg_id)
+            .expect("original message must still be in inbox");
+        assert_eq!(
+            msg.selected_response,
+            Some(0),
+            "selected_response must be recorded"
+        );
 
         // Expect an ObjectiveSummary to be sent to the captain.
         let obj_summary = out.iter().find_map(|m| {
@@ -3043,7 +3170,10 @@ mod tests {
                 None
             }
         });
-        assert!(obj_summary.is_some(), "ObjectiveSummary expected after AddObjective action");
+        assert!(
+            obj_summary.is_some(),
+            "ObjectiveSummary expected after AddObjective action"
+        );
         let objectives = obj_summary.unwrap();
         assert_eq!(objectives.len(), 1);
         assert_eq!(objectives[0].text, "Complete the survey");
@@ -3059,7 +3189,7 @@ mod tests {
         let _ = tick(&mut app);
 
         // Inject an orphaned message directly.
-        let orphaned =         CommsMessage {
+        let orphaned = CommsMessage {
             id: "orphaned-001".into(),
             sender_uuid: station_uuid.into(),
             sender_name: "Starbase Alpha".into(),
@@ -3090,7 +3220,10 @@ mod tests {
                 None
             }
         });
-        assert!(comms_state.is_some(), "CommsState expected after ClearComms");
+        assert!(
+            comms_state.is_some(),
+            "CommsState expected after ClearComms"
+        );
         let messages = comms_state.unwrap();
         assert!(
             messages.iter().all(|m| !m.is_orphaned),
@@ -3115,7 +3248,10 @@ mod tests {
                 None
             }
         });
-        assert!(contacts.is_some(), "initial CommsState with contacts expected");
+        assert!(
+            contacts.is_some(),
+            "initial CommsState with contacts expected"
+        );
         let contacts = contacts.unwrap();
         assert!(
             contacts.iter().any(|c| c.uuid == station_uuid),
@@ -3164,7 +3300,13 @@ mod tests {
         setup_game_with_comms_and_followup(&mut app2, station_uuid);
         let _ = tick(&mut app2);
 
-        push_msg(&mut app2, "comms", ClientMessage::Hail { target_uuid: station_uuid.into() });
+        push_msg(
+            &mut app2,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
         let out = tick(&mut app2);
 
         let first_msg = out.iter().find_map(|m| {
@@ -3176,7 +3318,10 @@ mod tests {
         });
         let first_msg = first_msg.expect("CommsState expected after hail");
         let parent_thread_id = first_msg.thread_id.clone();
-        assert!(!parent_thread_id.is_empty(), "parent message must have a non-empty thread_id");
+        assert!(
+            !parent_thread_id.is_empty(),
+            "parent message must have a non-empty thread_id"
+        );
 
         push_msg(
             &mut app2,
@@ -3210,15 +3355,24 @@ mod tests {
         setup_game_with_comms_and_followup(&mut app, station_uuid);
         let _ = tick(&mut app);
 
-        push_msg(&mut app, "comms", ClientMessage::Hail { target_uuid: station_uuid.into() });
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
         let out = tick(&mut app);
-        let first_msg = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { messages, .. } = &m.msg {
-                messages.first().cloned()
-            } else {
-                None
-            }
-        }).expect("CommsState expected after hail");
+        let first_msg = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                    messages.first().cloned()
+                } else {
+                    None
+                }
+            })
+            .expect("CommsState expected after hail");
 
         assert_eq!(first_msg.sender_uuid, station_uuid);
         assert_eq!(first_msg.sender_name, "Starbase Alpha");
@@ -3233,13 +3387,16 @@ mod tests {
         );
         let out = tick(&mut app);
 
-        let messages = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { messages, .. } = &m.msg {
-                Some(messages.clone())
-            } else {
-                None
-            }
-        }).expect("CommsState expected after follow-up");
+        let messages = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                    Some(messages.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("CommsState expected after follow-up");
         let follow_up_msg = messages.get(1).expect("follow-up message expected");
 
         assert_eq!(follow_up_msg.sender_uuid, station_uuid);
@@ -3269,7 +3426,10 @@ mod tests {
             thread_id: "thread-delayed".into(),
             is_urgent: false,
         };
-        app.world_mut().resource_mut::<CommsInboxRes>().0.inject(placeholder);
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(placeholder);
         app.world_mut()
             .resource_mut::<WorldContentRuntime>()
             .pending_follow_ups
@@ -3359,32 +3519,34 @@ mod tests {
         // Replace the single template with one that has a follow-up node.
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.comms_template_states.clear();
-        runtime.comms_template_states.push(crate::world::content::CommsTemplateState {
-            template: crate::world::content::CommsTemplate {
-                from: "starbase_alpha".into(),
-                trigger: TriggerCondition::OnHailed {
-                    entity_name: "starbase_alpha".into(),
+        runtime
+            .comms_template_states
+            .push(crate::world::content::CommsTemplateState {
+                template: crate::world::content::CommsTemplate {
+                    from: "starbase_alpha".into(),
+                    trigger: TriggerCondition::OnHailed {
+                        entity_name: "starbase_alpha".into(),
+                    },
+                    node: CommsDialogueNode {
+                        body: "Identify yourself.".into(),
+                        responses: vec![CommsResponse {
+                            text: "We are the Phoenix.".into(),
+                            actions: vec![],
+                            follow_up: Some(CommsDialogueNode {
+                                body: "Welcome, Phoenix.".into(),
+                                responses: vec![],
+                                speaker: Some("Dockmaster Kade".into()),
+                                delay_secs: None,
+                            }),
+                        }],
+                        speaker: None,
+                        delay_secs: None,
+                    },
+                    thread_id: None,
+                    urgent: false,
                 },
-                node: CommsDialogueNode {
-                    body: "Identify yourself.".into(),
-                    responses: vec![CommsResponse {
-                        text: "We are the Phoenix.".into(),
-                        actions: vec![],
-                        follow_up: Some(CommsDialogueNode {
-                            body: "Welcome, Phoenix.".into(),
-                            responses: vec![],
-                            speaker: Some("Dockmaster Kade".into()),
-                            delay_secs: None,
-                        }),
-                    }],
-                    speaker: None,
-                    delay_secs: None,
-                },
-                thread_id: None,
-                urgent: false,
-            },
-            fired: false,
-        });
+                fired: false,
+            });
     }
 
     // -- AI-event trigger tests -----------------------------------------------
@@ -3395,14 +3557,17 @@ mod tests {
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::ai_plugin::AiPlugin)
-            .insert_resource(crate::config_cache::FactionRegistryResource(crate::config_cache::get_faction_registry()))
+            .insert_resource(crate::config_cache::FactionRegistryResource(
+                crate::config_cache::get_faction_registry(),
+            ))
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsInboxRes>()
             .init_resource::<ObjectiveManagerRes>()
             .init_resource::<SimOutbox>()
             .add_systems(Update, handle_ai_events);
         // Set phase to InProgress
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
         app
     }
 
@@ -3412,14 +3577,19 @@ mod tests {
 
         let npc_uuid = "dead-npc-uuid-001";
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        runtime.name_to_uuid.insert("station_alpha".to_string(), npc_uuid.to_string());
+        runtime
+            .name_to_uuid
+            .insert("station_alpha".to_string(), npc_uuid.to_string());
         runtime.trigger_states = vec![TriggerState {
             trigger: crate::world::content::Trigger {
-                condition: TriggerCondition::OnDestroyed { entity_name: "station_alpha".to_string() },
+                condition: TriggerCondition::OnDestroyed {
+                    entity_name: "station_alpha".to_string(),
+                },
                 actions: vec![TriggerAction::AddObjective {
                     id: "obj-001".to_string(),
                     text: "Station destroyed".to_string(),
-                    mandatory: false, targets: vec![],
+                    mandatory: false,
+                    targets: vec![],
                 }],
                 when: None,
             },
@@ -3430,13 +3600,18 @@ mod tests {
         // Emit the AiEntityDestroyed message.
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.to_string() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.to_string(),
+            });
 
         app.update();
 
         let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives.sorted_snapshots().iter().any(|o| o.id == "obj-001"),
+            objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-001"),
             "AddObjective action must have fired"
         );
     }
@@ -3452,7 +3627,9 @@ mod tests {
         let npc_uuid = "uuid-destroyed-target";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("target".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("target".into(), npc_uuid.into());
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnDestroyed {
@@ -3461,7 +3638,8 @@ mod tests {
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-gated".into(),
                         text: "Should only fire after flag is set".into(),
-                        mandatory: false, targets: vec![],
+                        mandatory: false,
+                        targets: vec![],
                     }],
                     when: Some(crate::world::flags::parse_predicate("flag(green_light)").unwrap()),
                 },
@@ -3472,7 +3650,9 @@ mod tests {
         // First firing: flag unset â†’ no objective.
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
         app.update();
         {
             let runtime = app.world().resource::<WorldContentRuntime>();
@@ -3490,7 +3670,9 @@ mod tests {
         }
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
         app.update();
         let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
@@ -3508,7 +3690,9 @@ mod tests {
         let npc_uuid = "uuid-chain-source";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("source".into(), npc_uuid.into());
             runtime.trigger_states = vec![
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3527,7 +3711,8 @@ mod tests {
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-chain".into(),
                             text: "Reacted to flag set".into(),
-                            mandatory: false, targets: vec![],
+                            mandatory: false,
+                            targets: vec![],
                         }],
                         when: None,
                     },
@@ -3538,12 +3723,20 @@ mod tests {
         }
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
         app.update();
 
         let runtime = app.world().resource::<WorldContentRuntime>();
-        assert!(runtime.flags.flag("a"), "set_flag action must have mutated the store");
-        assert!(runtime.trigger_states[1].fired, "on_flag_set trigger must have fired");
+        assert!(
+            runtime.flags.flag("a"),
+            "set_flag action must have mutated the store"
+        );
+        assert!(
+            runtime.trigger_states[1].fired,
+            "on_flag_set trigger must have fired"
+        );
         let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
             objs.sorted_snapshots().iter().any(|o| o.id == "obj-chain"),
@@ -3560,7 +3753,9 @@ mod tests {
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime.flags.set_flag("a"); // pre-set
-            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("source".into(), npc_uuid.into());
             runtime.trigger_states = vec![
                 TriggerState {
                     trigger: crate::world::content::Trigger {
@@ -3579,7 +3774,8 @@ mod tests {
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-no-op".into(),
                             text: "Should not fire on no-op re-set".into(),
-                            mandatory: false, targets: vec![],
+                            mandatory: false,
+                            targets: vec![],
                         }],
                         when: None,
                     },
@@ -3590,7 +3786,9 @@ mod tests {
         }
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
         app.update();
 
         let runtime = app.world().resource::<WorldContentRuntime>();
@@ -3612,14 +3810,18 @@ mod tests {
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             runtime.flags.set_flag("shields_up"); // pre-set so we transition trueâ†’false
-            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("source".into(), npc_uuid.into());
             runtime.trigger_states = vec![
                 TriggerState {
                     trigger: crate::world::content::Trigger {
                         condition: TriggerCondition::OnDestroyed {
                             entity_name: "source".into(),
                         },
-                        actions: vec![TriggerAction::ClearWorldFlag { name: "shields_up".into() }],
+                        actions: vec![TriggerAction::ClearWorldFlag {
+                            name: "shields_up".into(),
+                        }],
                         when: None,
                     },
                     fired: false,
@@ -3627,11 +3829,14 @@ mod tests {
                 },
                 TriggerState {
                     trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnFlagCleared { name: "shields_up".into() },
+                        condition: TriggerCondition::OnFlagCleared {
+                            name: "shields_up".into(),
+                        },
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-shields-down".into(),
                             text: "Shields are down".into(),
-                            mandatory: true, targets: vec![],
+                            mandatory: true,
+                            targets: vec![],
                         }],
                         when: None,
                     },
@@ -3642,14 +3847,18 @@ mod tests {
         }
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
         app.update();
 
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(!runtime.flags.flag("shields_up"));
         let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objs.sorted_snapshots().iter().any(|o| o.id == "obj-shields-down"),
+            objs.sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-shields-down"),
             "on_flag_cleared trigger must fire on trueâ†’false transition"
         );
     }
@@ -3681,7 +3890,9 @@ mod tests {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
             // Base layer: flag `armed` is set.
             runtime.flags.set_flag("armed");
-            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("source".into(), npc_uuid.into());
             // Sub-world trigger: on_destroyed with when=flag(parent:armed).
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
@@ -3691,11 +3902,10 @@ mod tests {
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-parent-when".into(),
                         text: "parent flag was set".into(),
-                        mandatory: false, targets: vec![],
+                        mandatory: false,
+                        targets: vec![],
                     }],
-                    when: Some(
-                        crate::world::flags::parse_predicate("flag(parent:armed)").unwrap(),
-                    ),
+                    when: Some(crate::world::flags::parse_predicate("flag(parent:armed)").unwrap()),
                 },
                 fired: false,
                 origin_layer: Some(layer_path.clone()),
@@ -3703,12 +3913,16 @@ mod tests {
         }
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
         app.update();
 
         let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objs.sorted_snapshots().iter().any(|o| o.id == "obj-parent-when"),
+            objs.sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-parent-when"),
             "sub-world trigger gated on parent:armed must fire when base flag is set"
         );
     }
@@ -3735,7 +3949,9 @@ mod tests {
         let npc_uuid = "uuid-scoped-source";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("source".into(), npc_uuid.into());
             runtime.trigger_states = vec![
                 // Sub-world trigger: setting `armed` in the sub-world layer.
                 TriggerState {
@@ -3743,7 +3959,9 @@ mod tests {
                         condition: TriggerCondition::OnDestroyed {
                             entity_name: "source".into(),
                         },
-                        actions: vec![TriggerAction::SetWorldFlag { name: "armed".into() }],
+                        actions: vec![TriggerAction::SetWorldFlag {
+                            name: "armed".into(),
+                        }],
                         when: None,
                     },
                     fired: false,
@@ -3752,11 +3970,14 @@ mod tests {
                 // Base-world watcher: on_flag_set armed.
                 TriggerState {
                     trigger: crate::world::content::Trigger {
-                        condition: TriggerCondition::OnFlagSet { name: "armed".into() },
+                        condition: TriggerCondition::OnFlagSet {
+                            name: "armed".into(),
+                        },
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-base-armed".into(),
                             text: "should NOT fire — different layer".into(),
-                            mandatory: false, targets: vec![],
+                            mandatory: false,
+                            targets: vec![],
                         }],
                         when: None,
                     },
@@ -3767,18 +3988,26 @@ mod tests {
         }
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
         app.update();
 
         // Sub-world layer's flag store got the mutation; base store did not.
         let lm = app.world().resource::<WorldLayerMap>();
         let layer_flags = &lm.0.get(&layer_path).expect("layer present").flags;
-        assert!(layer_flags.flag("armed"), "mutation lands in sub-world layer");
+        assert!(
+            layer_flags.flag("armed"),
+            "mutation lands in sub-world layer"
+        );
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(!runtime.flags.flag("armed"), "base store must remain empty");
         let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            !objs.sorted_snapshots().iter().any(|o| o.id == "obj-base-armed"),
+            !objs
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-base-armed"),
             "base trigger must not cross-fire on sub-world flag"
         );
     }
@@ -3793,7 +4022,9 @@ mod tests {
         let npc_uuid = "uuid-past-root";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("source".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("source".into(), npc_uuid.into());
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
                     condition: TriggerCondition::OnDestroyed {
@@ -3812,7 +4043,9 @@ mod tests {
         }
         app.world_mut()
             .resource_mut::<Messages<AiEntityDestroyed>>()
-            .write(AiEntityDestroyed { entity_uuid: npc_uuid.into() });
+            .write(AiEntityDestroyed {
+                entity_uuid: npc_uuid.into(),
+            });
         app.update();
 
         // Neither the base `armed` nor `parent:armed` should be set.
@@ -3835,14 +4068,19 @@ mod tests {
         let attacker_uuid = uuid::Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("enemy_ship".to_string(), npc_uuid.to_string());
+            runtime
+                .name_to_uuid
+                .insert("enemy_ship".to_string(), npc_uuid.to_string());
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked { entity_name: "enemy_ship".to_string() },
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "enemy_ship".to_string(),
+                    },
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-002".to_string(),
                         text: "Enemy attacked".to_string(),
-                        mandatory: false, targets: vec![],
+                        mandatory: false,
+                        targets: vec![],
                     }],
                     when: None,
                 },
@@ -3862,7 +4100,10 @@ mod tests {
 
         let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives.sorted_snapshots().iter().any(|o| o.id == "obj-002"),
+            objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-002"),
             "AddObjective action from on_entity_attacked must have fired"
         );
     }
@@ -3881,33 +4122,60 @@ mod tests {
         let behaviour = BehaviourConfig {
             initial_state: "idle".to_string(),
             state: vec![
-                StateConfig { name: "idle".to_string(), kind: "idle".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.0, maintain_range: 0.0, duration_secs: 0.0 },
-                StateConfig { name: "chase".to_string(), kind: "pursuing".to_string(), waypoints: vec![], loop_path: false, target_speed: 0.8, maintain_range: 0.0, duration_secs: 0.0 },
+                StateConfig {
+                    name: "idle".to_string(),
+                    kind: "idle".to_string(),
+                    waypoints: vec![],
+                    loop_path: false,
+                    target_speed: 0.0,
+                    maintain_range: 0.0,
+                    duration_secs: 0.0,
+                },
+                StateConfig {
+                    name: "chase".to_string(),
+                    kind: "pursuing".to_string(),
+                    waypoints: vec![],
+                    loop_path: false,
+                    target_speed: 0.8,
+                    maintain_range: 0.0,
+                    duration_secs: 0.0,
+                },
             ],
             transition: vec![],
         };
 
-        let entity = app.world_mut().spawn((
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            EntityUuid(npc_uuid.to_string()),
-            BehaviourSection(behaviour),
-        )).id();
+        let entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                EntityUuid(npc_uuid.to_string()),
+                BehaviourSection(behaviour),
+            ))
+            .id();
         // First update: attach controller
         app.update();
 
         // Verify controller starts in Idle
-        let ctrl_state_name = app.world().get::<AiControllerComponent>(entity)
+        let ctrl_state_name = app
+            .world()
+            .get::<AiControllerComponent>(entity)
             .expect("controller must be attached")
-            .controller.current_state_name.clone();
+            .controller
+            .current_state_name
+            .clone();
         assert_eq!(ctrl_state_name, "idle");
 
         // Set up trigger: on attacked ? SetAiState to "chase"
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("npc_alpha".to_string(), npc_uuid.to_string());
+            runtime
+                .name_to_uuid
+                .insert("npc_alpha".to_string(), npc_uuid.to_string());
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked { entity_name: "npc_alpha".to_string() },
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "npc_alpha".to_string(),
+                    },
                     actions: vec![TriggerAction::SetAiState {
                         entity: "npc_alpha".to_string(),
                         state: "chase".to_string(),
@@ -3931,8 +4199,10 @@ mod tests {
         app.update();
 
         let ctrl = app.world().get::<AiControllerComponent>(entity).unwrap();
-        assert_eq!(ctrl.controller.current_state_name, "chase",
-            "SetAiState must update current_state_name to 'chase'");
+        assert_eq!(
+            ctrl.controller.current_state_name, "chase",
+            "SetAiState must update current_state_name to 'chase'"
+        );
         assert!(
             matches!(ctrl.controller.current_state, AiState::Pursuing { .. }),
             "current_state must be Pursuing after SetAiState to 'chase'"
@@ -3946,7 +4216,9 @@ mod tests {
     /// into the CommsInbox.
     #[test]
     fn on_attacked_comms_template_auto_injects_into_inbox() {
-        use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerCondition};
+        use crate::world::content::{
+            CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerCondition,
+        };
 
         let mut app = ai_trigger_test_app();
 
@@ -3954,7 +4226,9 @@ mod tests {
         let attacker_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000001").unwrap();
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("raider".to_string(), raider_uuid.to_string());
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
             runtime.comms_template_states = vec![CommsTemplateState {
                 template: CommsTemplate {
                     from: "raider".to_string(),
@@ -3985,15 +4259,25 @@ mod tests {
 
         let inbox = &app.world().resource::<CommsInboxRes>().0;
         let messages = inbox.messages();
-        assert_eq!(messages.len(), 1, "on_attacked comms template must auto-inject one message");
+        assert_eq!(
+            messages.len(),
+            1,
+            "on_attacked comms template must auto-inject one message"
+        );
         assert_eq!(messages[0].body, "Mayday! We are under attack!");
-        assert_eq!(messages[0].responses.len(), 0, "broadcast message should have no responses");
+        assert_eq!(
+            messages[0].responses.len(),
+            0,
+            "broadcast message should have no responses"
+        );
     }
 
     /// A comms template with `on_attacked` must fire only once (single-shot).
     #[test]
     fn on_attacked_comms_template_fires_only_once() {
-        use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerCondition};
+        use crate::world::content::{
+            CommsDialogueNode, CommsTemplate, CommsTemplateState, TriggerCondition,
+        };
 
         let mut app = ai_trigger_test_app();
 
@@ -4001,7 +4285,9 @@ mod tests {
         let attacker_uuid = uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000002").unwrap();
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("raider".to_string(), raider_uuid.to_string());
+            runtime
+                .name_to_uuid
+                .insert("raider".to_string(), raider_uuid.to_string());
             runtime.comms_template_states = vec![CommsTemplateState {
                 template: CommsTemplate {
                     from: "raider".to_string(),
@@ -4040,15 +4326,19 @@ mod tests {
         app.update();
 
         let inbox = &app.world().resource::<CommsInboxRes>().0;
-        assert_eq!(inbox.messages().len(), 1, "on_attacked comms template must fire only once");
+        assert_eq!(
+            inbox.messages().len(),
+            1,
+            "on_attacked comms template must fire only once"
+        );
     }
 
     // -- Unified [[entity]] name ? uuid pipeline (PRD #337/#339 slice 2) -------
 
     #[test]
     fn spawn_world_entities_populates_name_to_uuid_for_named_entity() {
-        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
 
         // Build a unified WorldConfig with one named entry (no template
         // resolution needed â€” the helper that mutates `name_to_uuid` runs
@@ -4084,7 +4374,10 @@ mod tests {
             1,
             "only named [[entity]] entries get a uuid"
         );
-        let uuid = cfg.name_to_uuid.get("starbase_alpha").expect("named entity must register");
+        let uuid = cfg
+            .name_to_uuid
+            .get("starbase_alpha")
+            .expect("named entity must register");
         assert!(!uuid.is_empty(), "registered uuid must be non-empty");
     }
 
@@ -4094,8 +4387,8 @@ mod tests {
         // `WorldContentRuntime.name_to_uuid`. The unified pipeline must
         // mirror its registrations into that map so the lookup path stays
         // a single source of truth during the transitional slices.
-        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
 
         let mut world_cfg = UnifiedWorldConfig::default();
         world_cfg.entities.push(WorldEntity {
@@ -4162,12 +4455,18 @@ mod tests {
 
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert_eq!(
-            runtime.name_to_uuid.get("starbase_alpha").map(String::as_str),
+            runtime
+                .name_to_uuid
+                .get("starbase_alpha")
+                .map(String::as_str),
             Some("unified-pipeline-uuid"),
             "init_world_runtime must preserve unified-pipeline registrations"
         );
         assert_eq!(
-            runtime.name_to_uuid.get("only_in_world").map(String::as_str),
+            runtime
+                .name_to_uuid
+                .get("only_in_world")
+                .map(String::as_str),
             Some("world-only-uuid"),
             "names that exist only in WorldConfig.name_to_uuid still flow through"
         );
@@ -4183,8 +4482,8 @@ mod tests {
         // no fresh UUID allocation inside the spawn loop).
         use crate::entity_config::EntityConfig;
         use crate::entity_spawner::EntityUuid;
-        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
         use std::collections::HashMap;
 
         let mut world_cfg = UnifiedWorldConfig::default();
@@ -4218,8 +4517,14 @@ mod tests {
         // Empty EntityConfig is sufficient â€” no asteroid_field section, so
         // `is_owned_by_unified_pipeline` routes by `name.is_some()`.
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
-        m.insert("fixture/station.toml".into(), EntityConfig::from_toml("").unwrap());
-        m.insert("fixture/star.toml".into(), EntityConfig::from_toml("").unwrap());
+        m.insert(
+            "fixture/station.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
+        m.insert(
+            "fixture/star.toml".into(),
+            EntityConfig::from_toml("").unwrap(),
+        );
         let cache = crate::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
@@ -4264,8 +4569,8 @@ mod tests {
         // anchor's coordinates. This is the migration path for the patrol
         // raider NPC moving off `[[spawn]]`.
         use crate::entity_config::EntityConfig;
-        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
         use std::collections::HashMap;
 
         let mut world_cfg = UnifiedWorldConfig::default();
@@ -4324,8 +4629,8 @@ mod tests {
         // [[spawn]] to [[entity]] still get AI on spawn.
         use crate::entity_config::EntityConfig;
         use crate::entity_spawner::BehaviourSection;
-        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
         use std::collections::HashMap;
 
         let raider_toml = r#"
@@ -4388,8 +4693,8 @@ transition = []
             AsteroidFieldConfig, AsteroidFieldShape, EntityConfig, GridConfig,
         };
         use crate::entity_spawner::AsteroidFieldSection;
-        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
         use std::collections::HashMap;
 
         let mut world_cfg = UnifiedWorldConfig::default();
@@ -4448,7 +4753,11 @@ transition = []
         };
         app.update();
 
-        assert_eq!(spawned.len(), 1, "exactly one asteroid_field entry must spawn");
+        assert_eq!(
+            spawned.len(),
+            1,
+            "exactly one asteroid_field entry must spawn"
+        );
         let section = app
             .world()
             .get::<AsteroidFieldSection>(spawned[0])
@@ -4476,8 +4785,8 @@ transition = []
             AsteroidFieldConfig, AsteroidFieldShape, EntityConfig, GridConfig,
         };
         use crate::entity_spawner::AsteroidFieldSection;
-        use crate::world::config::WorldEntity;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
+        use crate::world::config::WorldEntity;
         use std::collections::HashMap;
 
         let mut world_cfg = UnifiedWorldConfig::default();
@@ -4535,7 +4844,8 @@ transition = []
         app.update();
 
         assert_eq!(
-            spawned.len(), 1,
+            spawned.len(),
+            1,
             "unknown anchor must NOT block spawn â€” fallback to origin keeps the field alive"
         );
         let section = app
@@ -4578,8 +4888,12 @@ transition = []
             .init_resource::<PendingWorldLayerChanges>();
 
         let mut world_cfg = crate::world::config::WorldConfig::default();
-        world_cfg.extra_worlds.push("assets/worlds/patrol.toml".into());
-        world_cfg.extra_worlds.push("assets/worlds/side.toml".into());
+        world_cfg
+            .extra_worlds
+            .push("assets/worlds/patrol.toml".into());
+        world_cfg
+            .extra_worlds
+            .push("assets/worlds/side.toml".into());
         app.insert_resource(world_cfg);
 
         app.add_systems(Startup, load_extra_worlds);
@@ -4604,16 +4918,20 @@ transition = []
     fn load_world_trigger_action_queues_pending_layer_change() {
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>()
-           .init_resource::<PendingWorldLayerChanges>();
+            .init_resource::<PendingWorldLayerChanges>();
 
         let npc_uuid = "trigger-load-world-npc-001";
         let attacker_uuid = uuid::Uuid::parse_str("dddddddd-0000-0000-0000-000000000001").unwrap();
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("raider".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("raider".into(), npc_uuid.into());
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked { entity_name: "raider".into() },
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "raider".into(),
+                    },
                     actions: vec![TriggerAction::LoadWorld {
                         path: "assets/worlds/patrol.toml".into(),
                     }],
@@ -4644,16 +4962,20 @@ transition = []
     fn unload_world_trigger_action_queues_pending_layer_change() {
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>()
-           .init_resource::<PendingWorldLayerChanges>();
+            .init_resource::<PendingWorldLayerChanges>();
 
         let npc_uuid = "trigger-unload-world-npc-002";
         let attacker_uuid = uuid::Uuid::parse_str("dddddddd-0000-0000-0000-000000000002").unwrap();
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("raider".into(), npc_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("raider".into(), npc_uuid.into());
             runtime.trigger_states = vec![TriggerState {
                 trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnAttacked { entity_name: "raider".into() },
+                    condition: TriggerCondition::OnAttacked {
+                        entity_name: "raider".into(),
+                    },
                     actions: vec![TriggerAction::UnloadWorld {
                         path: "assets/worlds/patrol.toml".into(),
                     }],
@@ -4689,7 +5011,10 @@ transition = []
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: "assets/worlds/patrol.toml".into(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: "assets/worlds/patrol.toml".into(),
+                loader_path: None,
+            });
 
         app.update();
 
@@ -4715,7 +5040,10 @@ transition = []
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: "assets/worlds/patrol.toml".into(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: "assets/worlds/patrol.toml".into(),
+                loader_path: None,
+            });
         app.update();
 
         let trigger_count_after_first = app
@@ -4728,7 +5056,10 @@ transition = []
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: "assets/worlds/patrol.toml".into(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: "assets/worlds/patrol.toml".into(),
+                loader_path: None,
+            });
         app.update();
 
         let trigger_count_after_second = app
@@ -4752,7 +5083,10 @@ transition = []
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: "assets/worlds/patrol.toml".into(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: "assets/worlds/patrol.toml".into(),
+                loader_path: None,
+            });
         app.update();
 
         let trigger_count_loaded = app
@@ -4760,7 +5094,10 @@ transition = []
             .resource::<WorldContentRuntime>()
             .trigger_states
             .len();
-        assert!(trigger_count_loaded > 0, "patrol.toml must add at least one trigger");
+        assert!(
+            trigger_count_loaded > 0,
+            "patrol.toml must add at least one trigger"
+        );
 
         // Unload it.
         app.world_mut()
@@ -4803,11 +5140,15 @@ transition = []
 
         // Two triggers in the same world both request the same load in one tick.
         {
-            let mut pending = app
-                .world_mut()
-                .resource_mut::<PendingWorldLayerChanges>();
-            pending.0.push(WorldLayerChange::Load { path: world_path.clone(), loader_path: None });
-            pending.0.push(WorldLayerChange::Load { path: world_path.clone(), loader_path: None });
+            let mut pending = app.world_mut().resource_mut::<PendingWorldLayerChanges>();
+            pending.0.push(WorldLayerChange::Load {
+                path: world_path.clone(),
+                loader_path: None,
+            });
+            pending.0.push(WorldLayerChange::Load {
+                path: world_path.clone(),
+                loader_path: None,
+            });
         }
         // First update: apply_world_layer_changes drains both commands; the
         // second must be a no-op because the first already inserted into
@@ -4845,7 +5186,10 @@ transition = []
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: world_path.clone(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: world_path.clone(),
+                loader_path: None,
+            });
         app.update();
         app.update();
 
@@ -4886,7 +5230,9 @@ transition = []
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Unload("assets/worlds/nonexistent.toml".into()));
+            .push(WorldLayerChange::Unload(
+                "assets/worlds/nonexistent.toml".into(),
+            ));
         app.update(); // must not panic
 
         let runtime = app.world().resource::<WorldContentRuntime>();
@@ -4945,7 +5291,10 @@ entity = "layer_npc"
 
         std::fs::write(&world_path, &world_toml).expect("failed to write layer world TOML");
 
-        (world_path.to_string_lossy().into_owned(), template_path.to_string_lossy().into_owned())
+        (
+            world_path.to_string_lossy().into_owned(),
+            template_path.to_string_lossy().into_owned(),
+        )
     }
 
     /// `LoadWorld` spawns the world's `[[entity]]` blocks into the ECS and
@@ -4964,7 +5313,10 @@ entity = "layer_npc"
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: world_path.clone(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: world_path.clone(),
+                loader_path: None,
+            });
 
         // First update: commands are queued by apply_world_layer_changes.
         app.update();
@@ -5008,7 +5360,10 @@ entity = "layer_npc"
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: world_path.clone(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: world_path.clone(),
+                loader_path: None,
+            });
         app.update();
         app.update();
 
@@ -5045,7 +5400,10 @@ entity = "layer_npc"
 
         // WorldLayerMap entry must be removed.
         assert!(
-            !app.world().resource::<WorldLayerMap>().0.contains_key(&world_path),
+            !app.world()
+                .resource::<WorldLayerMap>()
+                .0
+                .contains_key(&world_path),
             "WorldLayerMap must not contain the path after UnloadWorld"
         );
     }
@@ -5068,11 +5426,14 @@ entity = "layer_npc"
             .world_mut()
             .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)))
             .id();
-        let station_entity = app.world_mut().spawn((
-            EntityUuid(station_uuid.into()),
-            Transform::from_xyz(50.0, 0.0, 0.0),
-            CommsRange(100.0),
-        )).id();
+        let station_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(station_uuid.into()),
+                Transform::from_xyz(50.0, 0.0, 0.0),
+                CommsRange(100.0),
+            ))
+            .id();
 
         // Flush initial broadcast.
         let _ = tick(&mut app);
@@ -5081,7 +5442,9 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail { target_uuid: station_uuid.into() },
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
         );
         let _ = tick(&mut app);
 
@@ -5092,16 +5455,30 @@ entity = "layer_npc"
         }
         let out = tick(&mut app);
 
-        let (messages, contacts) = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { messages, contacts, .. } = &m.msg {
-                Some((messages.clone(), contacts.clone()))
-            } else { None }
-        }).expect("CommsState must be broadcast after range flip");
+        let (messages, contacts) = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState {
+                    messages, contacts, ..
+                } = &m.msg
+                {
+                    Some((messages.clone(), contacts.clone()))
+                } else {
+                    None
+                }
+            })
+            .expect("CommsState must be broadcast after range flip");
 
-        let contact = contacts.iter().find(|c| c.uuid == station_uuid).expect("contact present");
+        let contact = contacts
+            .iter()
+            .find(|c| c.uuid == station_uuid)
+            .expect("contact present");
         assert!(!contact.in_range, "contact should be out of range");
         assert_eq!(messages.len(), 1, "one hail message expected");
-        assert!(!messages[0].sender_in_range, "sender_in_range must be false when station is far");
+        assert!(
+            !messages[0].sender_in_range,
+            "sender_in_range must be false when station is far"
+        );
     }
 
     #[test]
@@ -5114,7 +5491,8 @@ entity = "layer_npc"
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 
-        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
@@ -5125,19 +5503,35 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail { target_uuid: station_uuid.into() },
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
         );
         let out = tick(&mut app);
 
-        let (messages, contacts) = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { messages, contacts, .. } = &m.msg {
-                Some((messages.clone(), contacts.clone()))
-            } else { None }
-        }).expect("CommsState must be broadcast");
+        let (messages, contacts) = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState {
+                    messages, contacts, ..
+                } = &m.msg
+                {
+                    Some((messages.clone(), contacts.clone()))
+                } else {
+                    None
+                }
+            })
+            .expect("CommsState must be broadcast");
 
-        let contact = contacts.iter().find(|c| c.uuid == station_uuid).expect("contact present");
+        let contact = contacts
+            .iter()
+            .find(|c| c.uuid == station_uuid)
+            .expect("contact present");
         assert!(contact.in_range, "contact should be in range");
-        assert!(messages[0].sender_in_range, "sender_in_range true when station within range");
+        assert!(
+            messages[0].sender_in_range,
+            "sender_in_range true when station within range"
+        );
     }
 
     // -- Review fixes: pruning, server enforcement, despawn handling ---------
@@ -5157,14 +5551,20 @@ entity = "layer_npc"
 
         // Spawn the ship so range tracking activates, but DO NOT spawn an
         // entity with `bogus_uuid` + CommsRange.
-        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
 
         let out = tick(&mut app);
-        let contacts = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { contacts, .. } = &m.msg {
-                Some(contacts.clone())
-            } else { None }
-        }).expect("CommsState must be broadcast");
+        let contacts = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { contacts, .. } = &m.msg {
+                    Some(contacts.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("CommsState must be broadcast");
 
         assert!(
             !contacts.iter().any(|c| c.uuid == bogus_uuid),
@@ -5185,7 +5585,8 @@ entity = "layer_npc"
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 
-        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)));
+        app.world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(100.0)));
         app.world_mut().spawn((
             EntityUuid(station_uuid.into()),
             Transform::from_xyz(5000.0, 0.0, 0.0),
@@ -5198,14 +5599,19 @@ entity = "layer_npc"
         push_msg(
             &mut app,
             "comms",
-            ClientMessage::Hail { target_uuid: station_uuid.into() },
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
         );
         let out = tick(&mut app);
 
         // No CommsState broadcast should contain a non-empty inbox.
         for m in &out {
             if let ServerMessage::CommsState { messages, .. } = &m.msg {
-                assert!(messages.is_empty(), "out-of-range Hail must not inject messages, got {messages:?}");
+                assert!(
+                    messages.is_empty(),
+                    "out-of-range Hail must not inject messages, got {messages:?}"
+                );
             }
         }
     }
@@ -5223,21 +5629,36 @@ entity = "layer_npc"
         setup_game_with_comms(&mut app, station_uuid);
 
         // Start in range, hail, then move ship far away and respond.
-        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
-        let station_entity = app.world_mut().spawn((
-            EntityUuid(station_uuid.into()),
-            Transform::from_xyz(50.0, 0.0, 0.0),
-            CommsRange(500.0),
-        )).id();
+        app.world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        let station_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(station_uuid.into()),
+                Transform::from_xyz(50.0, 0.0, 0.0),
+                CommsRange(500.0),
+            ))
+            .id();
         let _ = tick(&mut app);
 
-        push_msg(&mut app, "comms", ClientMessage::Hail { target_uuid: station_uuid.into() });
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
         let out = tick(&mut app);
-        let msg_id = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { messages, .. } = &m.msg {
-                messages.first().map(|m| m.id.clone())
-            } else { None }
-        }).expect("hail produced a message");
+        let msg_id = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                    messages.first().map(|m| m.id.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("hail produced a message");
 
         // Move the station far away.
         if let Ok(mut e) = app.world_mut().get_entity_mut(station_entity) {
@@ -5247,10 +5668,14 @@ entity = "layer_npc"
         let _ = tick(&mut app);
 
         // Try to respond.
-        push_msg(&mut app, "comms", ClientMessage::RespondToMessage {
-            message_id: msg_id.clone(),
-            response_index: 0,
-        });
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::RespondToMessage {
+                message_id: msg_id.clone(),
+                response_index: 0,
+            },
+        );
         let _ = tick(&mut app);
 
         // Objective `obj-survey` must NOT have been added (response_actions
@@ -5277,27 +5702,42 @@ entity = "layer_npc"
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 
-        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)));
-        let station_entity = app.world_mut().spawn((
-            EntityUuid(station_uuid.into()),
-            Transform::from_xyz(50.0, 0.0, 0.0),
-            CommsRange(1000.0),
-        )).id();
+        app.world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)));
+        let station_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(station_uuid.into()),
+                Transform::from_xyz(50.0, 0.0, 0.0),
+                CommsRange(1000.0),
+            ))
+            .id();
         let _ = tick(&mut app);
 
         // Hail to populate the inbox while in range.
-        push_msg(&mut app, "comms", ClientMessage::Hail { target_uuid: station_uuid.into() });
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
         let _ = tick(&mut app);
 
         // Now despawn the station entity.
         app.world_mut().despawn(station_entity);
         let out = tick(&mut app);
 
-        let messages = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { messages, .. } = &m.msg {
-                Some(messages.clone())
-            } else { None }
-        }).expect("a broadcast must fire after despawn (range flip)");
+        let messages = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                    Some(messages.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("a broadcast must fire after despawn (range flip)");
 
         assert!(
             messages.iter().all(|m| !m.sender_in_range),
@@ -5328,7 +5768,8 @@ entity = "layer_npc"
             });
         }
 
-        app.world_mut().spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
+        app.world_mut()
+            .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)));
         app.world_mut().spawn((
             EntityUuid(near_uuid.into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
@@ -5341,14 +5782,25 @@ entity = "layer_npc"
         ));
 
         let out = tick(&mut app);
-        let contacts = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { contacts, .. } = &m.msg {
-                Some(contacts.clone())
-            } else { None }
-        }).expect("CommsState must be broadcast");
+        let contacts = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { contacts, .. } = &m.msg {
+                    Some(contacts.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("CommsState must be broadcast");
 
-        let near = contacts.iter().find(|c| c.uuid == near_uuid).expect("near contact");
-        let far = contacts.iter().find(|c| c.uuid == far_uuid).expect("far contact");
+        let near = contacts
+            .iter()
+            .find(|c| c.uuid == near_uuid)
+            .expect("near contact");
+        let far = contacts
+            .iter()
+            .find(|c| c.uuid == far_uuid)
+            .expect("far contact");
         assert!(near.in_range, "near contact must be in range");
         assert!(!far.in_range, "far contact must be out of range");
     }
@@ -5365,7 +5817,8 @@ entity = "layer_npc"
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 
-        let ship_entity = app.world_mut()
+        let ship_entity = app
+            .world_mut()
             .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(500.0)))
             .id();
         app.world_mut().spawn((
@@ -5385,8 +5838,13 @@ entity = "layer_npc"
         }
         let out = tick(&mut app);
 
-        let has_broadcast = out.iter().any(|m| matches!(&m.msg, ServerMessage::CommsState { .. }));
-        assert!(has_broadcast, "range flip from inâ†’out must trigger a fresh CommsState broadcast");
+        let has_broadcast = out
+            .iter()
+            .any(|m| matches!(&m.msg, ServerMessage::CommsState { .. }));
+        assert!(
+            has_broadcast,
+            "range flip from inâ†’out must trigger a fresh CommsState broadcast"
+        );
     }
 
     /// If the player ship is despawned mid-game (hypothetical hull-zero edge
@@ -5403,7 +5861,8 @@ entity = "layer_npc"
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
 
-        let ship_entity = app.world_mut()
+        let ship_entity = app
+            .world_mut()
             .spawn((Ship, Transform::from_xyz(0.0, 0.0, 0.0), CommsRange(1000.0)))
             .id();
         app.world_mut().spawn((
@@ -5456,7 +5915,8 @@ entity = "layer_npc"
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-loaded".into(),
                         text: "World loaded.".into(),
-                        mandatory: false, targets: vec![],
+                        mandatory: false,
+                        targets: vec![],
                     }],
                     when: None,
                 },
@@ -5470,7 +5930,10 @@ entity = "layer_npc"
 
         let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objectives.sorted_snapshots().iter().any(|o| o.id == "obj-loaded"),
+            objectives
+                .sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-loaded"),
             "on_world_loaded trigger must have fired its add_objective action"
         );
         // Queue must be drained.
@@ -5479,7 +5942,10 @@ entity = "layer_npc"
             runtime.pending_world_events.is_empty(),
             "pending_world_events must be drained by handle_ai_events"
         );
-        assert!(runtime.trigger_states[0].fired, "trigger must be marked fired");
+        assert!(
+            runtime.trigger_states[0].fired,
+            "trigger must be marked fired"
+        );
     }
 
     /// Base-world Startup: `init_world_runtime` must push a `WorldLoaded`
@@ -5501,7 +5967,8 @@ entity = "layer_npc"
             actions: vec![TriggerAction::AddObjective {
                 id: "obj-startup".into(),
                 text: "Startup objective.".into(),
-                mandatory: false, targets: vec![],
+                mandatory: false,
+                targets: vec![],
             }],
             when: None,
         });
@@ -5511,10 +5978,17 @@ entity = "layer_npc"
 
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
-            runtime.pending_world_events.iter().any(|e| matches!(e, WorldEvent::WorldLoaded)),
+            runtime
+                .pending_world_events
+                .iter()
+                .any(|e| matches!(e, WorldEvent::WorldLoaded)),
             "init_world_runtime must queue a WorldLoaded event during Startup"
         );
-        assert_eq!(runtime.trigger_states.len(), 1, "trigger states must be populated");
+        assert_eq!(
+            runtime.trigger_states.len(),
+            1,
+            "trigger states must be populated"
+        );
     }
 
     /// Sub-world `LoadWorld` must push a `WorldLoaded` event so any
@@ -5534,12 +6008,18 @@ entity = "layer_npc"
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: world_path.clone(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: world_path.clone(),
+                loader_path: None,
+            });
         app.update();
 
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert!(
-            runtime.pending_world_events.iter().any(|e| matches!(e, WorldEvent::WorldLoaded)),
+            runtime
+                .pending_world_events
+                .iter()
+                .any(|e| matches!(e, WorldEvent::WorldLoaded)),
             "apply_world_layer_changes Load branch must queue a WorldLoaded event"
         );
     }
@@ -5554,21 +6034,27 @@ entity = "layer_npc"
 
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>()
-           .init_resource::<PendingWorldLayerChanges>()
-           .add_systems(Update, apply_world_layer_changes);
+            .init_resource::<PendingWorldLayerChanges>()
+            .add_systems(Update, apply_world_layer_changes);
 
         // -- First load cycle --
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: world_path.clone(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: world_path.clone(),
+                loader_path: None,
+            });
         app.update(); // applies load + queues WorldLoaded
         app.update(); // handle_ai_events drains pending event + fires trigger
 
         {
             let objectives = &app.world().resource::<ObjectiveManagerRes>().0;
             assert!(
-                objectives.sorted_snapshots().iter().any(|o| o.id == "obj-on-load"),
+                objectives
+                    .sorted_snapshots()
+                    .iter()
+                    .any(|o| o.id == "obj-on-load"),
                 "on_world_loaded trigger must fire on first load"
             );
         }
@@ -5589,9 +6075,10 @@ entity = "layer_npc"
         {
             let runtime = app.world().resource::<WorldContentRuntime>();
             assert!(
-                !runtime.trigger_states.iter().any(|s|
-                    matches!(s.trigger.condition, TriggerCondition::OnWorldLoaded)
-                ),
+                !runtime
+                    .trigger_states
+                    .iter()
+                    .any(|s| matches!(s.trigger.condition, TriggerCondition::OnWorldLoaded)),
                 "Unload must remove the on_world_loaded trigger state"
             );
         }
@@ -5600,7 +6087,10 @@ entity = "layer_npc"
         app.world_mut()
             .resource_mut::<PendingWorldLayerChanges>()
             .0
-            .push(WorldLayerChange::Load { path: world_path.clone(), loader_path: None });
+            .push(WorldLayerChange::Load {
+                path: world_path.clone(),
+                loader_path: None,
+            });
         app.update(); // applies load + queues WorldLoaded
         app.update(); // drain + dispatch
 
@@ -5645,10 +6135,10 @@ condition = "on_world_loaded"
 
     // -- Region enter/exit triggers (issue #416) -----------------------------
 
+    use crate::entity_config::EntityConfig;
+    use crate::entity_spawner::{spawn_entity, EntityUuid};
     use crate::region_shape::RegionShape;
     use crate::regions::server::RegionPlugin;
-    use crate::entity_spawner::{spawn_entity, EntityUuid};
-    use crate::entity_config::EntityConfig;
 
     /// Build a minimal app that wires `RegionPlugin` + the issue-#416
     /// observers + `handle_ai_events` into the same world. Skips the
@@ -5682,16 +6172,35 @@ condition = "on_world_loaded"
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: None,
-            hull: None, collider: None, appearance: None,
-            helm_console: None, weapons_console: None, engineering_console: None,
-            captain_console: None, power: None, sensors_console: None,
-            navigation_console: None, shields_console: None, torpedoes: None,
-            repair: None, comms: None, asteroid_field: None, faction: None,
-            behaviour: None, radar_appearance: None, mesh: None,
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            sensors_console: None,
+            navigation_console: None,
+            shields_console: None,
+            torpedoes: None,
+            repair: None,
+            comms: None,
+            asteroid_field: None,
+            faction: None,
+            behaviour: None,
+            radar_appearance: None,
+            mesh: None,
             target: None,
         };
         let mut commands = app.world_mut().commands();
-        spawn_entity(&mut commands, &config, Vec3::new(x, 0.0, z), uuid.to_string(), None)
+        spawn_entity(
+            &mut commands,
+            &config,
+            Vec3::new(x, 0.0, z),
+            uuid.to_string(),
+            None,
+        )
     }
 
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
@@ -5715,7 +6224,8 @@ condition = "on_world_loaded"
                 actions: vec![TriggerAction::AddObjective {
                     id: obj_id.into(),
                     text: "region trigger objective".into(),
-                    mandatory: false, targets: vec![],
+                    mandatory: false,
+                    targets: vec![],
                 }],
                 when: None,
             },
@@ -5742,14 +6252,18 @@ condition = "on_world_loaded"
             &mut app,
             "nebula",
             uuid,
-            TriggerCondition::OnEnteredRegion { entity_name: "nebula".into() },
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "nebula".into(),
+            },
             "obj-entered",
         );
 
         // Tick 1: ship outside (at origin), no enter â†’ no fire.
         app.update();
-        assert!(!objective_present(&app, "obj-entered"),
-            "trigger must not fire while outside");
+        assert!(
+            !objective_present(&app, "obj-entered"),
+            "trigger must not fire while outside"
+        );
 
         // Move ship inside. The membership system runs in Physics and
         // queues a WorldEvent via the observer; `handle_ai_events` (also
@@ -5758,23 +6272,31 @@ condition = "on_world_loaded"
         set_ship_pos(&mut app, 110.0, 0.0);
         app.update(); // queues EnteredRegion
         app.update(); // handle_ai_events drains + fires
-        assert!(objective_present(&app, "obj-entered"),
-            "trigger must fire on entry");
+        assert!(
+            objective_present(&app, "obj-entered"),
+            "trigger must fire on entry"
+        );
 
         // Confirm single-shot: trigger is marked fired, queue is drained.
         let runtime = app.world().resource::<WorldContentRuntime>();
-        assert!(runtime.trigger_states[0].fired,
-            "trigger state must be marked fired after entry");
-        assert!(runtime.pending_world_events.is_empty(),
-            "pending_world_events must be drained");
+        assert!(
+            runtime.trigger_states[0].fired,
+            "trigger state must be marked fired after entry"
+        );
+        assert!(
+            runtime.pending_world_events.is_empty(),
+            "pending_world_events must be drained"
+        );
 
         // Stay inside on subsequent ticks â€” membership system must not
         // re-emit `RegionEntered`, so no new events queue up.
         app.update();
         app.update();
         let runtime = app.world().resource::<WorldContentRuntime>();
-        assert!(runtime.pending_world_events.is_empty(),
-            "staying inside must not enqueue further EnteredRegion events");
+        assert!(
+            runtime.pending_world_events.is_empty(),
+            "staying inside must not enqueue further EnteredRegion events"
+        );
     }
 
     #[test]
@@ -5786,7 +6308,9 @@ condition = "on_world_loaded"
             &mut app,
             "nebula",
             uuid,
-            TriggerCondition::OnExitedRegion { entity_name: "nebula".into() },
+            TriggerCondition::OnExitedRegion {
+                entity_name: "nebula".into(),
+            },
             "obj-exited",
         );
 
@@ -5794,15 +6318,19 @@ condition = "on_world_loaded"
         set_ship_pos(&mut app, 10.0, 0.0);
         app.update();
         app.update();
-        assert!(!objective_present(&app, "obj-exited"),
-            "exit trigger must not fire on entry");
+        assert!(
+            !objective_present(&app, "obj-exited"),
+            "exit trigger must not fire on entry"
+        );
 
         // Now move outside â†’ RegionExited â†’ queued â†’ drained next tick.
         set_ship_pos(&mut app, 200.0, 0.0);
         app.update();
         app.update();
-        assert!(objective_present(&app, "obj-exited"),
-            "exit trigger must fire when ship moves outside the region");
+        assert!(
+            objective_present(&app, "obj-exited"),
+            "exit trigger must fire when ship moves outside the region"
+        );
     }
 
     #[test]
@@ -5814,7 +6342,9 @@ condition = "on_world_loaded"
             &mut app,
             "fragile",
             uuid,
-            TriggerCondition::OnExitedRegion { entity_name: "fragile".into() },
+            TriggerCondition::OnExitedRegion {
+                entity_name: "fragile".into(),
+            },
             "obj-imploded",
         );
 
@@ -5830,8 +6360,10 @@ condition = "on_world_loaded"
         app.update(); // queues ExitedRegion
         app.update(); // drains + fires
 
-        assert!(objective_present(&app, "obj-imploded"),
-            "exit trigger must fire when the region is despawned while ship is inside");
+        assert!(
+            objective_present(&app, "obj-imploded"),
+            "exit trigger must fire when the region is despawned while ship is inside"
+        );
     }
 
     #[test]
@@ -5846,14 +6378,18 @@ condition = "on_world_loaded"
             &mut app,
             "region_a",
             uuid_a,
-            TriggerCondition::OnEnteredRegion { entity_name: "region_a".into() },
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "region_a".into(),
+            },
             "obj-a",
         );
         install_region_trigger(
             &mut app,
             "region_b",
             uuid_b,
-            TriggerCondition::OnEnteredRegion { entity_name: "region_b".into() },
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "region_b".into(),
+            },
             "obj-b",
         );
 
@@ -5863,10 +6399,14 @@ condition = "on_world_loaded"
         app.update();
         app.update();
 
-        assert!(objective_present(&app, "obj-a"),
-            "region A enter trigger must fire");
-        assert!(objective_present(&app, "obj-b"),
-            "region B enter trigger must fire");
+        assert!(
+            objective_present(&app, "obj-a"),
+            "region A enter trigger must fire"
+        );
+        assert!(
+            objective_present(&app, "obj-b"),
+            "region B enter trigger must fire"
+        );
     }
 
     #[test]
@@ -5882,7 +6422,9 @@ condition = "on_world_loaded"
             &mut app,
             "quarantine",
             uuid,
-            TriggerCondition::OnEnteredRegion { entity_name: "quarantine".into() },
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "quarantine".into(),
+            },
             "obj-ship-quarantined",
         );
 
@@ -5890,21 +6432,40 @@ condition = "on_world_loaded"
         // entity (no Ship marker) at (110, 0). The membership system
         // ignores it because the only Ship is the player ship at origin.
         let npc_config = EntityConfig {
-            name: None, light: Vec::new(), tags: vec!["npc".into()],
-            shape: None, effects: None,
-            hull: None, collider: None, appearance: None,
-            helm_console: None, weapons_console: None, engineering_console: None,
-            captain_console: None, power: None, sensors_console: None,
-            navigation_console: None, shields_console: None, torpedoes: None,
-            repair: None, comms: None, asteroid_field: None, faction: None,
-            behaviour: None, radar_appearance: None, mesh: None,
+            name: None,
+            light: Vec::new(),
+            tags: vec!["npc".into()],
+            shape: None,
+            effects: None,
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
+            sensors_console: None,
+            navigation_console: None,
+            shields_console: None,
+            torpedoes: None,
+            repair: None,
+            comms: None,
+            asteroid_field: None,
+            faction: None,
+            behaviour: None,
+            radar_appearance: None,
+            mesh: None,
             target: None,
         };
         {
             let mut commands = app.world_mut().commands();
             let _npc = spawn_entity(
-                &mut commands, &npc_config,
-                Vec3::new(110.0, 0.0, 0.0), "uuid-npc".into(), None,
+                &mut commands,
+                &npc_config,
+                Vec3::new(110.0, 0.0, 0.0),
+                "uuid-npc".into(),
+                None,
             );
         }
 
@@ -5912,11 +6473,15 @@ condition = "on_world_loaded"
         app.update();
         app.update();
 
-        assert!(!objective_present(&app, "obj-ship-quarantined"),
-            "NPC entering the region must not fire the player-ship trigger");
+        assert!(
+            !objective_present(&app, "obj-ship-quarantined"),
+            "NPC entering the region must not fire the player-ship trigger"
+        );
         let runtime = app.world().resource::<WorldContentRuntime>();
-        assert!(!runtime.trigger_states[0].fired,
-            "trigger must remain unfired when only an NPC is inside");
+        assert!(
+            !runtime.trigger_states[0].fired,
+            "trigger must remain unfired when only an NPC is inside"
+        );
     }
 
     #[test]
@@ -5931,11 +6496,14 @@ condition = "on_world_loaded"
             runtime.name_to_uuid.insert("zone".into(), uuid.into());
             runtime.trigger_states.push(TriggerState {
                 trigger: crate::world::content::Trigger {
-                    condition: TriggerCondition::OnEnteredRegion { entity_name: "zone".into() },
+                    condition: TriggerCondition::OnEnteredRegion {
+                        entity_name: "zone".into(),
+                    },
                     actions: vec![TriggerAction::AddObjective {
                         id: "obj-armed-entry".into(),
                         text: "Armed entry.".into(),
-                        mandatory: false, targets: vec![],
+                        mandatory: false,
+                        targets: vec![],
                     }],
                     when: Some(crate::world::flags::parse_predicate("flag(armed)").unwrap()),
                 },
@@ -5947,12 +6515,16 @@ condition = "on_world_loaded"
         // First entry: flag unset â†’ predicate false â†’ no objective.
         set_ship_pos(&mut app, 10.0, 0.0);
         app.update();
-        assert!(!objective_present(&app, "obj-armed-entry"),
-            "gated trigger must not fire while flag is unset");
+        assert!(
+            !objective_present(&app, "obj-armed-entry"),
+            "gated trigger must not fire while flag is unset"
+        );
         {
             let runtime = app.world().resource::<WorldContentRuntime>();
-            assert!(!runtime.trigger_states[0].fired,
-                "predicate-false firings must NOT consume the trigger");
+            assert!(
+                !runtime.trigger_states[0].fired,
+                "predicate-false firings must NOT consume the trigger"
+            );
         }
 
         // Set the flag, leave the region, re-enter â€” trigger should fire now.
@@ -5962,11 +6534,13 @@ condition = "on_world_loaded"
         }
         set_ship_pos(&mut app, 200.0, 0.0); // exit
         app.update();
-        set_ship_pos(&mut app, 10.0, 0.0);  // re-enter
+        set_ship_pos(&mut app, 10.0, 0.0); // re-enter
         app.update();
 
-        assert!(objective_present(&app, "obj-armed-entry"),
-            "gated trigger must fire once the flag is set and ship re-enters");
+        assert!(
+            objective_present(&app, "obj-armed-entry"),
+            "gated trigger must fire once the flag is set and ship re-enters"
+        );
     }
 
     // -- Issue #417: spawn_entity / destroy_entity trigger actions ---------
@@ -6032,10 +6606,8 @@ size_max = 2.0
             .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
             .write(crate::ai_plugin::AiEntityAttacked {
                 entity_uuid: "marker-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str(
-                    "cccccccc-0000-0000-0000-000000000001",
-                )
-                .unwrap(),
+                attacker_uuid: uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000001")
+                    .unwrap(),
             });
 
         app.update();
@@ -6077,8 +6649,7 @@ size_max = 2.0
 
         // Insert a WorldConfig with a known anchor.
         let mut wc = crate::world::config::WorldConfig::default();
-        wc.anchors
-            .insert("alpha".to_string(), [42.0, 0.0, -5.0]);
+        wc.anchors.insert("alpha".to_string(), [42.0, 0.0, -5.0]);
         app.world_mut().insert_resource(wc);
 
         {
@@ -6152,7 +6723,8 @@ size_max = 2.0
         {
             let mut lm = app.world_mut().resource_mut::<WorldLayerMap>();
             let mut wr = WorldRuntime::default();
-            wr.anchors.insert("docking_bay".to_string(), [11.0, 0.0, 22.0]);
+            wr.anchors
+                .insert("docking_bay".to_string(), [11.0, 0.0, 22.0]);
             lm.0.insert(layer_path.clone(), wr);
         }
 
@@ -6192,10 +6764,8 @@ size_max = 2.0
             .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
             .write(crate::ai_plugin::AiEntityAttacked {
                 entity_uuid: "lt-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str(
-                    "dddddddd-0000-0000-0000-000000000001",
-                )
-                .unwrap(),
+                attacker_uuid: uuid::Uuid::parse_str("dddddddd-0000-0000-0000-000000000001")
+                    .unwrap(),
             });
 
         app.update();
@@ -6230,8 +6800,11 @@ size_max = 2.0
         for (eu, t) in q.iter(app.world()) {
             if eu.0 == uuid {
                 found = true;
-                assert!((t.translation.x - 11.0).abs() < 1e-3,
-                    "must use layer anchor (11), not base anchor (-99); got {}", t.translation.x);
+                assert!(
+                    (t.translation.x - 11.0).abs() < 1e-3,
+                    "must use layer anchor (11), not base anchor (-99); got {}",
+                    t.translation.x
+                );
                 assert!((t.translation.z - 22.0).abs() < 1e-3);
             }
         }
@@ -6288,7 +6861,8 @@ size_max = 2.0
                         actions: vec![TriggerAction::AddObjective {
                             id: "obj-chained".into(),
                             text: "chained".into(),
-                            mandatory: false, targets: vec![],
+                            mandatory: false,
+                            targets: vec![],
                         }],
                         when: None,
                     },
@@ -6302,10 +6876,8 @@ size_max = 2.0
             .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
             .write(crate::ai_plugin::AiEntityAttacked {
                 entity_uuid: "src-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str(
-                    "eeeeeeee-0000-0000-0000-000000000001",
-                )
-                .unwrap(),
+                attacker_uuid: uuid::Uuid::parse_str("eeeeeeee-0000-0000-0000-000000000001")
+                    .unwrap(),
             });
 
         app.update();
@@ -6320,7 +6892,9 @@ size_max = 2.0
         // Chained on_destroyed trigger must have fired (objective added).
         let objs = &app.world().resource::<ObjectiveManagerRes>().0;
         assert!(
-            objs.sorted_snapshots().iter().any(|o| o.id == "obj-chained"),
+            objs.sorted_snapshots()
+                .iter()
+                .any(|o| o.id == "obj-chained"),
             "chained on_destroyed trigger must fire from DestroyEntity action"
         );
 
@@ -6331,10 +6905,7 @@ size_max = 2.0
             .world()
             .resource::<Messages<crate::ai_plugin::AiEntityDestroyed>>();
         let mut cursor = msgs.get_cursor();
-        let emitted: Vec<String> = cursor
-            .read(msgs)
-            .map(|m| m.entity_uuid.clone())
-            .collect();
+        let emitted: Vec<String> = cursor.read(msgs).map(|m| m.entity_uuid.clone()).collect();
         assert!(
             emitted.iter().any(|u| u == target_uuid),
             "DestroyEntity action must emit AiEntityDestroyed for '{target_uuid}', got {emitted:?}"
@@ -6369,10 +6940,8 @@ size_max = 2.0
             .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
             .write(crate::ai_plugin::AiEntityAttacked {
                 entity_uuid: "src-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str(
-                    "ffffffff-0000-0000-0000-000000000001",
-                )
-                .unwrap(),
+                attacker_uuid: uuid::Uuid::parse_str("ffffffff-0000-0000-0000-000000000001")
+                    .unwrap(),
             });
         app.update();
         // No assertion needed beyond "does not panic". Verify objectives empty.
@@ -6425,10 +6994,8 @@ size_max = 2.0
             .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
             .write(crate::ai_plugin::AiEntityAttacked {
                 entity_uuid: "src-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str(
-                    "10101010-0000-0000-0000-000000000001",
-                )
-                .unwrap(),
+                attacker_uuid: uuid::Uuid::parse_str("10101010-0000-0000-0000-000000000001")
+                    .unwrap(),
             });
 
         app.update();
@@ -6500,10 +7067,8 @@ size_max = 2.0
             .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
             .write(crate::ai_plugin::AiEntityAttacked {
                 entity_uuid: "src-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str(
-                    "20202020-0000-0000-0000-000000000001",
-                )
-                .unwrap(),
+                attacker_uuid: uuid::Uuid::parse_str("20202020-0000-0000-0000-000000000001")
+                    .unwrap(),
             });
         app.update();
         app.update();
@@ -6559,10 +7124,8 @@ size_max = 2.0
             .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
             .write(crate::ai_plugin::AiEntityAttacked {
                 entity_uuid: "marker-uuid".into(),
-                attacker_uuid: uuid::Uuid::parse_str(
-                    "cccccccc-0000-0000-0000-000000000002",
-                )
-                .unwrap(),
+                attacker_uuid: uuid::Uuid::parse_str("cccccccc-0000-0000-0000-000000000002")
+                    .unwrap(),
             });
 
         app.update();
@@ -6590,21 +7153,27 @@ size_max = 2.0
                 assert!(
                     t.translation.abs_diff_eq(expected_translation, 1e-4),
                     "translation mismatch: got {:?}, expected {:?}",
-                    t.translation, expected_translation
+                    t.translation,
+                    expected_translation
                 );
                 assert!(
                     t.rotation.abs_diff_eq(expected_quat, 1e-4),
                     "rotation mismatch: got {:?}, expected {:?}",
-                    t.rotation, expected_quat
+                    t.rotation,
+                    expected_quat
                 );
                 assert!(
                     t.scale.abs_diff_eq(expected_scale, 1e-4),
                     "scale mismatch: got {:?}, expected {:?}",
-                    t.scale, expected_scale
+                    t.scale,
+                    expected_scale
                 );
             }
         }
-        assert!(found, "spawned entity must exist in ECS with the registered UUID");
+        assert!(
+            found,
+            "spawned entity must exist in ECS with the registered UUID"
+        );
     }
 
     // -- PRD #397 fix 2: comms-response action dispatch parity ----------------
@@ -6766,21 +7335,31 @@ size_max = 2.0
     #[test]
     fn comms_response_dispatches_clear_world_flag() {
         let actions = vec![
-            TriggerAction::SetWorldFlag { name: "to_clear".into() },
-            TriggerAction::ClearWorldFlag { name: "to_clear".into() },
+            TriggerAction::SetWorldFlag {
+                name: "to_clear".into(),
+            },
+            TriggerAction::ClearWorldFlag {
+                name: "to_clear".into(),
+            },
         ];
         let app = fire_response_with_actions(actions);
         let runtime = app.world().resource::<WorldContentRuntime>();
         assert_eq!(runtime.flags.counter("to_clear"), 0);
         // Both transitions must have been enqueued.
-        let has_set = runtime.pending_world_events.iter().any(|e| matches!(
-            e, WorldEvent::FlagSet { name, .. } if name == "to_clear"
-        ));
-        let has_cleared = runtime.pending_world_events.iter().any(|e| matches!(
-            e, WorldEvent::FlagCleared { name, .. } if name == "to_clear"
-        ));
-        assert!(has_set && has_cleared,
-            "both set and clear transitions must be enqueued");
+        let has_set = runtime.pending_world_events.iter().any(|e| {
+            matches!(
+                e, WorldEvent::FlagSet { name, .. } if name == "to_clear"
+            )
+        });
+        let has_cleared = runtime.pending_world_events.iter().any(|e| {
+            matches!(
+                e, WorldEvent::FlagCleared { name, .. } if name == "to_clear"
+            )
+        });
+        assert!(
+            has_set && has_cleared,
+            "both set and clear transitions must be enqueued"
+        );
     }
 
     #[test]
@@ -6930,7 +7509,8 @@ size_max = 2.0
         }]);
         let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
         assert_eq!(
-            mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams), 2,
+            mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams),
+            2,
             "ApplyIntModifier must add to RepairTeams int slot"
         );
 
@@ -6949,7 +7529,8 @@ size_max = 2.0
         ]);
         let mods = app.world().resource::<crate::modifiers::ShipModifiers>();
         assert_eq!(
-            mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams), 0,
+            mods.get_int(&crate::modifiers::IntModifierSlot::RepairTeams),
+            0,
             "RemoveIntModifier must reverse the int modifier"
         );
     }
@@ -7009,21 +7590,39 @@ size_max = 2.0
 
         // Boot identical to fire_response_with_actions but with a DestroyEntity
         // action that targets the pre-spawned entity.
-        push_msg(&mut app, "captain", ClientMessage::Identify {
-            token: "captain".into(), name: "Alice".into(),
-        });
+        push_msg(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(&mut app);
-        push_msg(&mut app, "captain", ClientMessage::SelectStation {
-            station: "Captain's Chair".into(),
-        });
+        push_msg(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(&mut app);
-        push_msg(&mut app, "comms", ClientMessage::Identify {
-            token: "comms".into(), name: "Uhura".into(),
-        });
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Identify {
+                token: "comms".into(),
+                name: "Uhura".into(),
+            },
+        );
         tick(&mut app);
-        push_msg(&mut app, "comms", ClientMessage::SelectStation {
-            station: "Comms".into(),
-        });
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::SelectStation {
+                station: "Comms".into(),
+            },
+        );
         tick(&mut app);
         push_msg(&mut app, "captain", ClientMessage::StartGame);
         tick(&mut app);
@@ -7031,8 +7630,12 @@ size_max = 2.0
         let station_uuid = "station-destroy-uuid";
         {
             let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-            runtime.name_to_uuid.insert("starbase_alpha".into(), station_uuid.into());
-            runtime.name_to_uuid.insert("doomed".into(), target_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("starbase_alpha".into(), station_uuid.into());
+            runtime
+                .name_to_uuid
+                .insert("doomed".into(), target_uuid.into());
             runtime.contacts.push(CommsContact {
                 uuid: station_uuid.into(),
                 name: "Starbase Alpha".into(),
@@ -7066,19 +7669,33 @@ size_max = 2.0
         }
         let _ = tick(&mut app);
 
-        push_msg(&mut app, "comms", ClientMessage::Hail {
-            target_uuid: station_uuid.into(),
-        });
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::Hail {
+                target_uuid: station_uuid.into(),
+            },
+        );
         let out = tick(&mut app);
-        let msg_id = out.iter().find_map(|m| {
-            if let ServerMessage::CommsState { messages, .. } = &m.msg {
-                messages.first().map(|msg| msg.id.clone())
-            } else { None }
-        }).expect("hail must deliver a message");
+        let msg_id = out
+            .iter()
+            .find_map(|m| {
+                if let ServerMessage::CommsState { messages, .. } = &m.msg {
+                    messages.first().map(|msg| msg.id.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("hail must deliver a message");
 
-        push_msg(&mut app, "comms", ClientMessage::RespondToMessage {
-            message_id: msg_id, response_index: 0,
-        });
+        push_msg(
+            &mut app,
+            "comms",
+            ClientMessage::RespondToMessage {
+                message_id: msg_id,
+                response_index: 0,
+            },
+        );
         let _ = tick(&mut app);
         // Run one more update so Commands::queue (deferred despawn + message
         // write) is applied.
@@ -7115,35 +7732,48 @@ size_max = 2.0
             // every variant.
             let variants: Vec<TriggerAction> = vec![
                 TriggerAction::AddObjective {
-                    id: "x".into(), text: "x".into(), mandatory: false, targets: vec![],
+                    id: "x".into(),
+                    text: "x".into(),
+                    mandatory: false,
+                    targets: vec![],
                 },
                 TriggerAction::CompleteObjective { id: "x".into() },
                 TriggerAction::FailObjective { id: "x".into() },
                 TriggerAction::SetAiState {
-                    entity: "x".into(), state: "x".into(), target: None,
+                    entity: "x".into(),
+                    state: "x".into(),
+                    target: None,
                 },
                 TriggerAction::ApplyModifier {
-                    entity: "x".into(), tag: "x".into(),
-                    slot: crate::messages::ModifierSlot::MaxSpeed, bonus: 0.0,
+                    entity: "x".into(),
+                    tag: "x".into(),
+                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                    bonus: 0.0,
                 },
                 TriggerAction::RemoveModifier {
-                    entity: "x".into(), tag: "x".into(),
+                    entity: "x".into(),
+                    tag: "x".into(),
                     slot: crate::messages::ModifierSlot::MaxSpeed,
                 },
                 TriggerAction::ApplyFlag {
-                    entity: "x".into(), tag: "x".into(),
+                    entity: "x".into(),
+                    tag: "x".into(),
                     kind: crate::flag_kind::FlagKind::CommsJammed,
                 },
                 TriggerAction::RemoveFlag {
-                    entity: "x".into(), tag: "x".into(),
+                    entity: "x".into(),
+                    tag: "x".into(),
                     kind: crate::flag_kind::FlagKind::CommsJammed,
                 },
                 TriggerAction::ApplyIntModifier {
-                    entity: "x".into(), tag: "x".into(),
-                    slot: crate::modifiers::IntModifierSlot::RepairTeams, bonus: 0,
+                    entity: "x".into(),
+                    tag: "x".into(),
+                    slot: crate::modifiers::IntModifierSlot::RepairTeams,
+                    bonus: 0,
                 },
                 TriggerAction::RemoveIntModifier {
-                    entity: "x".into(), tag: "x".into(),
+                    entity: "x".into(),
+                    tag: "x".into(),
                     slot: crate::modifiers::IntModifierSlot::RepairTeams,
                 },
                 TriggerAction::GameOver { message: None },
@@ -7151,12 +7781,21 @@ size_max = 2.0
                 TriggerAction::UnloadWorld { path: "x".into() },
                 TriggerAction::SetWorldFlag { name: "x".into() },
                 TriggerAction::ClearWorldFlag { name: "x".into() },
-                TriggerAction::IncrementWorldFlag { name: "x".into(), by: 0 },
-                TriggerAction::SetWorldFlagValue { name: "x".into(), value: 0 },
+                TriggerAction::IncrementWorldFlag {
+                    name: "x".into(),
+                    by: 0,
+                },
+                TriggerAction::SetWorldFlagValue {
+                    name: "x".into(),
+                    value: 0,
+                },
                 TriggerAction::SpawnEntity {
-                    template_path: "x".into(), name: "x".into(),
-                    anchor: None, position: None,
-                    rotation: None, scale: None,
+                    template_path: "x".into(),
+                    name: "x".into(),
+                    anchor: None,
+                    position: None,
+                    rotation: None,
+                    scale: None,
                 },
                 TriggerAction::DestroyEntity { entity: "x".into() },
             ];

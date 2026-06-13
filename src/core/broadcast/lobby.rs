@@ -111,7 +111,10 @@ impl Plugin for LobbyBroadcaster {
     fn build(&self, app: &mut App) {
         if !app.world().contains_resource::<LobbyBroadcastRegistry>() {
             app.insert_resource(LobbyBroadcastRegistry::new());
-            app.add_systems(Update, dispatch_lobby_broadcasts.after(crate::lobby::process_lobby));
+            app.add_systems(
+                Update,
+                dispatch_lobby_broadcasts.after(crate::lobby::process_lobby),
+            );
         }
         let mut registry = app.world_mut().resource_mut::<LobbyBroadcastRegistry>();
         for reg in &self.pending {
@@ -173,7 +176,10 @@ fn dispatch_lobby_broadcasts(world: &mut World) {
     // Call producers and write resulting messages.
     for (target, producer) in ready {
         for msg in producer(world) {
-            world.write_message(OutboundMessage { target: target.clone(), msg });
+            world.write_message(OutboundMessage {
+                target: target.clone(),
+                msg,
+            });
         }
     }
 }
@@ -203,7 +209,8 @@ mod tests {
         app.add_plugins(bevy::time::TimePlugin);
         app.add_plugins(broadcaster);
 
-        app.world_mut().insert_resource(State::new(GamePhase::Lobby));
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::Lobby));
         app.init_resource::<Outbox>();
         app.add_systems(PostUpdate, collect);
         app
@@ -217,32 +224,33 @@ mod tests {
 
     #[test]
     fn once_cadence_delivers_message_on_first_tick() {
-        let broadcaster = LobbyBroadcaster::new().register(
-            Audience::All,
-            Cadence::Once,
-            |_world: &mut World| vec![ServerMessage::GameStarted],
-        );
+        let broadcaster =
+            LobbyBroadcaster::new().register(Audience::All, Cadence::Once, |_world: &mut World| {
+                vec![ServerMessage::GameStarted]
+            });
         let mut app = dispatch_app(broadcaster);
         let msgs = tick_and_collect(&mut app);
         assert!(
-            msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),
+            msgs.iter()
+                .any(|m| matches!(m.msg, ServerMessage::GameStarted)),
             "Cadence::Once should deliver message on first tick"
         );
     }
 
     #[test]
     fn once_cadence_does_not_fire_again() {
-        let broadcaster = LobbyBroadcaster::new().register(
-            Audience::All,
-            Cadence::Once,
-            |_world: &mut World| vec![ServerMessage::GameStarted],
-        );
+        let broadcaster =
+            LobbyBroadcaster::new().register(Audience::All, Cadence::Once, |_world: &mut World| {
+                vec![ServerMessage::GameStarted]
+            });
         let mut app = dispatch_app(broadcaster);
         let _ = tick_and_collect(&mut app);
         app.world_mut().resource_mut::<Outbox>().0.clear();
         let msgs = tick_and_collect(&mut app);
         assert!(
-            !msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),
+            !msgs
+                .iter()
+                .any(|m| matches!(m.msg, ServerMessage::GameStarted)),
             "Cadence::Once should not fire on second tick"
         );
     }
@@ -268,49 +276,60 @@ mod tests {
         queue.lock().unwrap().push(ServerMessage::GameStarted);
 
         let msgs1 = tick_and_collect(&mut app);
-        let count1 = msgs1.iter().filter(|m| matches!(m.msg, ServerMessage::GameStarted)).count();
+        let count1 = msgs1
+            .iter()
+            .filter(|m| matches!(m.msg, ServerMessage::GameStarted))
+            .count();
         assert_eq!(count1, 2, "tick 1: expected 2 messages, got {count1}");
 
         app.world_mut().resource_mut::<Outbox>().0.clear();
         let msgs2 = tick_and_collect(&mut app);
-        let count2 = msgs2.iter().filter(|m| matches!(m.msg, ServerMessage::GameStarted)).count();
-        assert_eq!(count2, 0, "tick 2: expected 0 messages after drain, got {count2}");
+        let count2 = msgs2
+            .iter()
+            .filter(|m| matches!(m.msg, ServerMessage::GameStarted))
+            .count();
+        assert_eq!(
+            count2, 0,
+            "tick 2: expected 0 messages after drain, got {count2}"
+        );
     }
 
     #[test]
     fn multiple_registrations_all_fire() {
         let broadcaster = LobbyBroadcaster::new()
-            .register(
-                Audience::All,
-                Cadence::Once,
-                |_world: &mut World| vec![ServerMessage::GameStarted],
-            )
-            .register(
-                Audience::All,
-                Cadence::Once,
-                |_world: &mut World| vec![ServerMessage::PlayerLeft { token: "t1".into() }],
-            );
+            .register(Audience::All, Cadence::Once, |_world: &mut World| {
+                vec![ServerMessage::GameStarted]
+            })
+            .register(Audience::All, Cadence::Once, |_world: &mut World| {
+                vec![ServerMessage::PlayerLeft { token: "t1".into() }]
+            });
 
         let mut app = dispatch_app(broadcaster);
         let msgs = tick_and_collect(&mut app);
-        let game_started = msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted));
-        let player_left = msgs.iter().any(|m| matches!(m.msg, ServerMessage::PlayerLeft { .. }));
+        let game_started = msgs
+            .iter()
+            .any(|m| matches!(m.msg, ServerMessage::GameStarted));
+        let player_left = msgs
+            .iter()
+            .any(|m| matches!(m.msg, ServerMessage::PlayerLeft { .. }));
         assert!(game_started, "first registration should fire");
         assert!(player_left, "second registration should fire");
     }
 
     #[test]
     fn dispatch_skips_when_not_in_lobby_phase() {
-        let broadcaster = LobbyBroadcaster::new().register(
-            Audience::All,
-            Cadence::Once,
-            |_world: &mut World| vec![ServerMessage::GameStarted],
-        );
+        let broadcaster =
+            LobbyBroadcaster::new().register(Audience::All, Cadence::Once, |_world: &mut World| {
+                vec![ServerMessage::GameStarted]
+            });
         let mut app = dispatch_app(broadcaster);
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
         let msgs = tick_and_collect(&mut app);
         assert!(
-            !msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),
+            !msgs
+                .iter()
+                .any(|m| matches!(m.msg, ServerMessage::GameStarted)),
             "broadcasts should not fire outside lobby phase"
         );
     }

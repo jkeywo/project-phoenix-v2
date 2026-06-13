@@ -109,7 +109,12 @@ pub struct ShieldFacing {
 }
 
 impl ShieldFacing {
-    fn new(label: impl Into<String>, max_hp: i32, regen_per_sec: f32, offline_duration: f32) -> Self {
+    fn new(
+        label: impl Into<String>,
+        max_hp: i32,
+        regen_per_sec: f32,
+        offline_duration: f32,
+    ) -> Self {
         Self {
             label: label.into(),
             hp: max_hp,
@@ -336,8 +341,7 @@ impl ShieldSystem {
     /// (rather than snapping to max_hp in a single tick).
     pub fn tick(&mut self, dt: f32) {
         for (i, facing) in self.facings.iter_mut().enumerate() {
-            let is_decaying = self.focused_facing != Some(i)
-                && facing.hp > facing.max_hp;
+            let is_decaying = self.focused_facing != Some(i) && facing.hp > facing.max_hp;
 
             if is_decaying {
                 // Apply focus decay toward effective max_hp (no regen while decaying).
@@ -482,7 +486,7 @@ mod tests {
     fn regen_increases_hp_while_online() {
         let mut f = ShieldFacing::new("Fore", 100, 10.0, 10.0);
         f.apply_damage(40); // hp = 60
-        f.tick(2.0);        // +20 → hp = 80
+        f.tick(2.0); // +20 → hp = 80
         assert_eq!(f.hp, 80);
     }
 
@@ -490,7 +494,7 @@ mod tests {
     fn regen_does_not_exceed_max_hp() {
         let mut f = ShieldFacing::new("Fore", 100, 50.0, 10.0);
         f.apply_damage(10); // hp = 90
-        f.tick(10.0);       // +500 → capped at 100
+        f.tick(10.0); // +500 → capped at 100
         assert_eq!(f.hp, 100);
     }
 
@@ -498,7 +502,7 @@ mod tests {
     fn no_regen_while_offline() {
         let mut f = ShieldFacing::new("Fore", 100, 50.0, 10.0);
         f.apply_damage(100); // offline
-        f.tick(1.0);         // timer ticks, no regen
+        f.tick(1.0); // timer ticks, no regen
         assert_eq!(f.hp, 0);
     }
 
@@ -507,7 +511,7 @@ mod tests {
     #[test]
     fn four_facings_default_layout() {
         let s = ShieldSystem::default(); // 4 facings
-        // Forward (bearing 0) → facing 0 (Fore)
+                                         // Forward (bearing 0) → facing 0 (Fore)
         assert_eq!(s.facing_index_for_bearing(0.0), 0);
         // 90° left (port, bearing -PI/2) → facing 1 (Port)
         assert_eq!(s.facing_index_for_bearing(-PI / 2.0), 1);
@@ -519,11 +523,14 @@ mod tests {
 
     #[test]
     fn two_facings_fore_aft_layout() {
-        let config = ShieldConfig { num_facings: 2, ..Default::default() };
+        let config = ShieldConfig {
+            num_facings: 2,
+            ..Default::default()
+        };
         let s = ShieldSystem::new(&config);
-        assert_eq!(s.facing_index_for_bearing(0.0), 0);   // fore
-        assert_eq!(s.facing_index_for_bearing(PI), 1);     // aft
-        // 45° to the left: still in the fore hemisphere
+        assert_eq!(s.facing_index_for_bearing(0.0), 0); // fore
+        assert_eq!(s.facing_index_for_bearing(PI), 1); // aft
+                                                       // 45° to the left: still in the fore hemisphere
         assert_eq!(s.facing_index_for_bearing(-PI / 4.0), 0);
     }
 
@@ -539,7 +546,10 @@ mod tests {
 
     #[test]
     fn damage_passthrough_when_facing_depleted() {
-        let config = ShieldConfig { max_hp: 50, ..Default::default() };
+        let config = ShieldConfig {
+            max_hp: 50,
+            ..Default::default()
+        };
         let mut s = ShieldSystem::new(&config);
         let passthrough = s.apply_damage(60, 0.0); // fore only has 50
         assert_eq!(passthrough, 10);
@@ -585,7 +595,10 @@ mod tests {
 
     #[test]
     fn single_facing_absorbs_all_bearings() {
-        let config = ShieldConfig { num_facings: 1, ..Default::default() };
+        let config = ShieldConfig {
+            num_facings: 1,
+            ..Default::default()
+        };
         let mut s = ShieldSystem::new(&config);
         s.apply_damage(10, 0.0);
         s.apply_damage(10, PI);
@@ -647,7 +660,7 @@ mod tests {
     #[test]
     fn bearing_routes_to_fore_facing() {
         let s = ShieldSystem::default(); // 4 facings
-        // Attacker straight ahead → Fore (index 0)
+                                         // Attacker straight ahead → Fore (index 0)
         let b = attacker_bearing_relative(0.0, -10.0, 0.0, 0.0, 0.0);
         assert_eq!(s.facing_index_for_bearing(b), 0);
     }
@@ -708,10 +721,10 @@ mod tests {
     fn non_focused_facings_get_penalty_max_hp_and_regen() {
         let mut s = ShieldSystem::default();
         s.set_focused_facing(Some(0)); // Focus Fore
-        // Default: penalty_max_hp=25, penalty_regen=2.5
-        assert_eq!(s.facings[1].max_hp, 75);  // Port
-        assert_eq!(s.facings[2].max_hp, 75);  // Aft
-        assert_eq!(s.facings[3].max_hp, 75);  // Starboard
+                                       // Default: penalty_max_hp=25, penalty_regen=2.5
+        assert_eq!(s.facings[1].max_hp, 75); // Port
+        assert_eq!(s.facings[2].max_hp, 75); // Aft
+        assert_eq!(s.facings[3].max_hp, 75); // Starboard
         assert!((s.facings[1].regen_per_sec - 2.5).abs() < 1e-4);
     }
 
@@ -729,7 +742,10 @@ mod tests {
             assert!((f.regen_per_sec - 5.0).abs() < 1e-4);
         }
         // HP is NOT snapped immediately — it decays gradually via tick().
-        assert_eq!(s.facings[0].hp, 130, "HP should persist above max after clear");
+        assert_eq!(
+            s.facings[0].hp, 130,
+            "HP should persist above max after clear"
+        );
         s.tick(0.5); // decay_rate=10/s * 0.5s = 5 HP decay
         assert_eq!(s.facings[0].hp, 125);
         s.tick(3.0); // 125 - min(10*3, 125-100) = 100
@@ -769,7 +785,7 @@ mod tests {
         // Fore (facing 0) at 80 HP, gets reduced max=75 when another arc focused.
         s.facings[0].hp = 80;
         s.set_focused_facing(Some(1)); // Focus Port
-        // Fore max=75, HP=80 → 80 - 10*0.5 = 75 → should decay to exactly 75
+                                       // Fore max=75, HP=80 → 80 - 10*0.5 = 75 → should decay to exactly 75
         s.tick(0.5);
         assert_eq!(s.facings[0].hp, 75);
         // Next tick: HP=75 ≤ max=75 → no more decay
@@ -812,7 +828,8 @@ mod tests {
         let toml_str = include_str!("../../assets/entities/player_ship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
             .expect("player_ship.toml must parse");
-        let base = config.shields_console
+        let base = config
+            .shields_console
             .expect("player_ship must declare [shields_console]")
             .base
             .expect("player_ship must declare [shields_console.base]");
@@ -824,7 +841,10 @@ mod tests {
             assert_eq!(f.max_hp, base.max_hp, "facing max_hp must match TOML");
             assert_eq!(f.hp, base.max_hp, "facing starts full");
             assert_eq!(f.regen_per_sec, base.regen_per_sec, "regen must match TOML");
-            assert_eq!(f.offline_duration, base.offline_duration, "offline_duration must match TOML");
+            assert_eq!(
+                f.offline_duration, base.offline_duration,
+                "offline_duration must match TOML"
+            );
         }
     }
 }

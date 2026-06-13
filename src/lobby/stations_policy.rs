@@ -1,5 +1,5 @@
-use std::collections::{HashMap, VecDeque};
 use crate::stations_config::{ShipStations, StationAssignments, StationDef};
+use std::collections::{HashMap, VecDeque};
 
 // ── Reassignment helpers ─────────────────────────────────────────────────────
 
@@ -51,8 +51,7 @@ pub fn reassign_on_join(
 
     // Build a set of all station names at n+1 that will be claimed by existing
     // players, so we can find the one with no predecessor.
-    let mut claimed_at_n1: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut claimed_at_n1: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (token, station_name) in current.iter() {
         let resolved_next = resolve_next(current_defs, station_name, n1);
@@ -179,7 +178,10 @@ pub fn reassign_on_leave(
 
     let leaver_station = current.get(leaving_player).cloned();
     let no_prev_holder: Option<String> = no_prev_station.as_ref().and_then(|s| {
-        current.iter().find(|(_, v)| *v == s).map(|(k, _)| k.clone())
+        current
+            .iter()
+            .find(|(_, v)| *v == s)
+            .map(|(k, _)| k.clone())
     });
 
     let leaver_is_no_prev = match (&leaver_station, &no_prev_station) {
@@ -225,7 +227,11 @@ pub fn reassign_on_leave(
 
 /// Resolve the `next` target for a station at `n` toward count `n+1`.
 /// Returns the station name at `n+1` the player should move to.
-fn resolve_next(current_defs: &[StationDef], station_name: &str, _next_count: u32) -> Option<String> {
+fn resolve_next(
+    current_defs: &[StationDef],
+    station_name: &str,
+    _next_count: u32,
+) -> Option<String> {
     let def = current_defs.iter().find(|d| d.name == station_name)?;
     // Explicit next takes precedence.
     if let Some(explicit) = &def.next {
@@ -236,7 +242,11 @@ fn resolve_next(current_defs: &[StationDef], station_name: &str, _next_count: u3
 }
 
 /// Resolve the `previous` target for a station at `n` toward count `n-1`.
-fn resolve_previous(current_defs: &[StationDef], station_name: &str, _prev_count: u32) -> Option<String> {
+fn resolve_previous(
+    current_defs: &[StationDef],
+    station_name: &str,
+    _prev_count: u32,
+) -> Option<String> {
     let def = current_defs.iter().find(|d| d.name == station_name)?;
     if let Some(explicit) = &def.previous {
         return Some(explicit.clone());
@@ -277,8 +287,8 @@ fn find_no_previous_station(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stations_config::*;
     use crate::messages::Console;
+    use crate::stations_config::*;
 
     // ── Helper TOML fixtures ─────────────────────────────────────────────────
 
@@ -365,7 +375,9 @@ consoles = ["Sensors"]
     #[test]
     fn default_complexity_presets_sensors_only_std() {
         let presets = default_complexity_presets();
-        let got = presets.get(&Console::Sensors).expect("Sensors should have presets");
+        let got = presets
+            .get(&Console::Sensors)
+            .expect("Sensors should have presets");
         assert_eq!(got.len(), 1, "Sensors should have exactly one preset");
         assert_eq!(got[0], "Std", "Sensors preset should be 'Std'");
     }
@@ -373,7 +385,9 @@ consoles = ["Sensors"]
     #[test]
     fn default_complexity_presets_shields_only_std() {
         let presets = default_complexity_presets();
-        let got = presets.get(&Console::Shields).expect("Shields should have presets");
+        let got = presets
+            .get(&Console::Shields)
+            .expect("Shields should have presets");
         assert_eq!(got.len(), 1, "Shields should have exactly one preset");
         assert_eq!(got[0], "Std", "Shields preset should be 'Std'");
     }
@@ -381,7 +395,9 @@ consoles = ["Sensors"]
     #[test]
     fn default_complexity_presets_navigation_only_std() {
         let presets = default_complexity_presets();
-        let got = presets.get(&Console::Navigation).expect("Navigation should have presets");
+        let got = presets
+            .get(&Console::Navigation)
+            .expect("Navigation should have presets");
         assert_eq!(got.len(), 1, "Navigation should have exactly one preset");
         assert_eq!(got[0], "Std", "Navigation preset should be 'Std'");
     }
@@ -575,7 +591,14 @@ consoles = ["Helm"]
 "#;
         let err = parse_and_validate(toml).unwrap_err();
         assert!(
-            matches!(err, StationConfigError::CountOutOfRange { count: 1, min: 2, max: 4 }),
+            matches!(
+                err,
+                StationConfigError::CountOutOfRange {
+                    count: 1,
+                    min: 2,
+                    max: 4
+                }
+            ),
             "unexpected error: {:?}",
             err
         );
@@ -669,7 +692,11 @@ consoles = ["CaptainChair"]
     fn implicit_next_resolved_when_same_name_exists_at_next_count() {
         // multi_count_toml has "Bridge" at all counts — should validate fine
         let result = parse_and_validate(multi_count_toml());
-        assert!(result.is_ok(), "implicit next resolution failed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "implicit next resolution failed: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -719,13 +746,18 @@ consoles = ["CaptainChair", "Helm"]
     fn join_1p_to_2p_existing_player_follows_next_new_player_gets_no_prev() {
         let stations = worked_example_stations();
         // Alice is at 1P Captain (next=Helm)
-        let current: StationAssignments =
-            [("alice".to_string(), "Captain".to_string())].into();
+        let current: StationAssignments = [("alice".to_string(), "Captain".to_string())].into();
         let result = reassign_on_join(&stations, &current, "bob");
-        assert_eq!(result.get("alice").map(String::as_str), Some("Helm"),
-            "alice should follow next to Helm");
-        assert_eq!(result.get("bob").map(String::as_str), Some("Tactical"),
-            "bob gets the station with no previous at 2P");
+        assert_eq!(
+            result.get("alice").map(String::as_str),
+            Some("Helm"),
+            "alice should follow next to Helm"
+        );
+        assert_eq!(
+            result.get("bob").map(String::as_str),
+            Some("Tactical"),
+            "bob gets the station with no previous at 2P"
+        );
         assert_eq!(result.len(), 2);
     }
 
@@ -736,19 +768,23 @@ consoles = ["CaptainChair", "Helm"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-        ].into();
+        ]
+        .into();
         let result = reassign_on_join(&stations, &current, "carol");
         assert_eq!(result.get("alice").map(String::as_str), Some("Helm"));
         assert_eq!(result.get("bob").map(String::as_str), Some("Tactical"));
-        assert_eq!(result.get("carol").map(String::as_str), Some("Engineering"),
-            "carol gets Engineering which has no previous at 3P");
+        assert_eq!(
+            result.get("carol").map(String::as_str),
+            Some("Engineering"),
+            "carol gets Engineering which has no previous at 3P"
+        );
         assert_eq!(result.len(), 3);
     }
 
     #[test]
     fn join_at_max_players_returns_current_unchanged_new_player_is_spectator() {
         let stations = worked_example_stations(); // max_players = 6
-        // Full 6P crew
+                                                  // Full 6P crew
         let current: StationAssignments = [
             ("alice".to_string(), "Captain".to_string()),
             ("bob".to_string(), "Helm".to_string()),
@@ -756,7 +792,8 @@ consoles = ["CaptainChair", "Helm"]
             ("dave".to_string(), "Engineering".to_string()),
             ("eve".to_string(), "Comms".to_string()),
             ("frank".to_string(), "Sensors".to_string()),
-        ].into();
+        ]
+        .into();
         let result = reassign_on_join(&stations, &current, "gary");
         // Current unchanged; gary is not in the map (caller adds to spectator queue)
         assert!(!result.contains_key("gary"), "gary should be a spectator");
@@ -770,20 +807,27 @@ consoles = ["CaptainChair", "Helm"]
         let stations = worked_example_stations();
         let current = StationAssignments::new();
         let result = advance_on_join(&stations, &current);
-        assert!(result.is_empty(), "no assigned players → nothing to advance");
+        assert!(
+            result.is_empty(),
+            "no assigned players → nothing to advance"
+        );
     }
 
     #[test]
     fn advance_on_join_1p_to_2p_existing_player_follows_next_no_new_assignment() {
         let stations = worked_example_stations();
         // Alice is at 1P Captain (next=Helm). Bob joins (unassigned).
-        let current: StationAssignments =
-            [("alice".to_string(), "Captain".to_string())].into();
+        let current: StationAssignments = [("alice".to_string(), "Captain".to_string())].into();
         let result = advance_on_join(&stations, &current);
-        assert_eq!(result.get("alice").map(String::as_str), Some("Helm"),
-            "alice follows next to Helm at 2P");
-        assert!(!result.contains_key("bob"),
-            "new player is NOT assigned by advance_on_join");
+        assert_eq!(
+            result.get("alice").map(String::as_str),
+            Some("Helm"),
+            "alice follows next to Helm at 2P"
+        );
+        assert!(
+            !result.contains_key("bob"),
+            "new player is NOT assigned by advance_on_join"
+        );
         assert_eq!(result.len(), 1);
     }
 
@@ -793,12 +837,19 @@ consoles = ["CaptainChair", "Helm"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-        ].into();
+        ]
+        .into();
         let result = advance_on_join(&stations, &current);
-        assert_eq!(result.get("alice").map(String::as_str), Some("Helm"),
-            "alice stays Helm at 3P (next=Helm)");
-        assert_eq!(result.get("bob").map(String::as_str), Some("Tactical"),
-            "bob stays Tactical at 3P (next=Tactical)");
+        assert_eq!(
+            result.get("alice").map(String::as_str),
+            Some("Helm"),
+            "alice stays Helm at 3P (next=Helm)"
+        );
+        assert_eq!(
+            result.get("bob").map(String::as_str),
+            Some("Tactical"),
+            "bob stays Tactical at 3P (next=Tactical)"
+        );
         assert_eq!(result.len(), 2, "carol is NOT auto-assigned");
     }
 
@@ -810,9 +861,13 @@ consoles = ["CaptainChair", "Helm"]
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
             ("carol".to_string(), "Repair".to_string()),
-        ].into();
+        ]
+        .into();
         let result = advance_on_join(&stations, &current);
-        assert_eq!(result, current, "at max_players advance_on_join returns current unchanged");
+        assert_eq!(
+            result, current,
+            "at max_players advance_on_join returns current unchanged"
+        );
     }
 
     // ── reassign_on_leave ────────────────────────────────────────────────────
@@ -824,12 +879,12 @@ consoles = ["CaptainChair", "Helm"]
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
             ("carol".to_string(), "Repair".to_string()),
-        ].into();
+        ]
+        .into();
         // Carol holds Repair which has no previous at 3P → carol is no-prev holder
         // Carol leaves → alice follows prev(Helm)=Helm, bob follows prev(Tactical)=Tactical
-        let (result, remaining_q) = reassign_on_leave(
-            &stations, &current, "carol", &VecDeque::new()
-        );
+        let (result, remaining_q) =
+            reassign_on_leave(&stations, &current, "carol", &VecDeque::new());
         assert_eq!(result.get("alice").map(String::as_str), Some("Helm"));
         assert_eq!(result.get("bob").map(String::as_str), Some("Tactical"));
         assert!(!result.contains_key("carol"));
@@ -847,13 +902,15 @@ consoles = ["CaptainChair", "Helm"]
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
             ("carol".to_string(), "Engineering".to_string()),
-        ].into();
-        let (result, _) = reassign_on_leave(
-            &stations, &current, "bob", &VecDeque::new()
-        );
+        ]
+        .into();
+        let (result, _) = reassign_on_leave(&stations, &current, "bob", &VecDeque::new());
         assert_eq!(result.get("alice").map(String::as_str), Some("Helm"));
-        assert_eq!(result.get("carol").map(String::as_str), Some("Tactical"),
-            "carol (no-prev) should fill vacated Tactical slot");
+        assert_eq!(
+            result.get("carol").map(String::as_str),
+            Some("Tactical"),
+            "carol (no-prev) should fill vacated Tactical slot"
+        );
         assert!(!result.contains_key("bob"));
         assert_eq!(result.len(), 2);
     }
@@ -866,10 +923,9 @@ consoles = ["CaptainChair", "Helm"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-        ].into();
-        let (result, _) = reassign_on_leave(
-            &stations, &current, "bob", &VecDeque::new()
-        );
+        ]
+        .into();
+        let (result, _) = reassign_on_leave(&stations, &current, "bob", &VecDeque::new());
         assert_eq!(result.get("alice").map(String::as_str), Some("Captain"));
         assert!(!result.contains_key("bob"));
         assert_eq!(result.len(), 1);
@@ -883,12 +939,14 @@ consoles = ["CaptainChair", "Helm"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-        ].into();
-        let (result, _) = reassign_on_leave(
-            &stations, &current, "alice", &VecDeque::new()
+        ]
+        .into();
+        let (result, _) = reassign_on_leave(&stations, &current, "alice", &VecDeque::new());
+        assert_eq!(
+            result.get("bob").map(String::as_str),
+            Some("Captain"),
+            "bob (no-prev at 2P) fills alice's vacated Captain slot"
         );
-        assert_eq!(result.get("bob").map(String::as_str), Some("Captain"),
-            "bob (no-prev at 2P) fills alice's vacated Captain slot");
         assert!(!result.contains_key("alice"));
         assert_eq!(result.len(), 1);
     }
@@ -900,7 +958,8 @@ consoles = ["CaptainChair", "Helm"]
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
             ("carol".to_string(), "Repair".to_string()),
-        ].into();
+        ]
+        .into();
         let mut spectators: VecDeque<String> = VecDeque::new();
         spectators.push_back("dave".to_string());
         spectators.push_back("eve".to_string());
@@ -914,9 +973,9 @@ consoles = ["CaptainChair", "Helm"]
         // That requires N-1 to have more stations than N-1 players remain, i.e., only 1 stays.
         // Actually pull happens only if new_map.len() < prev_defs.len() after cascade.
         // At 3P leave, prev is 2P (2 defs). We end with 2 players → 2 defs. No pull.
-        // For a pull: need scenario where at max players, someone leaves and only 1 remains → 
+        // For a pull: need scenario where at max players, someone leaves and only 1 remains →
         // result at 1P has 1 def but result has 1 player = no pull either.
-        // Actually: spectator pull happens when N==max_players and the cascade produces 
+        // Actually: spectator pull happens when N==max_players and the cascade produces
         // fewer filled slots than defined slots at N-1.
         // This can only happen if the cascade itself can't fill all slots.
         // With the worked example all cascades work perfectly.
@@ -927,8 +986,8 @@ consoles = ["CaptainChair", "Helm"]
         // This happens only if N was at max AND... wait, let me re-read.
         // "if the cascade results in any unfilled station at N-1 (which only happens when N was already
         // at max_players)"
-        // I think the logic is: when max_players+1 spectators exist and one leaves, promoting a 
-        // spectator makes sense. But with worked example max=3, 3P leave → 2P, 2 players remain, 
+        // I think the logic is: when max_players+1 spectators exist and one leaves, promoting a
+        // spectator makes sense. But with worked example max=3, 3P leave → 2P, 2 players remain,
         // 2 stations at 2P → full. Spectator queue unchanged.
         // The ONLY way a slot is empty is if we go from 1P (only player leaves → 0P) but min=1.
         // OR: the number of players remaining < number of stations at n-1.
@@ -990,17 +1049,17 @@ consoles = ["Tactical"]
         // n-1 stations... actually that IS guaranteed by the station design.
 
         // Conclusion: spectator pull in reassign_on_leave is triggered when
-        // the PRD scenario is: N = max_players AND the leaver leaves an empty slot 
+        // the PRD scenario is: N = max_players AND the leaver leaves an empty slot
         // that the cascade CANNOT fill because there aren't enough players.
         // With worked example (max=3): 3P→2P always produces 2 filled slots at 2P.
-        // The pull is actually: "if the result map has fewer entries than prev_defs" which 
-        // only happens if somebody was already missing from current (shouldn't happen) 
-        // OR we're going to 0P (below min). 
+        // The pull is actually: "if the result map has fewer entries than prev_defs" which
+        // only happens if somebody was already missing from current (shouldn't happen)
+        // OR we're going to 0P (below min).
         // So for a proper spectator pull test, at max=2 with Alice=Helm, Bob=Tactical,
         // Bob leaves. Cascade: Alice→Captain (1 player), 1P has 1 station. No empty. No pull.
         // But if Bob PLUS we only have Alice remaining, and Dave is spectator...
         // the spectator pull mechanism is for refilling when the cascade leaves a hole.
-        // 
+        //
         // After reading again: the spectator gets pulled to MAINTAIN max_players count.
         // i.e. when N=max and a player leaves, go to N-1, THEN pull spectator to go back to N.
         // But our function returns the N-1 state; the caller promotes the spectator.
@@ -1010,11 +1069,11 @@ consoles = ["Tactical"]
         // With max=2: Alice=Helm(prev=Captain), Bob=Tactical(no-prev).
         // Dave=spectator. Bob leaves. Carol was also a spectator.
         // Result at 1P: Alice→Captain. 1 station at 1P. 1 player. No pull.
-        // 
+        //
         // For the pull to fire, I need N=max and leave produces count < n1 defs.
         // That means n-1 has MORE defs than n-1. That would mean the same config has
         // more stations at a lower player count which is unusual/wrong.
-        // 
+        //
         // I think the actual scenario from the PRD is: spectator was added because we were
         // AT MAX (say 3P full), dave joins as spectator. Then someone leaves (3P→2P).
         // Now we're at 2P. Dave was spectator at max. The pull at 2P level means dave joins
@@ -1025,7 +1084,8 @@ consoles = ["Tactical"]
         let current: StationAssignments = [
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
-        ].into();
+        ]
+        .into();
         let mut spectators: VecDeque<String> = VecDeque::new();
         spectators.push_back("dave".to_string());
 
@@ -1040,24 +1100,24 @@ consoles = ["Tactical"]
     #[test]
     fn spectator_pulled_when_cascade_leaves_empty_slot() {
         // Config: 1P has 1 station, 2P has 2 stations, but use max=2.
-        // At 2P: alice=Helm, bob=Tactical. 
+        // At 2P: alice=Helm, bob=Tactical.
         // Separately test a degenerate config where going 2P→1P leaves a hole.
-        // That's structurally impossible in a valid chain. 
-        // 
-        // The actual pull scenario: N=max_players is 2. Alice alone is at 2P somehow? 
+        // That's structurally impossible in a valid chain.
+        //
+        // The actual pull scenario: N=max_players is 2. Alice alone is at 2P somehow?
         // That would mean current has only 1 entry but n would be 1, not 2.
-        // 
+        //
         // Re-reading the function: pull fires if new_map.len() < prev_defs.len().
         // With worked example, after bob leaves at 2P: 1 player, 1 def → equal. No pull.
-        // 
+        //
         // To get pull: we need a config where 2P has 1 station but 1P also has 1 station,
-        // AND we go from 3P to 2P with only 1 player remaining. That's impossible via 
+        // AND we go from 3P to 2P with only 1 player remaining. That's impossible via
         // normal one-at-a-time leave.
         //
         // Conclusion: the spectator_pull path in reassign_on_leave is defensive code.
         // In a validly-constructed station chain with one-by-one joins/leaves, the cascade
         // always fills exactly n-1 slots. The pull path would only fire with corrupt state.
-        // 
+        //
         // I'll verify the code path EXISTS but not test an impossible scenario.
         // Instead, test "only one spectator pulled per leave" by ensuring at most 1 promotion.
         // We already verified spectators remain queued above. This test is satisfied.
@@ -1072,7 +1132,8 @@ consoles = ["Tactical"]
             ("alice".to_string(), "Helm".to_string()),
             ("bob".to_string(), "Tactical".to_string()),
             ("carol".to_string(), "Repair".to_string()),
-        ].into();
+        ]
+        .into();
         let mut spectators: VecDeque<String> = VecDeque::new();
         spectators.push_back("dave".to_string());
         spectators.push_back("eve".to_string());
@@ -1090,18 +1151,19 @@ consoles = ["Tactical"]
     fn round_trip_join_then_leave_returns_to_original() {
         let stations = worked_example_stations();
         // Start: alice=Captain (1P)
-        let start: StationAssignments =
-            [("alice".to_string(), "Captain".to_string())].into();
+        let start: StationAssignments = [("alice".to_string(), "Captain".to_string())].into();
 
         // Bob joins → 2P
         let after_join = reassign_on_join(&stations, &start, "bob");
         assert_eq!(after_join.len(), 2);
 
         // Bob leaves → back to 1P
-        let (after_leave, _) =
-            reassign_on_leave(&stations, &after_join, "bob", &VecDeque::new());
+        let (after_leave, _) = reassign_on_leave(&stations, &after_join, "bob", &VecDeque::new());
         assert_eq!(after_leave.len(), 1);
-        assert_eq!(after_leave.get("alice").map(String::as_str), Some("Captain"));
+        assert_eq!(
+            after_leave.get("alice").map(String::as_str),
+            Some("Captain")
+        );
     }
 
     #[test]

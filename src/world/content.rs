@@ -45,9 +45,15 @@ pub enum WorldEvent {
     /// from the trigger's own origin layer) equals `origin_layer`. This
     /// keeps same-named flags in different layers from cross-firing
     /// (PRD #397 US #6, fix 1).
-    FlagSet { name: String, origin_layer: Option<String> },
+    FlagSet {
+        name: String,
+        origin_layer: Option<String>,
+    },
     /// A world flag transitioned true→false. See `FlagSet`.
-    FlagCleared { name: String, origin_layer: Option<String> },
+    FlagCleared {
+        name: String,
+        origin_layer: Option<String>,
+    },
     /// The containing world finished loading (base-world `Startup` or
     /// sub-world `LoadWorld`). Emitted once per load cycle.
     WorldLoaded,
@@ -253,9 +259,9 @@ pub fn evaluate_single_trigger(
     if state.fired {
         return None;
     }
-    let fires = events.iter().any(|event| {
-        condition_matches(&state.trigger.condition, event, name_to_uuid, layer_chain)
-    });
+    let fires = events
+        .iter()
+        .any(|event| condition_matches(&state.trigger.condition, event, name_to_uuid, layer_chain));
     if !fires {
         return None;
     }
@@ -343,37 +349,58 @@ fn condition_matches(
 ) -> bool {
     match (condition, event) {
         (TriggerCondition::OnDestroyed { entity_name }, WorldEvent::Destroyed { uuid }) => {
-            name_to_uuid.get(entity_name).map(|u| u == uuid).unwrap_or(false)
+            name_to_uuid
+                .get(entity_name)
+                .map(|u| u == uuid)
+                .unwrap_or(false)
         }
         (TriggerCondition::OnAttacked { entity_name }, WorldEvent::Attacked { uuid, .. }) => {
-            name_to_uuid.get(entity_name).map(|u| u == uuid).unwrap_or(false)
+            name_to_uuid
+                .get(entity_name)
+                .map(|u| u == uuid)
+                .unwrap_or(false)
         }
         (TriggerCondition::OnTimer { after_secs }, WorldEvent::TimerElapsed { elapsed_secs }) => {
             elapsed_secs >= after_secs
         }
         (TriggerCondition::OnHailed { entity_name }, WorldEvent::Hailed { target_uuid }) => {
-            name_to_uuid.get(entity_name).map(|u| u == target_uuid).unwrap_or(false)
+            name_to_uuid
+                .get(entity_name)
+                .map(|u| u == target_uuid)
+                .unwrap_or(false)
         }
         (
             TriggerCondition::OnFlagSet { name },
-            WorldEvent::FlagSet { name: ev_name, origin_layer: ev_layer },
+            WorldEvent::FlagSet {
+                name: ev_name,
+                origin_layer: ev_layer,
+            },
         ) => match resolve_layer_prefix(name, layer_chain) {
             Some((stripped, target_layer)) => &stripped == ev_name && &target_layer == ev_layer,
             None => false,
         },
         (
             TriggerCondition::OnFlagCleared { name },
-            WorldEvent::FlagCleared { name: ev_name, origin_layer: ev_layer },
+            WorldEvent::FlagCleared {
+                name: ev_name,
+                origin_layer: ev_layer,
+            },
         ) => match resolve_layer_prefix(name, layer_chain) {
             Some((stripped, target_layer)) => &stripped == ev_name && &target_layer == ev_layer,
             None => false,
         },
         (TriggerCondition::OnWorldLoaded, WorldEvent::WorldLoaded) => true,
         (TriggerCondition::OnEnteredRegion { entity_name }, WorldEvent::EnteredRegion { uuid }) => {
-            name_to_uuid.get(entity_name).map(|u| u == uuid).unwrap_or(false)
+            name_to_uuid
+                .get(entity_name)
+                .map(|u| u == uuid)
+                .unwrap_or(false)
         }
         (TriggerCondition::OnExitedRegion { entity_name }, WorldEvent::ExitedRegion { uuid }) => {
-            name_to_uuid.get(entity_name).map(|u| u == uuid).unwrap_or(false)
+            name_to_uuid
+                .get(entity_name)
+                .map(|u| u == uuid)
+                .unwrap_or(false)
         }
         _ => false,
     }
@@ -384,9 +411,7 @@ fn condition_matches(
 /// Create a `Vec<TriggerState>` from a parsed `WorldConfig` (PRD #341).
 ///
 /// All triggers start unfired.
-pub fn trigger_states_from_world(
-    world: &crate::world::config::WorldConfig,
-) -> Vec<TriggerState> {
+pub fn trigger_states_from_world(world: &crate::world::config::WorldConfig) -> Vec<TriggerState> {
     world
         .triggers
         .iter()
@@ -421,7 +446,9 @@ mod tests {
 
     fn dest_trigger(name: &str, action: TriggerAction) -> Trigger {
         Trigger {
-            condition: TriggerCondition::OnDestroyed { entity_name: name.into() },
+            condition: TriggerCondition::OnDestroyed {
+                entity_name: name.into(),
+            },
             actions: vec![action],
             when: None,
         }
@@ -447,7 +474,9 @@ mod tests {
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
-        let events = vec![WorldEvent::Destroyed { uuid: "uuid-1".into() }];
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-1".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].actions.len(), 1);
@@ -464,7 +493,9 @@ mod tests {
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
         name_to_uuid.insert("station".into(), "uuid-2".into());
-        let events = vec![WorldEvent::Destroyed { uuid: "uuid-2".into() }];
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-2".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert!(fired.is_empty());
         assert!(!states[0].fired);
@@ -479,7 +510,9 @@ mod tests {
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-1".into());
-        let events = vec![WorldEvent::Destroyed { uuid: "uuid-1".into() }];
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-1".into(),
+        }];
         let fired1 = evaluate_triggers(&mut states, &events, &name_to_uuid);
         let fired2 = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired1.len(), 1);
@@ -510,7 +543,9 @@ mod tests {
     fn on_attacked_fires_when_entity_attacked() {
         let mut states = vec![TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnAttacked { entity_name: "raider".into() },
+                condition: TriggerCondition::OnAttacked {
+                    entity_name: "raider".into(),
+                },
                 actions: vec![add_obj("obj-atk")],
                 when: None,
             },
@@ -531,7 +566,9 @@ mod tests {
     fn on_hailed_fires_when_entity_hailed() {
         let mut states = vec![TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnHailed { entity_name: "starbase".into() },
+                condition: TriggerCondition::OnHailed {
+                    entity_name: "starbase".into(),
+                },
                 actions: vec![add_obj("obj-hail")],
                 when: None,
             },
@@ -540,7 +577,9 @@ mod tests {
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("starbase".into(), "uuid-sb".into());
-        let events = vec![WorldEvent::Hailed { target_uuid: "uuid-sb".into() }];
+        let events = vec![WorldEvent::Hailed {
+            target_uuid: "uuid-sb".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
     }
@@ -562,7 +601,9 @@ mod tests {
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider".into(), "uuid-r".into());
         name_to_uuid.insert("station".into(), "uuid-s".into());
-        let events = vec![WorldEvent::Destroyed { uuid: "uuid-r".into() }];
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-r".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
         assert!(states[0].fired);
@@ -577,7 +618,9 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let events = vec![WorldEvent::Destroyed { uuid: "uuid-x".into() }];
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-x".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert!(fired.is_empty());
     }
@@ -599,8 +642,15 @@ mod tests {
         let mut world = WorldConfig::default();
         world.comms.push(CommsTemplate {
             from: "starbase".into(),
-            trigger: TriggerCondition::OnHailed { entity_name: "starbase".into() },
-            node: CommsDialogueNode { body: "hello".into(), responses: vec![], speaker: None, delay_secs: None },
+            trigger: TriggerCondition::OnHailed {
+                entity_name: "starbase".into(),
+            },
+            node: CommsDialogueNode {
+                body: "hello".into(),
+                responses: vec![],
+                speaker: None,
+                delay_secs: None,
+            },
             thread_id: None,
             urgent: false,
         });
@@ -616,8 +666,15 @@ mod tests {
         let mut states = vec![CommsTemplateState {
             template: CommsTemplate {
                 from: "raider".into(),
-                trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], speaker: None, delay_secs: None },
+                trigger: TriggerCondition::OnAttacked {
+                    entity_name: "raider".into(),
+                },
+                node: CommsDialogueNode {
+                    body: "MAYDAY".into(),
+                    responses: vec![],
+                    speaker: None,
+                    delay_secs: None,
+                },
                 thread_id: None,
                 urgent: false,
             },
@@ -639,8 +696,15 @@ mod tests {
         let mut states = vec![CommsTemplateState {
             template: CommsTemplate {
                 from: "raider".into(),
-                trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], speaker: None, delay_secs: None },
+                trigger: TriggerCondition::OnAttacked {
+                    entity_name: "raider".into(),
+                },
+                node: CommsDialogueNode {
+                    body: "MAYDAY".into(),
+                    responses: vec![],
+                    speaker: None,
+                    delay_secs: None,
+                },
                 thread_id: None,
                 urgent: false,
             },
@@ -663,8 +727,15 @@ mod tests {
         let mut states = vec![CommsTemplateState {
             template: CommsTemplate {
                 from: "raider".into(),
-                trigger: TriggerCondition::OnAttacked { entity_name: "raider".into() },
-                node: CommsDialogueNode { body: "MAYDAY".into(), responses: vec![], speaker: None, delay_secs: None },
+                trigger: TriggerCondition::OnAttacked {
+                    entity_name: "raider".into(),
+                },
+                node: CommsDialogueNode {
+                    body: "MAYDAY".into(),
+                    responses: vec![],
+                    speaker: None,
+                    delay_secs: None,
+                },
                 thread_id: None,
                 urgent: false,
             },
@@ -695,7 +766,10 @@ mod tests {
             attacker_uuid: "uuid-p".into(),
         }];
         let fired = evaluate_comms_templates(&mut states, &events, &name_to_uuid);
-        assert!(!fired.is_empty(), "raider_alpha on_attacked comms must fire");
+        assert!(
+            !fired.is_empty(),
+            "raider_alpha on_attacked comms must fire"
+        );
         assert!(fired.iter().any(|f| f.from == "raider_alpha"));
     }
 
@@ -706,10 +780,15 @@ mod tests {
         let mut states = trigger_states_from_world(&world);
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("raider_alpha".into(), "uuid-r".into());
-        let events = vec![WorldEvent::Destroyed { uuid: "uuid-r".into() }];
+        let events = vec![WorldEvent::Destroyed {
+            uuid: "uuid-r".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
-        assert!(fired[0].actions.iter().any(|a| matches!(a, TriggerAction::AddObjective { .. })));
+        assert!(fired[0]
+            .actions
+            .iter()
+            .any(|a| matches!(a, TriggerAction::AddObjective { .. })));
     }
 
     // ── on_world_loaded (issue #415) ──────────────────────────────────────
@@ -747,7 +826,10 @@ mod tests {
         let events = vec![
             WorldEvent::Destroyed { uuid: "x".into() },
             WorldEvent::TimerElapsed { elapsed_secs: 5.0 },
-            WorldEvent::FlagSet { name: "f".into(), origin_layer: None },
+            WorldEvent::FlagSet {
+                name: "f".into(),
+                origin_layer: None,
+            },
         ];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert!(fired.is_empty());
@@ -779,7 +861,9 @@ mod tests {
     fn on_entered_region_matches_entered_region_event_with_resolved_uuid() {
         let mut states = vec![TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnEnteredRegion { entity_name: "nebula".into() },
+                condition: TriggerCondition::OnEnteredRegion {
+                    entity_name: "nebula".into(),
+                },
                 actions: vec![add_obj("obj-nebula")],
                 when: None,
             },
@@ -788,7 +872,9 @@ mod tests {
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
-        let events = vec![WorldEvent::EnteredRegion { uuid: "uuid-nebula".into() }];
+        let events = vec![WorldEvent::EnteredRegion {
+            uuid: "uuid-nebula".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
         assert!(states[0].fired);
@@ -798,7 +884,9 @@ mod tests {
     fn on_entered_region_does_not_match_different_uuid() {
         let mut states = vec![TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnEnteredRegion { entity_name: "nebula".into() },
+                condition: TriggerCondition::OnEnteredRegion {
+                    entity_name: "nebula".into(),
+                },
                 actions: vec![add_obj("obj-nebula")],
                 when: None,
             },
@@ -807,7 +895,9 @@ mod tests {
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
-        let events = vec![WorldEvent::EnteredRegion { uuid: "uuid-other".into() }];
+        let events = vec![WorldEvent::EnteredRegion {
+            uuid: "uuid-other".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert!(fired.is_empty());
         assert!(!states[0].fired);
@@ -817,7 +907,9 @@ mod tests {
     fn on_entered_region_does_not_match_exited_region_event() {
         let mut states = vec![TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnEnteredRegion { entity_name: "nebula".into() },
+                condition: TriggerCondition::OnEnteredRegion {
+                    entity_name: "nebula".into(),
+                },
                 actions: vec![add_obj("x")],
                 when: None,
             },
@@ -826,7 +918,9 @@ mod tests {
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
-        let events = vec![WorldEvent::ExitedRegion { uuid: "uuid-nebula".into() }];
+        let events = vec![WorldEvent::ExitedRegion {
+            uuid: "uuid-nebula".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert!(fired.is_empty());
     }
@@ -835,7 +929,9 @@ mod tests {
     fn on_exited_region_matches_exited_region_event_with_resolved_uuid() {
         let mut states = vec![TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnExitedRegion { entity_name: "nebula".into() },
+                condition: TriggerCondition::OnExitedRegion {
+                    entity_name: "nebula".into(),
+                },
                 actions: vec![add_obj("obj-left-nebula")],
                 when: None,
             },
@@ -844,7 +940,9 @@ mod tests {
         }];
         let mut name_to_uuid = HashMap::new();
         name_to_uuid.insert("nebula".into(), "uuid-nebula".into());
-        let events = vec![WorldEvent::ExitedRegion { uuid: "uuid-nebula".into() }];
+        let events = vec![WorldEvent::ExitedRegion {
+            uuid: "uuid-nebula".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert_eq!(fired.len(), 1);
     }
@@ -853,7 +951,9 @@ mod tests {
     fn on_entered_region_does_not_match_unresolved_name() {
         let mut states = vec![TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnEnteredRegion { entity_name: "unknown".into() },
+                condition: TriggerCondition::OnEnteredRegion {
+                    entity_name: "unknown".into(),
+                },
                 actions: vec![add_obj("x")],
                 when: None,
             },
@@ -861,7 +961,9 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new(); // empty — name does not resolve
-        let events = vec![WorldEvent::EnteredRegion { uuid: "any-uuid".into() }];
+        let events = vec![WorldEvent::EnteredRegion {
+            uuid: "any-uuid".into(),
+        }];
         let fired = evaluate_triggers(&mut states, &events, &name_to_uuid);
         assert!(fired.is_empty());
     }
@@ -875,7 +977,9 @@ mod tests {
         // origin_layer is the trigger's loader (base = None).
         let mut state = TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnFlagSet { name: "parent:armed".into() },
+                condition: TriggerCondition::OnFlagSet {
+                    name: "parent:armed".into(),
+                },
                 actions: vec![add_obj("obj-parent")],
                 when: None,
             },
@@ -888,10 +992,11 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(
-            &mut state, &events, &name_to_uuid, &[], &layer_chain,
+        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain);
+        assert!(
+            fired.is_some(),
+            "parent:armed must match a base-layer FlagSet"
         );
-        assert!(fired.is_some(), "parent:armed must match a base-layer FlagSet");
     }
 
     #[test]
@@ -900,7 +1005,9 @@ mod tests {
         // fire a trigger watching `armed` in its own layer.
         let mut state = TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnFlagSet { name: "armed".into() },
+                condition: TriggerCondition::OnFlagSet {
+                    name: "armed".into(),
+                },
                 actions: vec![add_obj("obj-self")],
                 when: None,
             },
@@ -914,9 +1021,7 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(
-            &mut state, &events, &name_to_uuid, &[], &layer_chain,
-        );
+        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain);
         assert!(
             fired.is_none(),
             "same-named flag in another layer must not cross-fire"
@@ -929,7 +1034,9 @@ mod tests {
         // — walks past root. Must never match.
         let mut state = TriggerState {
             trigger: Trigger {
-                condition: TriggerCondition::OnFlagSet { name: "parent:armed".into() },
+                condition: TriggerCondition::OnFlagSet {
+                    name: "parent:armed".into(),
+                },
                 actions: vec![add_obj("x")],
                 when: None,
             },
@@ -942,9 +1049,7 @@ mod tests {
             origin_layer: None,
         }];
         let name_to_uuid = HashMap::new();
-        let fired = evaluate_single_trigger(
-            &mut state, &events, &name_to_uuid, &[], &layer_chain,
-        );
+        let fired = evaluate_single_trigger(&mut state, &events, &name_to_uuid, &[], &layer_chain);
         assert!(fired.is_none(), "parent: from base must resolve past root");
     }
 

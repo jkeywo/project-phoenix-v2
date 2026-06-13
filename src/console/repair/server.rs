@@ -1,15 +1,15 @@
 use bevy::prelude::*;
 
-use crate::lobby::{InboundMessage, Sessions};
 use crate::console_bridge::ConsoleStateChanged;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
+use crate::lobby::{InboundMessage, Sessions};
+use crate::messages::ModifierSlot;
 use crate::messages::{
     ClientMessage, Console, ConsoleHullStatus, RepairConsoleState, ServerMessage, TeamSlot,
 };
+use crate::modifiers::ShipModifiers;
 use crate::repair_teams::RepairTeams;
 use crate::simulation::ShipHullIntegrity;
-use crate::modifiers::ShipModifiers;
-use crate::messages::ModifierSlot;
 
 // ── Resources ─────────────────────────────────────────────────────────────────
 
@@ -35,13 +35,17 @@ impl Plugin for RepairPlugin {
         app.add_message::<ConsoleStateChanged>();
         app.insert_resource(ShipRepairTeams(RepairTeams::default()))
             .add_systems(Startup, spawn_repair_console_state_entity)
-            .add_systems(Update, (
-                handle_dispatch_repair_team.in_set(crate::sim_sets::SimSet::Input),
-                tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
-                recompute_repair_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-                push_repair_console_state.in_set(crate::sim_sets::SimSet::Broadcast)
-                    .after(recompute_repair_console_state),
-            ))
+            .add_systems(
+                Update,
+                (
+                    handle_dispatch_repair_team.in_set(crate::sim_sets::SimSet::Input),
+                    tick_repair_teams.in_set(crate::sim_sets::SimSet::Physics),
+                    recompute_repair_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                    push_repair_console_state
+                        .in_set(crate::sim_sets::SimSet::Broadcast)
+                        .after(recompute_repair_console_state),
+                ),
+            )
             .add_plugins(repair_state_broadcaster());
     }
 }
@@ -78,7 +82,9 @@ pub fn handle_dispatch_repair_team(
 ) {
     for ev in reader.read() {
         let (team_idx, target_console) = match &ev.msg {
-            ClientMessage::DispatchRepairTeam { team_idx, console } => (*team_idx as usize, console.clone()),
+            ClientMessage::DispatchRepairTeam { team_idx, console } => {
+                (*team_idx as usize, console.clone())
+            }
             _ => continue,
         };
         // Only the Repair console holder may dispatch teams.
@@ -118,24 +124,22 @@ pub fn recompute_repair_console_state(
 ) {
     let team_slots: Vec<TeamSlot> = teams.0.slots().to_vec();
 
-    let console_hull: Vec<ConsoleHullStatus> = hull.0
+    let console_hull: Vec<ConsoleHullStatus> = hull
+        .0
         .entries()
         .iter()
         .map(|(c, cur, max)| ConsoleHullStatus {
-            console:  c.clone(),
-            current:  *cur,
-            max_hp:   *max,
+            console: c.clone(),
+            current: *cur,
+            max_hp: *max,
         })
         .collect();
 
-    let damageable_consoles: Vec<Console> = hull.0
-        .entries()
-        .iter()
-        .map(|(c, _, _)| c.clone())
-        .collect();
+    let damageable_consoles: Vec<Console> =
+        hull.0.entries().iter().map(|(c, _, _)| c.clone()).collect();
 
     let next = RepairConsoleState {
-        teams:               team_slots,
+        teams: team_slots,
         console_hull,
         travel_duration_secs: teams.0.timings().travel_duration,
         damageable_consoles,
@@ -168,12 +172,12 @@ pub fn push_repair_console_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::SimOutbox;
     use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
     use crate::messages::*;
-    use crate::simulation::{ShipImpulse, ShipShields};
     use crate::shield::ShieldSystem;
+    use crate::simulation::SimOutbox;
+    use crate::simulation::{ShipImpulse, ShipShields};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -224,7 +228,10 @@ mod tests {
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -239,20 +246,49 @@ mod tests {
     }
 
     fn start_game(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "eng", ClientMessage::Identify { token: "eng".into(), name: "Bob".into() });
+        push(
+            app,
+            "eng",
+            ClientMessage::Identify {
+                token: "eng".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(app);
-        push(app, "eng", ClientMessage::SelectStation { station: "Repair".into() });
+        push(
+            app,
+            "eng",
+            ClientMessage::SelectStation {
+                station: "Repair".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
 
     fn team_is_travelling(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Travelling { .. })
+        matches!(
+            teams.0.slots()[idx],
+            crate::messages::TeamSlot::Travelling { .. }
+        )
     }
 
     fn team_is_idle(teams: &ShipRepairTeams, idx: usize) -> bool {
@@ -267,11 +303,21 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
 
-        push(&mut app, "captain", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
         tick(&mut app);
 
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_idle(&teams, 0), "team 0 should remain idle after non-Repair dispatch");
+        assert!(
+            team_is_idle(&teams, 0),
+            "team 0 should remain idle after non-Repair dispatch"
+        );
     }
 
     /// Repair holder dispatches team to a console → team enters Travelling.
@@ -280,11 +326,21 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
 
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
         tick(&mut app);
 
         let teams = app.world().resource::<ShipRepairTeams>();
-        assert!(team_is_travelling(&teams, 0), "team 0 should be travelling after dispatch");
+        assert!(
+            team_is_travelling(&teams, 0),
+            "team 0 should be travelling after dispatch"
+        );
     }
 
     /// When team is busy, dispatching to a different console redirects it.
@@ -294,18 +350,42 @@ mod tests {
         start_game(&mut app);
 
         // Dispatch both teams (default is 2).
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
         tick(&mut app);
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 1, console: Console::Tactical });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 1,
+                console: Console::Tactical,
+            },
+        );
         tick(&mut app);
 
         // Redirect team 0 to Power (different console) — now team 0 is Returning with queue
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Power });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Power,
+            },
+        );
         tick(&mut app);
 
         let teams = app.world().resource::<ShipRepairTeams>();
         // team 0 should be Returning (redirected), team 1 still Travelling
-        assert!(matches!(&teams.0.slots()[0], crate::messages::TeamSlot::Returning { .. }));
+        assert!(matches!(
+            &teams.0.slots()[0],
+            crate::messages::TeamSlot::Returning { .. }
+        ));
         assert!(team_is_travelling(&teams, 1));
     }
 
@@ -315,7 +395,14 @@ mod tests {
         let mut app = test_app();
         start_game(&mut app);
 
-        push(&mut app, "eng", ClientMessage::DispatchRepairTeam { team_idx: 0, console: Console::Helm });
+        push(
+            &mut app,
+            "eng",
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 0,
+                console: Console::Helm,
+            },
+        );
         let out1 = tick(&mut app);
         let out2 = tick(&mut app);
 
@@ -323,7 +410,10 @@ mod tests {
             matches!(&m.msg, ServerMessage::RepairState { teams } if
                 teams.iter().any(|t| matches!(t, crate::messages::TeamSlot::Travelling { .. })))
         });
-        assert!(has_repair_state, "RepairState should include a Travelling team after dispatch");
+        assert!(
+            has_repair_state,
+            "RepairState should include a Travelling team after dispatch"
+        );
     }
 
     /// End-to-end TOML-driven wiring check: build the runtime `RepairTeams`
@@ -341,12 +431,18 @@ mod tests {
         let timings = rc.to_runtime();
         let teams = crate::repair_teams::RepairTeams::new_with_timings(2, timings);
         assert_eq!(teams.timings().travel_duration, rc.travel_duration_secs);
-        assert_eq!(teams.timings().repair_rate_hp_per_sec, rc.repair_rate_hp_per_sec);
+        assert_eq!(
+            teams.timings().repair_rate_hp_per_sec,
+            rc.repair_rate_hp_per_sec
+        );
         // And the runtime defaults still match (until someone intentionally
         // diverges them).
         let baseline = crate::repair_teams::RepairTimings::default();
         assert_eq!(teams.timings().travel_duration, baseline.travel_duration);
-        assert_eq!(teams.timings().repair_rate_hp_per_sec, baseline.repair_rate_hp_per_sec);
+        assert_eq!(
+            teams.timings().repair_rate_hp_per_sec,
+            baseline.repair_rate_hp_per_sec
+        );
     }
 
     // ── HTML push tests ─────────────────────────────────────────────────────
@@ -368,18 +464,21 @@ mod tests {
         app.add_message::<ConsoleStateChanged>()
             .insert_resource(ShipRepairTeams(RepairTeams::default()))
             .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[
-                (Console::Helm,     25.0),
+                (Console::Helm, 25.0),
                 (Console::Tactical, 25.0),
-                (Console::Power,    25.0),
+                (Console::Power, 25.0),
             ])))
             .insert_resource(crate::modifiers::ShipModifiers::new())
             .init_resource::<PushOutbox>()
             .add_systems(Startup, spawn_repair_console_state_entity)
-            .add_systems(Update, (
-                recompute_repair_console_state,
-                push_repair_console_state.after(recompute_repair_console_state),
-                collect_pushes.after(push_repair_console_state),
-            ));
+            .add_systems(
+                Update,
+                (
+                    recompute_repair_console_state,
+                    push_repair_console_state.after(recompute_repair_console_state),
+                    collect_pushes.after(push_repair_console_state),
+                ),
+            );
         app
     }
 
@@ -389,11 +488,29 @@ mod tests {
         app.update();
 
         let pushes = &app.world().resource::<PushOutbox>().0;
-        assert!(!pushes.is_empty(), "expected at least one ConsoleStateChanged on startup");
-        let push = pushes.iter().find(|p| p.name == "Repair").expect("expected push named 'Repair'");
-        assert!(push.json.contains("\"teams\""),               "json should contain teams: {}", push.json);
-        assert!(push.json.contains("\"console_hull\""),        "json should contain console_hull: {}", push.json);
-        assert!(push.json.contains("\"travel_duration_secs\""),"json should contain travel_duration_secs: {}", push.json);
+        assert!(
+            !pushes.is_empty(),
+            "expected at least one ConsoleStateChanged on startup"
+        );
+        let push = pushes
+            .iter()
+            .find(|p| p.name == "Repair")
+            .expect("expected push named 'Repair'");
+        assert!(
+            push.json.contains("\"teams\""),
+            "json should contain teams: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"console_hull\""),
+            "json should contain console_hull: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"travel_duration_secs\""),
+            "json should contain travel_duration_secs: {}",
+            push.json
+        );
     }
 
     #[test]
@@ -405,17 +522,25 @@ mod tests {
 
         // No state change → no push.
         app.update();
-        assert!(app.world().resource::<PushOutbox>().0.is_empty(),
-            "no push expected when state has not changed");
+        assert!(
+            app.world().resource::<PushOutbox>().0.is_empty(),
+            "no push expected when state has not changed"
+        );
 
         // Dispatch team 0 → state changes → push fires.
-        app.world_mut().resource_mut::<ShipRepairTeams>()
-            .0.dispatch(0, Console::Helm);
+        app.world_mut()
+            .resource_mut::<ShipRepairTeams>()
+            .0
+            .dispatch(0, Console::Helm);
         app.update();
         let pushes = &app.world().resource::<PushOutbox>().0;
         assert!(!pushes.is_empty(), "expected push after dispatch");
         let push = pushes.iter().find(|p| p.name == "Repair").unwrap();
-        assert!(push.json.contains("Travelling"), "Travelling state should appear in json: {}", push.json);
+        assert!(
+            push.json.contains("Travelling"),
+            "Travelling state should appear in json: {}",
+            push.json
+        );
     }
 
     #[test]
@@ -425,8 +550,20 @@ mod tests {
 
         let pushes = &app.world().resource::<PushOutbox>().0;
         let push = pushes.iter().find(|p| p.name == "Repair").unwrap();
-        assert!(push.json.contains("\"damageable_consoles\""), "json should contain damageable_consoles: {}", push.json);
-        assert!(push.json.contains("\"Helm\""),    "Helm should appear in damageable_consoles: {}", push.json);
-        assert!(push.json.contains("\"Tactical\""),"Tactical should appear in damageable_consoles: {}", push.json);
+        assert!(
+            push.json.contains("\"damageable_consoles\""),
+            "json should contain damageable_consoles: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"Helm\""),
+            "Helm should appear in damageable_consoles: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"Tactical\""),
+            "Tactical should appear in damageable_consoles: {}",
+            push.json
+        );
     }
 }

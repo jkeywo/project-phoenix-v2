@@ -2,9 +2,9 @@ use bevy::prelude::*;
 
 use crate::codec;
 use crate::console_bridge::ConsoleStateChanged;
-use crate::simulation::{AsteroidUuid, ShipShields, ShipHullIntegrity};
-use crate::ship_state::ShipState;
 use crate::messages::{ShieldFacingStatus, ShieldsConsoleState};
+use crate::ship_state::ShipState;
+use crate::simulation::{AsteroidUuid, ShipHullIntegrity, ShipShields};
 use crate::weapons_plugin::WeaponsTarget;
 
 #[derive(Component, Clone, PartialEq)]
@@ -16,11 +16,15 @@ impl Plugin for ShieldsConsolePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>()
             .add_systems(Startup, spawn_shields_console_state_entity)
-            .add_systems(Update, (
-                recompute_shields_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-                push_shields_console_state.in_set(crate::sim_sets::SimSet::Broadcast)
-                    .after(recompute_shields_console_state),
-            ));
+            .add_systems(
+                Update,
+                (
+                    recompute_shields_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                    push_shields_console_state
+                        .in_set(crate::sim_sets::SimSet::Broadcast)
+                        .after(recompute_shields_console_state),
+                ),
+            );
     }
 }
 
@@ -37,14 +41,19 @@ fn recompute_shields_console_state(
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     mut comp_q: Query<&mut ShieldsConsoleStateComp>,
 ) {
-    let facings: Vec<ShieldFacingStatus> = shields.0.snapshot().into_iter().map(|s| ShieldFacingStatus {
-        label: s.label,
-        hp: s.hp,
-        max_hp: s.max_hp,
-        online: s.online,
-        offline_remaining: s.offline_remaining,
-        is_focused: s.is_focused,
-    }).collect();
+    let facings: Vec<ShieldFacingStatus> = shields
+        .0
+        .snapshot()
+        .into_iter()
+        .map(|s| ShieldFacingStatus {
+            label: s.label,
+            hp: s.hp,
+            max_hp: s.max_hp,
+            online: s.online,
+            offline_remaining: s.offline_remaining,
+            is_focused: s.is_focused,
+        })
+        .collect();
 
     let total_hp = hull.0.total_max();
     let total_current = hull.0.total_current();
@@ -54,7 +63,10 @@ fn recompute_shields_console_state(
         100.0
     };
 
-    let focused_facing = facings.iter().find(|f| f.is_focused).map(|f| f.label.clone());
+    let focused_facing = facings
+        .iter()
+        .find(|f| f.is_focused)
+        .map(|f| f.label.clone());
 
     let all_online = facings.iter().all(|f| f.online);
     let any_offline = facings.iter().any(|f| !f.online);
@@ -64,17 +76,25 @@ fn recompute_shields_console_state(
         "GRID NOMINAL"
     } else {
         "GRID NOMINAL"
-    }.to_string();
+    }
+    .to_string();
 
     let target_bearing = weapons_target.as_ref().and_then(|wt| {
         let uuid = wt.0.as_ref()?;
-        let live = asteroid_q.iter().find(|(u, _)| u.0 == *uuid)
+        let live = asteroid_q
+            .iter()
+            .find(|(u, _)| u.0 == *uuid)
             .map(|(_, t)| (t.translation.x, t.translation.z))
-            .or_else(|| entity_q.iter().find(|(u, _)| u.0 == *uuid)
-                .map(|(_, t)| (t.translation.x, t.translation.z)))?;
+            .or_else(|| {
+                entity_q
+                    .iter()
+                    .find(|(u, _)| u.0 == *uuid)
+                    .map(|(_, t)| (t.translation.x, t.translation.z))
+            })?;
         let dx = live.0 - ship.x;
         let dz = live.1 - ship.z;
-        let bearing_rad = (dz.atan2(dx) - ship.yaw + std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
+        let bearing_rad =
+            (dz.atan2(dx) - ship.yaw + std::f32::consts::PI) % (2.0 * std::f32::consts::PI);
         Some(bearing_rad.to_degrees())
     });
 
@@ -110,10 +130,10 @@ fn push_shields_console_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::ShipShields;
-    use crate::ship_state::ShipState;
     use crate::damage::ConsoleHull;
     use crate::messages::Console;
+    use crate::ship_state::ShipState;
+    use crate::simulation::ShipShields;
 
     fn test_app() -> App {
         let config = crate::shield::ShieldConfig {

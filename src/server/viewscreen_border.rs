@@ -26,9 +26,11 @@ use rand::Rng;
 
 use crate::codec;
 use crate::console_ai_plugin::ConsoleComplexityState;
-use crate::lobby::{OutboundMessage, Sessions, WorldResource};
 use crate::console_bridge::{HudStateChanged, LobbyStateChanged};
-use crate::messages::{GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState};
+use crate::lobby::{OutboundMessage, Sessions, WorldResource};
+use crate::messages::{
+    GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState,
+};
 use crate::server::renderer::GameCamera;
 use crate::ship_state::ShipState;
 use crate::sim_sets::SimSet;
@@ -125,7 +127,10 @@ impl Plugin for ViewscreenBorderPlugin {
             // this plugin pushes the `LobbyStatePayload` / `ViewscreenHudState`
             // snapshots that drive it. The Bevy border/lobby UI trees were deleted in
             // issues #422/#436 — see wiki/concepts/server-lobby-ui.md.
-            .add_systems(Startup, (setup_vignette_material, spawn_hud_state_entity).chain())
+            .add_systems(
+                Startup,
+                (setup_vignette_material, spawn_hud_state_entity).chain(),
+            )
             .add_systems(
                 Update,
                 (
@@ -164,12 +169,16 @@ fn push_lobby_state(
     mut writer: MessageWriter<LobbyStateChanged>,
 ) {
     let Some(sessions) = sessions else { return };
-    let Some(stations) = ship_stations else { return };
+    let Some(stations) = ship_stations else {
+        return;
+    };
     let Some(complexity) = complexity else { return };
 
     let players = sessions.0.players();
     let connected_count = players.iter().filter(|p| p.connected).count() as u32;
-    let display_count = connected_count.max(stations.min_players).min(stations.max_players);
+    let display_count = connected_count
+        .max(stations.min_players)
+        .min(stations.max_players);
 
     let mut station_payloads: Vec<StationPayload> = Vec::new();
     let mut spectators: Vec<String> = Vec::new();
@@ -177,11 +186,21 @@ fn push_lobby_state(
     if let Some(defs) = stations.configs.get(&display_count) {
         for def in defs {
             let holder = players.iter().find(|p| {
-                p.connected && !p.consoles.is_empty()
+                p.connected
+                    && !p.consoles.is_empty()
                     && def.consoles.iter().all(|c| p.consoles.contains(c))
             });
-            let preset_names: Vec<String> = def.consoles.iter()
-                .map(|c| complexity.presets.get(c).map(String::as_str).unwrap_or("Std").to_string())
+            let preset_names: Vec<String> = def
+                .consoles
+                .iter()
+                .map(|c| {
+                    complexity
+                        .presets
+                        .get(c)
+                        .map(String::as_str)
+                        .unwrap_or("Std")
+                        .to_string()
+                })
                 .collect();
             station_payloads.push(StationPayload {
                 name: def.name.clone(),
@@ -198,19 +217,28 @@ fn push_lobby_state(
     // Players with no consoles who are connected are spectators
     // (only when connected count exceeds max_players).
     if stations.max_players > 0 && connected_count > stations.max_players {
-        for p in players.iter().filter(|p| p.connected && p.consoles.is_empty()) {
+        for p in players
+            .iter()
+            .filter(|p| p.connected && p.consoles.is_empty())
+        {
             spectators.push(p.name.clone());
         }
     }
 
-    let all_held: Vec<_> = players.iter().flat_map(|p| p.consoles.iter().cloned()).collect();
-    let all_filled = crate::stations_config::all_stations_filled(&stations, display_count, &all_held);
+    let all_held: Vec<_> = players
+        .iter()
+        .flat_map(|p| p.consoles.iter().cloned())
+        .collect();
+    let all_filled =
+        crate::stations_config::all_stations_filled(&stations, display_count, &all_held);
 
-    let scenario_title = world_resource.as_ref()
+    let scenario_title = world_resource
+        .as_ref()
         .map(|w| w.0.scenario_title.clone())
         .unwrap_or_default();
 
-    let scenario_body = world_resource.as_ref()
+    let scenario_body = world_resource
+        .as_ref()
         .map(|w| w.0.scenario_description.clone())
         .unwrap_or_default();
 
@@ -218,7 +246,10 @@ fn push_lobby_state(
         phase: format!("{:?}", phase.get()),
         scenario_title,
         scenario_body,
-        crew_count: station_payloads.iter().filter(|s| s.holder_name.is_some()).count() as u32,
+        crew_count: station_payloads
+            .iter()
+            .filter(|s| s.holder_name.is_some())
+            .count() as u32,
         max_players: stations.max_players,
         all_stations_filled: all_filled,
         stations: station_payloads,
@@ -279,10 +310,7 @@ fn process_shield_flash(
 ///
 /// Runs after `SimSet::Broadcast` so the outbox has been drained into
 /// `OutboundMessage` messages and is safe to read.
-fn process_hull_shake(
-    mut outbound: MessageReader<OutboundMessage>,
-    mut shake: ResMut<ShakeState>,
-) {
+fn process_hull_shake(mut outbound: MessageReader<OutboundMessage>, mut shake: ResMut<ShakeState>) {
     for msg in outbound.read() {
         if let ServerMessage::DamageTaken { hull, .. } = &msg.msg {
             if *hull > 0.0 {
@@ -307,7 +335,9 @@ fn apply_camera_shake(
     mut shake: ResMut<ShakeState>,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
-    let Ok(mut transform) = cam_query.single_mut() else { return };
+    let Ok(mut transform) = cam_query.single_mut() else {
+        return;
+    };
 
     if shake.magnitude > 0.01 {
         let dt = time.delta_secs();
@@ -339,7 +369,9 @@ fn drive_vignette_intensity(
     mut flash: ResMut<ShieldFlashState>,
 ) {
     let Some(handle) = handle else { return };
-    let Some(material) = materials.get_mut(&handle.0) else { return };
+    let Some(material) = materials.get_mut(&handle.0) else {
+        return;
+    };
 
     // Decay flash intensity toward zero.
     flash.intensity = (flash.intensity - time.delta_secs() * FLASH_DECAY_RATE).max(0.0);
@@ -509,7 +541,10 @@ mod tests {
     #[test]
     fn bearing_three_quarter_turn_is_two_seventy() {
         // 3*π/2 = three-quarter clockwise turn → ship faces West → 270°
-        assert_eq!(yaw_to_compass_bearing(3.0 * std::f32::consts::FRAC_PI_2), 270);
+        assert_eq!(
+            yaw_to_compass_bearing(3.0 * std::f32::consts::FRAC_PI_2),
+            270
+        );
     }
 
     #[test]

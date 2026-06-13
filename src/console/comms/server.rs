@@ -11,8 +11,8 @@ use bevy::prelude::*;
 
 use crate::console_bridge::ConsoleStateChanged;
 use crate::messages::{CommsConsoleState, ObjectiveSnapshot};
-use crate::world::server::{CommsInboxRes, WorldContentRuntime};
 use crate::world::server::ObjectiveManagerRes;
+use crate::world::server::{CommsInboxRes, WorldContentRuntime};
 
 pub struct CommsConsolePlugin;
 
@@ -20,10 +20,13 @@ impl Plugin for CommsConsolePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>();
         app.add_systems(Startup, spawn_comms_console_state_entity);
-        app.add_systems(Update, (
-            recompute_comms_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-            push_comms_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-        ));
+        app.add_systems(
+            Update,
+            (
+                recompute_comms_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                push_comms_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+            ),
+        );
     }
 }
 
@@ -63,14 +66,21 @@ fn recompute_comms_console_state(
         .map(|o| o.0.sorted_snapshots())
         .unwrap_or_default();
 
-    let mut contacts = runtime.as_ref().map(|rt| rt.contacts.clone()).unwrap_or_default();
+    let mut contacts = runtime
+        .as_ref()
+        .map(|rt| rt.contacts.clone())
+        .unwrap_or_default();
     for contact in contacts.iter_mut() {
         contact.is_urgent = messages
             .iter()
             .any(|m| m.sender_uuid == contact.uuid && m.is_urgent && !m.is_read);
     }
 
-    let next = CommsConsoleState { messages, objectives: objectives_snap, contacts };
+    let next = CommsConsoleState {
+        messages,
+        objectives: objectives_snap,
+        contacts,
+    };
 
     for mut comp in comp_q.iter_mut() {
         if comp.0 != next {
@@ -147,11 +157,15 @@ mod tests {
         let mut app = App::new();
         app.add_message::<ConsoleStateChanged>()
             .init_resource::<ConsolePushes>()
-            .add_systems(Update, (
-                push_comms_console_state,
-                collect_pushes.after(push_comms_console_state),
-            ));
-        app.world_mut().spawn(CommsConsoleStateComp(CommsConsoleState::default()));
+            .add_systems(
+                Update,
+                (
+                    push_comms_console_state,
+                    collect_pushes.after(push_comms_console_state),
+                ),
+            );
+        app.world_mut()
+            .spawn(CommsConsoleStateComp(CommsConsoleState::default()));
         app
     }
 
@@ -171,7 +185,10 @@ mod tests {
     #[test]
     fn recompute_reflects_inbox_messages() {
         let mut app = recompute_test_app();
-        app.world_mut().resource_mut::<CommsInboxRes>().0.inject(msg("m1"));
+        app.world_mut()
+            .resource_mut::<CommsInboxRes>()
+            .0
+            .inject(msg("m1"));
         app.update();
 
         let mut q = app.world_mut().query::<&CommsConsoleStateComp>();
@@ -199,7 +216,11 @@ mod tests {
         let pushes = &app.world().resource::<ConsolePushes>().0;
         assert_eq!(pushes.len(), 1, "expected one push after a change");
         assert_eq!(pushes[0].name, "Comms");
-        assert!(pushes[0].json.contains("\"m2\""), "json: {}", pushes[0].json);
+        assert!(
+            pushes[0].json.contains("\"m2\""),
+            "json: {}",
+            pushes[0].json
+        );
 
         // No further change → no further pushes.
         app.world_mut().resource_mut::<ConsolePushes>().0.clear();

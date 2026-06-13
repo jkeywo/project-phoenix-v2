@@ -74,12 +74,12 @@ const POWER_CONSOLE_ORDER: &[Console] = &[
 /// all others use the uppercased display name.
 pub fn power_console_label(console: &Console) -> &'static str {
     match console {
-        Console::Helm       => "HELM",
-        Console::Tactical   => "WEAPONS",
-        Console::Sensors    => "SENSORS",
-        Console::Shields    => "SHIELDS",
+        Console::Helm => "HELM",
+        Console::Tactical => "WEAPONS",
+        Console::Sensors => "SENSORS",
+        Console::Shields => "SHIELDS",
         Console::Navigation => "NAVIGATION",
-        Console::Comms      => "COMMS",
+        Console::Comms => "COMMS",
         _ => "UNKNOWN",
     }
 }
@@ -90,9 +90,9 @@ pub fn power_console_label(console: &Console) -> &'static str {
 /// console silently returns `0` (it should not appear in multipliers).
 fn power_level_for(ps: &PowerSystem, console: &Console) -> u8 {
     match console {
-        Console::Helm     => ps.helm,
+        Console::Helm => ps.helm,
         Console::Tactical => ps.weapons,
-        Console::Sensors  => ps.sensors,
+        Console::Sensors => ps.sensors,
         _ => 0,
     }
 }
@@ -108,13 +108,17 @@ impl Plugin for PowerPlugin {
             .init_resource::<PowerConfigResource>()
             .init_resource::<PowerMultiplierResource>()
             .add_systems(Startup, spawn_power_console_state_entity)
-            .add_systems(Update, (
-                handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
-                tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
-                recompute_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-                push_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast)
-                    .after(recompute_power_console_state),
-            ))
+            .add_systems(
+                Update,
+                (
+                    handle_power_messages.in_set(crate::sim_sets::SimSet::Input),
+                    tick_power_system.in_set(crate::sim_sets::SimSet::Physics),
+                    recompute_power_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                    push_power_console_state
+                        .in_set(crate::sim_sets::SimSet::Broadcast)
+                        .after(recompute_power_console_state),
+                ),
+            )
             .add_plugins(power_state_broadcaster());
     }
 }
@@ -206,21 +210,21 @@ pub fn recompute_power_console_state(
         .map(|c| {
             let max_level = multipliers.multipliers[c].len() as u8;
             PowerConsoleEntry {
-                id:        format!("{:?}", c),
-                label:     power_console_label(c).into(),
-                level:     power_level_for(&power.0, c),
+                id: format!("{:?}", c),
+                label: power_console_label(c).into(),
+                level: power_level_for(&power.0, c),
                 max_level,
             }
         })
         .collect();
 
     let next = PowerConsoleState {
-        total:          power.0.total(),
-        total_max:      8,
+        total: power.0.total(),
+        total_max: 8,
         battery_charge: power.0.battery_charge,
-        battery_max:    config.0.capacity,
-        locked:         power.0.locked,
-        consoles:       entries,
+        battery_max: config.0.capacity,
+        locked: power.0.locked,
+        consoles: entries,
     };
 
     for mut comp in q.iter_mut() {
@@ -254,8 +258,8 @@ mod tests {
     use crate::lobby::{LobbyPlugin, OutboundMessage, Target};
     use crate::messages::{ModifierSlot, ServerMessage, *};
     use crate::modifiers::ShipModifiers;
-    use crate::simulation::{ShipHullIntegrity, ShipImpulse, ShipShields, SimOutbox};
     use crate::shield::ShieldSystem;
+    use crate::simulation::{ShipHullIntegrity, ShipImpulse, ShipShields, SimOutbox};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -287,9 +291,12 @@ mod tests {
             .init_resource::<SimOutbox>()
             .init_resource::<Outbox>()
             .add_plugins(PowerPlugin)
-            .add_systems(Update, crate::modifier_coordination::translate_power_modifiers
-                .after(handle_power_messages)
-                .after(tick_power_system))
+            .add_systems(
+                Update,
+                crate::modifier_coordination::translate_power_modifiers
+                    .after(handle_power_messages)
+                    .after(tick_power_system),
+            )
             .add_plugins(crate::simulation::sim_state_broadcaster())
             .add_systems(PostUpdate, collect);
         app
@@ -298,7 +305,10 @@ mod tests {
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -313,22 +323,61 @@ mod tests {
     }
 
     fn start_game(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
 
     fn start_game_with_power(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "power", ClientMessage::Identify { token: "power".into(), name: "Monty".into() });
+        push(
+            app,
+            "power",
+            ClientMessage::Identify {
+                token: "power".into(),
+                name: "Monty".into(),
+            },
+        );
         tick(app);
-        push(app, "power", ClientMessage::SelectStation { station: "Power".into() });
+        push(
+            app,
+            "power",
+            ClientMessage::SelectStation {
+                station: "Power".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         let _ = tick(app);
@@ -341,7 +390,13 @@ mod tests {
 
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 1;
 
-        push(&mut app, "captain", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         let _ = tick(&mut app);
 
         assert_eq!(
@@ -356,7 +411,13 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        push(&mut app, "captain", ClientMessage::DecreasePower { console: Console::Sensors });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::DecreasePower {
+                console: Console::Sensors,
+            },
+        );
         let _ = tick(&mut app);
 
         assert_eq!(
@@ -371,15 +432,27 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         let _ = tick(&mut app);
 
         let out = tick(&mut app);
-        let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { helm, .. } => Some(*helm),
-            _ => None,
-        }).expect("expected a PowerState message for power holder");
-        assert_eq!(power_state, 3, "PowerState should show helm=3 after increase");
+        let power_state = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::PowerState { helm, .. } => Some(*helm),
+                _ => None,
+            })
+            .expect("expected a PowerState message for power holder");
+        assert_eq!(
+            power_state, 3,
+            "PowerState should show helm=3 after increase"
+        );
     }
 
     #[test]
@@ -387,15 +460,27 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        push(&mut app, "power", ClientMessage::DecreasePower { console: Console::Tactical });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::DecreasePower {
+                console: Console::Tactical,
+            },
+        );
         let _ = tick(&mut app);
 
         let out = tick(&mut app);
-        let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { weapons, .. } => Some(*weapons),
-            _ => None,
-        }).expect("expected a PowerState message");
-        assert_eq!(power_state, 1, "PowerState should show weapons=1 after decrease");
+        let power_state = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::PowerState { weapons, .. } => Some(*weapons),
+                _ => None,
+            })
+            .expect("expected a PowerState message");
+        assert_eq!(
+            power_state, 1,
+            "PowerState should show weapons=1 after decrease"
+        );
     }
 
     #[test]
@@ -405,7 +490,10 @@ mod tests {
 
         let out = tick(&mut app);
 
-        for m in out.iter().filter(|m| matches!(&m.msg, ServerMessage::PowerState { .. })) {
+        for m in out
+            .iter()
+            .filter(|m| matches!(&m.msg, ServerMessage::PowerState { .. }))
+        {
             assert!(
                 matches!(&m.target, Target::Token(t) if t == "power"),
                 "PowerState should only go to the Power holder, got {:?}",
@@ -420,8 +508,13 @@ mod tests {
         start_game(&mut app);
 
         let out = tick(&mut app);
-        let any_power_state = out.iter().any(|m| matches!(&m.msg, ServerMessage::PowerState { .. }));
-        assert!(!any_power_state, "no PowerState should be sent when no Power console holder exists");
+        let any_power_state = out
+            .iter()
+            .any(|m| matches!(&m.msg, ServerMessage::PowerState { .. }));
+        assert!(
+            !any_power_state,
+            "no PowerState should be sent when no Power console holder exists"
+        );
     }
 
     #[test]
@@ -429,16 +522,35 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Sensors });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Sensors,
+            },
+        );
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
-        let snap = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
-            _ => None,
-        }).expect("expected a SimState broadcast");
-        assert_eq!(snap.power_levels, (3, 2, 3), "SimState.power_levels should reflect power system state");
+        let snap = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::SimState { snapshot } => Some(snapshot.clone()),
+                _ => None,
+            })
+            .expect("expected a SimState broadcast");
+        assert_eq!(
+            snap.power_levels,
+            (3, 2, 3),
+            "SimState.power_levels should reflect power system state"
+        );
     }
 
     #[test]
@@ -448,15 +560,27 @@ mod tests {
 
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
 
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
-        let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { helm, .. } => Some(*helm),
-            _ => None,
-        }).expect("expected a PowerState message");
-        assert_eq!(power_state, 4, "helm should stay at 4 (max bound enforced by PowerSystem)");
+        let power_state = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::PowerState { helm, .. } => Some(*helm),
+                _ => None,
+            })
+            .expect("expected a PowerState message");
+        assert_eq!(
+            power_state, 4,
+            "helm should stay at 4 (max bound enforced by PowerSystem)"
+        );
     }
 
     #[test]
@@ -464,16 +588,28 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
-            Console::Helm, [-0.5, 0.0, 1.0, 2.0],
-        );
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Helm, [-0.5, 0.0, 1.0, 2.0]);
 
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Helm });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Helm,
+            },
+        );
         let _ = tick(&mut app);
 
-        let mult = app.world().resource::<ShipModifiers>().get(&ModifierSlot::MaxSpeed);
-        assert!((mult - 2.0).abs() < 1e-6,
-            "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}");
+        let mult = app
+            .world()
+            .resource::<ShipModifiers>()
+            .get(&ModifierSlot::MaxSpeed);
+        assert!(
+            (mult - 2.0).abs() < 1e-6,
+            "Helm power 3 should give MaxSpeed multiplier 2.0, got {mult}"
+        );
     }
 
     #[test]
@@ -481,17 +617,29 @@ mod tests {
         let mut app = test_app();
         start_game_with_power(&mut app);
 
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(
-            Console::Tactical, [-0.5, 0.0, 0.25, 0.5],
-        );
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Tactical, [-0.5, 0.0, 0.25, 0.5]);
 
-        push(&mut app, "power", ClientMessage::DecreasePower { console: Console::Tactical });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::DecreasePower {
+                console: Console::Tactical,
+            },
+        );
         let _ = tick(&mut app);
 
         let expected = 1.0 / 1.5;
-        let mult = app.world().resource::<ShipModifiers>().get(&ModifierSlot::PhaserDamage);
-        assert!((mult - expected).abs() < 1e-6,
-            "Weapons power 1 should give PhaserDamage multiplier {expected}, got {mult}");
+        let mult = app
+            .world()
+            .resource::<ShipModifiers>()
+            .get(&ModifierSlot::PhaserDamage);
+        assert!(
+            (mult - expected).abs() < 1e-6,
+            "Weapons power 1 should give PhaserDamage multiplier {expected}, got {mult}"
+        );
     }
 
     #[test]
@@ -500,9 +648,18 @@ mod tests {
         start_game_with_power(&mut app);
 
         let defaults = [-0.5, 0.0, 0.25, 0.5];
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(Console::Helm, defaults);
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(Console::Tactical, defaults);
-        app.world_mut().resource_mut::<PowerMultiplierResource>().multipliers.insert(Console::Sensors, defaults);
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Helm, defaults);
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Tactical, defaults);
+        app.world_mut()
+            .resource_mut::<PowerMultiplierResource>()
+            .multipliers
+            .insert(Console::Sensors, defaults);
 
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
@@ -518,12 +675,21 @@ mod tests {
         let expected = 1.0 / 1.5;
         let mods = app.world().resource::<ShipModifiers>();
 
-        assert!((mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,
-            "after exhaustion MaxSpeed should be {expected}, got {}", mods.get(&ModifierSlot::MaxSpeed));
-        assert!((mods.get(&ModifierSlot::PhaserDamage) - expected).abs() < 1e-6,
-            "after exhaustion PhaserDamage should be {expected}, got {}", mods.get(&ModifierSlot::PhaserDamage));
-        assert!((mods.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
-            "after exhaustion RadarRange should be {expected}, got {}", mods.get(&ModifierSlot::RadarRange));
+        assert!(
+            (mods.get(&ModifierSlot::MaxSpeed) - expected).abs() < 1e-6,
+            "after exhaustion MaxSpeed should be {expected}, got {}",
+            mods.get(&ModifierSlot::MaxSpeed)
+        );
+        assert!(
+            (mods.get(&ModifierSlot::PhaserDamage) - expected).abs() < 1e-6,
+            "after exhaustion PhaserDamage should be {expected}, got {}",
+            mods.get(&ModifierSlot::PhaserDamage)
+        );
+        assert!(
+            (mods.get(&ModifierSlot::RadarRange) - expected).abs() < 1e-6,
+            "after exhaustion RadarRange should be {expected}, got {}",
+            mods.get(&ModifierSlot::RadarRange)
+        );
     }
 
     #[test]
@@ -533,17 +699,32 @@ mod tests {
 
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 4;
 
-        push(&mut app, "power", ClientMessage::IncreasePower { console: Console::Sensors });
+        push(
+            &mut app,
+            "power",
+            ClientMessage::IncreasePower {
+                console: Console::Sensors,
+            },
+        );
         let _ = tick(&mut app);
 
         let out = tick(&mut app);
-        let power_state = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::PowerState { sensors, .. } => Some(*sensors),
-            _ => None,
-        }).expect("expected a PowerState message");
-        assert_eq!(power_state, 2, "sensors should stay at 2 when total is already at the cap of 8");
-        assert_eq!(app.world().resource::<ShipPowerSystem>().0.total(), 8,
-            "total should remain 8");
+        let power_state = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::PowerState { sensors, .. } => Some(*sensors),
+                _ => None,
+            })
+            .expect("expected a PowerState message");
+        assert_eq!(
+            power_state, 2,
+            "sensors should stay at 2 when total is already at the cap of 8"
+        );
+        assert_eq!(
+            app.world().resource::<ShipPowerSystem>().0.total(),
+            8,
+            "total should remain 8"
+        );
     }
 
     // ── HTML push tests ─────────────────────────────────────────────────────
@@ -568,11 +749,14 @@ mod tests {
             .init_resource::<PowerMultiplierResource>()
             .init_resource::<PushOutbox>()
             .add_systems(Startup, spawn_power_console_state_entity)
-            .add_systems(Update, (
-                recompute_power_console_state,
-                push_power_console_state.after(recompute_power_console_state),
-                collect_pushes.after(push_power_console_state),
-            ));
+            .add_systems(
+                Update,
+                (
+                    recompute_power_console_state,
+                    push_power_console_state.after(recompute_power_console_state),
+                    collect_pushes.after(push_power_console_state),
+                ),
+            );
         app
     }
 
@@ -582,12 +766,34 @@ mod tests {
         app.update();
 
         let pushes = &app.world().resource::<PushOutbox>().0;
-        assert!(!pushes.is_empty(), "expected at least one ConsoleStateChanged on startup");
-        let push = pushes.iter().find(|p| p.name == "Power").expect("expected push named 'Power'");
-        assert!(push.json.contains("\"consoles\""), "json should contain consoles array: {}", push.json);
-        assert!(push.json.contains("\"HELM\""),    "json should contain HELM label: {}", push.json);
-        assert!(push.json.contains("\"total\""),   "json should contain total field: {}", push.json);
-        assert!(push.json.contains("\"locked\""),  "json should contain locked field: {}", push.json);
+        assert!(
+            !pushes.is_empty(),
+            "expected at least one ConsoleStateChanged on startup"
+        );
+        let push = pushes
+            .iter()
+            .find(|p| p.name == "Power")
+            .expect("expected push named 'Power'");
+        assert!(
+            push.json.contains("\"consoles\""),
+            "json should contain consoles array: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"HELM\""),
+            "json should contain HELM label: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"total\""),
+            "json should contain total field: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"locked\""),
+            "json should contain locked field: {}",
+            push.json
+        );
     }
 
     #[test]
@@ -599,8 +805,10 @@ mod tests {
 
         // No state change → no push.
         app.update();
-        assert!(app.world().resource::<PushOutbox>().0.is_empty(),
-            "no push expected when state has not changed");
+        assert!(
+            app.world().resource::<PushOutbox>().0.is_empty(),
+            "no push expected when state has not changed"
+        );
 
         // Mutate helm power → recompute detects change → push fires.
         app.world_mut().resource_mut::<ShipPowerSystem>().0.helm = 3;
@@ -608,7 +816,11 @@ mod tests {
         let pushes = &app.world().resource::<PushOutbox>().0;
         assert!(!pushes.is_empty(), "expected push after helm power change");
         let push = pushes.iter().find(|p| p.name == "Power").unwrap();
-        assert!(push.json.contains("3"), "new level 3 should appear in json: {}", push.json);
+        assert!(
+            push.json.contains("3"),
+            "new level 3 should appear in json: {}",
+            push.json
+        );
     }
 
     #[test]
@@ -618,9 +830,25 @@ mod tests {
 
         let pushes = &app.world().resource::<PushOutbox>().0;
         let push = pushes.iter().find(|p| p.name == "Power").unwrap();
-        assert!(push.json.contains("\"Helm\""),    "id should be Helm variant name: {}", push.json);
-        assert!(push.json.contains("\"HELM\""),    "label should be HELM: {}", push.json);
-        assert!(push.json.contains("\"WEAPONS\""), "Tactical label should be WEAPONS: {}", push.json);
-        assert!(push.json.contains("\"SENSORS\""), "Sensors label should be SENSORS: {}", push.json);
+        assert!(
+            push.json.contains("\"Helm\""),
+            "id should be Helm variant name: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"HELM\""),
+            "label should be HELM: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"WEAPONS\""),
+            "Tactical label should be WEAPONS: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"SENSORS\""),
+            "Sensors label should be SENSORS: {}",
+            push.json
+        );
     }
 }

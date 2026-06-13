@@ -1,4 +1,4 @@
-﻿pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
+pub fn merge_toml(template: &toml::Value, override_: &toml::Value) -> toml::Value {
     match (template, override_) {
         (toml::Value::Table(t_table), toml::Value::Table(o_table)) => {
             let mut result = t_table.clone();
@@ -46,10 +46,7 @@ pub fn merge_entity_config_toml(template: &toml::Value, override_: &toml::Value)
                 .and_then(|t| t.get_mut("behaviour"))
                 .and_then(|v| v.as_table_mut())
             {
-                result_beh.insert(
-                    "state".to_string(),
-                    toml::Value::Array(merged_states),
-                );
+                result_beh.insert("state".to_string(), toml::Value::Array(merged_states));
             }
         }
     }
@@ -62,18 +59,15 @@ pub fn merge_entity_config_toml(template: &toml::Value, override_: &toml::Value)
 /// Override entries replace template entries with the same name.
 /// Template entries with no matching override are kept at their original
 /// position. Override entries with no matching template entry are appended.
-pub fn merge_named_array(
-    template: &[toml::Value],
-    overrides: &[toml::Value],
-) -> Vec<toml::Value> {
+pub fn merge_named_array(template: &[toml::Value], overrides: &[toml::Value]) -> Vec<toml::Value> {
     let mut result = template.to_vec();
     for o_entry in overrides {
         let o_name = o_entry.get("name").and_then(|v| v.as_str());
         match o_name {
             Some(name) => {
-                let pos = result.iter().position(|e| {
-                    e.get("name").and_then(|v| v.as_str()) == Some(name)
-                });
+                let pos = result
+                    .iter()
+                    .position(|e| e.get("name").and_then(|v| v.as_str()) == Some(name));
                 match pos {
                     Some(i) => result[i] = merge_toml(&result[i], o_entry),
                     None => result.push(o_entry.clone()),
@@ -142,10 +136,7 @@ capacity = 150
         )
         .unwrap();
         let result = merge_toml(&template, &over);
-        assert_eq!(
-            result.get("name").and_then(|v| v.as_str()),
-            Some("base")
-        );
+        assert_eq!(result.get("name").and_then(|v| v.as_str()), Some("base"));
         let power = result.get("power").and_then(|v| v.as_table()).unwrap();
         assert_eq!(
             power.get("capacity").and_then(|v| v.as_integer()),
@@ -158,10 +149,7 @@ capacity = 150
         let template: toml::Value = toml::from_str("online = true").unwrap();
         let over: toml::Value = toml::from_str("online = false").unwrap();
         let result = merge_toml(&template, &over);
-        assert_eq!(
-            result.get("online").and_then(|v| v.as_bool()),
-            Some(false)
-        );
+        assert_eq!(result.get("online").and_then(|v| v.as_bool()), Some(false));
     }
 
     #[test]
@@ -189,7 +177,8 @@ m_key = "middle"
 
     #[test]
     fn merge_named_array_replaces_entry_by_name() {
-        let template: Vec<toml::Value> = toml::from_str::<toml::Value>(r#"
+        let template: Vec<toml::Value> = toml::from_str::<toml::Value>(
+            r#"
 [[item]]
 name = "alpha"
 target_speed = 0.5
@@ -197,15 +186,28 @@ target_speed = 0.5
 [[item]]
 name = "beta"
 target_speed = 0.3
-"#).unwrap()
-            .get("item").unwrap().as_array().unwrap().clone();
+"#,
+        )
+        .unwrap()
+        .get("item")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
 
-        let overrides: Vec<toml::Value> = toml::from_str::<toml::Value>(r#"
+        let overrides: Vec<toml::Value> = toml::from_str::<toml::Value>(
+            r#"
 [[item]]
 name = "alpha"
 target_speed = 0.9
-"#).unwrap()
-            .get("item").unwrap().as_array().unwrap().clone();
+"#,
+        )
+        .unwrap()
+        .get("item")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
 
         let result = merge_named_array(&template, &overrides);
         assert_eq!(result.len(), 2, "length must be preserved");
@@ -224,7 +226,8 @@ target_speed = 0.9
 
     #[test]
     fn merge_named_array_keeps_unmentioned_entries() {
-        let template: Vec<toml::Value> = toml::from_str::<toml::Value>(r#"
+        let template: Vec<toml::Value> = toml::from_str::<toml::Value>(
+            r#"
 [[item]]
 name = "alpha"
 target_speed = 0.5
@@ -232,8 +235,14 @@ target_speed = 0.5
 [[item]]
 name = "beta"
 target_speed = 0.3
-"#).unwrap()
-            .get("item").unwrap().as_array().unwrap().clone();
+"#,
+        )
+        .unwrap()
+        .get("item")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
 
         let overrides: Vec<toml::Value> = vec![];
         let result = merge_named_array(&template, &overrides);
@@ -242,18 +251,32 @@ target_speed = 0.3
 
     #[test]
     fn merge_named_array_appends_new_entry() {
-        let template: Vec<toml::Value> = toml::from_str::<toml::Value>(r#"
+        let template: Vec<toml::Value> = toml::from_str::<toml::Value>(
+            r#"
 [[item]]
 name = "alpha"
-"#).unwrap()
-            .get("item").unwrap().as_array().unwrap().clone();
+"#,
+        )
+        .unwrap()
+        .get("item")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
 
-        let overrides: Vec<toml::Value> = toml::from_str::<toml::Value>(r#"
+        let overrides: Vec<toml::Value> = toml::from_str::<toml::Value>(
+            r#"
 [[item]]
 name = "gamma"
 target_speed = 0.7
-"#).unwrap()
-            .get("item").unwrap().as_array().unwrap().clone();
+"#,
+        )
+        .unwrap()
+        .get("item")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
 
         let result = merge_named_array(&template, &overrides);
         assert_eq!(result.len(), 2, "new entry should be appended");
@@ -267,7 +290,8 @@ target_speed = 0.7
 
     #[test]
     fn entity_merge_behaviour_state_by_name_replaces_matching_entry() {
-        let template: toml::Value = toml::from_str(r#"
+        let template: toml::Value = toml::from_str(
+            r#"
 [behaviour]
 initial_state = "patrol"
 
@@ -280,30 +304,51 @@ target_speed = 0.5
 name = "idle"
 kind = "idle"
 target_speed = 0.0
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let override_: toml::Value = toml::from_str(r#"
+        let override_: toml::Value = toml::from_str(
+            r#"
 [[behaviour.state]]
 name = "patrol"
 target_speed = 0.9
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let result = merge_entity_config_toml(&template, &override_);
         let states = result
-            .get("behaviour").unwrap()
-            .get("state").unwrap()
-            .as_array().unwrap();
+            .get("behaviour")
+            .unwrap()
+            .get("state")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert_eq!(states.len(), 2, "idle must be kept");
-        let patrol = states.iter().find(|s| s.get("name").and_then(|v| v.as_str()) == Some("patrol")).unwrap();
-        assert_eq!(patrol.get("target_speed").and_then(|v| v.as_float()), Some(0.9));
+        let patrol = states
+            .iter()
+            .find(|s| s.get("name").and_then(|v| v.as_str()) == Some("patrol"))
+            .unwrap();
+        assert_eq!(
+            patrol.get("target_speed").and_then(|v| v.as_float()),
+            Some(0.9)
+        );
         // idle untouched
-        let idle = states.iter().find(|s| s.get("name").and_then(|v| v.as_str()) == Some("idle")).unwrap();
-        assert_eq!(idle.get("target_speed").and_then(|v| v.as_float()), Some(0.0));
+        let idle = states
+            .iter()
+            .find(|s| s.get("name").and_then(|v| v.as_str()) == Some("idle"))
+            .unwrap();
+        assert_eq!(
+            idle.get("target_speed").and_then(|v| v.as_float()),
+            Some(0.0)
+        );
     }
 
     #[test]
     fn entity_merge_behaviour_transition_full_replacement() {
-        let template: toml::Value = toml::from_str(r#"
+        let template: toml::Value = toml::from_str(
+            r#"
 [behaviour]
 initial_state = "idle"
 
@@ -311,20 +356,28 @@ initial_state = "idle"
 from = "idle"
 to = "patrol"
 trigger = "damage"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let override_: toml::Value = toml::from_str(r#"
+        let override_: toml::Value = toml::from_str(
+            r#"
 [[behaviour.transition]]
 from = "patrol"
 to = "idle"
 trigger = "safe"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let result = merge_entity_config_toml(&template, &override_);
         let transitions = result
-            .get("behaviour").unwrap()
-            .get("transition").unwrap()
-            .as_array().unwrap();
+            .get("behaviour")
+            .unwrap()
+            .get("transition")
+            .unwrap()
+            .as_array()
+            .unwrap();
         // Full replacement: only the override entry
         assert_eq!(transitions.len(), 1);
         assert_eq!(

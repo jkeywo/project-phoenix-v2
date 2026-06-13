@@ -73,7 +73,11 @@ impl ObjectiveManager {
     /// Returns `true` if the objective was found and transitioned.
     /// If the objective does not exist or is not `Active`, returns `false`.
     pub fn complete(&mut self, id: &str) -> bool {
-        if let Some(rec) = self.objectives.iter_mut().find(|o| o.id == id && o.status == ObjectiveStatus::Active) {
+        if let Some(rec) = self
+            .objectives
+            .iter_mut()
+            .find(|o| o.id == id && o.status == ObjectiveStatus::Active)
+        {
             rec.status = ObjectiveStatus::Completed;
             self.dirty = true;
             true
@@ -87,7 +91,11 @@ impl ObjectiveManager {
     /// Returns `true` if the objective was found and transitioned.
     /// If the objective does not exist or is not `Active`, returns `false`.
     pub fn fail(&mut self, id: &str) -> bool {
-        if let Some(rec) = self.objectives.iter_mut().find(|o| o.id == id && o.status == ObjectiveStatus::Active) {
+        if let Some(rec) = self
+            .objectives
+            .iter_mut()
+            .find(|o| o.id == id && o.status == ObjectiveStatus::Active)
+        {
             rec.status = ObjectiveStatus::Failed;
             self.dirty = true;
             true
@@ -101,11 +109,15 @@ impl ObjectiveManager {
     ///
     /// This is the slice that should be packed into `ObjectiveSummary`.
     pub fn sorted_snapshots(&self) -> Vec<ObjectiveSnapshot> {
-        let mandatory: Vec<_> = self.objectives.iter()
+        let mandatory: Vec<_> = self
+            .objectives
+            .iter()
             .filter(|o| o.mandatory)
             .map(record_to_snapshot)
             .collect();
-        let optional: Vec<_> = self.objectives.iter()
+        let optional: Vec<_> = self
+            .objectives
+            .iter()
             .filter(|o| !o.mandatory)
             .map(record_to_snapshot)
             .collect();
@@ -273,7 +285,12 @@ mod tests {
     #[test]
     fn add_objective_stores_targets() {
         let mut mgr = ObjectiveManager::new();
-        mgr.add("obj-1", "Destroy Ironveil", true, vec!["Ironveil".to_string()]);
+        mgr.add(
+            "obj-1",
+            "Destroy Ironveil",
+            true,
+            vec!["Ironveil".to_string()],
+        );
         let snaps = mgr.sorted_snapshots();
         assert_eq!(snaps[0].targets, vec!["Ironveil".to_string()]);
     }

@@ -1,4 +1,4 @@
-﻿// Asteroid lifecycle managed by a ring-buffer window.
+// Asteroid lifecycle managed by a ring-buffer window.
 //
 // This module provides:
 // - AsteroidWindow resource: 2D ring-buffer tracking which grid cells are loaded
@@ -11,16 +11,18 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 use crate::asteroid_spawner::{cell_in_field, eval_cell};
-use crate::asteroid_window::{compute_player_grid_cell, compute_slot_for_world_cell, eval_on_player_move};
+use crate::asteroid_window::{
+    compute_player_grid_cell, compute_slot_for_world_cell, eval_on_player_move,
+};
 use crate::entity_spawner::{AsteroidFieldSection, MeshSection};
 use crate::lobby::Target;
 use crate::lobby::WorldResource;
 use crate::messages::{EntitySnapshot, ServerMessage};
-use crate::simulation::SimOutbox;
 use crate::ship_state::ShipState;
+use crate::simulation::SimOutbox;
 
-pub use crate::simulation::{Asteroid, AsteroidShieldPierce, AsteroidUuid};
 pub use crate::entity_spawner::EntityConsoleHull;
+pub use crate::simulation::{Asteroid, AsteroidShieldPierce, AsteroidUuid};
 
 // ── Resources ────────────────────────────────────────────────────────────
 
@@ -122,8 +124,10 @@ pub fn check_destroyed_asteroids(
             window.resolution,
         );
         if let Some((sx, sz)) = compute_slot_for_world_cell(
-            window.arena_gx, window.arena_gz,
-            cell_gx, cell_gz,
+            window.arena_gx,
+            window.arena_gz,
+            cell_gx,
+            cell_gz,
             window.despawn_cells,
         ) {
             if let Some(row) = window.slots.get_mut(sz) {
@@ -137,7 +141,12 @@ pub fn check_destroyed_asteroids(
         entity_map.0.remove(&uuid.0);
         world.0.entities.retain(|e| e.uuid != uuid.0);
 
-        outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: uuid.0.clone() }));
+        outbox.0.push((
+            Target::All,
+            ServerMessage::AsteroidDestroyed {
+                uuid: uuid.0.clone(),
+            },
+        ));
         commands.entity(entity).despawn();
     }
 }
@@ -183,8 +192,17 @@ pub fn update_asteroid_window(
 
     if needs_init || delta.full_rebuild {
         full_rebuild(
-            &mut commands, &mut window, &mut entity_map, &mut world, &mut outbox,
-            gx, gz, field_idx, &grid, field.inner_radius, field.outer_radius,
+            &mut commands,
+            &mut window,
+            &mut entity_map,
+            &mut world,
+            &mut outbox,
+            gx,
+            gz,
+            field_idx,
+            &grid,
+            field.inner_radius,
+            field.outer_radius,
             &field.asteroid_type_paths,
             &field.cosmetic_type_paths,
             field.shield_pierce,
@@ -194,9 +212,20 @@ pub fn update_asteroid_window(
     } else {
         for (cell_gx, cell_gz) in &delta.cells_to_despawn {
             if let Some((sx, sz)) = compute_slot_for_world_cell(
-                window.arena_gx, window.arena_gz, *cell_gx, *cell_gz, window.despawn_cells,
+                window.arena_gx,
+                window.arena_gz,
+                *cell_gx,
+                *cell_gz,
+                window.despawn_cells,
             ) {
-                clear_slot(&mut window, &mut commands, &mut entity_map, &mut world, sx, sz);
+                clear_slot(
+                    &mut window,
+                    &mut commands,
+                    &mut entity_map,
+                    &mut world,
+                    sx,
+                    sz,
+                );
             }
         }
 
@@ -205,20 +234,43 @@ pub fn update_asteroid_window(
 
         for (cell_gx, cell_gz) in &delta.cells_to_spawn {
             if let Some((sx, sz)) = compute_slot_for_world_cell(
-                window.arena_gx, window.arena_gz, *cell_gx, *cell_gz, window.despawn_cells,
+                window.arena_gx,
+                window.arena_gz,
+                *cell_gx,
+                *cell_gz,
+                window.despawn_cells,
             ) {
                 try_spawn_cell(
-                    &mut commands, &mut window, &mut entity_map, &mut world, &mut outbox,
-                    *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
-                    field.inner_radius, field.outer_radius, &field.asteroid_type_paths,
+                    &mut commands,
+                    &mut window,
+                    &mut entity_map,
+                    &mut world,
+                    &mut outbox,
+                    *cell_gx,
+                    *cell_gz,
+                    sx,
+                    sz,
+                    field_idx,
+                    &grid,
+                    field.inner_radius,
+                    field.outer_radius,
+                    &field.asteroid_type_paths,
                     field.shield_pierce,
                     field.shape,
                     field.anchor_offset,
                 );
                 try_spawn_cosmetic_cell(
-                    &mut commands, &mut window,
-                    *cell_gx, *cell_gz, sx, sz, field_idx, &grid,
-                    field.inner_radius, field.outer_radius, &field.cosmetic_type_paths,
+                    &mut commands,
+                    &mut window,
+                    *cell_gx,
+                    *cell_gz,
+                    sx,
+                    sz,
+                    field_idx,
+                    &grid,
+                    field.inner_radius,
+                    field.outer_radius,
+                    &field.cosmetic_type_paths,
                     field.shape,
                     field.anchor_offset,
                 );
@@ -239,10 +291,12 @@ fn full_rebuild(
     entity_map: &mut AsteroidEntityMap,
     world: &mut ResMut<WorldResource>,
     outbox: &mut ResMut<SimOutbox>,
-    gx: i32, gz: i32,
+    gx: i32,
+    gz: i32,
     field_idx: usize,
     grid: &crate::entity_config::GridConfig,
-    inner_radius: f32, outer_radius: f32,
+    inner_radius: f32,
+    outer_radius: f32,
     gameplay_type_paths: &[String],
     cosmetic_type_paths: &[String],
     shield_pierce: f32,
@@ -272,7 +326,10 @@ fn full_rebuild(
 
     // Only remove asteroid snapshots from WorldResource; preserve named entities
     // (stations, raiders, player ship) spawned by world/server.rs and game-start systems.
-    world.0.entities.retain(|e| !e.tags.iter().any(|t| t == "asteroid"));
+    world
+        .0
+        .entities
+        .retain(|e| !e.tags.iter().any(|t| t == "asteroid"));
 
     // Sync window extents from grid config so TOML-specified values take effect.
     window.spawn_cells = grid.spawn_cells;
@@ -294,21 +351,40 @@ fn full_rebuild(
     let s_cells = window.spawn_cells as i32;
     for cx in (gx - s_cells)..=(gx + s_cells) {
         for cz in (gz - s_cells)..=(gz + s_cells) {
-            if let Some((sx, sz)) = compute_slot_for_world_cell(
-                gx, gz, cx, cz, window.despawn_cells,
-            ) {
+            if let Some((sx, sz)) =
+                compute_slot_for_world_cell(gx, gz, cx, cz, window.despawn_cells)
+            {
                 try_spawn_cell(
-                    commands, window, entity_map, world, outbox,
-                    cx, cz, sx, sz, field_idx, grid,
-                    inner_radius, outer_radius, gameplay_type_paths,
+                    commands,
+                    window,
+                    entity_map,
+                    world,
+                    outbox,
+                    cx,
+                    cz,
+                    sx,
+                    sz,
+                    field_idx,
+                    grid,
+                    inner_radius,
+                    outer_radius,
+                    gameplay_type_paths,
                     shield_pierce,
                     shape,
                     anchor_offset,
                 );
                 try_spawn_cosmetic_cell(
-                    commands, window,
-                    cx, cz, sx, sz, field_idx, grid,
-                    inner_radius, outer_radius, cosmetic_type_paths,
+                    commands,
+                    window,
+                    cx,
+                    cz,
+                    sx,
+                    sz,
+                    field_idx,
+                    grid,
+                    inner_radius,
+                    outer_radius,
+                    cosmetic_type_paths,
                     shape,
                     anchor_offset,
                 );
@@ -326,11 +402,14 @@ fn try_spawn_cell(
     entity_map: &mut AsteroidEntityMap,
     world: &mut ResMut<WorldResource>,
     outbox: &mut ResMut<SimOutbox>,
-    cell_gx: i32, cell_gz: i32,
-    slot_x: usize, slot_z: usize,
+    cell_gx: i32,
+    cell_gz: i32,
+    slot_x: usize,
+    slot_z: usize,
     field_idx: usize,
     grid: &crate::entity_config::GridConfig,
-    inner_radius: f32, outer_radius: f32,
+    inner_radius: f32,
+    outer_radius: f32,
     gameplay_type_paths: &[String],
     shield_pierce: f32,
     shape: Option<crate::entity_config::AsteroidFieldShape>,
@@ -340,7 +419,14 @@ fn try_spawn_cell(
         return;
     }
 
-    if !cell_in_field(cell_gx, cell_gz, grid.resolution, inner_radius, outer_radius, shape) {
+    if !cell_in_field(
+        cell_gx,
+        cell_gz,
+        grid.resolution,
+        inner_radius,
+        outer_radius,
+        shape,
+    ) {
         return;
     }
 
@@ -349,10 +435,17 @@ fn try_spawn_cell(
     }
 
     let Some(spawn) = eval_cell(
-        field_idx as u64, cell_gx, cell_gz, grid,
-        inner_radius, outer_radius,
-        gameplay_type_paths, &[],
-    ) else { return };
+        field_idx as u64,
+        cell_gx,
+        cell_gz,
+        grid,
+        inner_radius,
+        outer_radius,
+        gameplay_type_paths,
+        &[],
+    ) else {
+        return;
+    };
 
     // Look up the entity config from the cache so the collider radius,
     // visual mesh, HP, and tags come from the TOML rather than hard-coded values.
@@ -364,7 +457,13 @@ fn try_spawn_cell(
         .unwrap_or(2.0);
     let max_hp = entity_config
         .and_then(|c| c.hull.as_ref())
-        .map(|h| if h.hull_integrity > 0.0 { h.hull_integrity } else { h.captain_chair.unwrap_or(30.0) })
+        .map(|h| {
+            if h.hull_integrity > 0.0 {
+                h.hull_integrity
+            } else {
+                h.captain_chair.unwrap_or(30.0)
+            }
+        })
         .unwrap_or(30.0);
     let snapshot_tags = entity_config
         .map(|c| c.tags.clone())
@@ -379,9 +478,10 @@ fn try_spawn_cell(
     let world_x = spawn.x + anchor_offset[0];
     let world_z = spawn.z + anchor_offset[2];
 
-    let asteroid_hull = EntityConsoleHull(
-        crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])
-    );
+    let asteroid_hull = EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+        crate::messages::Console::CaptainChair,
+        max_hp,
+    )]));
 
     let mut entity_cmd = commands.spawn((
         Asteroid,
@@ -419,16 +519,19 @@ fn try_spawn_cell(
         ..EntitySnapshot::default()
     });
 
-    outbox.0.push((Target::All, ServerMessage::AsteroidSpawned {
-        uuid,
-        x: world_x,
-        y: spawn.y,
-        z: world_z,
-        config_path: spawn.config_path,
-        max_hp: max_hp as i32,
-        current_hp: max_hp as i32,
-        radius: collider_radius,
-    }));
+    outbox.0.push((
+        Target::All,
+        ServerMessage::AsteroidSpawned {
+            uuid,
+            x: world_x,
+            y: spawn.y,
+            z: world_z,
+            config_path: spawn.config_path,
+            max_hp: max_hp as i32,
+            current_hp: max_hp as i32,
+            radius: collider_radius,
+        },
+    ));
 }
 
 /// Clear a single window slot: remove data and despawn the associated entity.
@@ -437,9 +540,14 @@ fn clear_slot(
     commands: &mut Commands,
     entity_map: &mut AsteroidEntityMap,
     world: &mut ResMut<WorldResource>,
-    slot_x: usize, slot_z: usize,
+    slot_x: usize,
+    slot_z: usize,
 ) {
-    if let Some(slot) = window.slots.get_mut(slot_z).and_then(|row| row.get_mut(slot_x)) {
+    if let Some(slot) = window
+        .slots
+        .get_mut(slot_z)
+        .and_then(|row| row.get_mut(slot_x))
+    {
         if let Some(data) = slot.take() {
             if let Some(&entity) = entity_map.0.get(&data.uuid) {
                 commands.entity(entity).despawn();
@@ -448,13 +556,19 @@ fn clear_slot(
             world.0.entities.retain(|e| e.uuid != data.uuid);
         }
     }
-    if let Some(entity) = window.cosmetic_upper_slots
-        .get_mut(slot_z).and_then(|row| row.get_mut(slot_x)).and_then(|s| s.take())
+    if let Some(entity) = window
+        .cosmetic_upper_slots
+        .get_mut(slot_z)
+        .and_then(|row| row.get_mut(slot_x))
+        .and_then(|s| s.take())
     {
         commands.entity(entity).despawn();
     }
-    if let Some(entity) = window.cosmetic_lower_slots
-        .get_mut(slot_z).and_then(|row| row.get_mut(slot_x)).and_then(|s| s.take())
+    if let Some(entity) = window
+        .cosmetic_lower_slots
+        .get_mut(slot_z)
+        .and_then(|row| row.get_mut(slot_x))
+        .and_then(|s| s.take())
     {
         commands.entity(entity).despawn();
     }
@@ -495,11 +609,14 @@ fn spawn_cosmetic_entity(
 fn try_spawn_cosmetic_cell(
     commands: &mut Commands,
     window: &mut AsteroidWindow,
-    cell_gx: i32, cell_gz: i32,
-    slot_x: usize, slot_z: usize,
+    cell_gx: i32,
+    cell_gz: i32,
+    slot_x: usize,
+    slot_z: usize,
     field_idx: usize,
     grid: &crate::entity_config::GridConfig,
-    inner_radius: f32, outer_radius: f32,
+    inner_radius: f32,
+    outer_radius: f32,
     cosmetic_type_paths: &[String],
     shape: Option<crate::entity_config::AsteroidFieldShape>,
     anchor_offset: [f32; 3],
@@ -508,7 +625,14 @@ fn try_spawn_cosmetic_cell(
         return;
     }
 
-    if !cell_in_field(cell_gx, cell_gz, grid.resolution, inner_radius, outer_radius, shape) {
+    if !cell_in_field(
+        cell_gx,
+        cell_gz,
+        grid.resolution,
+        inner_radius,
+        outer_radius,
+        shape,
+    ) {
         return;
     }
 
@@ -516,9 +640,13 @@ fn try_spawn_cosmetic_cell(
     if window.cosmetic_upper_slots[slot_z][slot_x].is_none() {
         if let Some(spawn) = eval_cell(
             field_idx as u64 + 0x0001_0000_0000,
-            cell_gx, cell_gz, grid,
-            inner_radius, outer_radius,
-            &[], cosmetic_type_paths,
+            cell_gx,
+            cell_gz,
+            grid,
+            inner_radius,
+            outer_radius,
+            &[],
+            cosmetic_type_paths,
         ) {
             let entity = spawn_cosmetic_entity(commands, &spawn, spawn.y, anchor_offset);
             window.cosmetic_upper_slots[slot_z][slot_x] = Some(entity);
@@ -529,9 +657,13 @@ fn try_spawn_cosmetic_cell(
     if window.cosmetic_lower_slots[slot_z][slot_x].is_none() {
         if let Some(spawn) = eval_cell(
             field_idx as u64 + 0x0002_0000_0000,
-            cell_gx, cell_gz, grid,
-            inner_radius, outer_radius,
-            &[], cosmetic_type_paths,
+            cell_gx,
+            cell_gz,
+            grid,
+            inner_radius,
+            outer_radius,
+            &[],
+            cosmetic_type_paths,
         ) {
             let entity = spawn_cosmetic_entity(commands, &spawn, -spawn.y, anchor_offset);
             window.cosmetic_lower_slots[slot_z][slot_x] = Some(entity);
@@ -546,24 +678,20 @@ pub struct AsteroidLifecyclePlugin;
 
 impl Plugin for AsteroidLifecyclePlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<AsteroidWindow>()
+        app.init_resource::<AsteroidWindow>()
             .init_resource::<PlayerGridPosition>()
             .init_resource::<AsteroidEntityMap>()
-            .add_systems(Update, (
-                check_destroyed_asteroids,
-                update_asteroid_window,
-            ));
+            .add_systems(Update, (check_destroyed_asteroids, update_asteroid_window));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entity_config::{AsteroidFieldConfig, GridConfig};
     use crate::entity_spawner::AsteroidFieldSection;
     use crate::lobby::OutboundMessage;
     use crate::simulation::SimOutbox;
-    use crate::entity_config::{AsteroidFieldConfig, GridConfig};
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -619,15 +747,15 @@ mod tests {
     fn window_initialises_from_spawned_asteroid_field_section() {
         let mut app = test_app();
         // WorldResource is init'd by test_app. The system should find the field.
-        app.world_mut().spawn((
-            AsteroidFieldSection(field(15.0)),
-            Transform::default(),
-        ));
+        app.world_mut()
+            .spawn((AsteroidFieldSection(field(15.0)), Transform::default()));
         app.update();
 
         let window = app.world().resource::<AsteroidWindow>();
-        assert_eq!(window.resolution, 15.0,
-            "window.resolution should be sourced from the spawned AsteroidFieldSection");
+        assert_eq!(
+            window.resolution, 15.0,
+            "window.resolution should be sourced from the spawned AsteroidFieldSection"
+        );
         assert_eq!(window.inner_radius, 100.0);
         assert_eq!(window.outer_radius, 200.0);
     }
@@ -676,10 +804,8 @@ shield_pierce = 0.4
         let mut app = test_app();
         let mut f = field(15.0);
         f.shape = Some(crate::entity_config::AsteroidFieldShape::Torus);
-        app.world_mut().spawn((
-            AsteroidFieldSection(f),
-            Transform::default(),
-        ));
+        app.world_mut()
+            .spawn((AsteroidFieldSection(f), Transform::default()));
         app.update();
 
         let window = app.world().resource::<AsteroidWindow>();
@@ -697,10 +823,8 @@ shield_pierce = 0.4
         // Back-compat: an AsteroidFieldSection with `shape = None` must
         // leave the window in legacy (centre-distance) mode.
         let mut app = test_app();
-        app.world_mut().spawn((
-            AsteroidFieldSection(field(15.0)),
-            Transform::default(),
-        ));
+        app.world_mut()
+            .spawn((AsteroidFieldSection(field(15.0)), Transform::default()));
         app.update();
 
         let window = app.world().resource::<AsteroidWindow>();
@@ -719,7 +843,7 @@ shield_pierce = 0.4
         let res = 15.0f32;
         let grid_cfg = GridConfig {
             resolution: res,
-            fill_gameplay: 0.0,        // admit every cell that passes density
+            fill_gameplay: 0.0, // admit every cell that passes density
             fill_cosmetic: 1.0,
             uniformity: 0.0,
             noise_freq: 0.02,
@@ -753,10 +877,8 @@ shield_pierce = 0.4
             ship.x = 150.0;
             ship.z = 0.0;
         }
-        app.world_mut().spawn((
-            AsteroidFieldSection(f),
-            Transform::default(),
-        ));
+        app.world_mut()
+            .spawn((AsteroidFieldSection(f), Transform::default()));
         app.update();
 
         let tol = res * std::f32::consts::SQRT_2;
@@ -767,7 +889,11 @@ shield_pierce = 0.4
             assert!(
                 d >= 100.0 - tol && d <= 200.0 + tol,
                 "asteroid at ({}, {}) dist={} outside [{}, {}]",
-                t.translation.x, t.translation.z, d, 100.0 - tol, 200.0 + tol,
+                t.translation.x,
+                t.translation.z,
+                d,
+                100.0 - tol,
+                200.0 + tol,
             );
             count += 1;
         }
@@ -782,6 +908,9 @@ shield_pierce = 0.4
         app.update();
         let mut q = app.world_mut().query::<&Asteroid>();
         let remaining = q.iter(app.world()).count();
-        assert_eq!(remaining, 0, "all asteroids must despawn after departing the belt");
+        assert_eq!(
+            remaining, 0,
+            "all asteroids must despawn after departing the belt"
+        );
     }
 }

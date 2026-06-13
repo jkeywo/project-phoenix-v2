@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use bevy::prelude::Resource;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::messages::Console;
 
@@ -26,7 +26,14 @@ pub struct StationDef {
 /// Return the default available complexity presets for every console.
 pub fn default_complexity_presets() -> HashMap<Console, Vec<String>> {
     let mut m = HashMap::new();
-    for c in &[Console::CaptainChair, Console::Helm, Console::Tactical, Console::Repair, Console::Power, Console::Comms] {
+    for c in &[
+        Console::CaptainChair,
+        Console::Helm,
+        Console::Tactical,
+        Console::Repair,
+        Console::Power,
+        Console::Comms,
+    ] {
         m.insert(c.clone(), vec!["Low".into(), "Std".into()]);
     }
     for c in &[Console::Sensors, Console::Shields, Console::Navigation] {
@@ -77,7 +84,11 @@ pub enum StationConfigError {
     /// Two stations at the same player count share the same name.
     DuplicateName { count: u32, name: String },
     /// A console name in the TOML could not be mapped to a `Console` variant.
-    UnknownConsole { count: u32, station: String, console: String },
+    UnknownConsole {
+        count: u32,
+        station: String,
+        console: String,
+    },
     /// A station's `consoles` list is empty.
     EmptyConsoles { count: u32, station: String },
     /// A player count is outside the declared `min_players`/`max_players` range.
@@ -162,8 +173,8 @@ fn parse_console(s: &str, count: u32, station: &str) -> Result<Console, StationC
 /// consoles = ["CaptainChair", "Helm"]
 /// ```
 pub fn parse_and_validate(toml_str: &str) -> Result<ShipStations, StationConfigError> {
-    let raw: RawConfig = toml::from_str(toml_str)
-        .map_err(|e| StationConfigError::ParseError(e.to_string()))?;
+    let raw: RawConfig =
+        toml::from_str(toml_str).map_err(|e| StationConfigError::ParseError(e.to_string()))?;
 
     let raw_stations = raw.stations;
     let min = raw_stations.min_players;
@@ -291,7 +302,12 @@ pub fn parse_and_validate(toml_str: &str) -> Result<ShipStations, StationConfigE
         }
     }
 
-    Ok(ShipStations { configs, min_players: min, max_players: max, complexity_presets: default_complexity_presets() })
+    Ok(ShipStations {
+        configs,
+        min_players: min,
+        max_players: max,
+        complexity_presets: default_complexity_presets(),
+    })
 }
 
 /// Look up a station by player count and name. Returns `None` if the count
@@ -352,4 +368,4 @@ mod tests {
             );
         }
     }
-}
+}

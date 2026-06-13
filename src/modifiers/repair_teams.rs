@@ -79,21 +79,48 @@ impl RepairTeams {
     /// - `Returning` with no queue: add the console as queued (or clear if same).
     pub fn dispatch(&mut self, team_idx: usize, new_console: Console) {
         let travel_duration = self.timings.travel_duration;
-        let Some(slot) = self.slots.get_mut(team_idx) else { return };
+        let Some(slot) = self.slots.get_mut(team_idx) else {
+            return;
+        };
         match slot.clone() {
             TeamSlot::Idle => {
-                *slot = TeamSlot::Travelling { console: new_console, elapsed: 0.0 };
+                *slot = TeamSlot::Travelling {
+                    console: new_console,
+                    elapsed: 0.0,
+                };
             }
-            TeamSlot::Travelling { console: current, elapsed } => {
-                let queued = if new_console == current { None } else { Some(new_console) };
-                *slot = TeamSlot::Returning { remaining: elapsed, queued };
+            TeamSlot::Travelling {
+                console: current,
+                elapsed,
+            } => {
+                let queued = if new_console == current {
+                    None
+                } else {
+                    Some(new_console)
+                };
+                *slot = TeamSlot::Returning {
+                    remaining: elapsed,
+                    queued,
+                };
             }
-            TeamSlot::Repairing { console: current, .. } => {
-                let queued = if new_console == current { None } else { Some(new_console) };
-                *slot = TeamSlot::Returning { remaining: travel_duration, queued };
+            TeamSlot::Repairing {
+                console: current, ..
+            } => {
+                let queued = if new_console == current {
+                    None
+                } else {
+                    Some(new_console)
+                };
+                *slot = TeamSlot::Returning {
+                    remaining: travel_duration,
+                    queued,
+                };
             }
             TeamSlot::Returning { remaining, .. } => {
-                *slot = TeamSlot::Returning { remaining, queued: Some(new_console) };
+                *slot = TeamSlot::Returning {
+                    remaining,
+                    queued: Some(new_console),
+                };
             }
         }
     }
@@ -119,7 +146,10 @@ impl RepairTeams {
                         let console = console.clone();
                         let is_full = hull.is_at_max(&console);
                         if is_full {
-                            *slot = TeamSlot::Returning { remaining: 0.0, queued: None };
+                            *slot = TeamSlot::Returning {
+                                remaining: 0.0,
+                                queued: None,
+                            };
                         } else {
                             *slot = TeamSlot::Repairing { console };
                         }
@@ -129,14 +159,20 @@ impl RepairTeams {
                     let hp_to_restore = dt * repair_rate;
                     hull.restore(console.clone(), hp_to_restore);
                     if hull.is_at_max(console) {
-                        *slot = TeamSlot::Returning { remaining: travel_duration, queued: None };
+                        *slot = TeamSlot::Returning {
+                            remaining: travel_duration,
+                            queued: None,
+                        };
                     }
                 }
                 TeamSlot::Returning { remaining, queued } => {
                     *remaining -= dt;
                     if *remaining <= 0.0 {
                         if let Some(c) = queued.take() {
-                            *slot = TeamSlot::Travelling { console: c, elapsed: 0.0 };
+                            *slot = TeamSlot::Travelling {
+                                console: c,
+                                elapsed: 0.0,
+                            };
                         } else {
                             *slot = TeamSlot::Idle;
                         }
@@ -223,7 +259,9 @@ mod tests {
     fn dispatch_idle_team_enters_travelling() {
         let mut teams = RepairTeams::new(2);
         teams.dispatch(0, Console::Helm);
-        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, elapsed } if *elapsed == 0.0));
+        assert!(
+            matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, elapsed } if *elapsed == 0.0)
+        );
     }
 
     #[test]
@@ -235,7 +273,10 @@ mod tests {
         teams.dispatch(0, Console::Helm);
         // Recall (same console)
         teams.dispatch(0, Console::Helm);
-        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { queued: None, .. }));
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Returning { queued: None, .. }
+        ));
     }
 
     // ── Travelling → Repairing ────────────────────────────────────────────────
@@ -246,7 +287,13 @@ mod tests {
         let mut hull = hull_damaged(20.0); // not at max
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull);
-        assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { console: Console::Helm, .. }));
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Repairing {
+                console: Console::Helm,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -273,10 +320,13 @@ mod tests {
         let mut hull = hull_damaged(0.0); // 0 HP
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull); // travel
-        // Now repairing; restore for 2s should give 1 HP
+                                    // Now repairing; restore for 2s should give 1 HP
         teams.tick(2.0, &mut hull);
         let hp = hull.current_for(Console::Helm).unwrap();
-        assert!((hp - 1.0).abs() < 1e-4, "expected 1 HP after 2s repair, got {hp}");
+        assert!(
+            (hp - 1.0).abs() < 1e-4,
+            "expected 1 HP after 2s repair, got {hp}"
+        );
     }
 
     #[test]
@@ -285,7 +335,7 @@ mod tests {
         let mut hull = hull_damaged(24.9); // almost full
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull); // travel
-        // One tick of 1s restores 0.5 HP — enough to max at 25
+                                    // One tick of 1s restores 0.5 HP — enough to max at 25
         teams.tick(1.0, &mut hull);
         assert!(matches!(&teams.slots()[0], TeamSlot::Returning { .. }));
     }
@@ -298,7 +348,7 @@ mod tests {
         let mut hull = hull_full();
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull); // travel (arrives full → Returning with remaining=0)
-        // remaining is already 0 from arriving at full hp; tick 0.1 to trigger idle
+                                    // remaining is already 0 from arriving at full hp; tick 0.1 to trigger idle
         teams.tick(0.1, &mut hull);
         assert!(matches!(&teams.slots()[0], TeamSlot::Idle));
     }
@@ -339,10 +389,8 @@ mod tests {
 
     #[test]
     fn two_teams_operate_independently() {
-        let mut hull = ConsoleHull::from_config(&[
-            (Console::Helm, 25.0),
-            (Console::Tactical, 25.0),
-        ]);
+        let mut hull =
+            ConsoleHull::from_config(&[(Console::Helm, 25.0), (Console::Tactical, 25.0)]);
         // Damage both consoles
         let mut rng = rand::rng();
         hull.apply_damage(10.0, &mut rng);
@@ -353,15 +401,43 @@ mod tests {
         teams.dispatch(1, Console::Tactical);
 
         // Both should be Travelling
-        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Helm, .. }));
-        assert!(matches!(&teams.slots()[1], TeamSlot::Travelling { console: Console::Tactical, .. }));
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Travelling {
+                console: Console::Helm,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &teams.slots()[1],
+            TeamSlot::Travelling {
+                console: Console::Tactical,
+                ..
+            }
+        ));
 
         // After 5s both transition
         teams.tick(5.0, &mut hull);
         let s0 = &teams.slots()[0];
         let s1 = &teams.slots()[1];
-        assert!(matches!(s0, TeamSlot::Repairing { console: Console::Helm, .. }) || matches!(s0, TeamSlot::Returning { .. }));
-        assert!(matches!(s1, TeamSlot::Repairing { console: Console::Tactical, .. }) || matches!(s1, TeamSlot::Returning { .. }));
+        assert!(
+            matches!(
+                s0,
+                TeamSlot::Repairing {
+                    console: Console::Helm,
+                    ..
+                }
+            ) || matches!(s0, TeamSlot::Returning { .. })
+        );
+        assert!(
+            matches!(
+                s1,
+                TeamSlot::Repairing {
+                    console: Console::Tactical,
+                    ..
+                }
+            ) || matches!(s1, TeamSlot::Returning { .. })
+        );
     }
 
     #[test]
@@ -370,7 +446,13 @@ mod tests {
         let mut teams = RepairTeams::new(2);
         teams.dispatch(0, Console::Helm);
         teams.dispatch(0, Console::Tactical); // redirect to different console
-        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { queued: Some(Console::Tactical), .. }));
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Returning {
+                queued: Some(Console::Tactical),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -394,11 +476,15 @@ mod tests {
         teams.dispatch(0, Console::Helm);
         // Advance 2s into travel
         teams.tick(2.0, &mut hull);
-        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { elapsed, .. } if (*elapsed - 2.0).abs() < 1e-4));
+        assert!(
+            matches!(&teams.slots()[0], TeamSlot::Travelling { elapsed, .. } if (*elapsed - 2.0).abs() < 1e-4)
+        );
         // Redirect to a different console
         teams.dispatch(0, Console::Tactical);
         // remaining should equal the elapsed (2.0)
-        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { remaining, queued: Some(Console::Tactical) } if (*remaining - 2.0).abs() < 1e-4));
+        assert!(
+            matches!(&teams.slots()[0], TeamSlot::Returning { remaining, queued: Some(Console::Tactical) } if (*remaining - 2.0).abs() < 1e-4)
+        );
     }
 
     #[test]
@@ -408,7 +494,10 @@ mod tests {
         teams.dispatch(0, Console::Helm);
         teams.tick(3.0, &mut hull);
         teams.dispatch(0, Console::Helm); // same console = recall
-        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { queued: None, .. }));
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Returning { queued: None, .. }
+        ));
     }
 
     #[test]
@@ -419,7 +508,9 @@ mod tests {
         teams.tick(5.0, &mut hull); // travel → Repairing
         assert!(matches!(&teams.slots()[0], TeamSlot::Repairing { .. }));
         teams.dispatch(0, Console::Tactical);
-        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { remaining, queued: Some(Console::Tactical) } if (*remaining - 5.0).abs() < 1e-4));
+        assert!(
+            matches!(&teams.slots()[0], TeamSlot::Returning { remaining, queued: Some(Console::Tactical) } if (*remaining - 5.0).abs() < 1e-4)
+        );
     }
 
     #[test]
@@ -429,7 +520,10 @@ mod tests {
         teams.dispatch(0, Console::Helm);
         teams.tick(5.0, &mut hull); // travel → Repairing
         teams.dispatch(0, Console::Helm); // recall
-        assert!(matches!(&teams.slots()[0], TeamSlot::Returning { queued: None, .. }));
+        assert!(matches!(
+            &teams.slots()[0],
+            TeamSlot::Returning { queued: None, .. }
+        ));
     }
 
     #[test]
@@ -442,7 +536,7 @@ mod tests {
         let hp_before_recall = hull.current_for(Console::Helm).unwrap();
         assert!((hp_before_recall - 1.0).abs() < 1e-4);
         teams.dispatch(0, Console::Helm); // recall
-        // HP should not have changed
+                                          // HP should not have changed
         let hp_after_recall = hull.current_for(Console::Helm).unwrap();
         assert!((hp_after_recall - hp_before_recall).abs() < 1e-4);
     }
@@ -455,7 +549,9 @@ mod tests {
         teams.tick(2.0, &mut hull); // elapsed=2
         teams.dispatch(0, Console::Tactical); // redirect → Returning { remaining:2, queued:Tactical }
         teams.tick(2.1, &mut hull); // remaining expires → auto-dispatch to Tactical
-        assert!(matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Tactical, elapsed } if *elapsed < 1e-3));
+        assert!(
+            matches!(&teams.slots()[0], TeamSlot::Travelling { console: Console::Tactical, elapsed } if *elapsed < 1e-3)
+        );
     }
 
     #[test]
@@ -477,6 +573,9 @@ mod tests {
         assert!(matches!(&teams.slots()[1], TeamSlot::Idle));
         // redirect team 0
         teams.dispatch(0, Console::Tactical);
-        assert!(matches!(&teams.slots()[1], TeamSlot::Idle), "team 1 should be unaffected");
+        assert!(
+            matches!(&teams.slots()[1], TeamSlot::Idle),
+            "team 1 should be unaffected"
+        );
     }
 }

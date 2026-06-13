@@ -124,17 +124,17 @@ impl FlagStore {
 /// successively outer parents. Each leading `parent:` token advances one
 /// step up the chain. Walking past the end resolves as not-found (returns
 /// `None`, evaluated as `0` / `false`).
-fn resolve_chain<'a>(
-    chain: &'a [&'a FlagStore],
-    name: &str,
-) -> Option<(&'a FlagStore, String)> {
+fn resolve_chain<'a>(chain: &'a [&'a FlagStore], name: &str) -> Option<(&'a FlagStore, String)> {
     let mut depth = 0usize;
     let mut rest = name;
     while let Some(stripped) = rest.strip_prefix("parent:") {
         depth += 1;
         rest = stripped;
     }
-    chain.get(depth).copied().map(|store| (store, rest.to_string()))
+    chain
+        .get(depth)
+        .copied()
+        .map(|store| (store, rest.to_string()))
 }
 
 /// Read the counter at `name` from a layer chain, honouring `parent:` prefixes.
@@ -180,9 +180,15 @@ impl CmpOp {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Predicate {
     /// `flag(name)`
-    Flag { name: String },
+    Flag {
+        name: String,
+    },
     /// `counter(name) CMP n`
-    Counter { name: String, op: CmpOp, rhs: i64 },
+    Counter {
+        name: String,
+        op: CmpOp,
+        rhs: i64,
+    },
     Not(Box<Predicate>),
     And(Box<Predicate>, Box<Predicate>),
     Or(Box<Predicate>, Box<Predicate>),
@@ -193,9 +199,7 @@ impl Predicate {
     pub fn evaluate(&self, chain: &[&FlagStore]) -> bool {
         match self {
             Predicate::Flag { name } => flag_in_chain(chain, name),
-            Predicate::Counter { name, op, rhs } => {
-                op.apply(counter_in_chain(chain, name), *rhs)
-            }
+            Predicate::Counter { name, op, rhs } => op.apply(counter_in_chain(chain, name), *rhs),
             Predicate::Not(inner) => !inner.evaluate(chain),
             Predicate::And(a, b) => a.evaluate(chain) && b.evaluate(chain),
             Predicate::Or(a, b) => a.evaluate(chain) || b.evaluate(chain),
@@ -248,12 +252,23 @@ impl<'a> Tokeniser<'a> {
         self.skip_ws();
         let start = self.pos;
         let mut chars = self.rest().chars();
-        let Some(c) = chars.next() else { return Ok(None) };
+        let Some(c) = chars.next() else {
+            return Ok(None);
+        };
         // Single-char punctuation
         match c {
-            '(' => { self.pos += 1; return Ok(Some((Token::LParen, start))); }
-            ')' => { self.pos += 1; return Ok(Some((Token::RParen, start))); }
-            ',' => { self.pos += 1; return Ok(Some((Token::Comma, start))); }
+            '(' => {
+                self.pos += 1;
+                return Ok(Some((Token::LParen, start)));
+            }
+            ')' => {
+                self.pos += 1;
+                return Ok(Some((Token::RParen, start)));
+            }
+            ',' => {
+                self.pos += 1;
+                return Ok(Some((Token::Comma, start)));
+            }
             _ => {}
         }
         // Comparison operators
@@ -267,12 +282,16 @@ impl<'a> Tokeniser<'a> {
                 _ => match c {
                     '>' => (CmpOp::Gt, 1),
                     '<' => (CmpOp::Lt, 1),
-                    '=' => return Err(format!(
-                        "Unexpected token '=' at position {start}; did you mean '=='?"
-                    )),
-                    '!' => return Err(format!(
-                        "Unexpected token '!' at position {start}; did you mean '!='?"
-                    )),
+                    '=' => {
+                        return Err(format!(
+                            "Unexpected token '=' at position {start}; did you mean '=='?"
+                        ))
+                    }
+                    '!' => {
+                        return Err(format!(
+                            "Unexpected token '!' at position {start}; did you mean '!='?"
+                        ))
+                    }
                     _ => unreachable!(),
                 },
             };
@@ -281,7 +300,13 @@ impl<'a> Tokeniser<'a> {
         }
         // Integer (with optional leading -)
         if c.is_ascii_digit()
-            || (c == '-' && self.rest().chars().nth(1).map(|d| d.is_ascii_digit()).unwrap_or(false))
+            || (c == '-'
+                && self
+                    .rest()
+                    .chars()
+                    .nth(1)
+                    .map(|d| d.is_ascii_digit())
+                    .unwrap_or(false))
         {
             let mut end = self.pos + c.len_utf8();
             for ch in self.rest().chars().skip(1) {
@@ -374,9 +399,7 @@ impl Parser {
     fn expect(&mut self, expected: &Token, ctx: &str) -> Result<(), String> {
         match self.bump() {
             Some((t, _)) if &t == expected => Ok(()),
-            Some((t, p)) => Err(format!(
-                "Expected {ctx} but got {t:?} at position {p}"
-            )),
+            Some((t, p)) => Err(format!("Expected {ctx} but got {t:?} at position {p}")),
             None => Err(format!("Expected {ctx} but reached end of predicate")),
         }
     }
@@ -441,11 +464,14 @@ impl Parser {
                 };
                 let rhs = match self.bump() {
                     Some((Token::Int(n), _)) => n,
-                    Some((t, p)) => return Err(format!(
+                    Some((t, p)) => {
+                        return Err(format!(
                         "Expected integer after comparison operator but got {t:?} at position {p}"
-                    )),
+                    ))
+                    }
                     None => return Err(
-                        "Expected integer after comparison operator but reached end of predicate".into()
+                        "Expected integer after comparison operator but reached end of predicate"
+                            .into(),
                     ),
                 };
                 Ok(Predicate::Counter { name, op, rhs })
@@ -609,7 +635,11 @@ mod tests {
         let pred = parse_predicate("counter(x) >= 5").unwrap();
         assert_eq!(
             pred,
-            Predicate::Counter { name: "x".into(), op: CmpOp::Ge, rhs: 5 }
+            Predicate::Counter {
+                name: "x".into(),
+                op: CmpOp::Ge,
+                rhs: 5
+            }
         );
     }
 
@@ -624,7 +654,14 @@ mod tests {
             ("counter(x) < 1", CmpOp::Lt),
         ] {
             let p = parse_predicate(src).unwrap_or_else(|e| panic!("{src}: {e}"));
-            assert_eq!(p, Predicate::Counter { name: "x".into(), op, rhs: 1 });
+            assert_eq!(
+                p,
+                Predicate::Counter {
+                    name: "x".into(),
+                    op,
+                    rhs: 1
+                }
+            );
         }
     }
 
@@ -633,7 +670,11 @@ mod tests {
         let pred = parse_predicate("counter(x) >= -3").unwrap();
         assert_eq!(
             pred,
-            Predicate::Counter { name: "x".into(), op: CmpOp::Ge, rhs: -3 }
+            Predicate::Counter {
+                name: "x".into(),
+                op: CmpOp::Ge,
+                rhs: -3
+            }
         );
     }
 
@@ -642,7 +683,9 @@ mod tests {
         let pred = parse_predicate("flag(parent:parent:goal)").unwrap();
         assert_eq!(
             pred,
-            Predicate::Flag { name: "parent:parent:goal".into() }
+            Predicate::Flag {
+                name: "parent:parent:goal".into()
+            }
         );
     }
 
@@ -691,10 +734,18 @@ mod tests {
     #[test]
     fn evaluate_counter_comparison() {
         let s = store_with(&[("kills", 4)]);
-        assert!(parse_predicate("counter(kills) >= 4").unwrap().evaluate(&[&s]));
-        assert!(!parse_predicate("counter(kills) > 4").unwrap().evaluate(&[&s]));
-        assert!(parse_predicate("counter(kills) == 4").unwrap().evaluate(&[&s]));
-        assert!(parse_predicate("counter(missing) == 0").unwrap().evaluate(&[&s]));
+        assert!(parse_predicate("counter(kills) >= 4")
+            .unwrap()
+            .evaluate(&[&s]));
+        assert!(!parse_predicate("counter(kills) > 4")
+            .unwrap()
+            .evaluate(&[&s]));
+        assert!(parse_predicate("counter(kills) == 4")
+            .unwrap()
+            .evaluate(&[&s]));
+        assert!(parse_predicate("counter(missing) == 0")
+            .unwrap()
+            .evaluate(&[&s]));
     }
 
     #[test]
@@ -747,7 +798,10 @@ mod tests {
     #[test]
     fn parse_unbalanced_paren_errors_without_panic() {
         let err = parse_predicate("(flag(a)").unwrap_err();
-        assert!(err.contains("')'") || err.contains("end of predicate"), "got: {err}");
+        assert!(
+            err.contains("')'") || err.contains("end of predicate"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -760,7 +814,10 @@ mod tests {
     fn parse_unknown_character_reports_position() {
         let err = parse_predicate("flag(a) & flag(b)").unwrap_err();
         assert!(err.contains("position"), "got: {err}");
-        assert!(err.contains('&'), "error must mention offending char: {err}");
+        assert!(
+            err.contains('&'),
+            "error must mention offending char: {err}"
+        );
     }
 
     #[test]

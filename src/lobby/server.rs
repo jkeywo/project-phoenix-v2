@@ -2,7 +2,9 @@ use bevy::prelude::*;
 
 use crate::lobby_handler;
 pub use crate::lobby_handler::Target;
-use crate::messages::{ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData};
+use crate::messages::{
+    ClientMessage, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
+};
 use crate::session::SessionManager;
 use crate::stations_config::ShipStations;
 
@@ -81,7 +83,10 @@ impl Plugin for LobbyPlugin {
             .add_message::<OutboundMessage>()
             .add_message::<PlayerDisconnected>()
             .add_systems(Startup, update_session_with_config)
-            .add_systems(Update, (process_lobby, handle_disconnect, update_game_state_cache));
+            .add_systems(
+                Update,
+                (process_lobby, handle_disconnect, update_game_state_cache),
+            );
     }
 }
 
@@ -91,8 +96,8 @@ fn update_session_with_config(
     mut ship_client_config: ResMut<ShipClientConfigResource>,
 ) {
     // Get the config cache from thread-local storage
-    if let Some(ship_config) = crate::config_cache::get_config_cache()
-        .get("assets/entities/player_ship.toml")
+    if let Some(ship_config) =
+        crate::config_cache::get_config_cache().get("assets/entities/player_ship.toml")
     {
         sessions.0 = SessionManager::new_with_config(ship_config);
 
@@ -176,20 +181,42 @@ fn update_session_with_config(
         }
         if let Some(sc) = &ship_config.sensors_console {
             next.sensors_radar_range = sc.long_range_radar.range;
-            next.sensors_radar_shows = sc.long_range_radar.shows.iter().map(|t| t.as_str().to_string()).collect();
-            next.sensors_radar_selects = sc.long_range_radar.selects.iter().map(|t| t.as_str().to_string()).collect();
+            next.sensors_radar_shows = sc
+                .long_range_radar
+                .shows
+                .iter()
+                .map(|t| t.as_str().to_string())
+                .collect();
+            next.sensors_radar_selects = sc
+                .long_range_radar
+                .selects
+                .iter()
+                .map(|t| t.as_str().to_string())
+                .collect();
         }
         if let Some(nc) = &ship_config.navigation_console {
-            next.nav_chart_shows = nc.system_chart.shows.iter().map(|t| t.as_str().to_string()).collect();
-            next.nav_chart_selects = nc.system_chart.selects.iter().map(|t| t.as_str().to_string()).collect();
+            next.nav_chart_shows = nc
+                .system_chart
+                .shows
+                .iter()
+                .map(|t| t.as_str().to_string())
+                .collect();
+            next.nav_chart_selects = nc
+                .system_chart
+                .selects
+                .iter()
+                .map(|t| t.as_str().to_string())
+                .collect();
             if nc.system_chart.range > 0.0 {
                 next.nav_chart_range = nc.system_chart.range;
             }
         }
         if let Some(wc) = &ship_config.weapons_console {
             if let Some(r) = &wc.radar {
-                next.tactical_radar_shows = r.shows.iter().map(|t| t.as_str().to_string()).collect();
-                next.tactical_radar_selects = r.selects.iter().map(|t| t.as_str().to_string()).collect();
+                next.tactical_radar_shows =
+                    r.shows.iter().map(|t| t.as_str().to_string()).collect();
+                next.tactical_radar_selects =
+                    r.selects.iter().map(|t| t.as_str().to_string()).collect();
                 next.tactical_radar_range = r.range;
             }
         }
@@ -229,7 +256,10 @@ pub fn process_lobby(
         return;
     }
     let default_stations = ShipStations::default();
-    let stations = ship_stations.as_ref().map(|s| s.as_ref()).unwrap_or(&default_stations);
+    let stations = ship_stations
+        .as_ref()
+        .map(|s| s.as_ref())
+        .unwrap_or(&default_stations);
     let world_data = world.as_ref().map(|w| &w.0);
     for ev in inbound.read() {
         let result = lobby_handler::process_message(
@@ -312,7 +342,6 @@ pub fn lobby_outbox_broadcaster() -> LobbyOutboxPlugin {
 mod tests {
     use super::*;
 
-
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
 
@@ -335,7 +364,10 @@ mod tests {
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -348,8 +380,17 @@ mod tests {
     #[test]
     fn identify_arrives_via_inbound_message_and_welcome_is_sent_via_outbound() {
         let mut app = test_app();
-        push(&mut app, "peer-id", ClientMessage::Identify { token: "t1".into(), name: "Alice".into() });
+        push(
+            &mut app,
+            "peer-id",
+            ClientMessage::Identify {
+                token: "t1".into(),
+                name: "Alice".into(),
+            },
+        );
         let out = tick(&mut app);
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::Welcome { .. })));
+        assert!(out
+            .iter()
+            .any(|m| matches!(&m.msg, ServerMessage::Welcome { .. })));
     }
 }

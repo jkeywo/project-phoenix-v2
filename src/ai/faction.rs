@@ -8,8 +8,8 @@
 /// Factionless entities (those with no faction UUID) are neither enemies nor
 /// targets of anyone.
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Configuration for a single faction, loaded from a `assets/factions/*.toml`
 /// file.
@@ -231,9 +231,13 @@ name = "Pirate"
         reg.insert(fed.clone());
         reg.insert(pirate.clone());
 
-        assert!(is_enemy(Some(fed.uuid), Some(pirate.uuid), &reg),
-            "Federation must consider Pirates as enemies");
-        assert!(is_enemy(Some(pirate.uuid), Some(fed.uuid), &reg),
-            "Pirates must consider Federation as enemies");
+        assert!(
+            is_enemy(Some(fed.uuid), Some(pirate.uuid), &reg),
+            "Federation must consider Pirates as enemies"
+        );
+        assert!(
+            is_enemy(Some(pirate.uuid), Some(fed.uuid), &reg),
+            "Pirates must consider Federation as enemies"
+        );
     }
 }

@@ -1,4 +1,4 @@
-﻿// WASM/JS bridge for config preloading — all public functions are #[wasm_bindgen] exports.
+// WASM/JS bridge for config preloading — all public functions are #[wasm_bindgen] exports.
 //
 // This module implements the preload sequence for the unified world TOML,
 // entity templates, complexity TOML files, and faction TOML files. It uses
@@ -185,7 +185,10 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
                 // Return TRUE so handleConfigRequest calls finishInit().
                 Ok(JsValue::TRUE)
             } else {
-                Err(JsValue::from_str(&format!("Entity config parse error at {}: {:?}", path, e)))
+                Err(JsValue::from_str(&format!(
+                    "Entity config parse error at {}: {:?}",
+                    path, e
+                )))
             }
         }
     }
@@ -200,7 +203,10 @@ pub fn wasm_load_complexity(path: String, toml_str: String) -> Result<JsValue, J
     match crate::complexity::parse_complexity_config(&toml_str) {
         Ok(config) => {
             COMPLEXITY_CACHE.with(|cache| {
-                cache.borrow_mut().get_or_insert_with(HashMap::new).insert(path.clone(), config);
+                cache
+                    .borrow_mut()
+                    .get_or_insert_with(HashMap::new)
+                    .insert(path.clone(), config);
             });
 
             IN_FLIGHT.with(|in_flight| {
@@ -241,7 +247,10 @@ pub fn wasm_load_complexity(path: String, toml_str: String) -> Result<JsValue, J
                 });
                 Ok(JsValue::TRUE)
             } else {
-                Err(JsValue::from_str(&format!("Complexity config parse error at {}: {}", path, e)))
+                Err(JsValue::from_str(&format!(
+                    "Complexity config parse error at {}: {}",
+                    path, e
+                )))
             }
         }
     }
@@ -253,7 +262,11 @@ fn queue_complexity_refs(config: &EntityConfig) {
     let paths = config.complexity_toml_paths();
     for p in paths {
         COMPLEXITY_CACHE.with(|cache| {
-            if cache.borrow().as_ref().map_or(true, |m| !m.contains_key(&p)) {
+            if cache
+                .borrow()
+                .as_ref()
+                .map_or(true, |m| !m.contains_key(&p))
+            {
                 queue_and_fire(p);
             }
         });
@@ -360,7 +373,6 @@ pub fn request_world_fetch(path: String) {
     });
 }
 
-
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsValue> {
     match crate::faction::parse_faction_config(&toml_str) {
@@ -416,7 +428,7 @@ pub fn get_config_cache() -> ConfigCache {
 #[cfg(target_arch = "wasm32")]
 fn queue_and_fire(path: String) {
     let mut should_fire = false;
-    
+
     CONFIG_CACHE.with(|cache| {
         if !cache.borrow().contains_key(&path) {
             PENDING_QUEUE.with(|q| {
@@ -427,12 +439,12 @@ fn queue_and_fire(path: String) {
             });
         }
     });
-    
+
     if should_fire {
         IN_FLIGHT.with(|in_flight| {
             in_flight.borrow_mut().insert(path.clone());
         });
-        
+
         CONFIG_REQUEST_CB.with(|slot| {
             if let Some(cb) = slot.borrow().as_ref() {
                 let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&path));
@@ -470,7 +482,9 @@ pub type ConfigCache = std::collections::HashMap<String, crate::entity_config::E
 /// Newtype wrapper so HashMap<String, ComplexityConfig> can be inserted as a Bevy Resource.
 #[cfg(target_arch = "wasm32")]
 #[derive(Resource)]
-pub struct ComplexityResources(pub std::collections::HashMap<String, crate::complexity::ComplexityConfig>);
+pub struct ComplexityResources(
+    pub std::collections::HashMap<String, crate::complexity::ComplexityConfig>,
+);
 
 #[cfg(target_arch = "wasm32")]
 impl std::ops::Deref for ComplexityResources {
@@ -482,7 +496,8 @@ impl std::ops::Deref for ComplexityResources {
 
 /// On non-wasm, ComplexityResources is just a plain HashMap.
 #[cfg(not(target_arch = "wasm32"))]
-pub type ComplexityResources = std::collections::HashMap<String, crate::complexity::ComplexityConfig>;
+pub type ComplexityResources =
+    std::collections::HashMap<String, crate::complexity::ComplexityConfig>;
 
 /// Newtype wrapper so `FactionRegistry` can be inserted as a Bevy Resource.
 #[derive(Resource)]
@@ -574,7 +589,9 @@ pub fn get_world_config() -> Option<crate::world::config::WorldConfig> {
 
 // Native no-ops for the runtime world-fetch helpers (native uses std::fs directly).
 #[cfg(not(target_arch = "wasm32"))]
-pub fn pop_pending_world_toml(_path: &str) -> Option<String> { None }
+pub fn pop_pending_world_toml(_path: &str) -> Option<String> {
+    None
+}
 #[cfg(not(target_arch = "wasm32"))]
 pub fn request_world_fetch(_path: String) {}
 
@@ -605,13 +622,13 @@ pub fn get_faction_registry() -> crate::faction::FactionRegistry {
 mod tests {
     use crate::entity_config::EntityConfig;
     use std::collections::{HashMap, HashSet, VecDeque};
-    
+
     // ── Helper for tests ───────────────────────────────────────────────────────
-    
+
     fn default_entity_config() -> EntityConfig {
         EntityConfig::default()
     }
-    
+
     // ── Integration Tests ──────────────────────────────────────────────────────
 
     #[test]
@@ -635,9 +652,9 @@ length = 0.0
         assert!((config.hull.as_ref().unwrap().hull_integrity - 30.0).abs() < 1e-6);
         assert!(config.collider.is_some());
     }
-    
+
     // ── Native ConfigCache Tests ──────────────────────────────────────────────
-    
+
     // A simple native version of ConfigCache for testing
     #[derive(Default)]
     struct TestConfigCache {
@@ -645,12 +662,12 @@ length = 0.0
         pending: VecDeque<String>,
         in_flight: HashSet<String>,
     }
-    
+
     impl TestConfigCache {
         fn new() -> Self {
             Self::default()
         }
-        
+
         fn insert(&mut self, path: String, config: EntityConfig) {
             self.cache.insert(path.clone(), config);
             self.in_flight.remove(&path);
@@ -659,11 +676,11 @@ length = 0.0
                 self.pending.remove(pos);
             }
         }
-        
+
         fn has_pending(&self) -> bool {
             !self.pending.is_empty()
         }
-        
+
         fn queue_fetch(&mut self, path: String) {
             if !self.cache.contains_key(&path) && !self.in_flight.contains(&path) {
                 if !self.pending.contains(&path) {
@@ -671,65 +688,65 @@ length = 0.0
                 }
             }
         }
-        
+
         fn mark_in_flight(&mut self, path: String) {
             self.in_flight.insert(path);
         }
-        
+
         fn all_pending(&self) -> Vec<String> {
             self.pending.iter().cloned().collect()
         }
     }
-    
+
     #[test]
     fn config_cache_no_duplicate_queueing() {
         let mut cache = TestConfigCache::new();
-        
+
         cache.queue_fetch("path1".to_string());
         cache.queue_fetch("path1".to_string()); // Duplicate
-        
+
         assert_eq!(cache.all_pending(), vec!["path1"]);
     }
-    
+
     #[test]
     fn config_cache_in_flight_prevents_queueing() {
         let mut cache = TestConfigCache::new();
-        
+
         cache.mark_in_flight("path1".to_string());
         cache.queue_fetch("path1".to_string());
-        
+
         assert!(!cache.has_pending());
     }
-    
+
     #[test]
     fn config_cache_cached_prevents_queueing() {
         let mut cache = TestConfigCache::new();
         let config = default_entity_config();
-        
+
         cache.insert("path1".to_string(), config);
         cache.queue_fetch("path1".to_string());
-        
+
         assert!(!cache.has_pending());
     }
-    
+
     #[test]
     fn config_cache_preload_complete_when_all_inserted() {
         let mut cache = TestConfigCache::new();
-        
+
         // Queue multiple paths
         cache.queue_fetch("path1".to_string());
         cache.queue_fetch("path2".to_string());
-        
+
         assert!(cache.has_pending());
-        
+
         // Insert configs
         cache.insert("path1".to_string(), default_entity_config());
         cache.insert("path2".to_string(), default_entity_config());
-        
+
         // Now no pending - preload complete
         assert!(!cache.has_pending());
     }
-    
+
     #[test]
     fn entity_config_complexity_toml_paths_discovered() {
         let toml = r#"
@@ -749,13 +766,13 @@ complexity_toml = "assets/complexity/tactical.toml"
     #[test]
     fn config_cache_partial_preload_still_has_pending() {
         let mut cache = TestConfigCache::new();
-        
+
         cache.queue_fetch("path1".to_string());
         cache.queue_fetch("path2".to_string());
-        
+
         // Insert only one
         cache.insert("path1".to_string(), default_entity_config());
-        
+
         // Still has pending
         assert!(cache.has_pending());
         assert_eq!(cache.all_pending(), vec!["path2"]);
@@ -818,6 +835,9 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
         // The variant paths must now be pending.
         let mut pending = cache.all_pending();
         pending.sort();
-        assert_eq!(pending, vec!["asteroid_cosmetic.toml", "asteroid_small.toml"]);
+        assert_eq!(
+            pending,
+            vec!["asteroid_cosmetic.toml", "asteroid_small.toml"]
+        );
     }
 }

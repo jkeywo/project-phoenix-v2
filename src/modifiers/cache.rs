@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
-use serde::{Deserialize, Serialize};
-use bevy::prelude::Resource;
-pub use crate::messages::{ModifierSlot, ModifierSource};
 use crate::flag_kind::FlagKind;
+pub use crate::messages::{ModifierSlot, ModifierSource};
+use bevy::prelude::Resource;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 // ── Integer modifier system ───────────────────────────────────────────────────
 
@@ -85,8 +85,15 @@ pub struct Modifier {
 /// Drained by the simulation broadcast system to emit `OutboundMessage`s.
 #[derive(Clone, Debug)]
 pub enum ModifierEvent {
-    Added { source: ModifierSource, slot: ModifierSlot, bonus: f32 },
-    Removed { source: ModifierSource, slot: ModifierSlot },
+    Added {
+        source: ModifierSource,
+        slot: ModifierSlot,
+        bonus: f32,
+    },
+    Removed {
+        source: ModifierSource,
+        slot: ModifierSlot,
+    },
 }
 
 /// All active modifiers for a ship, plus an eagerly-maintained multiplier cache.
@@ -194,17 +201,17 @@ impl ShipModifiers {
     /// Pushes a `ModifierEvent::Removed` for each modifier removed.
     /// Rebuilds the cache after removal.
     pub fn clear_source(&mut self, source: &ModifierSource) {
-        let keys: Vec<(ModifierSource, ModifierSlot)> = self.table.keys()
+        let keys: Vec<(ModifierSource, ModifierSlot)> = self
+            .table
+            .keys()
             .filter(|(s, _)| s == source)
             .cloned()
             .collect();
 
         for (src, slot) in keys {
             self.table.remove(&(src.clone(), slot.clone()));
-            self.pending_events.push(ModifierEvent::Removed {
-                source: src,
-                slot,
-            });
+            self.pending_events
+                .push(ModifierEvent::Removed { source: src, slot });
         }
 
         let flag_kinds: Vec<FlagKind> = self.flags.keys().cloned().collect();
@@ -313,11 +320,8 @@ impl ShipModifiers {
         let mut float_by_slot: Vec<(ModifierSlot, f32, Vec<String>)> = ModifierSlot::all()
             .iter()
             .filter_map(|slot| {
-                let entries: Vec<(&(ModifierSource, ModifierSlot), &f32)> = self
-                    .table
-                    .iter()
-                    .filter(|((_, s), _)| s == slot)
-                    .collect();
+                let entries: Vec<(&(ModifierSource, ModifierSlot), &f32)> =
+                    self.table.iter().filter(|((_, s), _)| s == slot).collect();
                 if entries.is_empty() {
                     None
                 } else {
@@ -336,7 +340,12 @@ impl ShipModifiers {
             out.push_str("(none)\n");
         } else {
             for (slot, mult, detail) in float_by_slot {
-                out.push_str(&format!("{:?}  ×{:.2}  ← {}\n", slot, mult, detail.join(", ")));
+                out.push_str(&format!(
+                    "{:?}  ×{:.2}  ← {}\n",
+                    slot,
+                    mult,
+                    detail.join(", ")
+                ));
             }
         }
 
@@ -394,7 +403,11 @@ mod tests {
     use crate::messages::Console;
 
     fn ms(source: ModifierSource, slot: ModifierSlot, bonus: f32) -> Modifier {
-        Modifier { source, slot, bonus }
+        Modifier {
+            source,
+            slot,
+            bonus,
+        }
     }
 
     // ── 1. Empty table → 1.0 for every slot ──────────────────────────────────
@@ -412,7 +425,11 @@ mod tests {
     #[test]
     fn single_positive_bonus_gives_one_plus_bonus() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
     }
 
@@ -421,7 +438,11 @@ mod tests {
     #[test]
     fn single_penalty_gives_one_over_one_plus_abs() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::HullDamageTaken, -0.5));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::HullDamageTaken,
+            -0.5,
+        ));
         let expected = 1.0 / 1.5;
         assert!((mods.get(&ModifierSlot::HullDamageTaken) - expected).abs() < 1e-6);
     }
@@ -431,9 +452,15 @@ mod tests {
     #[test]
     fn multiple_sources_same_slot_stack_additively() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.3));
         mods.add_or_update(ms(
-            ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) },
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.3,
+        ));
+        mods.add_or_update(ms(
+            ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(1),
+            },
             ModifierSlot::MaxSpeed,
             0.2,
         ));
@@ -445,9 +472,15 @@ mod tests {
     #[test]
     fn mixed_bonuses_sum_before_formula() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 1.0));
         mods.add_or_update(ms(
-            ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(2) },
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            1.0,
+        ));
+        mods.add_or_update(ms(
+            ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(2),
+            },
             ModifierSlot::MaxSpeed,
             -0.5,
         ));
@@ -460,8 +493,16 @@ mod tests {
     #[test]
     fn readding_same_source_slot_replaces() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.1));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.1,
+        ));
         // Only 0.1 should remain, not 0.6
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.1).abs() < 1e-6);
     }
@@ -471,7 +512,11 @@ mod tests {
     #[test]
     fn remove_existing_modifier_restores_identity() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::RadarRange, 0.5));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::RadarRange,
+            0.5,
+        ));
         mods.remove(&ModifierSource::ImpulseDrive, &ModifierSlot::RadarRange);
         assert_eq!(mods.get(&ModifierSlot::RadarRange), 1.0);
     }
@@ -491,7 +536,11 @@ mod tests {
     #[test]
     fn slot_isolation() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 2.0));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            2.0,
+        ));
         // All other slots should still be 1.0
         assert_eq!(mods.get(&ModifierSlot::PhaserDamage), 1.0);
         assert_eq!(mods.get(&ModifierSlot::RepairRate), 1.0);
@@ -504,12 +553,16 @@ mod tests {
     fn different_region_ids_stack_as_distinct_sources() {
         let mut mods = ShipModifiers::new();
         mods.add_or_update(ms(
-            ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(3) },
+            ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(3),
+            },
             ModifierSlot::MaxSpeed,
             0.2,
         ));
         mods.add_or_update(ms(
-            ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(4) },
+            ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(4),
+            },
             ModifierSlot::MaxSpeed,
             0.3,
         ));
@@ -545,7 +598,12 @@ mod tests {
     fn multiple_sources_or_aggregate() {
         let mut mods = ShipModifiers::new();
         mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
-        mods.add_flag(ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) }, FlagKind::CommsJammed);
+        mods.add_flag(
+            ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(1),
+            },
+            FlagKind::CommsJammed,
+        );
         assert!(mods.has_flag(&FlagKind::CommsJammed));
     }
 
@@ -553,9 +611,17 @@ mod tests {
     fn removing_one_source_leaves_flag_set_when_multiple_sources() {
         let mut mods = ShipModifiers::new();
         mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
-        mods.add_flag(ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) }, FlagKind::CommsJammed);
+        mods.add_flag(
+            ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(1),
+            },
+            FlagKind::CommsJammed,
+        );
         mods.remove_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
-        assert!(mods.has_flag(&FlagKind::CommsJammed), "flag should remain because 2nd source still exists");
+        assert!(
+            mods.has_flag(&FlagKind::CommsJammed),
+            "flag should remain because 2nd source still exists"
+        );
     }
 
     #[test]
@@ -585,7 +651,11 @@ mod tests {
     fn flag_storage_independent_from_numeric_modifiers() {
         let mut mods = ShipModifiers::new();
         mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
         // Flag should still be set
         assert!(mods.has_flag(&FlagKind::CommsJammed));
         // Modifier value should be unaffected
@@ -596,7 +666,12 @@ mod tests {
     fn flags_returns_all_set_flags() {
         let mut mods = ShipModifiers::new();
         mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
-        mods.add_flag(ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) }, FlagKind::SensorBlind);
+        mods.add_flag(
+            ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(1),
+            },
+            FlagKind::SensorBlind,
+        );
         let result = mods.flags();
         assert!(result.contains(&FlagKind::CommsJammed));
         assert!(result.contains(&FlagKind::SensorBlind));
@@ -614,8 +689,16 @@ mod tests {
     #[test]
     fn clear_source_removes_all_modifiers_and_flags_for_source() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::RadarRange, 0.3));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::RadarRange,
+            0.3,
+        ));
         mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
         mods.clear_source(&ModifierSource::ImpulseDrive);
         assert_eq!(mods.get(&ModifierSlot::MaxSpeed), 1.0);
@@ -626,8 +709,14 @@ mod tests {
     #[test]
     fn clear_source_does_not_affect_other_sources() {
         let mut mods = ShipModifiers::new();
-        let region = ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(10) };
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        let region = ModifierSource::RegionEffect {
+            uuid: uuid::Uuid::from_u128(10),
+        };
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
         mods.add_or_update(ms(region.clone(), ModifierSlot::MaxSpeed, 0.3));
         mods.add_flag(ModifierSource::ImpulseDrive, FlagKind::CommsJammed);
         mods.add_flag(region.clone(), FlagKind::SensorBlind);
@@ -642,8 +731,14 @@ mod tests {
     #[test]
     fn clear_source_on_unknown_source_is_noop() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
-        mods.clear_source(&ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(99) });
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
+        mods.clear_source(&ModifierSource::RegionEffect {
+            uuid: uuid::Uuid::from_u128(99),
+        });
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
     }
 
@@ -677,7 +772,9 @@ mod tests {
             bonus: 2,
         });
         mods.add_or_update_int(IntModifier {
-            source: ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(1) },
+            source: ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(1),
+            },
             slot: IntModifierSlot::RepairTeams,
             bonus: 3,
         });
@@ -706,7 +803,9 @@ mod tests {
     #[test]
     fn remove_int_removes_correct_entry_and_updates_cache() {
         let mut mods = ShipModifiers::new();
-        let region = ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(5) };
+        let region = ModifierSource::RegionEffect {
+            uuid: uuid::Uuid::from_u128(5),
+        };
         mods.add_or_update_int(IntModifier {
             source: ModifierSource::ImpulseDrive,
             slot: IntModifierSlot::RepairTeams,
@@ -730,7 +829,9 @@ mod tests {
             bonus: 4,
         });
         mods.remove_int(
-            &ModifierSource::RegionEffect { uuid: uuid::Uuid::from_u128(99) },
+            &ModifierSource::RegionEffect {
+                uuid: uuid::Uuid::from_u128(99),
+            },
             &IntModifierSlot::RepairTeams,
         );
         assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 4);
@@ -756,7 +857,11 @@ mod tests {
             slot: IntModifierSlot::RepairTeams,
             bonus: 3,
         });
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
         assert_eq!(mods.get_int(&IntModifierSlot::RepairTeams), 3);
         assert!((mods.get(&ModifierSlot::MaxSpeed) - 1.5).abs() < 1e-6);
     }
@@ -780,12 +885,23 @@ mod tests {
     #[test]
     fn clear_source_pushes_removed_events() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::RadarRange, 0.3));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::RadarRange,
+            0.3,
+        ));
         mods.pending_events.clear();
         mods.clear_source(&ModifierSource::ImpulseDrive);
         assert_eq!(mods.pending_events.len(), 2);
-        assert!(mods.pending_events.iter().all(|e| matches!(e, ModifierEvent::Removed { .. })));
+        assert!(mods
+            .pending_events
+            .iter()
+            .all(|e| matches!(e, ModifierEvent::Removed { .. })));
     }
 
     // ── format_debug tests ────────────────────────────────────────────────
@@ -795,10 +911,20 @@ mod tests {
         let mods = ShipModifiers::new();
         let s = mods.format_debug();
         assert!(s.contains("[Flags]"), "missing [Flags] header");
-        assert!(s.contains("[Float Modifiers]"), "missing [Float Modifiers] header");
-        assert!(s.contains("[Int Modifiers]"), "missing [Int Modifiers] header");
+        assert!(
+            s.contains("[Float Modifiers]"),
+            "missing [Float Modifiers] header"
+        );
+        assert!(
+            s.contains("[Int Modifiers]"),
+            "missing [Int Modifiers] header"
+        );
         // All three sections should show (none)
-        assert_eq!(s.matches("(none)").count(), 3, "expected (none) in all three sections");
+        assert_eq!(
+            s.matches("(none)").count(),
+            3,
+            "expected (none) in all three sections"
+        );
     }
 
     #[test]
@@ -809,13 +935,21 @@ mod tests {
         assert!(s.contains("CommsJammed"), "missing flag name");
         assert!(s.contains("ImpulseDrive"), "missing source name");
         // Only Float and Int sections should be (none)
-        assert_eq!(s.matches("(none)").count(), 2, "expected (none) for float and int sections only");
+        assert_eq!(
+            s.matches("(none)").count(),
+            2,
+            "expected (none) for float and int sections only"
+        );
     }
 
     #[test]
     fn format_debug_shows_float_modifier_with_multiplier_and_source() {
         let mut mods = ShipModifiers::new();
-        mods.add_or_update(ms(ModifierSource::ImpulseDrive, ModifierSlot::MaxSpeed, 0.5));
+        mods.add_or_update(ms(
+            ModifierSource::ImpulseDrive,
+            ModifierSlot::MaxSpeed,
+            0.5,
+        ));
         let s = mods.format_debug();
         assert!(s.contains("MaxSpeed"), "missing slot name");
         assert!(s.contains("×1.50"), "missing multiplier");
@@ -845,9 +979,19 @@ mod tests {
         let s = mods.format_debug();
         // Float and Int sections should both say (none)
         let lines: Vec<&str> = s.lines().collect();
-        let float_idx = lines.iter().position(|l| l.contains("[Float Modifiers]")).unwrap();
-        let int_idx = lines.iter().position(|l| l.contains("[Int Modifiers]")).unwrap();
-        assert_eq!(lines[float_idx + 1], "(none)", "float section should be (none)");
+        let float_idx = lines
+            .iter()
+            .position(|l| l.contains("[Float Modifiers]"))
+            .unwrap();
+        let int_idx = lines
+            .iter()
+            .position(|l| l.contains("[Int Modifiers]"))
+            .unwrap();
+        assert_eq!(
+            lines[float_idx + 1],
+            "(none)",
+            "float section should be (none)"
+        );
         assert_eq!(lines[int_idx + 1], "(none)", "int section should be (none)");
     }
 }

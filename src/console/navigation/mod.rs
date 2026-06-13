@@ -29,7 +29,9 @@ fn handle_navigation_waypoint(
     for ev in reader.read() {
         match &ev.msg {
             ClientMessage::SetNavigationWaypoint { x, z }
-                if navigation_authorized(&sessions, &ev.token) && x.is_finite() && z.is_finite() =>
+                if navigation_authorized(&sessions, &ev.token)
+                    && x.is_finite()
+                    && z.is_finite() =>
             {
                 waypoint.0 = Some(WaypointSnapshot { x: *x, z: *z });
             }
@@ -46,9 +48,10 @@ fn handle_navigation_waypoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::damage::ConsoleHull;
     use crate::lobby::{LobbyPlugin, OutboundMessage};
-    use crate::messages::{GamePhase, ServerMessage};
-    use crate::server_app::{sim_state_broadcaster, ShipImpulse};
+    use crate::messages::ServerMessage;
+    use crate::server_app::{sim_state_broadcaster, ShipHullIntegrity, ShipImpulse};
     use crate::ship_state::ShipState;
 
     #[derive(Resource, Default)]
@@ -63,11 +66,20 @@ mod tests {
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
+            .add_plugins(bevy::time::TimePlugin)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(200),
+            ))
             .add_plugins(NavigationPlugin)
             .add_plugins(sim_state_broadcaster())
             .init_resource::<Outbox>()
             .insert_resource(ShipState::new())
+            .insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
+                Console::Navigation,
+                25.0,
+            )])))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
+            .insert_resource(crate::modifiers::ShipModifiers::new())
             .add_systems(PostUpdate, collect);
         app
     }
@@ -75,7 +87,10 @@ mod tests {
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -122,7 +137,6 @@ mod tests {
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
-        app.world_mut().insert_resource(GamePhase::InProgress);
     }
 
     fn latest_sim_snapshot(out: &[OutboundMessage]) -> Option<crate::messages::SimSnapshot> {
@@ -148,7 +162,11 @@ mod tests {
             Some(WaypointSnapshot { x: 120.0, z: -45.0 })
         );
 
-        push(&mut app, "navigation", ClientMessage::ClearNavigationWaypoint);
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::ClearNavigationWaypoint,
+        );
         tick(&mut app);
         assert!(app.world().resource::<NavigationWaypoint>().0.is_none());
     }
@@ -201,7 +219,11 @@ mod tests {
             Some(WaypointSnapshot { x: 10.0, z: 20.0 })
         );
 
-        push(&mut app, "navigation", ClientMessage::ClearNavigationWaypoint);
+        push(
+            &mut app,
+            "navigation",
+            ClientMessage::ClearNavigationWaypoint,
+        );
         let out = tick(&mut app);
         let snap = latest_sim_snapshot(&out).expect("expected SimState");
         assert!(snap.navigation_waypoint.is_none());

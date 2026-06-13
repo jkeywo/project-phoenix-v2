@@ -58,9 +58,12 @@ impl ImpulseState {
     /// `charge_duration` is the total time in seconds to fully charge.
     pub fn tick(&mut self, dt: f32, charge_duration: f32) {
         if self.phase == ImpulsePhase::Charging {
-            let duration = if charge_duration > 0.0 { charge_duration } else { IMPULSE_CHARGE_DURATION };
-            self.charge_progress =
-                (self.charge_progress + dt / duration).min(1.0);
+            let duration = if charge_duration > 0.0 {
+                charge_duration
+            } else {
+                IMPULSE_CHARGE_DURATION
+            };
+            self.charge_progress = (self.charge_progress + dt / duration).min(1.0);
             if self.charge_progress >= 1.0 {
                 self.phase = ImpulsePhase::Active;
             }
@@ -79,9 +82,18 @@ impl ImpulseState {
     /// - `steering` input is forced to 0.0 (ignored)
     ///
     /// Returns `(effective_max_speed, effective_steering)`.
-    pub fn apply_to_physics(&self, base_max_speed: f32, steering: f32, speed_multiplier: f32) -> (f32, f32) {
+    pub fn apply_to_physics(
+        &self,
+        base_max_speed: f32,
+        steering: f32,
+        speed_multiplier: f32,
+    ) -> (f32, f32) {
         if self.is_active() {
-            let mult = if speed_multiplier > 0.0 { speed_multiplier } else { IMPULSE_SPEED_MULTIPLIER };
+            let mult = if speed_multiplier > 0.0 {
+                speed_multiplier
+            } else {
+                IMPULSE_SPEED_MULTIPLIER
+            };
             (base_max_speed * mult, 0.0)
         } else {
             (base_max_speed, steering)

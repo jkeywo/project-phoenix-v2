@@ -4,19 +4,21 @@
 // gated behind #[cfg(target_arch = "wasm32")].
 
 #[cfg(target_arch = "wasm32")]
-    use {
-        crate::asteroid_lifecycle::AsteroidLifecyclePlugin,
-        crate::codec::{self, JsonCodec, MessageCodec},
-        crate::config_cache::ConfigCachePlugin,
-        crate::console_bridge::{ConsoleStateChanged, HudStateChanged, LOCAL_CONSOLE_TOKEN, LobbyStateChanged},
-        crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
+use {
+    crate::asteroid_lifecycle::AsteroidLifecyclePlugin,
+    crate::codec::{self, JsonCodec, MessageCodec},
+    crate::config_cache::ConfigCachePlugin,
+    crate::console_bridge::{
+        ConsoleStateChanged, HudStateChanged, LobbyStateChanged, LOCAL_CONSOLE_TOKEN,
+    },
+    crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, PlayerDisconnected, Target},
     crate::messages,
     crate::modifier_coordination::ModifierCoordinationPlugin,
     crate::renderer::RendererPlugin,
     crate::server_app::add_simulation_plugins,
-    crate::world::WorldPlugin,
     crate::stations_config::ShipStations,
     crate::viewscreen_border::ViewscreenBorderPlugin,
+    crate::world::WorldPlugin,
     bevy::{prelude::*, DefaultPlugins},
     js_sys::Function,
     std::cell::RefCell,
@@ -158,13 +160,15 @@ pub fn wasm_init() {
     .add_plugins(crate::lobby::lobby_outbox_broadcaster());
     add_simulation_plugins(&mut app);
     app.add_plugins(WorldPlugin)
-    .add_plugins(RendererPlugin)
-    .add_plugins(ViewscreenBorderPlugin);
+        .add_plugins(RendererPlugin)
+        .add_plugins(ViewscreenBorderPlugin);
 
     // Always add the debug overlay plugin; ?debug_regions=1 sets initial state.
     // Runtime toggling via F4 is handled by drain_debug_toggles.
     let debug_regions_initial = DEBUG_REGIONS_ENABLED.with(|v| *v.borrow());
-    app.add_plugins(crate::debug_overlay::DebugOverlayPlugin { enabled: debug_regions_initial });
+    app.add_plugins(crate::debug_overlay::DebugOverlayPlugin {
+        enabled: debug_regions_initial,
+    });
 
     app.insert_resource(bevy::winit::WinitSettings {
         focused_mode: bevy::winit::UpdateMode::Reactive {
@@ -180,8 +184,24 @@ pub fn wasm_init() {
             react_to_window_events: true,
         },
     })
-    .add_systems(PreUpdate, (drain_inbound, drain_disconnects, drain_debug_toggles, drain_ui_actions))
-    .add_systems(PostUpdate, (flush_outbound, flush_hud_state, flush_console_state, flush_lobby_state));
+    .add_systems(
+        PreUpdate,
+        (
+            drain_inbound,
+            drain_disconnects,
+            drain_debug_toggles,
+            drain_ui_actions,
+        ),
+    )
+    .add_systems(
+        PostUpdate,
+        (
+            flush_outbound,
+            flush_hud_state,
+            flush_console_state,
+            flush_lobby_state,
+        ),
+    );
 
     // Insert the validated ShipStations resource if it was pre-validated.
     SHIP_STATIONS.with(|slot| {
@@ -203,7 +223,8 @@ pub fn wasm_init() {
 #[wasm_bindgen]
 pub fn wasm_receive_message(sender_token: &str, json: &str) {
     INBOUND_QUEUE.with(|q| {
-        q.borrow_mut().push((sender_token.to_string(), json.to_string()));
+        q.borrow_mut()
+            .push((sender_token.to_string(), json.to_string()));
     });
 }
 
@@ -473,8 +494,7 @@ pub fn wasm_push_world_toml(path: String, toml_str: String) {
 /// Drains the inbound queue each frame and injects messages into Bevy.
 #[cfg(target_arch = "wasm32")]
 fn drain_inbound(mut writer: MessageWriter<InboundMessage>) {
-    let pending: Vec<(String, String)> =
-        INBOUND_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
+    let pending: Vec<(String, String)> = INBOUND_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
 
     for (token, json) in pending {
         if let Ok(msg) = JsonCodec.decode_client(&json) {
@@ -567,8 +587,7 @@ fn drain_debug_toggles(
 /// Drains the disconnect queue each frame and injects lifecycle events into Bevy.
 #[cfg(target_arch = "wasm32")]
 fn drain_disconnects(mut writer: MessageWriter<PlayerDisconnected>) {
-    let pending: Vec<String> =
-        DISCONNECT_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
+    let pending: Vec<String> = DISCONNECT_QUEUE.with(|q| q.borrow_mut().drain(..).collect());
     for token in pending {
         writer.write(PlayerDisconnected { token });
     }
@@ -647,8 +666,10 @@ fn flush_hud_state(mut reader: MessageReader<HudStateChanged>) {
 /// to the registered console-state callback via `cb.call2(NULL, name, json)`.
 #[cfg(target_arch = "wasm32")]
 fn flush_console_state(mut reader: MessageReader<ConsoleStateChanged>) {
-    let payloads: Vec<(String, String)> =
-        reader.read().map(|m| (m.name.clone(), m.json.clone())).collect();
+    let payloads: Vec<(String, String)> = reader
+        .read()
+        .map(|m| (m.name.clone(), m.json.clone()))
+        .collect();
     if payloads.is_empty() {
         return;
     }

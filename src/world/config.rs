@@ -332,29 +332,84 @@ pub enum TriggerCondition {
 /// An action to execute when a trigger fires.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TriggerAction {
-    AddObjective { id: String, text: String, mandatory: bool, targets: Vec<String> },
-    CompleteObjective { id: String },
-    FailObjective { id: String },
-    SetAiState { entity: String, state: String, target: Option<String> },
-    ApplyModifier { entity: String, tag: String, slot: crate::messages::ModifierSlot, bonus: f32 },
-    RemoveModifier { entity: String, tag: String, slot: crate::messages::ModifierSlot },
-    ApplyFlag { entity: String, tag: String, kind: crate::flag_kind::FlagKind },
-    RemoveFlag { entity: String, tag: String, kind: crate::flag_kind::FlagKind },
-    ApplyIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot, bonus: i32 },
-    RemoveIntModifier { entity: String, tag: String, slot: crate::modifiers::IntModifierSlot },
-    GameOver { message: Option<String> },
+    AddObjective {
+        id: String,
+        text: String,
+        mandatory: bool,
+        targets: Vec<String>,
+    },
+    CompleteObjective {
+        id: String,
+    },
+    FailObjective {
+        id: String,
+    },
+    SetAiState {
+        entity: String,
+        state: String,
+        target: Option<String>,
+    },
+    ApplyModifier {
+        entity: String,
+        tag: String,
+        slot: crate::messages::ModifierSlot,
+        bonus: f32,
+    },
+    RemoveModifier {
+        entity: String,
+        tag: String,
+        slot: crate::messages::ModifierSlot,
+    },
+    ApplyFlag {
+        entity: String,
+        tag: String,
+        kind: crate::flag_kind::FlagKind,
+    },
+    RemoveFlag {
+        entity: String,
+        tag: String,
+        kind: crate::flag_kind::FlagKind,
+    },
+    ApplyIntModifier {
+        entity: String,
+        tag: String,
+        slot: crate::modifiers::IntModifierSlot,
+        bonus: i32,
+    },
+    RemoveIntModifier {
+        entity: String,
+        tag: String,
+        slot: crate::modifiers::IntModifierSlot,
+    },
+    GameOver {
+        message: Option<String>,
+    },
     /// Additively load a sub-world from `path` into the running world layer map.
-    LoadWorld { path: String },
+    LoadWorld {
+        path: String,
+    },
     /// Unload a previously loaded sub-world identified by `path`.
-    UnloadWorld { path: String },
+    UnloadWorld {
+        path: String,
+    },
     /// Set a world flag to true (counter = 1).
-    SetWorldFlag { name: String },
+    SetWorldFlag {
+        name: String,
+    },
     /// Clear a world flag to false (counter = 0).
-    ClearWorldFlag { name: String },
+    ClearWorldFlag {
+        name: String,
+    },
     /// Increment a world flag counter by `by` (can be negative).
-    IncrementWorldFlag { name: String, by: i64 },
+    IncrementWorldFlag {
+        name: String,
+        by: i64,
+    },
     /// Assign a world flag counter directly to `value`.
-    SetWorldFlagValue { name: String, value: i64 },
+    SetWorldFlagValue {
+        name: String,
+        value: i64,
+    },
     /// Spawn an entity ad-hoc, registering it in `name_to_uuid` under `name`.
     ///
     /// Exactly one of `anchor` or `position` must be `Some` (enforced by the
@@ -373,7 +428,9 @@ pub enum TriggerAction {
     ///
     /// Emits `AiEntityDestroyed` so the normal destruction cascade runs and
     /// despawns the underlying entity.
-    DestroyEntity { entity: String },
+    DestroyEntity {
+        entity: String,
+    },
 }
 
 /// A single trigger: a condition plus an ordered list of actions.
@@ -448,7 +505,10 @@ fn parse_int_modifier_slot(s: &str) -> Result<crate::modifiers::IntModifierSlot,
     use crate::modifiers::IntModifierSlot;
     match s {
         "RepairTeams" => Ok(IntModifierSlot::RepairTeams),
-        other => Err(format!("Unknown int slot '{}'; valid values: RepairTeams", other)),
+        other => Err(format!(
+            "Unknown int slot '{}'; valid values: RepairTeams",
+            other
+        )),
     }
 }
 
@@ -457,132 +517,217 @@ fn parse_flag_kind(s: &str) -> Result<crate::flag_kind::FlagKind, String> {
     match s {
         "CommsJammed" => Ok(FlagKind::CommsJammed),
         "SensorBlind" => Ok(FlagKind::SensorBlind),
-        other => Err(format!("Unknown kind '{}'; valid values: CommsJammed, SensorBlind", other)),
+        other => Err(format!(
+            "Unknown kind '{}'; valid values: CommsJammed, SensorBlind",
+            other
+        )),
     }
 }
 
 fn parse_raw_actions(raw_actions: &[RawActionEntry]) -> Result<Vec<TriggerAction>, String> {
     let mut actions = Vec::new();
     for raw_action in raw_actions {
-        let action = match raw_action.kind.as_str() {
-            "add_objective" => TriggerAction::AddObjective {
-                id: raw_action.id.clone().ok_or_else(|| "Action 'add_objective' requires an 'id' field".to_string())?,
-                text: raw_action.text.clone().ok_or_else(|| "Action 'add_objective' requires a 'text' field".to_string())?,
-                mandatory: raw_action.mandatory.unwrap_or(false),
-                targets: raw_action.targets.clone().unwrap_or_default(),
-            },
-            "complete_objective" => TriggerAction::CompleteObjective {
-                id: raw_action.id.clone().ok_or_else(|| "Action 'complete_objective' requires an 'id' field".to_string())?,
-            },
-            "fail_objective" => TriggerAction::FailObjective {
-                id: raw_action.id.clone().ok_or_else(|| "Action 'fail_objective' requires an 'id' field".to_string())?,
-            },
-            "set_ai_state" => TriggerAction::SetAiState {
-                entity: raw_action.entity.clone().ok_or_else(|| "Action 'set_ai_state' requires an 'entity' field".to_string())?,
-                state: raw_action.state.clone().ok_or_else(|| "Action 'set_ai_state' requires a 'state' field".to_string())?,
-                target: raw_action.target.clone(),
-            },
-            "apply_modifier" => {
-                let slot_str = raw_action.slot.as_deref().ok_or_else(|| "Action 'apply_modifier' requires a 'slot' field".to_string())?;
-                TriggerAction::ApplyModifier {
-                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'apply_modifier' requires an 'entity' field".to_string())?,
-                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'apply_modifier' requires a 'tag' field".to_string())?,
-                    slot: parse_modifier_slot(slot_str)?,
-                    bonus: raw_action.bonus.ok_or_else(|| "Action 'apply_modifier' requires a 'bonus' field".to_string())?,
+        let action =
+            match raw_action.kind.as_str() {
+                "add_objective" => TriggerAction::AddObjective {
+                    id: raw_action.id.clone().ok_or_else(|| {
+                        "Action 'add_objective' requires an 'id' field".to_string()
+                    })?,
+                    text: raw_action.text.clone().ok_or_else(|| {
+                        "Action 'add_objective' requires a 'text' field".to_string()
+                    })?,
+                    mandatory: raw_action.mandatory.unwrap_or(false),
+                    targets: raw_action.targets.clone().unwrap_or_default(),
+                },
+                "complete_objective" => TriggerAction::CompleteObjective {
+                    id: raw_action.id.clone().ok_or_else(|| {
+                        "Action 'complete_objective' requires an 'id' field".to_string()
+                    })?,
+                },
+                "fail_objective" => TriggerAction::FailObjective {
+                    id: raw_action.id.clone().ok_or_else(|| {
+                        "Action 'fail_objective' requires an 'id' field".to_string()
+                    })?,
+                },
+                "set_ai_state" => TriggerAction::SetAiState {
+                    entity: raw_action.entity.clone().ok_or_else(|| {
+                        "Action 'set_ai_state' requires an 'entity' field".to_string()
+                    })?,
+                    state: raw_action.state.clone().ok_or_else(|| {
+                        "Action 'set_ai_state' requires a 'state' field".to_string()
+                    })?,
+                    target: raw_action.target.clone(),
+                },
+                "apply_modifier" => {
+                    let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                        "Action 'apply_modifier' requires a 'slot' field".to_string()
+                    })?;
+                    TriggerAction::ApplyModifier {
+                        entity: raw_action.entity.clone().ok_or_else(|| {
+                            "Action 'apply_modifier' requires an 'entity' field".to_string()
+                        })?,
+                        tag: raw_action.tag.clone().ok_or_else(|| {
+                            "Action 'apply_modifier' requires a 'tag' field".to_string()
+                        })?,
+                        slot: parse_modifier_slot(slot_str)?,
+                        bonus: raw_action.bonus.ok_or_else(|| {
+                            "Action 'apply_modifier' requires a 'bonus' field".to_string()
+                        })?,
+                    }
                 }
-            }
-            "remove_modifier" => {
-                let slot_str = raw_action.slot.as_deref().ok_or_else(|| "Action 'remove_modifier' requires a 'slot' field".to_string())?;
-                TriggerAction::RemoveModifier {
-                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'remove_modifier' requires an 'entity' field".to_string())?,
-                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'remove_modifier' requires a 'tag' field".to_string())?,
-                    slot: parse_modifier_slot(slot_str)?,
+                "remove_modifier" => {
+                    let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                        "Action 'remove_modifier' requires a 'slot' field".to_string()
+                    })?;
+                    TriggerAction::RemoveModifier {
+                        entity: raw_action.entity.clone().ok_or_else(|| {
+                            "Action 'remove_modifier' requires an 'entity' field".to_string()
+                        })?,
+                        tag: raw_action.tag.clone().ok_or_else(|| {
+                            "Action 'remove_modifier' requires a 'tag' field".to_string()
+                        })?,
+                        slot: parse_modifier_slot(slot_str)?,
+                    }
                 }
-            }
-            "apply_flag" => {
-                let kind_str = raw_action.flag_kind.as_deref().ok_or_else(|| "Action 'apply_flag' requires a 'kind' field".to_string())?;
-                TriggerAction::ApplyFlag {
-                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'apply_flag' requires an 'entity' field".to_string())?,
-                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'apply_flag' requires a 'tag' field".to_string())?,
-                    kind: parse_flag_kind(kind_str)?,
+                "apply_flag" => {
+                    let kind_str = raw_action
+                        .flag_kind
+                        .as_deref()
+                        .ok_or_else(|| "Action 'apply_flag' requires a 'kind' field".to_string())?;
+                    TriggerAction::ApplyFlag {
+                        entity: raw_action.entity.clone().ok_or_else(|| {
+                            "Action 'apply_flag' requires an 'entity' field".to_string()
+                        })?,
+                        tag: raw_action.tag.clone().ok_or_else(|| {
+                            "Action 'apply_flag' requires a 'tag' field".to_string()
+                        })?,
+                        kind: parse_flag_kind(kind_str)?,
+                    }
                 }
-            }
-            "remove_flag" => {
-                let kind_str = raw_action.flag_kind.as_deref().ok_or_else(|| "Action 'remove_flag' requires a 'kind' field".to_string())?;
-                TriggerAction::RemoveFlag {
-                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'remove_flag' requires an 'entity' field".to_string())?,
-                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'remove_flag' requires a 'tag' field".to_string())?,
-                    kind: parse_flag_kind(kind_str)?,
+                "remove_flag" => {
+                    let kind_str = raw_action.flag_kind.as_deref().ok_or_else(|| {
+                        "Action 'remove_flag' requires a 'kind' field".to_string()
+                    })?;
+                    TriggerAction::RemoveFlag {
+                        entity: raw_action.entity.clone().ok_or_else(|| {
+                            "Action 'remove_flag' requires an 'entity' field".to_string()
+                        })?,
+                        tag: raw_action.tag.clone().ok_or_else(|| {
+                            "Action 'remove_flag' requires a 'tag' field".to_string()
+                        })?,
+                        kind: parse_flag_kind(kind_str)?,
+                    }
                 }
-            }
-            "apply_int_modifier" => {
-                let slot_str = raw_action.slot.as_deref().ok_or_else(|| "Action 'apply_int_modifier' requires a 'slot' field".to_string())?;
-                TriggerAction::ApplyIntModifier {
-                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'apply_int_modifier' requires an 'entity' field".to_string())?,
-                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'apply_int_modifier' requires a 'tag' field".to_string())?,
-                    slot: parse_int_modifier_slot(slot_str)?,
-                    bonus: raw_action.int_bonus.ok_or_else(|| "Action 'apply_int_modifier' requires an 'int_bonus' field".to_string())?,
+                "apply_int_modifier" => {
+                    let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                        "Action 'apply_int_modifier' requires a 'slot' field".to_string()
+                    })?;
+                    TriggerAction::ApplyIntModifier {
+                        entity: raw_action.entity.clone().ok_or_else(|| {
+                            "Action 'apply_int_modifier' requires an 'entity' field".to_string()
+                        })?,
+                        tag: raw_action.tag.clone().ok_or_else(|| {
+                            "Action 'apply_int_modifier' requires a 'tag' field".to_string()
+                        })?,
+                        slot: parse_int_modifier_slot(slot_str)?,
+                        bonus: raw_action.int_bonus.ok_or_else(|| {
+                            "Action 'apply_int_modifier' requires an 'int_bonus' field".to_string()
+                        })?,
+                    }
                 }
-            }
-            "remove_int_modifier" => {
-                let slot_str = raw_action.slot.as_deref().ok_or_else(|| "Action 'remove_int_modifier' requires a 'slot' field".to_string())?;
-                TriggerAction::RemoveIntModifier {
-                    entity: raw_action.entity.clone().ok_or_else(|| "Action 'remove_int_modifier' requires an 'entity' field".to_string())?,
-                    tag: raw_action.tag.clone().ok_or_else(|| "Action 'remove_int_modifier' requires a 'tag' field".to_string())?,
-                    slot: parse_int_modifier_slot(slot_str)?,
+                "remove_int_modifier" => {
+                    let slot_str = raw_action.slot.as_deref().ok_or_else(|| {
+                        "Action 'remove_int_modifier' requires a 'slot' field".to_string()
+                    })?;
+                    TriggerAction::RemoveIntModifier {
+                        entity: raw_action.entity.clone().ok_or_else(|| {
+                            "Action 'remove_int_modifier' requires an 'entity' field".to_string()
+                        })?,
+                        tag: raw_action.tag.clone().ok_or_else(|| {
+                            "Action 'remove_int_modifier' requires a 'tag' field".to_string()
+                        })?,
+                        slot: parse_int_modifier_slot(slot_str)?,
+                    }
                 }
-            }
-            "game_over" => TriggerAction::GameOver { message: raw_action.message.clone() },
-            "load_world" => TriggerAction::LoadWorld {
-                path: raw_action.path.clone().ok_or_else(|| "Action 'load_world' requires a 'path' field".to_string())?,
-            },
-            "unload_world" => TriggerAction::UnloadWorld {
-                path: raw_action.path.clone().ok_or_else(|| "Action 'unload_world' requires a 'path' field".to_string())?,
-            },
-            "set_flag" => TriggerAction::SetWorldFlag {
-                name: raw_action.name.clone().ok_or_else(|| "Action 'set_flag' requires a 'name' field".to_string())?,
-            },
-            "clear_flag" => TriggerAction::ClearWorldFlag {
-                name: raw_action.name.clone().ok_or_else(|| "Action 'clear_flag' requires a 'name' field".to_string())?,
-            },
-            "increment_flag" => TriggerAction::IncrementWorldFlag {
-                name: raw_action.name.clone().ok_or_else(|| "Action 'increment_flag' requires a 'name' field".to_string())?,
-                by: raw_action.by.ok_or_else(|| "Action 'increment_flag' requires a 'by' field".to_string())?,
-            },
-            "set_flag_value" => TriggerAction::SetWorldFlagValue {
-                name: raw_action.name.clone().ok_or_else(|| "Action 'set_flag_value' requires a 'name' field".to_string())?,
-                value: raw_action.value.ok_or_else(|| "Action 'set_flag_value' requires a 'value' field".to_string())?,
-            },
-            "spawn_entity" => {
-                let template_path = raw_action.template_path.clone().ok_or_else(||
-                    "Action 'spawn_entity' requires a 'template_path' field".to_string())?;
-                let name = raw_action.name.clone().ok_or_else(||
-                    "Action 'spawn_entity' requires a 'name' field".to_string())?;
-                let has_anchor = raw_action.anchor.is_some();
-                let has_position = raw_action.position.is_some();
-                if has_anchor && has_position {
-                    return Err(
-                        "Action 'spawn_entity' must not set both 'anchor' and 'position'".to_string());
+                "game_over" => TriggerAction::GameOver {
+                    message: raw_action.message.clone(),
+                },
+                "load_world" => TriggerAction::LoadWorld {
+                    path: raw_action
+                        .path
+                        .clone()
+                        .ok_or_else(|| "Action 'load_world' requires a 'path' field".to_string())?,
+                },
+                "unload_world" => TriggerAction::UnloadWorld {
+                    path: raw_action.path.clone().ok_or_else(|| {
+                        "Action 'unload_world' requires a 'path' field".to_string()
+                    })?,
+                },
+                "set_flag" => TriggerAction::SetWorldFlag {
+                    name: raw_action
+                        .name
+                        .clone()
+                        .ok_or_else(|| "Action 'set_flag' requires a 'name' field".to_string())?,
+                },
+                "clear_flag" => TriggerAction::ClearWorldFlag {
+                    name: raw_action
+                        .name
+                        .clone()
+                        .ok_or_else(|| "Action 'clear_flag' requires a 'name' field".to_string())?,
+                },
+                "increment_flag" => TriggerAction::IncrementWorldFlag {
+                    name: raw_action.name.clone().ok_or_else(|| {
+                        "Action 'increment_flag' requires a 'name' field".to_string()
+                    })?,
+                    by: raw_action.by.ok_or_else(|| {
+                        "Action 'increment_flag' requires a 'by' field".to_string()
+                    })?,
+                },
+                "set_flag_value" => TriggerAction::SetWorldFlagValue {
+                    name: raw_action.name.clone().ok_or_else(|| {
+                        "Action 'set_flag_value' requires a 'name' field".to_string()
+                    })?,
+                    value: raw_action.value.ok_or_else(|| {
+                        "Action 'set_flag_value' requires a 'value' field".to_string()
+                    })?,
+                },
+                "spawn_entity" => {
+                    let template_path = raw_action.template_path.clone().ok_or_else(|| {
+                        "Action 'spawn_entity' requires a 'template_path' field".to_string()
+                    })?;
+                    let name = raw_action.name.clone().ok_or_else(|| {
+                        "Action 'spawn_entity' requires a 'name' field".to_string()
+                    })?;
+                    let has_anchor = raw_action.anchor.is_some();
+                    let has_position = raw_action.position.is_some();
+                    if has_anchor && has_position {
+                        return Err(
+                            "Action 'spawn_entity' must not set both 'anchor' and 'position'"
+                                .to_string(),
+                        );
+                    }
+                    if !has_anchor && !has_position {
+                        return Err(
+                            "Action 'spawn_entity' requires exactly one of 'anchor' or 'position'"
+                                .to_string(),
+                        );
+                    }
+                    TriggerAction::SpawnEntity {
+                        template_path,
+                        name,
+                        anchor: raw_action.anchor.clone(),
+                        position: raw_action.position,
+                        rotation: raw_action.rotation,
+                        scale: raw_action.scale,
+                    }
                 }
-                if !has_anchor && !has_position {
-                    return Err(
-                        "Action 'spawn_entity' requires exactly one of 'anchor' or 'position'".to_string());
-                }
-                TriggerAction::SpawnEntity {
-                    template_path,
-                    name,
-                    anchor: raw_action.anchor.clone(),
-                    position: raw_action.position,
-                    rotation: raw_action.rotation,
-                    scale: raw_action.scale,
-                }
-            }
-            "destroy_entity" => TriggerAction::DestroyEntity {
-                entity: raw_action.entity.clone().ok_or_else(||
-                    "Action 'destroy_entity' requires an 'entity' field".to_string())?,
-            },
-            other => return Err(format!("Unknown trigger action '{}'", other)),
-        };
+                "destroy_entity" => TriggerAction::DestroyEntity {
+                    entity: raw_action.entity.clone().ok_or_else(|| {
+                        "Action 'destroy_entity' requires an 'entity' field".to_string()
+                    })?,
+                },
+                other => return Err(format!("Unknown trigger action '{}'", other)),
+            };
         actions.push(action);
     }
     Ok(actions)
@@ -603,7 +748,11 @@ fn parse_comms_responses(raw_responses: &[RawCommsResponse]) -> Result<Vec<Comms
         } else {
             None
         };
-        responses.push(CommsResponse { text: raw_resp.text.clone(), actions, follow_up });
+        responses.push(CommsResponse {
+            text: raw_resp.text.clone(),
+            actions,
+            follow_up,
+        });
     }
     Ok(responses)
 }
@@ -617,29 +766,37 @@ fn parse_trigger_condition_from_string(
 ) -> Result<TriggerCondition, String> {
     match name {
         "on_destroyed" => Ok(TriggerCondition::OnDestroyed {
-            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_destroyed' requires an 'entity' field"))?,
+            entity_name: entity
+                .ok_or_else(|| format!("{ctx} 'on_destroyed' requires an 'entity' field"))?,
         }),
         "on_attacked" => Ok(TriggerCondition::OnAttacked {
-            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_attacked' requires an 'entity' field"))?,
+            entity_name: entity
+                .ok_or_else(|| format!("{ctx} 'on_attacked' requires an 'entity' field"))?,
         }),
         "on_timer" => Ok(TriggerCondition::OnTimer {
-            after_secs: after_secs.ok_or_else(|| format!("{ctx} 'on_timer' requires an 'after_secs' field"))?,
+            after_secs: after_secs
+                .ok_or_else(|| format!("{ctx} 'on_timer' requires an 'after_secs' field"))?,
         }),
         "on_hailed" => Ok(TriggerCondition::OnHailed {
-            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_hailed' requires an 'entity' field"))?,
+            entity_name: entity
+                .ok_or_else(|| format!("{ctx} 'on_hailed' requires an 'entity' field"))?,
         }),
         "on_flag_set" => Ok(TriggerCondition::OnFlagSet {
-            name: flag_name.ok_or_else(|| format!("{ctx} 'on_flag_set' requires a 'name' field"))?,
+            name: flag_name
+                .ok_or_else(|| format!("{ctx} 'on_flag_set' requires a 'name' field"))?,
         }),
         "on_flag_cleared" => Ok(TriggerCondition::OnFlagCleared {
-            name: flag_name.ok_or_else(|| format!("{ctx} 'on_flag_cleared' requires a 'name' field"))?,
+            name: flag_name
+                .ok_or_else(|| format!("{ctx} 'on_flag_cleared' requires a 'name' field"))?,
         }),
         "on_world_loaded" => Ok(TriggerCondition::OnWorldLoaded),
         "on_entered_region" => Ok(TriggerCondition::OnEnteredRegion {
-            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_entered_region' requires an 'entity' field"))?,
+            entity_name: entity
+                .ok_or_else(|| format!("{ctx} 'on_entered_region' requires an 'entity' field"))?,
         }),
         "on_exited_region" => Ok(TriggerCondition::OnExitedRegion {
-            entity_name: entity.ok_or_else(|| format!("{ctx} 'on_exited_region' requires an 'entity' field"))?,
+            entity_name: entity
+                .ok_or_else(|| format!("{ctx} 'on_exited_region' requires an 'entity' field"))?,
         }),
         other => Err(format!("Unknown {ctx} condition '{}'", other)),
     }
@@ -733,7 +890,11 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             ),
             None => None,
         };
-        triggers.push(Trigger { condition, actions, when });
+        triggers.push(Trigger {
+            condition,
+            actions,
+            when,
+        });
     }
 
     // Comms templates.
@@ -753,7 +914,13 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
             speaker: raw_comms.speaker,
             delay_secs: raw_comms.delay_secs,
         };
-        comms.push(CommsTemplate { from: raw_comms.from, trigger, node, thread_id: raw_comms.thread_id, urgent: raw_comms.urgent });
+        comms.push(CommsTemplate {
+            from: raw_comms.from,
+            trigger,
+            node,
+            thread_id: raw_comms.thread_id,
+            urgent: raw_comms.urgent,
+        });
     }
 
     // Validate extra_worlds: every entry must be a non-empty string.
@@ -811,10 +978,7 @@ where
 ///
 /// Both call sites (legacy + unified) call this helper with the same
 /// `is_asteroid_field` lookup to guarantee no entry is spawned twice.
-pub fn is_owned_by_unified_pipeline<F>(
-    entity_inst: &WorldEntity,
-    is_asteroid_field: F,
-) -> bool
+pub fn is_owned_by_unified_pipeline<F>(entity_inst: &WorldEntity, is_asteroid_field: F) -> bool
 where
     F: Fn(&str) -> bool,
 {
@@ -858,7 +1022,10 @@ pub fn entity_template_paths(world: &WorldConfig) -> Vec<String> {
 pub fn partition_immediate_entities<F>(
     world: &WorldConfig,
     is_asteroid_field: F,
-) -> (Vec<&crate::world::config::WorldEntity>, Vec<&crate::world::config::WorldEntity>)
+) -> (
+    Vec<&crate::world::config::WorldEntity>,
+    Vec<&crate::world::config::WorldEntity>,
+)
 where
     F: Fn(&str) -> bool,
 {
@@ -909,7 +1076,9 @@ where
 pub fn build_named_entity_positions(world: &WorldConfig) -> HashMap<String, [f32; 3]> {
     let mut out = HashMap::new();
     for ent in &world.entities {
-        let Some(name) = ent.name.as_ref() else { continue };
+        let Some(name) = ent.name.as_ref() else {
+            continue;
+        };
         // Skip entities whose own position is relative_to-based — their
         // position isn't valid as a base for further relative_to lookups.
         if ent
@@ -1040,7 +1209,10 @@ flat = [100.0, 200.0]
 busted = [1.0]
 "#;
         let err = parse_world(toml).expect_err("one-element anchor must error");
-        assert!(err.contains("busted"), "error must mention anchor name: {err}");
+        assert!(
+            err.contains("busted"),
+            "error must mention anchor name: {err}"
+        );
     }
 
     #[test]
@@ -1056,8 +1228,14 @@ transform = { position = [100.0, 0.0, -200.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.entities.len(), 2);
-        assert_eq!(cfg.entities[0].template_path, "assets/entities/star_sun.toml");
-        assert_eq!(cfg.entities[1].template_path, "assets/entities/asteroid_field_main.toml");
+        assert_eq!(
+            cfg.entities[0].template_path,
+            "assets/entities/star_sun.toml"
+        );
+        assert_eq!(
+            cfg.entities[1].template_path,
+            "assets/entities/asteroid_field_main.toml"
+        );
         assert_eq!(
             cfg.entities[1].transform.as_ref().and_then(|t| t.position),
             Some([100.0, 0.0, -200.0])
@@ -1114,7 +1292,10 @@ transform = { position = [0.0, 0.0, 0.0] }
             format!("uuid-{counter}")
         });
         assert_eq!(map.len(), 2, "only named entities get a uuid");
-        assert_eq!(map.get("starbase_alpha").map(String::as_str), Some("uuid-1"));
+        assert_eq!(
+            map.get("starbase_alpha").map(String::as_str),
+            Some("uuid-1")
+        );
         assert_eq!(map.get("earth").map(String::as_str), Some("uuid-2"));
     }
 
@@ -1175,8 +1356,7 @@ transform = { position = [0.0, 0.0, 0.0] }
         });
 
         let is_field = |p: &str| p.contains("asteroid_field");
-        let (fields, named, anon) =
-            partition_immediate_entities_three_way(&cfg, is_field);
+        let (fields, named, anon) = partition_immediate_entities_three_way(&cfg, is_field);
 
         assert_eq!(fields.len(), 1);
         assert_eq!(named.len(), 1);
@@ -1226,7 +1406,10 @@ transform = { anchor = "patrol_alpha" }
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.entities.len(), 1);
         assert_eq!(
-            cfg.entities[0].transform.as_ref().and_then(|t| t.anchor.as_deref()),
+            cfg.entities[0]
+                .transform
+                .as_ref()
+                .and_then(|t| t.anchor.as_deref()),
             Some("patrol_alpha")
         );
         assert!(
@@ -1260,7 +1443,10 @@ transform = { anchor = "patrol_alpha" }
     fn resolve_entity_position_uses_anchor_when_set() {
         let entity = entity_with(
             "assets/entities/pirate_raider.toml",
-            TransformConfig { anchor: Some("patrol_alpha".into()), ..Default::default() },
+            TransformConfig {
+                anchor: Some("patrol_alpha".into()),
+                ..Default::default()
+            },
         );
         let anchors = anchor_table(&[("patrol_alpha", [300.0, 0.0, -300.0])]);
         let pos = resolve_entity_position(&entity, &anchors).unwrap();
@@ -1271,7 +1457,10 @@ transform = { anchor = "patrol_alpha" }
     fn resolve_entity_position_falls_back_to_inline_position() {
         let entity = entity_with(
             "assets/entities/star_sun.toml",
-            TransformConfig { position: Some([10.0, 0.0, 20.0]), ..Default::default() },
+            TransformConfig {
+                position: Some([10.0, 0.0, 20.0]),
+                ..Default::default()
+            },
         );
         let pos = resolve_entity_position(&entity, &HashMap::new()).unwrap();
         assert_eq!(pos, [10.0, 0.0, 20.0]);
@@ -1281,10 +1470,16 @@ transform = { anchor = "patrol_alpha" }
     fn resolve_entity_position_errors_on_unknown_anchor() {
         let entity = entity_with(
             "assets/entities/pirate_raider.toml",
-            TransformConfig { anchor: Some("ghost".into()), ..Default::default() },
+            TransformConfig {
+                anchor: Some("ghost".into()),
+                ..Default::default()
+            },
         );
         let err = resolve_entity_position(&entity, &HashMap::new()).unwrap_err();
-        assert!(err.contains("ghost"), "error must mention missing anchor: {err}");
+        assert!(
+            err.contains("ghost"),
+            "error must mention missing anchor: {err}"
+        );
     }
 
     #[test]
@@ -1330,7 +1525,10 @@ transform = { anchor = "patrol_alpha" }
     fn resolve_entity_position_relative_to_with_missing_offset_uses_zero() {
         let entity = entity_with(
             "x.toml",
-            TransformConfig { relative_to: Some("origin".into()), ..Default::default() },
+            TransformConfig {
+                relative_to: Some("origin".into()),
+                ..Default::default()
+            },
         );
         let resolved = resolved_table(&[("origin", [5.0, 6.0, 7.0])]);
         let pos = resolve_entity_position_with(&entity, &HashMap::new(), &resolved).unwrap();
@@ -1341,10 +1539,13 @@ transform = { anchor = "patrol_alpha" }
     fn resolve_entity_position_relative_to_errors_on_unknown_reference() {
         let entity = entity_with(
             "x.toml",
-            TransformConfig { relative_to: Some("ghost".into()), ..Default::default() },
+            TransformConfig {
+                relative_to: Some("ghost".into()),
+                ..Default::default()
+            },
         );
-        let err = resolve_entity_position_with(&entity, &HashMap::new(), &HashMap::new())
-            .unwrap_err();
+        let err =
+            resolve_entity_position_with(&entity, &HashMap::new(), &HashMap::new()).unwrap_err();
         assert!(
             err.contains("ghost") && err.contains("relative_to"),
             "error must mention missing reference and relative_to: {err}"
@@ -1422,11 +1623,18 @@ entity    = "raider_alpha"
         assert_eq!(cfg.triggers.len(), 1);
         assert_eq!(
             cfg.triggers[0].condition,
-            TriggerCondition::OnDestroyed { entity_name: "raider_alpha".to_string() }
+            TriggerCondition::OnDestroyed {
+                entity_name: "raider_alpha".to_string()
+            }
         );
         assert_eq!(cfg.triggers[0].actions.len(), 1);
         match &cfg.triggers[0].actions[0] {
-            TriggerAction::AddObjective { id, text, mandatory, .. } => {
+            TriggerAction::AddObjective {
+                id,
+                text,
+                mandatory,
+                ..
+            } => {
                 assert_eq!(id, "obj-raider-destroyed");
                 assert_eq!(text, "Pirate raider eliminated.");
                 assert_eq!(*mandatory, false);
@@ -1491,7 +1699,9 @@ message = "MAYDAY!"
         assert_eq!(cfg.comms[0].from, "raider_alpha");
         assert_eq!(
             cfg.comms[0].trigger,
-            TriggerCondition::OnAttacked { entity_name: "raider_alpha".to_string() }
+            TriggerCondition::OnAttacked {
+                entity_name: "raider_alpha".to_string()
+            }
         );
         assert_eq!(cfg.comms[0].node.body, "MAYDAY!");
         assert!(cfg.comms[0].node.responses.is_empty());
@@ -1627,7 +1837,10 @@ message = "Stand by."
 condition = "on_zombie"
 "#;
         let err = parse_world(toml).expect_err("unknown trigger condition must error");
-        assert!(err.contains("on_zombie"), "error must mention the bad condition: {err}");
+        assert!(
+            err.contains("on_zombie"),
+            "error must mention the bad condition: {err}"
+        );
     }
 
     // -- Flag-system triggers (issue #412) ---------------------------------
@@ -1685,7 +1898,9 @@ name      = "phase_one_done"
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(
             cfg.triggers[0].condition,
-            TriggerCondition::OnFlagSet { name: "phase_one_done".into() }
+            TriggerCondition::OnFlagSet {
+                name: "phase_one_done".into()
+            }
         );
     }
 
@@ -1703,7 +1918,9 @@ name      = "shields_up"
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(
             cfg.triggers[0].condition,
-            TriggerCondition::OnFlagCleared { name: "shields_up".into() }
+            TriggerCondition::OnFlagCleared {
+                name: "shields_up".into()
+            }
         );
     }
 
@@ -1739,7 +1956,10 @@ when      = "flag(intro_done)"
 "#;
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.triggers[0].condition, TriggerCondition::OnWorldLoaded);
-        assert!(cfg.triggers[0].when.is_some(), "when predicate must round-trip");
+        assert!(
+            cfg.triggers[0].when.is_some(),
+            "when predicate must round-trip"
+        );
     }
 
     // -- on_entered_region / on_exited_region (issue #416) ------------------
@@ -1759,7 +1979,9 @@ entity    = "nebula_alpha"
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(
             cfg.triggers[0].condition,
-            TriggerCondition::OnEnteredRegion { entity_name: "nebula_alpha".into() }
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "nebula_alpha".into()
+            }
         );
         assert_eq!(cfg.triggers[0].actions.len(), 1);
     }
@@ -1778,7 +2000,9 @@ entity    = "nebula_alpha"
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(
             cfg.triggers[0].condition,
-            TriggerCondition::OnExitedRegion { entity_name: "nebula_alpha".into() }
+            TriggerCondition::OnExitedRegion {
+                entity_name: "nebula_alpha".into()
+            }
         );
     }
 
@@ -1798,9 +2022,14 @@ when      = "flag(stealth_mode)"
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(
             cfg.triggers[0].condition,
-            TriggerCondition::OnEnteredRegion { entity_name: "nebula_alpha".into() }
+            TriggerCondition::OnEnteredRegion {
+                entity_name: "nebula_alpha".into()
+            }
         );
-        assert!(cfg.triggers[0].when.is_some(), "when predicate must round-trip");
+        assert!(
+            cfg.triggers[0].when.is_some(),
+            "when predicate must round-trip"
+        );
     }
 
     #[test]
@@ -1867,10 +2096,32 @@ entity    = "raider_alpha"
         let cfg = parse_world(toml).expect("must parse");
         let actions = &cfg.triggers[0].actions;
         assert_eq!(actions.len(), 4);
-        assert_eq!(actions[0], TriggerAction::SetWorldFlag { name: "raider_down".into() });
-        assert_eq!(actions[1], TriggerAction::ClearWorldFlag { name: "danger".into() });
-        assert_eq!(actions[2], TriggerAction::IncrementWorldFlag { name: "kills".into(), by: 2 });
-        assert_eq!(actions[3], TriggerAction::SetWorldFlagValue { name: "wave".into(), value: 3 });
+        assert_eq!(
+            actions[0],
+            TriggerAction::SetWorldFlag {
+                name: "raider_down".into()
+            }
+        );
+        assert_eq!(
+            actions[1],
+            TriggerAction::ClearWorldFlag {
+                name: "danger".into()
+            }
+        );
+        assert_eq!(
+            actions[2],
+            TriggerAction::IncrementWorldFlag {
+                name: "kills".into(),
+                by: 2
+            }
+        );
+        assert_eq!(
+            actions[3],
+            TriggerAction::SetWorldFlagValue {
+                name: "wave".into(),
+                value: 3
+            }
+        );
     }
 
     #[test]
@@ -1922,11 +2173,31 @@ entity    = "raider"
     fn parse_world_before_the_fire_scenario_files_parse_with_expected_urgent_flags() {
         // Each entry: (file contents, expected number of urgent [[comms]] blocks).
         let cases: &[(&str, &str, usize)] = &[
-            ("before_the_fire", include_str!("../../assets/worlds/before_the_fire.toml"), 1),
-            ("btf_path_a", include_str!("../../assets/worlds/btf_path_a.toml"), 1),
-            ("btf_path_b", include_str!("../../assets/worlds/btf_path_b.toml"), 1),
-            ("btf_path_c", include_str!("../../assets/worlds/btf_path_c.toml"), 2),
-            ("btf_aphelion_protocol", include_str!("../../assets/worlds/btf_aphelion_protocol.toml"), 2),
+            (
+                "before_the_fire",
+                include_str!("../../assets/worlds/before_the_fire.toml"),
+                1,
+            ),
+            (
+                "btf_path_a",
+                include_str!("../../assets/worlds/btf_path_a.toml"),
+                1,
+            ),
+            (
+                "btf_path_b",
+                include_str!("../../assets/worlds/btf_path_b.toml"),
+                1,
+            ),
+            (
+                "btf_path_c",
+                include_str!("../../assets/worlds/btf_path_c.toml"),
+                2,
+            ),
+            (
+                "btf_aphelion_protocol",
+                include_str!("../../assets/worlds/btf_aphelion_protocol.toml"),
+                2,
+            ),
         ];
         for (name, toml, expected_urgent) in cases {
             let cfg = parse_world(toml).unwrap_or_else(|e| panic!("{name}.toml must parse: {e}"));
@@ -1991,7 +2262,11 @@ transform = { position = [0.0, 0.0, 0.0] }
         let paths = entity_template_paths(&cfg);
         assert_eq!(
             paths,
-            vec!["first.toml".to_string(), "second.toml".to_string(), "third.toml".to_string()],
+            vec![
+                "first.toml".to_string(),
+                "second.toml".to_string(),
+                "third.toml".to_string()
+            ],
             "iteration order must follow first-occurrence in the entity list"
         );
     }
@@ -2014,9 +2289,8 @@ template_path = "assets/entities/asteroid_field_outer.toml"
 transform = { position = [500.0, 0.0, 500.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let (fields, others) = partition_immediate_entities(&cfg, |path| {
-            path.contains("asteroid_field")
-        });
+        let (fields, others) =
+            partition_immediate_entities(&cfg, |path| path.contains("asteroid_field"));
         assert_eq!(fields.len(), 2);
         assert_eq!(others.len(), 1);
         assert_eq!(others[0].template_path, "assets/entities/star_sun.toml");
@@ -2035,11 +2309,13 @@ transform = { position = [0.0, 0.0, 0.0] }
 spawn_on = "game_start"
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let (fields, others) = partition_immediate_entities(&cfg, |path| {
-            path.contains("asteroid_field")
-        });
+        let (fields, others) =
+            partition_immediate_entities(&cfg, |path| path.contains("asteroid_field"));
         assert_eq!(fields.len(), 1);
-        assert!(others.is_empty(), "game_start entries must NOT appear in the 'other' bucket");
+        assert!(
+            others.is_empty(),
+            "game_start entries must NOT appear in the 'other' bucket"
+        );
     }
 
     #[test]
@@ -2099,7 +2375,10 @@ extra_worlds = ["   "]
 extra_worlds = ["assets/worlds/patrol.toml"]
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        assert_eq!(cfg.extra_worlds, vec!["assets/worlds/patrol.toml".to_string()]);
+        assert_eq!(
+            cfg.extra_worlds,
+            vec!["assets/worlds/patrol.toml".to_string()]
+        );
     }
 
     // -- LoadWorld / UnloadWorld trigger actions (issue #352) -------------
@@ -2229,7 +2508,10 @@ template_path = "x.toml"
 transform = { position = [1.0, 2.0, 3.0] }
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let xf = cfg.entities[0].transform.as_ref().expect("transform present");
+        let xf = cfg.entities[0]
+            .transform
+            .as_ref()
+            .expect("transform present");
         assert_eq!(xf.position, Some([1.0, 2.0, 3.0]));
         assert!(xf.anchor.is_none() && xf.relative_to.is_none());
         assert!(xf.rotation.is_none() && xf.scale.is_none());
@@ -2247,7 +2529,10 @@ rotation = [0.0, 1.5707963, 0.0]
 scale    = [2.0, 2.0, 2.0]
 "#;
         let cfg = parse_world(toml).expect("must parse");
-        let xf = cfg.entities[0].transform.as_ref().expect("transform present");
+        let xf = cfg.entities[0]
+            .transform
+            .as_ref()
+            .expect("transform present");
         assert_eq!(xf.position, Some([10.0, 0.0, 20.0]));
         assert_eq!(xf.rotation, Some([0.0, 1.5707963, 0.0]));
         assert_eq!(xf.scale, Some([2.0, 2.0, 2.0]));
@@ -2312,8 +2597,7 @@ template_path = "x.toml"
             rotation: Some([0.5, 1.0, -0.25]),
             ..Default::default()
         };
-        let expected =
-            bevy::math::Quat::from_euler(bevy::math::EulerRot::XYZ, 0.5, 1.0, -0.25);
+        let expected = bevy::math::Quat::from_euler(bevy::math::EulerRot::XYZ, 0.5, 1.0, -0.25);
         assert!(xf.quat().abs_diff_eq(expected, 1e-6));
     }
 
@@ -2350,7 +2634,9 @@ template_path = "x.toml"
     #[test]
     fn transform_config_resolve_falls_back_to_origin_when_nothing_set() {
         let xf = TransformConfig::default();
-        let pos = xf.resolve("x.toml", &HashMap::new(), &HashMap::new()).unwrap();
+        let pos = xf
+            .resolve("x.toml", &HashMap::new(), &HashMap::new())
+            .unwrap();
         assert_eq!(pos, [0.0, 0.0, 0.0]);
     }
 
@@ -2417,7 +2703,14 @@ condition = "on_world_loaded"
         let cfg = parse_world(toml).expect("must parse");
         assert_eq!(cfg.triggers.len(), 1);
         match &cfg.triggers[0].actions[0] {
-            TriggerAction::SpawnEntity { template_path, name, anchor, position, rotation, scale } => {
+            TriggerAction::SpawnEntity {
+                template_path,
+                name,
+                anchor,
+                position,
+                rotation,
+                scale,
+            } => {
                 assert_eq!(template_path, "assets/entities/pirate_raider.toml");
                 assert_eq!(name, "raider_beta");
                 assert!(anchor.is_none());
@@ -2443,7 +2736,13 @@ condition = "on_world_loaded"
 "#;
         let cfg = parse_world(toml).expect("must parse");
         match &cfg.triggers[0].actions[0] {
-            TriggerAction::SpawnEntity { anchor, position, rotation, scale, .. } => {
+            TriggerAction::SpawnEntity {
+                anchor,
+                position,
+                rotation,
+                scale,
+                ..
+            } => {
                 assert_eq!(anchor.as_deref(), Some("patrol_alpha"));
                 assert!(position.is_none());
                 assert!(rotation.is_none());
@@ -2465,7 +2764,10 @@ condition = "on_world_loaded"
   position = [0.0, 0.0, 0.0]
 "#;
         let err = parse_world(toml).expect_err("must reject");
-        assert!(err.contains("template_path"), "error must mention template_path: {err}");
+        assert!(
+            err.contains("template_path"),
+            "error must mention template_path: {err}"
+        );
     }
 
     #[test]
@@ -2497,8 +2799,10 @@ condition = "on_world_loaded"
   position      = [0.0, 0.0, 0.0]
 "#;
         let err = parse_world(toml).expect_err("must reject");
-        assert!(err.contains("anchor") && err.contains("position"),
-                "error must mention both: {err}");
+        assert!(
+            err.contains("anchor") && err.contains("position"),
+            "error must mention both: {err}"
+        );
     }
 
     #[test]
@@ -2513,8 +2817,10 @@ condition = "on_world_loaded"
   name          = "x"
 "#;
         let err = parse_world(toml).expect_err("must reject");
-        assert!(err.contains("anchor") || err.contains("position"),
-                "error must mention anchor/position: {err}");
+        assert!(
+            err.contains("anchor") || err.contains("position"),
+            "error must mention anchor/position: {err}"
+        );
     }
 
     #[test]

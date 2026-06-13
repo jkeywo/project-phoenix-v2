@@ -89,7 +89,9 @@ pub fn tick_frequency_hint(
             state.elapsed_secs += input.dt;
             if state.elapsed_secs >= input.delay_secs {
                 state.hint_sent = true;
-                FrequencyHintOutput::Hint { frequency: input.correct_frequency }
+                FrequencyHintOutput::Hint {
+                    frequency: input.correct_frequency,
+                }
             } else {
                 FrequencyHintOutput::None
             }
@@ -241,7 +243,9 @@ pub fn tick_auto_match_frequency(
             state.elapsed_secs += input.dt;
             if state.elapsed_secs >= input.delay_secs {
                 state.match_sent = true;
-                FrequencyMatchOutput::Match { frequency: input.target_frequency }
+                FrequencyMatchOutput::Match {
+                    frequency: input.target_frequency,
+                }
             } else {
                 FrequencyMatchOutput::None
             }
@@ -325,13 +329,15 @@ pub fn tick_power_movement_rule(
         return PowerEngageOutput::NoChange;
     }
 
-    let condition_met = input.thrust >= input.thrust_threshold
-        && input.battery_pct >= input.battery_engage_min_pct;
+    let condition_met =
+        input.thrust >= input.thrust_threshold && input.battery_pct >= input.battery_engage_min_pct;
 
     match state {
         EngageState::Idle => {
             if condition_met {
-                *state = EngageState::Counting { elapsed_secs: input.dt };
+                *state = EngageState::Counting {
+                    elapsed_secs: input.dt,
+                };
                 // Check if we already crossed the threshold in this tick.
                 if input.dt >= input.engage_delay_secs {
                     *state = EngageState::Engaged;
@@ -443,20 +449,25 @@ pub enum ShieldFocusAiOutput {
 /// - Focus the facing with the lowest HP fraction (it needs the bonus most).
 /// - If all facings are at full HP and no focus is set, return `ClearFocus`.
 /// - If the least-healthy facing is already focused, return `None`.
-pub fn tick_shield_focus_ai(
-    input: &ShieldFocusAiInput,
-) -> ShieldFocusAiOutput {
+pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
     if !input.shields_is_low || input.facings.is_empty() {
         return ShieldFocusAiOutput::None;
     }
 
     // Find the facing with the lowest HP fraction.
-    let worst = input.facings.iter().enumerate()
-        .min_by(|(_, a), (_, b)| {
-            let fa = if a.max_hp > 0 { a.hp as f32 / a.max_hp as f32 } else { 0.0 };
-            let fb = if b.max_hp > 0 { b.hp as f32 / b.max_hp as f32 } else { 0.0 };
-            fa.partial_cmp(&fb).unwrap()
-        });
+    let worst = input.facings.iter().enumerate().min_by(|(_, a), (_, b)| {
+        let fa = if a.max_hp > 0 {
+            a.hp as f32 / a.max_hp as f32
+        } else {
+            0.0
+        };
+        let fb = if b.max_hp > 0 {
+            b.hp as f32 / b.max_hp as f32
+        } else {
+            0.0
+        };
+        fa.partial_cmp(&fb).unwrap()
+    });
 
     match worst {
         None => ShieldFocusAiOutput::None,
@@ -464,7 +475,11 @@ pub fn tick_shield_focus_ai(
             if facing.is_focused {
                 return ShieldFocusAiOutput::None;
             }
-            let fraction = if facing.max_hp > 0 { facing.hp as f32 / facing.max_hp as f32 } else { 0.0 };
+            let fraction = if facing.max_hp > 0 {
+                facing.hp as f32 / facing.max_hp as f32
+            } else {
+                0.0
+            };
             // Only auto-focus if the facing is actually below full HP
             if fraction < 1.0 {
                 ShieldFocusAiOutput::Focus { facing_index: idx }
@@ -603,7 +618,8 @@ mod tests {
             elapsed_secs: 10.0,
             match_sent: false,
         };
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
         assert_eq!(out, FrequencyMatchOutput::None);
         assert!(state.current_target.is_none());
         assert_eq!(state.elapsed_secs, 0.0);
@@ -620,7 +636,8 @@ mod tests {
     #[test]
     fn auto_match_under_delay_returns_none() {
         let mut state = FrequencyMatchState::default();
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, true));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, true));
         assert_eq!(out, FrequencyMatchOutput::None);
         assert!(!state.match_sent);
     }
@@ -628,7 +645,8 @@ mod tests {
     #[test]
     fn auto_match_at_delay_fires_with_correct_frequency() {
         let mut state = FrequencyMatchState::default();
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.75, 3.0, 3.0, true));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.75, 3.0, 3.0, true));
         assert_eq!(out, FrequencyMatchOutput::Match { frequency: 0.75 });
         assert!(state.match_sent);
     }
@@ -637,7 +655,8 @@ mod tests {
     fn auto_match_above_delay_fires() {
         let mut state = FrequencyMatchState::default();
         tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.0, 3.0, true));
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.0, 3.0, true));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.0, 3.0, true));
         assert_eq!(out, FrequencyMatchOutput::Match { frequency: 0.5 });
     }
 
@@ -645,7 +664,8 @@ mod tests {
     fn auto_match_fires_only_once_per_target() {
         let mut state = FrequencyMatchState::default();
         tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 5.0, 3.0, true));
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 5.0, 3.0, true));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 5.0, 3.0, true));
         assert_eq!(out, FrequencyMatchOutput::None);
     }
 
@@ -653,7 +673,8 @@ mod tests {
     fn auto_match_target_change_resets_timer() {
         let mut state = FrequencyMatchState::default();
         tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.9, 3.0, true));
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.5, 2.9, 3.0, true));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.5, 2.9, 3.0, true));
         assert_eq!(out, FrequencyMatchOutput::None);
         assert_eq!(state.current_target.as_deref(), Some("t2"));
         assert!(!state.match_sent);
@@ -666,7 +687,8 @@ mod tests {
         // Switch target — timer resets to 0, accumulate enough for t2
         tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.9, 1.0, 3.0, true));
         tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.9, 1.0, 3.0, true));
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.9, 1.5, 3.0, true));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t2"), 0.9, 1.5, 3.0, true));
         assert_eq!(out, FrequencyMatchOutput::Match { frequency: 0.9 });
     }
 
@@ -676,9 +698,13 @@ mod tests {
         // Nearly at delay
         tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 2.9, 3.0, true));
         // Trigger turns off (e.g. either console goes Full)
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
         assert_eq!(out, FrequencyMatchOutput::None);
-        assert!(state.current_target.is_none(), "state must reset when trigger deactivates");
+        assert!(
+            state.current_target.is_none(),
+            "state must reset when trigger deactivates"
+        );
         assert_eq!(state.elapsed_secs, 0.0);
     }
 
@@ -689,14 +715,22 @@ mod tests {
         tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 5.0, 3.0, true));
         assert!(state.match_sent);
         // Trigger ends — state resets but we are NOT emitting a revert
-        let out = tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
+        let out =
+            tick_auto_match_frequency(&mut state, &match_input(Some("t1"), 0.5, 1.0, 3.0, false));
         // Must NOT emit a Match (which would be a revert) and must just return None
-        assert_eq!(out, FrequencyMatchOutput::None,
-            "frequency must persist at last value — no auto-revert when trigger ends");
+        assert_eq!(
+            out,
+            FrequencyMatchOutput::None,
+            "frequency must persist at last value — no auto-revert when trigger ends"
+        );
     }
 
     fn tube(id: &str, loaded: bool, in_arc: bool) -> TubeSummary {
-        TubeSummary { id: id.to_string(), loaded, in_arc }
+        TubeSummary {
+            id: id.to_string(),
+            loaded,
+            in_arc,
+        }
     }
 
     fn all_ready_input() -> TorpedoAiInput {
@@ -745,7 +779,10 @@ mod tests {
         let mut input = all_ready_input();
         input.target_locked = false;
         let result = auto_fire_torpedo(&input);
-        assert!(result.is_empty(), "should not fire when no target is locked");
+        assert!(
+            result.is_empty(),
+            "should not fire when no target is locked"
+        );
     }
 
     // ── Condition: magazine ────────────────────────────────────────────────
@@ -813,7 +850,11 @@ mod tests {
         let result = auto_fire_torpedo(&all_ready_input());
         assert_eq!(
             result,
-            vec!["fore_port".to_string(), "fore_starboard".to_string(), "aft".to_string()],
+            vec![
+                "fore_port".to_string(),
+                "fore_starboard".to_string(),
+                "aft".to_string()
+            ],
             "tubes must appear in deterministic priority order"
         );
     }
@@ -874,7 +915,11 @@ mod tests {
         // 2 ticks of 1.5s = 3.0s total ≥ engage_delay_secs(3.0)
         tick_power_movement_rule(&mut state, &movement_input(0.8, 80.0, 1.5));
         let out = tick_power_movement_rule(&mut state, &movement_input(0.8, 80.0, 1.5));
-        assert_eq!(out, PowerEngageOutput::Engage, "should engage after delay elapsed");
+        assert_eq!(
+            out,
+            PowerEngageOutput::Engage,
+            "should engage after delay elapsed"
+        );
         assert_eq!(state, EngageState::Engaged);
     }
 
@@ -887,7 +932,11 @@ mod tests {
         // Thrust drops below threshold
         let out = tick_power_movement_rule(&mut state, &movement_input(0.3, 80.0, 1.0));
         assert_eq!(out, PowerEngageOutput::NoChange);
-        assert_eq!(state, EngageState::Idle, "timer should reset when thrust drops");
+        assert_eq!(
+            state,
+            EngageState::Idle,
+            "timer should reset when thrust drops"
+        );
     }
 
     #[test]
@@ -914,7 +963,11 @@ mod tests {
         // Battery reaches 100% (recharge_pct)
         let out = tick_power_movement_rule(&mut state, &movement_input(0.8, 100.0, 1.0));
         assert_eq!(out, PowerEngageOutput::NoChange);
-        assert_eq!(state, EngageState::Idle, "should return to Idle when battery recharged");
+        assert_eq!(
+            state,
+            EngageState::Idle,
+            "should return to Idle when battery recharged"
+        );
     }
 
     #[test]
@@ -924,7 +977,11 @@ mod tests {
         input.power_is_low = false; // switched to Full
         let out = tick_power_movement_rule(&mut state, &input);
         assert_eq!(out, PowerEngageOutput::NoChange);
-        assert_eq!(state, EngageState::Idle, "pending engage cancelled when switching to Full");
+        assert_eq!(
+            state,
+            EngageState::Idle,
+            "pending engage cancelled when switching to Full"
+        );
     }
 
     #[test]
@@ -947,7 +1004,11 @@ mod tests {
         // Thrust high but battery below minimum (50%)
         let out = tick_power_movement_rule(&mut state, &movement_input(0.9, 40.0, 1.0));
         assert_eq!(out, PowerEngageOutput::NoChange);
-        assert_eq!(state, EngageState::Idle, "should not count when battery too low");
+        assert_eq!(
+            state,
+            EngageState::Idle,
+            "should not count when battery too low"
+        );
     }
 
     // ── tick_power_red_alert_rule ─────────────────────────────────────────
@@ -977,7 +1038,11 @@ mod tests {
         let mut state = EngageState::Idle;
         tick_power_red_alert_rule(&mut state, &red_alert_input(true, 50.0, 1.5));
         let out = tick_power_red_alert_rule(&mut state, &red_alert_input(true, 50.0, 1.5));
-        assert_eq!(out, PowerEngageOutput::Engage, "should engage after delay under red alert");
+        assert_eq!(
+            out,
+            PowerEngageOutput::Engage,
+            "should engage after delay under red alert"
+        );
     }
 
     #[test]
@@ -1014,8 +1079,16 @@ mod tests {
         }
 
         // At 3s elapsed both should be Engaged now
-        assert_eq!(helm_state, EngageState::Engaged, "movement rule should be Engaged");
-        assert_eq!(weapons_state, EngageState::Engaged, "red alert rule should be Engaged");
+        assert_eq!(
+            helm_state,
+            EngageState::Engaged,
+            "movement rule should be Engaged"
+        );
+        assert_eq!(
+            weapons_state,
+            EngageState::Engaged,
+            "red alert rule should be Engaged"
+        );
     }
 
     // ── Shields AI ────────────────────────────────────────────────────────
@@ -1062,7 +1135,10 @@ mod tests {
             ],
             shields_is_low: true,
         };
-        assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::Focus { facing_index: 1 });
+        assert_eq!(
+            tick_shield_focus_ai(&input),
+            ShieldFocusAiOutput::Focus { facing_index: 1 }
+        );
     }
 
     #[test]
@@ -1090,6 +1166,9 @@ mod tests {
             ],
             shields_is_low: true,
         };
-        assert_eq!(tick_shield_focus_ai(&input), ShieldFocusAiOutput::ClearFocus);
+        assert_eq!(
+            tick_shield_focus_ai(&input),
+            ShieldFocusAiOutput::ClearFocus
+        );
     }
 }

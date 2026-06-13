@@ -94,7 +94,9 @@ impl ConsoleHull {
     /// a console is exhausted. Consoles already at 0 HP are never targeted.
     pub fn apply_damage(&mut self, mut amount: f32, rng: &mut impl Rng) {
         while amount > 0.0 {
-            let total: f32 = self.entries.iter()
+            let total: f32 = self
+                .entries
+                .iter()
                 .filter(|(_, cur, _)| *cur > 0.0)
                 .map(|(_, cur, _)| *cur)
                 .sum();
@@ -117,7 +119,9 @@ impl ConsoleHull {
             }
             // Float-precision safety: fall back to the last available console.
             let idx = chosen.unwrap_or_else(|| {
-                self.entries.iter().enumerate()
+                self.entries
+                    .iter()
+                    .enumerate()
                     .filter(|(_, (_, cur, _))| *cur > 0.0)
                     .last()
                     .unwrap()
@@ -190,7 +194,6 @@ impl ConsoleHull {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -339,7 +342,11 @@ mod tests {
         let mut station_hull = single_console_hull(50.0);
         let mut rng = rand::rng();
         apply_hull_damage(&mut station_hull, 100.0, &mut rng);
-        assert_eq!(station_hull.total_current(), 0.0, "station hull should reach zero");
+        assert_eq!(
+            station_hull.total_current(),
+            0.0,
+            "station hull should reach zero"
+        );
     }
 
     #[test]
@@ -355,18 +362,21 @@ mod tests {
         let mut hull = single_console_hull(20.0);
         let mut rng = rand::rng();
         let (_applied, destroyed) = apply_hull_damage(&mut hull, 100.0, &mut rng);
-        assert!(destroyed, "ship should be destroyed when all consoles reach 0");
+        assert!(
+            destroyed,
+            "ship should be destroyed when all consoles reach 0"
+        );
     }
 
     #[test]
     fn apply_hull_damage_spillover_fires_destroyed_after_second_console_wiped() {
-        let mut hull = ConsoleHull::from_config(&[
-            (Console::Helm, 5.0),
-            (Console::Tactical, 10.0),
-        ]);
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 5.0), (Console::Tactical, 10.0)]);
         let mut rng = rand::rng();
         let (_applied, destroyed) = apply_hull_damage(&mut hull, 20.0, &mut rng);
-        assert!(destroyed, "spillover should destroy the ship after both consoles reach 0");
+        assert!(
+            destroyed,
+            "spillover should destroy the ship after both consoles reach 0"
+        );
         assert!(hull.is_destroyed());
     }
 
@@ -384,7 +394,10 @@ mod tests {
     #[test]
     fn depleted_shield_passes_overflow_to_hull() {
         use crate::shield::{ShieldConfig, ShieldSystem};
-        let config = ShieldConfig { max_hp: 50, ..Default::default() };
+        let config = ShieldConfig {
+            max_hp: 50,
+            ..Default::default()
+        };
         let mut shields = ShieldSystem::new(&config);
         // 60 damage, fore shield has 50 → 10 overflow to hull
         let hull_damage = apply_damage_with_shields(60, 0.0, &mut shields);
@@ -394,7 +407,10 @@ mod tests {
     #[test]
     fn offline_shield_passes_all_damage_to_hull() {
         use crate::shield::{ShieldConfig, ShieldSystem};
-        let config = ShieldConfig { max_hp: 50, ..Default::default() };
+        let config = ShieldConfig {
+            max_hp: 50,
+            ..Default::default()
+        };
         let mut shields = ShieldSystem::new(&config);
         // Deplete fore shield (goes offline)
         apply_damage_with_shields(50, 0.0, &mut shields);
@@ -462,10 +478,8 @@ mod tests {
     fn apply_damage_skips_depleted_consoles() {
         // Build hull with one console at very low HP so it depletes first.
         // Use a seeded RNG to control which console is chosen.
-        let mut hull = ConsoleHull::from_config(&[
-            (Console::Helm, 5.0),
-            (Console::Tactical, 100.0),
-        ]);
+        let mut hull =
+            ConsoleHull::from_config(&[(Console::Helm, 5.0), (Console::Tactical, 100.0)]);
         let mut rng = rand::rng();
         // Apply 110 damage — should wipe both consoles (5 + 105 spill to Tactical)
         hull.apply_damage(110.0, &mut rng);
@@ -510,10 +524,7 @@ mod tests {
     #[test]
     fn weighted_selection_favours_higher_hp_console() {
         // Tactical has 99× more HP than Helm, so it should absorb ~99% of hits.
-        let mut hull = ConsoleHull::from_config(&[
-            (Console::Helm, 1.0),
-            (Console::Tactical, 99.0),
-        ]);
+        let mut hull = ConsoleHull::from_config(&[(Console::Helm, 1.0), (Console::Tactical, 99.0)]);
         let mut rng = rand::rng();
         let mut tactical_hits = 0u32;
         let trials = 10_000;
@@ -527,7 +538,11 @@ mod tests {
         }
         // Expect ~99% of hits on Tactical; allow generous margin due to HP drift.
         let fraction = tactical_hits as f32 / trials as f32;
-        assert!(fraction > 0.90, "Tactical should absorb >90% of hits, got {:.1}%", fraction * 100.0);
+        assert!(
+            fraction > 0.90,
+            "Tactical should absorb >90% of hits, got {:.1}%",
+            fraction * 100.0
+        );
     }
 
     #[test]

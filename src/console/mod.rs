@@ -1,9 +1,9 @@
-pub mod helm;
 pub mod captain;
-pub mod weapons;
-pub mod repair;
+pub mod comms;
+pub mod helm;
+pub mod navigation;
 pub mod power;
+pub mod repair;
 pub mod science;
 pub mod shields;
-pub mod navigation;
-pub mod comms;
+pub mod weapons;

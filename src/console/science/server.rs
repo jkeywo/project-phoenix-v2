@@ -1,9 +1,9 @@
-﻿use bevy::prelude::*;
+use bevy::prelude::*;
 
+use crate::lobby::Target;
 use crate::lobby::{InboundMessage, Sessions};
 use crate::messages::{ClientMessage, Console, ServerMessage};
 use crate::simulation::SimOutbox;
-use crate::lobby::Target;
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────
 
@@ -11,7 +11,10 @@ pub struct SciencePlugin;
 
 impl Plugin for SciencePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_set_science_target.in_set(crate::sim_sets::SimSet::Input));
+        app.add_systems(
+            Update,
+            handle_set_science_target.in_set(crate::sim_sets::SimSet::Input),
+        );
     }
 }
 
@@ -23,7 +26,9 @@ pub fn handle_set_science_target(
     mut outbox: ResMut<SimOutbox>,
 ) {
     for ev in reader.read() {
-        let ClientMessage::SetScienceTarget { uuid } = &ev.msg else { continue };
+        let ClientMessage::SetScienceTarget { uuid } = &ev.msg else {
+            continue;
+        };
 
         // Only the Sensors console holder may broadcast a target suggestion.
         if sessions.0.console_holder(Console::Sensors) != Some(ev.token.as_str()) {
@@ -35,7 +40,10 @@ pub fn handle_set_science_target(
             continue;
         };
 
-        outbox.0.push((Target::Token(weapons_token.to_string()), ServerMessage::ScienceTargetSuggestion { uuid: uuid.clone() }));
+        outbox.0.push((
+            Target::Token(weapons_token.to_string()),
+            ServerMessage::ScienceTargetSuggestion { uuid: uuid.clone() },
+        ));
     }
 }
 
@@ -83,7 +91,10 @@ mod tests {
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -98,17 +109,56 @@ mod tests {
     }
 
     fn start_game_with_sensors_and_weapons(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
+        push(
+            app,
+            "sensors",
+            ClientMessage::Identify {
+                token: "sensors".into(),
+                name: "Spock".into(),
+            },
+        );
         tick(app);
-        push(app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
+        push(
+            app,
+            "sensors",
+            ClientMessage::SelectStation {
+                station: "Sensors".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -121,17 +171,28 @@ mod tests {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
 
-        push(&mut app, "sensors", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetScienceTarget {
+                uuid: "asteroid-42".into(),
+            },
+        );
         let out = tick(&mut app);
 
-        let suggestion = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::ScienceTargetSuggestion { uuid } => Some(uuid.clone()),
-            _ => None,
-        }).expect("expected a ScienceTargetSuggestion message");
+        let suggestion = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::ScienceTargetSuggestion { uuid } => Some(uuid.clone()),
+                _ => None,
+            })
+            .expect("expected a ScienceTargetSuggestion message");
         assert_eq!(suggestion, "asteroid-42");
 
         // Should be targeted to Weapons console player only.
-        let suggestion_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. }))
+        let suggestion_msg = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. }))
             .unwrap();
         assert!(
             matches!(&suggestion_msg.target, Target::Token(t) if t == "weapons"),
@@ -144,11 +205,18 @@ mod tests {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
 
-        push(&mut app, "captain", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetScienceTarget {
+                uuid: "asteroid-42".into(),
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
             "non-Sensors player should not be able to send ScienceTargetSuggestion"
         );
     }
@@ -156,16 +224,36 @@ mod tests {
     #[test]
     fn set_science_target_ignored_in_lobby() {
         let mut app = test_app();
-        push(&mut app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::Identify {
+                token: "sensors".into(),
+                name: "Spock".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SelectStation {
+                station: "Sensors".into(),
+            },
+        );
         tick(&mut app);
 
-        push(&mut app, "sensors", ClientMessage::SetScienceTarget { uuid: "asteroid-42".into() });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetScienceTarget {
+                uuid: "asteroid-42".into(),
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::ScienceTargetSuggestion { .. })),
             "SetScienceTarget should be ignored during Lobby phase"
         );
     }

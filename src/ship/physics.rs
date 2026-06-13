@@ -91,7 +91,11 @@ pub fn compute_physics(
         };
         let diff = target - state.forward_speed;
         let step = config.acceleration * dt;
-        let delta = if diff.abs() <= step { diff } else { step.copysign(diff) };
+        let delta = if diff.abs() <= step {
+            diff
+        } else {
+            step.copysign(diff)
+        };
         (state.forward_speed + delta).clamp(-max_rev, max_fwd)
     } else {
         let decel = config.deceleration * dt;
@@ -160,7 +164,10 @@ mod tests {
     #[test]
     fn thrust_at_max_approaches_max_speed() {
         let state = default_state();
-        let input = ShipPhysicsInput { thrust: 1.0, steering: 0.0 };
+        let input = ShipPhysicsInput {
+            thrust: 1.0,
+            steering: 0.0,
+        };
         // After 5 seconds of full thrust
         let result = compute_physics(state, input, 5.0, &config());
         assert!(result.forward_speed >= config().max_speed - 0.1);
@@ -173,7 +180,7 @@ mod tests {
             ..default_state()
         };
         let input = default_input(); // No thrust
-        // After 1 second of no thrust (decel is 25/s)
+                                     // After 1 second of no thrust (decel is 25/s)
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.forward_speed < 1.0);
     }
@@ -181,7 +188,10 @@ mod tests {
     #[test]
     fn right_steering_produces_positive_yaw() {
         let state = default_state();
-        let input = ShipPhysicsInput { thrust: 0.0, steering: 1.0 };
+        let input = ShipPhysicsInput {
+            thrust: 0.0,
+            steering: 1.0,
+        };
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.yaw > 0.0);
         // Should be max_yaw_rate * dt
@@ -191,7 +201,10 @@ mod tests {
     #[test]
     fn left_steering_produces_negative_yaw() {
         let state = default_state();
-        let input = ShipPhysicsInput { thrust: 0.0, steering: -1.0 };
+        let input = ShipPhysicsInput {
+            thrust: 0.0,
+            steering: -1.0,
+        };
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.yaw < 0.0);
         assert!((result.yaw - (-config().max_yaw_rate)).abs() < 0.01);
@@ -199,7 +212,10 @@ mod tests {
 
     #[test]
     fn zero_steering_produces_no_rotation() {
-        let state = ShipPhysicsState { yaw: 0.5, ..default_state() };
+        let state = ShipPhysicsState {
+            yaw: 0.5,
+            ..default_state()
+        };
         let input = default_input();
         let result = compute_physics(state, input, 5.0, &config());
         assert!((result.yaw - 0.5).abs() < f32::EPSILON);
@@ -208,7 +224,10 @@ mod tests {
     #[test]
     fn thrust_moves_forward_along_yaw_direction() {
         let state = default_state();
-        let input = ShipPhysicsInput { thrust: 1.0, steering: 0.0 };
+        let input = ShipPhysicsInput {
+            thrust: 1.0,
+            steering: 0.0,
+        };
         let result = compute_physics(state, input, 0.016, &config());
         // Facing -Z direction, should move in -Z
         assert!(result.z < 0.0);
@@ -218,7 +237,10 @@ mod tests {
     #[test]
     fn thrust_with_steering_produces_diagonal_motion() {
         let state = default_state();
-        let input = ShipPhysicsInput { thrust: 1.0, steering: 1.0 };
+        let input = ShipPhysicsInput {
+            thrust: 1.0,
+            steering: 1.0,
+        };
         let result = compute_physics(state, input, 1.0, &config());
         // Should have both X and Z displacement
         assert!((result.x).abs() > 0.1);
@@ -228,7 +250,10 @@ mod tests {
     #[test]
     fn delta_time_scales_movement() {
         let state = default_state();
-        let input = ShipPhysicsInput { thrust: 0.5, steering: 0.0 };
+        let input = ShipPhysicsInput {
+            thrust: 0.5,
+            steering: 0.0,
+        };
         let config = config();
         let dt_1 = compute_physics(state, input, 0.016, &config);
         let dt_2 = compute_physics(state, input, 0.032, &config);
@@ -242,7 +267,10 @@ mod tests {
     #[test]
     fn speed_capped_at_max() {
         let state = default_state();
-        let input = ShipPhysicsInput { thrust: 1.0, steering: 0.0 };
+        let input = ShipPhysicsInput {
+            thrust: 1.0,
+            steering: 0.0,
+        };
         // Long enough time to exceed max speed if not capped
         let result = compute_physics(state, input, 10.0, &config());
         assert!(result.forward_speed <= config().max_speed);
@@ -251,7 +279,10 @@ mod tests {
     #[test]
     fn negative_thrust_produces_reverse_motion() {
         let state = default_state();
-        let input = ShipPhysicsInput { thrust: -1.0, steering: 0.0 };
+        let input = ShipPhysicsInput {
+            thrust: -1.0,
+            steering: 0.0,
+        };
         let result = compute_physics(state, input, 5.0, &config());
         assert!(result.forward_speed <= -config().max_reverse_speed + 0.1);
         // Facing -Z; reverse goes +Z
@@ -260,15 +291,24 @@ mod tests {
 
     #[test]
     fn reverse_speed_clamped_to_negative_max() {
-        let state = ShipPhysicsState { forward_speed: -100.0, ..default_state() };
-        let input = ShipPhysicsInput { thrust: -1.0, steering: 0.0 };
+        let state = ShipPhysicsState {
+            forward_speed: -100.0,
+            ..default_state()
+        };
+        let input = ShipPhysicsInput {
+            thrust: -1.0,
+            steering: 0.0,
+        };
         let result = compute_physics(state, input, 0.1, &config());
         assert!(result.forward_speed >= -config().max_reverse_speed - f32::EPSILON);
     }
 
     #[test]
     fn no_thrust_decelerates_negative_speed_toward_zero() {
-        let state = ShipPhysicsState { forward_speed: -25.0, ..default_state() };
+        let state = ShipPhysicsState {
+            forward_speed: -25.0,
+            ..default_state()
+        };
         let input = default_input();
         let result = compute_physics(state, input, 1.0, &config());
         assert!(result.forward_speed > -1.0);
@@ -286,17 +326,29 @@ mod tests {
     #[test]
     fn thrust_reversal_does_not_overshoot_target() {
         // At full forward speed; apply slight forward thrust → settles at slight target.
-        let state = ShipPhysicsState { forward_speed: 25.0, ..default_state() };
-        let input = ShipPhysicsInput { thrust: 0.2, steering: 0.0 };
+        let state = ShipPhysicsState {
+            forward_speed: 25.0,
+            ..default_state()
+        };
+        let input = ShipPhysicsInput {
+            thrust: 0.2,
+            steering: 0.0,
+        };
         let cfg = config();
         let target = 0.2 * cfg.max_speed;
         // Several seconds — should converge to target, not below.
         let mut s = state;
         for _ in 0..600 {
             let r = compute_physics(s, input, 0.016, &cfg);
-            s.x = r.x; s.z = r.z; s.yaw = r.yaw; s.forward_speed = r.forward_speed;
+            s.x = r.x;
+            s.z = r.z;
+            s.yaw = r.yaw;
+            s.forward_speed = r.forward_speed;
         }
-        assert!((s.forward_speed - target).abs() < 1.0,
-            "expected ~{target}, got {}", s.forward_speed);
+        assert!(
+            (s.forward_speed - target).abs() < 1.0,
+            "expected ~{target}, got {}",
+            s.forward_speed
+        );
     }
 }

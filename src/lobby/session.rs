@@ -25,18 +25,18 @@ pub struct SessionManager {
 
 impl SessionManager {
     pub fn new() -> Self {
-        Self { 
-            players: Vec::new(), 
+        Self {
+            players: Vec::new(),
             last_consoles: HashMap::new(),
             available_consoles: None,
             spectator_queue: VecDeque::new(),
         }
     }
-    
+
     /// Create a new SessionManager with available consoles from EntityConfig.
     pub fn new_with_config(config: &crate::entity_config::EntityConfig) -> Self {
         let mut available = Vec::new();
-        
+
         if config.captain_console.is_some() {
             available.push(Console::CaptainChair);
         }
@@ -59,9 +59,9 @@ impl SessionManager {
         // Comms has no dedicated TOML config section; always available when a ship entity is loaded.
         // Required for stations that include the Comms console (e.g. Helm at 2P+, Comms at 4P).
         available.push(Console::Comms);
-        
-        Self { 
-            players: Vec::new(), 
+
+        Self {
+            players: Vec::new(),
             last_consoles: HashMap::new(),
             available_consoles: Some(available),
             spectator_queue: VecDeque::new(),
@@ -76,7 +76,12 @@ impl SessionManager {
         if self.idx(&token).is_some() {
             return Err(RegisterError::DuplicateToken);
         }
-        self.players.push(Player { token, name, consoles: Vec::new(), connected: true });
+        self.players.push(Player {
+            token,
+            name,
+            consoles: Vec::new(),
+            connected: true,
+        });
         Ok(self.players.last().unwrap())
     }
 
@@ -93,7 +98,8 @@ impl SessionManager {
         if let Some(idx) = self.idx(token) {
             self.players[idx].connected = false;
             if !self.players[idx].consoles.is_empty() {
-                self.last_consoles.insert(token.to_string(), self.players[idx].consoles.clone());
+                self.last_consoles
+                    .insert(token.to_string(), self.players[idx].consoles.clone());
             }
             self.players[idx].consoles.clear();
         }
@@ -114,9 +120,11 @@ impl SessionManager {
                 return Err(ConflictError::ConsoleTaken); // Reuse error type for "not available"
             }
         }
-        
+
         // Check: is it held by someone else who is connected?
-        let taken_by_other = self.players.iter()
+        let taken_by_other = self
+            .players
+            .iter()
             .any(|p| p.connected && p.token != token && p.consoles.contains(&console));
         if taken_by_other {
             return Err(ConflictError::ConsoleTaken);
@@ -151,11 +159,13 @@ impl SessionManager {
 
     /// Consoles not held by any connected player.
     pub fn available_consoles(&self) -> Vec<Console> {
-        let taken: Vec<Console> = self.players.iter()
+        let taken: Vec<Console> = self
+            .players
+            .iter()
             .filter(|p| p.connected)
             .flat_map(|p| p.consoles.clone())
             .collect();
-        
+
         // Use configured available consoles, or default to all if not configured
         let all_available = self.available_consoles.as_deref().unwrap_or(&[
             Console::CaptainChair,
@@ -167,7 +177,7 @@ impl SessionManager {
             Console::Navigation,
             Console::Power,
         ]);
-        
+
         all_available
             .iter()
             .filter(|c| !taken.contains(c))
@@ -181,20 +191,24 @@ impl SessionManager {
 
     /// Check if any connected player holds this console.
     pub fn has_console(&self, console: Console) -> bool {
-        self.players.iter().any(|p| p.connected && p.consoles.contains(&console))
+        self.players
+            .iter()
+            .any(|p| p.connected && p.consoles.contains(&console))
     }
 
     /// Get the connected player token(s) holding this console.  
     /// Returns the first one if multiple players hold it (shared console).
     pub fn console_holder(&self, console: Console) -> Option<&str> {
-        self.players.iter()
+        self.players
+            .iter()
             .find(|p| p.connected && p.consoles.contains(&console))
             .map(|p| p.token.as_str())
     }
 
     /// Check if a specific token is assigned this console.
     pub fn player_has_console(&self, token: &str, console: Console) -> bool {
-        self.players.iter()
+        self.players
+            .iter()
             .find(|p| p.token == token && p.connected)
             .is_some_and(|p| p.consoles.contains(&console))
     }
@@ -249,7 +263,10 @@ mod tests {
     fn duplicate_token_fails() {
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();
-        assert!(matches!(sm.register("t1".into(), "Bob".into()), Err(RegisterError::DuplicateToken)));
+        assert!(matches!(
+            sm.register("t1".into(), "Bob".into()),
+            Err(RegisterError::DuplicateToken)
+        ));
     }
 
     #[test]
@@ -275,7 +292,10 @@ mod tests {
         sm.register("t1".into(), "Alice".into()).unwrap();
         sm.register("t2".into(), "Bob".into()).unwrap();
         sm.toggle_console("t1", Console::CaptainChair).unwrap();
-        assert_eq!(sm.toggle_console("t2", Console::CaptainChair), Err(ConflictError::ConsoleTaken));
+        assert_eq!(
+            sm.toggle_console("t2", Console::CaptainChair),
+            Err(ConflictError::ConsoleTaken)
+        );
     }
 
     #[test]
@@ -463,15 +483,15 @@ mod tests {
         sm.toggle_console("t2", Console::Repair).unwrap();
         assert!(sm.players()[1].consoles.contains(&Console::Repair));
     }
-    
+
     // ── Console Selectability Tests ────────────────────────────────────────
-    
+
     fn sm_with_config(consoles: Vec<Console>) -> SessionManager {
         let mut sm = SessionManager::new();
         sm.available_consoles = Some(consoles);
         sm
     }
-    
+
     #[test]
     fn all_consoles_available_with_all_sections_present() {
         let sm = sm_with_config(vec![
@@ -486,42 +506,30 @@ mod tests {
         assert!(available.contains(&Console::Tactical));
         assert!(available.contains(&Console::Repair));
     }
-    
+
     #[test]
     fn weapons_console_hidden_when_not_in_config() {
-        let sm = sm_with_config(vec![
-            Console::CaptainChair,
-            Console::Helm,
-            Console::Repair,
-        ]);
+        let sm = sm_with_config(vec![Console::CaptainChair, Console::Helm, Console::Repair]);
         let available = sm.available_consoles();
         assert!(!available.contains(&Console::Tactical));
     }
-    
+
     #[test]
     fn captain_console_hidden_when_not_in_config() {
-        let sm = sm_with_config(vec![
-            Console::Helm,
-            Console::Tactical,
-            Console::Repair,
-        ]);
+        let sm = sm_with_config(vec![Console::Helm, Console::Tactical, Console::Repair]);
         let available = sm.available_consoles();
         assert!(!available.contains(&Console::CaptainChair));
     }
-    
+
     #[test]
     fn selecting_unavailable_console_is_rejected() {
-        let mut sm = sm_with_config(vec![
-            Console::CaptainChair,
-            Console::Helm,
-            Console::Repair,
-        ]);
+        let mut sm = sm_with_config(vec![Console::CaptainChair, Console::Helm, Console::Repair]);
         sm.register("t1".into(), "Alice".into()).unwrap();
         // Weapons console is not available
         let result = sm.toggle_console("t1", Console::Tactical);
         assert!(matches!(result, Err(ConflictError::ConsoleTaken)));
     }
-    
+
     #[test]
     fn default_session_manager_has_all_consoles() {
         let sm = SessionManager::new();
@@ -539,30 +547,46 @@ mod tests {
     #[test]
     fn new_with_config_includes_sensors_shields_navigation_consoles() {
         use crate::entity_config::EntityConfig;
-        let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
+        let toml_str =
+            "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
         let config = EntityConfig::from_toml(toml_str).unwrap();
         let sm = SessionManager::new_with_config(&config);
         let available = sm.available_consoles();
-        assert!(available.contains(&Console::Sensors), "Sensors must be in available_consoles after new_with_config");
-        assert!(available.contains(&Console::Shields), "Shields must be in available_consoles after new_with_config");
-        assert!(available.contains(&Console::Navigation), "Navigation must be in available_consoles after new_with_config");
+        assert!(
+            available.contains(&Console::Sensors),
+            "Sensors must be in available_consoles after new_with_config"
+        );
+        assert!(
+            available.contains(&Console::Shields),
+            "Shields must be in available_consoles after new_with_config"
+        );
+        assert!(
+            available.contains(&Console::Navigation),
+            "Navigation must be in available_consoles after new_with_config"
+        );
     }
 
     #[test]
     fn sensors_console_selectable_after_new_with_config() {
         use crate::entity_config::EntityConfig;
-        let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
+        let toml_str =
+            "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
         let config = EntityConfig::from_toml(toml_str).unwrap();
         let mut sm = SessionManager::new_with_config(&config);
         sm.register("t1".into(), "Alice".into()).unwrap();
         let result = sm.toggle_console("t1", Console::Sensors);
-        assert!(result.is_ok(), "Sensors console toggle must succeed, got: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Sensors console toggle must succeed, got: {:?}",
+            result
+        );
     }
 
     #[test]
     fn new_with_config_includes_power_console() {
         use crate::entity_config::EntityConfig;
-        let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
+        let toml_str =
+            "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
         let config = EntityConfig::from_toml(toml_str).unwrap();
         let sm = SessionManager::new_with_config(&config);
         let available = sm.available_consoles();
@@ -575,12 +599,17 @@ mod tests {
     #[test]
     fn power_console_selectable_after_new_with_config() {
         use crate::entity_config::EntityConfig;
-        let toml_str = "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
+        let toml_str =
+            "[helm_console]\n[weapons_console]\n[engineering_console]\n[captain_console]\n";
         let config = EntityConfig::from_toml(toml_str).unwrap();
         let mut sm = SessionManager::new_with_config(&config);
         sm.register("t1".into(), "Alice".into()).unwrap();
         let result = sm.toggle_console("t1", Console::Power);
-        assert!(result.is_ok(), "Power console toggle must succeed, got: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Power console toggle must succeed, got: {:?}",
+            result
+        );
     }
 
     // ── Spectator queue ───────────────────────────────────────────────────
@@ -644,6 +673,9 @@ mod tests {
         sm.toggle_console("t1", Console::CaptainChair).unwrap();
         sm.disconnect("t1");
         sm.reconnect("t1");
-        assert!(sm.players()[0].consoles.is_empty(), "reconnect must not restore consoles");
+        assert!(
+            sm.players()[0].consoles.is_empty(),
+            "reconnect must not restore consoles"
+        );
     }
 }

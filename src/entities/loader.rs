@@ -1,4 +1,4 @@
-﻿// Pure module: resolve an WorldEntity into a concrete EntityConfig.
+// Pure module: resolve an WorldEntity into a concrete EntityConfig.
 // No Bevy dependency — fully unit-testable on native.
 
 use crate::entity_config::EntityConfig;
@@ -15,7 +15,12 @@ pub fn resolve_entity(
 ) -> Result<EntityConfig, String> {
     let template = config_cache
         .get(&entity_inst.template_path)
-        .ok_or_else(|| format!("entity template not found in cache: '{}'", entity_inst.template_path))?;
+        .ok_or_else(|| {
+            format!(
+                "entity template not found in cache: '{}'",
+                entity_inst.template_path
+            )
+        })?;
 
     let config = match &entity_inst.overrides {
         None => template.clone(),
@@ -26,10 +31,12 @@ pub fn resolve_entity(
             )
             .map_err(|e| format!("template re-parse error: {e}"))?;
 
-            let merged = crate::entity_override::merge_entity_config_toml(&template_value, overrides);
+            let merged =
+                crate::entity_override::merge_entity_config_toml(&template_value, overrides);
             let merged_str =
                 toml::to_string(&merged).map_err(|e| format!("merged serialise error: {e}"))?;
-            EntityConfig::from_toml(&merged_str).map_err(|e| format!("merged parse error: {e:?}"))?
+            EntityConfig::from_toml(&merged_str)
+                .map_err(|e| format!("merged parse error: {e:?}"))?
         }
     };
 
@@ -107,10 +114,21 @@ transition = []
             ..Default::default()
         };
         let config = resolve_entity(&inst, &cache).unwrap();
-        let beh = config.behaviour.expect("raider must keep [behaviour] section");
-        assert_eq!(beh.initial_state, "idle", "initial_state must be overridden to idle");
-        assert!(beh.transition.is_empty(), "all transitions must be replaced with []");
-        assert!(!beh.state.is_empty(), "template state blocks must be preserved by name-merge");
+        let beh = config
+            .behaviour
+            .expect("raider must keep [behaviour] section");
+        assert_eq!(
+            beh.initial_state, "idle",
+            "initial_state must be overridden to idle"
+        );
+        assert!(
+            beh.transition.is_empty(),
+            "all transitions must be replaced with []"
+        );
+        assert!(
+            !beh.state.is_empty(),
+            "template state blocks must be preserved by name-merge"
+        );
     }
 
     /// End-to-end check that the smoke test's appended world TOML (inline-table
@@ -134,23 +152,37 @@ overrides     = { behaviour = { initial_state = "idle", transition = [] } }
 
         let world = crate::world::config::parse_world(world_toml)
             .expect("smoke-test world TOML must parse");
-        assert_eq!(world.entities.len(), 1, "expected exactly one [[entity]] block");
+        assert_eq!(
+            world.entities.len(),
+            1,
+            "expected exactly one [[entity]] block"
+        );
 
         let inst = &world.entities[0];
-        assert!(inst.overrides.is_some(), "overrides must round-trip through parse_world");
+        assert!(
+            inst.overrides.is_some(),
+            "overrides must round-trip through parse_world"
+        );
 
         let config = resolve_entity(inst, &cache).unwrap();
-        let beh = config.behaviour.expect("raider keeps behaviour section after merge");
+        let beh = config
+            .behaviour
+            .expect("raider keeps behaviour section after merge");
         assert_eq!(beh.initial_state, "idle");
-        assert!(beh.transition.is_empty(),
-                "smoke-test override must produce zero transitions; got {} transitions",
-                beh.transition.len());
+        assert!(
+            beh.transition.is_empty(),
+            "smoke-test override must produce zero transitions; got {} transitions",
+            beh.transition.len()
+        );
     }
 
     #[test]
     fn assign_uuid_returns_valid_uuid() {
         let id = assign_uuid();
-        assert!(uuid::Uuid::parse_str(&id).is_ok(), "assign_uuid should return a valid UUID v4");
+        assert!(
+            uuid::Uuid::parse_str(&id).is_ok(),
+            "assign_uuid should return a valid UUID v4"
+        );
     }
 
     #[test]

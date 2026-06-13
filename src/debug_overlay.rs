@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use std::collections::VecDeque;
 
 use crate::entity_spawner::RegionShapeSection;
-use crate::region_shape::RegionShape;
 use crate::modifiers::ShipModifiers;
+use crate::region_shape::RegionShape;
 
 /// Resource indicating whether debug region wireframes are enabled.
 #[derive(Resource)]
@@ -189,7 +189,8 @@ fn write_entity_debug_state(
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
     )>,
-) {}
+) {
+}
 
 /// Reads all non-asteroid entities plus the player ship resources and writes a
 /// formatted entity inspector block to the WASM thread-local for F6.
@@ -200,15 +201,18 @@ fn write_entity_debug_state(
 /// Only runs when `DebugEntityInspectorEnabled` is true.
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
 fn update_entity_inspector(
-    entities: Query<(
-        &Transform,
-        &crate::entities::spawner::EntityName,
-        Option<&crate::entities::spawner::EntityConsoleHull>,
-        Option<&crate::entities::spawner::FactionComponent>,
-        Option<&crate::comms::component::CommsRange>,
-        Option<&crate::ai::server::AiControllerComponent>,
-        &crate::entities::spawner::EntityTagsSection,
-    ), bevy::ecs::query::Without<crate::server_app::Asteroid>>,
+    entities: Query<
+        (
+            &Transform,
+            &crate::entities::spawner::EntityName,
+            Option<&crate::entities::spawner::EntityConsoleHull>,
+            Option<&crate::entities::spawner::FactionComponent>,
+            Option<&crate::comms::component::CommsRange>,
+            Option<&crate::ai::server::AiControllerComponent>,
+            &crate::entities::spawner::EntityTagsSection,
+        ),
+        bevy::ecs::query::Without<crate::server_app::Asteroid>,
+    >,
     ship_state: Res<crate::ship::state::ShipState>,
     ship_hull: Res<crate::server_app::ShipHullIntegrity>,
     ship_shields: Res<crate::server_app::ShipShields>,
@@ -250,10 +254,15 @@ fn update_entity_inspector(
             } else {
                 0
             };
-            let status = if f.offline_remaining > 0.0 { " [OFFLINE]" } else { "" };
+            let status = if f.offline_remaining > 0.0 {
+                " [OFFLINE]"
+            } else {
+                ""
+            };
             let focus = if f.is_focused { "*" } else { "" };
             out.push_str(&format!(
-                "  {}{} {}/{} ({}%){}", focus, f.label, f.hp, f.max_hp, pct, status
+                "  {}{} {}/{} ({}%){}",
+                focus, f.label, f.hp, f.max_hp, pct, status
             ));
         }
         out.push('\n');
@@ -280,17 +289,16 @@ fn update_entity_inspector(
         da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    for (i, (transform, name, hull, faction_comp, comms_range, ai, tags)) in sorted.iter().enumerate() {
+    for (i, (transform, name, hull, faction_comp, comms_range, ai, tags)) in
+        sorted.iter().enumerate()
+    {
         let p = transform.translation;
         let dx = p.x - player_x;
         let dz = p.z - player_z;
         let dist = (dx * dx + dz * dz).sqrt();
 
         let tag_list = tags.0.join(", ");
-        out.push_str(&format!(
-            "{:>2}. {}  [{}]\n",
-            i + 1, name.0, tag_list
-        ));
+        out.push_str(&format!("{:>2}. {}  [{}]\n", i + 1, name.0, tag_list));
         out.push_str(&format!(
             "    pos=({:>8.1}, {:>8.1})  dist={:>7.1}u\n",
             p.x, p.z, dist
@@ -298,7 +306,8 @@ fn update_entity_inspector(
 
         // Faction
         if let Some(fc) = faction_comp {
-            let faction_name = faction_registry.0
+            let faction_name = faction_registry
+                .0
                 .get(&fc.0)
                 .map(|f| f.name.as_str())
                 .unwrap_or("<unknown>");
@@ -309,8 +318,15 @@ fn update_entity_inspector(
         if let Some(h) = hull {
             let cur = h.0.total_current();
             let max = h.0.total_max();
-            let pct = if max > 0.0 { (cur / max * 100.0) as i32 } else { 0 };
-            out.push_str(&format!("    hull: {}/{} ({}%)\n", cur as i32, max as i32, pct));
+            let pct = if max > 0.0 {
+                (cur / max * 100.0) as i32
+            } else {
+                0
+            };
+            out.push_str(&format!(
+                "    hull: {}/{} ({}%)\n",
+                cur as i32, max as i32, pct
+            ));
         }
 
         // Comms
@@ -325,7 +341,10 @@ fn update_entity_inspector(
 
         // AI state
         if let Some(ai_ctrl) = ai {
-            out.push_str(&format!("    ai: {}\n", ai_ctrl.controller.current_state_name));
+            out.push_str(&format!(
+                "    ai: {}\n",
+                ai_ctrl.controller.current_state_name
+            ));
         }
     }
 
@@ -336,26 +355,27 @@ fn update_entity_inspector(
 /// Native / test stub — does nothing.
 #[cfg(not(all(target_arch = "wasm32", feature = "server")))]
 fn update_entity_inspector(
-    _entities: Query<(
-        &Transform,
-        &crate::entities::spawner::EntityName,
-        Option<&crate::entities::spawner::EntityConsoleHull>,
-        Option<&crate::entities::spawner::FactionComponent>,
-        Option<&crate::comms::component::CommsRange>,
-        Option<&crate::ai::server::AiControllerComponent>,
-        &crate::entities::spawner::EntityTagsSection,
-    ), bevy::ecs::query::Without<crate::server_app::Asteroid>>,
+    _entities: Query<
+        (
+            &Transform,
+            &crate::entities::spawner::EntityName,
+            Option<&crate::entities::spawner::EntityConsoleHull>,
+            Option<&crate::entities::spawner::FactionComponent>,
+            Option<&crate::comms::component::CommsRange>,
+            Option<&crate::ai::server::AiControllerComponent>,
+            &crate::entities::spawner::EntityTagsSection,
+        ),
+        bevy::ecs::query::Without<crate::server_app::Asteroid>,
+    >,
     _ship_state: Res<crate::ship::state::ShipState>,
     _ship_hull: Res<crate::server_app::ShipHullIntegrity>,
     _ship_shields: Res<crate::server_app::ShipShields>,
     _faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
-) {}
+) {
+}
 
 /// Draws wireframe outlines for every region entity with a shape component.
-fn draw_region_wireframes(
-    regions: Query<(&Transform, &RegionShapeSection)>,
-    mut gizmos: Gizmos,
-) {
+fn draw_region_wireframes(regions: Query<(&Transform, &RegionShapeSection)>, mut gizmos: Gizmos) {
     for (transform, shape) in regions.iter() {
         let origin = transform.translation - Vec3::Y * 10.0;
         match &shape.0 {
@@ -365,7 +385,10 @@ fn draw_region_wireframes(
             RegionShape::Box { half_extents, .. } => {
                 draw_box_wireframe(&mut gizmos, origin, *half_extents);
             }
-            RegionShape::Torus { inner_radius, outer_radius } => {
+            RegionShape::Torus {
+                inner_radius,
+                outer_radius,
+            } => {
                 draw_torus_wireframe(&mut gizmos, origin, *inner_radius, *outer_radius);
             }
         }
@@ -379,11 +402,7 @@ fn draw_sphere_wireframe(gizmos: &mut Gizmos, origin: Vec3, radius: f32) {
         radius,
         color,
     );
-    gizmos.circle(
-        Isometry3d::new(origin, Quat::IDENTITY),
-        radius,
-        color,
-    );
+    gizmos.circle(Isometry3d::new(origin, Quat::IDENTITY), radius, color);
     gizmos.circle(
         Isometry3d::new(origin, Quat::from_rotation_z(std::f32::consts::FRAC_PI_2)),
         radius,
@@ -406,9 +425,18 @@ fn draw_box_wireframe(gizmos: &mut Gizmos, origin: Vec3, half_extents: [f32; 3])
     ]
     .map(|c| origin + c);
     let edges: [(usize, usize); 12] = [
-        (0, 1), (1, 2), (2, 3), (3, 0),
-        (4, 5), (5, 6), (6, 7), (7, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7),
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
     ];
     for (i, j) in edges {
         gizmos.line(corners[i], corners[j], color);
@@ -418,16 +446,8 @@ fn draw_box_wireframe(gizmos: &mut Gizmos, origin: Vec3, half_extents: [f32; 3])
 fn draw_torus_wireframe(gizmos: &mut Gizmos, origin: Vec3, inner_radius: f32, outer_radius: f32) {
     let color = Color::srgba(0.0, 1.0, 0.3, 0.6);
     // Draw two horizontal circles representing the inner and outer edges of the torus
-    gizmos.circle(
-        Isometry3d::new(origin, Quat::IDENTITY),
-        inner_radius,
-        color,
-    );
-    gizmos.circle(
-        Isometry3d::new(origin, Quat::IDENTITY),
-        outer_radius,
-        color,
-    );
+    gizmos.circle(Isometry3d::new(origin, Quat::IDENTITY), inner_radius, color);
+    gizmos.circle(Isometry3d::new(origin, Quat::IDENTITY), outer_radius, color);
 }
 
 #[cfg(test)]
@@ -542,7 +562,10 @@ mod tests {
         }
         assert_eq!(log.entries.len(), DAMAGE_LOG_CAPACITY);
         // Newest at front
-        assert_eq!(log.entries[0].source, format!("s{}", DAMAGE_LOG_CAPACITY + 4));
+        assert_eq!(
+            log.entries[0].source,
+            format!("s{}", DAMAGE_LOG_CAPACITY + 4)
+        );
         // Oldest retained is the one DAMAGE_LOG_CAPACITY back from newest
         assert_eq!(log.entries[DAMAGE_LOG_CAPACITY - 1].source, "s5");
     }

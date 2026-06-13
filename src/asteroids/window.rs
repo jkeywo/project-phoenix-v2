@@ -151,50 +151,32 @@ mod tests {
 
     #[test]
     fn slot_at_player_center_is_despawn_cells() {
-        assert_eq!(
-            compute_slot_for_world_cell(0, 0, 0, 0, 2),
-            Some((2, 2)),
-        );
+        assert_eq!(compute_slot_for_world_cell(0, 0, 0, 0, 2), Some((2, 2)),);
     }
 
     #[test]
     fn slot_positive_offset_from_player() {
-        assert_eq!(
-            compute_slot_for_world_cell(0, 0, 2, 1, 2),
-            Some((4, 3)),
-        );
+        assert_eq!(compute_slot_for_world_cell(0, 0, 2, 1, 2), Some((4, 3)),);
     }
 
     #[test]
     fn slot_negative_offset_from_player() {
-        assert_eq!(
-            compute_slot_for_world_cell(0, 0, -2, -2, 2),
-            Some((0, 0)),
-        );
+        assert_eq!(compute_slot_for_world_cell(0, 0, -2, -2, 2), Some((0, 0)),);
     }
 
     #[test]
     fn slot_out_of_range_returns_none() {
-        assert_eq!(
-            compute_slot_for_world_cell(0, 0, 3, 0, 2),
-            None,
-        );
+        assert_eq!(compute_slot_for_world_cell(0, 0, 3, 0, 2), None,);
     }
 
     #[test]
     fn slot_out_of_range_negative() {
-        assert_eq!(
-            compute_slot_for_world_cell(0, 0, 0, -3, 2),
-            None,
-        );
+        assert_eq!(compute_slot_for_world_cell(0, 0, 0, -3, 2), None,);
     }
 
     #[test]
     fn slot_edge_max_distance_in_range() {
-        assert_eq!(
-            compute_slot_for_world_cell(5, 5, 7, 3, 2),
-            Some((4, 0)),
-        );
+        assert_eq!(compute_slot_for_world_cell(5, 5, 7, 3, 2), Some((4, 0)),);
     }
 
     #[test]
@@ -223,8 +205,7 @@ mod tests {
         // new despawn: x∈[-1,3], z∈[-2,2]
         // Old \ New: x=-2 → 5 cells: [(-2,-2),(-2,-1),(-2,0),(-2,1),(-2,2)]
         let delta = eval_on_player_move(0, 0, 1, 0, 1, 2);
-        let mut expected_despawn: Vec<(i32, i32)> =
-            (-2..=2).map(|z| (-2, z)).collect();
+        let mut expected_despawn: Vec<(i32, i32)> = (-2..=2).map(|z| (-2, z)).collect();
         expected_despawn.sort();
         let mut actual_despawn = delta.cells_to_despawn.clone();
         actual_despawn.sort();
@@ -238,8 +219,7 @@ mod tests {
         // old spawn: x∈[-1,1], z∈[-1,1]
         // New \ Old (spawn): x=2 → 3 cells
         let delta = eval_on_player_move(0, 0, 1, 0, 1, 2);
-        let mut expected_spawn: Vec<(i32, i32)> =
-            (-1..=1).map(|z| (2, z)).collect();
+        let mut expected_spawn: Vec<(i32, i32)> = (-1..=1).map(|z| (2, z)).collect();
         expected_spawn.sort();
         let mut actual_spawn = delta.cells_to_spawn.clone();
         actual_spawn.sort();
@@ -282,8 +262,7 @@ mod tests {
         // new despawn: x∈[-2,2], z∈[-1,3]
         // Old \ New: z=-2 → 5 cells
         let delta = eval_on_player_move(0, 0, 0, 1, 1, 2);
-        let mut expected: Vec<(i32, i32)> =
-            (-2..=2).map(|x| (x, -2)).collect();
+        let mut expected: Vec<(i32, i32)> = (-2..=2).map(|x| (x, -2)).collect();
         expected.sort();
         let mut actual = delta.cells_to_despawn.clone();
         actual.sort();

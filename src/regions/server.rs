@@ -2,16 +2,16 @@ use bevy::prelude::*;
 use rand::SeedableRng as _;
 use std::collections::{HashMap, HashSet};
 
-use crate::entity_spawner::{RegionShapeSection, RegionEffectsSection, EntityUuid};
 use crate::debug_overlay::{DamageLog, DamageLogEntry};
-use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse};
-use crate::ship_state::ShipState;
-use crate::region_effects::RegionEffectKind;
-use crate::modifiers::ShipModifiers;
-use crate::messages::{GamePhase, ModifierSlot, ServerMessage};
+use crate::entity_spawner::{EntityUuid, RegionEffectsSection, RegionShapeSection};
 use crate::lobby::Target;
+use crate::messages::{GamePhase, ModifierSlot, ServerMessage};
+use crate::modifiers::ShipModifiers;
+use crate::region_effects::RegionEffectKind;
 use crate::server_app::SimOutbox;
+use crate::ship_state::ShipState;
 use crate::simulation::GameOverReason;
+use crate::simulation::{Ship, ShipHullIntegrity, ShipImpulse};
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -41,10 +41,15 @@ pub struct RegionPlugin;
 impl Plugin for RegionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RegionMembership>()
-            .add_systems(Update, (
-                update_region_membership.in_set(crate::sim_sets::SimSet::Physics),
-                apply_damage_zone_damage.in_set(crate::sim_sets::SimSet::Physics).after(update_region_membership),
-            ))
+            .add_systems(
+                Update,
+                (
+                    update_region_membership.in_set(crate::sim_sets::SimSet::Physics),
+                    apply_damage_zone_damage
+                        .in_set(crate::sim_sets::SimSet::Physics)
+                        .after(update_region_membership),
+                ),
+            )
             .add_observer(handle_blocks_impulse_region_enter)
             .add_observer(handle_slow_zone_speed_clamp);
     }
@@ -87,7 +92,11 @@ pub(crate) fn update_region_membership(
         .collect();
 
     // Get previous frame's inside set for this ship
-    let prev_inside = membership.inside.get(&ship_entity).cloned().unwrap_or_default();
+    let prev_inside = membership
+        .inside
+        .get(&ship_entity)
+        .cloned()
+        .unwrap_or_default();
 
     // Detect exits: were in prev_inside but not in current_inside
     // (also catches despawned regions Ã¢â‚¬â€ despawned entities don't appear in region_query)
@@ -148,7 +157,9 @@ fn apply_damage_zone_damage(
             continue;
         };
         for effect in &effects.0 {
-            if let crate::region_effects::RegionEffectKind::DamageZone { dps, shield_pierce } = effect {
+            if let crate::region_effects::RegionEffectKind::DamageZone { dps, shield_pierce } =
+                effect
+            {
                 let total_damage = dps * dt;
                 let (pierced, absorbed) =
                     crate::damage::split_damage_for_pierce(total_damage, *shield_pierce);
@@ -160,9 +171,7 @@ fn apply_damage_zone_damage(
                 let mut shield_amount = 0.0;
                 if absorbed > 0.0 {
                     if let Some(shields) = shields.as_deref_mut() {
-                        let leak = shields.0.apply_uniform_damage(
-                            absorbed.round() as i32,
-                        );
+                        let leak = shields.0.apply_uniform_damage(absorbed.round() as i32);
                         shield_amount = (absorbed - leak as f32).max(0.0);
                         hull_amount += leak as f32;
                     } else {
@@ -188,10 +197,13 @@ fn apply_damage_zone_damage(
                     });
                 }
                 if let Some(ref mut ob) = outbox {
-                    ob.0.push((Target::All, ServerMessage::DamageTaken {
-                        hull: hull_applied,
-                        shield: shield_amount,
-                    }));
+                    ob.0.push((
+                        Target::All,
+                        ServerMessage::DamageTaken {
+                            hull: hull_applied,
+                            shield: shield_amount,
+                        },
+                    ));
                 }
                 if ship_destroyed {
                     if let Some(ref mut ob) = outbox {
@@ -225,16 +237,14 @@ fn handle_blocks_impulse_region_enter(
     let Ok(effects) = region_query.get(ev.region_entity) else {
         return;
     };
-    if effects.0.iter().any(|e| *e == RegionEffectKind::BlocksImpulse) {
+    if effects
+        .0
+        .iter()
+        .any(|e| *e == RegionEffectKind::BlocksImpulse)
+    {
         impulse.0.cancel_charge();
     }
 }
-
-
-
-
-
-
 
 /// Clamps the ship's forward speed to the effective maximum when entering a
 /// slow zone region. The modifier registration is handled by the coordinator's
@@ -252,7 +262,10 @@ pub(crate) fn handle_slow_zone_speed_clamp(
     let Ok(effects) = region_query.get(ev.region_entity) else {
         return;
     };
-    let has_slow = effects.0.iter().any(|e| matches!(e, RegionEffectKind::SlowZone { .. }));
+    let has_slow = effects
+        .0
+        .iter()
+        .any(|e| matches!(e, RegionEffectKind::SlowZone { .. }));
     if !has_slow {
         return;
     }
@@ -263,21 +276,19 @@ pub(crate) fn handle_slow_zone_speed_clamp(
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity_spawner::spawn_entity;
-    use crate::entity_config::EntityConfig;
-    use crate::region_shape::RegionShape;
     use crate::damage::ConsoleHull;
-    use crate::simulation::{ShipHullIntegrity, ShipImpulse};
-    use crate::impulse::{ImpulseState, ImpulsePhase, IMPULSE_CHARGE_DURATION};
-    use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
-    use crate::ship_physics::ShipPhysicsConfig;
-    use crate::modifiers::ShipModifiers;
+    use crate::entity_config::EntityConfig;
+    use crate::entity_spawner::spawn_entity;
+    use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_CHARGE_DURATION};
     use crate::messages::ModifierSlot;
+    use crate::modifiers::ShipModifiers;
+    use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
+    use crate::region_shape::RegionShape;
+    use crate::ship_physics::ShipPhysicsConfig;
+    use crate::simulation::{ShipHullIntegrity, ShipImpulse};
 
     /// Build a minimal Bevy app with the region plugin.
     fn test_app() -> App {
@@ -287,10 +298,7 @@ mod tests {
             .insert_resource(ShipState::new())
             .insert_resource(ShipModifiers::new());
         // Spawn the ship entity
-        app.world_mut().spawn((
-            Ship,
-            Transform::default(),
-        ));
+        app.world_mut().spawn((Ship, Transform::default()));
         app
     }
 
@@ -336,7 +344,11 @@ mod tests {
 
     fn is_inside(app: &mut App, region: Entity) -> bool {
         let ship = ship_entity(app);
-        app.world().resource::<RegionMembership>().inside.get(&ship).map_or(false, |set| set.contains(&region))
+        app.world()
+            .resource::<RegionMembership>()
+            .inside
+            .get(&ship)
+            .map_or(false, |set| set.contains(&region))
     }
 
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
@@ -354,14 +366,19 @@ mod tests {
         // Flush so region entity is queryable + system runs once
         app.update();
         // Ship at (0,0) is outside region at (100,0) with radius 50 Ã¢â€ â€™ no entry
-        assert!(!is_inside(&mut app, region), "ship should start outside region");
+        assert!(
+            !is_inside(&mut app, region),
+            "ship should start outside region"
+        );
 
         // Move ship inside the region
         set_ship_pos(&mut app, 120.0, 0.0); // 20 units from centre, well inside radius 50
         app.update();
 
-        assert!(is_inside(&mut app, region),
-            "ship should enter region when moving inside");
+        assert!(
+            is_inside(&mut app, region),
+            "ship should enter region when moving inside"
+        );
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Exit tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -372,14 +389,19 @@ mod tests {
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 20.0, 0.0); // inside
         app.update(); // flush + system run Ã¢â€ â€™ enters
-        assert!(is_inside(&mut app, region), "ship should be inside after moving in");
+        assert!(
+            is_inside(&mut app, region),
+            "ship should be inside after moving in"
+        );
 
         // Move ship outside
         set_ship_pos(&mut app, 100.0, 0.0); // far outside radius 50
         app.update();
 
-        assert!(!is_inside(&mut app, region),
-            "ship should exit region when moving outside");
+        assert!(
+            !is_inside(&mut app, region),
+            "ship should exit region when moving outside"
+        );
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ No-duplicate-while-inside test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -390,12 +412,17 @@ mod tests {
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         app.update(); // flush + system run Ã¢â€ â€™ enters
-        assert!(is_inside(&mut app, region), "ship should be inside after first tick");
+        assert!(
+            is_inside(&mut app, region),
+            "ship should be inside after first tick"
+        );
 
         // Stay inside Ã¢â‚¬â€ tick again; membership should remain stable
         app.update();
-        assert!(is_inside(&mut app, region),
-            "ship should remain inside without duplicate entry");
+        assert!(
+            is_inside(&mut app, region),
+            "ship should remain inside without duplicate entry"
+        );
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Despawn-implicit-exit test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -406,14 +433,19 @@ mod tests {
         let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         app.update(); // flush + system run Ã¢â€ â€™ enters
-        assert!(is_inside(&mut app, region), "ship should be inside before despawn");
+        assert!(
+            is_inside(&mut app, region),
+            "ship should be inside before despawn"
+        );
 
         // Despawn the region entity
         app.world_mut().despawn(region);
         app.update();
 
-        assert!(!is_inside(&mut app, region),
-            "ship should exit region when region is despawned");
+        assert!(
+            !is_inside(&mut app, region),
+            "ship should exit region when region is despawned"
+        );
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Edge: ship outside from start Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -425,8 +457,10 @@ mod tests {
         set_ship_pos(&mut app, 200.0, 0.0); // far outside
         app.update();
 
-        assert!(!is_inside(&mut app, region),
-            "ship outside region should not enter");
+        assert!(
+            !is_inside(&mut app, region),
+            "ship outside region should not enter"
+        );
     }
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Enter and exit across multiple regions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -461,8 +495,8 @@ mod tests {
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Damage Zone tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-    use std::time::Duration;
     use crate::region_effects::{DamageZoneEffect, RegionEffectsConfig as EffectsCfg};
+    use std::time::Duration;
 
     fn damage_test_app() -> App {
         let mut app = App::new();
@@ -539,14 +573,24 @@ mod tests {
         spawn_damage_zone_with_pierce(app, x, z, radius, dps, 1.0)
     }
 
-    fn spawn_damage_zone_with_pierce(app: &mut App, x: f32, z: f32, radius: f32, dps: f32, shield_pierce: f32) -> Entity {
+    fn spawn_damage_zone_with_pierce(
+        app: &mut App,
+        x: f32,
+        z: f32,
+        radius: f32,
+        dps: f32,
+        shield_pierce: f32,
+    ) -> Entity {
         let config = EntityConfig {
             name: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
-                damage_zone: Some(DamageZoneEffect { damage_per_second: dps, shield_pierce }),
+                damage_zone: Some(DamageZoneEffect {
+                    damage_per_second: dps,
+                    shield_pierce,
+                }),
                 ..Default::default()
             }),
             hull: None,
@@ -581,7 +625,11 @@ mod tests {
         spawn_damage_zone(&mut app, 0.0, 0.0, 50.0, 50.0);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let hull_hp = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
         assert!(
             (hull_hp - 95.0).abs() < 1e-6,
             "hull should be ~95 after 0.1s at 50 dps, got {}",
@@ -598,7 +646,11 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let hull_hp = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
         assert!(
             (hull_hp - 100.0).abs() < 1e-6,
             "hull should remain at 100 when outside damage zone, got {}",
@@ -610,8 +662,8 @@ mod tests {
     fn damage_zone_bypasses_shields() {
         let mut app = damage_test_app();
         // Add shields with known state
+        use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        use crate::shield::{ShieldSystem, ShieldConfig};
         app.insert_resource(ShipShields(ShieldSystem::new(&ShieldConfig {
             max_hp: 100,
             ..Default::default()
@@ -621,7 +673,11 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
 
         // Hull should have taken damage (bypassing shields)
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let hull_hp = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
         assert!(
             (hull_hp - 95.0).abs() < 1e-6,
             "hull should be ~95 (damage bypassed shields), got {}",
@@ -638,8 +694,8 @@ mod tests {
     #[test]
     fn damage_zone_partial_pierce_splits_70_30() {
         let mut app = damage_test_app();
+        use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        use crate::shield::{ShieldSystem, ShieldConfig};
         app.insert_resource(ShipShields(ShieldSystem::new(&ShieldConfig {
             max_hp: 1000,
             ..Default::default()
@@ -650,7 +706,11 @@ mod tests {
         spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 100.0, 0.3);
         tick_with_dt(&mut app, 1.0);
 
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let hull_hp = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
         assert!(
             (hull_hp - 70.0).abs() < 0.5,
             "hull should be ~70 after 30 pierced damage on 100hp, got {}",
@@ -661,14 +721,17 @@ mod tests {
         assert_eq!(shields.0.facings[0].hp, 982, "fore should get 18 of 70");
         assert_eq!(shields.0.facings[1].hp, 982, "port should get 18 of 70");
         assert_eq!(shields.0.facings[2].hp, 983, "aft should get 17 of 70");
-        assert_eq!(shields.0.facings[3].hp, 983, "starboard should get 17 of 70");
+        assert_eq!(
+            shields.0.facings[3].hp, 983,
+            "starboard should get 17 of 70"
+        );
     }
 
     #[test]
     fn damage_zone_zero_pierce_routes_all_to_shields() {
         let mut app = damage_test_app();
+        use crate::shield::{ShieldConfig, ShieldSystem};
         use crate::simulation::ShipShields;
-        use crate::shield::{ShieldSystem, ShieldConfig};
         app.insert_resource(ShipShields(ShieldSystem::new(&ShieldConfig {
             max_hp: 1000,
             ..Default::default()
@@ -678,7 +741,11 @@ mod tests {
         spawn_damage_zone_with_pierce(&mut app, 0.0, 0.0, 50.0, 50.0, 0.0);
         tick_with_dt(&mut app, 1.0);
 
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let hull_hp = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
         assert!(
             (hull_hp - 100.0).abs() < 1e-6,
             "hull should be untouched at zero pierce, got {}",
@@ -689,7 +756,10 @@ mod tests {
         assert_eq!(shields.0.facings[0].hp, 987, "fore should get 13 of 50");
         assert_eq!(shields.0.facings[1].hp, 987, "port should get 13 of 50");
         assert_eq!(shields.0.facings[2].hp, 988, "aft should get 12 of 50");
-        assert_eq!(shields.0.facings[3].hp, 988, "starboard should get 12 of 50");
+        assert_eq!(
+            shields.0.facings[3].hp, 988,
+            "starboard should get 12 of 50"
+        );
     }
 
     #[test]
@@ -702,7 +772,11 @@ mod tests {
         tick_with_dt(&mut app, 0.1);
         tick_with_dt(&mut app, 0.1);
 
-        let hull_hp = app.world().resource::<ShipHullIntegrity>().0.total_current();
+        let hull_hp = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
         assert!(
             (hull_hp - 99.1).abs() < 0.001,
             "hull should be ~99.1 after 0.3s at 3 dps, got {}",
@@ -725,7 +799,11 @@ mod tests {
 
     fn assert_impulse_phase(app: &App, expected: ImpulsePhase) {
         let phase = app.world().resource::<ShipImpulse>().0.phase;
-        assert_eq!(phase, expected, "expected impulse {:?}, got {:?}", expected, phase);
+        assert_eq!(
+            phase, expected,
+            "expected impulse {:?}, got {:?}",
+            expected, phase
+        );
     }
 
     #[test]
@@ -734,7 +812,6 @@ mod tests {
         let _region = spawn_blocks_impulse_region(&mut app, 100.0, 0.0, 50.0);
         set_ship_pos(&mut app, 0.0, 0.0); // outside region at (100,0) radius 50
         tick_with_dt(&mut app, 0.016); // initialise membership
-
 
         // Move ship inside the region
         set_ship_pos(&mut app, 80.0, 0.0);
@@ -754,7 +831,6 @@ mod tests {
         set_ship_pos(&mut app, 0.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
-
         // Move ship inside
         set_ship_pos(&mut app, 80.0, 0.0);
         set_impulse_active(&mut app);
@@ -771,7 +847,6 @@ mod tests {
         let _region = spawn_blocks_impulse_region(&mut app, 200.0, 0.0, 50.0);
         set_ship_pos(&mut app, 0.0, 0.0); // far outside
         tick_with_dt(&mut app, 0.016);
-
 
         set_impulse_charging(&mut app);
         tick_with_dt(&mut app, 0.016);
@@ -791,14 +866,22 @@ mod tests {
         app
     }
 
-    fn spawn_radar_dampening_region(app: &mut App, x: f32, z: f32, radius: f32, multiplier: f32) -> Entity {
+    fn spawn_radar_dampening_region(
+        app: &mut App,
+        x: f32,
+        z: f32,
+        radius: f32,
+        multiplier: f32,
+    ) -> Entity {
         let config = EntityConfig {
             name: None,
             light: Vec::new(),
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
-                radar_dampening: Some(RadarDampeningEffect { range_modifier: multiplier }),
+                radar_dampening: Some(RadarDampeningEffect {
+                    range_modifier: multiplier,
+                }),
                 ..Default::default()
             }),
             hull: None,
@@ -851,8 +934,6 @@ mod tests {
         set_ship_pos(&mut app, 0.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
 
-
-
         // Verify modifier is present
         let modifiers_before = app.world().resource::<ShipModifiers>();
         assert!(
@@ -895,7 +976,6 @@ mod tests {
 
         // Move to (-40,0): still inside A (dist 40 < 80), outside B (dist 100 > 80)
 
-
         set_ship_pos(&mut app, -40.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
@@ -921,7 +1001,14 @@ mod tests {
         app
     }
 
-    fn spawn_slow_zone(app: &mut App, x: f32, z: f32, radius: f32, thrust_modifier: Option<f32>, yaw_rate_modifier: Option<f32>) -> Entity {
+    fn spawn_slow_zone(
+        app: &mut App,
+        x: f32,
+        z: f32,
+        radius: f32,
+        thrust_modifier: Option<f32>,
+        yaw_rate_modifier: Option<f32>,
+    ) -> Entity {
         use crate::region_effects::RegionEffectsConfig as EffectsCfg;
         let config = EntityConfig {
             name: None,
@@ -929,7 +1016,10 @@ mod tests {
             tags: vec!["region".to_string()],
             shape: Some(RegionShape::Sphere { radius }),
             effects: Some(EffectsCfg {
-                slow_zone: Some(SlowZoneEffect { thrust_modifier, yaw_rate_modifier }),
+                slow_zone: Some(SlowZoneEffect {
+                    thrust_modifier,
+                    yaw_rate_modifier,
+                }),
                 ..Default::default()
             }),
             hull: None,
@@ -963,7 +1053,9 @@ mod tests {
         assert!(
             (modifiers.get(&slot) - expected).abs() < 1e-6,
             "expected modifier multiplier {} for {:?}, got {}",
-            expected, slot, modifiers.get(&slot)
+            expected,
+            slot,
+            modifiers.get(&slot)
         );
     }
 
@@ -1035,7 +1127,8 @@ mod tests {
         assert!(
             (ship.forward_speed - expected_clamped).abs() < 0.001,
             "expected forward_speed clamped to ~{}, got {}",
-            expected_clamped, ship.forward_speed
+            expected_clamped,
+            ship.forward_speed
         );
     }
 
@@ -1070,8 +1163,6 @@ mod tests {
         tick_with_dt(&mut app, 0.016);
         check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
 
-
-
         // Exit the region
         set_ship_pos(&mut app, 200.0, 0.0);
         tick_with_dt(&mut app, 0.016);
@@ -1093,8 +1184,6 @@ mod tests {
         drop(ship);
 
         tick_with_dt(&mut app, 0.016);
-
-
 
         // Confirm speed was clamped
         let ship = app.world().resource::<ShipState>();
@@ -1143,9 +1232,14 @@ mod tests {
                 comms_jammed: Some(CommsJamEffect {}),
                 ..Default::default()
             }),
-            hull: None, collider: None, appearance: None,
-            helm_console: None, weapons_console: None, engineering_console: None,
-            captain_console: None, power: None,
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
@@ -1175,9 +1269,14 @@ mod tests {
                 sensor_blind: Some(SensorBlindEffect {}),
                 ..Default::default()
             }),
-            hull: None, collider: None, appearance: None,
-            helm_console: None, weapons_console: None, engineering_console: None,
-            captain_console: None, power: None,
+            hull: None,
+            collider: None,
+            appearance: None,
+            helm_console: None,
+            weapons_console: None,
+            engineering_console: None,
+            captain_console: None,
+            power: None,
             sensors_console: None,
             navigation_console: None,
             shields_console: None,
@@ -1198,9 +1297,14 @@ mod tests {
 
     fn assert_flag(app: &App, flag: FlagKind, expected: bool) {
         let modifiers = app.world().resource::<ShipModifiers>();
-        assert_eq!(modifiers.has_flag(&flag), expected,
+        assert_eq!(
+            modifiers.has_flag(&flag),
+            expected,
             "expected flag {:?} to be {}, but got {}",
-            flag, expected, !expected);
+            flag,
+            expected,
+            !expected
+        );
     }
 
     /// RED 1: entering a comms_jam region sets the CommsJammed flag
@@ -1232,8 +1336,6 @@ mod tests {
         tick_with_dt(&mut app, 0.016);
         assert_flag(&app, FlagKind::CommsJammed, true);
 
-
-
         // Exit the region
         set_ship_pos(&mut app, 200.0, 0.0);
         tick_with_dt(&mut app, 0.016);
@@ -1256,17 +1358,11 @@ mod tests {
 
         assert_flag(&app, FlagKind::CommsJammed, true);
 
-
-
-
         // Exit B: move to (-40,0) Ã¢â‚¬â€ still inside A (dist 40 < 80), outside B (dist 100 > 80)
         set_ship_pos(&mut app, -40.0, 0.0);
         tick_with_dt(&mut app, 0.016);
 
         assert_flag(&app, FlagKind::CommsJammed, true);
-
-
-
 
         // Exit A: move far away Ã¢â‚¬â€ outside both
         set_ship_pos(&mut app, -200.0, 0.0);
@@ -1284,8 +1380,6 @@ mod tests {
         tick_with_dt(&mut app, 0.016);
         assert_flag(&app, FlagKind::CommsJammed, true);
 
-
-
         // Despawn the region entity
         app.world_mut().despawn(region);
         tick_with_dt(&mut app, 0.016);
@@ -1301,8 +1395,6 @@ mod tests {
         set_ship_pos(&mut app, 10.0, 0.0); // inside
         tick_with_dt(&mut app, 0.016);
         check_modifier(&app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
-
-
 
         // Despawn the region (implicit exit)
         app.world_mut().despawn(region);

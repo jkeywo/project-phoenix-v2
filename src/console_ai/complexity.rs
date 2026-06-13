@@ -144,7 +144,11 @@ hidden_elements = ["phaser_mode_selector", "torpedo_tube_selector", "fire_confir
         let low = config.get_preset("Low").expect("Low preset");
         assert_eq!(
             low.hidden_elements,
-            vec!["phaser_mode_selector", "torpedo_tube_selector", "fire_confirm"]
+            vec![
+                "phaser_mode_selector",
+                "torpedo_tube_selector",
+                "fire_confirm"
+            ]
         );
     }
 
@@ -174,7 +178,10 @@ Helm = { controls = ["auto_steering"] }
         assert_eq!(low.delegated.len(), 2);
 
         let tactical = low.delegated.get("Tactical").expect("Tactical delegation");
-        assert_eq!(tactical.controls, vec!["auto_fire_torpedoes", "auto_frequency_match"]);
+        assert_eq!(
+            tactical.controls,
+            vec!["auto_fire_torpedoes", "auto_frequency_match"]
+        );
 
         let helm = low.delegated.get("Helm").expect("Helm delegation");
         assert_eq!(helm.controls, vec!["auto_steering"]);
@@ -195,11 +202,28 @@ frequency_match = { sweep_interval_secs = 2.0 }
         assert_eq!(low.ai.len(), 2);
 
         let torpedo = low.ai.get("torpedo_auto_fire").expect("torpedo_auto_fire");
-        assert_eq!(torpedo.params.get("lead_prediction").and_then(|v| v.as_bool()), Some(true));
-        assert_eq!(torpedo.params.get("min_accuracy").and_then(|v| v.as_float()), Some(0.7));
+        assert_eq!(
+            torpedo
+                .params
+                .get("lead_prediction")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            torpedo
+                .params
+                .get("min_accuracy")
+                .and_then(|v| v.as_float()),
+            Some(0.7)
+        );
 
         let freq = low.ai.get("frequency_match").expect("frequency_match");
-        assert_eq!(freq.params.get("sweep_interval_secs").and_then(|v| v.as_float()), Some(2.0));
+        assert_eq!(
+            freq.params
+                .get("sweep_interval_secs")
+                .and_then(|v| v.as_float()),
+            Some(2.0)
+        );
     }
 
     #[test]
@@ -231,18 +255,38 @@ name = "Bad"
     fn shields_toml_has_only_std_preset() {
         let toml = include_str!("../../assets/complexity/shields.toml");
         let config = parse_complexity_config(toml).expect("shields.toml should parse");
-        assert_eq!(config.presets.len(), 1, "Shields should have exactly one preset");
-        assert_eq!(config.presets[0].name, "Std", "Shields preset should be 'Std'");
-        assert!(!config.has_multiple_presets(), "Shields should not have multiple presets");
+        assert_eq!(
+            config.presets.len(),
+            1,
+            "Shields should have exactly one preset"
+        );
+        assert_eq!(
+            config.presets[0].name, "Std",
+            "Shields preset should be 'Std'"
+        );
+        assert!(
+            !config.has_multiple_presets(),
+            "Shields should not have multiple presets"
+        );
     }
 
     #[test]
     fn navigation_toml_has_only_std_preset() {
         let toml = include_str!("../../assets/complexity/navigation.toml");
         let config = parse_complexity_config(toml).expect("navigation.toml should parse");
-        assert_eq!(config.presets.len(), 1, "Navigation should have exactly one preset");
-        assert_eq!(config.presets[0].name, "Std", "Navigation preset should be 'Std'");
-        assert!(!config.has_multiple_presets(), "Navigation should not have multiple presets");
+        assert_eq!(
+            config.presets.len(),
+            1,
+            "Navigation should have exactly one preset"
+        );
+        assert_eq!(
+            config.presets[0].name, "Std",
+            "Navigation preset should be 'Std'"
+        );
+        assert!(
+            !config.has_multiple_presets(),
+            "Navigation should not have multiple presets"
+        );
     }
 
     /// Sensors carries the auto-hint AI rule on its Low preset (merged from
@@ -253,11 +297,16 @@ name = "Bad"
     fn sensors_toml_low_preset_has_auto_hint() {
         let toml = include_str!("../../assets/complexity/sensors.toml");
         let config = parse_complexity_config(toml).expect("sensors.toml should parse");
-        let low = config.get_preset("Low").expect("Sensors should have a Low preset");
+        let low = config
+            .get_preset("Low")
+            .expect("Sensors should have a Low preset");
         assert!(
             low.ai.contains_key("auto_hint"),
             "Sensors Low preset should enable the auto_hint AI rule"
         );
-        assert!(config.get_preset("Std").is_some(), "Sensors should have a Std preset");
+        assert!(
+            config.get_preset("Std").is_some(),
+            "Sensors should have a Std preset"
+        );
     }
 }

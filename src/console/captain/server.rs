@@ -2,7 +2,9 @@ use bevy::prelude::*;
 
 use crate::console_bridge::ConsoleStateChanged;
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, ViewDirection, ViewMode};
+use crate::messages::{
+    CaptainConsoleState, ClientMessage, Console, ObjectiveSnapshot, ViewDirection, ViewMode,
+};
 use crate::ship_state::ShipState;
 use crate::world::server::ObjectiveManagerRes;
 
@@ -11,16 +13,22 @@ pub struct CaptainPlugin;
 impl Plugin for CaptainPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ConsoleStateChanged>();
-        app.add_systems(Update, (
-            handle_toggle_red_alert.in_set(crate::sim_sets::SimSet::Input),
-            handle_set_view.in_set(crate::sim_sets::SimSet::Input),
-        ));
+        app.add_systems(
+            Update,
+            (
+                handle_toggle_red_alert.in_set(crate::sim_sets::SimSet::Input),
+                handle_set_view.in_set(crate::sim_sets::SimSet::Input),
+            ),
+        );
         // HTML console state push (mirrors the WeaponsPlugin pattern from issue #422).
         app.add_systems(Startup, spawn_captain_console_state_entity);
-        app.add_systems(Update, (
-            recompute_captain_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-            push_captain_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
-        ));
+        app.add_systems(
+            Update,
+            (
+                recompute_captain_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                push_captain_console_state.in_set(crate::sim_sets::SimSet::Broadcast),
+            ),
+        );
     }
 }
 
@@ -110,12 +118,13 @@ fn recompute_captain_console_state(
 ) {
     let red_alert = ship.red_alert();
     let view_direction = match &ship.view_mode {
-        ViewMode::Camera(ViewDirection::Fore)      => "Fore",
-        ViewMode::Camera(ViewDirection::Port)      => "Port",
+        ViewMode::Camera(ViewDirection::Fore) => "Fore",
+        ViewMode::Camera(ViewDirection::Port) => "Port",
         ViewMode::Camera(ViewDirection::Starboard) => "Starboard",
-        ViewMode::Camera(ViewDirection::Aft)       => "Aft",
-        _                                          => "Fore",
-    }.to_string();
+        ViewMode::Camera(ViewDirection::Aft) => "Aft",
+        _ => "Fore",
+    }
+    .to_string();
 
     let objectives_snap: Vec<ObjectiveSnapshot> = objectives
         .as_ref()
@@ -204,7 +213,10 @@ mod tests {
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -215,9 +227,22 @@ mod tests {
     }
 
     fn start_game(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -231,9 +256,22 @@ mod tests {
         // In test configurations without SimSet, the system processes messages during Lobby.
         // The production gate is enforced by the SimSet chain, not individual system logic.
         let mut app = test_app();
-        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(&mut app);
         push(&mut app, "captain", ClientMessage::ToggleRedAlert);
         tick(&mut app);
@@ -244,7 +282,14 @@ mod tests {
     fn non_captain_toggle_red_alert_is_ignored() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "crew", ClientMessage::Identify { token: "crew".into(), name: "Bob".into() });
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::Identify {
+                token: "crew".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(&mut app);
         push(&mut app, "crew", ClientMessage::ToggleRedAlert);
         tick(&mut app);
@@ -279,11 +324,30 @@ mod tests {
         // Note: The Lobby gate is now at the SimSet chain level (`.run_if(in_state(GamePhase::InProgress))`).
         // In test configurations without SimSet, the system processes messages during Lobby.
         let mut app = test_app();
-        push(&mut app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Starboard) });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::Camera(ViewDirection::Starboard),
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -295,9 +359,22 @@ mod tests {
     fn non_captain_set_view_is_ignored() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "crew", ClientMessage::Identify { token: "crew".into(), name: "Bob".into() });
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::Identify {
+                token: "crew".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "crew", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Port) });
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::SetView {
+                mode: ViewMode::Camera(ViewDirection::Port),
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -309,7 +386,13 @@ mod tests {
     fn captain_set_view_changes_direction() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::SetView { mode: ViewMode::Camera(ViewDirection::Aft) });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetView {
+                mode: ViewMode::Camera(ViewDirection::Aft),
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<ShipState>().view_mode,
@@ -325,10 +408,10 @@ mod tests {
     //     (no SimSet — the test app does not call `add_simulation_plugins`).
 
     use crate::damage::ConsoleHull;
+    use crate::messages::Console;
+    use crate::objectives::ObjectiveManager;
     use crate::server_app::ShipHullIntegrity;
     use crate::world::server::ObjectiveManagerRes;
-    use crate::objectives::ObjectiveManager;
-    use crate::messages::Console;
 
     /// Helper app that adds only the recompute system (no push, no message bus).
     /// Used for recompute-assertion tests that inspect the component directly.
@@ -337,9 +420,10 @@ mod tests {
         app.add_systems(Startup, spawn_captain_console_state_entity);
         app.add_systems(Update, recompute_captain_console_state);
         app.insert_resource(ShipState::new());
-        app.insert_resource(ShipHullIntegrity(
-            ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]),
-        ));
+        app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
+            Console::CaptainChair,
+            100.0,
+        )])));
         app
     }
 
@@ -363,23 +447,28 @@ mod tests {
         let mut app = App::new();
         app.add_message::<ConsoleStateChanged>()
             .init_resource::<ConsolePushes>()
-            .add_systems(Update, (
-                push_captain_console_state,
-                collect_console_pushes.after(push_captain_console_state),
-            ));
+            .add_systems(
+                Update,
+                (
+                    push_captain_console_state,
+                    collect_console_pushes.after(push_captain_console_state),
+                ),
+            );
         // Spawn the component in the world directly (not via Startup system)
         // so that the first update sees it as Changed (spawn → new).
-        app.world_mut().spawn(CaptainConsoleStateComp(CaptainConsoleState {
-            red_alert: false,
-            view_direction: "Fore".into(),
-            objectives: Vec::new(),
-            hull_integrity_pct: 100.0,
-            game_status: String::new(),
-        }));
+        app.world_mut()
+            .spawn(CaptainConsoleStateComp(CaptainConsoleState {
+                red_alert: false,
+                view_direction: "Fore".into(),
+                objectives: Vec::new(),
+                hull_integrity_pct: 100.0,
+                game_status: String::new(),
+            }));
         app.insert_resource(ShipState::new());
-        app.insert_resource(ShipHullIntegrity(
-            ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)]),
-        ));
+        app.insert_resource(ShipHullIntegrity(ConsoleHull::from_config(&[(
+            Console::CaptainChair,
+            100.0,
+        )])));
         app
     }
 
@@ -403,13 +492,18 @@ mod tests {
     #[test]
     fn recompute_reflects_red_alert() {
         let mut app = recompute_test_app();
-        app.world_mut().resource_mut::<ShipState>().toggle_red_alert();
+        app.world_mut()
+            .resource_mut::<ShipState>()
+            .toggle_red_alert();
         app.update();
 
         let mut q = app.world_mut().query::<&CaptainConsoleStateComp>();
         let comp = q.single(app.world()).unwrap();
         assert!(comp.0.red_alert);
-        assert_eq!(comp.0.game_status, "RED ALERT — All hands to battlestations.");
+        assert_eq!(
+            comp.0.game_status,
+            "RED ALERT — All hands to battlestations."
+        );
     }
 
     #[test]
@@ -475,10 +569,22 @@ mod tests {
         assert_eq!(pushes.len(), 1, "expected exactly one push after a change");
         let push = &pushes[0];
         assert_eq!(push.name, "CaptainChair");
-        assert!(push.json.contains("\"red_alert\":true"), "json: {}", push.json);
-        assert!(push.json.contains("\"hull_integrity_pct\":75.0"), "json: {}", push.json);
+        assert!(
+            push.json.contains("\"red_alert\":true"),
+            "json: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"hull_integrity_pct\":75.0"),
+            "json: {}",
+            push.json
+        );
         assert!(push.json.contains("\"RED ALERT\""), "json: {}", push.json);
-        assert!(push.json.contains("\"view_direction\":\"Aft\""), "json: {}", push.json);
+        assert!(
+            push.json.contains("\"view_direction\":\"Aft\""),
+            "json: {}",
+            push.json
+        );
 
         // No further change → no further pushes.
         app.world_mut().resource_mut::<ConsolePushes>().0.clear();

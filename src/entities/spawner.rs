@@ -3,8 +3,8 @@ use bevy_rapier3d::prelude::*;
 
 use crate::entity_config::EntityConfig;
 use crate::entity_config::{AsteroidFieldConfig, LightConfig};
-use crate::region_shape::RegionShape;
 use crate::region_effects::RegionEffectKind;
+use crate::region_shape::RegionShape;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Marker Components Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -128,9 +128,7 @@ pub fn spawn_entity(
     // Collider section Ã¢â€ â€™ Rapier collider + rigid body
     if let Some(collider) = &config.collider {
         let rapier_collider = match collider.shape {
-            crate::entity_config::ColliderShape::Ball => {
-                Collider::ball(collider.radius)
-            }
+            crate::entity_config::ColliderShape::Ball => Collider::ball(collider.radius),
             crate::entity_config::ColliderShape::Capsule => {
                 Collider::capsule_y(collider.length / 2.0, collider.radius)
             }
@@ -234,10 +232,7 @@ pub fn spawn_entity(
             crate::damage::ConsoleHull::from_config(&entries)
         } else if let Some(hp) = hull.captain_chair {
             // Spec-required NPC ship path: `captain_chair = <n>` in TOML.
-            crate::damage::ConsoleHull::from_config(&[(
-                crate::messages::Console::CaptainChair,
-                hp,
-            )])
+            crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, hp)])
         } else if hull.hull_integrity > 0.0 {
             // Legacy fallback: `hull_integrity = <n>` (stations, asteroids).
             crate::damage::ConsoleHull::from_config(&[(
@@ -246,7 +241,9 @@ pub fn spawn_entity(
             )])
         } else {
             // Empty hull section Ã¢â‚¬â€ skip.
-            entity_commands.insert(EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[])));
+            entity_commands.insert(EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                &[],
+            )));
             return entity_commands.id();
         };
         entity_commands.insert(EntityConsoleHull(console_hull));
@@ -254,7 +251,6 @@ pub fn spawn_entity(
 
     entity_commands.id()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -395,7 +391,9 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
 
         let world = app.world_mut();
-        let name_comp = world.get::<EntityName>(spawned).expect("should have EntityName");
+        let name_comp = world
+            .get::<EntityName>(spawned)
+            .expect("should have EntityName");
         assert_eq!(name_comp.0, "Sun");
     }
 
@@ -476,9 +474,18 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
 
         let world = app.world_mut();
-        assert!(world.get::<ColliderSection>(spawned).is_some(), "should have ColliderSection");
-        assert!(world.get::<Collider>(spawned).is_some(), "should have Rapier Collider");
-        assert!(world.get::<RigidBody>(spawned).is_some(), "should have RigidBody");
+        assert!(
+            world.get::<ColliderSection>(spawned).is_some(),
+            "should have ColliderSection"
+        );
+        assert!(
+            world.get::<Collider>(spawned).is_some(),
+            "should have Rapier Collider"
+        );
+        assert!(
+            world.get::<RigidBody>(spawned).is_some(),
+            "should have RigidBody"
+        );
     }
 
     #[test]
@@ -486,14 +493,12 @@ mod tests {
         let mut app = test_app();
         let config = EntityConfig {
             name: None,
-            light: vec![
-                LightConfig {
-                    kind: LightKind::Point,
-                    colour: [1.0, 0.95, 0.85],
-                    intensity: 150000.0,
-                    range: Some(5000.0),
-                },
-            ],
+            light: vec![LightConfig {
+                kind: LightKind::Point,
+                colour: [1.0, 0.95, 0.85],
+                intensity: 150000.0,
+                range: Some(5000.0),
+            }],
             tags: vec![],
             hull: None,
             collider: None,
@@ -579,7 +584,9 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
 
         let world = app.world_mut();
-        let field = world.get::<AsteroidFieldSection>(spawned).expect("should have AsteroidFieldSection");
+        let field = world
+            .get::<AsteroidFieldSection>(spawned)
+            .expect("should have AsteroidFieldSection");
         assert!((field.0.inner_radius - 100.0).abs() < 1e-6);
     }
 
@@ -622,7 +629,9 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
 
         let world = app.world_mut();
-        let appearance = world.get::<AppearanceSection>(spawned).expect("should have AppearanceSection");
+        let appearance = world
+            .get::<AppearanceSection>(spawned)
+            .expect("should have AppearanceSection");
         assert_eq!(appearance.0.colour, "#ff0000");
     }
 
@@ -632,10 +641,18 @@ mod tests {
         let config = EntityConfig::from_toml("").unwrap();
 
         let uuid = uuid::Uuid::new_v4().to_string();
-        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, Some("player-ship".to_string()));
+        let spawned = spawn_and_flush(
+            &mut app,
+            &config,
+            Vec3::ZERO,
+            uuid,
+            Some("player-ship".to_string()),
+        );
 
         let world = app.world_mut();
-        let id_comp = world.get::<EntityId>(spawned).expect("should have EntityId");
+        let id_comp = world
+            .get::<EntityId>(spawned)
+            .expect("should have EntityId");
         assert_eq!(id_comp.0, "player-ship");
     }
 
@@ -648,7 +665,10 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
 
         let world = app.world_mut();
-        assert!(world.get::<EntityId>(spawned).is_none(), "should NOT have EntityId");
+        assert!(
+            world.get::<EntityId>(spawned).is_none(),
+            "should NOT have EntityId"
+        );
     }
 
     #[test]
@@ -690,15 +710,21 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::new(100.0, 0.0, 50.0), uuid, None);
 
         let world = app.world_mut();
-        let shape_comp = world.get::<RegionShapeSection>(spawned)
+        let shape_comp = world
+            .get::<RegionShapeSection>(spawned)
             .expect("should have RegionShapeSection");
         assert_eq!(shape_comp.0, RegionShape::Sphere { radius: 150.0 });
 
-        let effects_comp = world.get::<RegionEffectsSection>(spawned)
+        let effects_comp = world
+            .get::<RegionEffectsSection>(spawned)
             .expect("should have RegionEffectsSection");
         assert_eq!(effects_comp.0.len(), 2);
-        assert!(effects_comp.0.contains(&crate::region_effects::RegionEffectKind::CommsJam));
-        assert!(effects_comp.0.contains(&crate::region_effects::RegionEffectKind::SensorBlind));
+        assert!(effects_comp
+            .0
+            .contains(&crate::region_effects::RegionEffectKind::CommsJam));
+        assert!(effects_comp
+            .0
+            .contains(&crate::region_effects::RegionEffectKind::SensorBlind));
     }
 
     #[test]
@@ -736,8 +762,14 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
 
         let world = app.world_mut();
-        assert!(world.get::<RegionShapeSection>(spawned).is_some(), "should have RegionShapeSection");
-        assert!(world.get::<RegionEffectsSection>(spawned).is_none(), "should NOT have RegionEffectsSection");
+        assert!(
+            world.get::<RegionShapeSection>(spawned).is_some(),
+            "should have RegionShapeSection"
+        );
+        assert!(
+            world.get::<RegionEffectsSection>(spawned).is_none(),
+            "should NOT have RegionEffectsSection"
+        );
     }
 
     #[test]
@@ -774,7 +806,9 @@ mod tests {
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
-        let comp = world.get::<FactionComponent>(spawned).expect("should have FactionComponent");
+        let comp = world
+            .get::<FactionComponent>(spawned)
+            .expect("should have FactionComponent");
         assert_eq!(comp.0, faction_id);
     }
 
@@ -785,7 +819,10 @@ mod tests {
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
-        assert!(world.get::<FactionComponent>(spawned).is_none(), "should NOT have FactionComponent");
+        assert!(
+            world.get::<FactionComponent>(spawned).is_none(),
+            "should NOT have FactionComponent"
+        );
     }
 
     #[test]
@@ -797,7 +834,9 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::new(42.0, 0.0, -7.0), uuid, None);
 
         let world = app.world_mut();
-        let transform = world.get::<Transform>(spawned).expect("should have Transform");
+        let transform = world
+            .get::<Transform>(spawned)
+            .expect("should have Transform");
         assert_eq!(transform.translation.x, 42.0);
         assert_eq!(transform.translation.z, -7.0);
     }
@@ -840,10 +879,17 @@ mod tests {
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
-        let hull_comp = world.get::<EntityConsoleHull>(spawned)
+        let hull_comp = world
+            .get::<EntityConsoleHull>(spawned)
             .expect("should have EntityConsoleHull when hull_integrity > 0");
-        assert!((hull_comp.0.total_max() - 60.0).abs() < 1e-6, "max HP should be 60");
-        assert!((hull_comp.0.total_current() - 60.0).abs() < 1e-6, "current HP should start at 60");
+        assert!(
+            (hull_comp.0.total_max() - 60.0).abs() < 1e-6,
+            "max HP should be 60"
+        );
+        assert!(
+            (hull_comp.0.total_current() - 60.0).abs() < 1e-6,
+            "current HP should start at 60"
+        );
     }
 
     #[test]
@@ -895,13 +941,21 @@ mod tests {
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
-        let hull_comp = world.get::<EntityConsoleHull>(spawned)
+        let hull_comp = world
+            .get::<EntityConsoleHull>(spawned)
             .expect("NPC with captain_chair should have EntityConsoleHull");
         let entries = hull_comp.0.entries();
         assert_eq!(entries.len(), 1, "NPC should have exactly one hull slot");
-        assert_eq!(entries[0].0, crate::messages::Console::CaptainChair, "slot should be CaptainChair");
+        assert_eq!(
+            entries[0].0,
+            crate::messages::Console::CaptainChair,
+            "slot should be CaptainChair"
+        );
         assert!((entries[0].2 - 60.0).abs() < 1e-6, "max_hp should be 60");
-        assert!((entries[0].1 - 60.0).abs() < 1e-6, "current should start at 60");
+        assert!(
+            (entries[0].1 - 60.0).abs() < 1e-6,
+            "current should start at 60"
+        );
     }
 
     #[test]
@@ -941,7 +995,8 @@ mod tests {
         let uuid = uuid::Uuid::new_v4().to_string();
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
-        let hull_comp = world.get::<EntityConsoleHull>(spawned)
+        let hull_comp = world
+            .get::<EntityConsoleHull>(spawned)
             .expect("entity with hull_integrity should still get EntityConsoleHull");
         assert!((hull_comp.0.total_max() - 200.0).abs() < 1e-6);
         let entries = hull_comp.0.entries();
@@ -987,7 +1042,9 @@ mod tests {
         let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
         let world = app.world_mut();
         let hull_comp = world.get::<EntityConsoleHull>(spawned).unwrap();
-        assert!((hull_comp.0.total_max() - 80.0).abs() < 1e-6,
-            "captain_chair should take precedence over hull_integrity");
+        assert!(
+            (hull_comp.0.total_max() - 80.0).abs() < 1e-6,
+            "captain_chair should take precedence over hull_integrity"
+        );
     }
 }

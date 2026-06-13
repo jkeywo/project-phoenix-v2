@@ -116,7 +116,10 @@ impl Plugin for SimBroadcaster {
     fn build(&self, app: &mut App) {
         if !app.world().contains_resource::<SimBroadcastRegistry>() {
             app.insert_resource(SimBroadcastRegistry::new());
-            app.add_systems(Update, dispatch_sim_broadcasts.in_set(crate::sim_sets::SimSet::Broadcast));
+            app.add_systems(
+                Update,
+                dispatch_sim_broadcasts.in_set(crate::sim_sets::SimSet::Broadcast),
+            );
         }
         let mut registry = app.world_mut().resource_mut::<SimBroadcastRegistry>();
         for reg in &self.pending {
@@ -174,7 +177,10 @@ fn dispatch_sim_broadcasts(world: &mut World) {
     // Call producers and write resulting messages.
     for (target, producer) in ready {
         for msg in producer(world) {
-            world.write_message(OutboundMessage { target: target.clone(), msg });
+            world.write_message(OutboundMessage {
+                target: target.clone(),
+                msg,
+            });
         }
     }
 }
@@ -217,7 +223,8 @@ mod tests {
         // Register one player and advance to InProgress.
         {
             let mut sm = app.world_mut().resource_mut::<Sessions>();
-            sm.0.register("alice".to_string(), "Alice".to_string()).unwrap();
+            sm.0.register("alice".to_string(), "Alice".to_string())
+                .unwrap();
         }
         // dispatch_sim_broadcasts no longer gates internally (SimSet handles it).
         // No State<GamePhase> setup needed for these tests.
@@ -244,17 +251,17 @@ mod tests {
     /// `Target` with at least one connected player.
     #[test]
     fn audience_all_resolves_and_delivers_message() {
-        let broadcaster = SimBroadcaster::new().register(
-            Audience::All,
-            Cadence::Once,
-            |_world: &mut World| vec![ServerMessage::GameStarted],
-        );
+        let broadcaster =
+            SimBroadcaster::new().register(Audience::All, Cadence::Once, |_world: &mut World| {
+                vec![ServerMessage::GameStarted]
+            });
 
         let mut app = dispatch_app(broadcaster);
         let msgs = tick_and_collect(&mut app);
 
         assert!(
-            msgs.iter().any(|m| matches!(m.msg, ServerMessage::GameStarted)),
+            msgs.iter()
+                .any(|m| matches!(m.msg, ServerMessage::GameStarted)),
             "expected GameStarted from Audience::All producer, got: {:?}",
             msgs.iter().map(|m| &m.msg).collect::<Vec<_>>(),
         );
@@ -294,13 +301,25 @@ mod tests {
 
         // Tick 1: both events should be drained and broadcast.
         let msgs1 = tick_and_collect(&mut app);
-        let count1 = msgs1.iter().filter(|m| matches!(m.msg, ServerMessage::GameStarted)).count();
-        assert_eq!(count1, 2, "tick 1: expected 2 GameStarted messages, got {count1}");
+        let count1 = msgs1
+            .iter()
+            .filter(|m| matches!(m.msg, ServerMessage::GameStarted))
+            .count();
+        assert_eq!(
+            count1, 2,
+            "tick 1: expected 2 GameStarted messages, got {count1}"
+        );
 
         // Clear the outbox, then tick again with an empty queue.
         app.world_mut().resource_mut::<Outbox>().0.clear();
         let msgs2 = tick_and_collect(&mut app);
-        let count2 = msgs2.iter().filter(|m| matches!(m.msg, ServerMessage::GameStarted)).count();
-        assert_eq!(count2, 0, "tick 2: expected 0 messages after drain, got {count2}");
+        let count2 = msgs2
+            .iter()
+            .filter(|m| matches!(m.msg, ServerMessage::GameStarted))
+            .count();
+        assert_eq!(
+            count2, 0,
+            "tick 2: expected 0 messages after drain, got {count2}"
+        );
     }
 }

@@ -2,13 +2,24 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RegionEffectKind {
-    DamageZone { dps: f32, shield_pierce: f32 },
-    SlowZone { thrust_modifier: Option<f32>, yaw_rate_modifier: Option<f32> },
+    DamageZone {
+        dps: f32,
+        shield_pierce: f32,
+    },
+    SlowZone {
+        thrust_modifier: Option<f32>,
+        yaw_rate_modifier: Option<f32>,
+    },
     BlocksImpulse,
-    RadarDampening { multiplier: f32 },
+    RadarDampening {
+        multiplier: f32,
+    },
     CommsJam,
     SensorBlind,
-    NebulaFog { color: [f32; 3], density: f32 },
+    NebulaFog {
+        color: [f32; 3],
+        density: f32,
+    },
 }
 
 // ── Effect config types for TOML entity templates ─────────────────────
@@ -105,7 +116,9 @@ impl RegionEffectsConfig {
             kinds.push(RegionEffectKind::BlocksImpulse);
         }
         if let Some(r) = &self.radar_dampening {
-            kinds.push(RegionEffectKind::RadarDampening { multiplier: r.range_modifier });
+            kinds.push(RegionEffectKind::RadarDampening {
+                multiplier: r.range_modifier,
+            });
         }
         if self.comms_jammed.is_some() {
             kinds.push(RegionEffectKind::CommsJam);
@@ -114,7 +127,10 @@ impl RegionEffectsConfig {
             kinds.push(RegionEffectKind::SensorBlind);
         }
         if let Some(n) = &self.nebula_fog {
-            kinds.push(RegionEffectKind::NebulaFog { color: n.color, density: n.density });
+            kinds.push(RegionEffectKind::NebulaFog {
+                color: n.color,
+                density: n.density,
+            });
         }
         kinds
     }
@@ -132,16 +148,30 @@ mod tests {
 
     #[test]
     fn serde_round_trip_damage_zone() {
-        round_trip(RegionEffectKind::DamageZone { dps: 15.0, shield_pierce: 0.0 });
+        round_trip(RegionEffectKind::DamageZone {
+            dps: 15.0,
+            shield_pierce: 0.0,
+        });
     }
-
 
     #[test]
     fn serde_round_trip_slow_zone() {
-        round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(0.5), yaw_rate_modifier: Some(-0.3) });
-        round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(0.5), yaw_rate_modifier: None });
-        round_trip(RegionEffectKind::SlowZone { thrust_modifier: None, yaw_rate_modifier: Some(-0.3) });
-        round_trip(RegionEffectKind::SlowZone { thrust_modifier: None, yaw_rate_modifier: None });
+        round_trip(RegionEffectKind::SlowZone {
+            thrust_modifier: Some(0.5),
+            yaw_rate_modifier: Some(-0.3),
+        });
+        round_trip(RegionEffectKind::SlowZone {
+            thrust_modifier: Some(0.5),
+            yaw_rate_modifier: None,
+        });
+        round_trip(RegionEffectKind::SlowZone {
+            thrust_modifier: None,
+            yaw_rate_modifier: Some(-0.3),
+        });
+        round_trip(RegionEffectKind::SlowZone {
+            thrust_modifier: None,
+            yaw_rate_modifier: None,
+        });
     }
 
     #[test]
@@ -153,7 +183,6 @@ mod tests {
     fn serde_round_trip_radar_dampening() {
         round_trip(RegionEffectKind::RadarDampening { multiplier: 0.3 });
     }
-
 
     #[test]
     fn serde_round_trip_comms_jam() {
@@ -167,22 +196,36 @@ mod tests {
 
     #[test]
     fn serde_round_trip_nebula_fog() {
-        round_trip(RegionEffectKind::NebulaFog { color: [0.25, 0.08, 0.32], density: 0.008 });
-        round_trip(RegionEffectKind::NebulaFog { color: [0.5, 0.1, 0.2], density: 0.015 });
+        round_trip(RegionEffectKind::NebulaFog {
+            color: [0.25, 0.08, 0.32],
+            density: 0.008,
+        });
+        round_trip(RegionEffectKind::NebulaFog {
+            color: [0.5, 0.1, 0.2],
+            density: 0.015,
+        });
     }
 
     #[test]
     fn serde_round_trip_negative_values() {
-        round_trip(RegionEffectKind::DamageZone { dps: -5.0, shield_pierce: 0.0 });
-        round_trip(RegionEffectKind::SlowZone { thrust_modifier: Some(-1.0), yaw_rate_modifier: None });
+        round_trip(RegionEffectKind::DamageZone {
+            dps: -5.0,
+            shield_pierce: 0.0,
+        });
+        round_trip(RegionEffectKind::SlowZone {
+            thrust_modifier: Some(-1.0),
+            yaw_rate_modifier: None,
+        });
     }
 
     #[test]
     fn serde_round_trip_zero_values() {
-        round_trip(RegionEffectKind::DamageZone { dps: 0.0, shield_pierce: 0.0 });
+        round_trip(RegionEffectKind::DamageZone {
+            dps: 0.0,
+            shield_pierce: 0.0,
+        });
         round_trip(RegionEffectKind::RadarDampening { multiplier: 0.0 });
     }
-
 
     // ── RegionEffectsConfig tests ─────────────────────────────────
 
@@ -196,29 +239,55 @@ mod tests {
     #[test]
     fn effects_config_damage_zone() {
         let cfg = RegionEffectsConfig {
-            damage_zone: Some(DamageZoneEffect { damage_per_second: 15.0, shield_pierce: 0.0 }),
+            damage_zone: Some(DamageZoneEffect {
+                damage_per_second: 15.0,
+                shield_pierce: 0.0,
+            }),
             ..Default::default()
         };
         assert!(!cfg.is_empty());
         let kinds = cfg.to_kinds();
         assert_eq!(kinds.len(), 1);
-        assert_eq!(kinds[0], RegionEffectKind::DamageZone { dps: 15.0, shield_pierce: 0.0 });
+        assert_eq!(
+            kinds[0],
+            RegionEffectKind::DamageZone {
+                dps: 15.0,
+                shield_pierce: 0.0
+            }
+        );
     }
 
     #[test]
     fn effects_config_to_kinds_aggregates_all() {
         let cfg = RegionEffectsConfig {
-            damage_zone: Some(DamageZoneEffect { damage_per_second: 10.0, shield_pierce: 0.0 }),
-            slow_zone: Some(SlowZoneEffect { thrust_modifier: Some(0.5), yaw_rate_modifier: Some(-0.3) }),
+            damage_zone: Some(DamageZoneEffect {
+                damage_per_second: 10.0,
+                shield_pierce: 0.0,
+            }),
+            slow_zone: Some(SlowZoneEffect {
+                thrust_modifier: Some(0.5),
+                yaw_rate_modifier: Some(-0.3),
+            }),
             blocks_impulse: Some(BlocksImpulseEffect {}),
-            radar_dampening: Some(RadarDampeningEffect { range_modifier: 0.3 }),
+            radar_dampening: Some(RadarDampeningEffect {
+                range_modifier: 0.3,
+            }),
             comms_jammed: Some(CommsJamEffect {}),
             sensor_blind: Some(SensorBlindEffect {}),
-            nebula_fog: Some(NebulaFogEffect { color: [0.25, 0.08, 0.32], density: 0.008 }),
+            nebula_fog: Some(NebulaFogEffect {
+                color: [0.25, 0.08, 0.32],
+                density: 0.008,
+            }),
         };
         let kinds = cfg.to_kinds();
         assert_eq!(kinds.len(), 7);
-        assert_eq!(kinds[6], RegionEffectKind::NebulaFog { color: [0.25, 0.08, 0.32], density: 0.008 });
+        assert_eq!(
+            kinds[6],
+            RegionEffectKind::NebulaFog {
+                color: [0.25, 0.08, 0.32],
+                density: 0.008
+            }
+        );
     }
 
     #[test]

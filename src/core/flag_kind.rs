@@ -13,7 +13,7 @@ mod tests {
     #[test]
     fn comms_jammed_variant_exists() {
         match FlagKind::CommsJammed {
-            FlagKind::CommsJammed => {},
+            FlagKind::CommsJammed => {}
             _ => panic!("expected CommsJammed"),
         }
     }
@@ -21,7 +21,7 @@ mod tests {
     #[test]
     fn sensor_blind_variant_exists() {
         match FlagKind::SensorBlind {
-            FlagKind::SensorBlind => {},
+            FlagKind::SensorBlind => {}
             _ => panic!("expected SensorBlind"),
         }
     }

@@ -2,8 +2,8 @@
 //! `CommsRange` marker component (`component`) attached to entities that
 //! declare a `[comms]` block in their TOML.
 
-pub mod range;
 pub mod component;
+pub mod range;
 
 pub use component::CommsRange;
 pub use range::in_range;

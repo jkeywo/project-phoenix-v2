@@ -270,7 +270,12 @@ pub struct RadarViewControl {
 
 impl Default for RadarViewControl {
     fn default() -> Self {
-        Self { pan_x: 0.0, pan_z: 0.0, zoom: 1.0, user_engaged: false }
+        Self {
+            pan_x: 0.0,
+            pan_z: 0.0,
+            zoom: 1.0,
+            user_engaged: false,
+        }
     }
 }
 
@@ -667,18 +672,20 @@ impl GenericRadar {
 
         if let Some(overlay) = overlay_image {
             let margin_pct = (1.0 - overlay_fraction) * 50.0;
-            let child = commands.spawn((
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Percent(overlay_fraction * 100.0),
-                    height: Val::Percent(overlay_fraction * 100.0),
-                    top: Val::Percent(margin_pct),
-                    left: Val::Percent(margin_pct),
-                    ..default()
-                },
-                ImageNode::new(overlay),
-                ZIndex(1),
-            )).id();
+            let child = commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Percent(overlay_fraction * 100.0),
+                        height: Val::Percent(overlay_fraction * 100.0),
+                        top: Val::Percent(margin_pct),
+                        left: Val::Percent(margin_pct),
+                        ..default()
+                    },
+                    ImageNode::new(overlay),
+                    ZIndex(1),
+                ))
+                .id();
             commands.entity(entity).add_child(child);
             commands.entity(entity).insert(RadarOverlayEntity(child));
         }
@@ -736,7 +743,10 @@ const NAV_LABEL_TAGS: [&str; 5] = ["star", "planet", "station", "asteroid_field"
 /// display name is present and non-empty AND at least one tag is in the
 /// navigational label set. Pure (Bevy-free) so it is unit-testable.
 fn should_label(name: &Option<String>, tags: &[String]) -> bool {
-    let has_name = name.as_deref().map(|n| !n.trim().is_empty()).unwrap_or(false);
+    let has_name = name
+        .as_deref()
+        .map(|n| !n.trim().is_empty())
+        .unwrap_or(false);
     has_name && tags.iter().any(|t| NAV_LABEL_TAGS.contains(&t.as_str()))
 }
 
@@ -748,9 +758,17 @@ pub fn bridge_sim_to_radar(
     entities: &[EntitySnapshot],
 ) {
     // ── Player-ship RadarCenter blip ──────────────────────────────────────
-    let pose_comp = BlipWorldPose { x: pose.x, z: pose.z, yaw: pose.yaw };
+    let pose_comp = BlipWorldPose {
+        x: pose.x,
+        z: pose.z,
+        yaw: pose.yaw,
+    };
     let centre_bundle = (
-        RadarCenter { world_x: pose.x, world_z: pose.z, yaw: pose.yaw },
+        RadarCenter {
+            world_x: pose.x,
+            world_z: pose.z,
+            yaw: pose.yaw,
+        },
         OnRadar(vec!["player".to_string()]),
         RadarAppearance::player_ship(),
         pose_comp,
@@ -814,7 +832,11 @@ pub fn bridge_sim_to_radar(
         let bundle = (
             OnRadar(snapshot.tags.clone()),
             appearance,
-            BlipWorldPose { x: snapshot.x(), z: snapshot.z(), yaw: entity_yaw },
+            BlipWorldPose {
+                x: snapshot.x(),
+                z: snapshot.z(),
+                yaw: entity_yaw,
+            },
             RadarEntityUuid(uuid.clone()),
             BlipLabel(snapshot.name.clone()),
         );
@@ -899,7 +921,12 @@ fn sync_radar_blip_nodes(
     )>,
     centers: Query<&RadarCenter>,
     mut existing_blip_nodes: Query<
-        (&mut Node, &MaterialNode<RadarBlipMaterial>, &mut Transform, &RadarBlipNode),
+        (
+            &mut Node,
+            &MaterialNode<RadarBlipMaterial>,
+            &mut Transform,
+            &RadarBlipNode,
+        ),
         (Without<RadarRegionNode>, Without<RadarLabelNode>),
     >,
     mut existing_region_nodes: Query<
@@ -1041,10 +1068,8 @@ fn sync_radar_blip_nodes(
 
         // ── Build intended region set (region shape entities) ────────────────
         // source entity → (nx, ny, colour, shape, outer_size_px)
-        let mut intended_regions: HashMap<
-            Entity,
-            (f32, f32, Color, RegionRadarShape, f32),
-        > = HashMap::new();
+        let mut intended_regions: HashMap<Entity, (f32, f32, Color, RegionRadarShape, f32)> =
+            HashMap::new();
 
         // ── Build intended label set (named navigational blips) ──────────────
         // source entity → (text, label_left, label_top)
@@ -1114,17 +1139,19 @@ fn sync_radar_blip_nodes(
                 }
             } else {
                 // ── Point entity: render as icon ─────────────────────────────
-                let icon_angle = icon_rotation_angle(
-                    blip_pose.yaw,
-                    effective_yaw,
-                    &widget.orientation,
-                );
+                let icon_angle =
+                    icon_rotation_angle(blip_pose.yaw, effective_yaw, &widget.orientation);
                 let size_px = world_size_to_px(appearance.world_size, range, radar_radius_px);
                 let half = size_px * 0.5;
-                let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
+                let (left, top) =
+                    blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
                 let icon_handle = icons.0.get(&appearance.icon).cloned();
                 let size_frac = half / radar_radius_px;
-                let clip_circle = if widget.clip_mode == RadarClipMode::Circle { 1.0_f32 } else { 0.0_f32 };
+                let clip_circle = if widget.clip_mode == RadarClipMode::Circle {
+                    1.0_f32
+                } else {
+                    0.0_f32
+                };
                 let highlight_match = matches!(
                     (target_highlight, blip_uuid),
                     (Some(hl), Some(uuid)) if hl.0.as_deref() == Some(uuid.0.as_str())
@@ -1141,19 +1168,22 @@ fn sync_radar_blip_nodes(
                 } else {
                     appearance.color
                 };
-                intended.insert(src, BlipIntent {
-                    left,
-                    top,
-                    size_px,
-                    color: blip_color,
-                    icon: icon_handle,
-                    angle: icon_angle,
-                    nx,
-                    ny,
-                    size_frac,
-                    clip_circle,
-                    highlighted: highlight_match,
-                });
+                intended.insert(
+                    src,
+                    BlipIntent {
+                        left,
+                        top,
+                        size_px,
+                        color: blip_color,
+                        icon: icon_handle,
+                        angle: icon_angle,
+                        nx,
+                        ny,
+                        size_frac,
+                        clip_circle,
+                        highlighted: highlight_match,
+                    },
+                );
                 if show_labels.is_some() {
                     let name = blip_label.and_then(|l| l.0.clone());
                     if should_label(&name, &on_radar.0) {
@@ -1179,7 +1209,12 @@ fn sync_radar_blip_nodes(
                         node.height = Val::Px(intent.size_px);
                         transform.rotation = Quat::from_rotation_z(intent.angle);
                         if let Some(mat) = blip_materials.get_mut(&mat_node.0) {
-                            let LinearRgba { red, green, blue, alpha } = intent.color.to_linear();
+                            let LinearRgba {
+                                red,
+                                green,
+                                blue,
+                                alpha,
+                            } = intent.color.to_linear();
                             mat.color_r = red;
                             mat.color_g = green;
                             mat.color_b = blue;
@@ -1199,9 +1234,7 @@ fn sync_radar_blip_nodes(
                 } else if let Ok((mut node, mut bg, mut border_color, tag)) =
                     existing_region_nodes.get_mut(child)
                 {
-                    if let Some((nx, ny, colour, shape, _)) =
-                        intended_regions.remove(&tag.source)
-                    {
+                    if let Some((nx, ny, colour, shape, _)) = intended_regions.remove(&tag.source) {
                         update_region_node(
                             &mut node,
                             &mut bg,
@@ -1238,7 +1271,12 @@ fn sync_radar_blip_nodes(
             commands.entity(radar_entity).with_children(|parent| {
                 for (source, intent) in intended.drain() {
                     let icon_handle = intent.icon.unwrap_or_else(|| fallback_icon.clone());
-                    let LinearRgba { red, green, blue, alpha } = intent.color.to_linear();
+                    let LinearRgba {
+                        red,
+                        green,
+                        blue,
+                        alpha,
+                    } = intent.color.to_linear();
                     let mat_handle = blip_materials.add(RadarBlipMaterial {
                         icon: icon_handle,
                         color_r: red,
@@ -1296,7 +1334,10 @@ fn sync_radar_blip_nodes(
                 for (source, (text, label_left, label_top)) in intended_labels.drain() {
                     parent.spawn((
                         Text::new(text),
-                        TextFont { font_size: 11.0, ..default() },
+                        TextFont {
+                            font_size: 11.0,
+                            ..default()
+                        },
                         TextColor(Color::srgba(0.6, 1.0, 0.85, 0.9)),
                         Node {
                             position_type: PositionType::Absolute,
@@ -1322,12 +1363,12 @@ fn sync_radar_blip_nodes(
                 Some((cx, cy)) => {
                     // Position the ring centred on the blip icon.
                     let ring_left = cx - RING_PX * 0.5;
-                    let ring_top  = cy - RING_PX * 0.5;
+                    let ring_top = cy - RING_PX * 0.5;
                     let ring_node = Node {
                         position_type: PositionType::Absolute,
-                        left:   Val::Px(ring_left),
-                        top:    Val::Px(ring_top),
-                        width:  Val::Px(RING_PX),
+                        left: Val::Px(ring_left),
+                        top: Val::Px(ring_top),
+                        width: Val::Px(RING_PX),
                         height: Val::Px(RING_PX),
                         border: UiRect::all(Val::Px(RING_BORDER_PX)),
                         border_radius: BorderRadius::all(Val::Percent(50.0)),
@@ -1340,12 +1381,14 @@ fn sync_radar_blip_nodes(
                         }
                         None => {
                             // Spawn a new ring node as a child of the radar widget.
-                            let e = commands.spawn((
-                                ring_node,
-                                BorderColor::all(Color::srgb(1.0, 0.2, 0.2)),
-                                BackgroundColor(Color::NONE),
-                                ZIndex(20),
-                            )).id();
+                            let e = commands
+                                .spawn((
+                                    ring_node,
+                                    BorderColor::all(Color::srgb(1.0, 0.2, 0.2)),
+                                    BackgroundColor(Color::NONE),
+                                    ZIndex(20),
+                                ))
+                                .id();
                             commands.entity(radar_entity).add_child(e);
                             ring.0 = Some(e);
                         }
@@ -1372,12 +1415,12 @@ fn sync_radar_blip_nodes(
             // Update existing rings or spawn new ones for current objective blips.
             for (blip_src, &(cx, cy)) in &objective_blip_centers {
                 let ring_left = cx - OBJ_RING_PX * 0.5;
-                let ring_top  = cy - OBJ_RING_PX * 0.5;
+                let ring_top = cy - OBJ_RING_PX * 0.5;
                 let ring_node = Node {
                     position_type: PositionType::Absolute,
-                    left:   Val::Px(ring_left),
-                    top:    Val::Px(ring_top),
-                    width:  Val::Px(OBJ_RING_PX),
+                    left: Val::Px(ring_left),
+                    top: Val::Px(ring_top),
+                    width: Val::Px(OBJ_RING_PX),
                     height: Val::Px(OBJ_RING_PX),
                     border: UiRect::all(Val::Px(OBJ_RING_BORDER_PX)),
                     border_radius: BorderRadius::all(Val::Percent(50.0)),
@@ -1390,12 +1433,14 @@ fn sync_radar_blip_nodes(
                         *ring
                     }
                     None => {
-                        let e = commands.spawn((
-                            ring_node,
-                            BorderColor::all(Color::srgb(1.0, 0.75, 0.1)),
-                            BackgroundColor(Color::NONE),
-                            ZIndex(15),
-                        )).id();
+                        let e = commands
+                            .spawn((
+                                ring_node,
+                                BorderColor::all(Color::srgb(1.0, 0.75, 0.1)),
+                                BackgroundColor(Color::NONE),
+                                ZIndex(15),
+                            ))
+                            .id();
                         commands.entity(radar_entity).add_child(e);
                         e
                     }
@@ -1417,11 +1462,7 @@ fn sync_radar_blip_nodes(
 
 /// Compute the Z-rotation angle for a radar blip icon based on the
 /// entity's world yaw and the radar's orientation mode.
-fn icon_rotation_angle(
-    entity_yaw: f32,
-    effective_yaw: f32,
-    _orientation: &OrientationMode,
-) -> f32 {
+fn icon_rotation_angle(entity_yaw: f32, effective_yaw: f32, _orientation: &OrientationMode) -> f32 {
     effective_yaw - entity_yaw
 }
 
@@ -1441,10 +1482,10 @@ fn update_region_node(
 ) {
     match *shape {
         RegionRadarShape::Sphere { radius } => {
-            let diameter_px =
-                world_size_to_px(radius, range, radar_radius_px).max(2.0);
+            let diameter_px = world_size_to_px(radius, range, radar_radius_px).max(2.0);
             let half = diameter_px * 0.5;
-            let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
+            let (left, top) =
+                blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
             node.left = Val::Px(left);
             node.top = Val::Px(top);
             node.width = Val::Px(diameter_px);
@@ -1458,12 +1499,12 @@ fn update_region_node(
             inner_radius,
             outer_radius,
         } => {
-            let outer_px =
-                world_size_to_px(outer_radius, range, radar_radius_px).max(2.0);
+            let outer_px = world_size_to_px(outer_radius, range, radar_radius_px).max(2.0);
             let inner_px = (inner_radius / range * radar_radius_px * 2.0).max(0.0);
             let border_px = ((outer_px - inner_px) * 0.5).max(1.0);
             let half = outer_px * 0.5;
-            let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
+            let (left, top) =
+                blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half);
             node.left = Val::Px(left);
             node.top = Val::Px(top);
             node.width = Val::Px(outer_px);
@@ -1478,13 +1519,12 @@ fn update_region_node(
             half_extents_z,
             ..
         } => {
-            let width_px =
-                world_size_to_px(half_extents_x, range, radar_radius_px).max(2.0);
-            let height_px =
-                world_size_to_px(half_extents_z, range, radar_radius_px).max(2.0);
+            let width_px = world_size_to_px(half_extents_x, range, radar_radius_px).max(2.0);
+            let height_px = world_size_to_px(half_extents_z, range, radar_radius_px).max(2.0);
             let half_w = width_px * 0.5;
             let half_h = height_px * 0.5;
-            let (left, top) = blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half_w);
+            let (left, top) =
+                blip_local_offset(nx, ny, center_x_px, center_y_px, radar_radius_px, half_w);
             let top = top - (half_h - half_w);
             node.left = Val::Px(left);
             node.top = Val::Px(top);
@@ -1655,7 +1695,11 @@ fn sync_radar_arc_nodes(
         &bevy::camera::visibility::InheritedVisibility,
         Option<&Children>,
     )>,
-    mut existing: Query<(&mut Node, &MaterialNode<RadarArcMaterial>, &mut RadarArcNode)>,
+    mut existing: Query<(
+        &mut Node,
+        &MaterialNode<RadarArcMaterial>,
+        &mut RadarArcNode,
+    )>,
     mut materials: ResMut<Assets<RadarArcMaterial>>,
 ) {
     for (radar_entity, arcs, vis, children) in radars.iter() {
@@ -1678,7 +1722,12 @@ fn sync_radar_arc_nodes(
                         node.width = Val::Percent(100.0);
                         node.height = Val::Percent(100.0);
                         if let Some(mat) = materials.get_mut(&mat_node.0) {
-                            let LinearRgba { red, green, blue, alpha } = arc.color.to_linear();
+                            let LinearRgba {
+                                red,
+                                green,
+                                blue,
+                                alpha,
+                            } = arc.color.to_linear();
                             mat.color_r = red;
                             mat.color_g = green;
                             mat.color_b = blue;
@@ -1697,7 +1746,12 @@ fn sync_radar_arc_nodes(
         if !intended.is_empty() {
             commands.entity(radar_entity).with_children(|parent| {
                 for ((kind, id), arc) in intended.drain() {
-                    let LinearRgba { red, green, blue, alpha } = arc.color.to_linear();
+                    let LinearRgba {
+                        red,
+                        green,
+                        blue,
+                        alpha,
+                    } = arc.color.to_linear();
                     let mat = materials.add(RadarArcMaterial {
                         color_r: red,
                         color_g: green,
@@ -1761,7 +1815,11 @@ impl Plugin for GuiRadarPlugin {
             .add_systems(Startup, setup_radar_blip_fallback)
             .add_systems(
                 Update,
-                (sync_radar_blip_nodes, sync_radar_arc_nodes, detect_radar_blip_press),
+                (
+                    sync_radar_blip_nodes,
+                    sync_radar_arc_nodes,
+                    detect_radar_blip_press,
+                ),
             );
     }
 }
@@ -1776,7 +1834,10 @@ mod tests {
 
     #[test]
     fn should_label_named_nav_entity() {
-        assert!(should_label(&Some("Sol".to_string()), &["star".to_string()]));
+        assert!(should_label(
+            &Some("Sol".to_string()),
+            &["star".to_string()]
+        ));
         assert!(should_label(
             &Some("Starbase 12".to_string()),
             &["station".to_string(), "friendly".to_string()]
@@ -1786,15 +1847,30 @@ mod tests {
     #[test]
     fn should_label_rejects_missing_or_empty_name() {
         assert!(!should_label(&None, &["star".to_string()]));
-        assert!(!should_label(&Some("".to_string()), &["planet".to_string()]));
-        assert!(!should_label(&Some("   ".to_string()), &["planet".to_string()]));
+        assert!(!should_label(
+            &Some("".to_string()),
+            &["planet".to_string()]
+        ));
+        assert!(!should_label(
+            &Some("   ".to_string()),
+            &["planet".to_string()]
+        ));
     }
 
     #[test]
     fn should_label_rejects_non_nav_tags() {
-        assert!(!should_label(&Some("Raider".to_string()), &["pirate".to_string()]));
-        assert!(!should_label(&Some("Torp".to_string()), &["torpedo".to_string()]));
-        assert!(!should_label(&Some("You".to_string()), &["player".to_string()]));
+        assert!(!should_label(
+            &Some("Raider".to_string()),
+            &["pirate".to_string()]
+        ));
+        assert!(!should_label(
+            &Some("Torp".to_string()),
+            &["torpedo".to_string()]
+        ));
+        assert!(!should_label(
+            &Some("You".to_string()),
+            &["player".to_string()]
+        ));
     }
 
     // ── icon_from_radar_icon_str ──────────────────────────────────────────────
@@ -1805,7 +1881,10 @@ mod tests {
         assert_eq!(icon_from_radar_icon_str("pirate"), RadarIcon::Ship);
         assert_eq!(icon_from_radar_icon_str("player"), RadarIcon::PlayerShip);
         assert_eq!(icon_from_radar_icon_str("asteroid"), RadarIcon::Asteroid);
-        assert_eq!(icon_from_radar_icon_str("asteroid_field"), RadarIcon::Asteroid);
+        assert_eq!(
+            icon_from_radar_icon_str("asteroid_field"),
+            RadarIcon::Asteroid
+        );
         assert_eq!(icon_from_radar_icon_str("station"), RadarIcon::Station);
         assert_eq!(icon_from_radar_icon_str("missile"), RadarIcon::Torpedo);
         assert_eq!(icon_from_radar_icon_str("torpedo"), RadarIcon::Torpedo);
@@ -1872,11 +1951,27 @@ mod tests {
     #[test]
     fn all_tags_filter_accepts_all_known_tags() {
         let f = filter(&[
-            "player", "ship", "asteroid", "asteroid_field",
-            "station", "missile", "planet", "star", "region",
+            "player",
+            "ship",
+            "asteroid",
+            "asteroid_field",
+            "station",
+            "missile",
+            "planet",
+            "star",
+            "region",
         ]);
-        for tag in &["player", "ship", "asteroid", "asteroid_field",
-                     "station", "missile", "planet", "star", "region"] {
+        for tag in &[
+            "player",
+            "ship",
+            "asteroid",
+            "asteroid_field",
+            "station",
+            "missile",
+            "planet",
+            "star",
+            "region",
+        ] {
             assert!(is_on_radar(&f, &tags(&[tag])), "tag {tag} should pass");
         }
     }
@@ -2165,7 +2260,10 @@ mod tests {
             physical_size * 0.5,
             8.0,
         );
-        assert!(bad_left > logical_size, "regression sentinel: bad_left={bad_left} should overflow {logical_size}");
+        assert!(
+            bad_left > logical_size,
+            "regression sentinel: bad_left={bad_left} should overflow {logical_size}"
+        );
     }
 
     // ── apply_zoom_step ───────────────────────────────────────────────────────
@@ -2246,22 +2344,21 @@ mod tests {
 
         // Spawn the UI blip node as a child of the radar, with Pressed
         // interaction so the system picks it up next frame.
-        let mut blip_cmd = app.world_mut().spawn((
-            RadarBlipNode { source },
-            Interaction::Pressed,
-        ));
+        let mut blip_cmd = app
+            .world_mut()
+            .spawn((RadarBlipNode { source }, Interaction::Pressed));
         blip_cmd.insert(ChildOf(radar));
 
         // Capture observer fires. Register on the **radar** entity — this is
         // the per-radar registration pattern consoles use.
         let captured: Arc<Mutex<Vec<(Entity, Entity)>>> = Arc::new(Mutex::new(Vec::new()));
         let captured_for_obs = captured.clone();
-        app.world_mut().entity_mut(radar).observe(
-            move |trigger: On<RadarBlipClicked>| {
+        app.world_mut()
+            .entity_mut(radar)
+            .observe(move |trigger: On<RadarBlipClicked>| {
                 let ev = trigger.event();
                 captured_for_obs.lock().unwrap().push((ev.radar, ev.source));
-            },
-        );
+            });
 
         // One frame: detect_radar_blip_press queues the trigger; observer runs.
         app.update();
@@ -2269,7 +2366,10 @@ mod tests {
         let hits = captured.lock().unwrap().clone();
         assert_eq!(hits.len(), 1, "observer fired exactly once: {hits:?}");
         assert_eq!(hits[0].0, radar, "event.radar is the radar entity");
-        assert_eq!(hits[0].1, source, "event.source is the source ECS blip entity");
+        assert_eq!(
+            hits[0].1, source,
+            "event.source is the source ECS blip entity"
+        );
     }
 
     // ── arc_contains ────────────────────────────────────────────────────────

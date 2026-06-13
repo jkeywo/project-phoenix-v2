@@ -99,6 +99,7 @@ export class ClientSimState {
     /** Per-tube torpedo state from the latest WeaponsUpdate. */
     this.tubeStates = [];
     this.currentTargetUuid = null;
+    this.currentTargetName = null;
     /** Shared waypoint set by the Navigation console, or null when clear. */
     this.navigationWaypoint = null;
     /** Radar range from server ship_config, populated on Welcome. */
@@ -171,7 +172,11 @@ export class ClientSimState {
         this.lastPhaserTarget = d.target_uuid != null ? d.target_uuid : null;
         break;
       case 'WeaponsUpdate':
+        const previousTargetUuid = this.currentTargetUuid;
         this.currentTargetUuid = d.target_uuid != null ? d.target_uuid : null;
+        this.currentTargetName = d.target_uuid != null
+          ? (d.target_name || (previousTargetUuid === d.target_uuid ? this.currentTargetName : null))
+          : null;
         this.bankStates = d.banks || [];
         this.tubeStates = d.tubes || [];
         this.torpedoCount = typeof d.torpedo_count === 'number' ? d.torpedo_count : 0;

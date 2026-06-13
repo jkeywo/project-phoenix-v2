@@ -195,12 +195,24 @@ describe('buildWeaponsConsoleState', () => {
   it('uses state values when present', () => {
     const s = parse(buildWeaponsConsoleState({
       weaponsTarget: 'tgt-1',
+      weaponsTargetName: 'Harrow Patrol',
       weaponsPhaserMode: 'Manual',
       weaponsTorpedoCount: 3,
     }));
     expect(s.target_uuid).toBe('tgt-1');
+    expect(s.target_name).toBe('Harrow Patrol');
     expect(s.phaser_mode).toBe('Manual');
     expect(s.torpedo_count).toBe(3);
+  });
+
+  it('derives target_name from the locked server blip when no explicit name is stored', () => {
+    const s = parse(buildWeaponsConsoleState({
+      weaponsTarget: 'srv-1',
+      weaponsBlips: [
+        { uuid: 'srv-1', radar_x: 0.2, radar_y: 0.1, scaled_radius: 0.02, kind: 'ship', selectable: true, name: 'KSV Nemesis' },
+      ],
+    }));
+    expect(s.target_name).toBe('KSV Nemesis');
   });
 
   it('blips excludes entities outside WEAPONS_RADAR_RANGE', () => {

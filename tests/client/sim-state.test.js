@@ -144,6 +144,7 @@ describe('apply weapons / targets / shields', () => {
       torpedo_count: 7, phaser_mode: 'Manual',
     } });
     expect(s.currentTargetUuid).toBe('t1');
+    expect(s.currentTargetName).toBe('Rock');
     expect(s.bankStates).toHaveLength(1);
     expect(s.tubeStates).toHaveLength(1);
     expect(s.torpedoCount).toBe(7);
@@ -153,8 +154,29 @@ describe('apply weapons / targets / shields', () => {
   it('WeaponsUpdate with null target clears the lock', () => {
     const s = new ClientSimState();
     s.currentTargetUuid = 'old';
+    s.currentTargetName = 'Old Target';
     s.apply({ type: 'WeaponsUpdate', data: { target_uuid: null, banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto' } });
     expect(s.currentTargetUuid).toBeNull();
+    expect(s.currentTargetName).toBeNull();
+  });
+
+  it('WeaponsUpdate preserves missing target name only for the same target', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'WeaponsUpdate', data: {
+      target_uuid: 't1', target_name: 'Rock',
+      banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto',
+    } });
+    s.apply({ type: 'WeaponsUpdate', data: {
+      target_uuid: 't1',
+      banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto',
+    } });
+    expect(s.currentTargetName).toBe('Rock');
+
+    s.apply({ type: 'WeaponsUpdate', data: {
+      target_uuid: 't2',
+      banks: [], tubes: [], torpedo_count: 0, phaser_mode: 'Auto',
+    } });
+    expect(s.currentTargetName).toBeNull();
   });
 
   it('Science and Sensors target suggestions update independently', () => {

@@ -196,8 +196,12 @@ export function buildWeaponsConsoleState(state) {
         selects: state.tacticalRadarSelects || ['ship', 'station', 'asteroid'],
       }
     );
+  const targetUuid = state.weaponsTarget || null;
+  const targetBlip = targetUuid ? blips.find(b => b.uuid === targetUuid) : null;
+  const targetName = state.weaponsTargetName || (targetBlip && targetBlip.name) || null;
   return JSON.stringify({
-    target_uuid:   state.weaponsTarget      || null,
+    target_uuid:   targetUuid,
+    target_name:   targetName,
     banks:         state.weaponsBanks       || [],
     tubes:         state.weaponsTubes       || [],
     torpedo_count: state.weaponsTorpedoCount || 0,

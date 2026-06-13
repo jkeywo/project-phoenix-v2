@@ -1,6 +1,9 @@
-use bevy::prelude::Resource;
 use crate::flag_kind::FlagKind;
-use crate::messages::{ConsoleHullStatus, EntityStateSnapshot, RadarStateSnapshot, SimSnapshot, ViewDirection, ViewMode};
+use crate::messages::{
+    ConsoleHullStatus, EntityStateSnapshot, RadarStateSnapshot, SimSnapshot, ViewDirection,
+    ViewMode,
+};
+use bevy::prelude::Resource;
 
 #[derive(Resource)]
 pub struct ShipState {
@@ -13,6 +16,8 @@ pub struct ShipState {
     pub yaw: f32,
     /// Current forward speed
     pub forward_speed: f32,
+    /// Current visual banking roll angle in radians (leans into turns).
+    pub roll: f32,
     /// Current phaser emitter frequency (0.0–1.0). Changed by `SetPhaserFrequency`.
     pub phaser_frequency: f32,
 }
@@ -26,6 +31,7 @@ impl ShipState {
             z: 0.0,
             yaw: 0.0,
             forward_speed: 0.0,
+            roll: 0.0,
             phaser_frequency: 0.5,
         }
     }
@@ -89,11 +95,22 @@ mod tests {
         assert!(!s.red_alert);
     }
 
-    fn empty_entity_states() -> Vec<EntityStateSnapshot> { vec![] }
-    fn default_radar() -> RadarStateSnapshot { RadarStateSnapshot::default() }
+    fn empty_entity_states() -> Vec<EntityStateSnapshot> {
+        vec![]
+    }
+    fn default_radar() -> RadarStateSnapshot {
+        RadarStateSnapshot::default()
+    }
 
     fn snap(s: &ShipState, _hull: f32, levels: (u8, u8, u8)) -> SimSnapshot {
-        s.snapshot(levels, vec![], empty_entity_states(), default_radar(), 0.0, vec![])
+        s.snapshot(
+            levels,
+            vec![],
+            empty_entity_states(),
+            default_radar(),
+            0.0,
+            vec![],
+        )
     }
 
     #[test]
@@ -114,7 +131,10 @@ mod tests {
     fn snapshot_includes_view_mode() {
         let mut s = ShipState::new();
         s.view_mode = ViewMode::Camera(ViewDirection::Port);
-        assert_eq!(snap(&s, 100.0, (2, 2, 2)).view_mode, ViewMode::Camera(ViewDirection::Port));
+        assert_eq!(
+            snap(&s, 100.0, (2, 2, 2)).view_mode,
+            ViewMode::Camera(ViewDirection::Port)
+        );
     }
 
     #[test]
@@ -123,7 +143,14 @@ mod tests {
         s.x = 3.0;
         s.z = -7.5;
         s.yaw = 1.25;
-        let snap = s.snapshot((2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.0, vec![]);
+        let snap = s.snapshot(
+            (2, 2, 2),
+            vec![],
+            empty_entity_states(),
+            default_radar(),
+            0.0,
+            vec![],
+        );
         assert_eq!(snap.ship_x, 3.0);
         assert_eq!(snap.ship_z, -7.5);
         assert_eq!(snap.ship_yaw, 1.25);
@@ -145,7 +172,14 @@ mod tests {
     #[test]
     fn snapshot_includes_impulse_charge_progress() {
         let s = ShipState::new();
-        let snap = s.snapshot((2, 2, 2), vec![], empty_entity_states(), default_radar(), 0.5, vec![]);
+        let snap = s.snapshot(
+            (2, 2, 2),
+            vec![],
+            empty_entity_states(),
+            default_radar(),
+            0.5,
+            vec![],
+        );
         assert!((snap.impulse_charge_progress - 0.5).abs() < 1e-6);
     }
 

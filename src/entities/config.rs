@@ -112,7 +112,9 @@ pub struct MeshConfig {
     pub rotation: [f32; 3],
 }
 
-fn default_mesh_scale() -> f32 { 1.0 }
+fn default_mesh_scale() -> f32 {
+    1.0
+}
 
 /// Kind of a `[[light]]` entry: a point light or a directional light.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -241,6 +243,11 @@ pub struct HelmConsoleConfig {
     /// Defaults to `IMPULSE_ACCELERATION_MULTIPLIER` (5.0) when absent.
     #[serde(default = "default_impulse_acceleration_multiplier")]
     pub impulse_acceleration_multiplier: f32,
+    /// Maximum visual banking (roll) angle in degrees when steering at full
+    /// deflection. The ship leans into turns, lerped from 0 toward ±max_bank_deg
+    /// based on steering input percentage. 0 = no banking.
+    #[serde(default)]
+    pub max_bank_deg: f32,
 }
 
 impl HelmConsoleConfig {
@@ -927,14 +934,54 @@ impl EntityConfig {
     pub fn complexity_toml_by_console(&self) -> Vec<(crate::messages::Console, &str)> {
         use crate::messages::Console;
         let refs = [
-            (Console::Helm, self.helm_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
-            (Console::Tactical, self.weapons_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
-            (Console::Repair, self.engineering_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
-            (Console::CaptainChair, self.captain_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
-            (Console::Sensors, self.sensors_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
-            (Console::Shields, self.shields_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
-            (Console::Navigation, self.navigation_console.as_ref().and_then(|c| c.complexity_toml.as_deref())),
-            (Console::Power, self.power.as_ref().and_then(|c| c.complexity_toml.as_deref())),
+            (
+                Console::Helm,
+                self.helm_console
+                    .as_ref()
+                    .and_then(|c| c.complexity_toml.as_deref()),
+            ),
+            (
+                Console::Tactical,
+                self.weapons_console
+                    .as_ref()
+                    .and_then(|c| c.complexity_toml.as_deref()),
+            ),
+            (
+                Console::Repair,
+                self.engineering_console
+                    .as_ref()
+                    .and_then(|c| c.complexity_toml.as_deref()),
+            ),
+            (
+                Console::CaptainChair,
+                self.captain_console
+                    .as_ref()
+                    .and_then(|c| c.complexity_toml.as_deref()),
+            ),
+            (
+                Console::Sensors,
+                self.sensors_console
+                    .as_ref()
+                    .and_then(|c| c.complexity_toml.as_deref()),
+            ),
+            (
+                Console::Shields,
+                self.shields_console
+                    .as_ref()
+                    .and_then(|c| c.complexity_toml.as_deref()),
+            ),
+            (
+                Console::Navigation,
+                self.navigation_console
+                    .as_ref()
+                    .and_then(|c| c.complexity_toml.as_deref()),
+            ),
+            (
+                Console::Power,
+                self.power
+                    .as_ref()
+                    .and_then(|c| c.complexity_toml.as_deref()),
+            ),
         ];
         refs.into_iter()
             .filter_map(|(console, path)| path.map(|p| (console, p)))
@@ -1401,11 +1448,18 @@ complexity_toml = "assets/complexity/captain.toml"
             }
             let text = std::fs::read_to_string(&path).expect("template must be readable");
             EntityConfig::from_toml(&text).unwrap_or_else(|e| {
-                panic!("entity template {} failed strict parse: {e}", path.display())
+                panic!(
+                    "entity template {} failed strict parse: {e}",
+                    path.display()
+                )
             });
             checked += 1;
         }
-        assert!(checked > 0, "no entity templates found in {}", dir.display());
+        assert!(
+            checked > 0,
+            "no entity templates found in {}",
+            dir.display()
+        );
     }
 
     /// Unknown keys in an entity TOML must be rejected, not silently ignored.
@@ -1519,7 +1573,8 @@ asteroid_type_paths = ["x.toml"]
         let field = config.asteroid_field.expect("asteroid_field must be Some");
         assert_eq!(field.anchor.as_deref(), Some("belt_origin"));
         assert_eq!(
-            field.anchor_offset, [0.0, 0.0, 0.0],
+            field.anchor_offset,
+            [0.0, 0.0, 0.0],
             "anchor_offset is serde-skipped and defaults to origin until spawn-time resolution"
         );
     }
@@ -1554,7 +1609,10 @@ asteroid_type_paths = ["x.toml"]
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let field = config.asteroid_field.expect("asteroid_field must be Some");
-        assert_eq!(field.shape, Some(crate::entity_config::AsteroidFieldShape::Torus));
+        assert_eq!(
+            field.shape,
+            Some(crate::entity_config::AsteroidFieldShape::Torus)
+        );
         assert!((field.inner_radius - 300.0).abs() < 1e-6);
         assert!((field.outer_radius - 350.0).abs() < 1e-6);
     }
@@ -1569,7 +1627,10 @@ outer_radius = 200.0
 density = 0.005
 "##;
         let result = EntityConfig::from_toml(toml_str);
-        assert!(result.is_err(), "unknown shape variant must be a parse error");
+        assert!(
+            result.is_err(),
+            "unknown shape variant must be a parse error"
+        );
     }
 
     // ── name / mesh.emissive / [[light]] tests (PRD: schema refactor slice 3) ──
@@ -1798,8 +1859,8 @@ radius = 100.0
     #[test]
     fn station_research_outpost_template_parses_hull_integrity() {
         let toml_str = include_str!("../../assets/entities/station_research_outpost.toml");
-        let config = EntityConfig::from_toml(toml_str)
-            .expect("station_research_outpost.toml must parse");
+        let config =
+            EntityConfig::from_toml(toml_str).expect("station_research_outpost.toml must parse");
         let hull = config.hull.as_ref().expect("must have [hull]");
         assert!((hull.hull_integrity - 60.0).abs() < 1e-6);
     }
@@ -1836,9 +1897,18 @@ hull_integrity = 100
         let toml_str = include_str!("../../assets/entities/star_sun.toml");
         let config = EntityConfig::from_toml(toml_str).expect("star_sun.toml must parse");
         assert_eq!(config.name.as_deref(), Some("Sun"));
-        let mesh = config.mesh.as_ref().expect("star_sun.toml must have [mesh]");
-        assert!(mesh.emissive.is_some(), "star_sun.toml must set [mesh].emissive");
-        assert!(!config.light.is_empty(), "star_sun.toml must have at least one [[light]]");
+        let mesh = config
+            .mesh
+            .as_ref()
+            .expect("star_sun.toml must have [mesh]");
+        assert!(
+            mesh.emissive.is_some(),
+            "star_sun.toml must set [mesh].emissive"
+        );
+        assert!(
+            !config.light.is_empty(),
+            "star_sun.toml must have at least one [[light]]"
+        );
         assert_eq!(config.light[0].kind, LightKind::Point);
         let collider = config
             .collider
@@ -1871,7 +1941,10 @@ hull_integrity = 100
             .asteroid_field
             .as_ref()
             .expect("must have [asteroid_field]");
-        field.grid.as_ref().expect("must have [asteroid_field.grid]");
+        field
+            .grid
+            .as_ref()
+            .expect("must have [asteroid_field.grid]");
         assert_eq!(field.asteroid_type_paths.len(), 2);
         assert_eq!(field.cosmetic_type_paths.len(), 1);
     }
@@ -2627,7 +2700,9 @@ fire_arc_deg = 90.0
         let mut cfg = TorpedoConfig::default();
         cfg.shield_pierce = 0.75;
         let tubes = vec![TorpedoTubeConfig {
-            id: "fore".into(), facing_deg: 0.0, fire_arc_deg: 90.0,
+            id: "fore".into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 90.0,
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
         sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, None, None);
@@ -2716,7 +2791,10 @@ beam_range = 40.0
             shield_pierce: None,
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
-        assert!(err.contains("auto_arc_deg"), "error mentions auto arc: {err}");
+        assert!(
+            err.contains("auto_arc_deg"),
+            "error mentions auto arc: {err}"
+        );
     }
 
     #[test]
@@ -2730,7 +2808,10 @@ beam_range = 40.0
             shield_pierce: None,
         }];
         let err = validate_phaser_banks(&banks).unwrap_err();
-        assert!(err.contains("fire_arc_deg"), "error mentions fire arc: {err}");
+        assert!(
+            err.contains("fire_arc_deg"),
+            "error mentions fire arc: {err}"
+        );
 
         let banks = vec![PhaserBankConfig {
             id: "port".into(),
@@ -2883,7 +2964,11 @@ pub struct GlobalConfig {
 
 impl Default for GlobalConfig {
     fn default() -> Self {
-        Self { seed: 42, title: None, description: None }
+        Self {
+            seed: 42,
+            title: None,
+            description: None,
+        }
     }
 }
 

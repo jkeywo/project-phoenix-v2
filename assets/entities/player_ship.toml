@@ -112,6 +112,7 @@ max_reverse_speed = 10.0
 acceleration = 10.0
 deceleration = 25.0
 max_yaw_rate = 0.5
+max_bank_deg = 10.0
 impulse_charge_duration = 3.0
 impulse_speed_multiplier = 10.0
 impulse_acceleration_multiplier = 5.0

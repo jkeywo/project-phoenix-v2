@@ -45,6 +45,21 @@ impl Default for ImpulseConfigResource {
     }
 }
 
+/// Runtime banking config, loaded from `[helm_console] max_bank_deg` in the entity TOML.
+#[derive(Resource, Clone)]
+pub struct BankConfigResource {
+    pub max_bank_deg: f32,
+}
+
+impl Default for BankConfigResource {
+    fn default() -> Self {
+        Self { max_bank_deg: 0.0 }
+    }
+}
+
+/// How quickly the ship's visual roll lerps toward the target bank angle.
+const BANK_LERP_RATE: f32 = 5.0;
+
 // Ã¢â€â‚¬Ã¢â€â‚¬ Plugin Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 pub struct ShipPlugin;
@@ -57,6 +72,7 @@ impl Plugin for ShipPlugin {
         )))
         .init_resource::<LastHelmInput>()
         .init_resource::<ImpulseConfigResource>()
+        .init_resource::<BankConfigResource>()
         .add_systems(
             Update,
             (
@@ -85,6 +101,7 @@ fn process_helm_inputs(
     ship_physics_config: Option<Res<ShipPhysicsConfigResource>>,
     impulse: Res<ShipImpulse>,
     impulse_config: Res<ImpulseConfigResource>,
+    bank_config: Res<BankConfigResource>,
     mut prev_phase: Local<Option<crate::impulse::ImpulsePhase>>,
 ) {
     // Edge-detect Idle → Charging (or any → Charging) and zero out the
@@ -134,7 +151,10 @@ fn process_helm_inputs(
     let impulse_active = impulse.0.is_active();
     let input = if impulse_active {
         // Autopilot: full forward thrust, zero steering. Player input is ignored.
-        ShipPhysicsInput { thrust: 1.0, steering: 0.0 }
+        ShipPhysicsInput {
+            thrust: 1.0,
+            steering: 0.0,
+        }
     } else {
         ShipPhysicsInput {
             thrust: last_input.thrust,
@@ -165,6 +185,12 @@ fn process_helm_inputs(
     ship.z = result.z;
     ship.yaw = result.yaw;
     ship.forward_speed = result.forward_speed;
+
+    // Visual banking: lerp roll toward target based on steering
+    let max_bank_rad = bank_config.max_bank_deg.to_radians();
+    let target_roll = if impulse_active { 0.0 } else { -input.steering * max_bank_rad };
+    let lerp_factor = (BANK_LERP_RATE * dt).min(1.0);
+    ship.roll = ship.roll + (target_roll - ship.roll) * lerp_factor;
 }
 
 fn sync_ship_position(ship: Res<ShipState>, mut ship_query: Query<&mut Transform, With<Ship>>) {
@@ -174,7 +200,7 @@ fn sync_ship_position(ship: Res<ShipState>, mut ship_query: Query<&mut Transform
 
     transform.translation.x = ship.x;
     transform.translation.z = ship.z;
-    transform.rotation = Quat::from_axis_angle(Vec3::Y, ship.yaw);
+    transform.rotation = Quat::from_euler(EulerRot::YXZ, ship.yaw, 0.0, ship.roll);
 }
 
 pub fn handle_impulse_messages(
@@ -252,16 +278,16 @@ fn is_inside_blocks_impulse(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lobby::LobbyPlugin;
-    use crate::messages::ClientMessage;
-    use crate::regions::server::RegionPlugin;
     use crate::entity_config::EntityConfig;
-    use crate::region_shape::RegionShape;
-    use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
     use crate::entity_spawner::spawn_entity;
     use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
-    use crate::ship_state::ShipState;
+    use crate::lobby::LobbyPlugin;
+    use crate::messages::ClientMessage;
     use crate::modifiers::ShipModifiers;
+    use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
+    use crate::region_shape::RegionShape;
+    use crate::regions::server::RegionPlugin;
+    use crate::ship_state::ShipState;
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -271,13 +297,17 @@ mod tests {
                 std::time::Duration::from_millis(200),
             ))
             .insert_resource(ShipState::new())
-            .insert_resource(ShipHullIntegrity(crate::damage::ConsoleHull::from_config(&[
-                (crate::messages::Console::Helm, 25.0),
-                (crate::messages::Console::Tactical, 25.0),
-                (crate::messages::Console::Power, 25.0),
-                (crate::messages::Console::Shields, 25.0),
-            ])))
-            .insert_resource(crate::simulation::ShipShields(crate::shield::ShieldSystem::default()))
+            .insert_resource(ShipHullIntegrity(crate::damage::ConsoleHull::from_config(
+                &[
+                    (crate::messages::Console::Helm, 25.0),
+                    (crate::messages::Console::Tactical, 25.0),
+                    (crate::messages::Console::Power, 25.0),
+                    (crate::messages::Console::Shields, 25.0),
+                ],
+            )))
+            .insert_resource(crate::simulation::ShipShields(
+                crate::shield::ShieldSystem::default(),
+            ))
             .insert_resource(ShipImpulse(crate::impulse::ImpulseState::new()))
             .insert_resource(ShipModifiers::new())
             .add_plugins(ShipPlugin);
@@ -455,7 +485,12 @@ mod tests {
         app
     }
 
-    fn spawn_blocks_impulse_region(app: &mut App, x: f32, z: f32, radius: f32) -> bevy::ecs::entity::Entity {
+    fn spawn_blocks_impulse_region(
+        app: &mut App,
+        x: f32,
+        z: f32,
+        radius: f32,
+    ) -> bevy::ecs::entity::Entity {
         let config = EntityConfig {
             name: None,
             light: Vec::new(),
@@ -564,7 +599,10 @@ mod tests {
         push(
             &mut app,
             "helm",
-            ClientMessage::HelmInput { thrust: 0.0, steering: 1.0 },
+            ClientMessage::HelmInput {
+                thrust: 0.0,
+                steering: 1.0,
+            },
         );
         tick(&mut app);
 
@@ -602,7 +640,10 @@ mod tests {
         push(
             &mut app,
             "helm",
-            ClientMessage::HelmInput { thrust: 1.0, steering: 0.0 },
+            ClientMessage::HelmInput {
+                thrust: 1.0,
+                steering: 0.0,
+            },
         );
         tick(&mut app);
 
@@ -668,7 +709,10 @@ mod tests {
         push(
             &mut app,
             "helm",
-            ClientMessage::HelmInput { thrust: 0.0, steering: 1.0 },
+            ClientMessage::HelmInput {
+                thrust: 0.0,
+                steering: 1.0,
+            },
         );
         tick(&mut app);
 

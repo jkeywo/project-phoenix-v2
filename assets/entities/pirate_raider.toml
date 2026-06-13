@@ -27,6 +27,7 @@ max_reverse_speed = 0.0
 acceleration = 25.0
 deceleration = 60.0
 max_yaw_rate = 2.0
+max_bank_deg = 15.0
 
 [weapons_console]
 beam_range = 50.0

@@ -22,10 +22,10 @@ use crate::entity_spawner::{
     AsteroidFieldSection, BehaviourSection, EntityId, EntityName, EntityTagsSection, EntityUuid,
     FactionComponent, MeshSection, RadarAppearanceSection, RegionShapeSection,
 };
-use crate::world::server::ObjectiveManagerRes;
 use crate::impulse::ImpulseState;
 use crate::messages::ModifierSlot;
 use crate::modifiers::ShipModifiers;
+use crate::world::server::ObjectiveManagerRes;
 use std::collections::HashMap;
 
 // â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -182,8 +182,14 @@ pub fn add_simulation_plugins(app: &mut App) {
         0.1,
         TimerMode::Repeating,
     )))
-    .add_systems(Startup, setup_world.after(crate::world::server::insert_world_config_resource))
-    .add_systems(OnEnter(GamePhase::InProgress), (spawn_game_start_entities, dump_tracked_entities).chain())
+    .add_systems(
+        Startup,
+        setup_world.after(crate::world::server::insert_world_config_resource),
+    )
+    .add_systems(
+        OnEnter(GamePhase::InProgress),
+        (spawn_game_start_entities, dump_tracked_entities).chain(),
+    )
     .add_systems(Update, render_spawned_entities)
     .add_systems(OnEnter(GamePhase::GameOver), on_game_over_enter)
     .insert_resource(GameOverReason(None))
@@ -221,9 +227,8 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(modifier_events_broadcaster())
     .add_plugins(sim_outbox_broadcaster());
 
-#[cfg(feature = "server")]
-app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
-
+    #[cfg(feature = "server")]
+    app.add_plugins(crate::server::ServerViewscreenRadarPlugin);
 }
 
 /// Returns a [`SimBroadcaster`] pre-configured with the `SimState` producer.
@@ -490,7 +495,10 @@ fn handle_collisions(
     time: Res<Time>,
     context: ReadRapierContext,
     ship_query: Query<Entity, With<Ship>>,
-    asteroid_query: Query<(&Transform, &AsteroidUuid, Option<&AsteroidShieldPierce>), With<Asteroid>>,
+    asteroid_query: Query<
+        (&Transform, &AsteroidUuid, Option<&AsteroidShieldPierce>),
+        With<Asteroid>,
+    >,
     mut ship: ResMut<ShipState>,
     mut hull: ResMut<ShipHullIntegrity>,
     mut shields: ResMut<ShipShields>,
@@ -548,9 +556,10 @@ fn handle_collisions(
 
         let source_label = contact
             .and_then(|attacker_entity| {
-                asteroid_query.get(attacker_entity).ok().map(|(_, uuid, _)| {
-                    format!("asteroid:{}", uuid.0)
-                })
+                asteroid_query
+                    .get(attacker_entity)
+                    .ok()
+                    .map(|(_, uuid, _)| format!("asteroid:{}", uuid.0))
             })
             .unwrap_or_else(|| "collision".to_string());
 
@@ -567,11 +576,7 @@ fn handle_collisions(
             .unwrap_or(0.0);
 
         let arc_idx = shields.0.facing_index_for_bearing(bearing);
-        let arc_label = shields
-            .0
-            .facings
-            .get(arc_idx)
-            .map(|f| f.label.clone());
+        let arc_label = shields.0.facings.get(arc_idx).map(|f| f.label.clone());
 
         damage_log.push(DamageLogEntry {
             source: source_label,
@@ -594,8 +599,7 @@ fn handle_collisions(
 
         if total_hull > 0.0 {
             let rng = &mut rand::rngs::SmallRng::from_os_rng();
-            let (hull_applied, ship_destroyed) =
-                apply_hull_damage(&mut hull.0, total_hull, rng);
+            let (hull_applied, ship_destroyed) = apply_hull_damage(&mut hull.0, total_hull, rng);
             outbox.0.push((
                 Target::All,
                 ServerMessage::DamageTaken {
@@ -835,12 +839,27 @@ fn reconcile_runtime_entities(
     if !registry.seeded {
         for (uuid, entity) in &current {
             registry.reported.insert(uuid.clone());
-            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field, hull_comp, entity_target)) =
-                query.get(*entity)
+            if let Ok((
+                _,
+                _,
+                id,
+                name,
+                transform,
+                region_shape,
+                entity_tags,
+                radar_appearance,
+                asteroid_field,
+                hull_comp,
+                entity_target,
+            )) = query.get(*entity)
             {
                 let hull_fraction = hull_comp.map(|h| {
                     let max = h.0.total_max();
-                    if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+                    if max > 0.0 {
+                        h.0.total_current() / max
+                    } else {
+                        1.0
+                    }
                 });
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
@@ -867,7 +886,10 @@ fn reconcile_runtime_entities(
                                 snapshot.radius = Some(max_he);
                                 snapshot.half_extents = Some(*half_extents);
                             }
-                            crate::region_shape::RegionShape::Torus { inner_radius, outer_radius } => {
+                            crate::region_shape::RegionShape::Torus {
+                                inner_radius,
+                                outer_radius,
+                            } => {
                                 snapshot.radius = Some(*outer_radius);
                                 snapshot.inner_radius = Some(*inner_radius);
                             }
@@ -891,8 +913,9 @@ fn reconcile_runtime_entities(
                     }
                 }
                 snapshot.radar_icon = Some(
-                    radar_appearance.and_then(|r| r.0.icon.clone())
-                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags))
+                    radar_appearance
+                        .and_then(|r| r.0.icon.clone())
+                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags)),
                 );
                 if let Some(ref id) = snapshot.id {
                     snapshot.objective_target = active_objective_names.contains(id);
@@ -913,12 +936,27 @@ fn reconcile_runtime_entities(
     // Emit EntitySpawned for new entities.
     for (uuid, entity) in &current {
         if registry.reported.insert(uuid.clone()) {
-            if let Ok((_, _, id, name, transform, region_shape, entity_tags, radar_appearance, asteroid_field, hull_comp, entity_target)) =
-                query.get(*entity)
+            if let Ok((
+                _,
+                _,
+                id,
+                name,
+                transform,
+                region_shape,
+                entity_tags,
+                radar_appearance,
+                asteroid_field,
+                hull_comp,
+                entity_target,
+            )) = query.get(*entity)
             {
                 let hull_fraction = hull_comp.map(|h| {
                     let max = h.0.total_max();
-                    if max > 0.0 { h.0.total_current() / max } else { 1.0 }
+                    if max > 0.0 {
+                        h.0.total_current() / max
+                    } else {
+                        1.0
+                    }
                 });
                 let mut snapshot = EntitySnapshot {
                     uuid: uuid.clone(),
@@ -945,7 +983,10 @@ fn reconcile_runtime_entities(
                                 snapshot.radius = Some(max_he);
                                 snapshot.half_extents = Some(*half_extents);
                             }
-                            crate::region_shape::RegionShape::Torus { inner_radius, outer_radius } => {
+                            crate::region_shape::RegionShape::Torus {
+                                inner_radius,
+                                outer_radius,
+                            } => {
                                 snapshot.radius = Some(*outer_radius);
                                 snapshot.inner_radius = Some(*inner_radius);
                             }
@@ -969,8 +1010,9 @@ fn reconcile_runtime_entities(
                     }
                 }
                 snapshot.radar_icon = Some(
-                    radar_appearance.and_then(|r| r.0.icon.clone())
-                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags))
+                    radar_appearance
+                        .and_then(|r| r.0.icon.clone())
+                        .unwrap_or_else(|| radar_icon_from_tags(&snapshot.tags)),
                 );
                 if let Some(ref id) = snapshot.id {
                     snapshot.objective_target = active_objective_names.contains(id);
@@ -1349,6 +1391,14 @@ fn spawn_game_start_entities(
                         acceleration_multiplier: hc.impulse_acceleration_multiplier,
                     });
             commands.insert_resource(impulse_cfg.unwrap_or_default());
+
+            // Bank config from [helm_console] TOML, or default
+            let bank_cfg = config.helm_console.as_ref().map(|hc| {
+                crate::ship_plugin::BankConfigResource {
+                    max_bank_deg: hc.max_bank_deg,
+                }
+            });
+            commands.insert_resource(bank_cfg.unwrap_or_default());
         }
     }
 
@@ -1480,7 +1530,9 @@ fn render_spawned_entities(
             let emissive = LinearRgba::from(color) * emissive_mul;
 
             let mesh = match cfg.shape {
-                MeshShape::Sphere => meshes.add(Sphere { radius: cfg.radius.max(0.1) }),
+                MeshShape::Sphere => meshes.add(Sphere {
+                    radius: cfg.radius.max(0.1),
+                }),
                 MeshShape::Cuboid => {
                     let [x, y, z] = cfg.size.unwrap_or([2.0, 1.0, 3.0]);
                     meshes.add(Cuboid::new(x, y, z))
@@ -1541,7 +1593,10 @@ fn render_spawned_entities(
     }
 }
 
-fn insert_light(ec: &mut bevy::ecs::system::EntityCommands, light: &crate::entity_config::LightConfig) {
+fn insert_light(
+    ec: &mut bevy::ecs::system::EntityCommands,
+    light: &crate::entity_config::LightConfig,
+) {
     use crate::entity_config::LightKind;
     let color = Color::srgb(light.colour[0], light.colour[1], light.colour[2]);
     match light.kind {
@@ -1565,7 +1620,10 @@ fn insert_light(ec: &mut bevy::ecs::system::EntityCommands, light: &crate::entit
     }
 }
 
-fn spawn_child_light(parent: &mut bevy::ecs::relationship::RelatedSpawnerCommands<ChildOf>, light: &crate::entity_config::LightConfig) {
+fn spawn_child_light(
+    parent: &mut bevy::ecs::relationship::RelatedSpawnerCommands<ChildOf>,
+    light: &crate::entity_config::LightConfig,
+) {
     use crate::entity_config::LightKind;
     let color = Color::srgb(light.colour[0], light.colour[1], light.colour[2]);
     match light.kind {
@@ -1606,9 +1664,13 @@ mod tests {
     /// or an empty default on WASM (tests do not run on WASM).
     fn test_complexity_rules() -> crate::console_ai_plugin::ComplexityRules {
         #[cfg(not(target_arch = "wasm32"))]
-        { crate::console_ai_plugin::ComplexityRules::from_asset_files() }
+        {
+            crate::console_ai_plugin::ComplexityRules::from_asset_files()
+        }
         #[cfg(target_arch = "wasm32")]
-        { crate::console_ai_plugin::ComplexityRules::default() }
+        {
+            crate::console_ai_plugin::ComplexityRules::default()
+        }
     }
 
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
@@ -2345,9 +2407,10 @@ mod tests {
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("target-uuid".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                &[(crate::messages::Console::CaptainChair, 30.0)],
-            )),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                crate::messages::Console::CaptainChair,
+                30.0,
+            )])),
             Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
         ));
     }
@@ -2531,9 +2594,7 @@ mod tests {
             .iter()
             .find_map(|m| match &m.msg {
                 ServerMessage::WeaponsUpdate {
-                    target_uuid,
-                    banks,
-                    ..
+                    target_uuid, banks, ..
                 } => Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
                 _ => None,
             })
@@ -2568,9 +2629,7 @@ mod tests {
             .iter()
             .find_map(|m| match &m.msg {
                 ServerMessage::WeaponsUpdate {
-                    target_uuid,
-                    banks,
-                    ..
+                    target_uuid, banks, ..
                 } => Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
                 _ => None,
             })
@@ -2598,7 +2657,13 @@ mod tests {
         );
         let _ = tick(app);
         // Fire
-        push(app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(app)
     }
 
@@ -2617,7 +2682,9 @@ mod tests {
             "expected BeamStarted after firing at fire-ready target"
         );
         match &beam_started.unwrap().msg {
-            ServerMessage::BeamStarted { target_uuid, .. } => assert_eq!(target_uuid, "target-uuid"),
+            ServerMessage::BeamStarted { target_uuid, .. } => {
+                assert_eq!(target_uuid, "target-uuid")
+            }
             _ => unreachable!(),
         }
         match &beam_started.unwrap().target {
@@ -2644,7 +2711,13 @@ mod tests {
             .resource_mut::<PhaserCooldown>()
             .start_bank_with_cooldown("port", 3.0);
 
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
@@ -2661,7 +2734,13 @@ mod tests {
         setup_weapons_world(&mut app, 0.0, -20.0);
         start_game(&mut app);
 
-        push(&mut app, "captain", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
@@ -2688,7 +2767,13 @@ mod tests {
         );
         let _ = tick(&mut app);
         // Fire â€" rejected because target is behind.
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
@@ -2710,7 +2795,9 @@ mod tests {
         // asteroid ECS entity. Fetch its handle after setup.
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
         let asteroid_entity = {
-            let mut q = app.world_mut().query::<(bevy::ecs::entity::Entity, &AsteroidUuid)>();
+            let mut q = app
+                .world_mut()
+                .query::<(bevy::ecs::entity::Entity, &AsteroidUuid)>();
             q.iter(app.world())
                 .find(|(_, u)| u.0 == "target-uuid")
                 .map(|(e, _)| e)
@@ -2769,7 +2856,9 @@ mod tests {
 
         // Cooldown started.
         assert!(
-            app.world().resource::<PhaserCooldown>().is_bank_active("port"),
+            app.world()
+                .resource::<PhaserCooldown>()
+                .is_bank_active("port"),
             "cooldown should start after beam end"
         );
 
@@ -2803,7 +2892,9 @@ mod tests {
             "beam should be cleared after sever-by-arc"
         );
         assert!(
-            app.world().resource::<PhaserCooldown>().is_bank_active("port"),
+            app.world()
+                .resource::<PhaserCooldown>()
+                .is_bank_active("port"),
             "cooldown should start after arc sever"
         );
     }
@@ -2819,7 +2910,9 @@ mod tests {
             Some([0.0, 0.0, -50.0]);
         // Move the live ECS Transform too — gameplay reads positions from
         // Transforms, not from the WorldResource snapshot.
-        let mut q = app.world_mut().query_filtered::<&mut Transform, With<AsteroidUuid>>();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&mut Transform, With<AsteroidUuid>>();
         for mut t in q.iter_mut(app.world_mut()) {
             t.translation.z = -50.0;
         }
@@ -2836,7 +2929,9 @@ mod tests {
             "beam should be cleared after sever-by-range"
         );
         assert!(
-            app.world().resource::<PhaserCooldown>().is_bank_active("port"),
+            app.world()
+                .resource::<PhaserCooldown>()
+                .is_bank_active("port"),
             "cooldown should start after range sever"
         );
     }
@@ -2850,7 +2945,9 @@ mod tests {
         // matching UUID after the fact.
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
         let asteroid_entity = {
-            let mut q = app.world_mut().query::<(bevy::ecs::entity::Entity, &AsteroidUuid)>();
+            let mut q = app
+                .world_mut()
+                .query::<(bevy::ecs::entity::Entity, &AsteroidUuid)>();
             q.iter(app.world())
                 .find(|(_, u)| u.0 == "target-uuid")
                 .map(|(e, _)| e)
@@ -2897,17 +2994,19 @@ mod tests {
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("t1".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                &[(crate::messages::Console::CaptainChair, 30.0)],
-            )),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                crate::messages::Console::CaptainChair,
+                30.0,
+            )])),
             Transform::from_xyz(0.0, 0.0, -20.0),
         ));
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("t2".into()),
-            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
-                &[(crate::messages::Console::CaptainChair, 30.0)],
-            )),
+            crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                crate::messages::Console::CaptainChair,
+                30.0,
+            )])),
             Transform::from_xyz(0.0, 0.0, -15.0),
         ));
         start_game_with_weapons(&mut app);
@@ -2919,7 +3018,13 @@ mod tests {
             ClientMessage::SetTarget { uuid: "t1".into() },
         );
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let _ = tick(&mut app);
         assert_eq!(
             app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
@@ -2935,7 +3040,10 @@ mod tests {
         let _ = tick(&mut app); // beam ends, cooldown starts
 
         // Cooldown should be active.
-        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"));
+        assert!(app
+            .world()
+            .resource::<PhaserCooldown>()
+            .is_bank_active("port"));
 
         // Force cooldown to expire.
         app.world_mut()
@@ -2949,7 +3057,13 @@ mod tests {
             ClientMessage::SetTarget { uuid: "t2".into() },
         );
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
@@ -3448,7 +3562,13 @@ mod tests {
             },
         );
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app);
 
         // Advance by 1 second of simulated time (many small ticks).
@@ -3504,7 +3624,13 @@ mod tests {
             },
         );
         tick(&mut app_fast);
-        push(&mut app_fast, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app_fast,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app_fast); // processes FirePhaser, beam becomes active
 
         // Inject accumulated damage: 3.5s Ã— (5 HP/s Ã— 2Ã—) = 35 HP â†' enough to destroy 30-HP asteroid.
@@ -3538,7 +3664,13 @@ mod tests {
             },
         );
         tick(&mut app_base);
-        push(&mut app_base, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app_base,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app_base); // processes FirePhaser, beam becomes active
                              // Inject same real time but at base rate: 3.5s Ã— 5 HP/s = 17.5 HP accumulated
         {
@@ -3634,7 +3766,9 @@ mod tests {
         // Replicates the split + apply that `handle_collisions` performs
         // (without standing up Rapier), proving the pierce=0 path leaves
         // hull untouched and the shield quadrant absorbs full damage.
-        use crate::damage::{apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce};
+        use crate::damage::{
+            apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce,
+        };
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
@@ -3652,7 +3786,8 @@ mod tests {
         }
         assert!(
             (hull.total_current() - 100.0).abs() < 1e-6,
-            "hull untouched with pierce=0 (leak={})", leak
+            "hull untouched with pierce=0 (leak={})",
+            leak
         );
         assert_eq!(
             shields.facings[0].hp,
@@ -3663,7 +3798,9 @@ mod tests {
 
     #[test]
     fn asteroid_collision_pierce_full_routes_all_to_hull() {
-        use crate::damage::{apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce};
+        use crate::damage::{
+            apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce,
+        };
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
@@ -3693,7 +3830,9 @@ mod tests {
 
     #[test]
     fn asteroid_collision_pierce_partial_splits_proportionally() {
-        use crate::damage::{apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce};
+        use crate::damage::{
+            apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce,
+        };
         use crate::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;

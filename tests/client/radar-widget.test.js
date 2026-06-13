@@ -146,6 +146,23 @@ describe('RadarWidget: zoom / pan API', () => {
   });
 });
 
+describe('RadarWidget: waypoint drawing', () => {
+  afterEach(teardownGlobals);
+
+  it('draws waypoint blips with the dedicated canvas shape', () => {
+    const { widget, canvas } = makeWidget();
+    const ctx = canvas._ctx;
+    const arcsBefore = ctx._drawn.arcs.length;
+    widget._drawPreProjectedBlips(ctx, 150, 150, 142, {
+      mode: 'pre-projected',
+      blips: [{ uuid: 'navigation-waypoint', radar_x: 0, radar_y: 0, scaled_radius: 0.02, kind: 'waypoint', edge: true }],
+    });
+    expect(ctx._drawn.arcs.length).toBeGreaterThan(arcsBefore);
+    expect(ctx._drawn.strokeStyles).toContain('#72f3ff');
+    widget.destroy();
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // double-tap reset
 // ─────────────────────────────────────────────────────────────────────────────
@@ -466,6 +483,18 @@ describe('RadarWidget: _getBlipAt', () => {
     const blip = widget._getBlipAt(79, 150);
     expect(blip).not.toBeNull();
     expect(blip.uuid).toBe('close');
+    widget.destroy();
+  });
+
+  it('pre-projected: waypoint blips remain hit-testable', () => {
+    const { widget } = makeWidget();
+    widget.update({
+      mode: 'pre-projected',
+      blips: [{ uuid: 'navigation-waypoint', radar_x: 0, radar_y: 0, scaled_radius: 0.02, kind: 'waypoint', edge: true }],
+    });
+    const blip = widget._getBlipAt(150, 150);
+    expect(blip).not.toBeNull();
+    expect(blip.uuid).toBe('navigation-waypoint');
     widget.destroy();
   });
 

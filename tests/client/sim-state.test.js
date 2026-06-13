@@ -76,6 +76,21 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.world.entities[0].position).toEqual([7, 0, 8]);
     expect(s.world.entities[0].hull_fraction).toBe(0.25);
   });
+
+  it('SimState mirrors the shared navigation waypoint', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      navigation_waypoint: { x: 120, z: -45 },
+      entity_states: [],
+    } } });
+    expect(s.navigationWaypoint).toEqual({ x: 120, z: -45 });
+
+    s.apply({ type: 'SimState', data: { snapshot: {
+      navigation_waypoint: null,
+      entity_states: [],
+    } } });
+    expect(s.navigationWaypoint).toBeNull();
+  });
 });
 
 describe('apply Welcome', () => {

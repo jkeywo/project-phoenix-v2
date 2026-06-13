@@ -1,9 +1,9 @@
 ---
 title: Radar Projection
 type: concept
-tags: [radar, helm, viewscreen, pure-iterator, shared]
-sources: [src/shared/radar.rs, CONTEXT.md]
-updated: 2026-05-08
+tags: [radar, helm, navigation, viewscreen, pure-iterator, shared]
+sources: [gui/console-state.js, gui/radar-widget.js, src/radar.rs, CONTEXT.md]
+updated: 2026-06-13
 ---
 
 # Radar Projection
@@ -35,6 +35,10 @@ Same input → same output → same visual semantics. This was an explicit deepe
 - Caller decides how to consume (filter by range, take top-N, collect).
 - No allocation in the hot path.
 - Easy to test: collect into a `Vec` and assert.
+
+## HTML console waypoint blips
+
+The HTML console path uses `gui/console-state.js::buildBlips()` and `buildWaypointBlip()` before passing pre-projected blips into `gui/radar-widget.js`. Navigation owns one shared custom waypoint via server `SimSnapshot.navigation_waypoint`; Helm projects it ship-relative and clamps it to radius `0.96` with `edge: true` when it is outside Helm radar range. The radar widget renders `kind: "waypoint"` as a cyan diamond/ring without a bitmap asset.
 
 ## Future filters
 

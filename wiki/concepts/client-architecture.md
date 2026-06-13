@@ -2,8 +2,8 @@
 title: Client Architecture
 type: concept
 tags: [client, plugin, wasm, bevy, panel, composition]
-sources: [src/client/app.rs, src/client/bridge.rs, src/client_sim.rs, src/ship_view.rs]
-updated: 2026-05-16
+sources: [client.html, gui/sim-state.js, gui/console-state.js, gui/action-map.js]
+updated: 2026-06-13
 ---
 
 ## Summary
@@ -64,6 +64,10 @@ The bridge (`src/client/bridge.rs::wasm_client_init`) adds `DefaultPlugins`, cal
 ## Notes on client_sim.rs
 
 `src/client_sim.rs` retains `ClientSimState` and all its console-specific fields. These have not yet been migrated to per-panel resources. The client-split series (#228) extracted ship-level fields into `ShipView` (issue #234) but the remaining console-specific state (repair, weapons, shields, world entities, modifiers, power, torpedoes) still lives in `ClientSimState`. Future splits could extract each panel's state into its own resource alongside its plugin.
+
+## HTML waypoint state
+
+The pure-JS client mirrors the server-owned `SimSnapshot.navigation_waypoint` into `gui/sim-state.js::ClientSimState.navigationWaypoint`, then `client.html` copies it into the inline iframe state. `gui/console-state.js` includes it in Navigation state and appends a special waypoint blip to Helm state. Navigation sends `set_navigation_waypoint` / `clear_navigation_waypoint` actions through `gui/action-map.js`, which map to `ClientMessage::SetNavigationWaypoint` and `ClientMessage::ClearNavigationWaypoint`.
 
 ## Client-split history
 

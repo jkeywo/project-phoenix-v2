@@ -98,6 +98,21 @@
 
     #on-screen-btn { width: 100%; }
 
+    .waypoint-readout {
+      display: flex; flex-direction: column; gap: 4px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px; letter-spacing: 0.08em;
+      color: var(--ink-dim);
+      border-top: 1px solid var(--line-faint);
+      padding-top: 10px;
+    }
+    .waypoint-readout .value {
+      font-family: "Chakra Petch", sans-serif;
+      font-size: 22px; letter-spacing: 0.12em;
+      color: var(--cyan);
+    }
+    #clear-waypoint-btn { width: 100%; }
+
     /* ── Side rails ─────────────────────────────────────────────── */
     .side-rail {
       position: absolute;
@@ -126,6 +141,7 @@
   <!-- Hidden data containers for Playwright smoke tests -->
   <div id="nav-data"    aria-hidden="true"></div>
   <div id="impulse-data" aria-hidden="true"></div>
+  <div id="waypoint-data" aria-hidden="true"></div>
 
   <div class="frame landscape" data-screen-label="Navigation Console">
     <div class="panel">
@@ -190,6 +206,18 @@
               <span class="btn-bg"></span>
               <span class="label">ON SCREEN</span>
             </button>
+
+            <div class="nav-label" style="margin-top:8px;">WAYPOINT</div>
+
+            <div class="waypoint-readout">
+              <span>ACTIVE TARGET</span>
+              <span class="value" id="waypoint-readout">NONE</span>
+            </div>
+
+            <button id="clear-waypoint-btn" class="btn danger" type="button">
+              <span class="btn-bg"></span>
+              <span class="label">CLEAR WAYPOINT</span>
+            </button>
           </section>
 
         </div>
@@ -230,6 +258,12 @@
       navData.dataset.shipZ           = String(s.ship_z || 0);
       navData.dataset.onScreen        = String(!!s.on_screen);
 
+      var waypointData = document.getElementById('waypoint-data');
+      var waypoint = s.waypoint || null;
+      waypointData.dataset.active = String(!!waypoint);
+      waypointData.dataset.x = waypoint ? String(waypoint.x) : '';
+      waypointData.dataset.z = waypoint ? String(waypoint.z) : '';
+
       var impulseData = document.getElementById('impulse-data');
       impulseData.dataset.charge      = String(s.impulse_charge_progress || 0);
       impulseData.dataset.cancelVisible = String(!!s.cancel_visible);
@@ -250,6 +284,8 @@
 
       var rangeDisplay = document.getElementById('range-display');
       if (rangeDisplay) rangeDisplay.textContent = String(Math.round(s.radar_range || 5000));
+
+      _updateWaypoint(s);
     }
 
     function _updateRadar(s) {
@@ -303,6 +339,26 @@
       if (footerImpulse) footerImpulse.textContent = label;
     }
 
+    function _updateWaypoint(s) {
+      var waypoint = s.waypoint || null;
+      var readout = document.getElementById('waypoint-readout');
+      if (readout) {
+        readout.textContent = waypoint
+          ? 'X ' + _signedCoord(waypoint.x) + ' / Z ' + _signedCoord(waypoint.z)
+          : 'NONE';
+      }
+      var clearBtn = document.getElementById('clear-waypoint-btn');
+      if (clearBtn) {
+        clearBtn.classList.toggle('disabled', !waypoint);
+        clearBtn.disabled = !waypoint;
+      }
+    }
+
+    function _signedCoord(n) {
+      var v = Number(n) || 0;
+      return (v >= 0 ? '+' : '-') + Math.abs(v).toFixed(0).padStart(4, '0');
+    }
+
     function _impulseLabel(charge) {
       if (charge <= 0)    return 'STANDBY';
       if (charge < 0.25)  return 'CHARGING…';
@@ -319,6 +375,35 @@
 
     document.getElementById('on-screen-btn').addEventListener('click', function() {
       sendAction('set_navigation_chart');
+    });
+
+    document.getElementById('clear-waypoint-btn').addEventListener('click', function() {
+      sendAction('clear_navigation_waypoint');
+    });
+
+    document.getElementById('nav-radar').addEventListener('click', function(e) {
+      var s = _state;
+      if (!s) return;
+      var canvas = e.currentTarget;
+      var rect = canvas.getBoundingClientRect();
+      var size = Math.min(rect.width, rect.height);
+      if (size <= 0) return;
+      var cx = rect.left + rect.width / 2;
+      var cy = rect.top + rect.height / 2;
+      var radius = size / 2 - 8;
+      if (radius <= 0) return;
+      var nx = (e.clientX - cx) / radius;
+      var ny = (cy - e.clientY) / radius;
+      var dist = Math.hypot(nx, ny);
+      if (dist > 1) {
+        nx /= dist;
+        ny /= dist;
+      }
+      var range = s.radar_range || 5000;
+      sendAction('set_navigation_waypoint', {
+        x: (s.ship_x || 0) + nx * range,
+        z: (s.ship_z || 0) + ny * range,
+      });
     });
 
     // ── Resize: re-render radar when container changes ─────────────────────
@@ -347,6 +432,7 @@
       cancel_visible:          true,
       on_screen:               false,
       radar_range:             5000,
+      waypoint:                { x: 1200, z: -800 },
     };
 
     _apply(_DEMO);

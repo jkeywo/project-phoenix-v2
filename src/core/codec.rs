@@ -266,6 +266,20 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
 
+    #[test]
+    fn client_set_navigation_waypoint() {
+        let msg = ClientMessage::SetNavigationWaypoint { x: 120.0, z: -45.0 };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn client_clear_navigation_waypoint() {
+        let msg = ClientMessage::ClearNavigationWaypoint;
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg);
+    }
+
     // ServerMessage round-trips
 
     #[test]
@@ -329,6 +343,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -352,6 +367,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -375,6 +391,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -398,6 +415,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -421,6 +439,31 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
+            },
+        };
+        assert_server_roundtrip(&JsonCodec, msg.clone());
+        assert_server_roundtrip(&PrettyJsonCodec, msg);
+    }
+
+    #[test]
+    fn sim_snapshot_with_navigation_waypoint_round_trips() {
+        let msg = ServerMessage::SimState {
+            snapshot: SimSnapshot {
+                red_alert: false,
+                view_mode: ViewMode::default(),
+                ship_x: 0.0,
+                ship_z: 0.0,
+                ship_yaw: 0.0,
+                forward_speed: 0.0,
+                power_levels: (2, 2, 2),
+                flags: vec![],
+                entity_states: vec![],
+                radar_state: RadarStateSnapshot::default(),
+                impulse_charge_progress: 0.0,
+                engine_thrust: 0.0,
+                console_hull: vec![],
+                navigation_waypoint: Some(WaypointSnapshot { x: 12.5, z: -8.0 }),
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1257,6 +1300,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1280,6 +1324,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         // Encoding then decoding should preserve (2, 2, 2) for power_levels.
@@ -1534,6 +1579,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1565,6 +1611,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1593,6 +1640,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1640,6 +1688,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2144,6 +2193,7 @@ mod tests {
                 impulse_charge_progress: 0.0,
                 engine_thrust: 0.0,
                 console_hull: vec![],
+                navigation_waypoint: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2519,6 +2569,7 @@ mod tests {
                 TeamSlot::Returning  { remaining: 3.0, queued: Some(Console::Power) },
             ],
             console_hull: vec![],
+                navigation_waypoint: None,
             travel_duration_secs: 5.0,
             damageable_consoles: vec![Console::Helm, Console::Tactical, Console::Power],
         };

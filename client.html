@@ -646,7 +646,9 @@
       // Shields console iframe state (issue #423)
       shieldFacings: [], shieldFocusedFacing: null,
       // Sensors console iframe state
-      sensorsTarget: null };
+      sensorsTarget: null,
+      // Shared Navigation waypoint from SimState
+      navigationWaypoint: null };
     let conn = null;
     // Station configs from server Welcome message (keyed by player count).
     let stationConfigs = {};
@@ -1299,8 +1301,8 @@
         if (mine.length < 2 || state.phase !== 'InProgress') return;
         const idx = Math.max(0, mine.indexOf(activeConsole));
         const next = (dx < 0)
-          ? (idx + 1) % mine.length
-          : (idx - 1 + mine.length) % mine.length;
+          ? (idx - 1 + mine.length) % mine.length
+          : (idx + 1) % mine.length;
         // setActiveConsole() is the single source of truth — also called by
         // the tab-bar onPress handler (issue #441) and the render() reconciler.
         setActiveConsole(mine[next]);
@@ -1349,6 +1351,7 @@
             state.sensorsRadarSelects  = window.simState.sensorsRadarSelects;
             state.phaserArcConfigs  = window.simState.phaserArcConfigs;
             state.torpedoArcConfigs = window.simState.torpedoArcConfigs;
+            state.navigationWaypoint = window.simState.navigationWaypoint;
             // Push the pre-seeded repair teams so the Repair console renders its
             // rows immediately on (re)connect, before the first RepairState
             // broadcast (no-op unless Repair is the active console).
@@ -1445,6 +1448,9 @@
           state.shipYaw = snap.ship_yaw || 0;
           state.forwardSpeed = snap.forward_speed || 0;
           state.impulseChargeProgress = snap.impulse_charge_progress || 0;
+          state.navigationWaypoint = window.simState
+            ? window.simState.navigationWaypoint
+            : (snap.navigation_waypoint || null);
           if (vd) state.currentView = vd;
           // Red alert visual (issue #439): drives the phone bezel image swap.
           // `snap.red_alert` is a snake-cased serde field on SimSnapshot.
@@ -1477,6 +1483,7 @@
           pushWeaponsConsoleState();
           pushRepairConsoleState();
           pushSensorsConsoleState();
+          pushNavigationConsoleState();
           // Fall through to scheduleRender() so the helm + captain iframes
           // receive updated state (the weapons console is pushed above so
           // it doesn't need renderGame dispatch).

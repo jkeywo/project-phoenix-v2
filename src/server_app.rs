@@ -158,6 +158,7 @@ pub fn add_simulation_plugins(app: &mut App) {
     .add_plugins(crate::power_plugin::PowerPlugin)
     .add_plugins(crate::shields_plugin::ShieldsConsolePlugin)
     .add_plugins(crate::science_plugin::SciencePlugin)
+    .add_plugins(crate::navigation_plugin::NavigationPlugin)
     .add_plugins(crate::comms_plugin::CommsConsolePlugin)
     .add_message::<AsteroidDestroyedVfx>()
     .insert_resource(ShipState::new())
@@ -317,6 +318,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             ship_forward_speed,
             ship_red_alert,
             ship_view_mode,
+            navigation_waypoint,
         ) = {
             let ship = world.resource::<ShipState>();
             let hull = world.resource::<ShipHullIntegrity>();
@@ -324,6 +326,9 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             let impulse = world.resource::<ShipImpulse>();
             let modifiers = world.resource::<crate::modifiers::ShipModifiers>();
             let last_helm = world.get_resource::<crate::ship_plugin::LastHelmInput>();
+            let navigation_waypoint = world
+                .get_resource::<crate::navigation_plugin::NavigationWaypoint>()
+                .and_then(|w| w.0.clone());
 
             let power_levels = power
                 .map(|p| (p.0.helm, p.0.weapons, p.0.sensors))
@@ -358,6 +363,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
                 ship.forward_speed,
                 ship.red_alert(),
                 ship.view_mode.clone(),
+                navigation_waypoint,
             )
         };
 
@@ -392,6 +398,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             radar_state,
             impulse_charge_progress: charge_progress,
             engine_thrust,
+            navigation_waypoint,
         };
         vec![ServerMessage::SimState { snapshot }]
     })
@@ -1404,6 +1411,11 @@ fn dump_tracked_entities(
 #[derive(Component)]
 struct RenderProcessed;
 
+/// Holds a pending GLB scene handle so the asset server keeps the asset alive
+/// across frames until it finishes loading.
+#[derive(Component)]
+struct PendingSceneHandle(Handle<bevy::scene::Scene>);
+
 /// Add visual meshes and materials to spawned entities that have a `[mesh]`
 /// section but no `RenderProcessed` yet. When `cfg.model` is set, loads a GLB
 /// scene instead of creating a procedural shape — but defers insertion until
@@ -1425,22 +1437,34 @@ fn render_spawned_entities(
             &Transform,
             &crate::entity_spawner::MeshSection,
             Option<&crate::entity_spawner::Lights>,
+            Option<&PendingSceneHandle>,
         ),
         Without<RenderProcessed>,
     >,
 ) {
     use crate::entity_config::MeshShape;
 
-    for (entity, transform, mesh_sec, lights_opt) in entities.iter() {
+    for (entity, transform, mesh_sec, lights_opt, pending) in entities.iter() {
         let cfg = &mesh_sec.0;
         let mut ec = commands.entity(entity);
         let mut rendered = false;
 
         if let Some(model_path) = &cfg.model {
-            // PATH A: GLB model — only attach scene when asset is ready.
-            let path = format!("{}#Scene0", model_path);
-            let scene: Handle<bevy::scene::Scene> = asset_server.load(&path);
+            // PATH A: GLB model — issue the load once and store the handle so the
+            // asset server keeps the asset alive. On subsequent frames the same
+            // strong handle is retrieved via `pending`, and we check readiness
+            // against that stable handle.
+            let scene: Handle<bevy::scene::Scene> = match pending {
+                Some(p) => p.0.clone(),
+                None => {
+                    let path = format!("{}#Scene0", model_path);
+                    let h: Handle<bevy::scene::Scene> = asset_server.load(&path);
+                    ec.insert(PendingSceneHandle(h.clone()));
+                    h
+                }
+            };
             if scenes.get(&scene).is_some() {
+                ec.remove::<PendingSceneHandle>();
                 ec.insert(bevy::scene::SceneRoot(scene));
                 rendered = true;
             }

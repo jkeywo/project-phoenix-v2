@@ -555,10 +555,19 @@ pub struct SimSnapshot {
     /// Per-console hull integrity. Empty when the ship has no per-console hull config.
     #[serde(default)]
     pub console_hull: Vec<ConsoleHullStatus>,
+    /// Shared custom waypoint set by the Navigation console.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub navigation_waypoint: Option<WaypointSnapshot>,
 }
 
 fn default_power_levels() -> (u8, u8, u8) {
     (2, 2, 2)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WaypointSnapshot {
+    pub x: f32,
+    pub z: f32,
 }
 
 /// A single entity in the unified wire format.
@@ -905,6 +914,15 @@ pub enum ClientMessage {
     SetShieldFocus {
         facing: Option<ViewDirection>,
     },
+    /// Set the shared custom navigation waypoint. Sender must hold
+    /// `Console::Navigation`.
+    SetNavigationWaypoint {
+        x: f32,
+        z: f32,
+    },
+    /// Clear the shared custom navigation waypoint. Sender must hold
+    /// `Console::Navigation`.
+    ClearNavigationWaypoint,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1488,6 +1506,18 @@ pub enum UiAction {
     ///
     /// The HTML navigation panel sends `{ action: "set_navigation_chart", console: "Navigation" }`.
     SetNavigationChart,
+    /// Set the shared Navigation waypoint.
+    ///
+    /// The HTML navigation panel sends
+    /// `{ action: "set_navigation_waypoint", console: "Navigation", x: 120.0, z: -45.0 }`.
+    SetNavigationWaypoint {
+        x: f32,
+        z: f32,
+    },
+    /// Clear the shared Navigation waypoint.
+    ///
+    /// The HTML navigation panel sends `{ action: "clear_navigation_waypoint", console: "Navigation" }`.
+    ClearNavigationWaypoint,
 }
 
 /// Maps a decoded [`UiAction`] to the existing [`ClientMessage`] the server
@@ -1531,6 +1561,11 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
         UiAction::ClearComms => ClientMessage::ClearComms,
         UiAction::ShowOnScreen { message_id } => ClientMessage::ShowOnScreen { message_id: message_id.clone() },
         UiAction::SetNavigationChart => ClientMessage::SetView { mode: ViewMode::NavigationChart },
+        UiAction::SetNavigationWaypoint { x, z } => ClientMessage::SetNavigationWaypoint {
+            x: *x,
+            z: *z,
+        },
+        UiAction::ClearNavigationWaypoint => ClientMessage::ClearNavigationWaypoint,
     }
 }
 

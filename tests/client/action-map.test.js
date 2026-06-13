@@ -8,10 +8,11 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 21 expected action keys', () => {
+  it('contains exactly the 23 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'cancel_impulse',
       'clear_comms',
+      'clear_navigation_waypoint',
       'decrease_power',
       'dispatch_repair_team',
       'fire_phaser',
@@ -22,6 +23,7 @@ describe('ACTION_MAP', () => {
       'respond_to_message',
       'select_comms_message',
       'set_navigation_chart',
+      'set_navigation_waypoint',
       'set_phaser_mode',
       'set_radar_view',
       'set_sensors_target',
@@ -295,6 +297,28 @@ describe('set_navigation_chart', () => {
     const send = mkSend();
     ACTION_MAP.set_navigation_chart({ action: 'set_navigation_chart' }, send);
     expect(send).toHaveBeenCalledWith('SetView', { mode: { kind: 'NavigationChart' } });
+  });
+});
+
+describe('set_navigation_waypoint', () => {
+  it('calls send SetNavigationWaypoint with coordinates', () => {
+    const send = mkSend();
+    ACTION_MAP.set_navigation_waypoint({ action: 'set_navigation_waypoint', x: 12.5, z: -8 }, send);
+    expect(send).toHaveBeenCalledWith('SetNavigationWaypoint', { x: 12.5, z: -8 });
+  });
+
+  it('does nothing for invalid coordinates', () => {
+    const send = mkSend();
+    ACTION_MAP.set_navigation_waypoint({ action: 'set_navigation_waypoint', x: Number.NaN, z: -8 }, send);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('clear_navigation_waypoint', () => {
+  it('calls send ClearNavigationWaypoint', () => {
+    const send = mkSend();
+    ACTION_MAP.clear_navigation_waypoint({}, send);
+    expect(send).toHaveBeenCalledWith('ClearNavigationWaypoint');
   });
 });
 

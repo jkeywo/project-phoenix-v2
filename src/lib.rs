@@ -77,6 +77,7 @@ pub use console::shields::server as shields_plugin;
 pub use console::science::server as science_plugin;
 pub use console::comms::inbox as comms_inbox;
 pub use console::comms::server as comms_plugin;
+pub use console::navigation as navigation_plugin;
 
 // Server-only grouped module (bridge, renderer, viewscreen_border, debug_overlay).
 #[cfg(feature = "server")]

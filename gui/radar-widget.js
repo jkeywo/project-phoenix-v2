@@ -36,6 +36,7 @@
     battleship: '#e6330d',   // dark red — large enemy
     cruiser:    '#cc4d1a',   // orange-red — medium enemy
     destroyer:  '#ff3333',   // bright red — small enemy
+    waypoint:   '#72f3ff',
   };
 
   /** Icon name → PNG filename stem (e.g. "ship" → "Icon-Ship.png"). */
@@ -390,7 +391,9 @@
       var icon = self._icons[iconName];
       var iconLoaded = icon && icon.complete && icon.naturalWidth > 0;
 
-      if (iconLoaded) {
+      if (b.kind === 'waypoint') {
+        self._drawWaypointBlip(ctx, bx, by, dotR, !!b.edge);
+      } else if (iconLoaded) {
         self._drawIconBlip(ctx, icon, bx, by, dotR, b.color);
       } else {
         // Colored circle fallback
@@ -406,6 +409,36 @@
         self._drawRing(ctx, bx, by, dotR + 7, 2, '#ff3344', true);
       }
     });
+  };
+
+  RadarWidget.prototype._drawWaypointBlip = function (ctx, bx, by, dotR, edge) {
+    var r = Math.max(7, dotR + 3);
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.strokeStyle = '#72f3ff';
+    ctx.fillStyle = edge ? 'rgba(114,243,255,0.26)' : 'rgba(114,243,255,0.42)';
+    ctx.lineWidth = edge ? 2.5 : 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r, 0);
+    ctx.lineTo(0, r);
+    ctx.lineTo(-r, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 5, 0, Math.PI * 2);
+    ctx.stroke();
+    if (edge) {
+      ctx.beginPath();
+      ctx.moveTo(0, -r - 8);
+      ctx.lineTo(4, -r - 1);
+      ctx.lineTo(-4, -r - 1);
+      ctx.closePath();
+      ctx.fillStyle = '#72f3ff';
+      ctx.fill();
+    }
+    ctx.restore();
   };
 
   // ── World-space blip rendering (Slice 5a / #447) ─────────────────────────

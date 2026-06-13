@@ -51,6 +51,14 @@ Example: Before the Fire keeps `from = "Research Outpost"` and
 Outpost channel, while the chat transcript shows Dr. Myst as the speaker for
 the relevant messages.
 
+### Delayed messages
+
+`delay_secs` works on both root `[[comms]]` messages and
+`[comms.response.follow_up]` nodes. Root/template delays are silent until the
+timer expires, so a delayed character introduction does not appear as an
+immediate `...` row. Response follow-ups still show a `...` placeholder inside
+the active thread while the reply is pending.
+
 ### Inbox list — one row per thread
 
 `sorted_threads()` groups `messages` by `effective_thread_id`, then sorts unread

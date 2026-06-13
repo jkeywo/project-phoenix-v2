@@ -121,7 +121,7 @@ pub struct ActiveDialogue {
     pub thread_id: String,
 }
 
-/// A follow-up message that is waiting for its `delay_secs` timer to expire
+/// A delayed comms message that is waiting for its `delay_secs` timer to expire
 /// before being injected into the inbox.
 #[derive(Clone, Debug)]
 pub struct PendingFollowUp {
@@ -136,9 +136,10 @@ pub struct PendingFollowUp {
     pub thread_id: String,
     /// Remaining seconds before injection.
     pub remaining_secs: f32,
-    /// The id of the `...` placeholder message currently shown in the inbox.
-    /// Replaced by the real message on expiry.
-    pub placeholder_id: String,
+    /// The id of the `...` placeholder message currently shown in the inbox,
+    /// if the delay is an in-thread response follow-up. Root/template delays
+    /// stay silent until the real message is ready.
+    pub placeholder_id: Option<String>,
     /// Whether the real message should be flagged as urgent.
     pub urgent: bool,
 }

@@ -272,7 +272,7 @@ struct RawCommsEntry {
     #[serde(default)]
     thread_id: Option<String>,
     /// Optional delay in seconds before this template's message is injected
-    /// after the trigger fires. A `...` placeholder is shown during the wait.
+    /// after the trigger fires. Root/template delays stay silent during the wait.
     #[serde(default)]
     delay_secs: Option<f32>,
     #[serde(default)]

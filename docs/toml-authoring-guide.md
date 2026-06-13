@@ -167,7 +167,7 @@ A comms template — a top-level message and a tree of player response choices.
 | `speaker` | string | none | Optional display speaker for this root message. Use when the voice on the channel is a specific character distinct from the hailed contact, e.g. `speaker = "Dr. Myst"` on a message sent via `from = "Research Outpost"`. |
 | `trigger` | `"on_hailed"` \| `"on_destroyed"` \| `"on_attacked"` | **required** | When to deliver this message. |
 | `entity` | string | depends | The named `[[entity]]` whose event triggers delivery (typically the same as `from`). |
-| `message` | string | **required** | The root message body. |
+| `message` | string | **required** | The root message body. |`n| `delay_secs` | number | `0.0` | Optional delay before the root message is delivered. Root delays are silent: no `...` placeholder or speaker reveal appears until the timer expires. |
 | `[[comms.response]]` | array | `[]` | Player response options. |
 
 #### `[[comms.response]]`
@@ -176,7 +176,7 @@ A comms template — a top-level message and a tree of player response choices.
 |---|---|---|---|
 | `text` | string | **required** | Display text on the response button. |
 | `[[comms.response.action]]` | array | `[]` | Same shape as `[[trigger.action]]`. |
-| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, speaker?, response... }` block presented after this choice. Follow-ups may set `speaker`; legacy `from` is accepted as a display-speaker alias, but new content should use `speaker`. |
+| `[comms.response.follow_up]` | table | none | Recursive: another `{ message, speaker?, delay_secs?, response... }` block presented after this choice. Follow-ups may set `speaker`; legacy `from` is accepted as a display-speaker alias, but new content should use `speaker`. If `delay_secs` is set, the thread shows a `...` placeholder while waiting. |
 
 `from` is the radio endpoint; `speaker` is the voice currently talking on that endpoint. This lets one chat thread stay anchored to a station while multiple characters speak inside it:
 

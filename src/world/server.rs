@@ -70,9 +70,9 @@ pub struct WorldContentRuntime {
     /// without duplicating the dispatch logic that lives inside
     /// `handle_ai_events`.
     pub pending_world_events: Vec<WorldEvent>,
-    /// Follow-up messages awaiting their `delay_secs` timer before injection.
-    /// Each entry holds a `...` placeholder already shown in the inbox and
-    /// the real node that replaces it once the timer expires.
+    /// Delayed comms messages awaiting their `delay_secs` timer before injection.
+    /// Response follow-ups may hold a `...` placeholder that is replaced with
+    /// the real message when ready; root/template delays stay silent.
     pub pending_follow_ups: Vec<PendingFollowUp>,
 }
 
@@ -748,29 +748,13 @@ fn handle_hail(
 
             let delay = f.node.delay_secs.unwrap_or(0.0);
             if delay > 0.0 {
-                let placeholder_id = uuid::Uuid::new_v4().to_string();
-                let placeholder = CommsMessage {
-                    id: placeholder_id.clone(),
-                    sender_uuid: sender_uuid.clone(),
-                    sender_name: sender_name.clone(),
-                    subject: "...".to_string(),
-                    body: "...".to_string(),
-                    responses: vec![],
-                    selected_response: None,
-                    is_read: false,
-                    is_orphaned: false,
-                    sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
-                    thread_id: thread_id.clone(),
-                    is_urgent: f.urgent,
-                };
-                inbox.0.inject(placeholder);
                 runtime.pending_follow_ups.push(PendingFollowUp {
                     node: f.node.clone(),
                     sender_uuid,
                     sender_name,
                     thread_id,
                     remaining_secs: delay,
-                    placeholder_id,
+                    placeholder_id: None,
                     urgent: f.urgent,
                 });
             } else {
@@ -804,8 +788,9 @@ fn handle_hail(
     }
 }
 
-/// Tick pending follow-up messages: decrement their timers each frame and, when
-/// the timer reaches zero, replace the `...` placeholder with the real message.
+/// Tick delayed comms messages: decrement their timers each frame and, when
+/// the timer reaches zero, remove any `...` placeholder and inject the real
+/// message.
 fn tick_pending_follow_ups(
     time: Res<bevy::time::Time>,
     mut runtime: ResMut<WorldContentRuntime>,
@@ -829,8 +814,9 @@ fn tick_pending_follow_ups(
     runtime.pending_follow_ups.retain(|p| p.remaining_secs > 0.0);
 
     for pfu in ready {
-        // Remove the `...` placeholder.
-        inbox.0.remove(&pfu.placeholder_id);
+        if let Some(placeholder_id) = &pfu.placeholder_id {
+            inbox.0.remove(placeholder_id);
+        }
 
         // Inject the real message.
         let new_msg_id = uuid::Uuid::new_v4().to_string();
@@ -1372,7 +1358,7 @@ fn handle_respond_to_message(
                     sender_name,
                     thread_id,
                     remaining_secs: delay,
-                    placeholder_id,
+                    placeholder_id: Some(placeholder_id),
                     urgent: false, // follow-up urgency is not a TOML-level concept
                 });
             } else {
@@ -1742,29 +1728,13 @@ fn handle_ai_events(
 
         let delay = fc.node.delay_secs.unwrap_or(0.0);
         if delay > 0.0 {
-            let placeholder_id = uuid::Uuid::new_v4().to_string();
-            let placeholder = crate::messages::CommsMessage {
-                id: placeholder_id.clone(),
-                sender_uuid: sender_uuid.clone(),
-                sender_name: sender_name.clone(),
-                subject: "...".to_string(),
-                body: "...".to_string(),
-                responses: vec![],
-                selected_response: None,
-                is_read: false,
-                is_orphaned: false,
-                sender_in_range: current_sender_in_range(&runtime, &sender_uuid),
-                thread_id: thread_id.clone(),
-                is_urgent: fc.urgent,
-            };
-            inbox.0.inject(placeholder);
             runtime.pending_follow_ups.push(PendingFollowUp {
                 node: fc.node.clone(),
                 sender_uuid,
                 sender_name,
                 thread_id,
                 remaining_secs: delay,
-                placeholder_id,
+                placeholder_id: None,
                 urgent: fc.urgent,
             });
         } else {
@@ -3314,7 +3284,7 @@ mod tests {
                 sender_name: "Dockmaster Kade".into(),
                 thread_id: "thread-delayed".into(),
                 remaining_secs: -1.0,
-                placeholder_id: "placeholder-001".into(),
+                placeholder_id: Some("placeholder-001".into()),
                 urgent: false,
             });
 
@@ -3326,6 +3296,62 @@ mod tests {
         assert_eq!(messages[0].sender_uuid, "station-uuid-delayed");
         assert_eq!(messages[0].sender_name, "Dockmaster Kade");
         assert_eq!(messages[0].thread_id, "thread-delayed");
+    }
+
+    #[test]
+    fn delayed_root_comms_template_waits_silently_until_timer_expires() {
+        use crate::world::content::{CommsDialogueNode, CommsTemplate, CommsTemplateState};
+
+        let mut app = ai_trigger_test_app();
+        app.add_systems(Update, tick_pending_follow_ups);
+
+        {
+            let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
+            runtime.name_to_uuid.insert(
+                "Research Outpost".to_string(),
+                "research-outpost-uuid".to_string(),
+            );
+            runtime.comms_template_states = vec![CommsTemplateState {
+                template: CommsTemplate {
+                    from: "Research Outpost".to_string(),
+                    trigger: TriggerCondition::OnWorldLoaded,
+                    node: CommsDialogueNode {
+                        body: "Ardent, this is Dr. Myst.".to_string(),
+                        responses: vec![],
+                        speaker: Some("Dr. Myst".to_string()),
+                        delay_secs: Some(3.0),
+                    },
+                    thread_id: Some("research-scholar".to_string()),
+                    urgent: true,
+                },
+                fired: false,
+            }];
+            runtime.pending_world_events.push(WorldEvent::WorldLoaded);
+        }
+
+        app.update();
+
+        {
+            let messages = app.world().resource::<CommsInboxRes>().0.messages();
+            assert!(
+                messages.is_empty(),
+                "delayed root comms must not reveal a placeholder immediately"
+            );
+            let runtime = app.world().resource::<WorldContentRuntime>();
+            assert_eq!(runtime.pending_follow_ups.len(), 1);
+            assert!(runtime.pending_follow_ups[0].placeholder_id.is_none());
+        }
+
+        app.world_mut().resource_mut::<WorldContentRuntime>().pending_follow_ups[0]
+            .remaining_secs = -0.1;
+        app.update();
+
+        let messages = app.world().resource::<CommsInboxRes>().0.messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].sender_name, "Dr. Myst");
+        assert_eq!(messages[0].body, "Ardent, this is Dr. Myst.");
+        assert_eq!(messages[0].thread_id, "research-scholar");
+        assert!(messages[0].is_urgent);
     }
 
     fn setup_game_with_comms_and_followup(app: &mut App, station_uuid: &str) {

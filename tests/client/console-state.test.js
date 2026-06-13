@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   entityX, entityZ, entityRadius,
   buildBlips,
+  buildWaypointBlip,
   WEAPONS_RADAR_RANGE, HELM_RADAR_RANGE, SENSORS_RADAR_RANGE,
   NAVIGATION_RADAR_RANGE,
   buildWeaponsConsoleState,
@@ -149,6 +150,26 @@ describe('buildBlips', () => {
   });
 });
 
+describe('buildWaypointBlip', () => {
+  it('returns null when waypoint is absent', () => {
+    expect(buildWaypointBlip(null, 0, 0, 0, 100)).toBeNull();
+  });
+
+  it('projects in-range waypoint without edge flag', () => {
+    const blip = buildWaypointBlip({ x: 50, z: 0 }, 0, 0, 0, 100, { rotate: true, edgeClamp: true });
+    expect(blip.kind).toBe('waypoint');
+    expect(blip.radar_x).toBeCloseTo(0.5);
+    expect(blip.radar_y).toBeCloseTo(0);
+    expect(blip.edge).toBe(false);
+  });
+
+  it('clamps out-of-range waypoint to the edge when requested', () => {
+    const blip = buildWaypointBlip({ x: 500, z: 0 }, 0, 0, 0, 100, { rotate: true, edgeClamp: true });
+    expect(Math.hypot(blip.radar_x, blip.radar_y)).toBeCloseTo(0.96);
+    expect(blip.edge).toBe(true);
+  });
+});
+
 // ── State builders — all return valid JSON ─────────────────────────────────────
 
 function parse(jsonStr) {
@@ -256,6 +277,27 @@ describe('buildHelmConsoleState', () => {
 
   it('on_screen false for other views', () => {
     expect(parse(buildHelmConsoleState({ currentView: 'Fore' })).on_screen).toBe(false);
+  });
+
+  it('includes active waypoint as a helm radar blip', () => {
+    const s = parse(buildHelmConsoleState({
+      shipX: 0, shipZ: 0, shipYaw: 0, helmRadarRange: 100,
+      navigationWaypoint: { x: 50, z: 0 },
+    }));
+    const waypoint = s.blips.find(b => b.kind === 'waypoint');
+    expect(waypoint).toBeDefined();
+    expect(waypoint.edge).toBe(false);
+    expect(s.waypoint).toEqual({ x: 50, z: 0 });
+  });
+
+  it('edge-clamps active waypoint when outside helm range', () => {
+    const s = parse(buildHelmConsoleState({
+      shipX: 0, shipZ: 0, shipYaw: 0, helmRadarRange: 100,
+      navigationWaypoint: { x: 500, z: 0 },
+    }));
+    const waypoint = s.blips.find(b => b.kind === 'waypoint');
+    expect(waypoint.edge).toBe(true);
+    expect(Math.hypot(waypoint.radar_x, waypoint.radar_y)).toBeCloseTo(0.96);
   });
 });
 
@@ -532,6 +574,15 @@ describe('buildNavigationConsoleState', () => {
 
   it('on_screen is false for other views', () => {
     expect(parse(buildNavigationConsoleState({ currentView: 'Radar' })).on_screen).toBe(false);
+  });
+
+  it('passes waypoint through and adds a waypoint blip', () => {
+    const s = parse(buildNavigationConsoleState({
+      shipX: 0, shipZ: 0,
+      navigationWaypoint: { x: 250, z: 500 },
+    }));
+    expect(s.waypoint).toEqual({ x: 250, z: 500 });
+    expect(s.blips.find(b => b.kind === 'waypoint')).toBeDefined();
   });
 
   it('blips use world-axis (north-up) projection — no ship yaw rotation', () => {

@@ -113,8 +113,17 @@ pub struct TorpedoTubeState {
     pub id: TorpedoTube,
     /// True when the tube is loaded and ready to fire.
     pub loaded: bool,
-    /// Seconds remaining on the reload timer (0.0 when loaded).
+    /// Seconds remaining on the current load/unload timer (0.0 when done).
     pub reload_secs: f32,
+    /// Load state label: "loaded" | "unloaded" | "loading" | "unloading".
+    #[serde(default)]
+    pub state: String,
+    /// Completion fraction `[0.0, 1.0]` for the current load/unload operation.
+    #[serde(default)]
+    pub progress: f32,
+    /// Tube-specific load/unload duration in seconds.
+    #[serde(default)]
+    pub load_time: f32,
 }
 
 /// Static, per-bank configuration sent to clients in `Welcome` so the
@@ -861,6 +870,14 @@ pub enum ClientMessage {
         tube: TorpedoTube,
         target_uuid: Option<String>,
     },
+    /// Manually start loading a torpedo into the specified tube.
+    LoadTube {
+        tube: TorpedoTube,
+    },
+    /// Manually unload (or cancel loading of) the specified tube.
+    UnloadTube {
+        tube: TorpedoTube,
+    },
     /// Increase power allocation for a console. Validated server-side:
     /// sender must hold `Console::Power`.
     IncreasePower {
@@ -1429,6 +1446,12 @@ pub enum UiAction {
         #[serde(default)]
         target_uuid: Option<String>,
     },
+    LoadTube {
+        tube: String,
+    },
+    UnloadTube {
+        tube: String,
+    },
     FirePhaser {
         bank: String,
     },
@@ -1528,6 +1551,8 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             tube: tube.clone(),
             target_uuid: target_uuid.clone(),
         },
+        UiAction::LoadTube { tube } => ClientMessage::LoadTube { tube: tube.clone() },
+        UiAction::UnloadTube { tube } => ClientMessage::UnloadTube { tube: tube.clone() },
         UiAction::FirePhaser { bank } => ClientMessage::FirePhaser { bank: bank.clone() },
         UiAction::ToggleRedAlert => ClientMessage::ToggleRedAlert,
         UiAction::SetView { direction } => ClientMessage::SetView {
@@ -1552,19 +1577,29 @@ pub fn ui_action_to_client_message(a: &UiAction) -> ClientMessage {
             team_idx: *team_idx,
             console: target.clone(),
         },
-        UiAction::Hail { target_uuid } => ClientMessage::Hail { target_uuid: target_uuid.clone() },
-        UiAction::SelectCommsMessage { message_id } => ClientMessage::SelectCommsMessage { message_id: message_id.clone() },
-        UiAction::RespondToMessage { message_id, response_index } => ClientMessage::RespondToMessage {
+        UiAction::Hail { target_uuid } => ClientMessage::Hail {
+            target_uuid: target_uuid.clone(),
+        },
+        UiAction::SelectCommsMessage { message_id } => ClientMessage::SelectCommsMessage {
+            message_id: message_id.clone(),
+        },
+        UiAction::RespondToMessage {
+            message_id,
+            response_index,
+        } => ClientMessage::RespondToMessage {
             message_id: message_id.clone(),
             response_index: *response_index,
         },
         UiAction::ClearComms => ClientMessage::ClearComms,
-        UiAction::ShowOnScreen { message_id } => ClientMessage::ShowOnScreen { message_id: message_id.clone() },
-        UiAction::SetNavigationChart => ClientMessage::SetView { mode: ViewMode::NavigationChart },
-        UiAction::SetNavigationWaypoint { x, z } => ClientMessage::SetNavigationWaypoint {
-            x: *x,
-            z: *z,
+        UiAction::ShowOnScreen { message_id } => ClientMessage::ShowOnScreen {
+            message_id: message_id.clone(),
         },
+        UiAction::SetNavigationChart => ClientMessage::SetView {
+            mode: ViewMode::NavigationChart,
+        },
+        UiAction::SetNavigationWaypoint { x, z } => {
+            ClientMessage::SetNavigationWaypoint { x: *x, z: *z }
+        }
         UiAction::ClearNavigationWaypoint => ClientMessage::ClearNavigationWaypoint,
     }
 }
@@ -1605,10 +1640,14 @@ mod ui_action_tests {
 
     #[test]
     fn fire_phaser_maps_to_client_message() {
-        let action = UiAction::FirePhaser { bank: "port".into() };
+        let action = UiAction::FirePhaser {
+            bank: "port".into(),
+        };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::FirePhaser { bank: "port".into() }
+            ClientMessage::FirePhaser {
+                bank: "port".into()
+            }
         );
     }
 
@@ -1676,28 +1715,59 @@ mod ui_action_tests {
 
     #[test]
     fn increase_power_maps_to_client_message() {
-        let action = UiAction::IncreasePower { target: Console::Helm };
+        let action = UiAction::IncreasePower {
+            target: Console::Helm,
+        };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::IncreasePower { console: Console::Helm }
+            ClientMessage::IncreasePower {
+                console: Console::Helm
+            }
         );
     }
 
     #[test]
     fn decrease_power_maps_to_client_message() {
-        let action = UiAction::DecreasePower { target: Console::Tactical };
+        let action = UiAction::DecreasePower {
+            target: Console::Tactical,
+        };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::DecreasePower { console: Console::Tactical }
+            ClientMessage::DecreasePower {
+                console: Console::Tactical
+            }
         );
     }
 
     #[test]
     fn dispatch_repair_team_maps_to_client_message() {
-        let action = UiAction::DispatchRepairTeam { team_idx: 1, target: Console::Power };
+        let action = UiAction::DispatchRepairTeam {
+            team_idx: 1,
+            target: Console::Power,
+        };
         assert_eq!(
             ui_action_to_client_message(&action),
-            ClientMessage::DispatchRepairTeam { team_idx: 1, console: Console::Power }
+            ClientMessage::DispatchRepairTeam {
+                team_idx: 1,
+                console: Console::Power
+            }
+        );
+    }
+
+    #[test]
+    fn set_navigation_waypoint_maps_to_client_message() {
+        let action = UiAction::SetNavigationWaypoint { x: 12.5, z: -8.0 };
+        assert_eq!(
+            ui_action_to_client_message(&action),
+            ClientMessage::SetNavigationWaypoint { x: 12.5, z: -8.0 }
+        );
+    }
+
+    #[test]
+    fn clear_navigation_waypoint_maps_to_client_message() {
+        assert_eq!(
+            ui_action_to_client_message(&UiAction::ClearNavigationWaypoint),
+            ClientMessage::ClearNavigationWaypoint
         );
     }
 }

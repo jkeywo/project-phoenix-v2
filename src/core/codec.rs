@@ -494,7 +494,7 @@ mod tests {
                     target_tags: Vec::new(),
                     threat_level: None,
                     target_description: None,
-                    }],
+                }],
                 ..Default::default()
             },
         };
@@ -521,12 +521,12 @@ mod tests {
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
-                    half_extents: None,
-                    radar_icon: None,
-                    objective_target: false,
-                    target_tags: Vec::new(),
-                    threat_level: None,
-                    target_description: None,
+                        half_extents: None,
+                        radar_icon: None,
+                        objective_target: false,
+                        target_tags: Vec::new(),
+                        threat_level: None,
+                        target_description: None,
                     },
                     EntitySnapshot {
                         uuid: "b2c3d4e5-f6a7-4890-9bcd-ef0123456789".into(),
@@ -542,12 +542,12 @@ mod tests {
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
-                    half_extents: None,
-                    radar_icon: None,
-                    objective_target: false,
-                    target_tags: Vec::new(),
-                    threat_level: None,
-                    target_description: None,
+                        half_extents: None,
+                        radar_icon: None,
+                        objective_target: false,
+                        target_tags: Vec::new(),
+                        threat_level: None,
+                        target_description: None,
                     },
                 ],
                 ..Default::default()
@@ -580,11 +580,11 @@ mod tests {
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
                         half_extents: None,
-                    radar_icon: None,
-                    objective_target: false,
-                    target_tags: Vec::new(),
-                    threat_level: None,
-                    target_description: None,
+                        radar_icon: None,
+                        objective_target: false,
+                        target_tags: Vec::new(),
+                        threat_level: None,
+                        target_description: None,
                     }],
                     ..Default::default()
                 }),
@@ -638,9 +638,30 @@ mod tests {
                 cooldown_remaining: 0.0,
             }],
             tubes: vec![
-                TorpedoTubeState { id: "fore_port".to_string(), loaded: true, reload_secs: 0.0 },
-                TorpedoTubeState { id: "fore_starboard".to_string(), loaded: true, reload_secs: 0.0 },
-                TorpedoTubeState { id: "aft".to_string(), loaded: true, reload_secs: 0.0 },
+                TorpedoTubeState {
+                    id: "fore_port".to_string(),
+                    loaded: true,
+                    reload_secs: 0.0,
+                    state: "loaded".into(),
+                    progress: 1.0,
+                    load_time: 10.0,
+                },
+                TorpedoTubeState {
+                    id: "fore_starboard".to_string(),
+                    loaded: true,
+                    reload_secs: 0.0,
+                    state: "loaded".into(),
+                    progress: 1.0,
+                    load_time: 10.0,
+                },
+                TorpedoTubeState {
+                    id: "aft".to_string(),
+                    loaded: true,
+                    reload_secs: 0.0,
+                    state: "loaded".into(),
+                    progress: 1.0,
+                    load_time: 10.0,
+                },
             ],
             torpedo_count: 10,
             phaser_mode: crate::messages::PhaserMode::Auto,
@@ -662,9 +683,30 @@ mod tests {
                 cooldown_remaining: 0.0,
             }],
             tubes: vec![
-                TorpedoTubeState { id: "fore_port".to_string(), loaded: false, reload_secs: 7.5 },
-                TorpedoTubeState { id: "fore_starboard".to_string(), loaded: true, reload_secs: 0.0 },
-                TorpedoTubeState { id: "aft".to_string(), loaded: false, reload_secs: 3.2 },
+                TorpedoTubeState {
+                    id: "fore_port".to_string(),
+                    loaded: false,
+                    reload_secs: 7.5,
+                    state: "loading".into(),
+                    progress: 0.25,
+                    load_time: 10.0,
+                },
+                TorpedoTubeState {
+                    id: "fore_starboard".to_string(),
+                    loaded: true,
+                    reload_secs: 0.0,
+                    state: "loaded".into(),
+                    progress: 1.0,
+                    load_time: 10.0,
+                },
+                TorpedoTubeState {
+                    id: "aft".to_string(),
+                    loaded: false,
+                    reload_secs: 3.2,
+                    state: "loading".into(),
+                    progress: 0.68,
+                    load_time: 10.0,
+                },
             ],
             torpedo_count: 8,
             phaser_mode: crate::messages::PhaserMode::Manual,
@@ -686,9 +728,30 @@ mod tests {
                 cooldown_remaining: 1.5,
             }],
             tubes: vec![
-                TorpedoTubeState { id: "fore_port".to_string(), loaded: false, reload_secs: 10.0 },
-                TorpedoTubeState { id: "fore_starboard".to_string(), loaded: false, reload_secs: 5.0 },
-                TorpedoTubeState { id: "aft".to_string(), loaded: false, reload_secs: 2.0 },
+                TorpedoTubeState {
+                    id: "fore_port".to_string(),
+                    loaded: false,
+                    reload_secs: 10.0,
+                    state: "loading".into(),
+                    progress: 0.0,
+                    load_time: 10.0,
+                },
+                TorpedoTubeState {
+                    id: "fore_starboard".to_string(),
+                    loaded: false,
+                    reload_secs: 5.0,
+                    state: "loading".into(),
+                    progress: 0.5,
+                    load_time: 10.0,
+                },
+                TorpedoTubeState {
+                    id: "aft".to_string(),
+                    loaded: false,
+                    reload_secs: 2.0,
+                    state: "loading".into(),
+                    progress: 0.8,
+                    load_time: 10.0,
+                },
             ],
             torpedo_count: 0,
             phaser_mode: crate::messages::PhaserMode::Manual,
@@ -699,7 +762,9 @@ mod tests {
 
     #[test]
     fn client_fire_phaser_round_trips() {
-        let msg = ClientMessage::FirePhaser { bank: "port".to_string() };
+        let msg = ClientMessage::FirePhaser {
+            bank: "port".to_string(),
+        };
         assert_client_roundtrip(&JsonCodec, msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, msg);
     }
@@ -1359,7 +1424,7 @@ mod tests {
                     target_tags: Vec::new(),
                     threat_level: None,
                     target_description: None,
-                    }],
+                }],
                 ..Default::default()
             },
         };
@@ -1391,7 +1456,7 @@ mod tests {
                     target_tags: Vec::new(),
                     threat_level: None,
                     target_description: None,
-                    }],
+                }],
                 ..Default::default()
             },
         };
@@ -1423,7 +1488,7 @@ mod tests {
                     target_tags: Vec::new(),
                     threat_level: None,
                     target_description: None,
-                    }],
+                }],
                 ..Default::default()
             },
         };
@@ -1455,7 +1520,7 @@ mod tests {
                     target_tags: Vec::new(),
                     threat_level: None,
                     target_description: None,
-                    }],
+                }],
                 ..Default::default()
             },
         };
@@ -1487,7 +1552,7 @@ mod tests {
                     target_tags: Vec::new(),
                     threat_level: None,
                     target_description: None,
-                    }],
+                }],
                 ..Default::default()
             },
         };
@@ -1518,12 +1583,12 @@ mod tests {
                         inner_radius: None,
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
-                    half_extents: None,
-                    radar_icon: None,
-                    objective_target: false,
-                    target_tags: Vec::new(),
-                    threat_level: None,
-                    target_description: None,
+                        half_extents: None,
+                        radar_icon: None,
+                        objective_target: false,
+                        target_tags: Vec::new(),
+                        threat_level: None,
+                        target_description: None,
                     },
                     EntitySnapshot {
                         uuid: "field-1".into(),
@@ -1539,12 +1604,12 @@ mod tests {
                         inner_radius: Some(10.0),
                         warp_out_remaining_secs: None,
                         radar_world_size: None,
-                    half_extents: None,
-                    radar_icon: None,
-                    objective_target: false,
-                    target_tags: Vec::new(),
-                    threat_level: None,
-                    target_description: None,
+                        half_extents: None,
+                        radar_icon: None,
+                        objective_target: false,
+                        target_tags: Vec::new(),
+                        threat_level: None,
+                        target_description: None,
                     },
                 ],
                 ..Default::default()
@@ -1763,11 +1828,11 @@ mod tests {
                 warp_out_remaining_secs: None,
                 radar_world_size: None,
                 half_extents: None,
-            radar_icon: None,
-            objective_target: false,
-            target_tags: Vec::new(),
-            threat_level: None,
-            target_description: None,
+                radar_icon: None,
+                objective_target: false,
+                target_tags: Vec::new(),
+                threat_level: None,
+                target_description: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -1792,11 +1857,11 @@ mod tests {
                 warp_out_remaining_secs: None,
                 radar_world_size: None,
                 half_extents: None,
-            radar_icon: None,
-            objective_target: false,
-            target_tags: Vec::new(),
-            threat_level: None,
-            target_description: None,
+                radar_icon: None,
+                objective_target: false,
+                target_tags: Vec::new(),
+                threat_level: None,
+                target_description: None,
             },
         };
         assert_server_roundtrip(&JsonCodec, msg.clone());
@@ -2090,21 +2155,30 @@ mod tests {
     fn comms_contact_missing_in_range_defaults_to_true() {
         let json = r#"{"uuid":"x","name":"X"}"#;
         let contact: crate::messages::CommsContact = serde_json::from_str(json).unwrap();
-        assert!(contact.in_range, "in_range should default to true for backward compat");
+        assert!(
+            contact.in_range,
+            "in_range should default to true for backward compat"
+        );
     }
 
     #[test]
     fn comms_message_missing_sender_in_range_defaults_to_true() {
         let json = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false}"#;
         let msg: crate::messages::CommsMessage = serde_json::from_str(json).unwrap();
-        assert!(msg.sender_in_range, "sender_in_range should default to true for backward compat");
+        assert!(
+            msg.sender_in_range,
+            "sender_in_range should default to true for backward compat"
+        );
     }
 
     #[test]
     fn comms_message_missing_thread_id_defaults_to_empty() {
         let json = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false}"#;
         let msg: crate::messages::CommsMessage = serde_json::from_str(json).unwrap();
-        assert!(msg.thread_id.is_empty(), "thread_id should default to empty string for backward compat");
+        assert!(
+            msg.thread_id.is_empty(),
+            "thread_id should default to empty string for backward compat"
+        );
     }
 
     #[test]
@@ -2122,9 +2196,14 @@ mod tests {
         }"#;
         let msg = JsonCodec.decode_server(json).expect("decode");
         match msg {
-            ServerMessage::CommsState { messages, contacts, .. } => {
+            ServerMessage::CommsState {
+                messages, contacts, ..
+            } => {
                 assert_eq!(messages.len(), 1);
-                assert!(messages[0].sender_in_range, "sender_in_range must default to true");
+                assert!(
+                    messages[0].sender_in_range,
+                    "sender_in_range must default to true"
+                );
                 assert_eq!(contacts.len(), 1);
                 assert!(contacts[0].in_range, "in_range must default to true");
             }
@@ -2259,7 +2338,8 @@ mod tests {
     fn decode_ui_action_fire_torpedo_envelope() {
         // Full envelope as produced by window.__sendAction; the extra
         // `console` field is ignored by serde.
-        let json = r#"{"action":"fire_torpedo","console":"Tactical","tube":"fore","target_uuid":null}"#;
+        let json =
+            r#"{"action":"fire_torpedo","console":"Tactical","tube":"fore","target_uuid":null}"#;
         let action = decode_ui_action(json).expect("decode fire_torpedo");
         assert_eq!(
             action,
@@ -2301,7 +2381,12 @@ mod tests {
     fn decode_ui_action_fire_phaser_envelope() {
         let json = r#"{"action":"fire_phaser","console":"Tactical","bank":"port"}"#;
         let action = decode_ui_action(json).expect("decode fire_phaser");
-        assert_eq!(action, UiAction::FirePhaser { bank: "port".into() });
+        assert_eq!(
+            action,
+            UiAction::FirePhaser {
+                bank: "port".into()
+            }
+        );
     }
 
     #[test]
@@ -2363,6 +2448,9 @@ mod tests {
                 id: "fore".into(),
                 loaded: true,
                 reload_secs: 0.0,
+                state: "loaded".into(),
+                progress: 1.0,
+                load_time: 10.0,
             }],
             torpedo_count: 6,
             phaser_mode: PhaserMode::Auto,
@@ -2394,7 +2482,10 @@ mod tests {
         };
         let json = encode_console_state(&state).expect("encode captain console");
         // Verify field names match what the HTML JS reads.
-        assert!(json.contains("\"view_direction\":\"Starboard\""), "got: {json}");
+        assert!(
+            json.contains("\"view_direction\":\"Starboard\""),
+            "got: {json}"
+        );
         assert!(json.contains("\"red_alert\":true"), "got: {json}");
         assert!(json.contains("\"hull_integrity_pct\":87.5"), "got: {json}");
         let decoded: CaptainConsoleState = serde_json::from_str(&json).unwrap();
@@ -2481,21 +2572,38 @@ mod tests {
     fn decode_ui_action_increase_power() {
         let json = r#"{"action":"increase_power","console":"Power","target":"Helm"}"#;
         let action = decode_ui_action(json).expect("decode increase_power");
-        assert_eq!(action, UiAction::IncreasePower { target: Console::Helm });
+        assert_eq!(
+            action,
+            UiAction::IncreasePower {
+                target: Console::Helm
+            }
+        );
     }
 
     #[test]
     fn decode_ui_action_decrease_power() {
         let json = r#"{"action":"decrease_power","console":"Power","target":"Tactical"}"#;
         let action = decode_ui_action(json).expect("decode decrease_power");
-        assert_eq!(action, UiAction::DecreasePower { target: Console::Tactical });
+        assert_eq!(
+            action,
+            UiAction::DecreasePower {
+                target: Console::Tactical
+            }
+        );
     }
 
     #[test]
     fn decode_ui_action_dispatch_repair_team() {
-        let json = r#"{"action":"dispatch_repair_team","console":"Repair","team_idx":1,"target":"Helm"}"#;
+        let json =
+            r#"{"action":"dispatch_repair_team","console":"Repair","team_idx":1,"target":"Helm"}"#;
         let action = decode_ui_action(json).expect("decode dispatch_repair_team");
-        assert_eq!(action, UiAction::DispatchRepairTeam { team_idx: 1, target: Console::Helm });
+        assert_eq!(
+            action,
+            UiAction::DispatchRepairTeam {
+                team_idx: 1,
+                target: Console::Helm
+            }
+        );
     }
 
     #[test]
@@ -2503,9 +2611,24 @@ mod tests {
         use crate::messages::{PowerConsoleEntry, PowerConsoleState};
         let state = PowerConsoleState {
             consoles: vec![
-                PowerConsoleEntry { id: "Helm".into(),     label: "HELM".into(),    level: 3, max_level: 4 },
-                PowerConsoleEntry { id: "Tactical".into(), label: "WEAPONS".into(), level: 2, max_level: 4 },
-                PowerConsoleEntry { id: "Sensors".into(),  label: "SENSORS".into(), level: 2, max_level: 4 },
+                PowerConsoleEntry {
+                    id: "Helm".into(),
+                    label: "HELM".into(),
+                    level: 3,
+                    max_level: 4,
+                },
+                PowerConsoleEntry {
+                    id: "Tactical".into(),
+                    label: "WEAPONS".into(),
+                    level: 2,
+                    max_level: 4,
+                },
+                PowerConsoleEntry {
+                    id: "Sensors".into(),
+                    label: "SENSORS".into(),
+                    level: 2,
+                    max_level: 4,
+                },
             ],
             total: 7,
             total_max: 8,
@@ -2523,9 +2646,24 @@ mod tests {
         use crate::messages::{PowerConsoleEntry, PowerConsoleState};
         let state = PowerConsoleState {
             consoles: vec![
-                PowerConsoleEntry { id: "Helm".into(),     label: "HELM".into(),    level: 1, max_level: 4 },
-                PowerConsoleEntry { id: "Tactical".into(), label: "WEAPONS".into(), level: 1, max_level: 4 },
-                PowerConsoleEntry { id: "Sensors".into(),  label: "SENSORS".into(), level: 1, max_level: 4 },
+                PowerConsoleEntry {
+                    id: "Helm".into(),
+                    label: "HELM".into(),
+                    level: 1,
+                    max_level: 4,
+                },
+                PowerConsoleEntry {
+                    id: "Tactical".into(),
+                    label: "WEAPONS".into(),
+                    level: 1,
+                    max_level: 4,
+                },
+                PowerConsoleEntry {
+                    id: "Sensors".into(),
+                    label: "SENSORS".into(),
+                    level: 1,
+                    max_level: 4,
+                },
             ],
             total: 3,
             total_max: 8,
@@ -2544,11 +2682,22 @@ mod tests {
         let state = RepairConsoleState {
             teams: vec![
                 TeamSlot::Idle,
-                TeamSlot::Travelling { console: Console::Helm, elapsed: 1.5 },
+                TeamSlot::Travelling {
+                    console: Console::Helm,
+                    elapsed: 1.5,
+                },
             ],
             console_hull: vec![
-                ConsoleHullStatus { console: Console::Helm,     current: 20.0, max_hp: 25.0 },
-                ConsoleHullStatus { console: Console::Tactical, current: 25.0, max_hp: 25.0 },
+                ConsoleHullStatus {
+                    console: Console::Helm,
+                    current: 20.0,
+                    max_hp: 25.0,
+                },
+                ConsoleHullStatus {
+                    console: Console::Tactical,
+                    current: 25.0,
+                    max_hp: 25.0,
+                },
             ],
             travel_duration_secs: 5.0,
             damageable_consoles: vec![Console::Helm, Console::Tactical],
@@ -2564,12 +2713,19 @@ mod tests {
         let state = RepairConsoleState {
             teams: vec![
                 TeamSlot::Idle,
-                TeamSlot::Travelling { console: Console::Helm, elapsed: 2.0 },
-                TeamSlot::Repairing  { console: Console::Tactical },
-                TeamSlot::Returning  { remaining: 3.0, queued: Some(Console::Power) },
+                TeamSlot::Travelling {
+                    console: Console::Helm,
+                    elapsed: 2.0,
+                },
+                TeamSlot::Repairing {
+                    console: Console::Tactical,
+                },
+                TeamSlot::Returning {
+                    remaining: 3.0,
+                    queued: Some(Console::Power),
+                },
             ],
             console_hull: vec![],
-                navigation_waypoint: None,
             travel_duration_secs: 5.0,
             damageable_consoles: vec![Console::Helm, Console::Tactical, Console::Power],
         };
@@ -2583,10 +2739,38 @@ mod tests {
         use crate::messages::{ShieldFacingStatus, ShieldsConsoleState};
         let state = ShieldsConsoleState {
             facings: vec![
-                ShieldFacingStatus { label: "Fore".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: true },
-                ShieldFacingStatus { label: "Port".into(), hp: 72, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
-                ShieldFacingStatus { label: "Aft".into(), hp: 0, max_hp: 100, online: false, offline_remaining: 8.0, is_focused: false },
-                ShieldFacingStatus { label: "Starboard".into(), hp: 88, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: false },
+                ShieldFacingStatus {
+                    label: "Fore".into(),
+                    hp: 100,
+                    max_hp: 100,
+                    online: true,
+                    offline_remaining: 0.0,
+                    is_focused: true,
+                },
+                ShieldFacingStatus {
+                    label: "Port".into(),
+                    hp: 72,
+                    max_hp: 100,
+                    online: true,
+                    offline_remaining: 0.0,
+                    is_focused: false,
+                },
+                ShieldFacingStatus {
+                    label: "Aft".into(),
+                    hp: 0,
+                    max_hp: 100,
+                    online: false,
+                    offline_remaining: 8.0,
+                    is_focused: false,
+                },
+                ShieldFacingStatus {
+                    label: "Starboard".into(),
+                    hp: 88,
+                    max_hp: 100,
+                    online: true,
+                    offline_remaining: 0.0,
+                    is_focused: false,
+                },
             ],
             hull_integrity_pct: 78.0,
             focused_facing: Some("Fore".into()),
@@ -2617,9 +2801,14 @@ mod tests {
     fn shields_console_state_json_field_names() {
         use crate::messages::{ShieldFacingStatus, ShieldsConsoleState};
         let state = ShieldsConsoleState {
-            facings: vec![
-                ShieldFacingStatus { label: "Fore".into(), hp: 100, max_hp: 100, online: true, offline_remaining: 0.0, is_focused: true },
-            ],
+            facings: vec![ShieldFacingStatus {
+                label: "Fore".into(),
+                hp: 100,
+                max_hp: 100,
+                online: true,
+                offline_remaining: 0.0,
+                is_focused: true,
+            }],
             hull_integrity_pct: 100.0,
             focused_facing: Some("Fore".into()),
             grid_status: "GRID NOMINAL".into(),

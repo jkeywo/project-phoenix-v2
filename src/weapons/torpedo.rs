@@ -114,6 +114,37 @@ impl Torpedo {
 
 // ── Torpedo tube ───────────────────────────────────────────────────────────
 
+/// Load state for a single torpedo tube.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TubeLoadState {
+    Unloaded,
+    Loading { remaining: f32, total: f32 },
+    Loaded,
+    Unloading { remaining: f32, total: f32 },
+}
+
+impl TubeLoadState {
+    /// Completion fraction in `[0.0, 1.0]`: 0 = just started, 1 = done.
+    pub fn progress(&self) -> f32 {
+        match self {
+            TubeLoadState::Unloaded => 0.0,
+            TubeLoadState::Loaded => 1.0,
+            TubeLoadState::Loading { remaining, total } | TubeLoadState::Unloading { remaining, total } => {
+                if *total <= 0.0 { 1.0 } else { 1.0 - remaining / total }
+            }
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            TubeLoadState::Unloaded => "unloaded",
+            TubeLoadState::Loading { .. } => "loading",
+            TubeLoadState::Loaded => "loaded",
+            TubeLoadState::Unloading { .. } => "unloading",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TorpedoTube {
     /// Tube identifier from TOML (e.g. `"fore_port"`, `"aft"`).
@@ -122,21 +153,56 @@ pub struct TorpedoTube {
     pub facing_deg: f32,
     /// Total fire-arc width in degrees.
     pub fire_arc_deg: f32,
-    /// Seconds remaining until this tube is ready again. 0.0 = loaded.
-    pub reload_remaining: f32,
+    /// Current load state (loaded, unloaded, or transitioning).
+    pub load_state: TubeLoadState,
+    /// Seconds to load or unload this tube.
+    pub load_time: f32,
 }
 
 impl TorpedoTube {
     pub fn is_loaded(&self) -> bool {
-        self.reload_remaining <= 0.0
+        self.load_state == TubeLoadState::Loaded
     }
 
     pub fn tick(&mut self, dt: f32) {
-        self.reload_remaining = (self.reload_remaining - dt).max(0.0);
+        self.load_state = match self.load_state.clone() {
+            TubeLoadState::Loading { remaining, total } => {
+                let r = (remaining - dt).max(0.0);
+                if r <= 0.0 { TubeLoadState::Loaded } else { TubeLoadState::Loading { remaining: r, total } }
+            }
+            TubeLoadState::Unloading { remaining, total } => {
+                let r = (remaining - dt).max(0.0);
+                if r <= 0.0 { TubeLoadState::Unloaded } else { TubeLoadState::Unloading { remaining: r, total } }
+            }
+            other => other,
+        };
     }
 
+    /// Start loading from the Unloaded state (manual load).
+    pub fn start_load(&mut self) {
+        if self.load_state == TubeLoadState::Unloaded {
+            let t = self.load_time;
+            self.load_state = TubeLoadState::Loading { remaining: t, total: t };
+        }
+    }
+
+    /// Start unloading: from Loaded → Unloading; cancel an in-progress load → Unloaded.
+    pub fn start_unload(&mut self) {
+        match &self.load_state {
+            TubeLoadState::Loaded => {
+                let t = self.load_time;
+                self.load_state = TubeLoadState::Unloading { remaining: t, total: t };
+            }
+            TubeLoadState::Loading { .. } => {
+                self.load_state = TubeLoadState::Unloaded;
+            }
+            _ => {}
+        }
+    }
+
+    /// Start a post-fire reload (goes from Loaded → Loading with the given time).
     pub fn start_reload(&mut self, load_time: f32) {
-        self.reload_remaining = load_time;
+        self.load_state = TubeLoadState::Loading { remaining: load_time, total: load_time };
     }
 
     /// True if `bearing_rad` (radians from ship-forward, +right = positive)
@@ -177,10 +243,29 @@ impl TorpedoSystem {
     /// Production code should use [`Self::from_configs`].
     pub fn new(config: TorpedoConfig) -> Self {
         let count = config.count;
+        let load_time = config.load_time;
         let tubes = vec![
-            TorpedoTube { id: "fore_port".to_string(), facing_deg: -30.0, fire_arc_deg: 90.0, reload_remaining: 0.0 },
-            TorpedoTube { id: "fore_starboard".to_string(), facing_deg: 30.0, fire_arc_deg: 90.0, reload_remaining: 0.0 },
-            TorpedoTube { id: "aft".to_string(), facing_deg: 180.0, fire_arc_deg: 90.0, reload_remaining: 0.0 },
+            TorpedoTube {
+                id: "fore_port".to_string(),
+                facing_deg: -30.0,
+                fire_arc_deg: 90.0,
+                load_state: TubeLoadState::Loaded,
+                load_time,
+            },
+            TorpedoTube {
+                id: "fore_starboard".to_string(),
+                facing_deg: 30.0,
+                fire_arc_deg: 90.0,
+                load_state: TubeLoadState::Loaded,
+                load_time,
+            },
+            TorpedoTube {
+                id: "aft".to_string(),
+                facing_deg: 180.0,
+                fire_arc_deg: 90.0,
+                load_state: TubeLoadState::Loaded,
+                load_time,
+            },
         ];
         Self {
             tubes,
@@ -195,13 +280,15 @@ impl TorpedoSystem {
         tubes: &[crate::entities::config::TorpedoTubeConfig],
         config: TorpedoConfig,
     ) -> Self {
+        let global_load_time = config.load_time;
         let tubes = tubes
             .iter()
             .map(|c| TorpedoTube {
                 id: c.id.clone(),
                 facing_deg: c.facing_deg,
                 fire_arc_deg: c.fire_arc_deg,
-                reload_remaining: 0.0,
+                load_state: TubeLoadState::Loaded,
+                load_time: c.load_time.unwrap_or(global_load_time),
             })
             .collect();
         let count = config.count;
@@ -234,7 +321,6 @@ impl TorpedoSystem {
         if self.torpedoes_remaining == 0 {
             return LaunchResult::NoTorpedoes;
         }
-        let load_time = self.config.load_time;
         let lifespan = self.config.lifespan;
         let Some(tube) = self.tube_mut(tube_id) else {
             return LaunchResult::UnknownTube;
@@ -242,7 +328,8 @@ impl TorpedoSystem {
         if !tube.is_loaded() {
             return LaunchResult::TubeNotLoaded;
         }
-        tube.start_reload(load_time);
+        let tube_load_time = tube.load_time;
+        tube.start_reload(tube_load_time);
         self.torpedoes_remaining -= 1;
         let shield_pierce = self.config.shield_pierce;
         self.in_flight.push(Torpedo {
@@ -284,7 +371,8 @@ impl TorpedoSystem {
     }
 
     pub fn handle_collision(&mut self, torpedo_uuid: &str) -> Option<i32> {
-        self.handle_collision_full(torpedo_uuid).map(|d| d.damage_hull)
+        self.handle_collision_full(torpedo_uuid)
+            .map(|d| d.damage_hull)
     }
 
     /// Full detonation payload: hull damage, shield damage, and the firing
@@ -388,6 +476,7 @@ mod tests {
             id: id.into(),
             facing_deg,
             fire_arc_deg,
+            load_time: None,
         }
     }
 
@@ -490,7 +579,15 @@ mod tests {
     #[test]
     fn torpedo_homes_toward_target() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()), None);
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            Some("enemy".into()),
+            None,
+        );
         let mut targets = HashMap::new();
         targets.insert("enemy".into(), (20.0_f32, 0.0_f32));
         let h0 = sys.in_flight[0].heading;
@@ -504,7 +601,15 @@ mod tests {
         config.turn_rate = PI / 4.0;
         let tubes = vec![cfg("fore_port", -30.0, 90.0)];
         let mut sys = TorpedoSystem::from_configs(&tubes, config);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()), None);
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            Some("enemy".into()),
+            None,
+        );
         let mut targets = HashMap::new();
         targets.insert("enemy".into(), (20.0_f32, 0.0_f32));
         sys.tick(1.0, &targets);
@@ -514,7 +619,15 @@ mod tests {
     #[test]
     fn torpedo_flies_straight_when_target_destroyed() {
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("enemy".into()), None);
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            Some("enemy".into()),
+            None,
+        );
         let targets: HashMap<String, (f32, f32)> = HashMap::new();
         let h0 = sys.in_flight[0].heading;
         sys.tick(0.5, &targets);
@@ -528,7 +641,15 @@ mod tests {
         // keep homing toward "target-a", never re-routing to "target-b", and
         // its stored target_uuid must remain "target-a" throughout.
         let mut sys = default_system();
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, Some("target-a".into()), None);
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            Some("target-a".into()),
+            None,
+        );
         let mut targets = HashMap::new();
         targets.insert("target-a".into(), (100.0_f32, 0.0_f32)); // hard right
         targets.insert("target-b".into(), (0.0_f32, -100.0_f32)); // straight ahead
@@ -537,7 +658,10 @@ mod tests {
         sys.tick(0.1, &targets);
 
         // The torpedo must have turned right (toward target-a), not stayed straight.
-        assert!(sys.in_flight[0].heading > h0, "should home toward target-a (rightward turn)");
+        assert!(
+            sys.in_flight[0].heading > h0,
+            "should home toward target-a (rightward turn)"
+        );
         // The stored target_uuid is still "target-a".
         assert_eq!(
             sys.in_flight[0].target_uuid.as_deref(),
@@ -668,7 +792,15 @@ mod tests {
     fn find_detonation_hits_detonates_unlocked_torpedo_on_contact() {
         // Bug repro: shot without a target lock should still explode.
         let mut sys = detonation_system(5.0);
-        sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, /*target_uuid*/ None, /*source_uuid*/ None);
+        sys.launch(
+            "fore_port",
+            "t1".into(),
+            0.0,
+            0.0,
+            0.0,
+            /*target_uuid*/ None,
+            /*source_uuid*/ None,
+        );
         let targets = vec![("raider".to_string(), 0.0, -3.0, 1.0)];
         let hits = sys.find_detonation_hits(&targets);
         assert_eq!(hits, vec![("t1".to_string(), "raider".to_string())]);
@@ -691,7 +823,7 @@ mod tests {
             shield_pierce: 0.0,
         });
         let targets = vec![
-            ("a".to_string(), 1.0, 0.0, 0.0), // close to t1
+            ("a".to_string(), 1.0, 0.0, 0.0),     // close to t1
             ("b".to_string(), 101.0, 100.0, 0.0), // close to t2
         ];
         let hits = sys.find_detonation_hits(&targets);

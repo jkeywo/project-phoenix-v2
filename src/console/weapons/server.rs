@@ -1,18 +1,20 @@
 use bevy::prelude::*;
 
+use crate::ai_plugin::{AiControllerComponent, AiTokenRegistry, EntityPhaserState};
 use crate::codec;
 use crate::console_bridge::ConsoleStateChanged;
-use crate::lobby::{InboundMessage, Target, Sessions, WorldResource};
+use crate::entity_spawner::EntityConsoleHull;
+use crate::lobby::{InboundMessage, Sessions, Target, WorldResource};
 use crate::messages::{
     ClientMessage, Console, GamePhase, ModifierSlot, PhaserBank, PhaserBankClientConfig,
     PhaserBankState, RadarBlip, RadarRegion, ServerMessage, TorpedoTubeClientConfig,
     TorpedoTubeState, WeaponsConsoleState,
 };
-use crate::simulation::{AsteroidUuid, GameOverReason, Ship, ShipHullIntegrity, ShipShields, SimOutbox};
-use crate::entity_spawner::EntityConsoleHull;
-use crate::torpedo::{TorpedoSystem, TorpedoConfig};
-use crate::ai_plugin::{AiTokenRegistry, AiControllerComponent, EntityPhaserState};
 use crate::ship_state::ShipState;
+use crate::simulation::{
+    AsteroidUuid, GameOverReason, Ship, ShipHullIntegrity, ShipShields, SimOutbox,
+};
+use crate::torpedo::{TorpedoConfig, TorpedoSystem};
 
 // ── Beam constants ───────────────────────────────────────────────────────
 //
@@ -61,7 +63,8 @@ impl PhaserCooldown {
     }
 
     pub fn start_bank(&mut self, bank: &str, config: &crate::entity_config::PhaserCombatConfig) {
-        self.per_bank.insert(bank.to_string(), config.beam_cooldown_secs);
+        self.per_bank
+            .insert(bank.to_string(), config.beam_cooldown_secs);
     }
 
     pub fn start_bank_with_cooldown(&mut self, bank: &str, secs: f32) {
@@ -148,12 +151,18 @@ fn on_beam_started(
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
 ) {
     let ev = trigger.event();
-    let source_uuid = player_ship_q.single().map(|u| u.0.clone()).unwrap_or_default();
-    outbox.0.push((Target::All, ServerMessage::BeamStarted {
-        bank: ev.bank.clone(),
-        source_uuid,
-        target_uuid: ev.target_uuid.clone(),
-    }));
+    let source_uuid = player_ship_q
+        .single()
+        .map(|u| u.0.clone())
+        .unwrap_or_default();
+    outbox.0.push((
+        Target::All,
+        ServerMessage::BeamStarted {
+            bank: ev.bank.clone(),
+            source_uuid,
+            target_uuid: ev.target_uuid.clone(),
+        },
+    ));
 }
 
 fn on_beam_ended(
@@ -162,12 +171,18 @@ fn on_beam_ended(
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
 ) {
     let ev = trigger.event();
-    let source_uuid = player_ship_q.single().map(|u| u.0.clone()).unwrap_or_default();
-    outbox.0.push((Target::All, ServerMessage::BeamEnded {
-        bank: ev.bank.clone(),
-        source_uuid,
-        target_uuid: ev.target_uuid.clone(),
-    }));
+    let source_uuid = player_ship_q
+        .single()
+        .map(|u| u.0.clone())
+        .unwrap_or_default();
+    outbox.0.push((
+        Target::All,
+        ServerMessage::BeamEnded {
+            bank: ev.bank.clone(),
+            source_uuid,
+            target_uuid: ev.target_uuid.clone(),
+        },
+    ));
 }
 
 // ── Plugin ─────────────────────────────────────────────────────────────────
@@ -182,28 +197,42 @@ impl Plugin for WeaponsPlugin {
             .init_resource::<CurrentPhaserMode>()
             .init_resource::<PhaserRenderConfig>()
             .init_resource::<PhaserCombatConfigResource>()
-            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
+            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
+                TorpedoConfig::default(),
+            )))
             .add_message::<AsteroidDestroyedVfx>()
             .add_message::<ConsoleStateChanged>()
             .add_observer(on_beam_started)
             .add_observer(on_beam_ended)
             .add_systems(Startup, spawn_weapons_console_state_entity)
-            .add_systems(Update, (
-                handle_set_target.in_set(crate::sim_sets::SimSet::Input),
-                handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
-                handle_fire_phaser_npc.in_set(crate::sim_sets::SimSet::Damage),
-                handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
-                handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
-                handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Input),
-            ))
-            .add_systems(Update, (
-                tick_active_beam.in_set(crate::sim_sets::SimSet::Physics),
-                tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
-            ))
-            .add_systems(Update, (
-                recompute_weapons_console_state,
-                push_weapons_console_state.after(recompute_weapons_console_state),
-            ).run_if(in_state(GamePhase::InProgress)));
+            .add_systems(
+                Update,
+                (
+                    handle_set_target.in_set(crate::sim_sets::SimSet::Input),
+                    handle_fire_phaser.in_set(crate::sim_sets::SimSet::Input),
+                    handle_fire_phaser_npc.in_set(crate::sim_sets::SimSet::Damage),
+                    handle_set_phaser_mode.in_set(crate::sim_sets::SimSet::Input),
+                    handle_set_phaser_frequency.in_set(crate::sim_sets::SimSet::Input),
+                    handle_fire_torpedo.in_set(crate::sim_sets::SimSet::Input),
+                    handle_load_tube.in_set(crate::sim_sets::SimSet::Input),
+                    handle_unload_tube.in_set(crate::sim_sets::SimSet::Input),
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    tick_active_beam.in_set(crate::sim_sets::SimSet::Physics),
+                    tick_torpedo_system.in_set(crate::sim_sets::SimSet::Physics),
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    recompute_weapons_console_state,
+                    push_weapons_console_state.after(recompute_weapons_console_state),
+                )
+                    .run_if(in_state(GamePhase::InProgress)),
+            );
     }
 }
 
@@ -247,7 +276,9 @@ fn handle_set_target(
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     for ev in reader.read() {
-        let ClientMessage::SetTarget { uuid } = &ev.msg else { continue };
+        let ClientMessage::SetTarget { uuid } = &ev.msg else {
+            continue;
+        };
 
         let holder = sessions.0.console_holder(Console::Tactical);
         if holder != Some(ev.token.as_str()) {
@@ -272,7 +303,13 @@ fn handle_set_target(
             weapons_target.0 = None;
         }
 
-        outbox.0.push((Target::Token(ev.token.clone()), ServerMessage::TargetLock { uuid: uuid.clone(), locked }));
+        outbox.0.push((
+            Target::Token(ev.token.clone()),
+            ServerMessage::TargetLock {
+                uuid: uuid.clone(),
+                locked,
+            },
+        ));
     }
 }
 
@@ -312,21 +349,50 @@ fn handle_fire_phaser(
         if cooldown.is_bank_active(bank) || beam.target_uuid.is_some() {
             continue;
         }
-        let Some(target_uuid) = &weapons_target.0 else { continue };
+        let Some(target_uuid) = &weapons_target.0 else {
+            continue;
+        };
         let Some((tx, tz)) = live_entity_xz(target_uuid, &asteroid_q, &entity_q) else {
             continue;
         };
         let bank_in_arc = if combat_config.0.banks.is_empty() {
-            let effective_phaser_range = combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
-            crate::radar::is_fire_ready_with_range(tx, tz, ship.x, ship.z, ship.yaw, effective_phaser_range)
+            let effective_phaser_range =
+                combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
+            crate::radar::is_fire_ready_with_range(
+                tx,
+                tz,
+                ship.x,
+                ship.z,
+                ship.yaw,
+                effective_phaser_range,
+            )
         } else {
-            combat_config.0.banks.iter().find(|b| b.id == *bank).map(|bank_cfg| {
-                let bank_base_range = if bank_cfg.beam_range > 0.0 { bank_cfg.beam_range } else { combat_config.0.phaser_range };
-                let effective_bank_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-                let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
-                let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2) <= effective_bank_range * effective_bank_range;
-                range_ok && crate::weapons::phaser::in_arc(rx, ry, bank_cfg.facing_deg, bank_cfg.fire_arc_deg)
-            }).unwrap_or(false)
+            combat_config
+                .0
+                .banks
+                .iter()
+                .find(|b| b.id == *bank)
+                .map(|bank_cfg| {
+                    let bank_base_range = if bank_cfg.beam_range > 0.0 {
+                        bank_cfg.beam_range
+                    } else {
+                        combat_config.0.phaser_range
+                    };
+                    let effective_bank_range =
+                        bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
+                    let (rx, ry) =
+                        crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
+                    let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
+                        <= effective_bank_range * effective_bank_range;
+                    range_ok
+                        && crate::weapons::phaser::in_arc(
+                            rx,
+                            ry,
+                            bank_cfg.facing_deg,
+                            bank_cfg.fire_arc_deg,
+                        )
+                })
+                .unwrap_or(false)
         };
         if !bank_in_arc {
             continue;
@@ -336,7 +402,10 @@ fn handle_fire_phaser(
             let old_bank = beam.bank.clone().unwrap_or_default();
             beam.remaining_secs = 0.0;
             beam.damage_accumulator = 0.0;
-            commands.trigger(BeamEndedEvent { bank: old_bank, target_uuid: old_uuid });
+            commands.trigger(BeamEndedEvent {
+                bank: old_bank,
+                target_uuid: old_uuid,
+            });
         }
 
         beam.target_uuid = Some(target_uuid.clone());
@@ -367,16 +436,24 @@ fn handle_fire_phaser_npc(
     mut commands: Commands,
     registry: Option<Res<AiTokenRegistry>>,
     mut inbound: MessageReader<InboundMessage>,
-    mut npc_query: Query<(
-        Entity,
-        &crate::entity_spawner::EntityUuid,
-        &Transform,
-        Option<&mut EntityPhaserState>,
-        Option<&crate::entity_spawner::WeaponsConsoleSection>,
-        Option<&AiControllerComponent>,
-    ), With<AiControllerComponent>>,
+    mut npc_query: Query<
+        (
+            Entity,
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            Option<&mut EntityPhaserState>,
+            Option<&crate::entity_spawner::WeaponsConsoleSection>,
+            Option<&AiControllerComponent>,
+        ),
+        With<AiControllerComponent>,
+    >,
     mut hull_query: Query<
-        (Entity, &crate::entity_spawner::EntityUuid, &Transform, &mut EntityConsoleHull),
+        (
+            Entity,
+            &crate::entity_spawner::EntityUuid,
+            &Transform,
+            &mut EntityConsoleHull,
+        ),
         Without<AiControllerComponent>,
     >,
     mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
@@ -391,7 +468,9 @@ fn handle_fire_phaser_npc(
     let dt = time.delta_secs();
 
     // If no AiTokenRegistry resource is present (e.g. in tests without AiPlugin), skip entirely.
-    let Some(registry) = registry else { return; };
+    let Some(registry) = registry else {
+        return;
+    };
 
     // Collect FirePhaser orders for ai: tokens this tick.
     let mut fire_orders: Vec<String> = Vec::new();
@@ -409,7 +488,8 @@ fn handle_fire_phaser_npc(
     let mut target_positions: Vec<(uuid::Uuid, f32, f32)> = hull_query
         .iter()
         .filter_map(|(_, uid, t, _)| {
-            uuid::Uuid::parse_str(&uid.0).ok()
+            uuid::Uuid::parse_str(&uid.0)
+                .ok()
                 .map(|u| (u, t.translation.x, t.translation.z))
         })
         .collect();
@@ -431,7 +511,9 @@ fn handle_fire_phaser_npc(
         let phaser_state = match phaser_state_opt {
             Some(ps) => ps.into_inner(),
             None => {
-                commands.entity(npc_entity).insert(EntityPhaserState::default());
+                commands
+                    .entity(npc_entity)
+                    .insert(EntityPhaserState::default());
                 continue;
             }
         };
@@ -442,13 +524,31 @@ fn handle_fire_phaser_npc(
         let target_uuid: Option<uuid::Uuid> = ctrl_opt.and_then(|c| c.controller.blackboard.target);
 
         let beam_range = weapons_section
-            .map(|wc| if wc.0.beam_range > 0.0 { wc.0.beam_range } else { 40.0 })
+            .map(|wc| {
+                if wc.0.beam_range > 0.0 {
+                    wc.0.beam_range
+                } else {
+                    40.0
+                }
+            })
             .unwrap_or(40.0);
         let damage_per_sec = weapons_section
-            .map(|wc| if wc.0.beam_damage_per_sec > 0.0 { wc.0.beam_damage_per_sec } else { NPC_BEAM_DAMAGE_PER_SEC })
+            .map(|wc| {
+                if wc.0.beam_damage_per_sec > 0.0 {
+                    wc.0.beam_damage_per_sec
+                } else {
+                    NPC_BEAM_DAMAGE_PER_SEC
+                }
+            })
             .unwrap_or(NPC_BEAM_DAMAGE_PER_SEC);
         let beam_duration = weapons_section
-            .map(|wc| if wc.0.beam_duration_secs > 0.0 { wc.0.beam_duration_secs } else { NPC_BEAM_DURATION_SECS })
+            .map(|wc| {
+                if wc.0.beam_duration_secs > 0.0 {
+                    wc.0.beam_duration_secs
+                } else {
+                    NPC_BEAM_DURATION_SECS
+                }
+            })
             .unwrap_or(NPC_BEAM_DURATION_SECS);
 
         let npc_x = transform.translation.x;
@@ -460,8 +560,10 @@ fn handle_fire_phaser_npc(
         // event delay between tick_ai_controllers → InboundMessage → here).
         let should_fire = fire_orders.contains(&token)
             || ctrl_opt.as_ref().map_or(false, |c| {
-                matches!(c.controller.current_state, crate::ai::AiState::Attacking { .. })
-                    && c.controller.blackboard.target.is_some()
+                matches!(
+                    c.controller.current_state,
+                    crate::ai::AiState::Attacking { .. }
+                ) && c.controller.blackboard.target.is_some()
             });
 
         // DEBUG: instrument the NPC fire decision so we can see why phasers
@@ -551,72 +653,81 @@ fn handle_fire_phaser_npc(
                     // Player ship damage path: route through shields → hull resource → broadcast.
                     // Only apply when at least 1 whole unit has accumulated.
                     if damage >= 1.0 {
-                    let npc_x = transform.translation.x;
-                    let npc_z = transform.translation.z;
+                        let npc_x = transform.translation.x;
+                        let npc_z = transform.translation.z;
 
-                    if let Some((_, tx, tz)) = target_positions.iter().find(|(u, _, _)| u.to_string() == target_uuid_str) {
-                        let shield_pierce = weapons_section
-                            .map(|wc| wc.0.shield_pierce)
-                            .unwrap_or(0.0);
-                        let ship_yaw = ship_state.as_ref().map(|s| s.yaw).unwrap_or(0.0);
-                        let bearing = crate::shield::attacker_bearing_relative(
-                            npc_x, npc_z, *tx, *tz, ship_yaw,
-                        );
+                        if let Some((_, tx, tz)) = target_positions
+                            .iter()
+                            .find(|(u, _, _)| u.to_string() == target_uuid_str)
+                        {
+                            let shield_pierce =
+                                weapons_section.map(|wc| wc.0.shield_pierce).unwrap_or(0.0);
+                            let ship_yaw = ship_state.as_ref().map(|s| s.yaw).unwrap_or(0.0);
+                            let bearing = crate::shield::attacker_bearing_relative(
+                                npc_x, npc_z, *tx, *tz, ship_yaw,
+                            );
 
-                        let (pierced, absorbed) = crate::damage::split_damage_for_pierce(damage, shield_pierce);
-                        let mut hull_amount = pierced;
-                        let mut shield_amount = 0.0;
+                            let (pierced, absorbed) =
+                                crate::damage::split_damage_for_pierce(damage, shield_pierce);
+                            let mut hull_amount = pierced;
+                            let mut shield_amount = 0.0;
 
-                        info!(
+                            info!(
                             "[npc-damage] uuid={} damage={:.3} shield_pierce={:.2} pierced={:.3} absorbed={:.3} hull_res={} shield_res={}",
                             npc_uuid.0, damage, shield_pierce, pierced, absorbed,
                             hull_resource.is_some(), shields_resource.is_some(),
                         );
 
-                        if absorbed > 0.0 {
-                            if let Some(ref mut shields) = shields_resource {
-                                let leak = crate::damage::apply_damage_with_shields(
-                                    absorbed.round() as i32,
-                                    bearing,
-                                    &mut shields.0,
-                                );
-                                shield_amount = (absorbed - leak as f32).max(0.0);
-                                hull_amount += leak as f32;
-                                info!("[npc-damage] shield absorbed={:.1} leak={} hull_amount_after={:.3}", shield_amount, leak, hull_amount);
-                            } else {
-                                hull_amount += absorbed;
-                            }
-                        }
-
-                        if hull_amount > 0.0 {
-                            if let Some(ref mut hull) = hull_resource {
-                                let mut rng = rand::rng();
-                                let (hull_applied, ship_destroyed) = crate::damage::apply_hull_damage(&mut hull.0, hull_amount, &mut rng);
-                                if let Some(ref mut ob) = outbox {
-                                    ob.0.push((
-                                        Target::All,
-                                        ServerMessage::DamageTaken {
-                                            hull: hull_applied,
-                                            shield: shield_amount,
-                                        },
-                                    ));
+                            if absorbed > 0.0 {
+                                if let Some(ref mut shields) = shields_resource {
+                                    let leak = crate::damage::apply_damage_with_shields(
+                                        absorbed.round() as i32,
+                                        bearing,
+                                        &mut shields.0,
+                                    );
+                                    shield_amount = (absorbed - leak as f32).max(0.0);
+                                    hull_amount += leak as f32;
+                                    info!("[npc-damage] shield absorbed={:.1} leak={} hull_amount_after={:.3}", shield_amount, leak, hull_amount);
+                                } else {
+                                    hull_amount += absorbed;
                                 }
-                                if ship_destroyed {
+                            }
+
+                            if hull_amount > 0.0 {
+                                if let Some(ref mut hull) = hull_resource {
+                                    let mut rng = rand::rng();
+                                    let (hull_applied, ship_destroyed) =
+                                        crate::damage::apply_hull_damage(
+                                            &mut hull.0,
+                                            hull_amount,
+                                            &mut rng,
+                                        );
                                     if let Some(ref mut ob) = outbox {
-                                        ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                                        ob.0.push((
+                                            Target::All,
+                                            ServerMessage::DamageTaken {
+                                                hull: hull_applied,
+                                                shield: shield_amount,
+                                            },
+                                        ));
                                     }
-                                    if let Some(ref mut gs) = next_state {
-                                        gs.set(GamePhase::GameOver);
-                                    }
-                                    if let Some(ref mut reason) = game_over_reason {
-                                        if reason.0.is_none() {
-                                            reason.0 = Some("Ship destroyed by NPC fire".into());
+                                    if ship_destroyed {
+                                        if let Some(ref mut ob) = outbox {
+                                            ob.0.push((Target::All, ServerMessage::ShipDestroyed));
+                                        }
+                                        if let Some(ref mut gs) = next_state {
+                                            gs.set(GamePhase::GameOver);
+                                        }
+                                        if let Some(ref mut reason) = game_over_reason {
+                                            if reason.0.is_none() {
+                                                reason.0 =
+                                                    Some("Ship destroyed by NPC fire".into());
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
                     } // end if damage >= 1.0
 
                     // Deactivate beam if elapsed.
@@ -635,20 +746,23 @@ fn handle_fire_phaser_npc(
                     // NPC/asteroid target: existing EntityConsoleHull component path.
                     let mut target_destroyed = false;
                     if damage >= 1.0 {
-                    for (tgt_entity, tgt_uid, _tgt_transform, mut tgt_hull) in hull_query.iter_mut() {
-                        if tgt_uid.0 != target_uuid_str {
-                            continue;
+                        for (tgt_entity, tgt_uid, _tgt_transform, mut tgt_hull) in
+                            hull_query.iter_mut()
+                        {
+                            if tgt_uid.0 != target_uuid_str {
+                                continue;
+                            }
+                            let mut rng = rand::rng();
+                            tgt_hull.0.apply_damage(damage, &mut rng);
+                            if tgt_hull.0.is_destroyed() {
+                                target_destroyed = true;
+                                commands.entity(tgt_entity).despawn();
+                                destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+                                    entity_uuid: tgt_uid.0.clone(),
+                                });
+                            }
+                            break;
                         }
-                        let mut rng = rand::rng();
-                        tgt_hull.0.apply_damage(damage, &mut rng);
-                        if tgt_hull.0.is_destroyed() {
-                            target_destroyed = true;
-                            commands.entity(tgt_entity).despawn();
-                            destroyed_events
-                                .write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: tgt_uid.0.clone() });
-                        }
-                        break;
-                    }
                     } // end if damage >= 1.0
                     if target_destroyed || phaser_state.beam_remaining_secs <= 0.0 {
                         let ended_uuid = t_uuid.to_string();
@@ -676,7 +790,9 @@ fn handle_set_phaser_mode(
     mut phaser_mode: ResMut<CurrentPhaserMode>,
 ) {
     for ev in reader.read() {
-        let ClientMessage::SetPhaserMode { mode } = &ev.msg else { continue };
+        let ClientMessage::SetPhaserMode { mode } = &ev.msg else {
+            continue;
+        };
         if sessions.0.console_holder(Console::Tactical) != Some(ev.token.as_str()) {
             continue;
         }
@@ -696,15 +812,18 @@ fn handle_set_phaser_frequency(
     // (`[preset.delegated]` in its complexity TOML).
     let tactical_preset = rules.active_preset(&Console::Tactical, &complexity);
     for ev in reader.read() {
-        let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else { continue };
-
-        let sender_console = if sessions.0.console_holder(Console::Tactical) == Some(ev.token.as_str()) {
-            Console::Tactical
-        } else if sessions.0.console_holder(Console::Sensors) == Some(ev.token.as_str()) {
-            Console::Sensors
-        } else {
+        let ClientMessage::SetPhaserFrequency { frequency } = &ev.msg else {
             continue;
         };
+
+        let sender_console =
+            if sessions.0.console_holder(Console::Tactical) == Some(ev.token.as_str()) {
+                Console::Tactical
+            } else if sessions.0.console_holder(Console::Sensors) == Some(ev.token.as_str()) {
+                Console::Sensors
+            } else {
+                continue;
+            };
 
         if !is_sender_authorized(
             CONTROL_SET_PHASER_FREQUENCY,
@@ -719,6 +838,34 @@ fn handle_set_phaser_frequency(
     }
 }
 
+fn handle_load_tube(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+) {
+    for ev in reader.read() {
+        let ClientMessage::LoadTube { tube } = &ev.msg else { continue };
+        if !tactical_authorized(&sessions, &ev.token) { continue }
+        if let Some(t) = torpedo_sys.0.tube_mut(tube.as_str()) {
+            t.start_load();
+        }
+    }
+}
+
+fn handle_unload_tube(
+    mut reader: MessageReader<InboundMessage>,
+    sessions: Res<Sessions>,
+    mut torpedo_sys: ResMut<TorpedoSystemResource>,
+) {
+    for ev in reader.read() {
+        let ClientMessage::UnloadTube { tube } = &ev.msg else { continue };
+        if !tactical_authorized(&sessions, &ev.token) { continue }
+        if let Some(t) = torpedo_sys.0.tube_mut(tube.as_str()) {
+            t.start_unload();
+        }
+    }
+}
+
 fn handle_fire_torpedo(
     mut reader: MessageReader<InboundMessage>,
     sessions: Res<Sessions>,
@@ -728,30 +875,46 @@ fn handle_fire_torpedo(
     player_ship_q: Query<&crate::entity_spawner::EntityUuid, With<crate::server_app::Ship>>,
 ) {
     for ev in reader.read() {
-        let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else { continue };
+        let ClientMessage::FireTorpedo { tube, target_uuid } = &ev.msg else {
+            continue;
+        };
         if !tactical_authorized(&sessions, &ev.token) {
             continue;
         }
         let uuid = uuid::Uuid::new_v4().to_string();
-        let tube_facing_rad = torpedo_sys.0.tube(tube.as_str())
+        let tube_facing_rad = torpedo_sys
+            .0
+            .tube(tube.as_str())
             .map(|t| t.facing_deg.to_radians())
             .unwrap_or(0.0);
         let launch_heading = ship.yaw + tube_facing_rad;
         let source_uuid = player_ship_q.single().map(|u| u.0.clone()).ok();
         use crate::torpedo::LaunchResult;
-        match torpedo_sys.0.launch(tube.as_str(), uuid, ship.x, ship.z, launch_heading, target_uuid.clone(), source_uuid) {
-            LaunchResult::Launched { uuid: launched_uuid } => {
-                outbox.0.push((Target::All, ServerMessage::TorpedoLaunched {
-                    uuid: launched_uuid,
-                    tube: tube.clone(),
-                    x: ship.x,
-                    z: ship.z,
-                    heading: launch_heading,
-                }));
+        match torpedo_sys.0.launch(
+            tube.as_str(),
+            uuid,
+            ship.x,
+            ship.z,
+            launch_heading,
+            target_uuid.clone(),
+            source_uuid,
+        ) {
+            LaunchResult::Launched {
+                uuid: launched_uuid,
+            } => {
+                outbox.0.push((
+                    Target::All,
+                    ServerMessage::TorpedoLaunched {
+                        uuid: launched_uuid,
+                        tube: tube.clone(),
+                        x: ship.x,
+                        z: ship.z,
+                        heading: launch_heading,
+                    },
+                ));
             }
-            LaunchResult::TubeNotLoaded
-            | LaunchResult::NoTorpedoes
-            | LaunchResult::UnknownTube => {}
+            LaunchResult::TubeNotLoaded | LaunchResult::NoTorpedoes | LaunchResult::UnknownTube => {
+            }
         }
     }
 }
@@ -779,7 +942,8 @@ fn tick_torpedo_system(
     // Build target positions from *live* ECS transforms, falling back to the
     // (stale) WorldResource snapshot for entities not currently in the ECS.
     let target_positions: std::collections::HashMap<String, (f32, f32)> = {
-        let mut map: std::collections::HashMap<String, (f32, f32)> = std::collections::HashMap::new();
+        let mut map: std::collections::HashMap<String, (f32, f32)> =
+            std::collections::HashMap::new();
         for (u, t) in asteroid_q.iter() {
             map.insert(u.0.clone(), (t.translation.x, t.translation.z));
         }
@@ -794,22 +958,32 @@ fn tick_torpedo_system(
     };
     let result = torpedo_sys.0.tick(dt, &target_positions);
     for expired_uuid in result.expired {
-        outbox.0.push((Target::All, ServerMessage::TorpedoDestroyed { uuid: expired_uuid }));
+        outbox.0.push((
+            Target::All,
+            ServerMessage::TorpedoDestroyed { uuid: expired_uuid },
+        ));
     }
 
     // Proximity detonation. Use live positions for the target list.
     let targets: Vec<(String, f32, f32, f32)> = {
-        let mut map: std::collections::HashMap<String, (f32, f32, f32)> = std::collections::HashMap::new();
+        let mut map: std::collections::HashMap<String, (f32, f32, f32)> =
+            std::collections::HashMap::new();
         for (u, t) in asteroid_q.iter() {
             // Look up radius from WorldResource (AsteroidUuid has no radius field).
-            let radius = world.0.entities.iter()
+            let radius = world
+                .0
+                .entities
+                .iter()
                 .find(|e| e.uuid == u.0)
                 .map(|e| e.radius_or_zero())
                 .unwrap_or(0.0);
             map.insert(u.0.clone(), (t.translation.x, t.translation.z, radius));
         }
         for (u, t) in entity_q.iter() {
-            let radius = world.0.entities.iter()
+            let radius = world
+                .0
+                .entities
+                .iter()
                 .find(|e| e.uuid == u.0)
                 .map(|e| e.radius_or_zero())
                 .unwrap_or(0.0);
@@ -817,14 +991,22 @@ fn tick_torpedo_system(
         }
         // Fill remaining from WorldResource snapshot (entities not currently in ECS).
         for e in world.0.entities.iter() {
-            map.entry(e.uuid.clone()).or_insert_with(|| (e.x(), e.z(), e.radius_or_zero()));
+            map.entry(e.uuid.clone())
+                .or_insert_with(|| (e.x(), e.z(), e.radius_or_zero()));
         }
-        map.into_iter().map(|(uuid, (x, z, r))| (uuid, x, z, r)).collect()
+        map.into_iter()
+            .map(|(uuid, (x, z, r))| (uuid, x, z, r))
+            .collect()
     };
     let hits = torpedo_sys.0.find_detonation_hits(&targets);
     for (torpedo_uuid, target_uuid) in hits {
-        let Some(damage) = torpedo_sys.0.handle_collision(&torpedo_uuid) else { continue };
-        outbox.0.push((Target::All, ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid }));
+        let Some(damage) = torpedo_sys.0.handle_collision(&torpedo_uuid) else {
+            continue;
+        };
+        outbox.0.push((
+            Target::All,
+            ServerMessage::TorpedoDestroyed { uuid: torpedo_uuid },
+        ));
 
         let mut asteroid_destroyed = false;
         let mut npc_destroyed = false;
@@ -863,14 +1045,26 @@ fn tick_torpedo_system(
         if asteroid_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
             vfx_events.write(AsteroidDestroyedVfx { x: hit_x, z: hit_z });
-            outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
+            outbox.0.push((
+                Target::All,
+                ServerMessage::AsteroidDestroyed {
+                    uuid: target_uuid.clone(),
+                },
+            ));
             if weapons_target.0.as_deref() == Some(target_uuid.as_str()) {
                 weapons_target.0 = None;
             }
         } else if npc_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
-            destroyed_events.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: target_uuid.clone() });
-            outbox.0.push((Target::All, ServerMessage::EntityDespawned { uuid: target_uuid.clone() }));
+            destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+                entity_uuid: target_uuid.clone(),
+            });
+            outbox.0.push((
+                Target::All,
+                ServerMessage::EntityDespawned {
+                    uuid: target_uuid.clone(),
+                },
+            ));
             if weapons_target.0.as_deref() == Some(target_uuid.as_str()) {
                 weapons_target.0 = None;
             }
@@ -886,7 +1080,12 @@ fn tick_active_beam(
     mut cooldown: ResMut<PhaserCooldown>,
     ship: Res<ShipState>,
     mut world: ResMut<WorldResource>,
-    mut hull_query: Query<(Entity, Option<&AsteroidUuid>, Option<&crate::entity_spawner::EntityUuid>, &mut EntityConsoleHull)>,
+    mut hull_query: Query<(
+        Entity,
+        Option<&AsteroidUuid>,
+        Option<&crate::entity_spawner::EntityUuid>,
+        &mut EntityConsoleHull,
+    )>,
     mut commands: Commands,
     modifiers: Res<crate::modifiers::ShipModifiers>,
     combat_config: Res<PhaserCombatConfigResource>,
@@ -898,7 +1097,6 @@ fn tick_active_beam(
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     mut weapons_target: ResMut<WeaponsTarget>,
 ) {
-
     let dt = time.delta_secs();
     cooldown.tick(dt);
 
@@ -914,32 +1112,65 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start_bank(&active_bank, &combat_config.0);
-        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+        commands.trigger(BeamEndedEvent {
+            bank: active_bank.clone(),
+            target_uuid,
+        });
         return;
     };
 
     let bank_in_arc = if combat_config.0.banks.is_empty() {
-        let effective_phaser_range = combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
-        crate::radar::is_fire_ready_with_range(tx, tz, ship.x, ship.z, ship.yaw, effective_phaser_range)
+        let effective_phaser_range =
+            combat_config.0.phaser_range * modifiers.get(&ModifierSlot::RadarRange);
+        crate::radar::is_fire_ready_with_range(
+            tx,
+            tz,
+            ship.x,
+            ship.z,
+            ship.yaw,
+            effective_phaser_range,
+        )
     } else {
-        combat_config.0.banks.iter().find(|b| b.id == active_bank).map(|bank_cfg| {
-            let bank_base_range = if bank_cfg.beam_range > 0.0 { bank_cfg.beam_range } else { combat_config.0.phaser_range };
-            let effective_bank_range = bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
-            let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
-            let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2) <= effective_bank_range * effective_bank_range;
-            range_ok && crate::weapons::phaser::in_arc(rx, ry, bank_cfg.facing_deg, bank_cfg.fire_arc_deg)
-        }).unwrap_or(false)
+        combat_config
+            .0
+            .banks
+            .iter()
+            .find(|b| b.id == active_bank)
+            .map(|bank_cfg| {
+                let bank_base_range = if bank_cfg.beam_range > 0.0 {
+                    bank_cfg.beam_range
+                } else {
+                    combat_config.0.phaser_range
+                };
+                let effective_bank_range =
+                    bank_base_range * modifiers.get(&ModifierSlot::RadarRange);
+                let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
+                let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
+                    <= effective_bank_range * effective_bank_range;
+                range_ok
+                    && crate::weapons::phaser::in_arc(
+                        rx,
+                        ry,
+                        bank_cfg.facing_deg,
+                        bank_cfg.fire_arc_deg,
+                    )
+            })
+            .unwrap_or(false)
     };
     if !bank_in_arc {
         beam.target_uuid = None;
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start_bank(&active_bank, &combat_config.0);
-        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+        commands.trigger(BeamEndedEvent {
+            bank: active_bank.clone(),
+            target_uuid,
+        });
         return;
     }
 
-    beam.damage_accumulator += combat_config.0.beam_damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
+    beam.damage_accumulator +=
+        combat_config.0.beam_damage_per_sec * modifiers.get(&ModifierSlot::PhaserDamage) * dt;
     let damage_to_apply = beam.damage_accumulator.floor() as i32;
     if damage_to_apply > 0 {
         beam.damage_accumulator -= damage_to_apply as f32;
@@ -992,16 +1223,31 @@ fn tick_active_beam(
             cooldown.start_bank(&active_bank, &combat_config.0);
             weapons_target.0 = None;
 
-            outbox.0.push((Target::All, ServerMessage::AsteroidDestroyed { uuid: target_uuid.clone() }));
-            commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+            outbox.0.push((
+                Target::All,
+                ServerMessage::AsteroidDestroyed {
+                    uuid: target_uuid.clone(),
+                },
+            ));
+            commands.trigger(BeamEndedEvent {
+                bank: active_bank.clone(),
+                target_uuid,
+            });
             return;
         }
 
         if npc_destroyed {
             // Non-asteroid entity destroyed
             world.0.entities.retain(|a| a.uuid != target_uuid);
-            destroyed_events.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: target_uuid.clone() });
-            outbox.0.push((Target::All, ServerMessage::EntityDespawned { uuid: target_uuid.clone() }));
+            destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+                entity_uuid: target_uuid.clone(),
+            });
+            outbox.0.push((
+                Target::All,
+                ServerMessage::EntityDespawned {
+                    uuid: target_uuid.clone(),
+                },
+            ));
 
             beam.target_uuid = None;
             beam.remaining_secs = 0.0;
@@ -1009,7 +1255,10 @@ fn tick_active_beam(
             cooldown.start_bank(&active_bank, &combat_config.0);
             weapons_target.0 = None;
 
-            commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+            commands.trigger(BeamEndedEvent {
+                bank: active_bank.clone(),
+                target_uuid,
+            });
             return;
         }
     }
@@ -1020,7 +1269,10 @@ fn tick_active_beam(
         beam.remaining_secs = 0.0;
         beam.damage_accumulator = 0.0;
         cooldown.start_bank(&active_bank, &combat_config.0);
-        commands.trigger(BeamEndedEvent { bank: active_bank.clone(), target_uuid });
+        commands.trigger(BeamEndedEvent {
+            bank: active_bank.clone(),
+            target_uuid,
+        });
     }
 }
 
@@ -1048,14 +1300,32 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
             };
             let tubes: Vec<TorpedoTubeState> = {
                 let ts = &world.resource::<TorpedoSystemResource>().0;
-                ts.tubes.iter().map(|t| TorpedoTubeState {
-                    id: t.id.clone(),
-                    loaded: t.is_loaded(),
-                    reload_secs: t.reload_remaining,
-                }).collect()
+                ts.tubes
+                    .iter()
+                    .map(|t| {
+                        let remaining = match &t.load_state {
+                            crate::torpedo::TubeLoadState::Loading { remaining, .. }
+                            | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                            _ => 0.0,
+                        };
+                        TorpedoTubeState {
+                            id: t.id.clone(),
+                            loaded: t.is_loaded(),
+                            reload_secs: remaining,
+                            state: t.load_state.label().to_string(),
+                            progress: t.load_state.progress(),
+                            load_time: t.load_time,
+                        }
+                    })
+                    .collect()
             };
-            let torpedo_count = world.resource::<TorpedoSystemResource>().0.torpedoes_remaining;
-            let radar_range_mult = world.resource::<crate::modifiers::ShipModifiers>().get(&ModifierSlot::RadarRange);
+            let torpedo_count = world
+                .resource::<TorpedoSystemResource>()
+                .0
+                .torpedoes_remaining;
+            let radar_range_mult = world
+                .resource::<crate::modifiers::ShipModifiers>()
+                .get(&ModifierSlot::RadarRange);
             let phaser_mode = world.resource::<CurrentPhaserMode>().0;
             let (phaser_range, banks_config) = {
                 let cc = world.resource::<PhaserCombatConfigResource>();
@@ -1120,7 +1390,14 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                 let effective_phaser_range = phaser_range * radar_range_mult;
                 let fire_ready = match target_live_pos {
                     None => false,
-                    Some((tx, tz)) => crate::radar::is_fire_ready_with_range(tx, tz, ship_x, ship_z, ship_yaw, effective_phaser_range),
+                    Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
+                        tx,
+                        tz,
+                        ship_x,
+                        ship_z,
+                        ship_yaw,
+                        effective_phaser_range,
+                    ),
                 };
                 let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
                 vec![PhaserBankState {
@@ -1130,27 +1407,43 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
                     cooldown_remaining: cd,
                 }]
             } else {
-                banks_config.iter().map(|b| {
-                    let bank_ready = match target_live_pos {
-                        None => false,
-                        Some((tx, tz)) => {
-                            let bank_base_range = if b.beam_range > 0.0 { b.beam_range } else { phaser_range };
-                            let effective_bank_range = bank_base_range * radar_range_mult;
-                            let (rx, ry) = crate::weapons::phaser::ship_local(tx, tz, ship_x, ship_z, ship_yaw);
-                            let range_ok = (tx - ship_x).powi(2) + (tz - ship_z).powi(2) <= effective_bank_range * effective_bank_range;
-                            range_ok && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
+                banks_config
+                    .iter()
+                    .map(|b| {
+                        let bank_ready = match target_live_pos {
+                            None => false,
+                            Some((tx, tz)) => {
+                                let bank_base_range = if b.beam_range > 0.0 {
+                                    b.beam_range
+                                } else {
+                                    phaser_range
+                                };
+                                let effective_bank_range = bank_base_range * radar_range_mult;
+                                let (rx, ry) = crate::weapons::phaser::ship_local(
+                                    tx, tz, ship_x, ship_z, ship_yaw,
+                                );
+                                let range_ok = (tx - ship_x).powi(2) + (tz - ship_z).powi(2)
+                                    <= effective_bank_range * effective_bank_range;
+                                range_ok
+                                    && crate::weapons::phaser::in_arc(
+                                        rx,
+                                        ry,
+                                        b.facing_deg,
+                                        b.fire_arc_deg,
+                                    )
+                            }
+                        };
+                        let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
+                        let beam_on_this_bank =
+                            beam_active && active_beam_bank.as_deref() == Some(b.id.as_str());
+                        PhaserBankState {
+                            id: b.id.clone(),
+                            fire_ready: bank_ready,
+                            on_cooldown: beam_on_this_bank || cd > 0.0,
+                            cooldown_remaining: cd,
                         }
-                    };
-                    let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
-                    let beam_on_this_bank = beam_active
-                        && active_beam_bank.as_deref() == Some(b.id.as_str());
-                    PhaserBankState {
-                        id: b.id.clone(),
-                        fire_ready: bank_ready,
-                        on_cooldown: beam_on_this_bank || cd > 0.0,
-                        cooldown_remaining: cd,
-                    }
-                }).collect()
+                    })
+                    .collect()
             };
 
             vec![ServerMessage::WeaponsUpdate {
@@ -1281,7 +1574,9 @@ fn project_blip(
     let target_tags_raw: &[String] = meta.map(|e| e.target_tags.as_slice()).unwrap_or(&[]);
     let target_tags = crate::entity_tags::parse_tags(target_tags_raw);
     let selectable = crate::entity_tags::matches_any(&target_tags, selects);
-    let threat_level = meta.and_then(|e| e.threat_level.as_deref()).map(|s| s.to_string());
+    let threat_level = meta
+        .and_then(|e| e.threat_level.as_deref())
+        .map(|s| s.to_string());
     let description = meta
         .and_then(|e| e.target_description.as_deref())
         .or_else(|| name.as_deref())
@@ -1308,17 +1603,17 @@ fn project_blip(
 /// explicit colour.  Mirrors the `KIND_COLOR` palette in `radar-widget.js`.
 fn blip_default_color(icon: &str) -> [f32; 3] {
     match icon {
-        "asteroid"   => [0.478, 0.753, 1.0],   // #7ac0ff
-        "ship"       => [1.0, 0.502, 0.376],    // #ff8060
-        "station"    => [1.0, 0.878, 0.376],    // #ffe060
-        "torpedo"    => [1.0, 0.376, 1.0],      // #ff60ff
-        "planet"     => [0.376, 1.0, 0.753],    // #60ffc0
-        "star"       => [1.0, 0.980, 0.753],    // #fffac0
-        "player"     => [0.0, 1.0, 0.2],        // green — player ship
-        "battleship" => [0.9, 0.2, 0.05],       // dark red — large enemy
-        "cruiser"    => [0.8, 0.3, 0.1],        // orange-red — medium enemy
-        "destroyer"  => [1.0, 0.2, 0.2],        // bright red — small enemy
-        _            => [0.659, 0.690, 0.753],  // #a8b0c0 unknown
+        "asteroid" => [0.478, 0.753, 1.0], // #7ac0ff
+        "ship" => [1.0, 0.502, 0.376],     // #ff8060
+        "station" => [1.0, 0.878, 0.376],  // #ffe060
+        "torpedo" => [1.0, 0.376, 1.0],    // #ff60ff
+        "planet" => [0.376, 1.0, 0.753],   // #60ffc0
+        "star" => [1.0, 0.980, 0.753],     // #fffac0
+        "player" => [0.0, 1.0, 0.2],       // green — player ship
+        "battleship" => [0.9, 0.2, 0.05],  // dark red — large enemy
+        "cruiser" => [0.8, 0.3, 0.1],      // orange-red — medium enemy
+        "destroyer" => [1.0, 0.2, 0.2],    // bright red — small enemy
+        _ => [0.659, 0.690, 0.753],        // #a8b0c0 unknown
     }
 }
 
@@ -1338,7 +1633,10 @@ fn recompute_weapons_console_state(
     world_res: Res<WorldResource>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
     entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-    entity_name_q: Query<(&crate::entity_spawner::EntityUuid, &crate::entities::spawner::EntityName)>,
+    entity_name_q: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityName,
+    )>,
     mut comp_q: Query<&mut WeaponsConsoleStateComp>,
 ) {
     let target_uuid = weapons_target.0.clone();
@@ -1351,7 +1649,9 @@ fn recompute_weapons_console_state(
         .and_then(|uuid| live_entity_xz(uuid, &asteroid_q, &entity_q));
 
     let target_name: Option<String> = target_uuid.as_deref().and_then(|uuid| {
-        entity_name_q.iter().find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
+        entity_name_q
+            .iter()
+            .find_map(|(u, n)| (u.0 == uuid).then(|| n.0.clone()))
     });
 
     let banks: Vec<PhaserBankState> = if combat_config.0.banks.is_empty() {
@@ -1359,7 +1659,12 @@ fn recompute_weapons_console_state(
         let fire_ready = match target_live_pos {
             None => false,
             Some((tx, tz)) => crate::radar::is_fire_ready_with_range(
-                tx, tz, ship.x, ship.z, ship.yaw, effective_phaser_range,
+                tx,
+                tz,
+                ship.x,
+                ship.z,
+                ship.yaw,
+                effective_phaser_range,
             ),
         };
         let cd = cooldown.bank_remaining_secs("");
@@ -1388,7 +1693,8 @@ fn recompute_weapons_console_state(
                             crate::weapons::phaser::ship_local(tx, tz, ship.x, ship.z, ship.yaw);
                         let range_ok = (tx - ship.x).powi(2) + (tz - ship.z).powi(2)
                             <= effective_bank_range * effective_bank_range;
-                        range_ok && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
+                        range_ok
+                            && crate::weapons::phaser::in_arc(rx, ry, b.facing_deg, b.fire_arc_deg)
                     }
                 };
                 let cd = cooldown.bank_remaining_secs(b.id.as_str());
@@ -1408,10 +1714,20 @@ fn recompute_weapons_console_state(
         .0
         .tubes
         .iter()
-        .map(|t| TorpedoTubeState {
-            id: t.id.clone(),
-            loaded: t.is_loaded(),
-            reload_secs: t.reload_remaining,
+        .map(|t| {
+            let remaining = match &t.load_state {
+                crate::torpedo::TubeLoadState::Loading { remaining, .. }
+                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                _ => 0.0,
+            };
+            TorpedoTubeState {
+                id: t.id.clone(),
+                loaded: t.is_loaded(),
+                reload_secs: remaining,
+                state: t.load_state.label().to_string(),
+                progress: t.load_state.progress(),
+                load_time: t.load_time,
+            }
         })
         .collect();
 
@@ -1426,8 +1742,7 @@ fn recompute_weapons_console_state(
     // (see `gui::radar::project_radar_entity`) — forward = +radar_y,
     // right = +radar_x, normalised to `[-1.0, 1.0]` at
     // `effective_tactical_range`.
-    let effective_tactical_range =
-        ship_config.0.tactical_radar_range * radar_range_mult;
+    let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
     let shows: Vec<crate::entity_tags::EntityTag> = ship_config
         .0
         .tactical_radar_shows
@@ -1450,8 +1765,12 @@ fn recompute_weapons_console_state(
     // entities from the initial world TOML are visible. Asteroids are always
     // in the initial world so they always show. This limitation can be lifted
     // later by updating `WorldResource` from the `EntitySpawned` broadcast.
-    let entity_meta: std::collections::HashMap<&str, &crate::messages::EntitySnapshot> =
-        world_res.0.entities.iter().map(|e| (e.uuid.as_str(), e)).collect();
+    let entity_meta: std::collections::HashMap<&str, &crate::messages::EntitySnapshot> = world_res
+        .0
+        .entities
+        .iter()
+        .map(|e| (e.uuid.as_str(), e))
+        .collect();
 
     let mut blips: Vec<RadarBlip> = Vec::new();
 
@@ -1463,9 +1782,13 @@ fn recompute_weapons_console_state(
                 &uuid_comp.0,
                 transform.translation.x,
                 transform.translation.z,
-                ship.x, ship.z, ship.yaw,
+                ship.x,
+                ship.z,
+                ship.yaw,
                 effective_tactical_range,
-                meta, &shows, &selects,
+                meta,
+                &shows,
+                &selects,
             ) {
                 blips.push(b);
             }
@@ -1477,9 +1800,13 @@ fn recompute_weapons_console_state(
                 &uuid_comp.0,
                 transform.translation.x,
                 transform.translation.z,
-                ship.x, ship.z, ship.yaw,
+                ship.x,
+                ship.z,
+                ship.yaw,
                 effective_tactical_range,
-                meta, &shows, &selects,
+                meta,
+                &shows,
+                &selects,
             ) {
                 blips.push(b);
             }
@@ -1495,7 +1822,10 @@ fn recompute_weapons_console_state(
     // ── Region shapes ──────────────────────────────────────────────────────
     // Collect all world entities that carry a shape field so the HTML radar
     // widget can draw coloured zone overlays.
-    let regions: Vec<RadarRegion> = world_res.0.entities.iter()
+    let regions: Vec<RadarRegion> = world_res
+        .0
+        .entities
+        .iter()
         .filter_map(|e| {
             let shape = e.shape.as_deref()?;
             Some(RadarRegion {
@@ -1505,7 +1835,7 @@ fn recompute_weapons_console_state(
                 shape: shape.to_string(),
                 radius: e.radius,
                 inner_radius: e.inner_radius,
-                outer_radius: e.radius,   // torus: outer == radius
+                outer_radius: e.radius, // torus: outer == radius
                 half_extents: e.half_extents.map(|h| [h[0], h[2]]),
                 yaw: e.yaw,
                 color: e.colour.unwrap_or([0.6, 0.4, 1.0]),
@@ -1569,9 +1899,13 @@ mod tests {
     /// or an empty default on WASM (tests do not run on WASM).
     fn test_complexity_rules() -> crate::console_ai_plugin::ComplexityRules {
         #[cfg(not(target_arch = "wasm32"))]
-        { crate::console_ai_plugin::ComplexityRules::from_asset_files() }
+        {
+            crate::console_ai_plugin::ComplexityRules::from_asset_files()
+        }
         #[cfg(target_arch = "wasm32")]
-        { crate::console_ai_plugin::ComplexityRules::default() }
+        {
+            crate::console_ai_plugin::ComplexityRules::default()
+        }
     }
 
     fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>) {
@@ -1603,7 +1937,9 @@ mod tests {
             .init_resource::<PhaserCooldown>()
             .init_resource::<CurrentPhaserMode>()
             .insert_resource(ShipModifiers::new())
-            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())))
+            .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
+                TorpedoConfig::default(),
+            )))
             .init_resource::<crate::console_ai_plugin::ConsoleComplexityState>()
             .insert_resource(test_complexity_rules())
             .init_resource::<SimOutbox>()
@@ -1614,34 +1950,33 @@ mod tests {
             // Uses wide (270°) arcs so existing tests that fire "port" at a
             // target ahead still pass. Tighter arcs are tested in dedicated
             // per-bank arc severance tests.
-            .insert_resource(PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-                phaser_range: 40.0,
-                beam_duration_secs: 6.0,
-                beam_cooldown_secs: 6.0,
-                beam_damage_per_sec: 5.0,
-                banks: vec![
-                    crate::entity_config::PhaserBankConfig {
-                        id: "port".into(),
-                        facing_deg: -90.0,
-                        fire_arc_deg: 270.0,
-                        auto_arc_deg: 240.0,
-                        beam_range: 0.0,
-                        shield_pierce: None,
-                    },
-                    crate::entity_config::PhaserBankConfig {
-                        id: "starboard".into(),
-                        facing_deg: 90.0,
-                        fire_arc_deg: 270.0,
-                        auto_arc_deg: 240.0,
-                        beam_range: 0.0,
-                        shield_pierce: None,
-                    },
-                ],
-            }))
-            .add_systems(Update, (
-                tick_active_beam,
-                tick_torpedo_system,
+            .insert_resource(PhaserCombatConfigResource(
+                crate::entity_config::PhaserCombatConfig {
+                    phaser_range: 40.0,
+                    beam_duration_secs: 6.0,
+                    beam_cooldown_secs: 6.0,
+                    beam_damage_per_sec: 5.0,
+                    banks: vec![
+                        crate::entity_config::PhaserBankConfig {
+                            id: "port".into(),
+                            facing_deg: -90.0,
+                            fire_arc_deg: 270.0,
+                            auto_arc_deg: 240.0,
+                            beam_range: 0.0,
+                            shield_pierce: None,
+                        },
+                        crate::entity_config::PhaserBankConfig {
+                            id: "starboard".into(),
+                            facing_deg: 90.0,
+                            fire_arc_deg: 270.0,
+                            auto_arc_deg: 240.0,
+                            beam_range: 0.0,
+                            shield_pierce: None,
+                        },
+                    ],
+                },
             ))
+            .add_systems(Update, (tick_active_beam, tick_torpedo_system))
             .add_plugins(weapons_update_broadcaster())
             .add_systems(PostUpdate, collect);
         app
@@ -1650,7 +1985,10 @@ mod tests {
     fn push(app: &mut App, token: &str, msg: ClientMessage) {
         app.world_mut()
             .resource_mut::<Messages<InboundMessage>>()
-            .write(InboundMessage { token: token.into(), msg });
+            .write(InboundMessage {
+                token: token.into(),
+                msg,
+            });
     }
 
     fn tick(app: &mut App) -> Vec<OutboundMessage> {
@@ -1665,43 +2003,98 @@ mod tests {
     }
 
     fn start_game(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
     }
 
-    fn setup_weapons_world(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> bevy::ecs::entity::Entity {
+    fn setup_weapons_world(
+        app: &mut App,
+        asteroid_x: f32,
+        asteroid_z: f32,
+    ) -> bevy::ecs::entity::Entity {
         let uuid = "target-uuid".to_string();
-        app.world_mut().insert_resource(WorldResource(crate::messages::WorldData {
-            entities: vec![crate::messages::EntitySnapshot::asteroid(&uuid, asteroid_x, asteroid_z, 2.0)],
-            ..Default::default()
-        }));
+        app.world_mut()
+            .insert_resource(WorldResource(crate::messages::WorldData {
+                entities: vec![crate::messages::EntitySnapshot::asteroid(
+                    &uuid, asteroid_x, asteroid_z, 2.0,
+                )],
+                ..Default::default()
+            }));
         // handle_set_target and tick_active_beam use live ECS Transforms
         // (live_entity_xz), so every WorldResource entry must also have a
         // matching ECS entity with the components all queries expect.
-        app.world_mut().spawn((
-            crate::simulation::Asteroid,
-            crate::simulation::AsteroidUuid(uuid),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
-            Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
-        )).id()
+        app.world_mut()
+            .spawn((
+                crate::simulation::Asteroid,
+                crate::simulation::AsteroidUuid(uuid),
+                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                    crate::messages::Console::CaptainChair,
+                    30.0,
+                )])),
+                Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
+            ))
+            .id()
     }
 
-    fn setup_weapons_world_with_entity(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> bevy::ecs::entity::Entity {
+    fn setup_weapons_world_with_entity(
+        app: &mut App,
+        asteroid_x: f32,
+        asteroid_z: f32,
+    ) -> bevy::ecs::entity::Entity {
         setup_weapons_world(app, asteroid_x, asteroid_z)
     }
 
     fn start_game_with_weapons(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -1710,9 +2103,21 @@ mod tests {
     fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<OutboundMessage> {
         setup_weapons_world_with_entity(app, asteroid_x, asteroid_z);
         start_game_with_weapons(app);
-        push(app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let _ = tick(app);
-        push(app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(app)
     }
 
@@ -1724,13 +2129,22 @@ mod tests {
         setup_weapons_world(&mut app, 30.0, 0.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let out = tick(&mut app);
 
-        let lock = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
-            _ => None,
-        }).expect("expected a TargetLock response");
+        let lock = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+                _ => None,
+            })
+            .expect("expected a TargetLock response");
         assert_eq!(lock.0, "target-uuid");
         assert!(lock.1, "expected locked=true for in-range asteroid");
 
@@ -1746,13 +2160,22 @@ mod tests {
         setup_weapons_world(&mut app, 400.0, 0.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let out = tick(&mut app);
 
-        let lock = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
-            _ => None,
-        }).expect("expected a TargetLock response");
+        let lock = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+                _ => None,
+            })
+            .expect("expected a TargetLock response");
         assert!(!lock.1, "expected locked=false for out-of-range asteroid");
         assert!(app.world().resource::<WeaponsTarget>().0.is_none());
     }
@@ -1763,13 +2186,22 @@ mod tests {
         setup_weapons_world(&mut app, 10.0, 0.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "no-such-asteroid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "no-such-asteroid".into(),
+            },
+        );
         let out = tick(&mut app);
 
-        let lock = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
-            _ => None,
-        }).expect("expected a TargetLock response");
+        let lock = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::TargetLock { uuid, locked } => Some((uuid.clone(), *locked)),
+                _ => None,
+            })
+            .expect("expected a TargetLock response");
         assert!(!lock.1, "expected locked=false for unknown UUID");
         assert!(app.world().resource::<WeaponsTarget>().0.is_none());
     }
@@ -1782,17 +2214,30 @@ mod tests {
         setup_weapons_world(&mut app, 0.0, -20.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
-        let update = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::WeaponsUpdate { target_uuid, banks, .. } =>
-                Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
-            _ => None,
-        }).expect("expected a WeaponsUpdate message");
+        let update = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::WeaponsUpdate {
+                    target_uuid, banks, ..
+                } => Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
+                _ => None,
+            })
+            .expect("expected a WeaponsUpdate message");
         assert_eq!(update.0.as_deref(), Some("target-uuid"));
-        assert!(update.1, "expected fire_ready=true for in-range, forward-arc target");
+        assert!(
+            update.1,
+            "expected fire_ready=true for in-range, forward-arc target"
+        );
     }
 
     #[test]
@@ -1801,17 +2246,30 @@ mod tests {
         setup_weapons_world(&mut app, 0.0, -50.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let _ = tick(&mut app);
         let out = tick(&mut app);
 
-        let update = out.iter().find_map(|m| match &m.msg {
-            ServerMessage::WeaponsUpdate { target_uuid, banks, .. } =>
-                Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
-            _ => None,
-        }).expect("expected a WeaponsUpdate message");
+        let update = out
+            .iter()
+            .find_map(|m| match &m.msg {
+                ServerMessage::WeaponsUpdate {
+                    target_uuid, banks, ..
+                } => Some((target_uuid.clone(), banks.iter().any(|b| b.fire_ready))),
+                _ => None,
+            })
+            .expect("expected a WeaponsUpdate message");
         assert_eq!(update.0.as_deref(), Some("target-uuid"));
-        assert!(!update.1, "expected fire_ready=false for beyond-phaser-range target");
+        assert!(
+            !update.1,
+            "expected fire_ready=false for beyond-phaser-range target"
+        );
     }
 
     // ── FirePhaser / beam lifecycle tests ──────────────────────────────────
@@ -1821,10 +2279,17 @@ mod tests {
         let mut app = test_app();
         let out = lock_and_fire(&mut app, 0.0, -20.0);
 
-        let beam_started = out.iter().find(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. }));
-        assert!(beam_started.is_some(), "expected BeamStarted after firing at fire-ready target");
+        let beam_started = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. }));
+        assert!(
+            beam_started.is_some(),
+            "expected BeamStarted after firing at fire-ready target"
+        );
         match &beam_started.unwrap().msg {
-            ServerMessage::BeamStarted { target_uuid, .. } => assert_eq!(target_uuid, "target-uuid"),
+            ServerMessage::BeamStarted { target_uuid, .. } => {
+                assert_eq!(target_uuid, "target-uuid")
+            }
             _ => unreachable!(),
         }
         match &beam_started.unwrap().target {
@@ -1844,13 +2309,24 @@ mod tests {
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
 
         app.world_mut().resource_mut::<ActiveBeam>().target_uuid = None;
-        app.world_mut().resource_mut::<PhaserCooldown>().start_bank_with_cooldown("port", 3.0);
+        app.world_mut()
+            .resource_mut::<PhaserCooldown>()
+            .start_bank_with_cooldown("port", 3.0);
 
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let out = tick(&mut app);
 
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
-            "BeamStarted should not fire during cooldown");
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "BeamStarted should not fire during cooldown"
+        );
     }
 
     #[test]
@@ -1859,11 +2335,20 @@ mod tests {
         setup_weapons_world(&mut app, 0.0, -20.0);
         start_game(&mut app);
 
-        push(&mut app, "captain", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let out = tick(&mut app);
 
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
-            "captain should not be able to fire phaser");
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "captain should not be able to fire phaser"
+        );
     }
 
     #[test]
@@ -1873,13 +2358,28 @@ mod tests {
         // port bank's 270° arc centered at -90° (covers -135° to 45°).
         setup_weapons_world(&mut app, 20.0, 0.0);
         start_game_with_weapons(&mut app);
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let out = tick(&mut app);
 
-        assert!(!out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
-            "FirePhaser should be rejected when target is outside bank's fire arc");
+        assert!(
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "FirePhaser should be rejected when target is outside bank's fire arc"
+        );
     }
 
     #[test]
@@ -1889,7 +2389,9 @@ mod tests {
         // asteroid ECS entity. Fetch its handle after setup.
         let _ = lock_and_fire(&mut app, 0.0, -20.0);
         let asteroid_entity = {
-            let mut q = app.world_mut().query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
+            let mut q = app
+                .world_mut()
+                .query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
             q.iter(app.world())
                 .find(|(_, u)| u.0 == "target-uuid")
                 .map(|(e, _)| e)
@@ -1909,28 +2411,49 @@ mod tests {
 
         let out = tick(&mut app);
 
-        let destroyed = out.iter().find(|m| matches!(&m.msg, ServerMessage::AsteroidDestroyed { .. }));
-        assert!(destroyed.is_some(), "expected AsteroidDestroyed when asteroid HP reaches 0");
+        let destroyed = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::AsteroidDestroyed { .. }));
+        assert!(
+            destroyed.is_some(),
+            "expected AsteroidDestroyed when asteroid HP reaches 0"
+        );
         match &destroyed.unwrap().msg {
             ServerMessage::AsteroidDestroyed { uuid } => assert_eq!(uuid, "target-uuid"),
             _ => unreachable!(),
         }
 
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
-            "expected BeamEnded after asteroid destruction");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded after asteroid destruction"
+        );
 
         assert!(
-            !app.world().resource::<WorldResource>().0.entities.iter().any(|a| a.uuid == "target-uuid"),
+            !app.world()
+                .resource::<WorldResource>()
+                .0
+                .entities
+                .iter()
+                .any(|a| a.uuid == "target-uuid"),
             "destroyed asteroid should be removed from WorldData"
         );
 
         assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none());
 
-        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"),
-            "cooldown should start after beam end");
+        assert!(
+            app.world()
+                .resource::<PhaserCooldown>()
+                .is_bank_active("port"),
+            "cooldown should start after beam end"
+        );
 
-        assert!(app.world().get::<EntityConsoleHull>(asteroid_entity).is_none(),
-            "asteroid entity should be despawned");
+        assert!(
+            app.world()
+                .get::<EntityConsoleHull>(asteroid_entity)
+                .is_none(),
+            "asteroid entity should be despawned"
+        );
     }
 
     #[test]
@@ -1946,12 +2469,21 @@ mod tests {
 
         let out = tick(&mut app);
 
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
-            "expected BeamEnded when target leaves bank fire arc");
-        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none(),
-            "beam should be cleared after sever-by-arc");
-        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"),
-            "cooldown should start after arc sever");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded when target leaves bank fire arc"
+        );
+        assert!(
+            app.world().resource::<ActiveBeam>().target_uuid.is_none(),
+            "beam should be cleared after sever-by-arc"
+        );
+        assert!(
+            app.world()
+                .resource::<PhaserCooldown>()
+                .is_bank_active("port"),
+            "cooldown should start after arc sever"
+        );
     }
 
     #[test]
@@ -1962,43 +2494,66 @@ mod tests {
         // Move the live ECS Transform out of range. tick_active_beam reads the
         // live position, not the WorldResource snapshot.
         let entity = {
-            let mut q = app.world_mut().query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
+            let mut q = app
+                .world_mut()
+                .query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
             q.iter(app.world())
                 .find(|(_, u)| u.0 == "target-uuid")
                 .map(|(e, _)| e)
                 .expect("target entity should exist")
         };
-        app.world_mut().entity_mut(entity).insert(Transform::from_xyz(0.0, 0.0, -50.0));
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(Transform::from_xyz(0.0, 0.0, -50.0));
 
         let out = tick(&mut app);
 
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
-            "expected BeamEnded when target leaves phaser range");
-        assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none(),
-            "beam should be cleared after sever-by-range");
-        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"),
-            "cooldown should start after range sever");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded when target leaves phaser range"
+        );
+        assert!(
+            app.world().resource::<ActiveBeam>().target_uuid.is_none(),
+            "beam should be cleared after sever-by-range"
+        );
+        assert!(
+            app.world()
+                .resource::<PhaserCooldown>()
+                .is_bank_active("port"),
+            "cooldown should start after range sever"
+        );
     }
 
     #[test]
     fn no_damage_refund_on_sever() {
         let mut app = test_app();
-        let asteroid_entity = app.world_mut().spawn((
-            crate::simulation::Asteroid,
-            crate::simulation::AsteroidUuid("target-uuid".into()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
-        )).id();
+        let asteroid_entity = app
+            .world_mut()
+            .spawn((
+                crate::simulation::Asteroid,
+                crate::simulation::AsteroidUuid("target-uuid".into()),
+                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                    crate::messages::Console::CaptainChair,
+                    30.0,
+                )])),
+            ))
+            .id();
         // Target at port beam (-20, 0) so the port bank's arc check passes.
         let _ = lock_and_fire(&mut app, -20.0, 0.0);
 
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 10.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 10.0;
         let _ = tick(&mut app);
 
         // Rotate 180° — target moves to starboard beam, outside port bank's arc.
         app.world_mut().resource_mut::<ShipState>().yaw = std::f32::consts::PI;
         let _ = tick(&mut app);
 
-        let hp = app.world().get::<EntityConsoleHull>(asteroid_entity)
+        let hp = app
+            .world()
+            .get::<EntityConsoleHull>(asteroid_entity)
             .map(|h| h.0.total_current());
         assert!(
             hp.is_some() && hp.unwrap() < 30.0,
@@ -2010,50 +2565,93 @@ mod tests {
     #[test]
     fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
         let mut app = test_app();
-        app.world_mut().insert_resource(WorldResource(crate::messages::WorldData {
-            entities: vec![
-                crate::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
-                crate::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
-            ],
-            ..Default::default()
-        }));
+        app.world_mut()
+            .insert_resource(WorldResource(crate::messages::WorldData {
+                entities: vec![
+                    crate::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
+                    crate::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
+                ],
+                ..Default::default()
+            }));
         // Spawn matching ECS entities so live_entity_xz can find them.
         app.world_mut().spawn((
             crate::simulation::Asteroid,
             crate::simulation::AsteroidUuid("t1".into()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
+            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                crate::messages::Console::CaptainChair,
+                30.0,
+            )])),
             Transform::from_xyz(0.0, 0.0, -20.0),
         ));
         app.world_mut().spawn((
             crate::simulation::Asteroid,
             crate::simulation::AsteroidUuid("t2".into()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, 30.0)])),
+            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                crate::messages::Console::CaptainChair,
+                30.0,
+            )])),
             Transform::from_xyz(0.0, 0.0, -15.0),
         ));
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t1".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget { uuid: "t1".into() },
+        );
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let _ = tick(&mut app);
-        assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t1"));
+        assert_eq!(
+            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            Some("t1")
+        );
 
         app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 0.0;
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 0.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 0.0;
         let _ = tick(&mut app);
 
-        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"));
+        assert!(app
+            .world()
+            .resource::<PhaserCooldown>()
+            .is_bank_active("port"));
 
-        app.world_mut().resource_mut::<PhaserCooldown>().start_bank_with_cooldown("port", 0.0);
+        app.world_mut()
+            .resource_mut::<PhaserCooldown>()
+            .start_bank_with_cooldown("port", 0.0);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "t2".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget { uuid: "t2".into() },
+        );
         let _ = tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         let out = tick(&mut app);
 
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
-            "expected BeamStarted for new target after cooldown");
-        assert_eq!(app.world().resource::<ActiveBeam>().target_uuid.as_deref(), Some("t2"));
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamStarted { .. })),
+            "expected BeamStarted for new target after cooldown"
+        );
+        assert_eq!(
+            app.world().resource::<ActiveBeam>().target_uuid.as_deref(),
+            Some("t2")
+        );
     }
 
     // ── SetPhaserMode tests ────────────────────────────────────────────────
@@ -2062,7 +2660,13 @@ mod tests {
     fn weapons_console_can_set_phaser_mode_to_manual() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(&mut app, "weapons", ClientMessage::SetPhaserMode { mode: crate::messages::PhaserMode::Manual });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserMode {
+                mode: crate::messages::PhaserMode::Manual,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<CurrentPhaserMode>().0,
@@ -2075,7 +2679,13 @@ mod tests {
     fn non_weapons_player_cannot_set_phaser_mode() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(&mut app, "captain", ClientMessage::SetPhaserMode { mode: crate::messages::PhaserMode::Manual });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetPhaserMode {
+                mode: crate::messages::PhaserMode::Manual,
+            },
+        );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<CurrentPhaserMode>().0,
@@ -2091,10 +2701,14 @@ mod tests {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: "fore_port".to_string(),
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
@@ -2114,10 +2728,14 @@ mod tests {
         let mut app = test_app();
         // No player holds Tactical here — authorization comes purely from the
         // local-console bypass.
-        push(&mut app, crate::console_bridge::LOCAL_CONSOLE_TOKEN, ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            crate::console_bridge::LOCAL_CONSOLE_TOKEN,
+            ClientMessage::FireTorpedo {
+                tube: "fore_port".to_string(),
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
@@ -2135,7 +2753,9 @@ mod tests {
         let toml_str = include_str!("../../../assets/entities/player_ship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
             .expect("player_ship.toml must parse");
-        let tc = config.torpedoes.expect("player_ship must declare [torpedoes]");
+        let tc = config
+            .torpedoes
+            .expect("player_ship must declare [torpedoes]");
         let runtime = tc.to_runtime();
         let sys = crate::torpedo::TorpedoSystem::new(runtime.clone());
         // Magazine size matches TOML — changing `count = 10` to `count = 99`
@@ -2157,26 +2777,38 @@ mod tests {
         let toml_str = include_str!("../../../assets/entities/player_ship.toml");
         let config = crate::entity_config::EntityConfig::from_toml(toml_str)
             .expect("player_ship.toml must parse");
-        let wc = config.weapons_console
+        let wc = config
+            .weapons_console
             .expect("player_ship must declare [weapons_console]");
         let combat = crate::entity_config::PhaserCombatConfig::from_weapons_console(&wc);
 
         // The four values that actually drive player phaser behaviour.
-        assert_eq!(combat.beam_cooldown_secs, wc.cooldown_secs,
-            "beam_cooldown_secs must match TOML cooldown_secs");
-        assert_eq!(combat.beam_duration_secs, wc.beam_duration_secs,
-            "beam_duration_secs must match TOML beam_duration_secs");
-        assert_eq!(combat.beam_damage_per_sec, wc.beam_damage_per_sec,
-            "beam_damage_per_sec must match TOML beam_damage_per_sec");
-        assert_eq!(combat.phaser_range, wc.beam_range,
-            "phaser_range must match TOML beam_range");
+        assert_eq!(
+            combat.beam_cooldown_secs, wc.cooldown_secs,
+            "beam_cooldown_secs must match TOML cooldown_secs"
+        );
+        assert_eq!(
+            combat.beam_duration_secs, wc.beam_duration_secs,
+            "beam_duration_secs must match TOML beam_duration_secs"
+        );
+        assert_eq!(
+            combat.beam_damage_per_sec, wc.beam_damage_per_sec,
+            "beam_damage_per_sec must match TOML beam_damage_per_sec"
+        );
+        assert_eq!(
+            combat.phaser_range, wc.beam_range,
+            "phaser_range must match TOML beam_range"
+        );
 
         // And starting the cooldown produces exactly that value, so it flows
         // through to live `PhaserCooldown.bank_remaining_secs`.
         let mut cd = PhaserCooldown::default();
         cd.start_bank("test", &combat);
-        assert_eq!(cd.bank_remaining_secs("test"), wc.cooldown_secs,
-            "PhaserCooldown::start_bank must use the TOML-sourced cooldown");
+        assert_eq!(
+            cd.bank_remaining_secs("test"),
+            wc.cooldown_secs,
+            "PhaserCooldown::start_bank must use the TOML-sourced cooldown"
+        );
     }
 
     #[test]
@@ -2184,14 +2816,19 @@ mod tests {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "captain", ClientMessage::FireTorpedo {
-            tube: "fore_port".to_string(),
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::FireTorpedo {
+                tube: "fore_port".to_string(),
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            !out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            !out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
             "captain should not be able to fire torpedo"
         );
     }
@@ -2201,19 +2838,37 @@ mod tests {
         // Note: The Lobby gate is now at the SimSet chain level.
         // In test configurations without SimSet, the system processes messages during Lobby.
         let mut app = test_app();
-        push(&mut app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         tick(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: "aft".to_string(),
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: "aft".to_string(),
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
         assert!(
-            out.iter().any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. })),
             "FireTorpedo should fire during Lobby when no SimSet gate is configured"
         );
     }
@@ -2223,17 +2878,24 @@ mod tests {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::FireTorpedo {
-            tube: "fore_starboard".to_string(),
-            target_uuid: None,
-        });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FireTorpedo {
+                tube: "fore_starboard".to_string(),
+                target_uuid: None,
+            },
+        );
         let out = tick(&mut app);
 
-        let launched = out.iter().find(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. }))
+        let launched = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::TorpedoLaunched { .. }))
             .expect("expected TorpedoLaunched");
         assert!(
             matches!(&launched.target, Target::All),
-            "TorpedoLaunched should be broadcast to All, not {:?}", launched.target
+            "TorpedoLaunched should be broadcast to All, not {:?}",
+            launched.target
         );
     }
 
@@ -2245,22 +2907,39 @@ mod tests {
         setup_weapons_world_with_entity(&mut app, 0.0, -20.0);
         start_game_with_weapons(&mut app);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app);
 
         let hp_before = {
             let world = app.world().resource::<WorldResource>();
-            world.0.entities.iter().find(|a| a.uuid == "target-uuid").map(|_| true)
+            world
+                .0
+                .entities
+                .iter()
+                .find(|a| a.uuid == "target-uuid")
+                .map(|_| true)
         };
         assert!(hp_before.is_some(), "asteroid should still exist after <1s");
     }
 
     #[test]
     fn phaser_damage_modifier_doubles_kill_rate() {
-        use crate::modifiers::{Modifier, ShipModifiers};
         use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::modifiers::{Modifier, ShipModifiers};
 
         let mut app_fast = test_app();
         setup_weapons_world_with_entity(&mut app_fast, 0.0, -20.0);
@@ -2273,9 +2952,21 @@ mod tests {
             });
         }
         start_game_with_weapons(&mut app_fast);
-        push(&mut app_fast, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app_fast,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         tick(&mut app_fast);
-        push(&mut app_fast, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app_fast,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app_fast);
 
         {
@@ -2284,16 +2975,36 @@ mod tests {
         }
         tick(&mut app_fast);
 
-        let still_exists_fast = app_fast.world().resource::<WorldResource>()
-            .0.entities.iter().any(|a| a.uuid == "target-uuid");
-        assert!(!still_exists_fast, "with 2× phaser damage modifier, asteroid should be destroyed after 3.5s of beam");
+        let still_exists_fast = app_fast
+            .world()
+            .resource::<WorldResource>()
+            .0
+            .entities
+            .iter()
+            .any(|a| a.uuid == "target-uuid");
+        assert!(
+            !still_exists_fast,
+            "with 2× phaser damage modifier, asteroid should be destroyed after 3.5s of beam"
+        );
 
         let mut app_base = test_app();
         setup_weapons_world_with_entity(&mut app_base, 0.0, -20.0);
         start_game_with_weapons(&mut app_base);
-        push(&mut app_base, "weapons", ClientMessage::SetTarget { uuid: "target-uuid".into() });
+        push(
+            &mut app_base,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "target-uuid".into(),
+            },
+        );
         tick(&mut app_base);
-        push(&mut app_base, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app_base,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app_base);
         {
             let mut beam = app_base.world_mut().resource_mut::<ActiveBeam>();
@@ -2301,25 +3012,69 @@ mod tests {
         }
         tick(&mut app_base);
 
-        let still_exists_base = app_base.world().resource::<WorldResource>()
-            .0.entities.iter().any(|a| a.uuid == "target-uuid");
+        let still_exists_base = app_base
+            .world()
+            .resource::<WorldResource>()
+            .0
+            .entities
+            .iter()
+            .any(|a| a.uuid == "target-uuid");
         assert!(still_exists_base, "with identity modifier, asteroid should survive 3.5s of beam (only 17.5/30 HP removed)");
     }
 
     // ── SetPhaserFrequency delegation tests ────────────────────────────────
 
     fn start_game_with_sensors_and_weapons(app: &mut App) {
-        push(app, "captain", ClientMessage::Identify { token: "captain".into(), name: "Alice".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::Identify {
+                token: "captain".into(),
+                name: "Alice".into(),
+            },
+        );
         tick(app);
-        push(app, "captain", ClientMessage::SelectStation { station: "Captain's Chair".into() });
+        push(
+            app,
+            "captain",
+            ClientMessage::SelectStation {
+                station: "Captain's Chair".into(),
+            },
+        );
         tick(app);
-        push(app, "sensors", ClientMessage::Identify { token: "sensors".into(), name: "Spock".into() });
+        push(
+            app,
+            "sensors",
+            ClientMessage::Identify {
+                token: "sensors".into(),
+                name: "Spock".into(),
+            },
+        );
         tick(app);
-        push(app, "sensors", ClientMessage::SelectStation { station: "Sensors".into() });
+        push(
+            app,
+            "sensors",
+            ClientMessage::SelectStation {
+                station: "Sensors".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::Identify { token: "weapons".into(), name: "Bob".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::Identify {
+                token: "weapons".into(),
+                name: "Bob".into(),
+            },
+        );
         tick(app);
-        push(app, "weapons", ClientMessage::SelectStation { station: "Tactical".into() });
+        push(
+            app,
+            "weapons",
+            ClientMessage::SelectStation {
+                station: "Tactical".into(),
+            },
+        );
         tick(app);
         push(app, "captain", ClientMessage::StartGame);
         tick(app);
@@ -2329,10 +3084,17 @@ mod tests {
     fn tactical_holder_can_set_phaser_frequency() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: 0.8 });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserFrequency { frequency: 0.8 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.8).abs() < 1e-5, "Tactical holder should set phaser frequency to 0.8, got {freq}");
+        assert!(
+            (freq - 0.8).abs() < 1e-5,
+            "Tactical holder should set phaser frequency to 0.8, got {freq}"
+        );
     }
 
     #[test]
@@ -2342,67 +3104,113 @@ mod tests {
         app.world_mut()
             .resource_mut::<crate::console_ai_plugin::ConsoleComplexityState>()
             .set(Console::Tactical, "Low".into());
-        push(&mut app, "sensors", ClientMessage::SetPhaserFrequency { frequency: 0.3 });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetPhaserFrequency { frequency: 0.3 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.3).abs() < 1e-5, "Sensors holder should set phaser frequency when Tactical is Low, got {freq}");
+        assert!(
+            (freq - 0.3).abs() < 1e-5,
+            "Sensors holder should set phaser frequency when Tactical is Low, got {freq}"
+        );
     }
 
     #[test]
     fn sensors_holder_cannot_set_phaser_frequency_when_tactical_is_full() {
         let mut app = test_app();
         start_game_with_sensors_and_weapons(&mut app);
-        push(&mut app, "sensors", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
+        push(
+            &mut app,
+            "sensors",
+            ClientMessage::SetPhaserFrequency { frequency: 0.9 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.5).abs() < 1e-5, "Sensors holder must NOT change phaser frequency when Tactical is Full, got {freq}");
+        assert!(
+            (freq - 0.5).abs() < 1e-5,
+            "Sensors holder must NOT change phaser frequency when Tactical is Full, got {freq}"
+        );
     }
 
     #[test]
     fn unrelated_console_cannot_set_phaser_frequency() {
         let mut app = test_app();
         start_game(&mut app);
-        push(&mut app, "captain", ClientMessage::SetPhaserFrequency { frequency: 0.9 });
+        push(
+            &mut app,
+            "captain",
+            ClientMessage::SetPhaserFrequency { frequency: 0.9 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.5).abs() < 1e-5, "Captain must NOT change phaser frequency, got {freq}");
+        assert!(
+            (freq - 0.5).abs() < 1e-5,
+            "Captain must NOT change phaser frequency, got {freq}"
+        );
     }
 
     #[test]
     fn set_phaser_frequency_clamps_value() {
         let mut app = test_app();
         start_game_with_weapons(&mut app);
-        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: 1.5 });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserFrequency { frequency: 1.5 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 1.0).abs() < 1e-5, "frequency above 1.0 should clamp to 1.0, got {freq}");
+        assert!(
+            (freq - 1.0).abs() < 1e-5,
+            "frequency above 1.0 should clamp to 1.0, got {freq}"
+        );
 
-        push(&mut app, "weapons", ClientMessage::SetPhaserFrequency { frequency: -0.5 });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetPhaserFrequency { frequency: -0.5 },
+        );
         tick(&mut app);
         let freq = app.world().resource::<ShipState>().phaser_frequency;
-        assert!((freq - 0.0).abs() < 1e-5, "frequency below 0.0 should clamp to 0.0, got {freq}");
+        assert!(
+            (freq - 0.0).abs() < 1e-5,
+            "frequency below 0.0 should clamp to 0.0, got {freq}"
+        );
     }
 
     // ── NPC / station phaser damage (issue #311) ──────────────────────────
 
     fn setup_npc_world(app: &mut App, npc_x: f32, npc_z: f32) {
-        app.world_mut().insert_resource(WorldResource(crate::messages::WorldData {
-            entities: vec![crate::messages::EntitySnapshot {
-                uuid: "npc-1".into(),
-                position: Some([npc_x, 0.0, npc_z]),
-                tags: vec!["ship".into()],
+        app.world_mut()
+            .insert_resource(WorldResource(crate::messages::WorldData {
+                entities: vec![crate::messages::EntitySnapshot {
+                    uuid: "npc-1".into(),
+                    position: Some([npc_x, 0.0, npc_z]),
+                    tags: vec!["ship".into()],
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        }));
+            }));
     }
 
-    fn spawn_npc_entity(app: &mut App, npc_x: f32, npc_z: f32, max_hp: f32) -> bevy::ecs::entity::Entity {
-        app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("npc-1".into()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(crate::messages::Console::CaptainChair, max_hp)])),
-            Transform::from_xyz(npc_x, 0.0, npc_z),
-        )).id()
+    fn spawn_npc_entity(
+        app: &mut App,
+        npc_x: f32,
+        npc_z: f32,
+        max_hp: f32,
+    ) -> bevy::ecs::entity::Entity {
+        app.world_mut()
+            .spawn((
+                crate::entity_spawner::EntityUuid("npc-1".into()),
+                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                    crate::messages::Console::CaptainChair,
+                    max_hp,
+                )])),
+                Transform::from_xyz(npc_x, 0.0, npc_z),
+            ))
+            .id()
     }
 
     // ── Cycle 1: phaser beam reduces NPC hull ─────────────────────────────
@@ -2415,20 +3223,40 @@ mod tests {
 
         let npc_entity = spawn_npc_entity(&mut app, 0.0, -20.0, 30.0);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app);
 
         // Accumulate damage but don't destroy
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 10.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 10.0;
         app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
         tick(&mut app);
 
-        let hp = app.world().get::<EntityConsoleHull>(npc_entity)
+        let hp = app
+            .world()
+            .get::<EntityConsoleHull>(npc_entity)
             .expect("NPC entity should still exist")
-            .0.total_current();
-        assert!(hp < 30.0, "NPC hull should be reduced after phaser hit, got {hp}");
+            .0
+            .total_current();
+        assert!(
+            hp < 30.0,
+            "NPC hull should be reduced after phaser hit, got {hp}"
+        );
     }
 
     // ── Cycle 2: NPC at 0 HP is despawned and EntityDespawned broadcast ──
@@ -2441,13 +3269,27 @@ mod tests {
 
         let npc_entity = spawn_npc_entity(&mut app, 0.0, -20.0, 30.0);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app);
 
         // Force lethal damage
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 30.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 30.0;
         app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
         let out = tick(&mut app);
 
@@ -2458,16 +3300,27 @@ mod tests {
         );
 
         // EntityDespawned wire message broadcast to all
-        let despawned_msg = out.iter().find(|m| matches!(&m.msg, ServerMessage::EntityDespawned { uuid } if uuid == "npc-1"));
-        assert!(despawned_msg.is_some(), "expected EntityDespawned {{ uuid: npc-1 }} broadcast");
+        let despawned_msg = out
+            .iter()
+            .find(|m| matches!(&m.msg, ServerMessage::EntityDespawned { uuid } if uuid == "npc-1"));
+        assert!(
+            despawned_msg.is_some(),
+            "expected EntityDespawned {{ uuid: npc-1 }} broadcast"
+        );
 
         // BeamEnded sent
-        assert!(out.iter().any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
-            "expected BeamEnded after NPC destruction");
+        assert!(
+            out.iter()
+                .any(|m| matches!(&m.msg, ServerMessage::BeamEnded { .. })),
+            "expected BeamEnded after NPC destruction"
+        );
 
         // Beam cleared, cooldown started
         assert!(app.world().resource::<ActiveBeam>().target_uuid.is_none());
-        assert!(app.world().resource::<PhaserCooldown>().is_bank_active("port"));
+        assert!(app
+            .world()
+            .resource::<PhaserCooldown>()
+            .is_bank_active("port"));
     }
 
     // ── Cycle 3: AiEntityDestroyed message written on NPC destruction ─────
@@ -2479,20 +3332,40 @@ mod tests {
 
         let mut app = test_app();
         app.init_resource::<DestroyedBox>();
-        app.add_systems(bevy::app::Update, |mut r: bevy::ecs::prelude::MessageReader<crate::ai_plugin::AiEntityDestroyed>, mut b: bevy::ecs::prelude::ResMut<DestroyedBox>| {
-            for ev in r.read() { b.0.push(ev.clone()); }
-        });
+        app.add_systems(
+            bevy::app::Update,
+            |mut r: bevy::ecs::prelude::MessageReader<crate::ai_plugin::AiEntityDestroyed>,
+             mut b: bevy::ecs::prelude::ResMut<DestroyedBox>| {
+                for ev in r.read() {
+                    b.0.push(ev.clone());
+                }
+            },
+        );
 
         setup_npc_world(&mut app, 0.0, -20.0);
         start_game_with_weapons(&mut app);
         spawn_npc_entity(&mut app, 0.0, -20.0, 30.0);
 
-        push(&mut app, "weapons", ClientMessage::SetTarget { uuid: "npc-1".into() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::SetTarget {
+                uuid: "npc-1".into(),
+            },
+        );
         tick(&mut app);
-        push(&mut app, "weapons", ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            "weapons",
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         tick(&mut app);
 
-        app.world_mut().resource_mut::<ActiveBeam>().damage_accumulator = 30.0;
+        app.world_mut()
+            .resource_mut::<ActiveBeam>()
+            .damage_accumulator = 30.0;
         app.world_mut().resource_mut::<ActiveBeam>().remaining_secs = 5.0;
         tick(&mut app);
         tick(&mut app); // second tick allows PostUpdate-equivalent collector to drain the message
@@ -2515,9 +3388,9 @@ mod tests {
         target_x: f32,
         target_z: f32,
     ) -> (bevy::ecs::entity::Entity, bevy::ecs::entity::Entity) {
-        use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
         use crate::ai::AiController;
-        use crate::entity_spawner::{EntityUuid, EntityConsoleHull};
+        use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
+        use crate::entity_spawner::{EntityConsoleHull, EntityUuid};
 
         // Register the AI token.
         {
@@ -2531,25 +3404,32 @@ mod tests {
         ctrl.blackboard.target = target_as_uuid;
 
         // Spawn NPC entity facing toward negative-Z (yaw = 0 → forward = -Z).
-        let npc_entity = app.world_mut().spawn((
-            EntityUuid(npc_uuid.to_string()),
-            AiControllerComponent {
-                controller: ctrl,
-                entity_uuid: npc_uuid.to_string(),
-                forward_speed: 0.0,
-            },
-            EntityPhaserState::default(),
-            Transform::from_xyz(0.0, 0.0, 0.0),
-        )).id();
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(npc_uuid.to_string()),
+                AiControllerComponent {
+                    controller: ctrl,
+                    entity_uuid: npc_uuid.to_string(),
+                    forward_speed: 0.0,
+                },
+                EntityPhaserState::default(),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ))
+            .id();
 
         // Spawn target entity.
-        let target_entity = app.world_mut().spawn((
-            EntityUuid(target_uuid.to_string()),
-            EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[
-                (crate::messages::Console::CaptainChair, 50.0),
-            ])),
-            Transform::from_xyz(target_x, 0.0, target_z),
-        )).id();
+        let target_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(target_uuid.to_string()),
+                EntityConsoleHull(crate::damage::ConsoleHull::from_config(&[(
+                    crate::messages::Console::CaptainChair,
+                    50.0,
+                )])),
+                Transform::from_xyz(target_x, 0.0, target_z),
+            ))
+            .id();
 
         (npc_entity, target_entity)
     }
@@ -2559,7 +3439,7 @@ mod tests {
         // NPC entity at origin, target directly ahead (negative-Z), within beam range.
         // Sending a FirePhaser InboundMessage for the NPC's ai: token should set
         // `EntityPhaserState::beam_active = true` after one update.
-        use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
+        use crate::ai_plugin::{AiTokenRegistry, EntityPhaserState};
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -2572,7 +3452,13 @@ mod tests {
 
         // Send FirePhaser as the NPC's synthetic token.
         let ai_token = format!("ai:{}", npc_uuid);
-        push(&mut app, &ai_token, ClientMessage::FirePhaser { bank: "port".to_string() });
+        push(
+            &mut app,
+            &ai_token,
+            ClientMessage::FirePhaser {
+                bank: "port".to_string(),
+            },
+        );
         app.update();
 
         let phaser_state = app
@@ -2589,7 +3475,7 @@ mod tests {
     fn npc_beam_tick_applies_damage_to_target_hull() {
         // With an active NPC beam, each tick of handle_fire_phaser_npc reduces
         // the target's EntityConsoleHull.
-        use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
+        use crate::ai_plugin::{AiTokenRegistry, EntityPhaserState};
         use crate::entity_spawner::EntityConsoleHull;
 
         let mut app = test_app();
@@ -2604,21 +3490,37 @@ mod tests {
         // Activate the beam directly (no FirePhaser required for this test).
         let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();
         {
-            let mut ps = app.world_mut().get_mut::<EntityPhaserState>(npc_entity).unwrap();
+            let mut ps = app
+                .world_mut()
+                .get_mut::<EntityPhaserState>(npc_entity)
+                .unwrap();
             ps.beam_active = true;
             ps.beam_target = Some(target_uuid_parsed);
             ps.beam_remaining_secs = 10.0;
         }
 
-        let hp_before = app.world().get::<EntityConsoleHull>(target_entity).unwrap().0.total_current();
+        let hp_before = app
+            .world()
+            .get::<EntityConsoleHull>(target_entity)
+            .unwrap()
+            .0
+            .total_current();
 
         // Run several ticks so damage accumulates.
         for _ in 0..10 {
             app.update();
         }
 
-        let hp_after = app.world().get::<EntityConsoleHull>(target_entity).unwrap().0.total_current();
-        assert!(hp_after < hp_before, "target hull must decrease as NPC beam ticks (before={hp_before}, after={hp_after})");
+        let hp_after = app
+            .world()
+            .get::<EntityConsoleHull>(target_entity)
+            .unwrap()
+            .0
+            .total_current();
+        assert!(
+            hp_after < hp_before,
+            "target hull must decrease as NPC beam ticks (before={hp_before}, after={hp_after})"
+        );
     }
 
     #[test]
@@ -2627,9 +3529,9 @@ mod tests {
         // must route through shields → hull resource, not EntityConsoleHull.
         use crate::ai_plugin::{AiTokenRegistry, EntityPhaserState};
         use crate::entity_spawner::EntityUuid;
-        use crate::shield::ShieldConfig;
-        use crate::simulation::{ShipShields, GameOverReason};
         use crate::server_app::Ship;
+        use crate::shield::ShieldConfig;
+        use crate::simulation::{GameOverReason, ShipShields};
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -2642,26 +3544,31 @@ mod tests {
             num_facings: 4,
             ..Default::default()
         };
-        app.insert_resource(ShipShields(crate::shield::ShieldSystem::new(&shield_config)));
+        app.insert_resource(ShipShields(crate::shield::ShieldSystem::new(
+            &shield_config,
+        )));
 
         let npc_uuid = "00000000-0000-0000-0000-000000000010";
         let player_uuid = "00000000-0000-0000-0000-000000000011";
         let player_uuid_parsed = uuid::Uuid::parse_str(player_uuid).unwrap();
 
         // Spawn the player ship entity with Ship marker, EntityUuid, EntityConsoleHull.
-        let _player_entity = app.world_mut().spawn((
-            EntityUuid(player_uuid.to_string()),
-            Ship,
-            crate::entity_spawner::EntityConsoleHull(
-                crate::damage::ConsoleHull::from_config(&[
-                    (Console::Helm, 25.0),
-                    (Console::Tactical, 25.0),
-                    (Console::Power, 25.0),
-                    (Console::Shields, 25.0),
-                ])
-            ),
-            Transform::from_xyz(0.0, 0.0, -10.0),
-        )).id();
+        let _player_entity = app
+            .world_mut()
+            .spawn((
+                EntityUuid(player_uuid.to_string()),
+                Ship,
+                crate::entity_spawner::EntityConsoleHull(crate::damage::ConsoleHull::from_config(
+                    &[
+                        (Console::Helm, 25.0),
+                        (Console::Tactical, 25.0),
+                        (Console::Power, 25.0),
+                        (Console::Shields, 25.0),
+                    ],
+                )),
+                Transform::from_xyz(0.0, 0.0, -10.0),
+            ))
+            .id();
 
         // Spawn NPC entity (same pattern as setup_npc_shooter).
         let npc_entity = {
@@ -2672,26 +3579,41 @@ mod tests {
             let mut reg = app.world_mut().resource_mut::<AiTokenRegistry>();
             reg.register(npc_uuid);
 
-            app.world_mut().spawn((
-                EntityUuid(npc_uuid.to_string()),
-                crate::ai_plugin::AiControllerComponent {
-                    controller: ctrl,
-                    entity_uuid: npc_uuid.to_string(),
-                    forward_speed: 0.0,
-                },
-                EntityPhaserState::default(),
-                Transform::from_xyz(0.0, 0.0, 0.0),
-            )).id()
+            app.world_mut()
+                .spawn((
+                    EntityUuid(npc_uuid.to_string()),
+                    crate::ai_plugin::AiControllerComponent {
+                        controller: ctrl,
+                        entity_uuid: npc_uuid.to_string(),
+                        forward_speed: 0.0,
+                    },
+                    EntityPhaserState::default(),
+                    Transform::from_xyz(0.0, 0.0, 0.0),
+                ))
+                .id()
         };
 
-        let hull_before = app.world().resource::<ShipHullIntegrity>().0.total_current();
-        let shields_hp_before: Vec<i32> =
-            app.world().resource::<ShipShields>().0.facings.iter().map(|f| f.hp).collect();
+        let hull_before = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
+        let shields_hp_before: Vec<i32> = app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .facings
+            .iter()
+            .map(|f| f.hp)
+            .collect();
         let shields_sum_before: i32 = shields_hp_before.iter().sum();
 
         // Activate the beam directly targeting the player ship.
         {
-            let mut ps = app.world_mut().get_mut::<EntityPhaserState>(npc_entity).unwrap();
+            let mut ps = app
+                .world_mut()
+                .get_mut::<EntityPhaserState>(npc_entity)
+                .unwrap();
             ps.beam_active = true;
             ps.beam_target = Some(player_uuid_parsed);
             ps.beam_remaining_secs = 10.0;
@@ -2701,9 +3623,19 @@ mod tests {
             app.update();
         }
 
-        let hull_after = app.world().resource::<ShipHullIntegrity>().0.total_current();
-        let shields_sum_after: i32 =
-            app.world().resource::<ShipShields>().0.facings.iter().map(|f| f.hp).sum();
+        let hull_after = app
+            .world()
+            .resource::<ShipHullIntegrity>()
+            .0
+            .total_current();
+        let shields_sum_after: i32 = app
+            .world()
+            .resource::<ShipShields>()
+            .0
+            .facings
+            .iter()
+            .map(|f| f.hp)
+            .sum();
 
         let hull_lost = hull_before - hull_after;
         let shields_lost = shields_sum_before - shields_sum_after;
@@ -2718,7 +3650,7 @@ mod tests {
     fn npc_beam_cooldown_starts_after_beam_expires() {
         // When an NPC's beam_remaining_secs reaches zero, cooldown_remaining must
         // be set to a positive value and beam_active must become false.
-        use crate::ai_plugin::{EntityPhaserState, AiTokenRegistry};
+        use crate::ai_plugin::{AiTokenRegistry, EntityPhaserState};
 
         let mut app = test_app();
         app.init_resource::<AiTokenRegistry>();
@@ -2731,7 +3663,10 @@ mod tests {
 
         let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid_str).unwrap();
         {
-            let mut ps = app.world_mut().get_mut::<EntityPhaserState>(npc_entity).unwrap();
+            let mut ps = app
+                .world_mut()
+                .get_mut::<EntityPhaserState>(npc_entity)
+                .unwrap();
             ps.beam_active = true;
             ps.beam_target = Some(target_uuid_parsed);
             ps.beam_remaining_secs = 0.001; // expires on first tick
@@ -2741,8 +3676,15 @@ mod tests {
         app.update(); // cooldown ticked
 
         let ps = app.world().get::<EntityPhaserState>(npc_entity).unwrap();
-        assert!(!ps.beam_active, "beam_active must be false after beam expires");
-        assert!(ps.cooldown_remaining > 0.0, "cooldown_remaining must be positive after beam ends, got {}", ps.cooldown_remaining);
+        assert!(
+            !ps.beam_active,
+            "beam_active must be false after beam expires"
+        );
+        assert!(
+            ps.cooldown_remaining > 0.0,
+            "cooldown_remaining must be positive after beam ends, got {}",
+            ps.cooldown_remaining
+        );
     }
 
     // ── End-to-end: tick_ai_controllers → InboundMessage → handle_fire_phaser_npc ──
@@ -2757,7 +3699,9 @@ mod tests {
 
         let mut app = test_app();
         app.add_plugins(AiPlugin)
-            .insert_resource(FactionRegistryResource(crate::config_cache::get_faction_registry()));
+            .insert_resource(FactionRegistryResource(
+                crate::config_cache::get_faction_registry(),
+            ));
         app
     }
 
@@ -2768,16 +3712,17 @@ mod tests {
         // `tick_ai_controllers` to write a `FirePhaser` `InboundMessage`, which
         // `handle_fire_phaser_npc` picks up and sets `EntityPhaserState::beam_active`.
         use crate::ai_plugin::{AiControllerComponent, EntityPhaserState};
-        use crate::entity_spawner::{EntityUuid, EntityConsoleHull, WeaponsConsoleSection};
-        use crate::entity_config::{BehaviourConfig, StateConfig};
         use crate::damage::ConsoleHull;
-        use crate::messages::{GamePhase, Console};
+        use crate::entity_config::{BehaviourConfig, StateConfig};
+        use crate::entity_spawner::{EntityConsoleHull, EntityUuid, WeaponsConsoleSection};
+        use crate::messages::{Console, GamePhase};
         use bevy::prelude::State;
 
         let mut app = combined_test_app();
 
         // Put the simulation in InProgress so tick_ai_controllers runs.
-        app.world_mut().insert_resource(State::new(GamePhase::InProgress));
+        app.world_mut()
+            .insert_resource(State::new(GamePhase::InProgress));
 
         let beam_range = 50.0_f32;
         let npc_uuid_str = "ee000000-0000-0000-0000-000000000010";
@@ -2801,33 +3746,39 @@ mod tests {
         };
 
         // Spawn NPC at origin, facing -Z (yaw = 0 → forward = -Z).
-        let npc_entity = app.world_mut().spawn((
-            crate::entity_spawner::BehaviourSection(behaviour),
-            EntityUuid(npc_uuid_str.to_string()),
-            EntityPhaserState::default(),
-            WeaponsConsoleSection(crate::entity_config::WeaponsConsoleConfig {
-                beam_range,
-                beam_damage_per_sec: 5.0,
-                beam_duration_secs: 3.0,
-                cooldown_secs: 6.0,
-                beam_color: vec![],
-                torpedo_arc_color: vec![],
-                power_multipliers: None,
-                complexity_toml: None,
-                phaser_banks: Vec::new(),
-                radar: None,
-                shield_pierce: 0.0,
-            }),
-            EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)])),
-            Transform::from_xyz(0.0, 0.0, 0.0),
-        )).id();
+        let npc_entity = app
+            .world_mut()
+            .spawn((
+                crate::entity_spawner::BehaviourSection(behaviour),
+                EntityUuid(npc_uuid_str.to_string()),
+                EntityPhaserState::default(),
+                WeaponsConsoleSection(crate::entity_config::WeaponsConsoleConfig {
+                    beam_range,
+                    beam_damage_per_sec: 5.0,
+                    beam_duration_secs: 3.0,
+                    cooldown_secs: 6.0,
+                    beam_color: vec![],
+                    torpedo_arc_color: vec![],
+                    power_multipliers: None,
+                    complexity_toml: None,
+                    phaser_banks: Vec::new(),
+                    radar: None,
+                    shield_pierce: 0.0,
+                }),
+                EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 100.0)])),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            ))
+            .id();
 
         // Spawn target directly ahead (-Z), well within beam range.
-        let _target = app.world_mut().spawn((
-            EntityUuid(target_uuid_str.to_string()),
-            EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 200.0)])),
-            Transform::from_xyz(0.0, 0.0, -10.0),
-        )).id();
+        let _target = app
+            .world_mut()
+            .spawn((
+                EntityUuid(target_uuid_str.to_string()),
+                EntityConsoleHull(ConsoleHull::from_config(&[(Console::CaptainChair, 200.0)])),
+                Transform::from_xyz(0.0, 0.0, -10.0),
+            ))
+            .id();
 
         // Tick 1: `attach_controllers_on_spawn` runs → AiControllerComponent attached
         //         and token registered in AiTokenRegistry.
@@ -2835,7 +3786,10 @@ mod tests {
 
         // Set blackboard target so `tick_attacking` fires phasers.
         {
-            let mut ctrl = app.world_mut().get_mut::<AiControllerComponent>(npc_entity).unwrap();
+            let mut ctrl = app
+                .world_mut()
+                .get_mut::<AiControllerComponent>(npc_entity)
+                .unwrap();
             ctrl.controller.blackboard.target = Some(target_uuid_parsed);
         }
 
@@ -2845,7 +3799,9 @@ mod tests {
         app.update();
         app.update();
 
-        let ps = app.world().get::<EntityPhaserState>(npc_entity)
+        let ps = app
+            .world()
+            .get::<EntityPhaserState>(npc_entity)
             .expect("NPC must still have EntityPhaserState");
         assert!(
             ps.beam_active,
@@ -2875,11 +3831,15 @@ mod tests {
         let mut app = App::new();
         app.add_message::<ConsoleStateChanged>()
             .init_resource::<ConsolePushes>()
-            .add_systems(Update, (
-                push_weapons_console_state,
-                collect_console_pushes.after(push_weapons_console_state),
-            ));
-        app.world_mut().spawn(WeaponsConsoleStateComp(WeaponsConsoleState::default()));
+            .add_systems(
+                Update,
+                (
+                    push_weapons_console_state,
+                    collect_console_pushes.after(push_weapons_console_state),
+                ),
+            );
+        app.world_mut()
+            .spawn(WeaponsConsoleStateComp(WeaponsConsoleState::default()));
         app
     }
 
@@ -2909,6 +3869,9 @@ mod tests {
                     id: "fore".into(),
                     loaded: true,
                     reload_secs: 0.0,
+                    state: "loaded".into(),
+                    progress: 1.0,
+                    load_time: 10.0,
                 }],
                 torpedo_count: 9,
                 phaser_mode: crate::messages::PhaserMode::Manual,
@@ -2924,11 +3887,23 @@ mod tests {
         assert_eq!(pushes.len(), 1, "expected exactly one push after a change");
         let push = &pushes[0];
         assert_eq!(push.name, "Tactical");
-        assert!(push.json.contains("\"target_uuid\":\"tgt-42\""), "json: {}", push.json);
-        assert!(push.json.contains("\"torpedo_count\":9"), "json: {}", push.json);
+        assert!(
+            push.json.contains("\"target_uuid\":\"tgt-42\""),
+            "json: {}",
+            push.json
+        );
+        assert!(
+            push.json.contains("\"torpedo_count\":9"),
+            "json: {}",
+            push.json
+        );
         assert!(push.json.contains("\"id\":\"port\""), "json: {}", push.json);
         assert!(push.json.contains("\"id\":\"fore\""), "json: {}", push.json);
-        assert!(push.json.contains("\"phaser_mode\":\"Manual\""), "json: {}", push.json);
+        assert!(
+            push.json.contains("\"phaser_mode\":\"Manual\""),
+            "json: {}",
+            push.json
+        );
 
         // No further change → no further pushes.
         app.world_mut().resource_mut::<ConsolePushes>().0.clear();
@@ -2947,7 +3922,8 @@ mod tests {
         let mut app = test_app();
         // Configure tactical radar to show asteroids with range 300.
         {
-            let mut cfg = app.world_mut()
+            let mut cfg = app
+                .world_mut()
                 .resource_mut::<crate::lobby::server::ShipClientConfigResource>();
             cfg.0.tactical_radar_shows = vec!["asteroid".into()];
             cfg.0.tactical_radar_range = 300.0;
@@ -2965,15 +3941,22 @@ mod tests {
         assert_eq!(blips[0].uuid, "target-uuid");
         assert_eq!(blips[0].kind, "asteroid");
         // Forward (z=-50) at yaw=0 maps to radar_y > 0 (forward = up).
-        assert!(blips[0].radar_y > 0.0, "asteroid ahead should have positive radar_y");
-        assert!((blips[0].radar_x).abs() < 1e-4, "asteroid directly ahead has radar_x ≈ 0");
+        assert!(
+            blips[0].radar_y > 0.0,
+            "asteroid ahead should have positive radar_y"
+        );
+        assert!(
+            (blips[0].radar_x).abs() < 1e-4,
+            "asteroid directly ahead has radar_x ≈ 0"
+        );
     }
 
     #[test]
     fn asteroid_beyond_tactical_range_not_in_blips() {
         let mut app = test_app();
         {
-            let mut cfg = app.world_mut()
+            let mut cfg = app
+                .world_mut()
                 .resource_mut::<crate::lobby::server::ShipClientConfigResource>();
             cfg.0.tactical_radar_shows = vec!["asteroid".into()];
             cfg.0.tactical_radar_range = 100.0;

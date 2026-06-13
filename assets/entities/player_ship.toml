@@ -76,18 +76,21 @@ detonation_radius = 5.0
 id = "fore_port"
 facing_deg = 0.0
 fire_arc_deg = 90.0
+load_time = 3.0
 
 # Forward tube B
 [[torpedoes.tubes]]
 id = "fore_starboard"
 facing_deg = 0.0
 fire_arc_deg = 90.0
+load_time = 3.0
 
 # Aft tube: rear-facing torpedo launcher.
 [[torpedoes.tubes]]
 id = "aft"
 facing_deg = 180.0
 fire_arc_deg = 90.0
+load_time = 3.0
 
 [sensors_console]
 complexity_toml = "assets/complexity/sensors.toml"

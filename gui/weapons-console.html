@@ -431,23 +431,88 @@
                   <div class="spacer"></div>
                 </div>
 
-                <!-- Tube selector chips (built dynamically from state;
-                     hidden by Tactical Low preset) -->
-                <div class="tubes" id="tube-chips" data-hideable="torpedo_tube_selector"></div>
-
-                <!-- Per-tube status indicators (built dynamically) -->
-                <div class="tube-status-row" id="tube-status-row"></div>
-
-                <!-- Fire torpedo -->
-                <div class="fire-row">
-                  <button id="fire-torpedo" class="btn armed" style="width:100%;" type="button">
-                    <span class="btn-bg"></span>
-                    <span class="led on" id="torpedo-led"></span>
-                    <span class="label" id="torpedo-fire-label">FIRE TORPEDO</span>
-                  </button>
-                </div>
+                <!-- Per-tube rows (built dynamically) -->
+                <div id="tube-list"></div>
               </div>
             </div>
+
+            <style>
+              .tube-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-top: 10px;
+              }
+              .tube-row .tube-name {
+                font-family: "JetBrains Mono", monospace;
+                font-size: 12px;
+                letter-spacing: 0.12em;
+                color: var(--ink-faint);
+                min-width: 80px;
+                flex-shrink: 0;
+              }
+              .tube-row .load-btn {
+                flex: 1;
+                position: relative;
+                height: 36px;
+                border: 1px solid var(--ink-faint);
+                background: transparent;
+                color: var(--ink);
+                font-family: "JetBrains Mono", monospace;
+                font-size: 11px;
+                letter-spacing: 0.12em;
+                cursor: pointer;
+                overflow: hidden;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .tube-row .load-btn:disabled {
+                cursor: default;
+                opacity: 0.7;
+              }
+              .tube-row .load-btn .load-fill {
+                position: absolute;
+                inset: 0;
+                width: 0%;
+                background: rgba(0,200,120,0.18);
+                transition: width 0.15s linear;
+                pointer-events: none;
+              }
+              .tube-row .load-btn.btn-unload .load-fill {
+                background: rgba(255,120,60,0.18);
+              }
+              .tube-row .load-btn .load-label {
+                position: relative;
+                z-index: 1;
+              }
+              .tube-row .fire-btn {
+                height: 36px;
+                width: 80px;
+                flex-shrink: 0;
+                border: 1px solid var(--ink-faint);
+                background: transparent;
+                color: var(--ink);
+                font-family: "JetBrains Mono", monospace;
+                font-size: 11px;
+                letter-spacing: 0.12em;
+                cursor: pointer;
+              }
+              .tube-row .fire-btn.armed {
+                border-color: var(--tactical, #f04040);
+                color: var(--tactical, #f04040);
+              }
+              .tube-row .fire-btn:disabled {
+                cursor: default;
+                opacity: 0.35;
+              }
+
+              @media (orientation: portrait) {
+                .tube-row .tube-name { min-width: 60px; font-size: 10px; }
+                .tube-row .load-btn { height: 30px; font-size: 10px; }
+                .tube-row .fire-btn { height: 30px; width: 60px; font-size: 10px; }
+              }
+            </style>
 
             <!-- PHASER ARRAY ──────────────────────────────── -->
             <div class="inset">
@@ -534,10 +599,7 @@
     import { initConsole } from './console-core.js';
 
     // ── State ────────────────────────────────────────────────────────────
-    // Defaults ensure FIRE buttons work before first state push
-    // (smoke-test requirement: fire_phaser→bank:'fore', fire_torpedo→tube:'fore').
     var _selectedBank  = 'fore';
-    var _selectedTube  = 'fore';
     var _state         = null;
     var _radarWidget   = null;
 
@@ -578,50 +640,79 @@
       countEl.textContent   = String(n);
       countEl.dataset.count = String(n);
 
-      // ── Tube chips & status row ──────────────────────────────────────────
+      // ── Per-tube rows ────────────────────────────────────────────────────
       var tubes = s.tubes || [];
       var tubeCountTag = document.getElementById('tube-count-tag');
       if (tubeCountTag) tubeCountTag.textContent = tubes.length + ' TUBE' + (tubes.length !== 1 ? 'S' : '');
 
-      // Validate selected tube still exists; fall back to first
-      if (!tubes.some(function(t) { return t.id === _selectedTube; }) && tubes.length > 0) {
-        _selectedTube = tubes[0].id;
-      }
-
-      var chipsEl = document.getElementById('tube-chips');
-      chipsEl.innerHTML = '';
+      var tubeList = document.getElementById('tube-list');
+      tubeList.innerHTML = '';
       tubes.forEach(function(t) {
-        var btn = document.createElement('button');
-        btn.className = 'chip' + (t.id === _selectedTube ? ' selected' : '');
-        btn.type = 'button';
-        btn.innerHTML = '<span class="chip-bg"></span><span class="lbl">' + t.id.toUpperCase() + '</span>';
-        btn.addEventListener('pointerdown', (function(id) { return function(e) {
-          e.preventDefault();  // prevent 300ms-delayed synthetic click after DOM rebuild
-          _selectedTube = id;
-          if (_state) _renderConsole(_state);
+        var state    = t.state || (t.loaded ? 'loaded' : 'loading');
+        var progress = typeof t.progress === 'number' ? t.progress : (t.loaded ? 1 : 0);
+        var name     = t.id.replace(/_/g, ' ').toUpperCase();
+
+        // Load/unload button
+        var loadBtn = document.createElement('button');
+        loadBtn.type = 'button';
+        var isTransitioning = state === 'loading' || state === 'unloading';
+        loadBtn.disabled = isTransitioning;
+
+        var fill = document.createElement('span');
+        fill.className = 'load-fill';
+        fill.style.width = (progress * 100).toFixed(1) + '%';
+
+        var lbl = document.createElement('span');
+        lbl.className = 'load-label';
+
+        if (state === 'loaded') {
+          loadBtn.className = 'load-btn btn-unload';
+          lbl.textContent = 'UNLOAD';
+        } else if (state === 'unloaded') {
+          loadBtn.className = 'load-btn btn-load';
+          lbl.textContent = 'LOAD';
+        } else if (state === 'loading') {
+          loadBtn.className = 'load-btn btn-loading';
+          lbl.textContent = 'LOADING ' + Math.round(progress * 100) + '%';
+        } else {
+          loadBtn.className = 'load-btn btn-unloading';
+          lbl.textContent = 'UNLOADING ' + Math.round(progress * 100) + '%';
+        }
+
+        loadBtn.appendChild(fill);
+        loadBtn.appendChild(lbl);
+
+        loadBtn.addEventListener('click', (function(id, st) { return function() {
+          if (st === 'loaded' || st === 'unloading') {
+            sendAction('unload_tube', { tube: id });
+          } else {
+            sendAction('load_tube', { tube: id });
+          }
+        }; })(t.id, state));
+
+        // Fire button
+        var fireBtn = document.createElement('button');
+        fireBtn.type = 'button';
+        fireBtn.textContent = 'FIRE';
+        fireBtn.disabled = !t.loaded;
+        fireBtn.className = t.loaded ? 'fire-btn armed' : 'fire-btn';
+        fireBtn.addEventListener('click', (function(id) { return function() {
+          var targetUuid = (_state && _state.target_uuid) ? _state.target_uuid : null;
+          sendAction('fire_torpedo', { tube: id, target_uuid: targetUuid });
         }; })(t.id));
-        chipsEl.appendChild(btn);
-      });
 
-      var statusRow = document.getElementById('tube-status-row');
-      statusRow.innerHTML = '';
-      tubes.forEach(function(t) {
-        var cell = document.createElement('div');
-        cell.className = t.loaded ? 'tube-status loaded' : 'tube-status loading';
-        var dot = document.createElement('span');
-        dot.className = 'dot';
-        cell.appendChild(dot);
-        cell.appendChild(document.createTextNode(
-          t.loaded ? 'LOADED' : (Number(t.reload_secs).toFixed(1) + 's')
-        ));
-        statusRow.appendChild(cell);
-      });
+        var row = document.createElement('div');
+        row.className = 'tube-row';
 
-      // Fire torpedo label shows selected tube
-      var fireLabelEl = document.getElementById('torpedo-fire-label');
-      if (fireLabelEl) {
-        fireLabelEl.textContent = 'FIRE TORPEDO · ' + _selectedTube.toUpperCase();
-      }
+        var nameEl = document.createElement('span');
+        nameEl.className = 'tube-name';
+        nameEl.textContent = name;
+
+        row.appendChild(nameEl);
+        row.appendChild(loadBtn);
+        row.appendChild(fireBtn);
+        tubeList.appendChild(row);
+      });
 
       // ── Phaser state ─────────────────────────────────────────────────────
       var banks   = s.banks || [];
@@ -715,12 +806,6 @@
         if (ready.length > 0) bank = ready[0].id;
       }
       sendAction('fire_phaser', { bank: bank });
-    });
-
-    document.getElementById('fire-torpedo').addEventListener('click', function() {
-      var tube       = _selectedTube || 'fore';
-      var targetUuid = (_state && _state.target_uuid) ? _state.target_uuid : null;
-      sendAction('fire_torpedo', { tube: tube, target_uuid: targetUuid });
     });
 
     document.getElementById('phaser-mode-btn').addEventListener('click', function() {

@@ -1325,9 +1325,13 @@ fn spawn_game_start_entities(
             // torpedo systems land, lift this into `entity_spawner::spawn_entity`
             // as a per-entity component instead of a single shared resource.
             if let Some(tc) = &config.torpedoes {
-                commands.insert_resource(crate::weapons_plugin::TorpedoSystemResource(
-                    crate::torpedo::TorpedoSystem::new(tc.to_runtime()),
-                ));
+                let runtime_config = tc.to_runtime();
+                let torpedo_system = if !tc.tubes.is_empty() {
+                    crate::torpedo::TorpedoSystem::from_configs(&tc.tubes, runtime_config)
+                } else {
+                    crate::torpedo::TorpedoSystem::new(runtime_config)
+                };
+                commands.insert_resource(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
             }
 
             if let Some(pc) = &config.power {

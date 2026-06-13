@@ -329,6 +329,10 @@ pub struct TorpedoTubeConfig {
     pub id: TorpedoTubeId,
     pub facing_deg: f32,
     pub fire_arc_deg: f32,
+    /// Per-tube load/unload time override in seconds. Falls back to the
+    /// global `[torpedoes] load_time` when absent.
+    #[serde(default)]
+    pub load_time: Option<f32>,
 }
 
 /// Validate a `[[weapons_console.phaser_banks]]` list parsed from TOML.
@@ -2703,6 +2707,7 @@ fire_arc_deg = 90.0
             id: "fore".into(),
             facing_deg: 0.0,
             fire_arc_deg: 90.0,
+            load_time: None,
         }];
         let mut sys = TorpedoSystem::from_configs(&tubes, cfg);
         sys.launch("fore", "t1".into(), 0.0, 0.0, 0.0, None, None);
@@ -2877,11 +2882,13 @@ count = 10
                 id: "fore_port".into(),
                 facing_deg: -30.0,
                 fire_arc_deg: 90.0,
+                load_time: None,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
                 facing_deg: 180.0,
                 fire_arc_deg: 90.0,
+                load_time: None,
             },
         ];
         assert!(validate_torpedo_tubes(&tubes).is_ok());
@@ -2900,11 +2907,13 @@ count = 10
                 id: "aft".into(),
                 facing_deg: 180.0,
                 fire_arc_deg: 90.0,
+                load_time: None,
             },
             TorpedoTubeConfig {
                 id: "aft".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 90.0,
+                load_time: None,
             },
         ];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
@@ -2918,6 +2927,7 @@ count = 10
             id: "aft".into(),
             facing_deg: 180.0,
             fire_arc_deg: 0.0,
+            load_time: None,
         }];
         let err = validate_torpedo_tubes(&tubes).unwrap_err();
         assert!(err.contains("fire_arc_deg"));
